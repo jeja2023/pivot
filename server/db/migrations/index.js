@@ -95,7 +95,13 @@ const migrationModules = [
     require('./agent-artifact-annotations'),
     require('./agent-voice-sessions'),
     require('./memory-jobs-message-ids-jsonb-compatibility'),
-    require('./memory-source-ids-jsonb-compatibility')
+    require('./memory-source-ids-jsonb-compatibility'),
+    require('./regulations-governance-foundation'),
+    require('./regulations-collaboration'),
+    require('./regulations-ai-audit'),
+    require('./regulations-batch-audit'),
+    require('./regulations-bookmarks'),
+    require('./regulations-index-retries')
 ];
 
 module.exports = migrationModules

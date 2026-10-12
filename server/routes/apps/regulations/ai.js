@@ -1,6 +1,8 @@
 const { asyncHandler } = require('../../../http');
 const {
     buildRegulationAiContext,
+    getRegulationDocumentById,
+    recordRegulationAiAnswer,
     normalizeRegulationId,
     recordRegulationAccess
 } = require('./helpers');
@@ -15,14 +17,18 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             return res.status(400).json({ error: { message: '请输入要咨询的问题', type: 'invalid_request_error' } });
         }
         const documentId = normalizeRegulationId(body.documentId || body.document_id);
+        if (documentId && !(await getRegulationDocumentById(documentId))) {
+            return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+        }
         const limit = Number.parseInt(body.limit, 10) || 12;
-        const built = await buildRegulationAiContext({ query, documentId, limit, expandLinks: true });
+        const built = await buildRegulationAiContext({ query, documentId, limit, userId: req.user.id, expandLinks: true });
         await recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
         // 把命中条文的来源精简后随回答一并返回，便于前端展示「依据条文」并可点击跳转
         const sources = (built.sources || []).map(source => ({
             index: source.index,
             documentId: source.documentId,
+            versionId: source.versionId,
             articleId: source.articleId,
             label: source.label,
             excerpt: String(source.excerpt || '').slice(0, 200),
@@ -48,6 +54,16 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             temperature: 0.25,
             stream: !!body.stream,
             extraPayload: { sources },
+            onComplete: async (answer, metadata) => await recordRegulationAiAnswer({
+                userId: req.user.id,
+                documentId,
+                question: query,
+                answer,
+                modelName: metadata?.model || '',
+                contextSnapshot: context,
+                sources,
+                usage: metadata?.usage || {}
+            }),
             messages: [
                 {
                     role: 'system',

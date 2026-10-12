@@ -8,7 +8,10 @@
         function renderRegulationStatusCell(doc) {
                         const chips = [];
                         if (doc?.status === 'archived') chips.push('<span class="regulations-status-pill archived">已归档</span>');
-                        if (!chips.length) chips.push('<span class="regulations-status-pill active">有效</span>');
+                        if (!chips.length) chips.push('<span class="regulations-status-pill active">已启用</span>');
+                        const effectLabels = { unverified: '效力待核验', pending: '待生效', effective: '现行有效', expired: '已失效', repealed: '已废止' };
+                        const effectStatus = String(doc?.current_effect_status || 'unverified');
+                        chips.push(`<span class="regulations-status-pill ${esc(effectStatus)}">${esc(effectLabels[effectStatus] || '效力待核验')}</span>`);
                         return `<span class="regulations-status-cell">${chips.join('')}</span>`;
                     }
 
@@ -36,6 +39,16 @@
                     function renderRegulationsSummary() {
                         const target = document.getElementById('regulations-summary');
                         if (!target) return;
+                        if (state.libraryView === 'folders') {
+                            const folders = Array.isArray(state.categoryFolders) ? state.categoryFolders : [];
+                            const documentCount = folders.reduce((sum, folder) => sum + Number(folder.documentCount || 0), 0);
+                            const articleCount = folders.reduce((sum, folder) => sum + Number(folder.articleCount || 0), 0);
+                            const effectiveCount = folders.reduce((sum, folder) => sum + Number(folder.effectiveCount || 0), 0);
+                            const needsReviewCount = folders.reduce((sum, folder) => sum + Number(folder.needsReviewCount || 0), 0);
+                            const chips = [`${documentCount} 文档`, `${folders.length} 分类目录`, `${articleCount} 条文`, `${effectiveCount} 已核验现行`, `${needsReviewCount} 待治理`];
+                            PivotSafeHtml.setHtml(target, chips.map(text => `<span class="regulations-summary-pill">${esc(text)}</span>`).join(''));
+                            return;
+                        }
                         const docs = Array.isArray(state.documents) ? state.documents : [];
                         const articleCount = docs.reduce((sum, doc) => sum + Number(doc.article_count || 0), 0);
                         const archivedCount = docs.filter(doc => doc.status === 'archived').length;

@@ -4,30 +4,61 @@ const {
     isAdmin,
     SUPPORTED_UPLOAD_LABEL,
     analyzeRegulationChangeImpact,
+    cancelRegulationImportJob,
     cleanupTempUpload,
     cleanupTempUploads,
     countActualRegulationArticles,
     createRegulationDocumentFromUpload,
+    createRegulationObligation,
+    deleteRegulationBookmark,
+    enqueueRegulationImportJob,
     deleteRegulationDocument,
+    deleteRegulationDocuments,
     diffRegulationVersions,
     findRegulationDuplicateByHash,
     getRegulationCitationGraph,
+    getRegulationDocumentById,
     getRegulationDocumentDetail,
+    getRegulationVersionStorageById,
     hashUploadedFile,
     listRegulationDocuments,
+    listRegulationCategoryFolders,
+    listDeletedRegulationDocuments,
+    listRegulationBookmarks,
+    listRegulationDocumentChangeLogs,
+    listRegulationAiAnswerLogs,
     listRegulationFacets,
+    listRegulationFolderDocumentSelection,
+    listRegulationObligations,
+    listRegulationAssignees,
+    listRegulationQualitySummary,
+    listRegulationSubscriptions,
+    listRegulationImportJobs,
     normalizeRegulationId,
     parseRegulationArticles,
     prepareRegulationUploadMetadata,
     readRegulationMetadata,
     rebuildRegulationCrossLinks,
     recordRegulationAccess,
+    requestRegulationVersionReindex,
+    retryRegulationImportJob,
+    revertRegulationDocumentBatch,
+    reviewRegulationObligation,
     requireRegulationsAdmin,
     requireRegulationsSuperAdmin,
     resolveRegulationVersionDownloadPath,
+    restoreRegulationDocument,
     saveRegulationDocumentVersion,
+    saveRegulationBookmark,
+    startRegulationImportWorker,
+    startRegulationIndexRecoveryRunner,
+    triggerRegulationIndexRecovery,
+    subscribeToRegulation,
     searchRegulationArticles,
-    updateRegulationDocument
+    updateRegulationDocument,
+    updateRegulationDocuments,
+    updateRegulationVersionGovernance,
+    unsubscribeFromRegulation
 } = require('./helpers');
 
 function registerDocumentRoutes(router, deps) {
@@ -38,31 +69,86 @@ function registerDocumentRoutes(router, deps) {
         if (requireRegulationsAdmin(req, res)) next();
     };
 
+    async function getReadableDocument(req, documentId) {
+        return await getRegulationDocumentById(documentId, { includeArchived: isAdmin(req.user) });
+    }
+
+    async function resolveReadableVersionSource(req, documentId, versionId) {
+        const document = await getReadableDocument(req, documentId);
+        if (!document) return null;
+        const version = await getRegulationVersionStorageById(versionId, document.id);
+        if (!version) return null;
+        const filePath = resolveRegulationVersionDownloadPath(version);
+        const exists = filePath && await fs.promises.access(filePath).then(() => true).catch(() => false);
+        return exists ? { document, version, filePath } : null;
+    }
+
     router.get('/documents', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
             const result = await listRegulationDocuments({
                 query: req.query.query || '',
                 category: req.query.category || '',
+                issuingBody: req.query.issuingBody || req.query.issuing_body || '',
                 jurisdiction: req.query.jurisdiction || '',
                 status: req.query.status || '',
+                uncategorized: req.query.uncategorized === 'true',
                 includeArchived,
                 limit: req.query.limit,
                 offset: req.query.offset
             });
             res.json(result);
         }));
+
+        router.get('/category-folders', authMiddleware, asyncHandler(async (req, res) => {
+            const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
+            res.json({ folders: await listRegulationCategoryFolders({ includeArchived }) });
+        }));
+
+        router.get('/documents/folder-selection', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
+            res.json(await listRegulationFolderDocumentSelection({
+                category: req.query.category || '',
+                uncategorized: req.query.uncategorized === 'true',
+                includeArchived,
+                limit: req.query.limit
+            }));
+        }));
+
+        router.get('/recycle-bin', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsSuperAdmin(req, res)) return;
+            res.json(await listDeletedRegulationDocuments({ limit: req.query.limit, offset: req.query.offset }));
+        }));
+
+        router.post('/recycle-bin/:id/restore', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsSuperAdmin(req, res)) return;
+            const document = await restoreRegulationDocument({ documentId: req.params.id, userId: req.user.id });
+            if (!document) {
+                return res.status(404).json({ error: { message: '已删除法规不存在或已被恢复', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询恢复回收站文档', `文档 ${document.id}：${document.title}`);
+            res.json({ document });
+        }));
     
         router.get('/documents/search', authMiddleware, asyncHandler(async (req, res) => {
             const query = String(req.query.query || req.query.q || '').trim();
-            if (!query) return res.json({ matches: [] });
+            const hasFilters = ['category', 'issuingBody', 'issuing_body', 'jurisdiction', 'status']
+                .some(key => String(req.query[key] || '').trim());
+            if (!query && !hasFilters) return res.json({ matches: [] });
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
             const documentId = normalizeRegulationId(req.query.documentId || req.query.document_id);
             const matches = await searchRegulationArticles({
                 query,
                 documentId,
+                category: req.query.category || '',
+                issuingBody: req.query.issuingBody || req.query.issuing_body || '',
+                jurisdiction: req.query.jurisdiction || '',
+                status: req.query.status || '',
                 limit: req.query.limit,
                 includeArchived
             });
+            await recordRegulationAccess({ userId: req.user.id, documentId, action: 'search', detail: query.slice(0, 200) });
+            if (res.headersSent || res.writableEnded) return;
             res.json({ matches });
         }));
     
@@ -71,11 +157,81 @@ function registerDocumentRoutes(router, deps) {
             const facets = await listRegulationFacets({ includeArchived });
             res.json(facets);
         }));
+
+        router.get('/quality-summary', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            res.json({ summary: await listRegulationQualitySummary() });
+        }));
+
+        router.get('/subscriptions', authMiddleware, asyncHandler(async (req, res) => {
+            const subscriptions = await listRegulationSubscriptions({ userId: req.user.id, documentId: req.query.documentId || req.query.document_id });
+            res.json({ subscriptions });
+        }));
+
+        router.get('/bookmarks', authMiddleware, asyncHandler(async (req, res) => {
+            const documentId = normalizeRegulationId(req.query.documentId || req.query.document_id);
+            if (documentId && !(await getReadableDocument(req, documentId))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            res.json({ bookmarks: await listRegulationBookmarks({ userId: req.user.id, documentId }) });
+        }));
+
+        router.post('/documents/:id/bookmarks', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            const bookmark = await saveRegulationBookmark({
+                userId: req.user.id,
+                documentId: req.params.id,
+                topic: req.body?.topic,
+                note: req.body?.note
+            });
+            res.json({ bookmark });
+        }));
+
+        router.delete('/bookmarks/:bookmarkId', authMiddleware, asyncHandler(async (req, res) => {
+            const success = await deleteRegulationBookmark({ bookmarkId: req.params.bookmarkId, userId: req.user.id });
+            if (!success) {
+                return res.status(404).json({ error: { message: '收藏不存在或无权取消', type: 'invalid_request_error' } });
+            }
+            res.json({ success: true });
+        }));
+
+        router.get('/ai-logs', authMiddleware, asyncHandler(async (req, res) => {
+            const documentId = normalizeRegulationId(req.query.documentId || req.query.document_id);
+            if (documentId && !(await getReadableDocument(req, documentId))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            res.json(await listRegulationAiAnswerLogs({
+                userId: req.user.id,
+                documentId,
+                limit: req.query.limit,
+                offset: req.query.offset
+            }));
+        }));
+
+        router.post('/documents/:id/subscriptions', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            const subscription = await subscribeToRegulation({
+                userId: req.user.id,
+                documentId: req.params.id,
+                approvedOnly: req.body?.approvedOnly !== false
+            });
+            res.json({ subscription });
+        }));
+
+        router.delete('/documents/:id/subscriptions', authMiddleware, asyncHandler(async (req, res) => {
+            const ok = await unsubscribeFromRegulation({ userId: req.user.id, documentId: req.params.id });
+            res.json({ success: ok });
+        }));
     
         router.get('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user);
             const detail = await getRegulationDocumentDetail(req.params.id, {
                 versionId: req.query.versionId || req.query.version_id,
+                effectiveAt: req.query.effectiveAt || req.query.effective_at || '',
                 includeArchived
             });
             if (!detail || (!includeArchived && detail.document.status === 'archived')) {
@@ -86,13 +242,16 @@ function registerDocumentRoutes(router, deps) {
         }));
     
         router.get('/documents/:id/diff', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
             const fromVersionId = normalizeRegulationId(req.query.from);
             const toVersionId = normalizeRegulationId(req.query.to);
             if (!fromVersionId || !toVersionId) {
                 return res.status(400).json({ error: { message: '需要提供 from 和 to 版本 ID', type: 'invalid_request_error' } });
             }
             try {
-                const diff = await diffRegulationVersions({ documentId: req.params.id, fromVersionId, toVersionId });
+                const diff = await diffRegulationVersions({ documentId: req.params.id, fromVersionId, toVersionId, includeArchived: isAdmin(req.user) });
                 logAction(req, '法规查询版本对比', `${diff.document.title} (v${diff.from.id} → v${diff.to.id})`);
                 res.json({ diff });
             } catch (error) {
@@ -101,13 +260,16 @@ function registerDocumentRoutes(router, deps) {
         }));
     
         router.get('/documents/:id/change-impact', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
             const fromVersionId = normalizeRegulationId(req.query.from);
             const toVersionId = normalizeRegulationId(req.query.to);
             if (!fromVersionId || !toVersionId) {
                 return res.status(400).json({ error: { message: '需要提供 from 和 to 版本 ID', type: 'invalid_request_error' } });
             }
             try {
-                const impact = await analyzeRegulationChangeImpact({ documentId: req.params.id, fromVersionId, toVersionId });
+                const impact = await analyzeRegulationChangeImpact({ documentId: req.params.id, fromVersionId, toVersionId, includeArchived: isAdmin(req.user) });
                 res.json({ impact });
             } catch (error) {
                 res.status(404).json({ error: { message: error.message || '影响分析失败', type: 'not_found' } });
@@ -115,10 +277,67 @@ function registerDocumentRoutes(router, deps) {
         }));
     
         router.get('/documents/:id/citation-graph', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
             const graph = await getRegulationCitationGraph(req.params.id, {
-                versionId: req.query.versionId || req.query.version_id
+                versionId: req.query.versionId || req.query.version_id,
+                effectiveAt: req.query.effectiveAt || req.query.effective_at || '',
+                includeArchived: isAdmin(req.user)
             });
             res.json({ graph });
+        }));
+
+        router.get('/documents/:id/obligations', authMiddleware, asyncHandler(async (req, res) => {
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            const obligations = await listRegulationObligations({
+                documentId: req.params.id,
+                articleId: req.query.articleId || req.query.article_id,
+                includeArchived: isAdmin(req.user)
+            });
+            const assignees = isAdmin(req.user) ? await listRegulationAssignees() : [];
+            res.json({ obligations, assignees });
+        }));
+
+        router.post('/documents/:id/versions/:versionId/articles/:articleId/obligations', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const detail = await getRegulationDocumentDetail(req.params.id, { versionId: req.params.versionId, includeArchived: true });
+            const article = detail?.articles?.find(item => Number(item.id) === Number(normalizeRegulationId(req.params.articleId)));
+            if (!detail || !article) {
+                return res.status(404).json({ error: { message: '法规版本或条文不存在', type: 'invalid_request_error' } });
+            }
+            const obligation = await createRegulationObligation({
+                userId: req.user.id,
+                documentId: req.params.id,
+                versionId: req.params.versionId,
+                articleId: req.params.articleId,
+                input: req.body || {}
+            });
+            if (!obligation) {
+                return res.status(400).json({ error: { message: '义务事项必须填写要求动作', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询新增合规义务', `文档 ${req.params.id}，条文 ${req.params.articleId}`);
+            res.json({ obligation });
+        }));
+
+        router.put('/documents/:id/obligations/:obligationId/review', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            if (!(await getReadableDocument(req, req.params.id))) {
+                return res.status(404).json({ error: { message: '法规文档不存在或不可访问', type: 'invalid_request_error' } });
+            }
+            const obligation = await reviewRegulationObligation({
+                obligationId: req.params.obligationId,
+                documentId: req.params.id,
+                userId: req.user.id,
+                input: req.body || {}
+            });
+            if (!obligation) {
+                return res.status(400).json({ error: { message: '义务不存在，或审核状态不合法', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询审核合规义务', `文档 ${req.params.id}，义务 ${req.params.obligationId} → ${obligation.review_status}`);
+            res.json({ obligation });
         }));
     
         router.post('/cross-links/rebuild', authMiddleware, asyncHandler(async (req, res) => {
@@ -143,12 +362,40 @@ function registerDocumentRoutes(router, deps) {
             if (!currentVer) {
                 return res.status(404).json({ error: { message: '法规源文件不存在', type: 'invalid_request_error' } });
             }
-            const filePath = resolveRegulationVersionDownloadPath(currentVer);
+            const sourceVersion = await getRegulationVersionStorageById(currentVer.id, detail.document.id);
+            if (!sourceVersion) {
+                return res.status(404).json({ error: { message: '法规源文件不存在', type: 'not_found' } });
+            }
+            const filePath = resolveRegulationVersionDownloadPath(sourceVersion);
             if (!filePath || !await fs.promises.access(filePath).then(() => true).catch(() => false)) {
                 return res.status(404).json({ error: { message: '源文件已被移动或删除', type: 'not_found' } });
             }
             await recordRegulationAccess({ userId: req.user.id, documentId: detail.document.id, action: 'download', detail: detail.document.title });
-            res.download(filePath, currentVer.source_name || `${detail.document.title}.txt`);
+            res.download(filePath, sourceVersion.source_name || `${detail.document.title}.txt`);
+        }));
+
+        // 原页追溯使用版本级受控文件路由，不向客户端返回服务器源路径。
+        router.get('/documents/:id/versions/:versionId/source', authMiddleware, asyncHandler(async (req, res) => {
+            const source = await resolveReadableVersionSource(req, req.params.id, req.params.versionId);
+            if (!source) {
+                return res.status(404).json({ error: { message: '法规版本源文件不存在或不可访问', type: 'not_found' } });
+            }
+            await recordRegulationAccess({ userId: req.user.id, documentId: source.document.id, action: 'source_download', detail: source.version.source_name || source.document.title });
+            res.download(source.filePath, source.version.source_name || `${source.document.title}.txt`);
+        }));
+
+        router.get('/documents/:id/versions/:versionId/source-preview', authMiddleware, asyncHandler(async (req, res) => {
+            const source = await resolveReadableVersionSource(req, req.params.id, req.params.versionId);
+            if (!source) {
+                return res.status(404).json({ error: { message: '法规版本源文件不存在或不可访问', type: 'not_found' } });
+            }
+            if (String(source.version.source_format || '').toLowerCase() !== 'pdf') {
+                return res.status(415).json({ error: { message: '仅 PDF 源文件支持页内预览，请下载原文件查看', type: 'invalid_request_error' } });
+            }
+            await recordRegulationAccess({ userId: req.user.id, documentId: source.document.id, action: 'source_preview', detail: source.version.source_name || source.document.title });
+            res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(source.version.source_name || 'regulation.pdf')}"`);
+            res.type('application/pdf');
+            res.sendFile(source.filePath);
         }));
     
         router.post('/documents/batch', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
@@ -194,6 +441,71 @@ function registerDocumentRoutes(router, deps) {
                 created,
                 failed
             });
+        }));
+
+        router.get('/import-jobs', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await listRegulationImportJobs({
+                userId: req.user.id,
+                status: req.query.status,
+                limit: req.query.limit,
+                offset: req.query.offset
+            });
+            res.json(result);
+        }));
+
+        router.post('/import-jobs/:jobId/retry', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const job = await retryRegulationImportJob({ jobId: req.params.jobId, userId: req.user.id });
+            if (!job) {
+                return res.status(409).json({ error: { message: '仅失败或已取消的本人导入任务可以重新提交', type: 'invalid_request_error' } });
+            }
+            await startRegulationImportWorker();
+            logAction(req, '法规查询重试导入任务', `任务 ${job.id}`);
+            res.status(202).json({ job });
+        }));
+
+        router.delete('/import-jobs/:jobId', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const job = await cancelRegulationImportJob({ jobId: req.params.jobId, userId: req.user.id });
+            if (!job) {
+                return res.status(409).json({ error: { message: '仅排队或等待重试的本人导入任务可以取消', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询取消导入任务', `任务 ${job.id}`);
+            res.json({ job });
+        }));
+
+        router.post('/documents/import-jobs', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.array('file', 300), asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) {
+                await cleanupTempUploads(req.files);
+                return;
+            }
+            const files = Array.isArray(req.files) ? req.files : [];
+            if (!files.length) {
+                return res.status(400).json({ error: { message: `请选择要导入的法规文档，支持 ${SUPPORTED_UPLOAD_LABEL}`, type: 'invalid_request_error' } });
+            }
+            const metadata = readRegulationMetadata(req.body || {});
+            const duplicateAction = String(req.body?.duplicateAction || req.body?.duplicate_action || 'continue').trim().toLowerCase() === 'skip' ? 'skip' : 'continue';
+            const jobs = [];
+            const failed = [];
+            const skipped = [];
+            for (const file of files) {
+                try {
+                    const duplicateOf = await findRegulationDuplicateByHash(await hashUploadedFile(file));
+                    if (duplicateAction === 'skip' && duplicateOf) {
+                        skipped.push({ fileName: file.originalname || '', duplicateOf });
+                        await cleanupTempUpload(file);
+                        continue;
+                    }
+                    jobs.push(await enqueueRegulationImportJob({ userId: req.user.id, file, metadata }));
+                } catch (error) {
+                    failed.push({ fileName: file.originalname || '', message: error.message || '导入任务创建失败' });
+                    await cleanupTempUpload(file);
+                }
+            }
+            if (jobs.length) await startRegulationImportWorker();
+            logAction(req, '法规查询提交导入任务', `已提交 ${jobs.length} / 共 ${files.length}${skipped.length ? `，跳过重复 ${skipped.length}` : ''}${failed.length ? `，失败 ${failed.length}` : ''}`);
+            res.status(202).json({ total: files.length, jobs, failed, skipped });
         }));
     
         router.post('/documents', authMiddleware, requireRegulationsAdminBeforeUpload, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {
@@ -299,7 +611,75 @@ function registerDocumentRoutes(router, deps) {
             logAction(req, '法规查询更新信息', `文档：${updated.title}`);
             res.json({ document: updated });
         }));
+
+        router.put('/documents/:id/versions/:versionId/governance', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const version = await updateRegulationVersionGovernance({
+                documentId: req.params.id,
+                versionId: req.params.versionId,
+                userId: req.user.id,
+                patch: req.body || {}
+            });
+            if (!version) {
+                return res.status(404).json({ error: { message: '法规版本不存在或已删除', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询更新版本治理信息', `文档 ${req.params.id}，版本 ${req.params.versionId}`);
+            res.json({ version });
+        }));
+
+        router.post('/documents/:id/versions/:versionId/reindex', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const version = await requestRegulationVersionReindex({
+                documentId: req.params.id,
+                versionId: req.params.versionId,
+                userId: req.user.id
+            });
+            if (!version) {
+                return res.status(404).json({ error: { message: '法规版本不存在或不可重新建立索引', type: 'invalid_request_error' } });
+            }
+            await startRegulationIndexRecoveryRunner();
+            await triggerRegulationIndexRecovery();
+            logAction(req, '法规查询重新建立向量索引', `文档 ${req.params.id}，版本 ${req.params.versionId}`);
+            res.status(202).json({ version });
+        }));
     
+        router.post('/documents/batch-update', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await updateRegulationDocuments({
+                documentIds: req.body?.ids,
+                userId: req.user.id,
+                patch: req.body?.patch
+            });
+            logAction(req, '法规查询批量修改信息', `字段：${result.fields.join('、')}，成功 ${result.updated.length} / 共 ${result.total}，失败 ${result.failed.length}`);
+            res.json(result);
+        }));
+
+        router.get('/documents/batch-change-logs', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const batchId = String(req.query.batchId || req.query.batch_id || '').trim();
+            if (!batchId) return res.status(400).json({ error: { message: '需要提供批量修改记录 ID', type: 'invalid_request_error' } });
+            res.json({ logs: await listRegulationDocumentChangeLogs({ batchId }) });
+        }));
+
+        router.post('/documents/batch-revert', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const batchId = String(req.body?.batchId || req.body?.batch_id || '').trim();
+            if (!batchId) return res.status(400).json({ error: { message: '需要提供批量修改记录 ID', type: 'invalid_request_error' } });
+            const result = await revertRegulationDocumentBatch({ batchId, userId: req.user.id });
+            logAction(req, '法规查询撤销批量修改', `撤销 ${result.reverted.length} 项，未撤销 ${result.failed.length} 项`);
+            res.json(result);
+        }));
+
+        router.post('/documents/batch-delete', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsSuperAdmin(req, res)) return;
+            const result = await deleteRegulationDocuments({
+                documentIds: req.body?.ids,
+                userId: req.user.id
+            });
+            logAction(req, '法规查询批量删除', `成功 ${result.deleted.length} / 共 ${result.total}，失败 ${result.failed.length}`);
+            res.json(result);
+        }));
+
         router.delete('/documents/:id', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsSuperAdmin(req, res)) return;
             const deleted = await deleteRegulationDocument({

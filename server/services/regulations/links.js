@@ -100,14 +100,16 @@ function parseCrossLinkLabel(targetLabel) {
 }
 
 // 跨法引用回连：把指定版本中悬空的「《XX法》第N条」外链，匹配库内文档并对齐到目标条文 id
-async function resolveRegulationCrossLinks(versionId) {
+async function resolveRegulationCrossLinks(versionId, { force = false } = {}) {
     const vId = normalizeRegulationId(versionId);
     if (!vId) return { resolved: 0 };
-    // 取该版本下尚未连上、且 target_label 带书名号的外链
+    // 常规导入只处理悬空外链；重建时必须按目标文档当前版本重新对齐，
+    // 否则目标法规追加新版后仍会把问答依据指向旧条文。
     const pending = await query(`
-        SELECT id, target_label
+        SELECT id, target_label, binding_mode
         FROM regulation_article_links
-        WHERE version_id = ? AND target_article_id IS NULL AND target_label LIKE '《%'
+        WHERE version_id = ? AND target_label LIKE '《%'
+          ${force ? "AND binding_mode = 'current'" : 'AND target_article_id IS NULL'}
     `, [vId]);
     if (!pending.length) return { resolved: 0 };
 
@@ -118,10 +120,10 @@ async function resolveRegulationCrossLinks(versionId) {
         const norm = normalizeRegulationAlias(parsed.bookName);
         // 通过别名表匹配目标文档（在用、未归档）
         const aliasRow = await queryOne(`
-            SELECT a.document_id
+            SELECT a.document_id, d.current_version_id
             FROM regulation_aliases a
             JOIN regulation_documents d ON d.id = a.document_id
-            WHERE a.normalized_alias = ? AND d.deleted_at IS NULL
+            WHERE a.normalized_alias = ? AND d.deleted_at IS NULL AND d.status <> 'archived'
             ORDER BY a.is_primary DESC
             LIMIT 1
         `, [norm]);
@@ -141,9 +143,9 @@ async function resolveRegulationCrossLinks(versionId) {
         }
         await execute(`
             UPDATE regulation_article_links
-            SET target_document_id = ?, target_article_id = ?, confidence = ?
+            SET target_document_id = ?, target_article_id = ?, target_version_id = ?, confidence = ?
             WHERE id = ?
-        `, [targetDocId, targetArticleId, targetArticleId ? 0.8 : 0.65, row.id]);
+        `, [targetDocId, targetArticleId, aliasRow.current_version_id || null, targetArticleId ? 0.8 : 0.65, row.id]);
         resolved += 1;
     }
     return { resolved };
@@ -158,7 +160,7 @@ async function rebuildRegulationCrossLinks(documentId = null) {
     let total = 0;
     for (const v of versions) {
         if (v.id) {
-            const res = await resolveRegulationCrossLinks(v.id);
+            const res = await resolveRegulationCrossLinks(v.id, { force: true });
             total += res.resolved;
         }
     }

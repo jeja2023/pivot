@@ -25,22 +25,48 @@
     const focusFirstField = (...args) => ns.focusFirstField?.(...args);
     const closeInlineForms = (...args) => ns.closeInlineForms?.(...args);
     const archiveDocument = (...args) => ns.archiveDocument?.(...args);
+    const deleteSelectedDocuments = (...args) => ns.deleteSelectedDocuments?.(...args);
     const focusArticle = (...args) => ns.focusArticle?.(...args);
     const showSimilarArticles = (...args) => ns.showSimilarArticles?.(...args);
     const showCitationGraph = (...args) => ns.showCitationGraph?.(...args);
     const showVersionTimeline = (...args) => ns.showVersionTimeline?.(...args);
     const previewRegulationImport = (...args) => ns.previewRegulationImport?.(...args);
+    const mergePreviewArticles = (...args) => ns.mergePreviewArticles?.(...args);
+    const confirmPreviewImport = (...args) => ns.confirmPreviewImport?.(...args);
     const exportRegulationReport = (...args) => ns.exportRegulationReport?.(...args);
     const showAnnotations = (...args) => ns.showAnnotations?.(...args);
+    const showAccessLogs = (...args) => ns.showAccessLogs?.(...args);
+    const showRegulationAiLogs = (...args) => ns.showRegulationAiLogs?.(...args);
+    const showArticleLocations = (...args) => ns.showArticleLocations?.(...args);
+    const showQualitySummary = (...args) => ns.showQualitySummary?.(...args);
+    const toggleRegulationSubscription = (...args) => ns.toggleRegulationSubscription?.(...args);
+    const toggleRegulationBookmark = (...args) => ns.toggleRegulationBookmark?.(...args);
+    const showRegulationBookmarks = (...args) => ns.showRegulationBookmarks?.(...args);
+    const saveRegulationBookmarkTopic = (...args) => ns.saveRegulationBookmarkTopic?.(...args);
+    const deleteRegulationBookmark = (...args) => ns.deleteRegulationBookmark?.(...args);
+    const showRegulationRecycleBin = (...args) => ns.showRegulationRecycleBin?.(...args);
+    const restoreRegulationFromRecycleBin = (...args) => ns.restoreRegulationFromRecycleBin?.(...args);
+    const requestRegulationReindex = (...args) => ns.requestRegulationReindex?.(...args);
+    const showRegulationObligations = (...args) => ns.showRegulationObligations?.(...args);
+    const reviewRegulationObligation = (...args) => ns.reviewRegulationObligation?.(...args);
+    const submitRegulationObligation = (...args) => ns.submitRegulationObligation?.(...args);
     const deleteAnnotation = (...args) => ns.deleteAnnotation?.(...args);
     const showCompareDialog = (...args) => ns.showCompareDialog?.(...args);
     const runChangeImpact = (...args) => ns.runChangeImpact?.(...args);
     const askAi = (...args) => ns.askAi?.(...args);
+    const stopRegulationAi = (...args) => ns.stopRegulationAi?.(...args);
     const clearAiTurns = (...args) => ns.clearAiTurns?.(...args);
     const ensureView = (...args) => ns.ensureView?.(...args);
     const renderShell = (...args) => ns.renderShell?.(...args);
     const loadFacets = (...args) => ns.loadFacets?.(...args);
     const loadSavedSearches = (...args) => ns.loadSavedSearches?.(...args);
+    const loadImportJobs = (...args) => ns.loadImportJobs?.(...args);
+    const retryRegulationImportJob = (...args) => ns.retryRegulationImportJob?.(...args);
+    const cancelRegulationImportJob = (...args) => ns.cancelRegulationImportJob?.(...args);
+    const revertRegulationBatch = (...args) => ns.revertRegulationBatch?.(...args);
+    const openCategoryFolder = (...args) => ns.openCategoryFolder?.(...args);
+    const returnToCategoryFolders = (...args) => ns.returnToCategoryFolders?.(...args);
+    const loadCategoryFolders = (...args) => ns.loadCategoryFolders?.(...args);
         async function ensureModuleReadiness() {
             if (ns.renderReadyPromise) await ns.renderReadyPromise;
             if (ns.actionsReadyPromise) await ns.actionsReadyPromise;
@@ -50,6 +76,16 @@
                 if (root.dataset.regulationsBound === '1') return;
                 root.dataset.regulationsBound = '1';
                 root.addEventListener('submit', event => {
+                    if (event.target?.classList?.contains('regulations-obligation-form')) {
+                        event.preventDefault();
+                        submitRegulationObligation(event.target);
+                        return;
+                    }
+                    if (event.target?.id === 'regulations-batch-edit-form') {
+                        event.preventDefault();
+                        ns.saveBatchMetadata?.(event.target).catch(e => toast(e.message || '批量修改失败，请稍后重试', 'error'));
+                        return;
+                    }
                     if (event.target?.id === 'regulations-upload-form') {
                         event.preventDefault();
                         uploadDocument(event.target);
@@ -79,7 +115,7 @@
                         closeDialogs();
                         return;
                     }
-                    if (event.key === 'Enter' && ['regulations-query', 'regulations-category-filter', 'regulations-jurisdiction-filter'].includes(event.target?.id)) {
+                    if (event.key === 'Enter' && ['regulations-query', 'regulations-category-filter', 'regulations-issuing-body-filter', 'regulations-jurisdiction-filter'].includes(event.target?.id)) {
                         event.preventDefault();
                         runSearch().catch(e => toast(e.message || '搜索失败', 'error'));
                         return;
@@ -88,6 +124,22 @@
                         event.preventDefault();
                         document.getElementById('regulations-ai-btn')?.click();
                         return;
+                    }
+                });
+                root.addEventListener('change', event => {
+                    if (event.target?.id === 'regulations-ai-scope') {
+                        state.aiScope = event.target.value === 'document' && state.detail?.document?.id ? 'document' : 'library';
+                        ns.syncAiScopeControl?.();
+                        return;
+                    }
+                    if (event.target?.matches('[data-regulation-batch-field]')) {
+                        ns.syncBatchEditFields?.();
+                        return;
+                    }
+                    if (event.target?.id === 'regulations-select-all') {
+                        ns.selectAllDocuments?.(event.target.checked);
+                    } else if (event.target?.matches('[data-regulation-select]')) {
+                        ns.selectDocument?.(event.target.dataset.regulationSelect, event.target.checked);
                     }
                 });
                 root.addEventListener('input', event => {
@@ -99,6 +151,39 @@
                     }
                 });
                 root.addEventListener('click', event => {
+                    if (event.target.closest('#regulations-batch-mode-btn')) {
+                        ns.toggleBatchMode?.();
+                        return;
+                    }
+                    if (event.target.closest('#regulations-batch-edit-btn')) {
+                        ns.openBatchEditDialog?.();
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-batch-edit]') || event.target.id === 'regulations-batch-edit-panel') {
+                        ns.closeBatchEditDialog?.();
+                        return;
+                    }
+                    if (event.target.closest('#regulations-batch-delete-btn')) {
+                        deleteSelectedDocuments().catch(e => toast(e.message || '批量删除失败，请稍后重试', 'error'));
+                        return;
+                    }
+                    const revertBatch = event.target.closest('[data-regulation-batch-revert]');
+                    if (revertBatch) {
+                        revertRegulationBatch(revertBatch.dataset.regulationBatchRevert);
+                        return;
+                    }
+                    if (event.target.closest('#regulations-clear-selection-btn')) {
+                        ns.clearDocumentSelection?.();
+                        return;
+                    }
+                    if (event.target.closest('#regulations-select-folder-btn')) {
+                        ns.selectAllFolderDocuments?.();
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-batch-result]') || event.target.id === 'regulations-batch-result-panel') {
+                        document.getElementById('regulations-batch-result-panel')?.classList.add('hidden');
+                        return;
+                    }
                     const docOpener = event.target.closest('[data-regulation-open-doc]');
                     if (docOpener) {
                         loadDetail(docOpener.dataset.regulationOpenDoc).catch(e => toast(e.message || '加载法规详情失败', 'error'));
@@ -127,18 +212,48 @@
                         return;
                     }
                     if (event.target.closest('#regulations-refresh-btn')) {
-                        loadDocuments({ keepActive: true, page: state.page }).catch(e => toast(e.message || '刷新失败', 'error'));
+                        (state.libraryView === 'folders' ? loadCategoryFolders() : loadDocuments({ keepActive: true, page: state.page })).catch(e => toast(e.message || '刷新失败', 'error'));
+                        return;
+                    }
+                    if (event.target.closest('#regulations-folders-btn')) {
+                        returnToCategoryFolders().catch(e => toast(e.message || '加载分类目录失败', 'error'));
+                        return;
+                    }
+                    const folder = event.target.closest('[data-regulation-folder-title]');
+                    if (folder) {
+                        openCategoryFolder({
+                            title: folder.dataset.regulationFolderTitle,
+                            category: folder.dataset.regulationFolderCategory,
+                            isUncategorized: folder.dataset.regulationFolderUncategorized === 'true',
+                            documentCount: folder.dataset.regulationFolderDocuments,
+                            articleCount: folder.dataset.regulationFolderArticles,
+                            effectiveCount: folder.dataset.regulationFolderEffective,
+                            needsReviewCount: folder.dataset.regulationFolderReview,
+                            latestUpdatedAt: folder.dataset.regulationFolderUpdated
+                        }).catch(e => toast(e.message || '加载分类法规失败', 'error'));
+                        return;
+                    }
+                    if (event.target.closest('[data-regulation-folder-back]')) {
+                        returnToCategoryFolders().catch(e => toast(e.message || '加载分类目录失败', 'error'));
                         return;
                     }
                     if (event.target.closest('#regulations-ai-open-btn')) {
                         openAiDialog();
                         return;
                     }
+                    if (event.target.closest('#regulations-bookmarks-btn')) {
+                        showRegulationBookmarks();
+                        return;
+                    }
+                    if (event.target.closest('#regulations-recycle-bin-btn')) {
+                        showRegulationRecycleBin();
+                        return;
+                    }
                     if (event.target.id === 'regulations-search-panel') {
                         closeSearchDialog();
                         return;
                     }
-                    if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel'].includes(event.target.id)) {
+                    if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel', 'regulations-access-log-panel', 'regulations-ai-log-panel', 'regulations-bookmarks-panel', 'regulations-recycle-bin-panel', 'regulations-quality-panel', 'regulations-obligation-panel', 'regulations-location-panel'].includes(event.target.id)) {
                         closeDialogs();
                         return;
                     }
@@ -147,6 +262,21 @@
                         panel?.classList.toggle('hidden');
                         if (panel && !panel.classList.contains('hidden')) focusFirstField(panel);
                         syncImportHint(document.getElementById('regulations-upload-form'));
+                        if (panel && !panel.classList.contains('hidden')) loadImportJobs().catch(e => toast(e.message || '加载导入任务失败', 'error'));
+                        return;
+                    }
+                    const retryImportJob = event.target.closest('[data-regulation-import-retry]');
+                    if (retryImportJob) {
+                        retryRegulationImportJob(retryImportJob.dataset.regulationImportRetry);
+                        return;
+                    }
+                    const cancelImportJob = event.target.closest('[data-regulation-import-cancel]');
+                    if (cancelImportJob) {
+                        cancelRegulationImportJob(cancelImportJob.dataset.regulationImportCancel);
+                        return;
+                    }
+                    if (event.target.closest('#regulations-quality-btn')) {
+                        showQualitySummary();
                         return;
                     }
                     const presetBtn = event.target.closest('[data-preset]');
@@ -156,9 +286,11 @@
                             const form = document.getElementById('regulations-upload-form');
                             if (form) {
                                 const categoryInput = form.querySelector('[name="category"]');
+                                const legalLevelInput = form.querySelector('[name="legalLevel"]');
                                 const issuingBodyInput = form.querySelector('[name="issuingBody"]');
                                 const jurisdictionInput = form.querySelector('[name="jurisdiction"]');
                                 if (categoryInput) categoryInput.value = preset.category || '';
+                                if (legalLevelInput) legalLevelInput.value = preset.legalLevel || '';
                                 if (issuingBodyInput) issuingBodyInput.value = preset.issuingBody || '';
                                 if (jurisdictionInput) jurisdictionInput.value = preset.jurisdiction || '';
                                 toast('已应用预设模板', 'success');
@@ -221,9 +353,19 @@
                     if (match) {
                         document.getElementById('regulations-ai-panel')?.classList.add('hidden');
                         document.getElementById('regulations-similar-panel')?.classList.add('hidden');
-                        loadDetail(match.dataset.regulationMatchDoc).then(() => {
+                        loadDetail(match.dataset.regulationMatchDoc, match.dataset.regulationMatchVersion || '').then(() => {
                             focusArticle(match.dataset.regulationMatchArticle);
                         }).catch(e => toast(e.message || '打开命中条文失败', 'error'));
+                        return;
+                    }
+                    const effectiveDate = event.target.closest('[data-regulation-effective-date]');
+                    if (effectiveDate) {
+                        const date = document.getElementById('regulations-effective-date')?.value || '';
+                        if (!date) {
+                            toast('请选择要查看的适用日期', 'warning');
+                            return;
+                        }
+                        loadDetail(effectiveDate.dataset.regulationEffectiveDate, '', date).catch(e => toast(e.message || '未找到该日期适用的法规版本', 'error'));
                         return;
                     }
 
@@ -238,7 +380,8 @@
                     const articleAsk = event.target.closest('[data-article-ask]');
                     if (articleAsk) {
                         const article = state.detail?.articles?.find(a => String(a.id) === String(articleAsk.dataset.articleAsk));
-                        openAiDialog();
+                        state.aiScope = 'document';
+                        openAiDialog('document');
                         const question = document.getElementById('regulations-ai-question');
                         if (article && question) {
                             question.value = `${article.article_label || '条文'}：\n${(article.content || '').slice(0, 500)}`;
@@ -316,12 +459,83 @@
                     }
                     const exportReportBtn = event.target.closest('[data-regulation-export-report]');
                     if (exportReportBtn) {
-                        exportRegulationReport(Number(exportReportBtn.dataset.regulationExportReport));
+                        exportRegulationReport(Number(exportReportBtn.dataset.regulationExportReport), exportReportBtn.dataset.regulationExportFormat || 'md');
                         return;
                     }
                     const annotateBtn = event.target.closest('[data-regulation-annotate]');
                     if (annotateBtn) {
                         showAnnotations(annotateBtn.dataset.regulationAnnotate);
+                        return;
+                    }
+                    const accessLog = event.target.closest('[data-regulation-access-log]');
+                    if (accessLog) {
+                        showAccessLogs(accessLog.dataset.regulationAccessLog);
+                        return;
+                    }
+                    const aiLogs = event.target.closest('[data-regulation-ai-logs]');
+                    if (aiLogs) {
+                        showRegulationAiLogs(aiLogs.dataset.regulationAiLogs);
+                        return;
+                    }
+                    const subscribe = event.target.closest('[data-regulation-subscribe]');
+                    if (subscribe) {
+                        toggleRegulationSubscription(subscribe.dataset.regulationSubscribe);
+                        return;
+                    }
+                    const bookmark = event.target.closest('[data-regulation-bookmark]');
+                    if (bookmark) {
+                        toggleRegulationBookmark(bookmark.dataset.regulationBookmark);
+                        return;
+                    }
+                    const bookmarkSave = event.target.closest('[data-regulation-bookmark-save]');
+                    if (bookmarkSave) {
+                        saveRegulationBookmarkTopic(bookmarkSave.dataset.regulationBookmarkSave, bookmarkSave.dataset.regulationBookmarkDocument);
+                        return;
+                    }
+                    const bookmarkDelete = event.target.closest('[data-regulation-bookmark-delete]');
+                    if (bookmarkDelete) {
+                        deleteRegulationBookmark(bookmarkDelete.dataset.regulationBookmarkDelete);
+                        return;
+                    }
+                    const bookmarkOpen = event.target.closest('[data-regulation-bookmark-open]');
+                    if (bookmarkOpen) {
+                        document.getElementById('regulations-bookmarks-panel')?.classList.add('hidden');
+                        loadDetail(bookmarkOpen.dataset.regulationBookmarkOpen).catch(error => toast(error.message || '加载法规详情失败', 'error'));
+                        return;
+                    }
+                    const restore = event.target.closest('[data-regulation-restore]');
+                    if (restore) {
+                        restoreRegulationFromRecycleBin(restore.dataset.regulationRestore);
+                        return;
+                    }
+                    const reindex = event.target.closest('[data-regulation-reindex-document]');
+                    if (reindex) {
+                        requestRegulationReindex(reindex.dataset.regulationReindexDocument, reindex.dataset.regulationReindexVersion);
+                        return;
+                    }
+                    const obligations = event.target.closest('[data-regulation-obligations]');
+                    if (obligations) {
+                        showRegulationObligations(obligations.dataset.regulationObligations);
+                        return;
+                    }
+                    const obligation = event.target.closest('[data-regulation-obligation]');
+                    if (obligation) {
+                        showRegulationObligations(state.activeId, obligation.dataset.regulationObligation);
+                        return;
+                    }
+                    const obligationReview = event.target.closest('[data-regulation-obligation-review]');
+                    if (obligationReview) {
+                        // 延迟到当前点击事件结束后再切换全局忙碌状态，避免按钮在浏览器
+                        // 正处理本次点击时被重绘，导致重复触发或焦点丢失。
+                        Promise.resolve().then(() => reviewRegulationObligation(
+                            obligationReview.dataset.regulationObligationDocument,
+                            obligationReview.dataset.regulationObligationReview
+                        ));
+                        return;
+                    }
+                    const location = event.target.closest('[data-regulation-location]');
+                    if (location) {
+                        showArticleLocations(location.dataset.regulationLocation);
                         return;
                     }
                     const annotationDelete = event.target.closest('[data-annotation-delete]');
@@ -333,18 +547,40 @@
                         document.getElementById('regulations-annotation-panel')?.classList.add('hidden');
                         return;
                     }
+                    if (event.target.closest('[data-regulations-close-access-log]')) {
+                        document.getElementById('regulations-access-log-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-ai-log]')) {
+                        document.getElementById('regulations-ai-log-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-bookmarks]')) {
+                        document.getElementById('regulations-bookmarks-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-recycle-bin]')) {
+                        document.getElementById('regulations-recycle-bin-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-quality]')) {
+                        document.getElementById('regulations-quality-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-obligation]')) {
+                        document.getElementById('regulations-obligation-panel')?.classList.add('hidden');
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-location]')) {
+                        document.getElementById('regulations-location-panel')?.classList.add('hidden');
+                        return;
+                    }
                     if (event.target.closest('[data-preview-confirm]')) {
-                        toast('预览确认入库功能待后续完善：目前请关闭预览直接提交表单入库', 'info');
+                        confirmPreviewImport();
                         return;
                     }
                     if (event.target.closest('[data-preview-merge]')) {
-                        const list = document.getElementById('regulations-preview-list');
-                        const checked = Array.from(list?.querySelectorAll('.regulations-preview-checkbox:checked') || []);
-                        if (checked.length < 2) {
-                            toast('请至少选中两个相邻条文以合并', 'warning');
-                            return;
-                        }
-                        toast('条文合并功能待后续完善', 'info');
+                        mergePreviewArticles();
                         return;
                     }
                     const compare = event.target.closest('[data-regulation-compare]');
@@ -360,6 +596,10 @@
                     if (event.target.closest('#regulations-ai-btn')) {
                         const question = document.getElementById('regulations-ai-question');
                         askAi(question?.value?.trim());
+                        return;
+                    }
+                    if (event.target.closest('#regulations-ai-stop-btn')) {
+                        stopRegulationAi();
                         return;
                     }
                     if (event.target.closest('#regulations-ai-clear-btn')) {
@@ -395,10 +635,10 @@
 
             async function parseDeepLink() {
                 const hash = location.hash || '';
-                const m = hash.match(/^#reg=(\d+)\.(\d+)$/);
+                const m = hash.match(/^#reg=(\d+)(?:\.(\d+))?\.(\d+)$/);
                 if (m) {
-                    const [, docId, articleId] = m;
-                    await loadDetail(docId);
+                    const [, docId, versionId, articleId] = m;
+                    await loadDetail(docId, versionId || '');
                     focusArticle(articleId);
                 }
             }
@@ -420,7 +660,7 @@
                 await window.Pivot.legacy.PivotAppModels?.refresh?.('regulations', 'regulations-ai-model');
                 bindEvents(view);
                 try {
-                    await Promise.all([loadDocuments({ keepActive: true, page: state.page }), loadFacets(), loadSavedSearches()]);
+                    await Promise.all([loadCategoryFolders(), loadFacets(), loadSavedSearches()]);
                     await parseDeepLink();
                 } catch (e) {
                     toast(e.message || '加载法规查询失败', 'error');

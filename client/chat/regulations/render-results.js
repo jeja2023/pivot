@@ -9,18 +9,16 @@
                     }
 
                     function renderMatchScore(match) {
-                        const hybrid = Number(match?.hybridScore);
-                        if (Number.isFinite(hybrid) && hybrid > 0) {
-                            return `<em class="regulations-match-score">混合 ${Math.round(hybrid * 100)}%</em>`;
+                        if (match?.retrieval === 'hybrid') {
+                            return '<em class="regulations-match-score">混合排序</em>';
                         }
-                        const vector = Number(match?.vectorScore);
-                        if (Number.isFinite(vector) && vector > 0) {
-                            return `<em class="regulations-match-score">语义 ${Math.round(vector * 100)}%</em>`;
+                        if (match?.retrieval === 'semantic') {
+                            return '<em class="regulations-match-score">语义命中</em>';
                         }
-                        if (state.searchMode === 'keyword') {
+                        if (state.searchMode === 'keyword' || match?.retrieval === 'keyword') {
                             return '<em class="regulations-match-score muted">关键词</em>';
                         }
-                        return '<em class="regulations-match-score muted">BM25 降级</em>';
+                        return '<em class="regulations-match-score muted">筛选结果</em>';
                     }
 
                     function summarizeSavedSearch(search) {
@@ -63,13 +61,14 @@
                         const targets = Array.from(document.querySelectorAll('[data-regulations-search-results]'));
                         if (!targets.length) return;
                         const hasQuery = !!String(state.query || '').trim();
+                        const hasFilters = !!(state.filters.category || state.filters.issuingBody || state.filters.jurisdiction || state.filters.status);
                         const hasMatches = Array.isArray(state.matches) && state.matches.length > 0;
-                        const emptyText = hasQuery ? '暂无条文命中，已按文档列表展示相关法规' : '搜索后显示相关条文';
-                        const modeText = state.query ? ` · ${getSearchModeLabel()}` : '';
+                        const emptyText = hasQuery || hasFilters ? '暂无符合条件的条文' : '搜索后显示相关条文';
+                        const modeText = hasQuery ? ` · ${getSearchModeLabel()}` : (hasFilters ? ' · 条件筛选' : '');
                         const resultsHtml = `
                             <div class="regulations-section-head compact"><strong>条文命中</strong><span>${state.matches.length} 条${modeText}</span></div>
                             ${state.matches.map(match => `
-                                <button class="regulations-match" type="button" data-regulation-match-doc="${esc(match.document_id)}" data-regulation-match-article="${esc(match.article_id)}">
+                                <button class="btn-secondary regulations-match" type="button" data-regulation-match-doc="${esc(match.document_id)}" data-regulation-match-version="${esc(match.version_id || '')}" data-regulation-match-article="${esc(match.article_id)}">
                                     <strong>${esc(match.document_title || '未命名法规')}</strong>
                                     <span>${esc([match.article_label, match.article_title].filter(Boolean).join(' '))}${renderMatchScore(match)}</span>
                                     <p>${highlightText(match.excerpt || match.content || '', state.query)}</p>
@@ -77,8 +76,8 @@
                             `).join('') || `<div class="regulations-empty compact">${esc(emptyText)}</div>`}
                         `;
                         targets.forEach(target => {
-                            target.classList.toggle('hidden', !hasQuery && !hasMatches);
-                            PivotSafeHtml.setHtml(target, (!hasQuery && !hasMatches) ? '' : resultsHtml);
+                            target.classList.toggle('hidden', !hasQuery && !hasFilters && !hasMatches);
+                            PivotSafeHtml.setHtml(target, (!hasQuery && !hasFilters && !hasMatches) ? '' : resultsHtml);
                         });
                     }
                     function renderAiAnswer() {
@@ -146,11 +145,12 @@
                         }
 
                         const turnsHtml = state.aiTurns.map((turn, turnIndex) => {
+                            const isStreaming = !!turn.streaming;
                             const sources = Array.isArray(turn.sources) ? turn.sources : [];
                             const direct = sources.filter(s => !s.viaLink);
                             const related = sources.filter(s => s.viaLink);
                             const renderSourceBtn = source => `
-                                <button class="btn-secondary regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-article="${esc(source.articleId)}">
+                                <button class="btn-secondary regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}">
                                     <span class="regulations-ai-source-label">
                                         <span class="regulations-ai-source-name">${esc(source.label || '相关条文')}</span>
                                         ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
@@ -187,9 +187,10 @@
                                             <strong class="regulations-ai-card-title">法规问答答复</strong>
                                             <span class="regulations-ai-card-tag">基于条文检索</span>
                                         </div>
-                                        <div class="regulations-article-body regulations-ai-card-body">${renderRichText(turn.answer)}</div>
+                                        <div id="regulations-ai-answer-${turnIndex}" class="regulations-article-body regulations-ai-card-body">${isStreaming ? esc(turn.answer || '正在生成回答…') : renderRichText(turn.answer)}</div>
+                                        ${isStreaming ? '<div class="regulations-ai-loading-text">正在检索法规条文并生成回答…</div>' : ''}
                                         ${groupsHtml}
-                                        <div class="regulations-ai-turn-actions">
+                                        ${isStreaming ? '' : `<div class="regulations-ai-turn-actions">
                                             <button class="btn-secondary regulations-ai-copy-btn" type="button" data-regulations-ai-copy="${turnIndex}" title="复制此条回答">
                                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -197,21 +198,23 @@
                                                 </svg>
                                                 <span>复制回答</span>
                                             </button>
-                                            <button class="regulations-ai-export-btn" type="button" data-regulation-export-report="${turnIndex}">
+                                            <button class="btn-secondary regulations-ai-export-btn" type="button" data-regulation-export-report="${turnIndex}" data-regulation-export-format="md">
                                                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                                     <polyline points="7 10 12 15 17 10"></polyline>
                                                     <line x1="12" y1="15" x2="12" y2="3"></line>
                                                 </svg>
-                                                <span>导出报告</span>
+                                                <span>导出 Markdown</span>
                                             </button>
-                                        </div>
+                                            <button class="btn-secondary regulations-ai-export-btn" type="button" data-regulation-export-report="${turnIndex}" data-regulation-export-format="docx">导出 Word</button>
+                                            <button class="btn-secondary regulations-ai-export-btn" type="button" data-regulation-export-report="${turnIndex}" data-regulation-export-format="pdf">导出 PDF</button>
+                                        </div>`}
                                     </div>
                                 </div>
                             `;
                         }).join('');
 
-                        const loadingHtml = state.aiBusy ? `
+                        const loadingHtml = state.aiBusy && !state.aiTurns.some(turn => turn.streaming) ? `
                             <div class="regulations-ai-turn regulations-ai-turn-loading">
                                 <div class="regulations-ai-card regulations-ai-loading-card">
                                     <div class="regulations-ai-card-header">

@@ -1,7 +1,13 @@
 const analysis = require('./analysis');
+const aiAudit = require('./ai-audit');
+const bookmarks = require('./bookmarks');
 const catalog = require('./catalog');
 const collaboration = require('./collaboration');
+const documentBatch = require('./document-batch');
+const importJobs = require('./import-jobs');
+const governance = require('./governance');
 const links = require('./links');
+const locations = require('./locations');
 const mutations = require('./mutations');
 const parser = require('./parser');
 const search = require('./search');
@@ -9,14 +15,24 @@ const shared = require('./shared');
 
 module.exports = {
     analyzeRegulationChangeImpact: analysis.analyzeRegulationChangeImpact,
+    listRegulationAiAnswerLogs: aiAudit.listRegulationAiAnswerLogs,
     buildRegulationAiContext: analysis.buildRegulationAiContext,
+    buildRegulationSearchExcerpt: search.buildRegulationSearchExcerpt,
     buildRegulationQaReport: collaboration.buildRegulationQaReport,
+    buildRegulationQaReportIr: collaboration.buildRegulationQaReportIr,
+    cancelRegulationImportJob: importJobs.cancelRegulationImportJob,
     createRegulationAnnotation: collaboration.createRegulationAnnotation,
+    createRegulationIndexRecoveryRunner: mutations.createRegulationIndexRecoveryRunner,
+    deleteRegulationBookmark: bookmarks.deleteRegulationBookmark,
     createRegulationDocumentFromUpload: mutations.createRegulationDocumentFromUpload,
+    createRegulationObligation: governance.createRegulationObligation,
+    enqueueRegulationImportJob: importJobs.enqueueRegulationImportJob,
     createSavedSearch: search.createSavedSearch,
     countActualRegulationArticles: parser.countActualRegulationArticles,
     deleteRegulationAnnotation: collaboration.deleteRegulationAnnotation,
     deleteRegulationDocument: mutations.deleteRegulationDocument,
+    deleteRegulationDocuments: documentBatch.deleteRegulationDocuments,
+    listRegulationDocumentChangeLogs: documentBatch.listRegulationDocumentChangeLogs,
     deleteSavedSearch: search.deleteSavedSearch,
     diffRegulationVersions: analysis.diffRegulationVersions,
     embedRegulationArticles: mutations.embedRegulationArticles,
@@ -28,26 +44,59 @@ module.exports = {
     rebuildRegulationCrossLinks: links.rebuildRegulationCrossLinks,
     resolveRegulationCrossLinks: links.resolveRegulationCrossLinks,
     recordRegulationAccess: collaboration.recordRegulationAccess,
+    recordRegulationAiAnswer: aiAudit.recordRegulationAiAnswer,
+    revertRegulationDocumentBatch: documentBatch.revertRegulationDocumentBatch,
+    recoverRegulationArticleEmbeddings: mutations.recoverRegulationArticleEmbeddings,
+    requestRegulationVersionReindex: mutations.requestRegulationVersionReindex,
+    reviewRegulationObligation: governance.reviewRegulationObligation,
     saveRegulationAliases: shared.saveRegulationAliases,
+    saveRegulationBookmark: bookmarks.saveRegulationBookmark,
+    retryRegulationImportJob: importJobs.retryRegulationImportJob,
     findRegulationDuplicateByHash: mutations.findRegulationDuplicateByHash,
+    getRegulationIndexRetryDelayMs: mutations.getRegulationIndexRetryDelayMs,
+    isRegulationEmbeddingErrorRetryable: mutations.isRegulationEmbeddingErrorRetryable,
+    findRegulationVersionEffectiveOn: catalog.findRegulationVersionEffectiveOn,
     getRegulationDocumentById: catalog.getRegulationDocumentById,
     getRegulationCitationGraph: analysis.getRegulationCitationGraph,
     getRegulationDocumentDetail: catalog.getRegulationDocumentDetail,
+    getRegulationArticleLocation: locations.getRegulationArticleLocation,
+    getReadableRegulationArticle: catalog.getReadableRegulationArticle,
     getRegulationSupersedeNotices: analysis.getRegulationSupersedeNotices,
     getRegulationVersionById: catalog.getRegulationVersionById,
+    getRegulationVersionStorageById: catalog.getRegulationVersionStorageById,
     listRegulationAccessLogs: collaboration.listRegulationAccessLogs,
+    listRegulationCategoryFolders: catalog.listRegulationCategoryFolders,
+    listRegulationBookmarks: bookmarks.listRegulationBookmarks,
+    listRegulationArticleLocations: locations.listRegulationArticleLocations,
+    listRegulationObligations: governance.listRegulationObligations,
+    listRegulationAssignees: governance.listRegulationAssignees,
+    listRegulationQualitySummary: governance.listRegulationQualitySummary,
+    listRegulationSubscriptions: governance.listRegulationSubscriptions,
+    listRegulationImportJobs: importJobs.listRegulationImportJobs,
     listRegulationAnnotations: collaboration.listRegulationAnnotations,
     listRegulationDocuments: catalog.listRegulationDocuments,
+    listDeletedRegulationDocuments: catalog.listDeletedRegulationDocuments,
     listRegulationFacets: catalog.listRegulationFacets,
+    listRegulationFolderDocumentSelection: catalog.listRegulationFolderDocumentSelection,
     listRegulationVersions: catalog.listRegulationVersions,
     listSavedSearches: search.listSavedSearches,
+    mergeRegulationCandidates: search.mergeRegulationCandidates,
     normalizeRegulationId: shared.normalizeRegulationId,
+    normalizeReviewedArticles: mutations.normalizeReviewedArticles,
     parseRegulationArticles: parser.parseRegulationArticles,
     resolveRegulationVersionDownloadPath: mutations.resolveRegulationVersionDownloadPath,
+    restoreRegulationDocument: mutations.restoreRegulationDocument,
     saveRegulationDocumentVersion: mutations.saveRegulationDocumentVersion,
+    startRegulationImportWorker: importJobs.startRegulationImportWorker,
+    startRegulationIndexRecoveryRunner: mutations.startRegulationIndexRecoveryRunner,
+    triggerRegulationIndexRecovery: mutations.triggerRegulationIndexRecovery,
+    subscribeToRegulation: governance.subscribeToRegulation,
     searchRegulationArticles: search.searchRegulationArticles,
     searchRegulationArticlesHybrid: search.searchRegulationArticlesHybrid,
     setRegulationArticleStatus: mutations.setRegulationArticleStatus,
     updateRegulationAnnotation: collaboration.updateRegulationAnnotation,
-    updateRegulationDocument: mutations.updateRegulationDocument
+    updateRegulationDocument: mutations.updateRegulationDocument,
+    updateRegulationVersionGovernance: mutations.updateRegulationVersionGovernance,
+    updateRegulationDocuments: documentBatch.updateRegulationDocuments,
+    unsubscribeFromRegulation: governance.unsubscribeFromRegulation
 };

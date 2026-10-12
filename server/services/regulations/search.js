@@ -6,194 +6,333 @@ const {
     generateEmbeddings,
     normalizeRegulationField,
     normalizeRegulationId,
+    normalizeRegulationAlias,
     normalizeSearchText
 } = require('./shared');
+const { getEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
 
-async function searchRegulationArticles({ query: searchQuery, documentId = null, limit = 8, includeArchived = false } = {}) {
-    const normalizedQuery = normalizeSearchText(searchQuery);
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 8, 1), 50);
-    const normalizedDocId = normalizeRegulationId(documentId);
-    const filters = ['a.version_id = d.current_version_id'];
+const MAX_REGULATION_SEARCH_RESULTS = 50;
+const MAX_REGULATION_RETRIEVAL_CANDIDATES = 300;
+const RECIPROCAL_RANK_K = 60;
+
+function normalizeSearchLimit(value, fallback = 8, maximum = MAX_REGULATION_SEARCH_RESULTS) {
+    return Math.min(Math.max(Number.parseInt(value, 10) || fallback, 1), maximum);
+}
+
+function normalizeSearchStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    return ['active', 'archived'].includes(status) ? status : '';
+}
+
+function buildArticleFilters({ documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', includeArchived = false } = {}) {
+    const filters = ['a.version_id = d.current_version_id', 'd.deleted_at IS NULL'];
     const params = [];
-    if (!includeArchived) filters.push('d.deleted_at IS NULL');
+    const normalizedDocId = normalizeRegulationId(documentId);
+    const normalizedCategory = normalizeRegulationField(category, 120);
+    const normalizedIssuingBody = normalizeRegulationField(issuingBody, 120);
+    const normalizedJurisdiction = normalizeRegulationField(jurisdiction, 120);
+    const normalizedStatus = normalizeSearchStatus(status);
+    if (!includeArchived) filters.push("d.status <> 'archived'");
     if (normalizedDocId) {
         filters.push('d.id = ?');
         params.push(normalizedDocId);
     }
+    if (normalizedCategory) {
+        filters.push('d.category ILIKE ?');
+        params.push(`%${normalizedCategory}%`);
+    }
+    if (normalizedIssuingBody) {
+        filters.push('d.issuing_body ILIKE ?');
+        params.push(`%${normalizedIssuingBody}%`);
+    }
+    if (normalizedJurisdiction) {
+        filters.push('d.jurisdiction ILIKE ?');
+        params.push(`%${normalizedJurisdiction}%`);
+    }
+    if (normalizedStatus) {
+        filters.push('d.status = ?');
+        params.push(normalizedStatus);
+    }
+    return { filters, params };
+}
 
-    const whereBase = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+function buildArticleSelect(scoreSql = '0 AS score') {
+    return `
+        d.id AS document_id,
+        d.title AS document_title,
+        d.category,
+        d.issuing_body,
+        d.jurisdiction,
+        d.summary AS document_summary,
+        d.status AS document_status,
+        v.id AS version_id,
+        v.version_label,
+        a.id AS article_id,
+        a.sort_order,
+        a.article_label,
+        a.article_title,
+        a.content,
+        ${scoreSql}
+    `;
+}
+
+function buildRegulationSearchExcerpt(content, searchQuery = '', maxLength = 600) {
+    const text = String(content || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    const limit = Math.max(Number(maxLength) || 600, 80);
+    if (text.length <= limit) return text;
+    const terms = normalizeSearchText(searchQuery).split(/\s+/).map(term => term.trim()).filter(Boolean);
+    const lowerText = text.toLocaleLowerCase();
+    let matchIndex = -1;
+    for (const term of terms) {
+        const index = lowerText.indexOf(term.toLocaleLowerCase());
+        if (index !== -1 && (matchIndex === -1 || index < matchIndex)) matchIndex = index;
+    }
+    if (matchIndex === -1) return `${text.slice(0, limit - 1)}…`;
+    const start = Math.max(0, matchIndex - Math.floor(limit * 0.35));
+    const end = Math.min(text.length, start + limit);
+    return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
+
+function formatSearchRows(rows, searchQuery, retrieval = 'keyword') {
+    return (Array.isArray(rows) ? rows : []).map(row => ({
+        ...row,
+        score: Number.isFinite(Number(row.score)) ? Number(row.score) : 0,
+        vectorScore: Number.isFinite(Number(row.vectorScore ?? row.vector_score)) ? Number(row.vectorScore ?? row.vector_score) : null,
+        excerpt: buildRegulationSearchExcerpt(row.content, searchQuery),
+        retrieval
+    }));
+}
+
+async function searchRegulationArticles({
+    query: searchQuery,
+    documentId = null,
+    category = '',
+    issuingBody = '',
+    jurisdiction = '',
+    status = '',
+    limit = 8,
+    includeArchived = false,
+    candidateMode = false
+} = {}) {
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    const safeLimit = normalizeSearchLimit(limit, 8, candidateMode ? MAX_REGULATION_RETRIEVAL_CANDIDATES : MAX_REGULATION_SEARCH_RESULTS);
+    const { filters, params } = buildArticleFilters({ documentId, category, issuingBody, jurisdiction, status, includeArchived });
+    const whereBase = `WHERE ${filters.join(' AND ')}`;
     if (!normalizedQuery) {
-        return await query(`
-            SELECT
-                d.id AS document_id,
-                d.title AS document_title,
-                d.category,
-                d.issuing_body,
-                d.jurisdiction,
-                d.summary AS document_summary,
-                v.id AS version_id,
-                v.version_label,
-                a.id AS article_id,
-                a.sort_order,
-                a.article_label,
-                a.article_title,
-                a.content,
-                a.embedding,
-                substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
-                0 AS score
+        const rows = await query(`
+            SELECT ${buildArticleSelect()}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
             JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
             ${whereBase}
-            ORDER BY d.updated_at DESC, a.sort_order ASC
+            ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
         `, [...params, safeLimit]);
+        return formatSearchRows(rows, normalizedQuery, 'metadata');
     }
 
     const like = `%${normalizedQuery}%`;
-    // 优先在 PostgreSQL 中计算词法相关度并排序。这样法规库扩大后不会把一批
-    // “命中但按更新时间排列”的结果交给 Node 再猜顺序；pg_trgm 不可用时保留
-    // ILIKE 兼容路径，避免可选扩展故障导致法规查询整体下线。
+    const normalizedAlias = normalizeRegulationAlias(normalizedQuery);
+    const aliasLike = `%${normalizedAlias}%`;
     const relevanceSql = `GREATEST(
         similarity(COALESCE(d.title, ''), ?),
         similarity(COALESCE(d.summary, ''), ?),
+        similarity(COALESCE(d.issuing_body, ''), ?),
         similarity(COALESCE(a.article_label, ''), ?),
         similarity(COALESCE(a.article_title, ''), ?),
         similarity(COALESCE(a.content, ''), ?)
     )`;
-    const matchParams = [normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery, normalizedQuery];
+    const relevanceParams = Array(6).fill(normalizedQuery);
+    const aliasMatchSql = normalizedAlias ? `
+        OR EXISTS (
+            SELECT 1 FROM regulation_aliases ra
+            WHERE ra.document_id = d.id
+              AND (ra.alias ILIKE ? OR ra.normalized_alias = ? OR ra.normalized_alias ILIKE ?)
+        )` : '';
+    const matchSql = `(
+        d.title ILIKE ?
+        OR d.summary ILIKE ?
+        OR d.issuing_body ILIKE ?
+        OR d.category ILIKE ?
+        OR d.jurisdiction ILIKE ?
+        OR a.article_label ILIKE ?
+        OR a.article_title ILIKE ?
+        OR a.content ILIKE ?
+        ${aliasMatchSql}
+    )`;
+    const matchParams = [...Array(8).fill(like), ...(normalizedAlias ? [like, normalizedAlias, aliasLike] : [])];
+    const titleOrAliasFirstSql = normalizedAlias ? `
+        d.title ILIKE ? OR a.article_label ILIKE ? OR EXISTS (
+            SELECT 1 FROM regulation_aliases ra
+            WHERE ra.document_id = d.id AND (ra.normalized_alias = ? OR ra.normalized_alias ILIKE ?)
+        )` : 'd.title ILIKE ? OR a.article_label ILIKE ?';
+    const titleOrAliasFirstParams = normalizedAlias ? [like, like, normalizedAlias, aliasLike] : [like, like];
     try {
-        return await query(`
-            SELECT
-                d.id AS document_id,
-                d.title AS document_title,
-                d.category,
-                d.issuing_body,
-                d.jurisdiction,
-                d.summary AS document_summary,
-                v.id AS version_id,
-                v.version_label,
-                a.id AS article_id,
-                a.sort_order,
-                a.article_label,
-                a.article_title,
-                a.content,
-                a.embedding,
-                substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
-                ${relevanceSql} AS score
+        const rows = await query(`
+            SELECT ${buildArticleSelect(`${relevanceSql} AS score`)}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
             JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
-            ${whereBase}
-              AND (
-                LOWER(d.title) LIKE LOWER(?)
-                OR LOWER(d.summary) LIKE LOWER(?)
-                OR LOWER(a.article_label) LIKE LOWER(?)
-                OR LOWER(a.article_title) LIKE LOWER(?)
-                OR LOWER(a.content) LIKE LOWER(?)
-              )
-            ORDER BY score DESC, d.updated_at DESC, a.sort_order ASC
+            ${whereBase} AND ${matchSql}
+            ORDER BY
+                CASE WHEN ${titleOrAliasFirstSql} THEN 1 ELSE 0 END DESC,
+                score DESC,
+                d.updated_at DESC,
+                a.sort_order ASC,
+                a.id ASC
             LIMIT ?
-        `, [...matchParams, ...params, like, like, like, like, like, safeLimit]);
+        `, [...relevanceParams, ...params, ...matchParams, ...titleOrAliasFirstParams, safeLimit]);
+        return formatSearchRows(rows, normalizedQuery);
     } catch (error) {
         console.warn('[regulations] 词法相关度排序不可用，回退基础检索:', error.message);
-        return await query(`
-            SELECT
-                d.id AS document_id,
-                d.title AS document_title,
-                d.category,
-                d.issuing_body,
-                d.jurisdiction,
-                d.summary AS document_summary,
-                v.id AS version_id,
-                v.version_label,
-                a.id AS article_id,
-                a.sort_order,
-                a.article_label,
-                a.article_title,
-                a.content,
-                a.embedding,
-                substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt,
-                1 AS score
+        const rows = await query(`
+            SELECT ${buildArticleSelect('0 AS score')}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
             JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
-            ${whereBase}
-              AND (
-                LOWER(d.title) LIKE LOWER(?)
-                OR LOWER(d.summary) LIKE LOWER(?)
-                OR LOWER(a.article_label) LIKE LOWER(?)
-                OR LOWER(a.article_title) LIKE LOWER(?)
-                OR LOWER(a.content) LIKE LOWER(?)
-              )
-            ORDER BY d.updated_at DESC, a.sort_order ASC
+            ${whereBase} AND ${matchSql}
+            ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
-        `, [...params, like, like, like, like, like, safeLimit]);
+        `, [...params, ...matchParams, safeLimit]);
+        return formatSearchRows(rows, normalizedQuery);
     }
 }
 
-// #2 混合检索（BM25 + 向量重排）：先用 BM25 召回候选，再用向量相似度重排
-async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, limit = 8, includeArchived = false, userId = 0 } = {}) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 8, 1), 50);
-    let queryVector;
+async function searchRegulationArticlesByVector(queryVector, options = {}) {
+    if (!Array.isArray(queryVector) || !queryVector.length) return [];
+    const safeLimit = normalizeSearchLimit(options.limit, 48, MAX_REGULATION_RETRIEVAL_CANDIDATES);
+    const { filters, params } = buildArticleFilters(options);
+    const embeddingProfile = String(options.embeddingProfile || '').trim();
+    if (!embeddingProfile) return [];
     try {
-        // 尝试生成查询向量
-        const vectors = await generateEmbeddings([String(searchQuery || '').trim()], null, null, userId, { source: 'regulations_search', timeoutMs: 10000 });
-        queryVector = vectors[0];
-    } catch (err) {
-        // 向量生成失败，降级为纯 BM25
-        console.warn('[regulations] 混合检索降级为 BM25:', err.message);
-        return await searchRegulationArticles({ query: searchQuery, documentId, limit, includeArchived });
+        const rows = await query(`
+            SELECT ${buildArticleSelect('1 - (a.embedding <=> ?::vector) AS vector_score')}
+            FROM regulation_documents d
+            JOIN regulation_versions v ON v.id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            WHERE ${filters.join(' AND ')}
+              AND a.embedding IS NOT NULL
+              AND a.embedding_profile = ?
+              AND vector_dims(a.embedding) = ?
+            ORDER BY a.embedding <=> ?::vector ASC, a.id ASC
+            LIMIT ?
+        `, [JSON.stringify(queryVector), ...params, embeddingProfile, queryVector.length, JSON.stringify(queryVector), safeLimit]);
+        return formatSearchRows(rows, options.query, 'semantic');
+    } catch (error) {
+        console.warn('[regulations] 语义召回不可用，保留词法检索结果:', error.message);
+        return [];
     }
-    if (!queryVector || !Array.isArray(queryVector)) {
-        return await searchRegulationArticles({ query: searchQuery, documentId, limit, includeArchived });
-    }
-    // BM25 召回候选（数量为 limit*6，保证重排后有足够结果）
-    const candidateLimit = Math.min(safeLimit * 6, 300);
-    const candidates = await searchRegulationArticles({ query: searchQuery, documentId, limit: candidateLimit, includeArchived });
-    if (!candidates.length) return [];
-    // 筛选有向量的候选，计算相似度并重排
-    const withVector = candidates.filter(c => c.embedding && String(c.embedding).trim()).map(c => {
-        try {
-            const articleVector = JSON.parse(c.embedding);
-            const similarity = cosineSimilarity(queryVector, articleVector);
-            return { ...c, vectorScore: similarity };
-        } catch (_err) {
-            return null;
-        }
-    }).filter(Boolean);
-    if (!withVector.length) {
-        return candidates.slice(0, safeLimit);
-    }
-    // 混合打分：向量相似度占 70%，BM25 逆序分占 30%（score 越小 BM25 越好，归一化后取反）
-    const maxBM25 = Math.max(...withVector.map(c => c.score || 999), 1);
-    withVector.forEach(c => {
-        const bm25Normalized = 1 - (c.score || 999) / maxBM25;
-        c.hybridScore = (c.vectorScore || 0) * 0.7 + bm25Normalized * 0.3;
-    });
-    withVector.sort((a, b) => (b.hybridScore || 0) - (a.hybridScore || 0));
-    return withVector.slice(0, safeLimit);
 }
 
-// #14 相似条文推荐（基于向量近邻，降级为同分类/同颁布机构）
-async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
+function mergeRegulationCandidates(lexical, semantic, limit) {
+    const combined = new Map();
+    lexical.forEach((item, index) => {
+        const key = String(item.article_id);
+        const record = combined.get(key) || { ...item, lexicalRank: null, vectorRank: null };
+        record.lexicalRank = index + 1;
+        record.score = Number(item.score) || 0;
+        combined.set(key, record);
+    });
+    semantic.forEach((item, index) => {
+        const key = String(item.article_id);
+        const record = combined.get(key) || { ...item, lexicalRank: null, vectorRank: null };
+        record.vectorRank = index + 1;
+        record.vectorScore = Number(item.vectorScore) || 0;
+        combined.set(key, record);
+    });
+    return [...combined.values()]
+        .map(item => {
+            const lexicalScore = item.lexicalRank ? 1 / (RECIPROCAL_RANK_K + item.lexicalRank) : 0;
+            const semanticScore = item.vectorRank ? 1 / (RECIPROCAL_RANK_K + item.vectorRank) : 0;
+            return {
+                ...item,
+                hybridScore: lexicalScore + semanticScore,
+                retrieval: item.lexicalRank && item.vectorRank ? 'hybrid' : (item.lexicalRank ? 'keyword' : 'semantic')
+            };
+        })
+        .sort((left, right) => (
+            right.hybridScore - left.hybridScore
+            || right.score - left.score
+            || (right.vectorScore || 0) - (left.vectorScore || 0)
+            || Number(left.article_id) - Number(right.article_id)
+        ))
+        .slice(0, limit);
+}
+
+// 混合检索采用“词法、向量独立召回 + 倒数排名融合”。词法命中没有向量时仍会保留，
+// 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
+async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false, userId = 0 } = {}) {
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    const safeLimit = normalizeSearchLimit(limit);
+    const sharedOptions = { query: normalizedQuery, documentId, category, issuingBody, jurisdiction, status, includeArchived };
+
+    if (!normalizedQuery) {
+        const lexical = await searchRegulationArticles({ ...sharedOptions, limit: safeLimit, candidateMode: false });
+        return lexical.slice(0, safeLimit);
+    }
+
+    // 并行发起词法检索与查询向量生成；将向量超时严格限制在 4 秒内，
+    // 避免远端向量服务异常或排队将整个请求拖延至看门狗超时。
+    const [lexicalResult, vectorResult] = await Promise.allSettled([
+        searchRegulationArticles({ ...sharedOptions, limit: MAX_REGULATION_RETRIEVAL_CANDIDATES, candidateMode: true }),
+        generateEmbeddings([normalizedQuery], null, null, userId, { source: 'regulations_search', timeoutMs: 4000 })
+    ]);
+
+    const lexical = lexicalResult.status === 'fulfilled' && Array.isArray(lexicalResult.value) ? lexicalResult.value : [];
+    if (lexicalResult.status === 'rejected') {
+        console.warn('[regulations] 混合检索词法召回异常:', lexicalResult.reason?.message || lexicalResult.reason);
+    }
+
+    const queryVector = vectorResult.status === 'fulfilled' ? vectorResult.value?.[0] : null;
+    if (vectorResult.status === 'rejected') {
+        console.warn('[regulations] 混合检索向量生成不可用，回退词法检索:', vectorResult.reason?.message || vectorResult.reason);
+    }
+
+    if (!Array.isArray(queryVector) || !queryVector.length) {
+        return lexical.slice(0, safeLimit).map(item => ({ ...item, retrieval: 'keyword' }));
+    }
+
+    let semantic = [];
+    try {
+        semantic = await searchRegulationArticlesByVector(queryVector, {
+            ...sharedOptions,
+            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId)),
+            limit: MAX_REGULATION_RETRIEVAL_CANDIDATES
+        });
+    } catch (semanticError) {
+        console.warn('[regulations] 混合检索向量召回失败，回退词法检索:', semanticError.message);
+    }
+
+    if (!semantic.length) {
+        return lexical.slice(0, safeLimit).map(item => ({ ...item, retrieval: 'keyword' }));
+    }
+
+    return mergeRegulationCandidates(lexical, semantic, safeLimit);
+}
+
+// 相似条文推荐：优先使用 pgvector，在向量不可用时退回同分类或同发布机构。
+async function findSimilarRegulationArticles({ articleId, limit = 5, includeArchived = false } = {}) {
     const aid = normalizeRegulationId(articleId);
     if (!aid) return [];
-    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 5, 1), 20);
-    const source = await queryOne('SELECT embedding, document_id, content FROM regulation_articles WHERE id = ?', [aid]);
+    const safeLimit = normalizeSearchLimit(limit, 5, 20);
+    const statusFilter = includeArchived ? '' : " AND d.status <> 'archived'";
+    const source = await queryOne(`
+        SELECT a.embedding, a.embedding_profile, a.document_id, a.content
+        FROM regulation_articles a
+        JOIN regulation_documents d ON d.id = a.document_id
+        WHERE a.id = ? AND d.deleted_at IS NULL${statusFilter}
+    `, [aid]);
     if (!source) return [];
     let sourceVector;
     try {
-        if (source.embedding && String(source.embedding).trim()) {
-            sourceVector = JSON.parse(source.embedding);
-        }
-    } catch (_err) {
-        // 源条文无向量或解析失败，降级为分类推荐
+        if (source.embedding && String(source.embedding).trim()) sourceVector = JSON.parse(source.embedding);
+    } catch (_error) {
+        sourceVector = null;
     }
-    if (!sourceVector || !Array.isArray(sourceVector)) {
-        // 降级：推荐同一文档的其它条文，或同分类/颁布机构的条文
-        const doc = await queryOne('SELECT category, issuing_body FROM regulation_documents WHERE id = ?', [source.document_id]);
-        const where = doc?.category ? 'AND d.category = ?' : (doc?.issuing_body ? 'AND d.issuing_body = ?' : '');
+    if (!Array.isArray(sourceVector) || !sourceVector.length) {
+        const doc = await queryOne('SELECT category, issuing_body FROM regulation_documents WHERE id = ? AND deleted_at IS NULL', [source.document_id]);
+        const clause = doc?.category ? 'AND d.category = ?' : (doc?.issuing_body ? 'AND d.issuing_body = ?' : '');
         const param = doc?.category || doc?.issuing_body || '';
         return await query(`
             SELECT d.id AS document_id, d.title AS document_title, d.category, d.issuing_body,
@@ -201,13 +340,11 @@ async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
                    substr(replace(a.content, '\n', ' '), 1, 200) AS excerpt
             FROM regulation_articles a
             JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
-            WHERE a.id != ? ${where} AND d.deleted_at IS NULL
-            ORDER BY d.updated_at DESC
+            WHERE a.id != ? AND d.deleted_at IS NULL${statusFilter} ${clause}
+            ORDER BY d.updated_at DESC, a.sort_order ASC
             LIMIT ?
         `, [aid, ...(param ? [param] : []), safeLimit]);
     }
-    // 向量近邻优先由 pgvector 排序并限制候选集，避免把最多 1000 条向量拉到
-    // Node.js 再计算。vector_dims 过滤可避免不同 Embedding 模型维度混算。
     let candidates;
     try {
         candidates = await query(`
@@ -218,11 +355,11 @@ async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
             FROM regulation_articles a
             JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
             WHERE a.id != ? AND a.embedding IS NOT NULL
-              AND vector_dims(a.embedding) = ?
-              AND d.deleted_at IS NULL
+              AND a.embedding_profile = ?
+              AND vector_dims(a.embedding) = ? AND d.deleted_at IS NULL${statusFilter}
             ORDER BY a.embedding <=> ?::vector ASC, a.id ASC
             LIMIT ?
-        `, [JSON.stringify(sourceVector), aid, sourceVector.length, JSON.stringify(sourceVector), Math.min(1000, Math.max(safeLimit * 20, 100))]);
+        `, [JSON.stringify(sourceVector), aid, source.embedding_profile || '', sourceVector.length, JSON.stringify(sourceVector), Math.min(1000, Math.max(safeLimit * 20, 100))]);
     } catch (error) {
         console.warn('[regulations] 相似条文向量排序下推失败，回退应用层计算:', error.message);
         candidates = await query(`
@@ -231,25 +368,24 @@ async function findSimilarRegulationArticles({ articleId, limit = 5 } = {}) {
                    d.title AS document_title, d.category, d.issuing_body
             FROM regulation_articles a
             JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
-            WHERE a.id != ? AND a.embedding IS NOT NULL AND d.deleted_at IS NULL
+            WHERE a.id != ? AND a.embedding IS NOT NULL AND a.embedding_profile = ? AND d.deleted_at IS NULL${statusFilter}
             LIMIT 1000
-        `, [aid]);
+        `, [aid, source.embedding_profile || '']);
     }
-    const withScore = candidates.map(c => {
-        if (Number.isFinite(Number(c.similarity))) return { ...c, article_id: c.id, similarity: Number(c.similarity) };
+    const withScore = candidates.map(candidate => {
+        if (Number.isFinite(Number(candidate.similarity))) {
+            return { ...candidate, article_id: candidate.id, similarity: Number(candidate.similarity) };
+        }
         try {
-            const vec = JSON.parse(c.embedding);
-            const sim = cosineSimilarity(sourceVector, vec);
-            return { ...c, similarity: sim, article_id: c.id };
-        } catch (_err) {
+            return { ...candidate, article_id: candidate.id, similarity: cosineSimilarity(sourceVector, JSON.parse(candidate.embedding)) };
+        } catch (_error) {
             return null;
         }
     }).filter(Boolean);
-    withScore.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+    withScore.sort((left, right) => (right.similarity || 0) - (left.similarity || 0));
     return withScore.slice(0, safeLimit);
 }
 
-// #14 保存检索 CRUD
 async function createSavedSearch({ userId, name, query: searchQuery = '', category = '', jurisdiction = '' }) {
     const uid = normalizeRegulationId(userId);
     if (!uid || !String(name || '').trim()) return null;
@@ -283,10 +419,12 @@ async function deleteSavedSearch({ searchId, userId }) {
 }
 
 module.exports = {
+    buildRegulationSearchExcerpt,
     createSavedSearch,
     deleteSavedSearch,
     findSimilarRegulationArticles,
     listSavedSearches,
+    mergeRegulationCandidates,
     searchRegulationArticles,
     searchRegulationArticlesHybrid
 };

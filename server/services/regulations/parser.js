@@ -12,6 +12,8 @@ const {
     deriveRegulationTitleFromFilename
 } = require('./shared');
 
+const REGULATION_STRUCTURE_HEADING_RE = /^第([〇零一二三四五六七八九十百千万\d]+)([编篇章节])\s*(.*)$/;
+
 function deriveRegulationTitleFromText(extractedText, fallbackName = '') {
     const filenameTitle = deriveRegulationTitleFromFilename(fallbackName);
     if (filenameTitle) return filenameTitle;
@@ -114,6 +116,7 @@ function splitRegulationArticlesByStrategy(lines, strategy) {
     const articles = [];
     let current = null;
     let preambleLines = [];
+    const structurePath = [];
     const finalize = () => {
         if (!current) return;
         const content = normalizeRegulationText(current.lines.join('\n'));
@@ -128,7 +131,7 @@ function splitRegulationArticlesByStrategy(lines, strategy) {
             articleLabel: label,
             articleTitle: title,
             content,
-            headingPath: '',
+            headingPath: current.headingPath || '',
             searchContent: buildRagSearchContent([current.label, current.title, content].filter(Boolean).join(' '))
         });
     };
@@ -154,11 +157,24 @@ function splitRegulationArticlesByStrategy(lines, strategy) {
             else preambleLines.push('');
             continue;
         }
+        // 在以“第 X 条”为主的法规里，编、篇、章、节并不是条文边界。
+        // 将其写入后续条文的层级路径，避免“第二章”落进上一条正文。
+        const structureMatch = strategy === 'article' ? line.match(REGULATION_STRUCTURE_HEADING_RE) : null;
+        if (structureMatch) {
+            const levelOrder = { 编: 0, 篇: 1, 章: 2, 节: 3 };
+            const level = levelOrder[structureMatch[2]];
+            if (current) finalize();
+            structurePath.splice(level);
+            structurePath[level] = normalizeRegulationField(line, 120);
+            if (!articles.length) preambleLines.push(line);
+            current = null;
+            continue;
+        }
         const head = detectRegulationHeadingLine(line, strategy);
         if (head) {
             if (current) finalize();
             else finalizePreamble();
-            current = { ...head, lines: head.includeHeadingLine ? [line] : [] };
+            current = { ...head, headingPath: structurePath.filter(Boolean).join(' › '), lines: head.includeHeadingLine ? [line] : [] };
             continue;
         }
         if (current) current.lines.push(line);
@@ -220,7 +236,10 @@ function countActualRegulationArticles(articles = []) {
 }
 
 function parseRegulationArticles(extractedText, { docTitle = '' } = {}) {
-    const text = normalizeRegulationText(extractedText);
+    // OCR 与网页提取常把“第一条……第二条……”压到同一行。仅在中文句末/分号后
+    // 补入换行，避免把正文中普通的“第 X 条”叙述误拆成条文。
+    const text = normalizeRegulationText(extractedText)
+        .replace(/([。；;])\s*(第[〇零一二三四五六七八九十百千万\d]+条(?:之[〇零一二三四五六七八九十百千万\d]+)?)/g, '$1\n$2');
     if (!text) return [];
 
     const lines = text.split('\n');

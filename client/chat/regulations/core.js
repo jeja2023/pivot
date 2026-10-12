@@ -20,21 +20,28 @@
         const state = {
             documents: [], total: 0, activeId: '', detail: null, matches: [], query: '',
             searchMode: 'hybrid', savedSearches: [],
-            filters: { category: '', jurisdiction: '', includeArchived: false },
-            aiAnswer: '', aiSources: [], aiTurns: [], aiBusy: false,
-            facets: { categories: [], jurisdictions: [] },
+            filters: { category: '', issuingBody: '', jurisdiction: '', status: '', includeArchived: false },
+            aiAnswer: '', aiSources: [], aiTurns: [], aiBusy: false, aiAbortController: null, aiStopSilently: false,
+            aiScope: 'library',
+            importJobs: [], importJobsTimer: null,
+            importPreview: null,
+            facets: { categories: [], legalLevels: [], issuingBodies: [], jurisdictions: [] },
+            libraryView: 'folders', activeFolder: null, categoryFolders: [],
             page: 1, pageSize: REGULATIONS_PAGE_SIZE,
+            selectedDocumentIds: new Set(), selectedDocumentTitles: new Map(), batchMode: false, batchDeletePending: false,
             diffView: null,
             busy: false, loaded: false
         };
 
         const PRESETS = {
-            law: { category: '法律', issuingBody: '全国人民代表大会', jurisdiction: '全国' },
-            lawSc: { category: '法律', issuingBody: '全国人大常委会', jurisdiction: '全国' },
-            regulation: { category: '行政法规', issuingBody: '国务院', jurisdiction: '全国' },
-            interpretation: { category: '司法解释', issuingBody: '最高人民法院', jurisdiction: '全国' },
-            procuratorate: { category: '司法解释', issuingBody: '最高人民检察院', jurisdiction: '全国' },
-            rule: { category: '部门规章', issuingBody: '', jurisdiction: '全国' }
+            law: { legalLevel: '法律', category: '法律', issuingBody: '全国人民代表大会', jurisdiction: '全国' },
+            lawSc: { legalLevel: '法律', category: '法律', issuingBody: '全国人民代表大会常务委员会', jurisdiction: '全国' },
+            legalInterpretation: { legalLevel: '法律解释', category: '法律解释', issuingBody: '全国人民代表大会常务委员会', jurisdiction: '全国' },
+            regulation: { legalLevel: '行政法规', category: '行政法规', issuingBody: '国务院', jurisdiction: '全国' },
+            interpretation: { legalLevel: '司法解释', category: '司法解释', issuingBody: '最高人民法院', jurisdiction: '全国' },
+            procuratorate: { legalLevel: '司法解释', category: '司法解释', issuingBody: '最高人民检察院', jurisdiction: '全国' },
+            jointInterpretation: { legalLevel: '司法解释', category: '司法解释', issuingBody: '最高人民法院、最高人民检察院', jurisdiction: '全国' },
+            rule: { legalLevel: '部门规章', category: '部门规章', issuingBody: '', jurisdiction: '全国' }
         };
 
         function esc(value) { return html.escapeHtml(value); }

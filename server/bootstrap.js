@@ -24,6 +24,7 @@ const { startLongTermMemoryMaintenanceRunner } = require('./services/long-term-m
 const { startDecisionLearningMaintenanceRunner } = require('./services/decision-maintenance');
 const { createDecisionArtifactBreakerRunner } = require('./services/decision-artifact-breaker');
 const { startAnalysisRefreshRunner, startAsyncQueryRunner } = require('./services/data-analysis');
+const { startRegulationImportWorker, startRegulationIndexRecoveryRunner } = require('./services/regulations');
 
 function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = process, setTimeoutFn = setTimeout }) {
     let fatalExitScheduled = false;
@@ -87,6 +88,8 @@ function startBackgroundServices({
         startModelEndpointMonitor,
         recoverStaleKnowledgeDocumentIndexes,
         startKnowledgeIngestionWorker,
+        startRegulationImportWorker,
+        startRegulationIndexRecoveryRunner,
         recoverKnowledgeEvaluationRuns,
         refreshKnowledgeFreshness,
         backfillKnowledgeProductProjections,
@@ -131,6 +134,8 @@ function startBackgroundServices({
     runBackgroundTask(dependencies.startModelEndpointMonitor, logger, '模型端点监控服务启动失败');
     setImmediateFn(() => {
         runBackgroundTask(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');
+        runBackgroundTask(dependencies.startRegulationImportWorker, logger, '法规导入任务 Worker 启动失败');
+        runBackgroundTask(dependencies.startRegulationIndexRecoveryRunner, logger, '法规向量索引恢复巡检器启动失败');
         runBackgroundTask(dependencies.recoverStaleKnowledgeDocumentIndexes, logger, '知识库索引恢复执行失败');
         runBackgroundTask(dependencies.recoverKnowledgeEvaluationRuns, logger, '知识库评测运行恢复失败');
         runBackgroundTask(dependencies.refreshKnowledgeFreshness, logger, '知识库文档新鲜度巡检失败');

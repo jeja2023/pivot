@@ -52,6 +52,9 @@
     "regulation_aliases": "制度条款同义词与业务别名表",
     "regulation_article_annotations": "制度条款人工专家批注与解读表",
     "regulation_access_logs": "制度库用户查阅与访问审计日志表",
+    "regulation_ai_answer_logs": "法规 AI 问答的答案、依据版本与上下文快照审计表",
+    "regulation_document_change_logs": "法规批量修改逐条前后值与可撤销状态审计表",
+    "regulation_bookmarks": "用户个人法规收藏与专题整理表",
     "regulation_saved_searches": "用户制度检索收藏与常用查询条件表",
     "agent_runs": "智能体任务运行主表（包含目标、状态、预算与模式）",
     "agent_steps": "智能体单步执行记录表（规划、思考、工具调用与结果）",
@@ -328,6 +331,12 @@
       "extracted_text": "regulation_versions 表的 extracted_text 字段",
       "summary": "内容摘要总结",
       "article_count": "regulation_versions 表的 article_count 字段",
+      "index_status": "法规向量或关键词索引状态",
+      "index_error": "最近一次索引失败或降级原因",
+      "index_attempts": "当前索引重试周期已执行次数",
+      "index_max_attempts": "当前索引重试周期最大次数",
+      "index_next_retry_at": "临时索引故障的下一次自动重试时间",
+      "index_last_attempt_at": "最近一次索引尝试时间",
       "uploaded_by_user": "regulation_versions 表的 uploaded_by_user 字段",
       "created_at": "记录创建时间（东八区）",
       "updated_at": "最后更新时间（东八区）"
@@ -382,6 +391,39 @@
       "action": "操作动作权限",
       "detail": "regulation_access_logs 表的 detail 字段",
       "created_at": "记录创建时间（东八区）"
+    },
+    "regulation_ai_answer_logs": {
+      "id": "主键自增 ID / 唯一主键",
+      "user_id": "提问用户 ID（关联 users.id）",
+      "document_id": "限定检索的法规文档 ID",
+      "question": "用户问题快照",
+      "answer": "模型最终回答快照",
+      "model_name": "回答使用的模型名称",
+      "context_snapshot": "生成时送入模型的法规依据上下文快照",
+      "sources_json": "版本化条文来源列表 JSON",
+      "usage_json": "模型令牌使用量 JSON",
+      "created_at": "记录创建时间（东八区）"
+    },
+    "regulation_document_change_logs": {
+      "id": "主键自增 ID / 唯一主键",
+      "batch_id": "同一次批量修改的关联标识",
+      "document_id": "被修改法规文档 ID",
+      "actor_user_id": "执行批量修改的用户 ID",
+      "action": "审计操作类型",
+      "before_json": "修改前字段值 JSON",
+      "after_json": "修改后字段值 JSON",
+      "reverted_at": "撤销完成时间",
+      "reverted_by_user": "执行撤销的用户 ID",
+      "created_at": "记录创建时间（东八区）"
+    },
+    "regulation_bookmarks": {
+      "id": "主键自增 ID / 唯一主键",
+      "user_id": "收藏所属用户 ID",
+      "document_id": "被收藏法规文档 ID",
+      "topic": "用户自定义专题名称",
+      "note": "收藏备注",
+      "created_at": "记录创建时间（东八区）",
+      "updated_at": "最后更新时间（东八区）"
     },
     "regulation_saved_searches": {
       "id": "主键自增 ID / 唯一主键",

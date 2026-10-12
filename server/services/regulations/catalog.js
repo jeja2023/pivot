@@ -2,6 +2,7 @@ const {
     query,
     queryOne,
     normalizeRegulationField,
+    normalizeRegulationDateValue,
     normalizeRegulationId,
     normalizeRegulationStatus,
     normalizeSearchText
@@ -12,24 +13,67 @@ async function getRegulationSupersedeNotices(...args) {
     return await require('./analysis').getRegulationSupersedeNotices(...args);
 }
 
-async function getRegulationDocumentById(docId, { includeArchived = false } = {}) {
+const REGULATION_VERSION_COLUMNS = `
+    id, document_id, version_label, source_name, source_size, source_format,
+    source_url, summary, article_count, published_at, effective_from, effective_to,
+    effect_status, review_status, reviewed_by_user, reviewed_at, parse_status, index_status,
+    index_error, index_attempts, index_max_attempts, index_next_retry_at, index_last_attempt_at,
+    embedding_profile, uploaded_by_user, created_at, updated_at
+`;
+
+async function getRegulationDocumentById(docId, { includeArchived = false, includeDeleted = false } = {}) {
     const normalizedId = normalizeRegulationId(docId);
     if (!normalizedId) return null;
-    const archivedFilter = includeArchived ? '' : ' AND deleted_at IS NULL';
+    const clauses = ['id = ?'];
+    if (!includeDeleted) clauses.push('deleted_at IS NULL');
+    if (!includeArchived) clauses.push("status <> 'archived'");
     return await queryOne(`
         SELECT *
         FROM regulation_documents
-        WHERE id = ?${archivedFilter}
+        WHERE ${clauses.join(' AND ')}
     `, [normalizedId]);
 }
 
 async function getRegulationVersionById(versionId) {
     const normalizedId = normalizeRegulationId(versionId);
     if (!normalizedId) return null;
-    const row = await queryOne('SELECT * FROM regulation_versions WHERE id = ?', [normalizedId]);
+    const row = await queryOne(`SELECT ${REGULATION_VERSION_COLUMNS} FROM regulation_versions WHERE id = ?`, [normalizedId]);
     if (!row) return null;
-    const articleCount = await countRegulationArticlesByVersionId(row.id);
-    return { ...row, article_count: articleCount };
+    return { ...row, article_count: Number(row.article_count || 0), source_size: Number(row.source_size || 0) };
+}
+
+async function getRegulationVersionStorageById(versionId, documentId = null) {
+    const normalizedVersionId = normalizeRegulationId(versionId);
+    const normalizedDocumentId = normalizeRegulationId(documentId);
+    if (!normalizedVersionId) return null;
+    const clauses = ['id = ?'];
+    const params = [normalizedVersionId];
+    if (normalizedDocumentId) {
+        clauses.push('document_id = ?');
+        params.push(normalizedDocumentId);
+    }
+    return await queryOne(`
+        SELECT id, document_id, source_name, source_path
+        FROM regulation_versions
+        WHERE ${clauses.join(' AND ')}
+    `, params);
+}
+
+async function findRegulationVersionEffectiveOn(documentId, effectiveAt) {
+    const normalizedDocumentId = normalizeRegulationId(documentId);
+    const date = normalizeRegulationDateValue(effectiveAt);
+    if (!normalizedDocumentId || !date) return null;
+    const row = await queryOne(`
+        SELECT ${REGULATION_VERSION_COLUMNS}
+        FROM regulation_versions
+        WHERE document_id = ?
+          AND effect_status = 'effective'
+          AND effective_from IS NOT NULL AND effective_from <= ?::date
+          AND (effective_to IS NULL OR effective_to >= ?::date)
+        ORDER BY effective_from DESC, id DESC
+        LIMIT 1
+    `, [normalizedDocumentId, date, date]);
+    return row ? { ...row, article_count: Number(row.article_count || 0), source_size: Number(row.source_size || 0) } : null;
 }
 
 async function countRegulationArticlesByVersionId(versionId) {
@@ -48,24 +92,26 @@ async function listRegulationVersions(docId) {
     const normalizedId = normalizeRegulationId(docId);
     if (!normalizedId) return [];
     const rows = await query(`
-        SELECT *
+        SELECT ${REGULATION_VERSION_COLUMNS}
         FROM regulation_versions
         WHERE document_id = ?
         ORDER BY id DESC
     `, [normalizedId]);
-    return await Promise.all(rows.map(async row => ({
+    return rows.map(row => ({
         ...row,
-        article_count: await countRegulationArticlesByVersionId(row.id),
+        article_count: Number(row.article_count || 0),
         source_size: Number(row.source_size || 0)
-    })));
+    }));
 }
 
 async function listRegulationDocuments({
     query: searchQuery = '',
     category = '',
+    issuingBody = '',
     jurisdiction = '',
     status = '',
     includeArchived = false,
+    uncategorized = false,
     limit = 50,
     offset = 0
 } = {}) {
@@ -74,16 +120,21 @@ async function listRegulationDocuments({
     const clauses = [];
     const params = [];
 
-    if (!includeArchived) {
-        clauses.push('d.deleted_at IS NULL');
-    }
+    if (includeArchived) clauses.push('d.deleted_at IS NULL');
+    else clauses.push("d.deleted_at IS NULL AND d.status <> 'archived'");
     if (status) {
         clauses.push('d.status = ?');
         params.push(normalizeRegulationStatus(status));
     }
-    if (category) {
+    if (uncategorized) {
+        clauses.push("COALESCE(TRIM(d.category), '') = ''");
+    } else if (category) {
         clauses.push('LOWER(d.category) LIKE LOWER(?)');
         params.push(`%${normalizeRegulationField(category, 255)}%`);
+    }
+    if (issuingBody) {
+        clauses.push('LOWER(d.issuing_body) LIKE LOWER(?)');
+        params.push(`%${normalizeRegulationField(issuingBody, 255)}%`);
     }
     if (jurisdiction) {
         clauses.push('LOWER(d.jurisdiction) LIKE LOWER(?)');
@@ -111,6 +162,10 @@ async function listRegulationDocuments({
             v.version_label AS current_version_label,
             v.source_name AS current_source_name,
             v.source_size AS current_source_size,
+            v.effect_status AS current_effect_status,
+            v.effective_from AS current_effective_from,
+            v.effective_to AS current_effective_to,
+            v.review_status AS current_review_status,
             v.created_at AS current_version_created_at,
             v.updated_at AS current_version_updated_at,
             (
@@ -148,12 +203,12 @@ async function listRegulationDocuments({
     `, params);
     const total = Number(totalRow?.count || 0);
 
-    const data = await Promise.all(rows.map(async row => ({
+    const data = rows.map(row => ({
         ...row,
         version_count: Number(row.version_count || 0),
-        article_count: await countRegulationArticlesByVersionId(row.current_version_id),
+        article_count: Number(row.article_count || 0),
         source_size: Number(row.current_source_size || 0)
-    })));
+    }));
 
     return {
         data,
@@ -163,9 +218,73 @@ async function listRegulationDocuments({
     };
 }
 
+async function listRegulationCategoryFolders({ includeArchived = false } = {}) {
+    const visibility = includeArchived ? 'd.deleted_at IS NULL' : "d.deleted_at IS NULL AND d.status <> 'archived'";
+    const rows = await query(`
+        SELECT
+            COALESCE(NULLIF(TRIM(d.category), ''), '未分类') AS title,
+            COALESCE(NULLIF(TRIM(d.category), ''), '') AS category,
+            COUNT(*) AS document_count,
+            COALESCE(SUM(d.article_count), 0) AS article_count,
+            COUNT(*) FILTER (WHERE v.effect_status = 'effective' AND v.review_status = 'approved') AS effective_count,
+            COUNT(*) FILTER (WHERE v.effect_status = 'unverified' OR v.review_status <> 'approved') AS needs_review_count,
+            MAX(COALESCE(d.updated_at, d.created_at)) AS latest_updated_at
+        FROM regulation_documents d
+        LEFT JOIN regulation_versions v ON v.id = d.current_version_id
+        WHERE ${visibility}
+        GROUP BY COALESCE(NULLIF(TRIM(d.category), ''), '未分类'), COALESCE(NULLIF(TRIM(d.category), ''), '')
+        ORDER BY CASE WHEN COALESCE(NULLIF(TRIM(d.category), ''), '') = '' THEN 1 ELSE 0 END, title ASC
+    `);
+    return rows.map(row => ({
+        ...row,
+        isUncategorized: !row.category,
+        documentCount: Number(row.document_count || 0),
+        articleCount: Number(row.article_count || 0),
+        effectiveCount: Number(row.effective_count || 0),
+        needsReviewCount: Number(row.needs_review_count || 0)
+    }));
+}
+
+async function listRegulationFolderDocumentSelection({ category = '', uncategorized = false, includeArchived = false, limit = 2000 } = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 2000, 1), 2000);
+    const clauses = [includeArchived ? 'd.deleted_at IS NULL' : "d.deleted_at IS NULL AND d.status <> 'archived'"];
+    const params = [];
+    if (uncategorized) clauses.push("COALESCE(TRIM(d.category), '') = ''");
+    else if (String(category || '').trim()) {
+        clauses.push('d.category = ?');
+        params.push(normalizeRegulationField(category, 255));
+    }
+    const rows = await query(`
+        SELECT d.id, d.title
+        FROM regulation_documents d
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY d.id ASC
+        LIMIT ?
+    `, [...params, safeLimit + 1]);
+    const truncated = rows.length > safeLimit;
+    const data = rows.slice(0, safeLimit).map(row => ({ id: Number(row.id), title: row.title || `文档 ${row.id}` }));
+    return { data, total: data.length, truncated, limit: safeLimit };
+}
+
+async function listDeletedRegulationDocuments({ limit = 100, offset = 0 } = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 300);
+    const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+    const total = await queryOne('SELECT COUNT(*) AS count FROM regulation_documents WHERE deleted_at IS NOT NULL');
+    const data = await query(`
+        SELECT d.id, d.title, d.category, d.issuing_body, d.jurisdiction, d.deleted_at, d.deleted_by_user,
+               d.version_count, d.article_count, v.version_label AS current_version_label
+        FROM regulation_documents d
+        LEFT JOIN regulation_versions v ON v.id = d.current_version_id
+        WHERE d.deleted_at IS NOT NULL
+        ORDER BY d.deleted_at DESC, d.id DESC
+        LIMIT ? OFFSET ?
+    `, [safeLimit, safeOffset]);
+    return { data, total: Number(total?.count || 0), limit: safeLimit, offset: safeOffset };
+}
+
 // 返回库中已有的分类、适用范围去重候选，供前端下拉联想
 async function listRegulationFacets({ includeArchived = false } = {}) {
-    const archivedFilter = includeArchived ? '' : ' AND deleted_at IS NULL';
+    const archivedFilter = includeArchived ? ' AND deleted_at IS NULL' : " AND deleted_at IS NULL AND status <> 'archived'";
     const pick = async column => {
         const rows = await query(`
             SELECT DISTINCT ${column} AS value
@@ -178,24 +297,25 @@ async function listRegulationFacets({ includeArchived = false } = {}) {
     };
     return {
         categories: await pick('category'),
+        legalLevels: await pick('legal_level'),
+        issuingBodies: await pick('issuing_body'),
         jurisdictions: await pick('jurisdiction')
     };
 }
 
-async function getRegulationDocumentDetail(docId, { versionId = null, includeArchived = false } = {}) {
+async function getRegulationDocumentDetail(docId, { versionId = null, effectiveAt = '', includeArchived = false, includeDeleted = false } = {}) {
     const normalizedDocId = normalizeRegulationId(docId);
     if (!normalizedDocId) return null;
-    const doc = await getRegulationDocumentById(normalizedDocId, { includeArchived });
+    const doc = await getRegulationDocumentById(normalizedDocId, { includeArchived, includeDeleted });
     if (!doc) return null;
 
     const versions = await listRegulationVersions(normalizedDocId);
     if (versions.length === 0) {
-        const articleCount = await countRegulationArticlesByVersionId(doc.current_version_id);
         return {
             document: {
                 ...doc,
                 current_version_label: '',
-                article_count: articleCount
+                article_count: Number(doc.article_count || 0)
             },
             versions: [],
             currentVersion: null,
@@ -204,10 +324,19 @@ async function getRegulationDocumentDetail(docId, { versionId = null, includeArc
         };
     }
 
-    const selectedVersionId = normalizeRegulationId(versionId) || doc.current_version_id || versions[0].id;
-    const selectedVersion = versions.find(row => Number(row.id) === Number(selectedVersionId)) || versions[0];
+    const requestedVersionId = normalizeRegulationId(versionId);
+    const normalizedEffectiveAt = normalizeRegulationDateValue(effectiveAt);
+    if (!requestedVersionId && effectiveAt && !normalizedEffectiveAt) return null;
+    const effectiveVersion = !requestedVersionId && normalizedEffectiveAt
+        ? await findRegulationVersionEffectiveOn(normalizedDocId, normalizedEffectiveAt)
+        : null;
+    if (!requestedVersionId && normalizedEffectiveAt && !effectiveVersion) return null;
+    const selectedVersionId = requestedVersionId || effectiveVersion?.id || doc.current_version_id || versions[0].id;
+    const selectedVersion = versions.find(row => Number(row.id) === Number(selectedVersionId));
+    if (!selectedVersion) return null;
     const rawArticles = await query(`
-        SELECT *
+        SELECT id, document_id, version_id, sort_order, article_label, article_title,
+               content, heading_path, status, amended_date, created_at
         FROM regulation_articles
         WHERE document_id = ? AND version_id = ?
         ORDER BY sort_order ASC, id ASC
@@ -218,7 +347,7 @@ async function getRegulationDocumentDetail(docId, { versionId = null, includeArc
     }));
 
     // #5 附加废止/修订提醒：标记被其它法律 supersede 的条文
-    const supersedeNotices = await getRegulationSupersedeNotices(normalizedDocId, { versionId: selectedVersion.id });
+    const supersedeNotices = await getRegulationSupersedeNotices(normalizedDocId, { versionId: selectedVersion.id, includeArchived });
     const supersedeByArticle = new Map();
     supersedeNotices.forEach(n => {
         if (!supersedeByArticle.has(n.article_id)) supersedeByArticle.set(n.article_id, []);
@@ -247,12 +376,11 @@ async function getRegulationDocumentDetail(docId, { versionId = null, includeArc
         annotationCount: annotationCounts.get(a.id) || 0
     }));
 
-    const currentDocArticleCount = await countRegulationArticlesByVersionId(doc.current_version_id);
     return {
         document: {
             ...doc,
             current_version_label: versions.find(version => Number(version.id) === Number(doc.current_version_id))?.version_label || '',
-            article_count: currentDocArticleCount
+            article_count: Number(doc.article_count || 0)
         },
         versions: versions.map(version => ({
             ...version,
@@ -260,19 +388,35 @@ async function getRegulationDocumentDetail(docId, { versionId = null, includeArc
         })),
         currentVersion: selectedVersion,
         articles: articlesWithNotice,
-        download: selectedVersion.source_path ? {
-            fileName: selectedVersion.source_name,
-            sourcePath: selectedVersion.source_path
-        } : null
+        download: selectedVersion.source_name ? { fileName: selectedVersion.source_name } : null
     };
+}
+
+async function getReadableRegulationArticle(articleId, { includeArchived = false } = {}) {
+    const normalizedArticleId = normalizeRegulationId(articleId);
+    if (!normalizedArticleId) return null;
+    const statusFilter = includeArchived ? '' : " AND d.status <> 'archived'";
+    return await queryOne(`
+        SELECT a.id, a.document_id, a.version_id, a.article_label, a.article_title, a.content,
+               d.title AS document_title, d.status AS document_status
+        FROM regulation_articles a
+        JOIN regulation_documents d ON d.id = a.document_id
+        WHERE a.id = ? AND d.deleted_at IS NULL${statusFilter}
+    `, [normalizedArticleId]);
 }
 
 module.exports = {
     countRegulationArticlesByVersionId,
     getRegulationDocumentById,
     getRegulationDocumentDetail,
+    getReadableRegulationArticle,
     getRegulationVersionById,
+    getRegulationVersionStorageById,
+    findRegulationVersionEffectiveOn,
+    listRegulationCategoryFolders,
+    listRegulationFolderDocumentSelection,
     listRegulationDocuments,
+    listDeletedRegulationDocuments,
     listRegulationFacets,
     listRegulationVersions
 };

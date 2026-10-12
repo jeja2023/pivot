@@ -3,7 +3,15 @@
 const net = require('net');
 
 const asyncHandler = (fn) => (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+    Promise.resolve(fn(req, res, next)).catch(err => {
+        if (res.headersSent || err?.code === 'ERR_HTTP_HEADERS_SENT') {
+            if (!res.writableEnded) {
+                try { res.end(); } catch (_) {}
+            }
+            return;
+        }
+        next(err);
+    });
 };
 
 function normalizeIpAddress(value) {

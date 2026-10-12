@@ -10,6 +10,7 @@ const {
     debugRetrieveContext,
     deleteKnowledgeDocument,
     fs,
+    getBeijingTimestamp,
     getKnowledgeDocumentAuditList,
     getKnowledgeDocumentDetail,
     getKnowledgeDocumentSummaryForUser,
@@ -364,6 +365,42 @@ test('软删除存储清理会保留仍在保留期内的文件', async () => {
         db.prepare('DELETE FROM attachments WHERE id = ?').run(attachmentInfo.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
         removeTestPath(path.join(uploadRoot, 'gc-test', String(userId)), { recursive: true });
+    }
+});
+
+test('软删除法规超过保留期后会清理源文件但保留法规审计元数据', async () => {
+    const suffix = Date.now().toString(36);
+    const folder = path.join(uploadRoot, 'regulations', `gc-${suffix}`);
+    const sourcePath = path.join(folder, 'expired-regulation.txt');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(sourcePath, '第一条 到期法规源文件');
+    const now = getBeijingTimestamp();
+    const docInfo = db.prepare(`
+        INSERT INTO regulation_documents (
+            title, category, issuing_body, jurisdiction, status, current_version_id, version_count, article_count,
+            deleted_at, deleted_by_user, created_by_user, updated_by_user, created_at, updated_at
+        ) VALUES (?, '', '', '全国', 'archived', NULL, 0, 0,
+            (now() AT TIME ZONE 'Asia/Shanghai' - interval '40 days'), 1, 1, 1, ?, ?)
+    `).run(`到期回收法规 ${suffix}`, now, now);
+    const documentId = Number(docInfo.lastInsertRowid);
+    const versionInfo = db.prepare(`
+        INSERT INTO regulation_versions (
+            document_id, version_label, source_name, source_path, source_size, source_hash, source_format,
+            extracted_text, summary, article_count, uploaded_by_user, created_at, updated_at
+        ) VALUES (?, 'v1', 'expired-regulation.txt', ?, ?, '', 'txt', '第一条 到期法规源文件', '', 1, 1, ?, ?)
+    `).run(documentId, `uploads/regulations/gc-${suffix}/expired-regulation.txt`, fs.statSync(sourcePath).size, now, now);
+    try {
+        db.prepare('UPDATE regulation_documents SET current_version_id = ?, version_count = 1, article_count = 1 WHERE id = ?').run(versionInfo.lastInsertRowid, documentId);
+        const result = await cleanupSoftDeletedStorage({ retentionDays: 30, limit: 10 });
+        assert.equal(result.regulationVersionRows, 1);
+        assert.equal(fs.existsSync(sourcePath), false);
+        const version = db.prepare('SELECT source_path, source_size FROM regulation_versions WHERE id = ?').get(versionInfo.lastInsertRowid);
+        assert.equal(version.source_path, '');
+        assert.equal(Number(version.source_size), 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS count FROM regulation_documents WHERE id = ?').get(documentId).count, 1);
+    } finally {
+        db.prepare('DELETE FROM regulation_documents WHERE id = ?').run(documentId);
+        removeTestPath(folder, { recursive: true });
     }
 });
 

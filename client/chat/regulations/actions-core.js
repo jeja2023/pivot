@@ -12,6 +12,7 @@
         function setBusy(busy, text = '') {
                         state.busy = !!busy;
                         document.querySelector('.regulations-panel')?.classList.toggle('is-busy', state.busy);
+                        ns.syncDocumentSelection?.();
                         if (text) toast(text);
                     }
 
@@ -40,9 +41,26 @@
                         panel?.classList.remove('hidden');
                     }
 
-                    function openAiDialog() {
+                    function syncAiScopeControl() {
+                        const control = document.getElementById('regulations-ai-scope');
+                        if (!control) return;
+                        const activeDocument = state.detail?.document;
+                        const currentOption = control.querySelector('option[value="document"]');
+                        if (currentOption) {
+                            currentOption.disabled = !activeDocument?.id;
+                            currentOption.textContent = activeDocument?.title
+                                ? `当前法规：${String(activeDocument.title).slice(0, 28)}`
+                                : '当前法规（请先打开法规）';
+                        }
+                        if (!activeDocument?.id && state.aiScope === 'document') state.aiScope = 'library';
+                        control.value = state.aiScope;
+                    }
+
+                    function openAiDialog(scope = '') {
+                        if (scope === 'document' && state.detail?.document?.id) state.aiScope = 'document';
                         const panel = document.getElementById('regulations-ai-panel');
                         panel?.classList.remove('hidden');
+                        syncAiScopeControl();
                         renderAiAnswer();
                         renderSearchResults();
                         window.setTimeout(() => document.getElementById('regulations-ai-question')?.focus(), 0);
@@ -54,9 +72,13 @@
                     }
 
                     function closeDialogs() {
+                        // 关闭问答弹窗即取消仍在传输的流，避免后台继续占用模型连接。
+                        ns.stopRegulationAi?.({ silent: true });
                         document.getElementById('regulations-admin-panel')?.classList.add('hidden');
                         document.getElementById('regulations-search-panel')?.classList.add('hidden');
                         document.getElementById('regulations-import-result-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-batch-result-panel')?.classList.add('hidden');
+                        ns.closeBatchEditDialog?.();
                         document.getElementById('regulations-compare-panel')?.classList.add('hidden');
                         document.getElementById('regulations-detail-panel')?.classList.add('hidden');
                         document.getElementById('regulations-ai-panel')?.classList.add('hidden');
@@ -65,6 +87,17 @@
                         document.getElementById('regulations-timeline-panel')?.classList.add('hidden');
                         document.getElementById('regulations-preview-panel')?.classList.add('hidden');
                         document.getElementById('regulations-annotation-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-access-log-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-ai-log-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-bookmarks-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-recycle-bin-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-quality-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-obligation-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-location-panel')?.classList.add('hidden');
+                        if (state.importJobsTimer) {
+                            window.clearTimeout(state.importJobsTimer);
+                            state.importJobsTimer = null;
+                        }
                         closeInlineForms();
                     }
 
@@ -73,13 +106,61 @@
                         return Object.fromEntries(data.entries());
                     }
 
+                    function appendActiveFolderParams(params) {
+                        const folder = state.activeFolder;
+                        if (!folder) return;
+                        if (folder.isUncategorized) params.set('uncategorized', 'true');
+                        else if (folder.category) params.set('category', folder.category);
+                    }
+
+                    async function loadCategoryFolders() {
+                        const params = new URLSearchParams();
+                        if (canManage() && state.filters.includeArchived) params.set('includeArchived', 'true');
+                        const data = await fetchJson(`${API}/category-folders${params.toString() ? `?${params.toString()}` : ''}`);
+                        state.categoryFolders = Array.isArray(data.folders) ? data.folders : [];
+                        state.total = state.categoryFolders.reduce((total, folder) => total + Number(folder.documentCount || 0), 0);
+                        state.documents = [];
+                        state.page = 1;
+                        state.libraryView = 'folders';
+                        state.activeFolder = null;
+                        state.selectedDocumentIds.clear();
+                        state.selectedDocumentTitles.clear();
+                        renderDocuments();
+                    }
+
+                    async function openCategoryFolder(folder) {
+                        if (!folder) return;
+                        state.libraryView = 'documents';
+                        state.activeFolder = {
+                            title: String(folder.title || '未分类'),
+                            category: String(folder.category || ''),
+                            isUncategorized: Boolean(folder.isUncategorized || !folder.category),
+                            documentCount: Number(folder.documentCount || folder.document_count || 0),
+                            articleCount: Number(folder.articleCount || folder.article_count || 0),
+                            effectiveCount: Number(folder.effectiveCount || folder.effective_count || 0),
+                            needsReviewCount: Number(folder.needsReviewCount || folder.needs_review_count || 0),
+                            latestUpdatedAt: folder.latestUpdatedAt || folder.latest_updated_at || ''
+                        };
+                        state.page = 1;
+                        state.selectedDocumentIds.clear();
+                        state.selectedDocumentTitles.clear();
+                        await loadDocuments({ keepActive: false, page: 1 });
+                    }
+
+                    async function returnToCategoryFolders() {
+                        if (state.busy) return;
+                        await loadCategoryFolders();
+                    }
+
                     async function loadDocuments({ keepActive = true, page = state.page } = {}) {
+                        if (state.libraryView === 'folders') return await loadCategoryFolders();
                         const requestedPage = Math.max(Number(page) || 1, 1);
                         const pageSize = Math.max(Number(state.pageSize || REGULATIONS_PAGE_SIZE), 1);
                         const params = new URLSearchParams();
                         // 文档表格展示法规库目录，弹窗里的条文检索条件不应改写底层表格状态。
                         params.set('limit', String(pageSize));
                         params.set('offset', String((requestedPage - 1) * pageSize));
+                        appendActiveFolderParams(params);
                         const data = await fetchJson(`${API}/documents?${params.toString()}`);
                         const incoming = Array.isArray(data.data) ? data.data : [];
                         state.total = Number(data.total || 0);
@@ -89,6 +170,8 @@
                             state.page = totalPages;
                             return loadDocuments({ keepActive, page: totalPages });
                         }
+                        // 批量处理允许跨页保留选择；页首复选框仅操作当前页。已删除或
+                        // 无权访问的旧选择会由服务端返回逐项失败，不在翻页时静默抹除。
                         state.documents = incoming;
                         state.page = Math.min(requestedPage, totalPages);
                         const activeInPage = state.documents.some(doc => Number(doc.id) === Number(state.activeId));
@@ -102,19 +185,21 @@
                         renderDetail();
                         state.loaded = true;
                     }
-                    async function loadDetail(id, versionId = '') {
+                    async function loadDetail(id, versionId = '', effectiveAt = '') {
                         if (!id) return;
                         openDetailDialog();
                         const detailEl = document.getElementById('regulations-detail-body');
                         if (detailEl) PivotSafeHtml.setHtml(detailEl, '<div class="regulations-loading">正在加载法规详情…</div>');
                         const params = new URLSearchParams();
                         if (versionId) params.set('versionId', versionId);
+                        if (effectiveAt) params.set('effectiveAt', effectiveAt);
                         const url = `${API}/documents/${encodeURIComponent(id)}${params.toString() ? `?${params.toString()}` : ''}`;
                         const data = await fetchJson(url);
                         state.activeId = data.detail?.document?.id || id;
                         state.detail = data.detail || null;
                         renderDocuments();
                         renderDetail();
+                        syncAiScopeControl();
                     }
 
                     // 跳转到指定条文并短暂高亮，便于在长文档里定位
@@ -131,7 +216,9 @@
                         const mode = document.getElementById('regulations-search-mode')?.value || state.searchMode;
                         state.searchMode = mode === 'keyword' ? 'keyword' : 'hybrid';
                         state.filters.category = document.getElementById('regulations-category-filter')?.value.trim() || '';
+                        state.filters.issuingBody = document.getElementById('regulations-issuing-body-filter')?.value.trim() || '';
                         state.filters.jurisdiction = document.getElementById('regulations-jurisdiction-filter')?.value.trim() || '';
+                        state.filters.status = document.getElementById('regulations-status-filter')?.value || '';
                         state.filters.includeArchived = !!document.getElementById('regulations-include-archived')?.checked;
                     }
 
@@ -139,37 +226,42 @@
                         const query = document.getElementById('regulations-query');
                         const mode = document.getElementById('regulations-search-mode');
                         const category = document.getElementById('regulations-category-filter');
+                        const issuingBody = document.getElementById('regulations-issuing-body-filter');
                         const jurisdiction = document.getElementById('regulations-jurisdiction-filter');
+                        const status = document.getElementById('regulations-status-filter');
                         const includeArchived = document.getElementById('regulations-include-archived');
                         if (query) query.value = state.query || '';
                         if (mode) mode.value = state.searchMode === 'keyword' ? 'keyword' : 'hybrid';
                         if (category) category.value = state.filters.category || '';
+                        if (issuingBody) issuingBody.value = state.filters.issuingBody || '';
                         if (jurisdiction) jurisdiction.value = state.filters.jurisdiction || '';
+                        if (status) status.value = state.filters.status || '';
                         if (includeArchived) includeArchived.checked = !!state.filters.includeArchived;
                     }
 
-                    function matchPassesActiveFilters(match) {
-                        const category = String(state.filters.category || '').trim().toLowerCase();
-                        const jurisdiction = String(state.filters.jurisdiction || '').trim().toLowerCase();
-                        if (category && !String(match.category || '').toLowerCase().includes(category)) return false;
-                        if (jurisdiction && !String(match.jurisdiction || '').toLowerCase().includes(jurisdiction)) return false;
-                        return true;
-                    }
-
                     async function fetchArticleMatches() {
-                        if (!state.query) return [];
+                        const hasFilters = !!(state.filters.category || state.filters.issuingBody || state.filters.jurisdiction || state.filters.status);
+                        if (!state.query && !hasFilters) return [];
                         const params = new URLSearchParams({ query: state.query, limit: '50' });
+                        if (state.filters.category) params.set('category', state.filters.category);
+                        if (state.filters.issuingBody) params.set('issuingBody', state.filters.issuingBody);
+                        if (state.filters.jurisdiction) params.set('jurisdiction', state.filters.jurisdiction);
+                        if (state.filters.status) params.set('status', state.filters.status);
                         if (canManage() && state.filters.includeArchived) params.set('includeArchived', 'true');
                         const endpoint = state.searchMode === 'keyword' ? 'documents/search' : 'search/hybrid';
                         const data = await fetchJson(`${API}/${endpoint}?${params.toString()}`);
-                        return (Array.isArray(data.matches) ? data.matches : [])
-                            .filter(matchPassesActiveFilters)
-                            .slice(0, 20);
+                        return (Array.isArray(data.matches) ? data.matches : []).slice(0, 20);
                     }
 
                     async function runSearch() {
                         readSearchControls();
-                        state.matches = state.query ? await fetchArticleMatches() : [];
+                        try {
+                            state.matches = await fetchArticleMatches();
+                        } catch (err) {
+                            console.warn('[regulations] 检索执行异常:', err);
+                            toast(err.message || '检索失败，请稍后重试', 'warning');
+                            state.matches = [];
+                        }
                         renderSearchResults();
                     }
                     async function loadSavedSearches() {
@@ -184,7 +276,7 @@
                     }
 
                     function buildSavedSearchDefaultName() {
-                        const parts = [state.query, state.filters.category, state.filters.jurisdiction]
+                        const parts = [state.query, state.filters.category, state.filters.issuingBody, state.filters.jurisdiction, state.filters.status]
                             .map(item => String(item || '').trim())
                             .filter(Boolean);
                         return parts.length ? parts.join(' / ').slice(0, 60) : '全部法规';
@@ -192,7 +284,7 @@
 
                     async function saveCurrentSearch() {
                         readSearchControls();
-                        if (!state.query && !state.filters.category && !state.filters.jurisdiction) {
+                        if (!state.query && !state.filters.category && !state.filters.issuingBody && !state.filters.jurisdiction && !state.filters.status) {
                             toast('请先输入检索词或筛选条件', 'warning');
                             return;
                         }
@@ -227,7 +319,9 @@
                         if (!search) return;
                         state.query = search.query || '';
                         state.filters.category = search.category || '';
+                        state.filters.issuingBody = '';
                         state.filters.jurisdiction = search.jurisdiction || '';
+                        state.filters.status = '';
                         syncSearchControls();
                         await runSearch();
                     }
@@ -297,6 +391,7 @@
             closeSearchDialog,
             openDetailDialog,
             openAiDialog,
+            syncAiScopeControl,
             closeInlineForms,
             closeDialogs,
             collectForm,
@@ -304,8 +399,11 @@
             loadDetail,
             focusArticle,
             readSearchControls,
+                        appendActiveFolderParams,
+                        loadCategoryFolders,
+                        openCategoryFolder,
+                        returnToCategoryFolders,
             syncSearchControls,
-            matchPassesActiveFilters,
             fetchArticleMatches,
             runSearch,
             loadSavedSearches,

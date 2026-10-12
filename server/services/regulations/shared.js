@@ -62,6 +62,50 @@ function normalizeRegulationStatus(value) {
     return status === 'archived' ? 'archived' : 'active';
 }
 
+function normalizeRegulationEffectStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    return ['unverified', 'pending', 'effective', 'expired', 'repealed'].includes(status) ? status : 'unverified';
+}
+
+function normalizeRegulationReviewStatus(value, fallback = 'pending') {
+    const status = String(value || '').trim().toLowerCase();
+    return ['pending', 'approved', 'rejected', 'unreviewed', 'auto'].includes(status) ? status : fallback;
+}
+
+function normalizeRegulationTags(value, maxItems = 20) {
+    const input = Array.isArray(value) ? value : String(value || '').split(/[，,、]/);
+    const tags = [];
+    const seen = new Set();
+    for (const item of input) {
+        const tag = normalizeRegulationField(item, 40);
+        const key = tag.toLocaleLowerCase();
+        if (!tag || seen.has(key)) continue;
+        seen.add(key);
+        tags.push(tag);
+        if (tags.length >= maxItems) break;
+    }
+    return tags;
+}
+
+// 发布机构允许一个或多个共同发布单位。对输入中的逗号、顿号、分号统一为顿号，
+// 既方便检索任一机构，又避免同一机构因分隔符不同被存成重复值。
+function normalizeRegulationIssuingBodies(value, maxItems = 8, maxLength = 120) {
+    const input = Array.isArray(value) ? value : String(value || '').split(/[，,、；;]+/);
+    const issuingBodies = [];
+    const seen = new Set();
+    for (const item of input) {
+        const issuer = normalizeRegulationField(item, 80);
+        const key = issuer.toLocaleLowerCase();
+        if (!issuer || seen.has(key)) continue;
+        const next = issuingBodies.length ? `${issuingBodies.join('、')}、${issuer}` : issuer;
+        if (next.length > maxLength) break;
+        seen.add(key);
+        issuingBodies.push(issuer);
+        if (issuingBodies.length >= maxItems) break;
+    }
+    return issuingBodies.join('、');
+}
+
 // 把多种日期写法（ISO、YYYY年M月D日、YYYYMMDD）规范成 YYYY-MM-DD，无法识别返回空串
 const REGULATION_DATE_ISO_RE = /((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})/;
 const REGULATION_DATE_CN_RE = /((?:19|20)\d{2})[年/.\-](0?[1-9]|1[0-2])[月/.\-](0?[1-9]|[12]\d|3[01])日?/;
@@ -265,6 +309,10 @@ module.exports = {
     normalizeRegulationField,
     normalizeRegulationSummary,
     normalizeRegulationStatus,
+    normalizeRegulationEffectStatus,
+    normalizeRegulationReviewStatus,
+    normalizeRegulationTags,
+    normalizeRegulationIssuingBodies,
     buildIsoDate,
     normalizeRegulationDateValue,
     buildVersionLabelFromDate,

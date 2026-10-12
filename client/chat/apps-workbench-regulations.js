@@ -2,11 +2,14 @@
     const scripts = [
         '/chat/regulations/core.js',
         '/chat/regulations/render-base.js',
+        '/chat/regulations/render-batch.js',
         '/chat/regulations/render-shell.js',
         '/chat/regulations/render-documents.js',
         '/chat/regulations/render-results.js',
         '/chat/regulations/actions-core.js',
         '/chat/regulations/actions-import.js',
+        '/chat/regulations/actions-batch.js',
+        '/chat/regulations/actions-batch-edit.js',
         '/chat/regulations/actions-advanced.js',
         '/chat/regulations/events.js'
     ];

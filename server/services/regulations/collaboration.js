@@ -6,17 +6,19 @@ const {
     normalizeRegulationField,
     normalizeRegulationId
 } = require('./shared');
+const { getReadableRegulationArticle } = require('./catalog');
 
 // users 表不再包含历史的 name/email 列。保留 user_email 输出字段为 NULL，
 // 以免旧客户端读取该字段时发生结构性变化。
 const USER_DISPLAY_NAME_SQL = "COALESCE(NULLIF(u.nickname, ''), NULLIF(u.deleted_username, ''), u.username)";
 
-async function createRegulationAnnotation({ articleId, userId, content }) {
+async function createRegulationAnnotation({ articleId, userId, content, includeArchived = false }) {
     const aid = normalizeRegulationId(articleId);
     const uid = normalizeRegulationId(userId);
     if (!aid || !uid) return null;
     const safeContent = normalizeRegulationField(content, 5000);
     if (!safeContent) return null;
+    if (!(await getReadableRegulationArticle(aid, { includeArchived }))) return null;
     return await queryOne(`
         INSERT INTO regulation_article_annotations (article_id, user_id, content)
         VALUES (?, ?, ?)
@@ -24,9 +26,10 @@ async function createRegulationAnnotation({ articleId, userId, content }) {
     `, [aid, uid, safeContent]);
 }
 
-async function listRegulationAnnotations({ articleId }) {
+async function listRegulationAnnotations({ articleId, includeArchived = false }) {
     const aid = normalizeRegulationId(articleId);
     if (!aid) return [];
+    if (!(await getReadableRegulationArticle(aid, { includeArchived }))) return [];
     return await query(`
         SELECT a.*, ${USER_DISPLAY_NAME_SQL} AS user_name, NULL AS user_email
         FROM regulation_article_annotations a
@@ -36,24 +39,37 @@ async function listRegulationAnnotations({ articleId }) {
     `, [aid]);
 }
 
-async function updateRegulationAnnotation({ annotationId, userId, content }) {
+async function getReadableAnnotation(annotationId, { includeArchived = false } = {}) {
+    const id = normalizeRegulationId(annotationId);
+    if (!id) return null;
+    const statusFilter = includeArchived ? '' : " AND d.status <> 'archived'";
+    return await queryOne(`
+        SELECT n.id, n.article_id, n.user_id
+        FROM regulation_article_annotations n
+        JOIN regulation_articles a ON a.id = n.article_id
+        JOIN regulation_documents d ON d.id = a.document_id
+        WHERE n.id = ? AND d.deleted_at IS NULL${statusFilter}
+    `, [id]);
+}
+
+async function updateRegulationAnnotation({ annotationId, userId, content, includeArchived = false }) {
     const id = normalizeRegulationId(annotationId);
     const uid = normalizeRegulationId(userId);
     if (!id || !uid) return null;
     const safeContent = normalizeRegulationField(content, 5000);
     if (!safeContent) return null;
-    const existing = await queryOne('SELECT user_id FROM regulation_article_annotations WHERE id = ?', [id]);
+    const existing = await getReadableAnnotation(id, { includeArchived });
     if (!existing || Number(existing.user_id) !== Number(uid)) return null; // 只能编辑自己的批注
     const now = getBeijingTimestamp();
     await execute('UPDATE regulation_article_annotations SET content = ?, updated_at = ? WHERE id = ?', [safeContent, now, id]);
     return await queryOne('SELECT * FROM regulation_article_annotations WHERE id = ?', [id]);
 }
 
-async function deleteRegulationAnnotation({ annotationId, userId }) {
+async function deleteRegulationAnnotation({ annotationId, userId, includeArchived = false }) {
     const id = normalizeRegulationId(annotationId);
     const uid = normalizeRegulationId(userId);
     if (!id || !uid) return false;
-    const existing = await queryOne('SELECT user_id FROM regulation_article_annotations WHERE id = ?', [id]);
+    const existing = await getReadableAnnotation(id, { includeArchived });
     if (!existing || Number(existing.user_id) !== Number(uid)) return false;
     await execute('DELETE FROM regulation_article_annotations WHERE id = ?', [id]);
     return true;
@@ -137,8 +153,45 @@ function buildRegulationQaReport({ question, answer, sources = [] }) {
     return lines.join('\n');
 }
 
+// 报告导出统一转换为 Document IR，随后交给项目唯一的 DOCX/PDF 渲染器；
+// 避免法规应用自行拼接 Office 或 PDF 二进制，保证中文排版与审计内容一致。
+function buildRegulationQaReportIr({ question, answer, sources = [] }) {
+    const direct = (Array.isArray(sources) ? sources : []).filter(source => !source?.viaLink);
+    const related = (Array.isArray(sources) ? sources : []).filter(source => source?.viaLink);
+    const paragraph = (text, options = {}) => ({ type: 'paragraph', runs: [{ text: String(text || '') }], ...options });
+    const sourceText = source => [
+        String(source?.label || '相关条文').trim(),
+        source?.relation ? `（${String(source.relation).trim()}）` : '',
+        source?.excerpt ? `：${String(source.excerpt).trim()}` : ''
+    ].join('');
+    const blocks = [
+        { type: 'heading', level: 1, text: '法规查询合规报告' },
+        { type: 'heading', level: 2, text: '咨询问题' },
+        paragraph(String(question || '').trim() || '（未提供问题）'),
+        { type: 'heading', level: 2, text: 'AI 回答' },
+        paragraph(String(answer || '').trim() || '（无回答内容）')
+    ];
+    if (direct.length) {
+        blocks.push({ type: 'heading', level: 2, text: '依据法条（直接命中）' });
+        blocks.push({ type: 'list', ordered: true, items: direct.map(sourceText) });
+    }
+    if (related.length) {
+        blocks.push({ type: 'heading', level: 2, text: '关联法条（经引用关联）' });
+        blocks.push({ type: 'list', ordered: true, items: related.map(sourceText) });
+    }
+    blocks.push(paragraph('本报告由法规查询 AI 自动生成，仅供解释与检索辅助，不应替代正式法务意见。'));
+    return {
+        ir_version: '1',
+        doc_type: 'report',
+        meta: { title: '法规查询合规报告', security_level: 'internal' },
+        blocks,
+        footer: { page_number: true }
+    };
+}
+
 module.exports = {
     buildRegulationQaReport,
+    buildRegulationQaReportIr,
     createRegulationAnnotation,
     deleteRegulationAnnotation,
     listRegulationAccessLogs,

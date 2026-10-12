@@ -164,6 +164,11 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
 
         if (stream) {
             const sse = createSseResponseWriter(res);
+            // 业务模块的引用、范围等结构化元数据在上游文本增量之前发出，
+            // 使前端流式渲染结束后仍可精确回溯来源，而无需第二次检索。
+            if (extraPayload && typeof extraPayload === 'object') {
+                sse.writeData({ type: 'apps.extra', ...extraPayload });
+            }
             const accumulator = createStreamAccumulator();
             const parser = createSseEventParser({ onData(p) { accumulator.pushPayload(p); } });
             // 上游发完响应头再静默挂住时 axios 的 timeout 已失效（只覆盖到响应头），

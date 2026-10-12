@@ -38,5 +38,6 @@ downloads/SHA256SUMS-*.txt
 .tmp/
 test-results/
 deliverables/
+output/
 qa_a11y.json
 

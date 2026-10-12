@@ -728,7 +728,7 @@ app.use((err, req, res, _next) => {
     }, isClientError ? '客户端错误 (Client Error)' : '系统错误 (System Error)');
 
     // 如果是服务器内部错误 (500+)，记录到数据库审计日志
-    if (status >= 500) {
+    if (status >= 500 && !res.headersSent && err?.code !== 'ERR_HTTP_HEADERS_SENT') {
         try {
             logAction(req, '系统错误', JSON.stringify({
                 errorId: req.id || req.headers?.['x-request-id'] || '',

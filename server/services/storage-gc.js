@@ -98,6 +98,7 @@ async function listReferencedUploadPaths(queryFn = query, root = uploadRoot) {
         "SELECT file_path AS path FROM attachments WHERE file_path IS NOT NULL AND file_path != ''",
         "SELECT source_path AS path FROM knowledge_docs WHERE source_path IS NOT NULL AND source_path != ''",
         "SELECT source_path AS path FROM regulation_versions WHERE source_path IS NOT NULL AND source_path != ''",
+        "SELECT source_path AS path FROM regulation_import_jobs WHERE source_path IS NOT NULL AND source_path != '' AND status IN ('queued', 'running', 'retry_wait')",
         "SELECT file_path AS path FROM document_files WHERE file_path IS NOT NULL AND file_path != ''",
         "SELECT image_path AS path FROM document_pages WHERE image_path IS NOT NULL AND image_path != ''",
         "SELECT file_path AS path FROM document_outputs WHERE file_path IS NOT NULL AND file_path != ''"
@@ -199,6 +200,19 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         LIMIT ?
     `, [String(safeRetentionDays), safeLimit]);
 
+    // 法规删除后先保留源文件一段时间，支持管理员从法规回收站恢复；超过保留期
+    // 后清理版本源文件并清空路径，保留文档及版本审计元数据而不再保留原始内容。
+    const regulationVersions = await query(`
+        SELECT v.id, v.document_id, v.source_path AS file_path
+        FROM regulation_versions v
+        JOIN regulation_documents d ON d.id = v.document_id
+        WHERE d.deleted_at IS NOT NULL
+          AND d.deleted_at < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)
+          AND v.source_path IS NOT NULL AND v.source_path != ''
+        ORDER BY d.deleted_at ASC, v.id ASC
+        LIMIT ?
+    `, [String(safeRetentionDays), safeLimit]);
+
     // 运行记录保留审计元数据，但到期后不再保留 DAG 节点大输出。删除节点行时由
     // PostgreSQL 触发器递减 CAS 引用；之后的 CAS 过期扫描才可安全回收文件。
     const dagNodes = await query(`
@@ -211,15 +225,29 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         LIMIT ?
     `, [String(safeRetentionDays), safeLimit]);
 
-    const [attachmentCleanupResults, knowledgeDocCleanupResults] = await Promise.all([
+    const [attachmentCleanupResults, knowledgeDocCleanupResults, regulationCleanupResults] = await Promise.all([
         removeAttachmentFilesAsync(attachments || []),
-        removeAttachmentFilesAsync(knowledgeDocs || [])
+        removeAttachmentFilesAsync(knowledgeDocs || []),
+        removeAttachmentFilesAsync(regulationVersions || [])
     ]);
     const purgeableAttachments = filterRowsWithRemovedFiles(attachments || [], attachmentCleanupResults);
     const purgeableKnowledgeDocs = filterRowsWithRemovedFiles(knowledgeDocs || [], knowledgeDocCleanupResults);
 
     const attachmentRows = await cleanupPurgedAttachmentRows(purgeableAttachments);
     const knowledgeDocRows = await cleanupPurgedKnowledgeDocs(purgeableKnowledgeDocs);
+    const purgedRegulationVersionIds = regulationCleanupResults
+        .filter(result => result.ok !== false && !result.skipped)
+        .map(result => Number.parseInt(result.id, 10))
+        .filter(Number.isSafeInteger);
+    let regulationVersionRows = 0;
+    if (purgedRegulationVersionIds.length) {
+        const placeholders = purgedRegulationVersionIds.map(() => '?').join(', ');
+        regulationVersionRows = await execute(`
+            UPDATE regulation_versions
+            SET source_path = '', source_size = 0, updated_at = (NOW() AT TIME ZONE 'Asia/Shanghai')
+            WHERE id IN (${placeholders})
+        `, purgedRegulationVersionIds);
+    }
     const messageRows = await cleanupPurgedMessages(messages || []);
     const dagNodeIds = (dagNodes || []).map(row => Number.parseInt(row.id, 10)).filter(Number.isSafeInteger);
     let dagNodeRows = 0;
@@ -229,11 +257,12 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
     }
     const expiredDagOutputObjects = await expireOverdueObjects({ limit: safeLimit });
 
-    if (attachmentRows > 0 || knowledgeDocRows > 0 || messageRows > 0 || dagNodeRows > 0 || expiredDagOutputObjects.expired > 0) {
+    if (attachmentRows > 0 || knowledgeDocRows > 0 || regulationVersionRows > 0 || messageRows > 0 || dagNodeRows > 0 || expiredDagOutputObjects.expired > 0) {
         logger.info({
             retentionDays: safeRetentionDays,
             attachmentRows,
             knowledgeDocRows,
+            regulationVersionRows,
             messageRows,
             dagNodeRows,
             expiredDagOutputObjects: expiredDagOutputObjects.expired
@@ -244,6 +273,7 @@ async function cleanupSoftDeletedStorage({ retentionDays, limit } = {}) {
         retentionDays: safeRetentionDays,
         attachmentRows,
         knowledgeDocRows,
+        regulationVersionRows,
         messageRows,
         dagNodeRows,
         expiredDagOutputObjects: expiredDagOutputObjects.expired

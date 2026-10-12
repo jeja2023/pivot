@@ -7,7 +7,7 @@ const {
     getRegulationDocumentById,
     listRegulationVersions
 } = require('./catalog');
-const { searchRegulationArticles } = require('./search');
+const { buildRegulationSearchExcerpt, searchRegulationArticlesHybrid } = require('./search');
 
 function computeLineDiff(textA, textB) {
     const linesA = String(textA || '').split('\n');
@@ -41,10 +41,21 @@ function computeLineDiff(textA, textB) {
     return segments;
 }
 
-async function diffRegulationVersions({ documentId, fromVersionId, toVersionId }) {
+function groupArticlesByLabel(articles = []) {
+    const groups = new Map();
+    for (const article of articles) {
+        const label = String(article?.article_label || '').trim() || `条目 ${article?.sort_order || article?.id || 0}`;
+        const list = groups.get(label) || [];
+        list.push(article);
+        groups.set(label, list);
+    }
+    return groups;
+}
+
+async function diffRegulationVersions({ documentId, fromVersionId, toVersionId, includeArchived = false }) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) throw new Error('文档 ID 无效');
-    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived });
     if (!doc) throw new Error('文档不存在');
     const versions = await listRegulationVersions(docId);
     const fromVer = versions.find(v => Number(v.id) === Number(fromVersionId));
@@ -54,8 +65,8 @@ async function diffRegulationVersions({ documentId, fromVersionId, toVersionId }
     const fromArticles = await query('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id', [docId, fromVer.id]);
     const toArticles = await query('SELECT * FROM regulation_articles WHERE document_id=? AND version_id=? ORDER BY sort_order, id', [docId, toVer.id]);
 
-    const fromMap = new Map(fromArticles.map(a => [a.article_label, a]));
-    const toMap = new Map(toArticles.map(a => [a.article_label, a]));
+    const fromMap = groupArticlesByLabel(fromArticles);
+    const toMap = groupArticlesByLabel(toArticles);
     const allLabels = new Set([...fromMap.keys(), ...toMap.keys()]);
 
     const added = [];
@@ -63,21 +74,26 @@ async function diffRegulationVersions({ documentId, fromVersionId, toVersionId }
     const changed = [];
 
     allLabels.forEach(label => {
-        const a = fromMap.get(label);
-        const b = toMap.get(label);
-        if (!a && b) {
-            added.push({ id: b.id, label: b.article_label, title: b.article_title, content: b.content });
-        } else if (a && !b) {
-            removed.push({ id: a.id, label: a.article_label, title: a.article_title, content: a.content });
-        } else if (a && b && a.content !== b.content) {
-            changed.push({
-                id: b.id,
-                label: b.article_label,
-                title: b.article_title,
-                before: a.content,
-                after: b.content,
-                segments: computeLineDiff(a.content, b.content)
-            });
+        const fromGroup = fromMap.get(label) || [];
+        const toGroup = toMap.get(label) || [];
+        const pairs = Math.max(fromGroup.length, toGroup.length);
+        for (let index = 0; index < pairs; index += 1) {
+            const a = fromGroup[index];
+            const b = toGroup[index];
+            if (!a && b) {
+                added.push({ id: b.id, label: b.article_label, title: b.article_title, content: b.content });
+            } else if (a && !b) {
+                removed.push({ id: a.id, label: a.article_label, title: a.article_title, content: a.content });
+            } else if (a && b && a.content !== b.content) {
+                changed.push({
+                    id: b.id,
+                    label: b.article_label,
+                    title: b.article_title,
+                    before: a.content,
+                    after: b.content,
+                    segments: computeLineDiff(a.content, b.content)
+                });
+            }
         }
     });
 
@@ -101,7 +117,7 @@ const REGULATION_RELATION_LABELS = {
 };
 
 // 沿引用边扩展命中条文：把直接命中条文所引用、以及引用它们的关联条文补进候选
-async function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
+async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchived = false } = {}) {
     const baseIds = matches.map(m => Number(m.article_id)).filter(Boolean);
     if (!baseIds.length) return [];
     const seen = new Set(baseIds);
@@ -142,15 +158,16 @@ async function expandRegulationMatchesByLinks(matches, { limit = 8 } = {}) {
         FROM regulation_articles a
         JOIN regulation_documents d ON d.id = a.document_id
         JOIN regulation_versions v ON v.id = a.version_id
-        WHERE a.id IN (${relPlaceholders}) AND d.deleted_at IS NULL
+        WHERE a.id IN (${relPlaceholders}) AND a.version_id = d.current_version_id
+          AND d.deleted_at IS NULL${includeArchived ? '' : " AND d.status <> 'archived'"}
     `, relatedIds);
 
     return rows.map(row => ({ ...row, viaLink: true, relation: relatedInfo.get(row.article_id)?.relation || '关联' }));
 }
 
 // #6 变更影响分析：找出两版本间变更的条文，再反查引用了这些条文的其它条文（被影响方）
-async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId }) {
-    const diff = await diffRegulationVersions({ documentId, fromVersionId, toVersionId });
+async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVersionId, includeArchived = false }) {
+    const diff = await diffRegulationVersions({ documentId, fromVersionId, toVersionId, includeArchived });
     // 变更 + 删除的条文标签（这些是可能影响引用方的）
     const impactedLabels = [...diff.changed.map(a => a.label), ...diff.removed.map(a => a.label)];
     if (!impactedLabels.length) {
@@ -188,10 +205,10 @@ async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVers
 }
 
 // #4 条文引用网络：聚合一篇文档当前版本（或指定版本）的条文节点与引用边
-async function getRegulationCitationGraph(documentId, { versionId = null } = {}) {
+async function getRegulationCitationGraph(documentId, { versionId = null, includeArchived = false } = {}) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) return { nodes: [], edges: [] };
-    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived });
     if (!doc) return { nodes: [], edges: [] };
     const vId = normalizeRegulationId(versionId) || doc.current_version_id;
     if (!vId) return { nodes: [], edges: [] };
@@ -220,7 +237,7 @@ async function getRegulationCitationGraph(documentId, { versionId = null } = {})
     const edges = rawEdges.map(e => ({
         source: e.source,
         target: e.target,
-        type: e.relation_type || 'cite',
+        type: e.type || 'cite',
         targetLabel: e.target_label || '',
         confidence: e.confidence,
         // 标记跨法外链（target 不在本文档节点集合内）
@@ -231,10 +248,10 @@ async function getRegulationCitationGraph(documentId, { versionId = null } = {})
 }
 
 // #5 查文档中被其它法律废止/修订的条文（supersede 关系指向本文档条文）
-async function getRegulationSupersedeNotices(documentId, { versionId = null } = {}) {
+async function getRegulationSupersedeNotices(documentId, { versionId = null, includeArchived = false } = {}) {
     const docId = normalizeRegulationId(documentId);
     if (!docId) return [];
-    const doc = await getRegulationDocumentById(docId, { includeArchived: true });
+    const doc = await getRegulationDocumentById(docId, { includeArchived });
     if (!doc) return [];
     const vId = normalizeRegulationId(versionId) || doc.current_version_id;
     if (!vId) return [];
@@ -253,9 +270,31 @@ async function getRegulationSupersedeNotices(documentId, { versionId = null } = 
     `, [docId, vId, docId]);
 }
 
-async function buildRegulationAiContext({ query: searchQuery, documentId = null, limit = 12, expandLinks = true, relatedLimit = 8 } = {}) {
-    const matches = await searchRegulationArticles({ query: searchQuery, documentId, limit });
-    const related = expandLinks ? await expandRegulationMatchesByLinks(matches, { limit: relatedLimit }) : [];
+async function buildRegulationAiContext({
+    query: searchQuery,
+    documentId = null,
+    category = '',
+    issuingBody = '',
+    jurisdiction = '',
+    status = '',
+    userId = 0,
+    limit = 12,
+    expandLinks = true,
+    relatedLimit = 8,
+    includeArchived = false
+} = {}) {
+    const matches = await searchRegulationArticlesHybrid({
+        query: searchQuery,
+        documentId,
+        category,
+        issuingBody,
+        jurisdiction,
+        status,
+        userId,
+        limit,
+        includeArchived
+    });
+    const related = expandLinks ? await expandRegulationMatchesByLinks(matches, { limit: relatedLimit, includeArchived }) : [];
     const all = [...matches, ...related];
 
     const sources = all.map((match, index) => ({
@@ -264,15 +303,16 @@ async function buildRegulationAiContext({ query: searchQuery, documentId = null,
         versionId: match.version_id,
         articleId: match.article_id,
         label: `${match.document_title}${match.version_label ? ` / ${match.version_label}` : ''} / ${match.article_label}${match.article_title ? ` ${match.article_title}` : ''}`,
-        excerpt: normalizeRegulationSummary(match.excerpt || match.content),
+        excerpt: normalizeRegulationSummary(buildRegulationSearchExcerpt(match.content || match.excerpt, searchQuery, 600)),
+        contextExcerpt: normalizeRegulationSummary(buildRegulationSearchExcerpt(match.content || match.excerpt, searchQuery, 1800)),
         source: match.document_title,
         viaLink: !!match.viaLink,
         relation: match.relation || ''
     }));
 
     // 上下文分两组：直接命中 / 经引用关联，便于模型分辨主次
-    const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n${s.excerpt}`);
-    const relatedLines = sources.filter(s => s.viaLink).map(s => `[${s.index}] ${s.label}（${s.relation}）\n${s.excerpt}`);
+    const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n${s.contextExcerpt}`);
+    const relatedLines = sources.filter(s => s.viaLink).map(s => `[${s.index}] ${s.label}（${s.relation}）\n${s.contextExcerpt}`);
     const parts = [];
     if (directLines.length) parts.push(`【直接命中条文】\n${directLines.join('\n\n')}`);
     if (relatedLines.length) parts.push(`【经引用关联的条文】\n${relatedLines.join('\n\n')}`);

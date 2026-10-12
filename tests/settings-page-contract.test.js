@@ -68,6 +68,7 @@ test('系统监控固定在设置画布内，只有慢查询与异常告警列�
     assert.match(scale, /availableHeight \/ MONITOR_MIN_CANVAS_HEIGHT/);
     assert.match(monitor, /const visibleModels = models\.slice\(0, 6\)/);
     assert.match(monitor, /const healthChecks = allHealthChecks\.slice\(0, 8\)/);
+    assert.match(monitor, /'decisionProviders':\s*'决策服务提供方'/);
     assert.match(monitor, /const displayTime = match \? `\$\{match\[2\]\} \$\{match\[3\]\}` : fullStr/);
     assert.doesNotMatch(monitor, /const isToday = fullStr\.startsWith/);
 });
