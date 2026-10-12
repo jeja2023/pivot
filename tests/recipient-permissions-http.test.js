@@ -71,7 +71,7 @@ async function createTestUser(label, unit, role = 'user') {
     const username = `http_${String(label).slice(0, 10)}_${suffix}`;
     const password = 'RecipientPass123';
     const user = await register(username, password, `${label} HTTP user`, unit, role);
-    const session = await login(username, password);
+    const session = await login(username, password, { clientIp: '127.0.0.1' });
     return { ...user, accessToken: session.accessToken };
 }
 
