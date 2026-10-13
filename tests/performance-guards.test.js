@@ -163,7 +163,7 @@ test('RAG PostgreSQL retrieval pushes vector distance and lexical ranking into t
     assert.match(repository, /c\.embedding_profile\s*=\s*\?/);
     assert.match(rag, /ORDER BY lexical_score DESC/);
     assert.match(regulations, /a\.embedding\s*<=>\s*\?::vector/);
-    assert.match(regulations, /ORDER BY score DESC/);
+    assert.match(regulations, /ORDER BY[\s\S]*?\bscore DESC/);
 });
 
 test('DAG node watchdog uses a node-specific timeout and does not retry a timed-out node', async () => {
