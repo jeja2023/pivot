@@ -95,4 +95,32 @@ function createKnowledgeEmbeddingRecoveryRunner({
     };
 }
 
-module.exports = { createEmbeddingProfileMismatchScheduler, createKnowledgeEmbeddingRecoveryRunner, createLexicalReadyScheduler };
+function createAllKnowledgeDocumentsReindexScheduler({ query, scheduleKnowledgeDocumentIndexing }) {
+    return async function reindexAllKnowledgeDocuments({ limit = 2000 } = {}) {
+        const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 2000, 1), 5000);
+        const rows = await query(`
+            SELECT id, user_id
+            FROM knowledge_docs
+            WHERE deleted_at IS NULL AND source_path IS NOT NULL AND source_path <> ''
+            ORDER BY id ASC
+            LIMIT ?
+        `, [safeLimit + 1]);
+        const truncated = rows.length > safeLimit;
+        const selected = rows.slice(0, safeLimit);
+        let scheduled = 0;
+        let alreadyProcessing = 0;
+        for (const row of selected) {
+            const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -5 });
+            if (result.started) scheduled += 1;
+            if (result.reason === 'already_processing') alreadyProcessing += 1;
+        }
+        return { scanned: selected.length, scheduled, alreadyProcessing, truncated, limit: safeLimit };
+    };
+}
+
+module.exports = {
+    createAllKnowledgeDocumentsReindexScheduler,
+    createEmbeddingProfileMismatchScheduler,
+    createKnowledgeEmbeddingRecoveryRunner,
+    createLexicalReadyScheduler
+};

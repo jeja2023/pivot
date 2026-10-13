@@ -444,7 +444,6 @@ module.exports = {
     findSimilarRegulationArticles,
     listSavedSearches,
     mergeRegulationCandidates,
-    rerankRegulationCandidates,
     searchRegulationArticles,
     searchRegulationArticlesHybrid
 };

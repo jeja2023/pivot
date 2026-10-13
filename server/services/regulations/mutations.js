@@ -710,7 +710,7 @@ function createRegulationIndexRecoveryRunner({ intervalMs, batchSize, logger = d
     async function start() {
         if (started) return { started, running };
         started = true;
-        void tick();
+        void tick().catch(() => {});
         timer = setIntervalFn(() => { void tick(); }, safeIntervalMs);
         timer?.unref?.();
         return { started, running };

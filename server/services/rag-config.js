@@ -346,6 +346,5 @@ module.exports = {
     getUserSettingValue,
     getUserSettingValueAsync,
     normalizeEmbeddingMode,
-    normalizeRerankProtocol,
     toRagSettingValue
 };

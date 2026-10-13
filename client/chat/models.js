@@ -103,7 +103,7 @@ function renderRetrievalModelServices(settings = {}) {
     `);
 }
 
-window.Pivot.legacy.renderRetrievalModelServices = renderRetrievalModelServices;
+window.Pivot?.exposeModule?.('models.retrieval', { renderRetrievalModelServices });
 
 window.Pivot.legacy.loadModels = async function(page = 1) {
     const [modelRes, settingsRes] = await Promise.all([

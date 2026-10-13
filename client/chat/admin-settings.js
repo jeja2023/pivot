@@ -88,8 +88,8 @@ async function loadSettings() {
         updateRuntimeSettingsForm(data.runtimeConfig);
         updateApiAccessState(data.apiAccessEnabled === true);
         updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
-        window.Pivot.legacy.renderRetrievalModelServices?.(data);
-        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        (window.Pivot.getModule?.('models.retrieval')?.renderRetrievalModelServices || window.Pivot.legacy.renderRetrievalModelServices)?.(data);
+        (window.Pivot.getModule?.('knowledge.retrievalSummary')?.renderKnowledgeRetrievalModelSummary || window.Pivot.legacy.renderKnowledgeRetrievalModelSummary)?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
         setSettingsLoadState('', '');
         return true;
     } catch (error) {
@@ -162,55 +162,28 @@ function runtimeItemsByKey(runtimeConfig = {}) {
 
 function getRuntimeItemHint(item) {
     const hintMap = {
-        max_concurrent_ai_requests: '同时处理的聊天请求数，过大可能影响响应稳定性。',
-        max_ai_queue_size: '请求排队上限，队列满后会拒绝新的请求。',
-        ai_queue_timeout_ms: '请求在队列里等待多久后自动超时。',
-        model_endpoint_default_concurrency: '单个模型端点默认并发量。',
-        model_endpoint_queue_size: '单个模型端点的排队长度。',
-        model_endpoint_queue_timeout_ms: '模型端点排队等待超时时间。',
-        model_context_window_tokens: '没有单独配置上下文时使用的全局默认窗口。',
-        context_reserved_output_tokens: '为输出预留的 token 数，避免把回答空间压得太小。',
-        memory_threshold: '会话活跃 token 超过此值时触发自动压缩提炼。',
-        sampling_temperature: '温度越高越发散，越低越稳定。',
-        sampling_top_p: '采样概率上限，常和温度配合调节。',
-        sampling_presence_penalty: '减少反复提同一内容的倾向。',
-        sampling_frequency_penalty: '减少高频重复词的倾向。',
-        upload_attachment_max_bytes: '聊天附件的总上传上限。',
-        knowledge_upload_max_bytes: '知识库文件的总上传上限。',
-        image_upload_max_bytes: '单张图片在上传阶段的大小上限。',
-        image_context_max_bytes: '图片进入模型上下文前允许携带的大小上限。',
-        max_attachments_per_message: '用户输入框中一条消息最多保留的待发送附件数量。',
-        max_images_per_message: '一条消息允许注入的图片数量上限。',
-        attachment_context_max_chars: '附件抽取文本写入上下文时的字符上限。',
-        knowledge_extract_max_chars: '知识库文件抽取文本时的字符上限。',
-        rag_top_k_max: '每次检索最多返回多少条结果。',
-        rag_candidate_limit_max: '候选片段池的最大数量。',
-        rag_chunk_size_max: '检索切片的最大字符数。',
-        rag_context_budget_percent: 'RAG 在上下文中可占用的大致比例。',
-        rag_index_max_concurrent: '同时执行多少个知识库索引任务。',
-        agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。',
-        agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
+        max_concurrent_ai_requests: '同时处理的聊天请求数，过大可能影响响应稳定性。', max_ai_queue_size: '请求排队上限，队列满后会拒绝新的请求。',
+        ai_queue_timeout_ms: '请求在队列里等待多久后自动超时。', model_endpoint_default_concurrency: '单个模型端点默认并发量。',
+        model_endpoint_queue_size: '单个模型端点的排队长度。', model_endpoint_queue_timeout_ms: '模型端点排队等待超时时间。',
+        model_context_window_tokens: '没有单独配置上下文时使用的全局默认窗口。', context_reserved_output_tokens: '为输出预留的 token 数，避免把回答空间压得太小。',
+        memory_threshold: '会话活跃 token 超过此值时触发自动压缩提炼。', sampling_temperature: '温度越高越发散，越低越稳定。',
+        sampling_top_p: '采样概率上限，常和温度配合调节。', sampling_presence_penalty: '减少反复提同一内容的倾向。',
+        sampling_frequency_penalty: '减少高频重复词的倾向。', upload_attachment_max_bytes: '聊天附件的总上传上限。',
+        knowledge_upload_max_bytes: '知识库文件的总上传上限。', image_upload_max_bytes: '单张图片在上传阶段的大小上限。',
+        image_context_max_bytes: '图片进入模型上下文前允许携带的大小上限。', max_attachments_per_message: '用户输入框中一条消息最多保留的待发送附件数量。',
+        max_images_per_message: '一条消息允许注入的图片数量上限。', attachment_context_max_chars: '附件抽取文本写入上下文时的字符上限。',
+        knowledge_extract_max_chars: '知识库文件抽取文本时的字符上限。', rag_top_k_max: '每次检索最多返回多少条结果。',
+        rag_candidate_limit_max: '候选片段池的最大数量。', rag_chunk_size_max: '检索切片的最大字符数。',
+        rag_context_budget_percent: 'RAG 在上下文中可占用的大致比例。', rag_index_max_concurrent: '同时执行多少个知识库索引任务。',
+        agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。', agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
         chat_auto_agent_enabled: '关闭后用户不能选择聊天 Agent 执行模式；普通回答、手工 Agent 和工作流仍可使用。',
         memory_compression_max_concurrent: '后台同时压缩多少个记忆任务。'
     };
     return hintMap[item?.key] || '';
 }
 
-function isRuntimeHumanIntKey(key) {
-    return new Set([
-        'model_context_window_tokens',
-        'context_reserved_output_tokens',
-        'memory_threshold',
-        'upload_attachment_max_bytes',
-        'knowledge_upload_max_bytes',
-        'image_upload_max_bytes',
-        'image_context_max_bytes',
-        'attachment_context_max_chars',
-        'knowledge_extract_max_chars',
-        'rag_candidate_limit_max',
-        'rag_chunk_size_max'
-    ]).has(key);
-}
+const RUNTIME_HUMAN_INT_KEYS = new Set(['model_context_window_tokens', 'context_reserved_output_tokens', 'memory_threshold', 'upload_attachment_max_bytes', 'knowledge_upload_max_bytes', 'image_upload_max_bytes', 'image_context_max_bytes', 'attachment_context_max_chars', 'knowledge_extract_max_chars', 'rag_candidate_limit_max', 'rag_chunk_size_max']);
+function isRuntimeHumanIntKey(key) { return RUNTIME_HUMAN_INT_KEYS.has(key); }
 
 function updateRuntimeStatusMirrors(text = '') {
     document.querySelectorAll('[data-runtime-status]').forEach(el => {
@@ -392,17 +365,16 @@ function getEmbeddingModelValue() {
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     return (embeddingModelInput?.value.trim() || embeddingModelSelect?.value.trim() || '');
 }
-window.Pivot.moduleApi('settings.events').registerAdminSettingsEvents(() => {
 function callSettingsMemoryAction(name, ...args) {
     const legacyAction = window.Pivot.legacy?.[name];
     if (typeof legacyAction === 'function') return legacyAction(...args);
-    const api = window.Pivot.getModule?.('settings.memory');
-    const action = api?.[name];
-    if (typeof action !== 'function') {
-        throw new Error('长期记忆功能仍在加载，请稍后重试。');
+    const memoryModule = window.Pivot.getModule?.('settings.memory');
+    if (memoryModule && typeof memoryModule[name] === 'function') {
+        return memoryModule[name](...args);
     }
-    return action(...args);
+    throw new Error(`记忆功能未就绪：${name}`);
 }
+
 async function reloadSettingsMemories(page = 1) {
     try {
         await callSettingsMemoryAction('loadMemories', page);
@@ -410,267 +382,61 @@ async function reloadSettingsMemories(page = 1) {
         showToast(error.message || '长期记忆刷新失败', 'error');
     }
 }
-document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.Pivot.legacy.saveRuntimeSettings?.(event));
-document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.Pivot.legacy.loadSettings?.());
-document.getElementById('memory-refresh-btn')?.addEventListener('click', async () => {
-    try { await callSettingsMemoryAction('loadMemories'); } catch (error) { showToast(error.message || '长期记忆刷新失败', 'error'); }
-});
-document.getElementById('long-term-memory-toggle')?.addEventListener('change', async (event) => {
-    try {
-        await callSettingsMemoryAction('updateLongTermMemoryEnabled', event.target.checked === true);
-    } catch (error) {
-        event.target.checked = !event.target.checked;
-        showToast(error.message || '长期记忆设置保存失败', 'error');
-    }
-});
 
-document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', async () => {
-    try { await callSettingsMemoryAction('openMemoryMergeSuggestionsModal'); } catch (error) { showToast(error.message || '合并建议加载失败', 'error'); }
-});
-document.getElementById('memory-export-btn')?.addEventListener('click', async () => {
-    try { await callSettingsMemoryAction('exportMemories'); } catch (error) { showToast(error.message || '长期记忆导出失败', 'error'); }
-});
-document.getElementById('memory-evaluations-open-btn')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('openMemoryEvaluationsModal'); } catch (error) { showToast(error.message || '检索评测窗口加载失败', 'error'); }
-});
-document.getElementById('memory-evaluations-close-btn')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('closeMemoryEvaluationsModal'); } catch (_) {}
-});
-document.getElementById('memory-evaluations-modal')?.addEventListener('click', event => {
-    if (event.target === event.currentTarget) { try { callSettingsMemoryAction('closeMemoryEvaluationsModal'); } catch (_) {} }
-});
-document.getElementById('memory-evaluation-refresh-btn')?.addEventListener('click', async () => {
-    try { await callSettingsMemoryAction('loadMemoryEvaluations'); } catch (error) { showToast(error.message || '记忆评测记录加载失败', 'error'); }
-});
-document.getElementById('memory-evaluation-run-btn')?.addEventListener('click', async event => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        const result = await callSettingsMemoryAction('runMemoryEvaluation');
-        const summary = result.run?.summary || {};
-        showToast(`记忆评测完成：${Number(summary.passed || 0)}/${Number(summary.cases || 0)} 通过`);
-        await callSettingsMemoryAction('loadMemoryEvaluations');
-    } catch (error) {
-        showToast(error.message || '记忆评测运行失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-evaluation-case-form')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const submit = form.querySelector('button[type="submit"]');
-    submit.disabled = true;
-    try {
-        const payload = {
-            name: document.getElementById('memory-evaluation-name')?.value,
-            query: document.getElementById('memory-evaluation-query')?.value,
-            expectedMemoryIds: callSettingsMemoryAction('parseMemoryEvaluationIds', document.getElementById('memory-evaluation-expected')?.value),
-            forbiddenMemoryIds: callSettingsMemoryAction('parseMemoryEvaluationIds', document.getElementById('memory-evaluation-forbidden')?.value)
-        };
-        const id = document.getElementById('memory-evaluation-id')?.value;
-        if (id) await callSettingsMemoryAction('updateMemoryEvaluationCase', id, payload);
-        else await callSettingsMemoryAction('createMemoryEvaluationCase', payload);
-        callSettingsMemoryAction('resetMemoryEvaluationForm');
-        showToast(id ? '记忆评测用例已更新' : '记忆评测用例已添加');
-        await callSettingsMemoryAction('loadMemoryEvaluations');
-    } catch (error) {
-        showToast(error.message || '记忆评测用例创建失败', 'error');
-    } finally {
-        submit.disabled = false;
-    }
-});
-document.getElementById('memory-evaluation-reset-btn')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('resetMemoryEvaluationForm'); } catch (error) { showToast(error.message, 'error'); }
-});
-document.getElementById('memory-evaluation-cases')?.addEventListener('click', async event => {
-    const button = event.target?.closest?.('[data-memory-evaluation-action]');
-    if (!button) return;
-    const id = button.dataset.memoryEvaluationId;
-    const action = button.dataset.memoryEvaluationAction;
-    if (action === 'edit') {
-        try {
-            const item = callSettingsMemoryAction('getMemoryEvaluationCase', id);
-            if (item) callSettingsMemoryAction('fillMemoryEvaluationForm', item);
-        } catch (error) {
-            showToast(error.message || '评测用例加载失败', 'error');
-        }
-        return;
-    }
-    button.disabled = true;
-    try {
-        await callSettingsMemoryAction('deleteMemoryEvaluationCase', id);
-        callSettingsMemoryAction('resetMemoryEvaluationForm');
-        showToast('记忆评测用例已删除');
-        await callSettingsMemoryAction('loadMemoryEvaluations');
-    } catch (error) {
-        showToast(error.message || '记忆评测用例删除失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-search-input')?.addEventListener('input', () => {
-    clearTimeout(window.Pivot.legacy.memorySearchTimer);
-    window.Pivot.legacy.memorySearchTimer = setTimeout(() => { void reloadSettingsMemories(1); }, 250);
-});
-document.getElementById('memory-status-filter')?.addEventListener('change', () => { void reloadSettingsMemories(1); });
-document.getElementById('memory-type-filter')?.addEventListener('change', () => { void reloadSettingsMemories(1); });
-document.getElementById('memory-archive-expired-btn')?.addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    try {
-        const data = await callSettingsMemoryAction('archiveExpiredMemories');
-        showToast(`已归档 ${Number(data.archived || 0)} 条过期记忆`);
-            await callSettingsMemoryAction('loadMemories');
-    } catch (e) {
-        showToast(e.message || '过期记忆归档失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-select-all')?.addEventListener('change', (event) => {
-    document.querySelectorAll('[data-memory-select]').forEach(input => {
-        input.checked = event.target.checked === true;
+window.Pivot.moduleApi('settings.events').registerAdminSettingsEvents(() => {
+    document.getElementById('runtime-settings-page-save')?.addEventListener('click', event => window.Pivot.legacy.saveRuntimeSettings?.(event));
+    document.getElementById('runtime-settings-page-refresh')?.addEventListener('click', () => window.Pivot.legacy.loadSettings?.());
+    document.getElementById('memory-merge-suggestions-btn')?.addEventListener('click', async () => {
+        try { await callSettingsMemoryAction('openMemoryMergeSuggestionsModal'); } catch (error) { showToast(error.message || '合并建议加载失败', 'error'); }
     });
-});
-[
-    { id: 'memory-bulk-enable-btn', status: 'active', success: '选中记忆已恢复', err: '批量恢复失败' },
-    { id: 'memory-bulk-disable-btn', status: 'disabled', success: '选中记忆已禁用', err: '批量禁用失败' },
-    { id: 'memory-bulk-delete-btn', status: 'deleted', success: '选中记忆已删除', err: '批量删除失败' }
-].forEach(({ id, status, success, err }) => {
-    document.getElementById(id)?.addEventListener('click', async (event) => {
-        const ids = callSettingsMemoryAction('selectedMemoryIds');
-        if (!ids.length) return showToast('请先选择记忆', 'warning');
-        const button = event.currentTarget;
-        button.disabled = true;
+    document.getElementById('memory-jobs-panel')?.addEventListener('click', async (event) => {
+        const retryButton = event.target?.closest?.('#memory-jobs-retry-btn');
+        if (!retryButton) return;
+        retryButton.disabled = true;
         try {
-            await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, status);
-            showToast(success);
-            await callSettingsMemoryAction('loadMemories');
-        } catch (error) {
-            showToast(error.message || err, 'error');
-        } finally {
-            button.disabled = false;
-        }
-    });
-});
-document.getElementById('memory-jobs-panel')?.addEventListener('click', async (event) => {
-    const retryButton = event.target?.closest?.('#memory-jobs-retry-btn');
-    const cleanupButton = event.target?.closest?.('#memory-jobs-cleanup-btn');
-    if (!retryButton && !cleanupButton) return;
-    const button = retryButton || cleanupButton;
-    button.disabled = true;
-    try {
-        if (retryButton) {
             const result = await callSettingsMemoryAction('retryMemoryJobs');
             const queued = Number(result.queued || 0);
             showToast(queued ? `已将 ${queued} 个失败任务重新入队` : '没有可重试的失败任务', queued ? 'success' : 'info');
-        } else {
-            const data = await callSettingsMemoryAction('cleanupMemoryJobs');
-            showToast(`已清理 ${Number(data.deleted || 0)} 个旧任务`);
+            await callSettingsMemoryAction('loadMemories');
+        } catch (e) {
+            showToast(e.message || '任务维护失败', 'error');
+        } finally {
+            retryButton.disabled = false;
         }
-        await callSettingsMemoryAction('loadMemories');
-    } catch (e) {
-        showToast(e.message || '任务维护失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-document.getElementById('memory-list-body')?.addEventListener('click', async (event) => {
-    const button = event.target?.closest?.('[data-memory-action]');
-    if (!button) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const memoryId = button.dataset.memoryId;
-    const action = button.dataset.memoryAction;
-    button.disabled = true;
-    try {
+    });
+    document.getElementById('memory-list-body')?.addEventListener('click', async (event) => {
+        const button = event.target?.closest?.('[data-memory-action]');
+        if (!button) return;
+        const memoryId = button.dataset.memoryId;
+        const action = button.dataset.memoryAction;
         if (action === 'edit') {
             const selectedMemory = callSettingsMemoryAction('getCurrentMemory', memoryId);
             if (!selectedMemory) throw new Error('记忆数据已刷新，请重新加载后再编辑');
             callSettingsMemoryAction('openMemoryEditModal', selectedMemory);
-        } else if (action === 'source') {
-            await callSettingsMemoryAction('openMemorySourceModal', memoryId);
         } else if (action === 'usage') {
-            await callSettingsMemoryAction('openMemoryUsageModal', memoryId);
-        } else if (action === 'disable' || action === 'restore') {
-            const isDisable = action === 'disable';
-            await callSettingsMemoryAction('updateMemoryStatus', memoryId, isDisable ? 'disabled' : 'active');
-            showToast(isDisable ? '长期记忆已禁用' : '长期记忆已恢复');
-            await callSettingsMemoryAction('loadMemories');
-        } else if (action === 'delete') {
-            await callSettingsMemoryAction('deleteMemory', memoryId);
-            showToast('长期记忆已删除');
-            await callSettingsMemoryAction('loadMemories');
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            button.disabled = true;
+            try {
+                await callSettingsMemoryAction('openMemoryUsageModal', memoryId);
+            } catch (e) {
+                showToast(e.message || '长期记忆操作失败', 'error');
+            } finally {
+                button.disabled = false;
+            }
         }
-    } catch (e) {
-        showToast(e.message || '长期记忆操作失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-}, true);
-document.getElementById('memory-edit-cancel')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('closeMemoryEditModal'); } catch (_) {}
-});
-document.getElementById('memory-edit-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const saveButton = document.getElementById('memory-edit-save');
-    if (saveButton) saveButton.disabled = true;
-    const memoryId = document.getElementById('memory-edit-id')?.value;
-    try {
-        await callSettingsMemoryAction('saveMemory', memoryId, {
-            type: document.getElementById('memory-edit-type')?.value,
-            content: document.getElementById('memory-edit-content')?.value,
-            salience: Number(document.getElementById('memory-edit-salience')?.value),
-            confidence: Number(document.getElementById('memory-edit-confidence')?.value),
-            scope: document.getElementById('memory-edit-scope')?.value,
-            scopeReference: document.getElementById('memory-edit-scope-reference')?.value,
-            projectId: document.getElementById('memory-edit-scope')?.value === 'project'
-                ? document.getElementById('memory-edit-scope-reference')?.value : '',
-            validFrom: document.getElementById('memory-edit-valid-from')?.value || null,
-            expiresAt: document.getElementById('memory-edit-expires-at')?.value || null
+    }, true);
+    ['memory-edit-modal', 'memory-source-modal', 'memory-merge-modal'].forEach(id => {
+        document.getElementById(id)?.addEventListener('click', (event) => {
+            if (event.target?.id === id && id === 'memory-merge-modal') {
+                try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {}
+            }
         });
-        showToast('长期记忆已保存');
-        callSettingsMemoryAction('closeMemoryEditModal');
-        await callSettingsMemoryAction('loadMemories');
-    } catch (e) {
-        showToast(e.message || '记忆保存失败', 'error');
-    } finally {
-        if (saveButton) saveButton.disabled = false;
-    }
-});
-document.getElementById('memory-source-close')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('closeMemorySourceModal'); } catch (_) {}
-});
-document.getElementById('memory-merge-close')?.addEventListener('click', () => {
-    try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {}
-});
-document.getElementById('memory-merge-body')?.addEventListener('click', async (event) => {
-    const button = event.target?.closest?.('[data-memory-merge-target]');
-    if (!button) return;
-    button.disabled = true;
-    try {
-        await callSettingsMemoryAction('mergeMemoryPair', button.dataset.memoryMergeTarget, button.dataset.memoryMergeSource);
-        showToast('长期记忆已合并');
-        await callSettingsMemoryAction('loadMemories');
-        await callSettingsMemoryAction('openMemoryMergeSuggestionsModal');
-    } catch (e) {
-        showToast(e.message || '记忆合并失败', 'error');
-    } finally {
-        button.disabled = false;
-    }
-});
-['memory-edit-modal', 'memory-source-modal', 'memory-merge-modal'].forEach(id => {
-    document.getElementById(id)?.addEventListener('click', (event) => {
-        if (event.target?.id === id) {
-            if (id === 'memory-edit-modal') { try { callSettingsMemoryAction('closeMemoryEditModal'); } catch (_) {} }
-            else if (id === 'memory-source-modal') { try { callSettingsMemoryAction('closeMemorySourceModal'); } catch (_) {} }
-            else if (id === 'memory-merge-modal') { try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {} }
-        }
     });
+    window.Pivot.getModule?.('settings.memoryUi')?.bindAdminMemorySettingsEvents?.();
 });
-});
-window.Pivot.legacy.fetchEmbeddingModels = async () => {
+
+async function fetchEmbeddingModels() {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -857,8 +623,8 @@ window.Pivot.legacy.saveSettings = async () => {
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
         updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
-        window.Pivot.legacy.renderRetrievalModelServices?.(data);
-        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        (window.Pivot.getModule?.('models.retrieval')?.renderRetrievalModelServices || window.Pivot.legacy.renderRetrievalModelServices)?.(data);
+        (window.Pivot.getModule?.('knowledge.retrievalSummary')?.renderKnowledgeRetrievalModelSummary || window.Pivot.legacy.renderKnowledgeRetrievalModelSummary)?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
         setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         showToast(isSuperAdminUser() ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
@@ -866,7 +632,7 @@ window.Pivot.legacy.saveSettings = async () => {
     }
 };
 
-window.Pivot.legacy.saveEmbeddingSettings = async (requestedSection = 'embedding') => {
+async function saveEmbeddingSettings(requestedSection = 'embedding') {
     const section = getRetrievalConfigSection(requestedSection);
     const config = RETRIEVAL_CONFIG_SECTIONS[section];
     const modal = document.getElementById(config.modalId);
@@ -932,8 +698,8 @@ window.Pivot.legacy.saveEmbeddingSettings = async (requestedSection = 'embedding
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '检索配置保存失败');
         updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
-        window.Pivot.legacy.renderRetrievalModelServices?.(data);
-        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        (window.Pivot.getModule?.('models.retrieval')?.renderRetrievalModelServices || window.Pivot.legacy.renderRetrievalModelServices)?.(data);
+        (window.Pivot.getModule?.('knowledge.retrievalSummary')?.renderKnowledgeRetrievalModelSummary || window.Pivot.legacy.renderKnowledgeRetrievalModelSummary)?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
         if (section === 'policy') {
             setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         }
@@ -945,7 +711,7 @@ window.Pivot.legacy.saveEmbeddingSettings = async (requestedSection = 'embedding
         if (saveBtn) saveBtn.disabled = false;
     }
 };
-window.Pivot.legacy.testEmbeddingConnection = async () => {
+async function testEmbeddingConnection() {
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
@@ -990,7 +756,7 @@ window.Pivot.legacy.testEmbeddingConnection = async () => {
     }
 };
 
-window.Pivot.legacy.testRerankConnection = async () => {
+async function testRerankConnection() {
     const apiUrl = document.getElementById('setting-rag-rerank-url')?.value.trim() || '';
     const apiKey = document.getElementById('setting-rag-rerank-key')?.value.trim() || '';
     const model = document.getElementById('setting-rag-rerank-model')?.value.trim() || '';
@@ -1053,7 +819,7 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     document.querySelectorAll('[data-retrieval-config-save]').forEach(button => {
         if (button.dataset.boundRetrievalConfigSave === '1') return;
         button.dataset.boundRetrievalConfigSave = '1';
-        button.addEventListener('click', () => window.Pivot.legacy.saveEmbeddingSettings(button.dataset.retrievalConfigSave));
+        button.addEventListener('click', () => saveEmbeddingSettings(button.dataset.retrievalConfigSave));
     });
     modals.forEach(({ modal }) => {
         if (modal.dataset.boundRetrievalModalOverlay === '1') return;
@@ -1063,13 +829,13 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
         });
     });
     if (testBtn) {
-        testBtn.onclick = () => window.Pivot.legacy.testEmbeddingConnection();
+        testBtn.onclick = () => testEmbeddingConnection();
     }
     if (rerankTestBtn) {
-        rerankTestBtn.onclick = () => window.Pivot.legacy.testRerankConnection();
+        rerankTestBtn.onclick = () => testRerankConnection();
     }
     if (fetchModelsBtn) {
-        fetchModelsBtn.onclick = () => window.Pivot.legacy.fetchEmbeddingModels();
+        fetchModelsBtn.onclick = () => fetchEmbeddingModels();
     }
     if (embeddingModelSelect) {
         embeddingModelSelect.onchange = (e) => {
