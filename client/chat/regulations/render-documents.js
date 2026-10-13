@@ -65,12 +65,6 @@
                     </div>
                     <div class="regulations-folder-grid">
                         ${folderListHtml}
-                        ${canAdd ? `
-                            <button type="button" class="btn-secondary regulations-folder-card regulations-folder-card-add" data-regulation-create-folder aria-label="新建法规分类目录">
-                                <strong>+ 新建分类目录</strong>
-                                <span>自定义法规层级与业务分类</span>
-                            </button>
-                        ` : ''}
                     </div>
                 `);
             }
