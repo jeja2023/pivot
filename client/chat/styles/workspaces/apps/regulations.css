@@ -345,14 +345,96 @@
     color: var(--primary);
 }
 
-.regulations-create-folder-dialog {
-    max-width: 520px;
+/* 新建法规分类目录弹窗规范 */
+.workspace-modal.regulations-create-folder-dialog {
+    width: min(500px, calc(100vw - 32px));
 }
 
 .regulations-create-folder-form {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    padding: 20px 24px 22px;
+    background: var(--surface);
+    box-sizing: border-box;
+}
+
+.regulations-create-folder-form .regulations-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.regulations-create-folder-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--text-main);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.regulations-create-folder-form label span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.regulations-create-folder-form .form-input {
+    width: 100% !important;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 0.82rem;
+    color: var(--text-main);
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.regulations-create-folder-form .form-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--focus-ring, rgba(16, 163, 127, 0.1));
+    outline: none;
+}
+
+.regulations-create-folder-form .form-input::placeholder {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.regulations-create-folder-form textarea.form-input {
+    height: auto;
+    min-height: 80px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.regulations-create-folder-form .regulations-preset-tags {
+    margin: 2px 0 2px;
+}
+
+.regulations-create-folder-form .regulations-admin-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.regulations-create-folder-form .regulations-admin-actions .btn-primary,
+.regulations-create-folder-form .regulations-admin-actions .btn-secondary {
+    height: 34px;
+    min-width: 80px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 700;
 }
 
 .regulations-empty-actions {
