@@ -433,6 +433,9 @@ window.Pivot.moduleApi('settings.events').registerAdminSettingsEvents(() => {
             }
         });
     });
+    document.getElementById('memory-merge-close')?.addEventListener('click', () => {
+        try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {}
+    });
     window.Pivot.getModule?.('settings.memoryUi')?.bindAdminMemorySettingsEvents?.();
 });
 

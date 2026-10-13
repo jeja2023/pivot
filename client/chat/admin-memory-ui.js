@@ -21,7 +21,10 @@
         return memoryTooltipEl;
     }
 
+    let memoryEventsBound = false;
+
     function ensureMemoryModalsAttached() {
+        bindAdminMemorySettingsEvents();
         const editModal = document.getElementById('memory-edit-modal');
         const sourceModal = document.getElementById('memory-source-modal');
         const mergeModal = document.getElementById('memory-merge-modal');
@@ -117,6 +120,10 @@ async function reloadSettingsMemories(page = 1) {
 
 
     function bindAdminMemorySettingsEvents() {
+        if (memoryEventsBound) return;
+        const root = document.getElementById('admin-container');
+        if (!root && !document.getElementById('memory-merge-modal')) return;
+        memoryEventsBound = true;
         document.getElementById('memory-refresh-btn')?.addEventListener('click', async () => {
     try { await callSettingsMemoryAction('loadMemories'); } catch (error) { showToast(error.message || '长期记忆刷新失败', 'error'); }
 });
@@ -349,11 +356,12 @@ document.getElementById('memory-merge-body')?.addEventListener('click', async (e
         button.disabled = false;
     }
 });
-['memory-edit-modal', 'memory-source-modal'].forEach(id => {
+['memory-edit-modal', 'memory-source-modal', 'memory-merge-modal'].forEach(id => {
     document.getElementById(id)?.addEventListener('click', (event) => {
         if (event.target?.id === id) {
             if (id === 'memory-edit-modal') { try { callSettingsMemoryAction('closeMemoryEditModal'); } catch (_) {} }
             else if (id === 'memory-source-modal') { try { callSettingsMemoryAction('closeMemorySourceModal'); } catch (_) {} }
+            else if (id === 'memory-merge-modal') { try { callSettingsMemoryAction('closeMemoryMergeModal'); } catch (_) {} }
         }
     });
 });
@@ -365,4 +373,14 @@ document.getElementById('memory-merge-body')?.addEventListener('click', async (e
         ensureMemoryModalsAttached,
         initMemoryContentTooltips
     });
+
+    if (document.getElementById('admin-container') || document.getElementById('memory-merge-modal')) {
+        bindAdminMemorySettingsEvents();
+    } else {
+        document.addEventListener('pivot:workspace-mounted', (event) => {
+            if (event.detail?.name === 'settings') {
+                bindAdminMemorySettingsEvents();
+            }
+        });
+    }
 })();
