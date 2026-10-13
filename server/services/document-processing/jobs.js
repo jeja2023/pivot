@@ -1,18 +1,13 @@
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
-
 const { query, queryOne, execute } = require('../../db/client');
 const { extractDocumentText, truncateExtractedText } = require('../../document-text');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
-const { createKnowledgeDocumentFromUpload, scheduleKnowledgeDocumentIndexing } = require('../rag-documents');
-const { createRegulationDocumentFromUpload } = require('../regulations');
 const { getKnowledgeLimits } = require('../resource-limits');
 const {
     JOB_STATUSES,
     JOB_TYPES,
-    OUTPUT_TYPES,
     isImageExtension,
     isPdfExtension,
     isTextExtractableExtension,
@@ -42,19 +37,18 @@ const { createTextOutputs, pagesToText, serializeOutput } = require('./exporters
 const { getJobOutputsArchive, getOutputDownload, getPageImage } = require('./downloads');
 const { imageFileToPage, renderPdfPagesToFiles } = require('./renderers');
 const { recognizePage } = require('./ocr');
-const { PDF_TOOL_OPERATIONS, createSearchablePdfOutput, normalizePdfOperation, processPdfToolOperation } = require('./pdf');
-const { buildManagedPath, resolveStoredDocumentPath, safeUnlinkManaged, tempRoot } = require('./paths');
-
+const { PDF_TOOL_OPERATIONS, assertPdfInputFiles, createSearchablePdfOutput, getPdfPageMetrics, preflightPdfFile, processPdfToolOperation, requirePdfOperation } = require('./pdf');
+const { resolveStoredDocumentPath, safeUnlinkManaged } = require('./paths');
+const { getJobPassword, removeJobSecrets, storeJobPassword } = require('./secrets');
+const { createDocumentDistributionService } = require('./distribution');
+const { createDocumentProcessingMonitoring } = require('./monitoring');
+const { createDocumentExportActions } = require('./export-actions');
 const queue = [];
 const runningJobs = new Set();
 let runningCount = 0;
 const JOB_LEASE_MS = Math.max(60_000, Number.parseInt(process.env.DOCUMENT_PROCESSING_JOB_LEASE_MS || String(15 * 60 * 1000), 10) || 15 * 60 * 1000);
 const JOB_RECOVERY_BATCH = Math.max(1, Math.min(500, Number.parseInt(process.env.DOCUMENT_PROCESSING_RECOVERY_BATCH || '100', 10) || 100));
-
-function jobLeaseCutoff() {
-    return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS));
-}
-
+function jobLeaseCutoff() { return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS)); }
 async function getJobRow(jobId, userId = null) {
     const id = Number.parseInt(jobId, 10);
     if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -71,11 +65,11 @@ async function setJobStatus(jobId, status, patch = {}) {
     const result = patch.result === undefined ? parseJson(current.result_json, {}) : patch.result;
     const progress = patch.progress === undefined ? current.progress : Math.max(0, Math.min(Number(patch.progress) || 0, 100));
     const errorMessage = patch.errorMessage === undefined ? current.error_message : String(patch.errorMessage || '').slice(0, 500);
-    const completedAt = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status)
+    const completedAt = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status)
         ? (patch.completedAt || now)
         : current.completed_at;
     const cancelledAt = status === JOB_STATUSES.CANCELLED ? (patch.cancelledAt || now) : current.cancelled_at;
-    const terminal = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status);
+    const terminal = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status);
     const refreshLease = status === JOB_STATUSES.PROCESSING;
     await execute(`
         UPDATE document_jobs
@@ -92,19 +86,19 @@ async function isCancelled(jobId) {
 
 async function touchProgress(jobId, progress, resultPatch = null) {
     const row = await getJobRow(jobId);
-    if (!row || [JOB_STATUSES.CANCELLED, JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW].includes(row.status)) return null;
+    if (!row || [JOB_STATUSES.CANCELLED, JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW].includes(row.status)) return null;
     const result = resultPatch ? { ...parseJson(row.result_json, {}), ...resultPatch } : parseJson(row.result_json, {});
     return await setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result });
 }
 
-async function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, imagePath = '', text = '', ocrStatus = 'pending', confidence = null }) {
+async function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, pixelWidth = width, pixelHeight = height, pdfWidth = 0, pdfHeight = 0, rotation = 0, cropBox = {}, imagePath = '', text = '', ocrStatus = 'pending', confidence = null }) {
     const now = getBeijingTimestamp();
     return await queryOne(`
         INSERT INTO document_pages (
-            user_id, file_id, job_id, page_number, width, height, image_path, text, text_length, ocr_status, confidence, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, file_id, job_id, page_number, width, height, pixel_width, pixel_height, pdf_width, pdf_height, rotation, crop_box_json, image_path, text, text_length, ocr_status, confidence, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
-    `, [userId, fileId, jobId, pageNumber, width, height, imagePath, text, String(text || '').length, ocrStatus, confidence, now, now]);
+    `, [userId, fileId, jobId, pageNumber, width, height, pixelWidth, pixelHeight, pdfWidth, pdfHeight, rotation, safeJson(cropBox), imagePath, text, String(text || '').length, ocrStatus, confidence, now, now]);
 }
 
 async function updatePageText({ pageId, text, ocrStatus, confidence }) {
@@ -149,6 +143,34 @@ async function getOutputs(jobId) {
     return await query('SELECT * FROM document_outputs WHERE job_id = ? AND status = ? ORDER BY created_at DESC, id DESC', [jobId, 'ready']);
 }
 
+async function getJobItems(jobId) {
+    return await query('SELECT * FROM document_job_items WHERE job_id = ? ORDER BY item_order ASC, id ASC', [jobId]);
+}
+
+async function resetJobItems(jobId) {
+    await execute('DELETE FROM document_job_items WHERE job_id = ?', [jobId]);
+}
+
+async function recordJobItem({ job, file, itemOrder, status, progress = 100, errorCode = '', errorMessage = '', result = {} }) {
+    await execute(`
+        INSERT INTO document_job_items (
+            user_id, job_id, file_id, item_order, status, progress, error_code, error_message, result_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        job.user_id,
+        job.id,
+        file.id,
+        itemOrder,
+        status,
+        Math.min(Math.max(Number(progress) || 0, 0), 100),
+        String(errorCode || '').slice(0, 80),
+        String(errorMessage || '').slice(0, 500),
+        safeJson(result),
+        getBeijingTimestamp(),
+        getBeijingTimestamp()
+    ]);
+}
+
 async function getReviews(jobId) {
     return await query('SELECT * FROM document_reviews WHERE job_id = ? ORDER BY updated_at DESC, id DESC', [jobId]);
 }
@@ -165,6 +187,7 @@ async function cleanupJobArtifacts(jobId) {
     await execute('DELETE FROM document_outputs WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_ocr_blocks WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_reviews WHERE job_id = ?', [jobId]);
+    await execute('DELETE FROM document_job_items WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_pages WHERE job_id = ?', [jobId]);
 }
 
@@ -264,14 +287,15 @@ async function recoverDocumentProcessingJobs({ limit = JOB_RECOVERY_BATCH } = {}
     return { requeued, failed, enqueued: pending.length };
 }
 
-async function createJobRecord({ userId, fileId, jobType, sourceModule, config }) {
+async function createJobRecord({ userId, fileId, jobType, sourceModule, config, parentJobId = null }) {
     const now = getBeijingTimestamp();
+    const normalizedConfig = normalizeConfig(config);
     const row = await queryOne(`
         INSERT INTO document_jobs (
-            user_id, file_id, job_type, status, progress, config_json, result_json, attempts, max_attempts, source_module, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, file_id, job_type, status, progress, config_json, result_json, attempts, max_attempts, source_module, config_version, parent_job_id, attempt_token, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
-    `, [userId, fileId, normalizeJobType(jobType), JOB_STATUSES.QUEUED, 0, safeJson(normalizeConfig(config)), '{}', 0, 3, sourceModule, now, now]);
+    `, [userId, fileId, normalizeJobType(jobType), JOB_STATUSES.QUEUED, 0, safeJson(normalizedConfig), '{}', 0, 3, sourceModule, normalizedConfig.configVersion || 2, parentJobId, crypto.randomUUID(), now, now]);
     return row;
 }
 
@@ -280,6 +304,7 @@ async function createJobFromUpload({ user, file, jobType = JOB_TYPES.AUTO, sourc
     let job;
     try {
         job = await createJobRecord({ userId: user.id, fileId: registeredFile.id, jobType, sourceModule, config });
+        if (String(config.password || '').trim()) await storeJobPassword({ userId: user.id, jobId: job.id, password: config.password });
     } catch (error) {
         await cleanupJobSourceFiles({ file_id: registeredFile.id, config_json: '{}' }, user.id).catch(() => {});
         throw error;
@@ -296,14 +321,25 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
         throw error;
     }
     const registeredFiles = [];
-    for (const file of uploadFiles.slice(0, 20)) {
-        registeredFiles.push(await registerUploadedFile({
-            user,
-            file,
-            sourceModule: 'pdf_tools',
-            sourceRef,
-            metadata: { createdBy: 'pdf_tools' }
-        }));
+    try {
+        for (const file of uploadFiles.slice(0, 20)) {
+            registeredFiles.push(await registerUploadedFile({
+                user,
+                file,
+                sourceModule: 'pdf_tools',
+                sourceRef,
+                metadata: { createdBy: 'pdf_tools' }
+            }));
+        }
+        assertPdfInputFiles({ operation: requirePdfOperation(operation || config.operation), files: registeredFiles, mode: config.mode });
+    } catch (error) {
+        if (registeredFiles.length) {
+            await cleanupJobSourceFiles({
+                file_id: registeredFiles[0].id,
+                config_json: JSON.stringify({ sourceFileIds: registeredFiles.map(item => item.id) })
+            }, user.id).catch(() => {});
+        }
+        throw error;
     }
     const firstFile = registeredFiles[0];
     let job;
@@ -319,6 +355,7 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
                 sourceFileIds: registeredFiles.map(item => item.id)
             }
         });
+        if (String(config.password || '').trim()) await storeJobPassword({ userId: user.id, jobId: job.id, password: config.password });
     } catch (error) {
         await cleanupJobSourceFiles({
             file_id: firstFile.id,
@@ -378,20 +415,61 @@ async function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '
     };
 }
 
-async function getJobDetail({ userId, jobId }) {
+function allowedActions(job) {
+    const status = job?.status || '';
+    return {
+        view: Boolean(job),
+        cancel: [JOB_STATUSES.QUEUED, JOB_STATUSES.PROCESSING].includes(status),
+        retry: [JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status),
+        reprocess: [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status),
+        download: [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW].includes(status),
+        delete: ![JOB_STATUSES.QUEUED, JOB_STATUSES.PROCESSING].includes(status)
+    };
+}
+
+async function getJobPreflight(job, file) {
+    const config = parseJson(job?.config_json, {});
+    const sourceIds = Array.isArray(config.sourceFileIds) && config.sourceFileIds.length ? config.sourceFileIds : [file?.id];
+    const sources = [];
+    for (const sourceId of sourceIds.slice(0, 20)) {
+        const source = await getDocumentFileForUser(sourceId, job.user_id);
+        if (source) sources.push(await preflightPdfFile(source, { maxPages: config.maxToolPages || 300 }));
+    }
+    return {
+        operation: config.operation || '',
+        mode: config.mode || 'single',
+        files: sources,
+        totalPages: sources.reduce((sum, source) => sum + Number(source.pageCount || 0), 0),
+        warnings: sources.flatMap(source => source.warnings || [])
+    };
+}
+
+async function getJobDetail({ userId, jobId, sourceModule = '' }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
+    if (sourceModule && job.source_module !== sourceModule) return null;
     const file = await getDocumentFileForUser(job.file_id, userId);
     const pages = await getPages(job.id);
     const blocks = await getBlocks(job.id);
     const outputs = await getOutputs(job.id);
     const reviews = await getReviews(job.id);
+    const items = await getJobItems(job.id);
     return {
-        job: serializeJob(job),
+        job: { ...serializeJob(job), allowedActions: allowedActions(job) },
         file: serializeFile(file),
         pages: pages.map(serializePage),
         blocks: blocks.map(serializeBlock),
         outputs: outputs.map(serializeOutput),
+        items: items.map(row => ({
+            id: row.id,
+            fileId: row.file_id,
+            itemOrder: Number(row.item_order || 0),
+            status: row.status || '',
+            progress: Number(row.progress || 0),
+            errorCode: row.error_code || '',
+            errorMessage: row.error_message || '',
+            result: parseJson(row.result_json, {})
+        })),
         reviews: reviews.map(row => ({
             id: row.id,
             pageId: row.page_id,
@@ -400,7 +478,8 @@ async function getJobDetail({ userId, jobId }) {
             lowConfidenceConfirmed: Boolean(row.low_confidence_confirmed),
             reviewedAt: row.reviewed_at,
             updatedAt: row.updated_at
-        }))
+        })),
+        preflight: job.source_module === 'pdf_tools' ? await getJobPreflight(job, file) : null
     };
 }
 
@@ -409,11 +488,22 @@ async function preparePagesForJob({ job, file, filePath, config }) {
     const ext = file.file_ext;
     if (isImageExtension(ext)) {
         const page = await imageFileToPage({ filePath, relativePath: file.file_path, pageNumber: 1 });
-        const row = await insertPage({ userId, fileId: file.id, jobId: job.id, ...page, ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending' });
+        const row = await insertPage({
+            userId,
+            fileId: file.id,
+            jobId: job.id,
+            ...page,
+            pixelWidth: page.width,
+            pixelHeight: page.height,
+            pdfWidth: Number(page.width || 0) * 72 / Math.max(Number(config.dpi || 220), 72),
+            pdfHeight: Number(page.height || 0) * 72 / Math.max(Number(config.dpi || 220), 72),
+            ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
+        });
         await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: 1, metadata: { image: { width: page.width, height: page.height } } });
         return [row];
     }
     if (isPdfExtension(ext)) {
+        const metrics = await getPdfPageMetrics(file);
         const rendered = await renderPdfPagesToFiles({
             filePath,
             userId,
@@ -422,6 +512,7 @@ async function preparePagesForJob({ job, file, filePath, config }) {
         });
         const rows = [];
         for (const page of rendered) {
+            const metric = metrics.find(item => item.pageNumber === page.pageNumber) || {};
             rows.push(await insertPage({
                 userId,
                 fileId: file.id,
@@ -429,11 +520,21 @@ async function preparePagesForJob({ job, file, filePath, config }) {
                 pageNumber: page.pageNumber,
                 width: page.width,
                 height: page.height,
+                pixelWidth: page.pixelWidth || page.width,
+                pixelHeight: page.pixelHeight || page.height,
+                pdfWidth: metric.pdfWidth || 0,
+                pdfHeight: metric.pdfHeight || 0,
+                rotation: metric.rotation || 0,
+                cropBox: metric.cropBox || {},
                 imagePath: page.imagePath,
                 ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
             }));
         }
-        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: rows.length });
+        const requestedPages = Math.min(metrics.length, config.maxRenderPages);
+        if (rows.length !== requestedPages) {
+            throw new Error(`PDF 预览仅生成 ${rows.length}/${requestedPages} 页，未发布不完整的识别结果。`);
+        }
+        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: metrics.length, metadata: { pdf: { totalPages: metrics.length, renderedPages: rows.length } } });
         return rows;
     }
     return [];
@@ -554,16 +655,17 @@ async function processPdfToolJob({ job, file, config }) {
         if (f) files.push(f);
     }
     if (!files.length) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
-    const operation = normalizePdfOperation(config.operation);
+    const operation = requirePdfOperation(config.operation);
+    const input = assertPdfInputFiles({ operation, files, mode: config.mode });
     if (operation === PDF_TOOL_OPERATIONS.SEARCHABLE_PDF) {
-        const targetFile = files.find(item => isPdfExtension(item.file_ext) || isImageExtension(item.file_ext)) || files[0];
+        const targetFile = input.files[0];
         const targetPath = await getDocumentFilePathAsync(targetFile);
         if (!targetPath) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
         const pageLimit = Math.min(Math.max(Number.parseInt(config.maxToolPages, 10) || 20, 1), 300);
         const searchableConfig = {
             ...config,
-            maxRenderPages: Math.min(Math.max(Number.parseInt(config.maxRenderPages, 10) || pageLimit, 1), pageLimit),
-            maxOcrPages: Math.min(Math.max(Number.parseInt(config.maxOcrPages, 10) || pageLimit, 1), pageLimit)
+            maxRenderPages: pageLimit,
+            maxOcrPages: pageLimit
         };
         const pages = await preparePagesForJob({ job, file: targetFile, filePath: targetPath, config: searchableConfig });
         const recognized = await recognizePages({ job, file: targetFile, pages, config: searchableConfig });
@@ -583,23 +685,88 @@ async function processPdfToolJob({ job, file, config }) {
             }
         };
     }
-    const result = await processPdfToolOperation({
+    const runOne = async (source, index = 0, total = 1) => await processPdfToolOperation({
         job,
-        file: files[0],
-        files,
-        config,
-        onProgress: (progress, patch = {}) => touchProgress(job.id, progress, patch)
+        file: source,
+        files: [source],
+        config: { ...config, mode: 'single' },
+        isCancelled: () => isCancelled(job.id),
+        onProgress: async (progress, patch = {}) => {
+            const adjusted = total > 1 ? Math.floor((index / total) * 80 + (progress / 100) * (80 / total) + 10) : progress;
+            await touchProgress(job.id, adjusted, patch);
+        }
     });
+    let result;
+    if (config.mode === 'batch' && input.meta.inputMode === 'single-or-batch' && input.files.length > 1) {
+        const aggregate = { outputs: [], processedFiles: 0, processedPages: 0, requestedPages: 0, items: [], failedFiles: 0 };
+        await resetJobItems(job.id);
+        for (let index = 0; index < input.files.length; index += 1) {
+            const source = input.files[index];
+            try {
+                const item = await runOne(source, index, input.files.length);
+                aggregate.outputs.push(...(item.outputs || []));
+                aggregate.processedFiles += 1;
+                aggregate.processedPages += Number(item.processedPages || 0);
+                aggregate.requestedPages += Number(item.requestedPages || 0);
+                aggregate.items.push({ fileId: source.id, originalName: source.original_name, status: 'succeeded', outputs: item.outputs || [] });
+                await recordJobItem({
+                    job,
+                    file: source,
+                    itemOrder: index,
+                    status: JOB_STATUSES.SUCCEEDED,
+                    result: {
+                        outputIds: (item.outputs || []).map(output => output.id).filter(Boolean),
+                        processedPages: Number(item.processedPages || 0),
+                        requestedPages: Number(item.requestedPages || 0)
+                    }
+                });
+            } catch (error) {
+                if (await isCancelled(job.id)) throw error;
+                aggregate.failedFiles += 1;
+                aggregate.items.push({ fileId: source.id, originalName: source.original_name, status: 'failed', errorCode: error.code || 'PROCESSING_FAILED', errorMessage: sanitizeErrorMessage(error) });
+                await recordJobItem({
+                    job,
+                    file: source,
+                    itemOrder: index,
+                    status: JOB_STATUSES.FAILED,
+                    progress: 0,
+                    errorCode: error.code || 'PROCESSING_FAILED',
+                    errorMessage: sanitizeErrorMessage(error)
+                });
+            }
+        }
+        if (!aggregate.processedFiles) {
+            const firstFailure = aggregate.items.find(item => item.status === 'failed');
+            const error = new Error(firstFailure?.errorMessage || '批量 PDF 处理失败。');
+            error.code = firstFailure?.errorCode || 'PROCESSING_FAILED';
+            throw error;
+        }
+        result = aggregate;
+    } else if (operation === PDF_TOOL_OPERATIONS.MERGE || operation === PDF_TOOL_OPERATIONS.IMAGES_TO_PDF) {
+        result = await processPdfToolOperation({
+            job,
+            file: input.files[0],
+            files: input.files,
+            config,
+            isCancelled: () => isCancelled(job.id),
+            onProgress: (progress, patch = {}) => touchProgress(job.id, progress, patch)
+        });
+    } else {
+        result = await runOne(input.files[0]);
+    }
     return {
-        status: JOB_STATUSES.SUCCEEDED,
+        status: result.failedFiles ? JOB_STATUSES.PARTIAL_SUCCESS : JOB_STATUSES.SUCCEEDED,
         progress: 100,
         result: {
             operation: result.operation,
             outputs: result.outputs || [],
-            processedFiles: result.processedFiles || files.length,
+            processedFiles: result.processedFiles || 0,
             processedPages: result.processedPages || 0,
+            requestedPages: result.requestedPages || 0,
             removedPages: result.removedPages || 0,
-            textLength: result.textLength || 0
+            textLength: result.textLength || 0,
+            failedFiles: result.failedFiles || 0,
+            items: result.items || []
         }
     };
 }
@@ -620,7 +787,20 @@ async function processJob(jobId) {
     `, [JOB_STATUSES.PROCESSING, 5, now, now, jobId, JOB_STATUSES.QUEUED]);
     if (claimed !== 1) return await getJobRow(jobId);
     const job = await getJobRow(jobId);
-    const config = normalizeConfig(parseJson(job.config_json, {}));
+    const rawConfig = parseJson(job.config_json, {});
+    // 兼容旧任务的明文密码：首次实际执行时立即迁移到短期加密密钥表，
+    // 然后回写不含密码的公开配置，避免继续经详情接口泄露。
+    const legacyPassword = String(rawConfig.password || '');
+    if (legacyPassword) {
+        await storeJobPassword({ userId: job.user_id, jobId: job.id, password: legacyPassword });
+        delete rawConfig.password;
+        rawConfig.requiresPassword = true;
+        await execute('UPDATE document_jobs SET config_json = ?, config_version = ?, updated_at = ? WHERE id = ?', [safeJson(normalizeConfig(rawConfig)), 2, getBeijingTimestamp(), job.id]);
+    }
+    const config = { ...normalizeConfig(rawConfig), password: await getJobPassword({ userId: job.user_id, jobId: job.id }) };
+    if (config.requiresPassword && !config.password) {
+        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '文件密码已过期或未提供，请在再次处理时重新输入密码。', result: { errorCode: 'PDF_PASSWORD_REQUIRED' } });
+    }
 
     try {
         if (await isCancelled(jobId)) return await getJobRow(jobId);
@@ -643,43 +823,69 @@ async function processJob(jobId) {
         } else {
             outcome = { status: JOB_STATUSES.NEEDS_REVIEW, progress: 100, result: { message: '该文件类型暂不支持自动文本抽取。' } };
         }
-        if (await isCancelled(jobId)) return await getJobRow(jobId);
+        if (await isCancelled(jobId)) {
+            await cleanupJobArtifacts(jobId);
+            return await getJobRow(jobId);
+        }
         return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '' });
     } catch (error) {
-        if (await isCancelled(jobId)) return await getJobRow(jobId);
+        if (await isCancelled(jobId)) {
+            await cleanupJobArtifacts(jobId);
+            return await getJobRow(jobId);
+        }
         const message = sanitizeErrorMessage(error);
         return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() } });
+    } finally {
+        await removeJobSecrets({ userId: job.user_id, jobId: job.id }).catch(() => {});
     }
 }
 
-async function retryJob({ userId, jobId }) {
+async function retryJob({ userId, jobId, sourceModule = '', password = '' }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
+    if (sourceModule && job.source_module !== sourceModule) return null;
     const retryableStatuses = [
         JOB_STATUSES.FAILED,
         JOB_STATUSES.NEEDS_REVIEW,
-        JOB_STATUSES.CANCELLED,
-        JOB_STATUSES.SUCCEEDED
+        JOB_STATUSES.CANCELLED
     ];
     if (!retryableStatuses.includes(job.status)) {
-        const error = new Error('只有失败、待复核、已取消或已完成任务可以重试。');
+        const error = new Error('只有失败、待复核或已取消任务可以重试；已完成任务请使用再次处理，以保留原结果。');
         error.status = 409;
         throw error;
     }
-    await cleanupJobArtifacts(job.id);
+    if (String(password || '').trim()) await storeJobPassword({ userId, jobId: job.id, password });
     await execute(`
         UPDATE document_jobs
-        SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, updated_at = ?
+        SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, attempt_token = ?, updated_at = ?
         WHERE id = ? AND user_id = ?
-    `, [JOB_STATUSES.QUEUED, getBeijingTimestamp(), job.id, userId]);
+    `, [JOB_STATUSES.QUEUED, crypto.randomUUID(), getBeijingTimestamp(), job.id, userId]);
     enqueueJob(job.id);
     return await getJobDetail({ userId, jobId: job.id });
 }
 
-async function cancelJob({ userId, jobId }) {
+async function reprocessJob({ userId, jobId, sourceModule = '', password = '' }) {
+    const job = await getJobRow(jobId, userId);
+    if (!job || (sourceModule && job.source_module !== sourceModule)) return null;
+    const config = parseJson(job.config_json, {});
+    const successor = await createJobRecord({
+        userId,
+        fileId: job.file_id,
+        jobType: job.job_type,
+        sourceModule: job.source_module,
+        config,
+        parentJobId: job.id
+    });
+    if (String(password || '').trim()) await storeJobPassword({ userId, jobId: successor.id, password });
+    enqueueJob(successor.id);
+    return await getJobDetail({ userId, jobId: successor.id });
+}
+
+async function cancelJob({ userId, jobId, sourceModule = '' }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
-    if ([JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
+    if (sourceModule && job.source_module !== sourceModule) return null;
+    if ([JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
         return await getJobDetail({ userId, jobId: job.id });
     }
     removeQueuedJob(job.id);
@@ -691,12 +897,26 @@ async function deleteJob({ userId, jobId, sourceModule = '' }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if (sourceModule && job.source_module !== sourceModule) return null;
+    const reference = await queryOne(`
+        SELECT COUNT(*) AS count
+        FROM document_artifact_refs r
+        JOIN document_outputs o ON o.id = r.output_id
+        WHERE o.job_id = ? AND r.user_id = ?
+    `, [job.id, userId]);
+    if (Number(reference?.count || 0) > 0) {
+        const error = new Error('该任务的输出已被业务模块引用，不能直接删除。请先在目标模块解除引用。');
+        error.status = 409;
+        error.code = 'ARTIFACT_REFERENCED';
+        throw error;
+    }
     const deleted = serializeJob(job);
     removeQueuedJob(job.id);
-    if (![JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
+    if (![JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(job.status)) {
         await setJobStatus(job.id, JOB_STATUSES.CANCELLED, { progress: job.progress || 0, result: { message: '任务已删除。' } });
     }
     await cleanupJobArtifacts(job.id);
+    await removeJobSecrets({ userId, jobId: job.id }).catch(() => {});
+    await execute('DELETE FROM document_artifact_refs WHERE output_id IN (SELECT id FROM document_outputs WHERE job_id = ?)', [job.id]);
     await cleanupJobSourceFiles(job, userId);
     await execute('DELETE FROM document_jobs WHERE id = ? AND user_id = ?', [job.id, userId]);
     return deleted;
@@ -735,161 +955,6 @@ async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'rev
     return await getJobDetail({ userId, jobId: page.job_id });
 }
 
-function sanitizeShareFileName(value) {
-    const base = path.basename(String(value || 'ocr-result'), path.extname(String(value || ''))).trim() || 'ocr-result';
-    return base.replace(/[\\/:*?"<>|\0\r\n\t]/g, ' ').replace(/\s+/g, ' ').slice(0, 80) || 'ocr-result';
-}
-
-function buildJobShareText(detail) {
-    const pages = Array.isArray(detail?.pages) ? detail.pages : [];
-    const chunks = pages.map((page, index) => {
-        const text = String(page.text || '').trim();
-        if (!text) return '';
-        const pageNumber = Number(page.pageNumber || page.page_number || index + 1);
-        const confidence = page.confidence === null || page.confidence === undefined
-            ? '-'
-            : String(Math.round(Number(page.confidence || 0) * 100)) + '%';
-        return ['[\u7b2c ' + pageNumber + ' \u9875 | \u7f6e\u4fe1\u5ea6 ' + confidence + ']', text].join('\n');
-    }).filter(Boolean);
-    return chunks.join('\n\n').trim();
-}
-
-async function createTempTextUpload({ userId, originalName, text }) {
-    const safeName = sanitizeShareFileName(originalName) + '-ocr.txt';
-    const diskName = Date.now() + '-' + crypto.randomUUID() + '.txt';
-    const targetPath = await buildManagedPath(tempRoot, userId, diskName);
-    await fs.promises.writeFile(targetPath, String(text || ''), 'utf8');
-    const stat = await fs.promises.stat(targetPath);
-    return {
-        path: targetPath,
-        originalname: safeName,
-        mimetype: 'text/plain',
-        size: stat.size
-    };
-}
-
-async function shareJobResult({ user, jobId, target, options = {} }) {
-    const userId = user?.id;
-    const detail = await getJobDetail({ userId, jobId });
-    if (!detail) return null;
-    const text = buildJobShareText(detail);
-    if (!text) {
-        const error = new Error('\u6682\u65e0\u53ef\u5206\u53d1\u7684 OCR \u6587\u672c\u3002');
-        error.status = 400;
-        throw error;
-    }
-    const normalizedTarget = String(target || '').trim().toLowerCase().replace(/_/g, '-');
-    const originalName = detail.file?.originalName || ('ocr-job-' + detail.job.id);
-    if (normalizedTarget === 'knowledge' || normalizedTarget === 'knowledge-base' || normalizedTarget === 'rag') {
-        const upload = await createTempTextUpload({ userId, originalName, text });
-        const tags = Array.isArray(options.tags) ? options.tags : String(options.tags || 'ocr').split(/[;,\s]+/);
-        const created = await createKnowledgeDocumentFromUpload({
-            userId,
-            file: upload,
-            collectionId: options.collectionId,
-            tags: tags.filter(Boolean)
-        });
-        const scheduled = await scheduleKnowledgeDocumentIndexing({ docId: created.docId, userId, user });
-        return {
-            target: 'knowledge',
-            documentId: created.docId,
-            collectionId: created.collectionId || null,
-            scheduled: Boolean(scheduled.started),
-            textLength: text.length
-        };
-    }
-    if (normalizedTarget === 'regulations' || normalizedTarget === 'regulation') {
-        const upload = await createTempTextUpload({ userId, originalName, text });
-        const title = String(options.title || sanitizeShareFileName(originalName) + ' OCR').slice(0, 120);
-        const created = await createRegulationDocumentFromUpload({
-            userId,
-            file: upload,
-            metadata: {
-                title,
-                category: options.category || 'OCR',
-                jurisdiction: options.jurisdiction || '',
-                summary: options.summary || ('\u6765\u81ea\u6587\u5b57\u8bc6\u522b\u4efb\u52a1 ' + detail.job.id)
-            },
-            preloadedText: text
-        });
-        return {
-            target: 'regulations',
-            documentId: created.document?.id || null,
-            versionId: created.version?.id || null,
-            articleCount: Array.isArray(created.articles) ? created.articles.length : 0,
-            textLength: text.length
-        };
-    }
-    return {
-        target: normalizedTarget || 'text',
-        textLength: text.length
-    };
-}
-
-async function createJobExport({ userId, jobId, format = OUTPUT_TYPES.TEXT }) {
-    const job = await getJobRow(jobId, userId);
-    if (!job) return null;
-    const file = await getDocumentFileForUser(job.file_id, userId);
-    const pages = await getPages(job.id);
-    const blocks = await getBlocks(job.id);
-    const normalizedFormat = Object.values(OUTPUT_TYPES).includes(format) ? format : OUTPUT_TYPES.TEXT;
-    if (normalizedFormat === OUTPUT_TYPES.SEARCHABLE_PDF) {
-        return await createSearchablePdfOutput({ userId, file, job, pages, blocks });
-    }
-    const outputs = await createTextOutputs({ userId, file, job, pages, blocks, formats: [normalizedFormat] });
-    return outputs[0] || null;
-}
-
-function rowsToCountObject(rows, key = 'status') {
-    return rows.reduce((acc, row) => {
-        acc[row[key] || 'unknown'] = Number(row.count || 0);
-        return acc;
-    }, {});
-}
-
-async function getDocumentProcessingStats() {
-    const jobsByStatusRows = await query('SELECT status, COUNT(*) AS count FROM document_jobs GROUP BY status');
-    const jobsByTypeRows = await query('SELECT job_type, COUNT(*) AS count FROM document_jobs GROUP BY job_type');
-    const jobsByStatus = rowsToCountObject(jobsByStatusRows, 'status');
-    const jobsByType = rowsToCountObject(jobsByTypeRows, 'job_type');
-    const outputs = await queryOne('SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes FROM document_outputs');
-    const durationSql = `
-        SELECT AVG(EXTRACT(EPOCH FROM (completed_at::timestamptz - created_at::timestamptz))) AS seconds
-        FROM document_jobs
-        WHERE completed_at IS NOT NULL
-    `;
-    const duration = await queryOne(durationSql);
-    const failuresSql = `
-        SELECT j.id, j.job_type, j.status, j.error_message, j.updated_at, f.original_name
-        FROM document_jobs j
-        LEFT JOIN document_files f ON f.id = j.file_id
-        WHERE j.status = ?
-        ORDER BY j.updated_at DESC, j.id DESC
-        LIMIT 10
-    `;
-    const recentFailuresRows = await query(failuresSql, [JOB_STATUSES.FAILED]);
-    const recentFailures = recentFailuresRows.map(row => ({
-        id: row.id,
-        jobType: row.job_type,
-        status: row.status,
-        errorMessage: row.error_message || '',
-        updatedAt: row.updated_at,
-        originalName: row.original_name || ''
-    }));
-    return {
-        settings: getDocumentProcessingSettings(),
-        queue: getQueueStatus(),
-        jobsByStatus,
-        jobsByType,
-        outputs: {
-            count: Number(outputs?.count || 0),
-            bytes: Number(outputs?.bytes || 0)
-        },
-        averageDurationSeconds: Number(duration?.seconds || 0),
-        recentFailures
-    };
-}
-
 function getQueueStatus() {
     return {
         running: runningCount,
@@ -899,16 +964,21 @@ function getQueueStatus() {
     };
 }
 
+const distribution = createDocumentDistributionService({ getJobDetail });
+const monitoring = createDocumentProcessingMonitoring({ getQueueStatus });
+const exportActions = createDocumentExportActions({ getJobRow, getPages, getBlocks });
+
 module.exports = {
     cancelJob,
-    createJobExport,
-    shareJobResult,
+    createJobExport: exportActions.createJobExport,
+    dispatchPdfJobResult: distribution.dispatchPdfJobResult,
+    shareJobResult: distribution.shareJobResult,
     createJobFromUpload,
     createPdfToolJobFromUploads,
     deleteJob,
     enqueueJob,
     getDocumentProcessingSettings,
-    getDocumentProcessingStats,
+    getDocumentProcessingStats: monitoring.getDocumentProcessingStats,
     getJobDetail,
     getJobOutputsArchive,
     getOutputDownload,
@@ -918,6 +988,7 @@ module.exports = {
     processJob,
     recoverDocumentProcessingJobs,
     retryJob,
+    reprocessJob,
     updateDocumentProcessingSettings,
     savePageReview,
     serializeJob

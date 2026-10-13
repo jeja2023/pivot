@@ -19,9 +19,16 @@ const {
     getJobDetail,
     getJobOutputsArchive,
     getOutputDownload,
+    reprocessJob,
+    retryJob,
     savePageReview,
     updateDocumentProcessingSettings
 } = require('../server/services/document-processing');
+const {
+    getPdfToolCapabilities,
+    parsePageOrder,
+    parsePageSelection
+} = require('../server/services/document-processing/pdf');
 const { documentRoot, resolveStoredDocumentPath } = require('../server/services/document-processing/paths');
 const { PDFDocument } = require('pdf-lib');
 const nodeHttp = require('http');
@@ -513,6 +520,179 @@ test('PDF tools merge multiple PDFs into one output', async () => {
         assert.ok(download.filePath.startsWith(documentRoot));
         const merged = await PDFDocument.load(fs.readFileSync(download.filePath));
         assert.equal(merged.getPageCount(), 2);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('PDF 页面范围与重排必须严格匹配真实页数', () => {
+    assert.deepEqual(parsePageSelection('1-3,5', 6, { limit: 6 }), [0, 1, 2, 4]);
+    assert.throws(() => parsePageSelection('99', 6, { limit: 6 }), /超出文件/);
+    assert.throws(() => parsePageSelection('3-1', 6, { limit: 6 }), /起始页不能大于结束页/);
+    assert.deepEqual(parsePageOrder('3,1,2', 3, { limit: 3 }), [2, 0, 1]);
+    assert.throws(() => parsePageOrder('3,1', 3, { limit: 3 }), /必须包含全部/);
+    assert.throws(() => parsePageOrder('2junk,2,1', 3, { limit: 3 }), /不是有效页码/);
+});
+
+test('PDF 工具不在公开任务配置中保留密码，并公开能力契约', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_secret_${suffix}`, 'hash', 'PDF Secret Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-secret-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    await createSamplePdf(sourcePath, ['Secret test']);
+    try {
+        const initial = await createPdfToolJobFromUploads({
+            user: { id: userId, username: `pdf_secret_${suffix}` },
+            files: [{ path: sourcePath, originalname: 'secret-source.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+            operation: 'split',
+            config: { operation: 'split', pages: '1', password: 'synthetic-password-only-for-test' }
+        });
+        assert.equal(Object.prototype.hasOwnProperty.call(initial.job.config, 'password'), false);
+        assert.equal(initial.job.config.requiresPassword, true);
+        const stored = db.prepare('SELECT config_json FROM document_jobs WHERE id = ?').get(initial.job.id);
+        assert.equal(String(stored.config_json).includes('synthetic-password-only-for-test'), false);
+        const capabilities = getPdfToolCapabilities();
+        assert.ok(capabilities.operations.some(item => item.id === 'watermark'));
+        assert.equal(capabilities.engines.structuralPdf.encryptedInput, false);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM document_job_secrets WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('PDF 转图片会严格使用请求页码并保留原页号', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_pages_${suffix}`, 'hash', 'PDF Pages Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-pages-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    await createSamplePdf(sourcePath, ['Page 1', 'Page 2', 'Page 3', 'Page 4', 'Page 5', 'Page 6']);
+    try {
+        const initial = await createPdfToolJobFromUploads({
+            user: { id: userId, username: `pdf_pages_${suffix}` },
+            files: [{ path: sourcePath, originalname: 'six-pages.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+            operation: 'pdf_to_images',
+            config: { operation: 'pdf_to_images', pages: '5-6', maxToolPages: 6, dpi: 96 }
+        });
+        const detail = await waitForDocumentJob(userId, initial.job.id, 30000);
+        assert.equal(detail.job.status, 'succeeded', detail.job.errorMessage);
+        const names = detail.outputs.map(output => output.fileName).sort();
+        assert.deepEqual(names, ['six-pages-第5页.png', 'six-pages-第6页.png']);
+        assert.equal(detail.job.result.requestedPages, 2);
+        assert.equal(detail.job.result.processedPages, 2);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('已完成 PDF 任务再次处理会创建新版本且保留原输出', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_reprocess_${suffix}`, 'hash', 'PDF Reprocess Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-reprocess-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    await createSamplePdf(sourcePath, ['Reprocess page']);
+    try {
+        const initial = await createPdfToolJobFromUploads({
+            user: { id: userId, username: `pdf_reprocess_${suffix}` },
+            files: [{ path: sourcePath, originalname: 'reprocess.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+            operation: 'split',
+            config: { operation: 'split', pages: '1' }
+        });
+        const original = await waitForDocumentJob(userId, initial.job.id);
+        assert.equal(original.job.status, 'succeeded');
+        const originalOutput = original.outputs[0];
+        const next = await reprocessJob({ userId, jobId: original.job.id, sourceModule: 'pdf_tools' });
+        assert.ok(next.job.id !== original.job.id);
+        assert.equal(next.job.parentJobId, original.job.id);
+        const oldDownload = await getOutputDownload({ userId, outputId: originalOutput.id, sourceModule: 'pdf_tools' });
+        assert.ok(oldDownload?.filePath);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('PDF 批量操作逐文件产出结果，水印与页码使用中文字体输出', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_batch_${suffix}`, 'hash', 'PDF Batch Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-batch-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const firstPath = path.join(tempDir, `first-${suffix}.pdf`);
+    const secondPath = path.join(tempDir, `second-${suffix}.pdf`);
+    await createSamplePdf(firstPath, ['Batch 1']);
+    await createSamplePdf(secondPath, ['Batch 2']);
+    try {
+        const batch = await createPdfToolJobFromUploads({
+            user: { id: userId, username: `pdf_batch_${suffix}` },
+            files: [
+                { path: firstPath, originalname: 'first.pdf', mimetype: 'application/pdf', size: fs.statSync(firstPath).size },
+                { path: secondPath, originalname: 'second.pdf', mimetype: 'application/pdf', size: fs.statSync(secondPath).size }
+            ],
+            operation: 'watermark',
+            config: { operation: 'watermark', mode: 'batch', pages: '1', watermarkText: '内部资料', maxToolPages: 2 }
+        });
+        const detail = await waitForDocumentJob(userId, batch.job.id, 30000);
+        assert.equal(detail.job.status, 'succeeded', detail.job.errorMessage);
+        assert.equal(detail.job.result.processedFiles, 2);
+        assert.equal(detail.outputs.filter(output => output.outputType === 'watermarked_pdf').length, 2);
+        assert.equal(detail.job.result.items.filter(item => item.status === 'succeeded').length, 2);
+        assert.equal(detail.items.length, 2);
+        assert.equal(detail.items.every(item => item.status === 'succeeded'), true);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('错误模块范围不会重试或修改另一应用的任务', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`pdf_scope_${suffix}`, 'hash', 'PDF Scope Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'pdf-scope-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    await createSamplePdf(sourcePath, ['Scope']);
+    try {
+        const job = await createJobFromUpload({
+            user: { id: userId, username: `pdf_scope_${suffix}` },
+            file: { path: sourcePath, originalname: 'scope.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
+            jobType: 'auto',
+            sourceModule: 'ocr_app'
+        });
+        const before = await getJobDetail({ userId, jobId: job.job.id });
+        const rejected = await retryJob({ userId, jobId: job.job.id, sourceModule: 'pdf_tools' });
+        const after = await getJobDetail({ userId, jobId: job.job.id });
+        assert.equal(rejected, null);
+        assert.equal(after.job.status, before.job.status);
     } finally {
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);

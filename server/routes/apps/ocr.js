@@ -96,14 +96,14 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     }));
 
     router.post('/jobs/:id/retry', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id });
-        if (!detail || detail.job.sourceModule !== 'ocr_app') return res.status(404).json({ error: '文字识别任务不存在' });
+        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'ocr_app', password: req.body?.password });
+        if (!detail) return res.status(404).json({ error: '文字识别任务不存在' });
         return res.json({ success: true, ...detail });
     }));
 
     router.post('/jobs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await cancelJob({ userId: req.user.id, jobId: req.params.id });
-        if (!detail || detail.job.sourceModule !== 'ocr_app') return res.status(404).json({ error: '文字识别任务不存在' });
+        const detail = await cancelJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'ocr_app' });
+        if (!detail) return res.status(404).json({ error: '文字识别任务不存在' });
         return res.json({ success: true, ...detail });
     }));
 

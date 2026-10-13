@@ -23,7 +23,9 @@ async function writePageBuffer({ userId, jobId, pageNumber, buffer }) {
         pageNumber,
         imagePath: toProjectRelativePath(targetPath),
         width,
-        height
+        height,
+        pixelWidth: width,
+        pixelHeight: height
     };
 }
 

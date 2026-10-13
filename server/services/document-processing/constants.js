@@ -3,6 +3,7 @@ const JOB_STATUSES = Object.freeze({
     PROCESSING: 'processing',
     SUCCEEDED: 'succeeded',
     FAILED: 'failed',
+    PARTIAL_SUCCESS: 'partial_success',
     NEEDS_REVIEW: 'needs_review',
     CANCELLED: 'cancelled'
 });

@@ -3,6 +3,7 @@ const jobs = require('./jobs');
 const ocr = require('./ocr');
 const pdf = require('./pdf');
 const settings = require('./settings');
+const secrets = require('./secrets');
 const textExtraction = require('./text-extraction');
 
 module.exports = {
@@ -11,5 +12,6 @@ module.exports = {
     ...ocr,
     ...pdf,
     ...settings,
+    ...secrets,
     ...textExtraction
 };

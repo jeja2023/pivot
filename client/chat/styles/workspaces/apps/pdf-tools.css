@@ -1,45 +1,118 @@
-.pdf-tools-layout .doc-tool-sidebar {
-    overflow: auto;
-}
-
+.pdf-tools-layout .doc-tool-sidebar,
 .pdf-detail {
     overflow: auto;
 }
 
+.pdf-capability-summary,
+.pdf-tool-hint {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.45;
+}
+
+.pdf-tool-hint {
+    display: block;
+    margin-top: 4px;
+}
+
+.pdf-tool-checkbox {
+    align-items: center;
+    flex-direction: row;
+    gap: 7px;
+    justify-content: flex-start;
+    padding-top: 22px;
+}
+
+.pdf-tool-checkbox input {
+    flex: 0 0 auto;
+}
+
+.pdf-tools-view [data-pdf-option].hidden {
+    display: none;
+}
+
+.pdf-detail-section {
+    margin-top: 16px;
+}
+
+.pdf-detail-section h4 {
+    margin: 0 0 8px;
+    color: var(--text-main);
+    font-size: 0.94rem;
+}
+
+.pdf-detail-section p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.pdf-detail-list {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0 0;
+    padding-left: 20px;
+}
+
+.pdf-detail-list li {
+    color: var(--text-main);
+    line-height: 1.5;
+}
+
 .pdf-output-list {
     align-content: flex-start;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     padding: 10px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 8px;
-    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface);
+}
+
+.pdf-output-list .doc-tool-output-btn {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pdf-output-item {
+    display: grid;
+    min-width: min(100%, 260px);
+    gap: 7px;
+}
+
+.pdf-output-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .pdf-result-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
     gap: 8px;
+    margin-top: 12px;
 }
 
 .pdf-result-grid div {
-    min-height: 58px;
     display: flex;
+    min-height: 56px;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
     padding: 9px 11px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
-    border-radius: 8px;
-    background: rgba(248, 250, 252, 0.76);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--surface);
 }
 
 .pdf-result-grid span {
     color: var(--text-muted);
     font-size: 0.72rem;
-    font-weight: 800;
+    font-weight: 700;
 }
 
 .pdf-result-grid strong {
-    min-width: 0;
     overflow: hidden;
     color: var(--text-main);
     font-size: 0.92rem;
@@ -47,12 +120,74 @@
     white-space: nowrap;
 }
 
-.pdf-tools-view [data-pdf-option].hidden {
-    display: none;
+.pdf-page-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 10px;
+}
+
+.pdf-page-card {
+    display: grid;
+    min-width: 0;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    color: var(--text-main);
+    background: var(--surface);
+    text-align: left;
+}
+
+.pdf-page-card:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.pdf-page-card img {
+    width: 100%;
+    min-height: 104px;
+    max-height: 176px;
+    object-fit: contain;
+    border: 1px solid var(--border);
+    background: var(--surface-hover, var(--surface));
+}
+
+.pdf-page-card span {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pdf-page-preview-dialog {
+    width: min(960px, calc(100vw - 32px));
+}
+
+.pdf-page-preview-body {
+    display: grid;
+    min-height: 240px;
+    place-items: center;
+    padding: 16px;
+}
+
+.pdf-page-preview-body img {
+    display: block;
+    max-width: 100%;
+    max-height: min(72vh, 920px);
+    object-fit: contain;
+    border: 1px solid var(--border);
+    background: var(--surface);
 }
 
 @media (max-width: 760px) {
-    .pdf-result-grid {
+    .pdf-result-grid,
+    .pdf-page-grid {
         grid-template-columns: 1fr;
+    }
+
+    .pdf-output-list {
+        align-items: stretch;
+        flex-direction: column;
     }
 }

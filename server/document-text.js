@@ -356,9 +356,12 @@ async function renderPdfPages(filePath, options = {}) {
         ...(options.password ? { password: options.password } : {})
     });
     try {
+        const first = Math.max(Number.parseInt(options.first, 10) || 1, 1);
+        const requestedMaxPages = Math.max(Number.parseInt(options.maxPages, 10) || 3, 1);
+        const last = Number.parseInt(options.last, 10) || (first + requestedMaxPages - 1);
         const result = await parser.getScreenshot({
-            first: options.first || 1,
-            last: options.last || Math.min(options.maxPages || 3, 3),
+            first,
+            last,
             desiredWidth: options.desiredWidth || 1400,
             imageBuffer: true,
             imageDataUrl: false

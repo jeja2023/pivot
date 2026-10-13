@@ -85,7 +85,14 @@ function normalizeConfig(config = {}) {
     const requestedOcrPages = Number.parseInt(safe.maxOcrPages, 10);
     const requestedConfidence = Number.parseFloat(safe.confidenceThreshold);
     const requestedTimeoutMs = Number.parseInt(safe.timeoutMs, 10);
+    const pageSize = ['original', 'a4', 'a3', 'letter'].includes(String(safe.pageSize || '').toLowerCase())
+        ? String(safe.pageSize).toLowerCase()
+        : 'original';
+    const validPositions = new Set(['top-left', 'top-center', 'top-right', 'center', 'bottom-left', 'bottom-center', 'bottom-right']);
+    const watermarkPosition = validPositions.has(String(safe.watermarkPosition || '').toLowerCase()) ? String(safe.watermarkPosition).toLowerCase() : 'center';
+    const pageNumberPosition = validPositions.has(String(safe.pageNumberPosition || '').toLowerCase()) ? String(safe.pageNumberPosition).toLowerCase() : 'bottom-center';
     return {
+        configVersion: 2,
         language: String(safe.language || safe.lang || 'ch').slice(0, 24),
         engine: normalizeEngine(safe.engine || defaults.engine || 'http'),
         dpi: Math.min(Math.max(Number.parseInt(safe.dpi, 10) || 220, 72), 600),
@@ -93,17 +100,49 @@ function normalizeConfig(config = {}) {
         maxOcrPages: Math.min(Math.max(Number.isFinite(requestedOcrPages) ? requestedOcrPages : defaults.maxOcrPages, 1), defaults.maxOcrPages),
         confidenceThreshold: Math.min(Math.max(Number.isFinite(requestedConfidence) ? requestedConfidence : defaults.confidenceThreshold, 0), 1),
         timeoutMs: Math.min(Math.max(Number.isFinite(requestedTimeoutMs) ? requestedTimeoutMs : defaults.ocrTimeoutMs, 5000), 600000),
-        password: String(safe.password || '').slice(0, 200),
         operation: String(safe.operation || safe.pdfOperation || '').slice(0, 40),
+        mode: String(safe.mode || '').toLowerCase() === 'batch' ? 'batch' : 'single',
+        requiresPassword: Boolean(String(safe.password || '').trim() || safe.requiresPassword),
         pages: String(safe.pages || safe.pageRanges || '').slice(0, 500),
         pageRanges: String(safe.pageRanges || safe.pages || '').slice(0, 500),
         pageOrder: String(safe.pageOrder || '').slice(0, 500),
         rotateDegrees: Number.parseInt(safe.rotateDegrees, 10) || 90,
         maxToolPages: Math.min(Math.max(Number.parseInt(safe.maxToolPages, 10) || 100, 1), 300),
+        watermarkText: String(safe.watermarkText || '').slice(0, 120),
+        watermarkPosition,
+        watermarkFontSize: Math.min(Math.max(Number(safe.watermarkFontSize || 36), 8), 144),
+        watermarkOpacity: Math.min(Math.max(Number(safe.watermarkOpacity ?? 0.18), 0.05), 0.8),
+        watermarkRotate: Math.min(Math.max(Number(safe.watermarkRotate ?? -45), -180), 180),
+        watermarkMargin: Math.min(Math.max(Number(safe.watermarkMargin || 36), 0), 300),
+        pageNumberPosition,
+        pageNumberStart: Math.max(Number.parseInt(safe.pageNumberStart, 10) || 1, 1),
+        pageNumberPrefix: String(safe.pageNumberPrefix || '').slice(0, 40),
+        pageNumberSuffix: String(safe.pageNumberSuffix || '').slice(0, 40),
+        pageNumberFontSize: Math.min(Math.max(Number(safe.pageNumberFontSize || 10), 6), 36),
+        pageNumberMargin: Math.min(Math.max(Number(safe.pageNumberMargin || 28), 0), 300),
+        skipCover: safe.skipCover === true || String(safe.skipCover || '').toLowerCase() === 'true',
+        cropLeft: Math.min(Math.max(Number(safe.cropLeft || 0), 0), 10000),
+        cropRight: Math.min(Math.max(Number(safe.cropRight || 0), 0), 10000),
+        cropTop: Math.min(Math.max(Number(safe.cropTop || 0), 0), 10000),
+        cropBottom: Math.min(Math.max(Number(safe.cropBottom || 0), 0), 10000),
+        blankPageAfter: Math.min(Math.max(Number.parseInt(safe.blankPageAfter, 10) || 0, 0), 300),
+        blankPageCount: Math.min(Math.max(Number.parseInt(safe.blankPageCount, 10) || 1, 1), 20),
+        pageSize,
+        imageFit: String(safe.imageFit || '').toLowerCase() === 'cover' ? 'cover' : 'contain',
+        imageDpi: Math.min(Math.max(Number.parseInt(safe.imageDpi, 10) || 220, 72), 600),
+        pageMargin: Math.min(Math.max(Number(safe.pageMargin || 24), 0), 200),
         sourceFileIds: Array.isArray(safe.sourceFileIds)
             ? safe.sourceFileIds.map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 50)
             : []
     };
+}
+
+function publicConfig(config) {
+    const safe = config && typeof config === 'object' ? { ...config } : {};
+    delete safe.password;
+    delete safe.secretRef;
+    delete safe.secret_ref;
+    return safe;
 }
 
 function serializeJob(row) {
@@ -116,11 +155,14 @@ function serializeJob(row) {
         status: row.status,
         progress: Number(row.progress || 0),
         errorMessage: row.error_message || '',
-        config: parseJson(row.config_json, {}),
+        config: publicConfig(parseJson(row.config_json, {})),
         result: parseJson(row.result_json, {}),
         attempts: Number(row.attempts || 0),
         maxAttempts: Number(row.max_attempts || 0),
         sourceModule: row.source_module || '',
+        stage: row.stage || '',
+        configVersion: Number(row.config_version || 1),
+        parentJobId: row.parent_job_id || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         completedAt: row.completed_at || ''
@@ -140,6 +182,11 @@ function serializePage(row) {
         textLength: Number(row.text_length || 0),
         ocrStatus: row.ocr_status || '',
         confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+        pixelWidth: Number(row.pixel_width || row.width || 0),
+        pixelHeight: Number(row.pixel_height || row.height || 0),
+        pdfWidth: Number(row.pdf_width || 0),
+        pdfHeight: Number(row.pdf_height || 0),
+        rotation: Number(row.rotation || 0),
         updatedAt: row.updated_at
     };
 }
@@ -163,6 +210,7 @@ module.exports = {
     getDocumentProcessingSettings,
     getMaxConcurrentJobs,
     normalizeConfig,
+    publicConfig,
     safeJson,
     sanitizeErrorMessage,
     serializeBlock,

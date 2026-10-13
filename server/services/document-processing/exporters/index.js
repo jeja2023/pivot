@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const { queryOne } = require('../../../db/client');
 const { getBeijingTimestamp } = require('../../../time');
+const { getAppSettingValue } = require('../../app-settings');
 const { OUTPUT_TYPES } = require('../constants');
 const { buildManagedPath, outputsRoot, resolveStoredDocumentPath, toProjectRelativePath } = require('../paths');
 
@@ -48,16 +50,32 @@ function serializeOutput(row) {
         mimeType: row.mime_type,
         fileSize: Number(row.file_size || 0),
         status: row.status,
+        pageCount: Number(row.page_count || 0),
+        sha256: row.sha256 || '',
+        quality: safeParseJson(row.quality_json, {}),
+        versionKey: row.version_key || '',
+        expiresAt: row.expires_at || '',
         createdAt: row.created_at
     };
 }
 
-async function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName, mimeType, status = 'ready' }) {
+async function sha256Output(filePath) {
+    const digest = require('crypto').createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    for await (const chunk of stream) digest.update(chunk);
+    return digest.digest('hex');
+}
+
+async function registerOutput({ userId, fileId, jobId, outputType, filePath, fileName, mimeType, status = 'ready', pageCount = 0, quality = {}, expiresAt = null, versionKey = '' }) {
     const stat = await fs.promises.stat(filePath).catch(() => ({ size: 0 }));
+    const sha256 = stat.size ? await sha256Output(filePath) : '';
+    const configuredRetention = Number.parseInt(getAppSettingValue('document_processing_output_retention_days'), 10);
+    const retentionDays = Math.min(Math.max(configuredRetention || Number.parseInt(process.env.DOCUMENT_PROCESSING_OUTPUT_RETENTION_DAYS || '30', 10) || 30, 1), 365);
+    const expiry = expiresAt || new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000).toISOString();
     return await queryOne(`
         INSERT INTO document_outputs (
-            user_id, file_id, job_id, output_type, file_path, file_name, mime_type, file_size, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, file_id, job_id, output_type, file_path, file_name, mime_type, file_size, status, page_count, sha256, quality_json, version_key, expires_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
     `, [
         userId,
@@ -69,6 +87,11 @@ async function registerOutput({ userId, fileId, jobId, outputType, filePath, fil
         mimeType,
         stat.size,
         status,
+        Number(pageCount || 0),
+        sha256,
+        JSON.stringify(quality && typeof quality === 'object' ? quality : {}),
+        String(versionKey || `${jobId}-${crypto.randomUUID()}`).slice(0, 120),
+        expiry,
         getBeijingTimestamp()
     ]);
 }

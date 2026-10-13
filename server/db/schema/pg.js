@@ -10,7 +10,7 @@ const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
-const PG_SCHEMA_VERSION = '20261012.5';
+const PG_SCHEMA_VERSION = '20261013.1';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
 // 这类索引依赖“已部署旧库尚未拥有”的迁移字段。初始化快照会先于版本迁移运行，
 // 因而在旧库上应安静地延后到对应迁移创建；其他未知字段缺失仍须保留告警。

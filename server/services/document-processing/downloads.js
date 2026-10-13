@@ -38,9 +38,19 @@ async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
     const entries = [];
     for (const output of outputs) {
         const filePath = resolveStoredDocumentPath(output.file_path);
-        if (!filePath) continue;
+        if (!filePath) {
+            const error = new Error(`输出文件“${output.file_name || output.id}”路径无效，无法生成完整归档。`);
+            error.status = 409;
+            error.code = 'OUTPUT_INCOMPLETE';
+            throw error;
+        }
         let stat;
-        try { stat = await fs.promises.stat(filePath); } catch (_) { continue; }
+        try { stat = await fs.promises.stat(filePath); } catch (_) {
+            const error = new Error(`输出文件“${output.file_name || output.id}”不存在或已被清理，无法生成完整归档。`);
+            error.status = 409;
+            error.code = 'OUTPUT_INCOMPLETE';
+            throw error;
+        }
         totalBytes += stat.size;
         if (totalBytes > MAX_OUTPUT_ARCHIVE_BYTES) {
             const error = new Error(`输出归档超过 ${Math.round(MAX_OUTPUT_ARCHIVE_BYTES / 1024 / 1024)}MB 限制，请分批下载。`);
@@ -53,23 +63,42 @@ async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
             data: await fs.promises.readFile(filePath)
         });
     }
-    if (!entries.length) return null;
+    if (!entries.length || entries.length !== outputs.length) {
+        const error = new Error('输出归档不完整，请先重新处理缺失的文件。');
+        error.status = 409;
+        error.code = 'OUTPUT_INCOMPLETE';
+        throw error;
+    }
     const file = await queryOne('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?', [job.file_id, userId]);
     const originalName = String(file?.original_name || `pdf-job-${job.id}`);
     const base = sanitizeArchiveFileName(path.basename(originalName, path.extname(originalName)), `pdf-job-${job.id}`);
     return { buffer: createZip(entries), fileName: `${base}-全部输出.zip`, mimeType: 'application/zip', count: entries.length };
 }
 
-async function getOutputDownload({ userId, outputId }) {
-    const output = await queryOne('SELECT * FROM document_outputs WHERE id = ? AND user_id = ? AND status = ?', [Number.parseInt(outputId, 10), userId, 'ready']);
+async function getOutputDownload({ userId, outputId, sourceModule = '' }) {
+    const output = await queryOne(`
+        SELECT o.*
+        FROM document_outputs o
+        JOIN document_jobs j ON j.id = o.job_id AND j.user_id = o.user_id
+        WHERE o.id = ? AND o.user_id = ? AND o.status = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
+    `, sourceModule
+        ? [Number.parseInt(outputId, 10), userId, 'ready', sourceModule]
+        : [Number.parseInt(outputId, 10), userId, 'ready']);
     if (!output) return null;
     const filePath = resolveStoredDocumentPath(output.file_path);
     if (!filePath || !await fs.promises.access(filePath, fs.constants.R_OK).then(() => true).catch(() => false)) return null;
     return { filePath, fileName: output.file_name || `document-output-${output.id}`, mimeType: output.mime_type || 'application/octet-stream' };
 }
 
-async function getPageImage({ userId, pageId }) {
-    const page = await queryOne('SELECT * FROM document_pages WHERE id = ? AND user_id = ?', [Number.parseInt(pageId, 10), userId]);
+async function getPageImage({ userId, pageId, sourceModule = '' }) {
+    const page = await queryOne(`
+        SELECT p.*
+        FROM document_pages p
+        JOIN document_jobs j ON j.id = p.job_id AND j.user_id = p.user_id
+        WHERE p.id = ? AND p.user_id = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
+    `, sourceModule
+        ? [Number.parseInt(pageId, 10), userId, sourceModule]
+        : [Number.parseInt(pageId, 10), userId]);
     if (!page?.image_path) return null;
     const filePath = resolveStoredDocumentPath(page.image_path);
     if (!filePath || !await fs.promises.access(filePath, fs.constants.R_OK).then(() => true).catch(() => false)) return null;

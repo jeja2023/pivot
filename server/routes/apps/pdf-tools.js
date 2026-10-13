@@ -4,10 +4,14 @@ const {
     cancelJob,
     createPdfToolJobFromUploads,
     deleteJob,
+    dispatchPdfJobResult,
+    getPdfToolCapabilities,
     getJobDetail,
     getJobOutputsArchive,
     getOutputDownload,
+    getPageImage,
     listJobs,
+    reprocessJob,
     retryJob
 } = require('../../services/document-processing');
 
@@ -21,12 +25,40 @@ function readPdfToolConfig(body = {}) {
         maxToolPages: body.maxToolPages,
         maxRenderPages: body.maxRenderPages,
         dpi: body.dpi,
-        password: body.password
+        password: body.password,
+        mode: body.mode,
+        watermarkText: body.watermarkText,
+        watermarkPosition: body.watermarkPosition,
+        watermarkFontSize: body.watermarkFontSize,
+        watermarkOpacity: body.watermarkOpacity,
+        watermarkRotate: body.watermarkRotate,
+        watermarkMargin: body.watermarkMargin,
+        pageNumberPosition: body.pageNumberPosition,
+        pageNumberStart: body.pageNumberStart,
+        pageNumberPrefix: body.pageNumberPrefix,
+        pageNumberSuffix: body.pageNumberSuffix,
+        pageNumberFontSize: body.pageNumberFontSize,
+        pageNumberMargin: body.pageNumberMargin,
+        skipCover: body.skipCover,
+        cropLeft: body.cropLeft,
+        cropRight: body.cropRight,
+        cropTop: body.cropTop,
+        cropBottom: body.cropBottom,
+        blankPageAfter: body.blankPageAfter,
+        blankPageCount: body.blankPageCount,
+        pageSize: body.pageSize,
+        imageFit: body.imageFit,
+        imageDpi: body.imageDpi,
+        pageMargin: body.pageMargin
     };
 }
 
 function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     const router = express.Router();
+
+    router.get('/capabilities', authMiddleware, asyncHandler(async (_req, res) => {
+        return res.json(getPdfToolCapabilities());
+    }));
 
     router.get('/jobs', authMiddleware, asyncHandler(async (req, res) => {
         res.json(await listJobs({
@@ -55,20 +87,45 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
     }));
 
     router.get('/jobs/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await getJobDetail({ userId: req.user.id, jobId: req.params.id });
-        if (!detail || detail.job.sourceModule !== 'pdf_tools') return res.status(404).json({ error: 'PDF 工具任务不存在' });
+        const detail = await getJobDetail({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
+        if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
         return res.json(detail);
     }));
 
+    router.get('/jobs/:id/preflight', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getJobDetail({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
+        if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
+        return res.json({ preflight: detail.preflight });
+    }));
+
     router.post('/jobs/:id/retry', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id });
-        if (!detail || detail.job.sourceModule !== 'pdf_tools') return res.status(404).json({ error: 'PDF 工具任务不存在' });
+        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password });
+        if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
         return res.json({ success: true, ...detail });
     }));
 
+    router.post('/jobs/:id/reprocess', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await reprocessJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password });
+        if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
+        logAction?.(req, 'PDF 工具再次处理', `来源任务: ${req.params.id}，新任务: ${detail.job.id}`);
+        return res.json({ success: true, ...detail });
+    }));
+
+    router.post('/jobs/:id/dispatch', authMiddleware, asyncHandler(async (req, res) => {
+        const dispatch = await dispatchPdfJobResult({
+            user: req.user,
+            jobId: req.params.id,
+            target: req.body?.target,
+            options: req.body || {}
+        });
+        if (!dispatch) return res.status(404).json({ error: 'PDF 工具任务或输出文件不存在' });
+        logAction?.(req, 'PDF 处理结果分发', `任务: ${req.params.id}，输出: ${dispatch.outputId}，目标: ${dispatch.target}`);
+        return res.json({ success: true, dispatch });
+    }));
+
     router.post('/jobs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await cancelJob({ userId: req.user.id, jobId: req.params.id });
-        if (!detail || detail.job.sourceModule !== 'pdf_tools') return res.status(404).json({ error: 'PDF 工具任务不存在' });
+        const detail = await cancelJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
+        if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
         return res.json({ success: true, ...detail });
     }));
 
@@ -89,10 +146,16 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
     }));
 
     router.get('/outputs/:id/download', authMiddleware, asyncHandler(async (req, res) => {
-        const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id });
+        const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id, sourceModule: 'pdf_tools' });
         if (!output) return res.status(404).json({ error: '输出文件不存在或已过期' });
         res.setHeader('Content-Type', output.mimeType);
         return res.download(output.filePath, output.fileName);
+    }));
+
+    router.get('/pages/:id/image', authMiddleware, asyncHandler(async (req, res) => {
+        const image = await getPageImage({ userId: req.user.id, pageId: req.params.id, sourceModule: 'pdf_tools' });
+        if (!image) return res.status(404).json({ error: 'PDF 页面预览不存在或已过期' });
+        return res.sendFile(image.filePath);
     }));
 
     return router;
