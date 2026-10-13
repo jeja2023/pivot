@@ -34,15 +34,16 @@ const {
     updateDocumentFileMetadata
 } = require('./files');
 const { createTextOutputs, pagesToText, serializeOutput } = require('./exporters');
-const { getJobOutputsArchive, getOutputDownload, getPageImage } = require('./downloads');
+const { getJobOutputsArchive, getJobOutputsArchiveStream, getOutputDownload, getPageImage } = require('./downloads');
 const { imageFileToPage, renderPdfPagesToFiles } = require('./renderers');
 const { recognizePage } = require('./ocr');
 const { PDF_TOOL_OPERATIONS, assertPdfInputFiles, createSearchablePdfOutput, getPdfPageMetrics, preflightPdfFile, processPdfToolOperation, requirePdfOperation } = require('./pdf');
 const { resolveStoredDocumentPath, safeUnlinkManaged } = require('./paths');
-const { getJobPassword, removeJobSecrets, storeJobPassword } = require('./secrets');
+const { getJobPassword, getJobSecret, removeJobSecrets, storeJobPassword, storeJobSecret } = require('./secrets');
 const { createDocumentDistributionService } = require('./distribution');
 const { createDocumentProcessingMonitoring } = require('./monitoring');
 const { createDocumentExportActions } = require('./export-actions');
+const { createPdfJobProcessor } = require('./job-pdf');
 const queue = [];
 const runningJobs = new Set();
 let runningCount = 0;
@@ -356,6 +357,8 @@ async function createPdfToolJobFromUploads({ user, files = [], operation, source
             }
         });
         if (String(config.password || '').trim()) await storeJobPassword({ userId: user.id, jobId: job.id, password: config.password });
+        if (String(config.outputPassword || '').trim()) await storeJobSecret({ userId: user.id, jobId: job.id, purpose: 'output_password', value: config.outputPassword });
+        if (String(config.ownerPassword || '').trim()) await storeJobSecret({ userId: user.id, jobId: job.id, purpose: 'owner_password', value: config.ownerPassword });
     } catch (error) {
         await cleanupJobSourceFiles({
             file_id: firstFile.id,
@@ -429,11 +432,12 @@ function allowedActions(job) {
 
 async function getJobPreflight(job, file) {
     const config = parseJson(job?.config_json, {});
+    const password = await getJobPassword({ userId: job.user_id, jobId: job.id });
     const sourceIds = Array.isArray(config.sourceFileIds) && config.sourceFileIds.length ? config.sourceFileIds : [file?.id];
     const sources = [];
     for (const sourceId of sourceIds.slice(0, 20)) {
         const source = await getDocumentFileForUser(sourceId, job.user_id);
-        if (source) sources.push(await preflightPdfFile(source, { maxPages: config.maxToolPages || 300 }));
+        if (source) sources.push(await preflightPdfFile(source, { maxPages: config.maxToolPages || 300, password, userId: job.user_id }));
     }
     return {
         operation: config.operation || '',
@@ -644,132 +648,26 @@ async function processImageOcr({ job, file, filePath, config }) {
     };
 }
 
-async function processPdfToolJob({ job, file, config }) {
-    const sourceIds = (Array.isArray(config.sourceFileIds) && config.sourceFileIds.length ? config.sourceFileIds : [file.id])
-        .map(id => Number.parseInt(id, 10))
-        .filter(id => Number.isSafeInteger(id) && id > 0)
-        .slice(0, 50);
-    const files = [];
-    for (const id of sourceIds) {
-        const f = await getDocumentFileForUser(id, job.user_id);
-        if (f) files.push(f);
-    }
-    if (!files.length) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
-    const operation = requirePdfOperation(config.operation);
-    const input = assertPdfInputFiles({ operation, files, mode: config.mode });
-    if (operation === PDF_TOOL_OPERATIONS.SEARCHABLE_PDF) {
-        const targetFile = input.files[0];
-        const targetPath = await getDocumentFilePathAsync(targetFile);
-        if (!targetPath) throw new Error('PDF 工具任务的源文件不存在，请重新上传。');
-        const pageLimit = Math.min(Math.max(Number.parseInt(config.maxToolPages, 10) || 20, 1), 300);
-        const searchableConfig = {
-            ...config,
-            maxRenderPages: pageLimit,
-            maxOcrPages: pageLimit
-        };
-        const pages = await preparePagesForJob({ job, file: targetFile, filePath: targetPath, config: searchableConfig });
-        const recognized = await recognizePages({ job, file: targetFile, pages, config: searchableConfig });
-        const finalPages = await getPages(job.id);
-        const blocks = await getBlocks(job.id);
-        const output = await createSearchablePdfOutput({ userId: job.user_id, file: targetFile, job, pages: finalPages, blocks });
-        return {
-            status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
-            progress: 100,
-            result: {
-                operation,
-                outputs: [output],
-                processedFiles: 1,
-                processedPages: finalPages.length,
-                lowConfidence: recognized.needsReview,
-                truncated: recognized.truncated
-            }
-        };
-    }
-    const runOne = async (source, index = 0, total = 1) => await processPdfToolOperation({
-        job,
-        file: source,
-        files: [source],
-        config: { ...config, mode: 'single' },
-        isCancelled: () => isCancelled(job.id),
-        onProgress: async (progress, patch = {}) => {
-            const adjusted = total > 1 ? Math.floor((index / total) * 80 + (progress / 100) * (80 / total) + 10) : progress;
-            await touchProgress(job.id, adjusted, patch);
-        }
-    });
-    let result;
-    if (config.mode === 'batch' && input.meta.inputMode === 'single-or-batch' && input.files.length > 1) {
-        const aggregate = { outputs: [], processedFiles: 0, processedPages: 0, requestedPages: 0, items: [], failedFiles: 0 };
-        await resetJobItems(job.id);
-        for (let index = 0; index < input.files.length; index += 1) {
-            const source = input.files[index];
-            try {
-                const item = await runOne(source, index, input.files.length);
-                aggregate.outputs.push(...(item.outputs || []));
-                aggregate.processedFiles += 1;
-                aggregate.processedPages += Number(item.processedPages || 0);
-                aggregate.requestedPages += Number(item.requestedPages || 0);
-                aggregate.items.push({ fileId: source.id, originalName: source.original_name, status: 'succeeded', outputs: item.outputs || [] });
-                await recordJobItem({
-                    job,
-                    file: source,
-                    itemOrder: index,
-                    status: JOB_STATUSES.SUCCEEDED,
-                    result: {
-                        outputIds: (item.outputs || []).map(output => output.id).filter(Boolean),
-                        processedPages: Number(item.processedPages || 0),
-                        requestedPages: Number(item.requestedPages || 0)
-                    }
-                });
-            } catch (error) {
-                if (await isCancelled(job.id)) throw error;
-                aggregate.failedFiles += 1;
-                aggregate.items.push({ fileId: source.id, originalName: source.original_name, status: 'failed', errorCode: error.code || 'PROCESSING_FAILED', errorMessage: sanitizeErrorMessage(error) });
-                await recordJobItem({
-                    job,
-                    file: source,
-                    itemOrder: index,
-                    status: JOB_STATUSES.FAILED,
-                    progress: 0,
-                    errorCode: error.code || 'PROCESSING_FAILED',
-                    errorMessage: sanitizeErrorMessage(error)
-                });
-            }
-        }
-        if (!aggregate.processedFiles) {
-            const firstFailure = aggregate.items.find(item => item.status === 'failed');
-            const error = new Error(firstFailure?.errorMessage || '批量 PDF 处理失败。');
-            error.code = firstFailure?.errorCode || 'PROCESSING_FAILED';
-            throw error;
-        }
-        result = aggregate;
-    } else if (operation === PDF_TOOL_OPERATIONS.MERGE || operation === PDF_TOOL_OPERATIONS.IMAGES_TO_PDF) {
-        result = await processPdfToolOperation({
-            job,
-            file: input.files[0],
-            files: input.files,
-            config,
-            isCancelled: () => isCancelled(job.id),
-            onProgress: (progress, patch = {}) => touchProgress(job.id, progress, patch)
-        });
-    } else {
-        result = await runOne(input.files[0]);
-    }
-    return {
-        status: result.failedFiles ? JOB_STATUSES.PARTIAL_SUCCESS : JOB_STATUSES.SUCCEEDED,
-        progress: 100,
-        result: {
-            operation: result.operation,
-            outputs: result.outputs || [],
-            processedFiles: result.processedFiles || 0,
-            processedPages: result.processedPages || 0,
-            requestedPages: result.requestedPages || 0,
-            removedPages: result.removedPages || 0,
-            textLength: result.textLength || 0,
-            failedFiles: result.failedFiles || 0,
-            items: result.items || []
-        }
-    };
-}
+const processPdfToolJob = createPdfJobProcessor({
+    assertPdfInputFiles,
+    createSearchablePdfOutput,
+    getBlocks,
+    getDocumentFileForUser,
+    getDocumentFilePathAsync,
+    getPages,
+    isCancelled,
+    JOB_STATUSES,
+    PDF_TOOL_OPERATIONS,
+    preparePagesForJob,
+    processPdfToolOperation,
+    recognizePages,
+    recordJobItem,
+    requirePdfOperation,
+    resetJobItems,
+    sanitizeErrorMessage,
+    touchProgress
+});
+
 
 async function processJob(jobId) {
     const initialJob = await getJobRow(jobId);
@@ -797,7 +695,12 @@ async function processJob(jobId) {
         rawConfig.requiresPassword = true;
         await execute('UPDATE document_jobs SET config_json = ?, config_version = ?, updated_at = ? WHERE id = ?', [safeJson(normalizeConfig(rawConfig)), 2, getBeijingTimestamp(), job.id]);
     }
-    const config = { ...normalizeConfig(rawConfig), password: await getJobPassword({ userId: job.user_id, jobId: job.id }) };
+    const config = {
+        ...normalizeConfig(rawConfig),
+        password: await getJobPassword({ userId: job.user_id, jobId: job.id }),
+        outputPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'output_password' }),
+        ownerPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'owner_password' })
+    };
     if (config.requiresPassword && !config.password) {
         return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '文件密码已过期或未提供，请在再次处理时重新输入密码。', result: { errorCode: 'PDF_PASSWORD_REQUIRED' } });
     }
@@ -840,7 +743,7 @@ async function processJob(jobId) {
     }
 }
 
-async function retryJob({ userId, jobId, sourceModule = '', password = '' }) {
+async function retryJob({ userId, jobId, sourceModule = '', password = '', outputPassword = '', ownerPassword = '' }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if (sourceModule && job.source_module !== sourceModule) return null;
@@ -855,6 +758,8 @@ async function retryJob({ userId, jobId, sourceModule = '', password = '' }) {
         throw error;
     }
     if (String(password || '').trim()) await storeJobPassword({ userId, jobId: job.id, password });
+    if (String(outputPassword || '').trim()) await storeJobSecret({ userId, jobId: job.id, purpose: 'output_password', value: outputPassword });
+    if (String(ownerPassword || '').trim()) await storeJobSecret({ userId, jobId: job.id, purpose: 'owner_password', value: ownerPassword });
     await execute(`
         UPDATE document_jobs
         SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, attempt_token = ?, updated_at = ?
@@ -864,10 +769,12 @@ async function retryJob({ userId, jobId, sourceModule = '', password = '' }) {
     return await getJobDetail({ userId, jobId: job.id });
 }
 
-async function reprocessJob({ userId, jobId, sourceModule = '', password = '' }) {
+async function reprocessJob({ userId, jobId, sourceModule = '', password = '', outputPassword = '', ownerPassword = '', configPatch = {} }) {
     const job = await getJobRow(jobId, userId);
     if (!job || (sourceModule && job.source_module !== sourceModule)) return null;
-    const config = parseJson(job.config_json, {});
+    const previousConfig = parseJson(job.config_json, {});
+    const patch = configPatch && typeof configPatch === 'object' && !Array.isArray(configPatch) ? configPatch : {};
+    const config = { ...previousConfig, ...patch, sourceFileIds: previousConfig.sourceFileIds || [] };
     const successor = await createJobRecord({
         userId,
         fileId: job.file_id,
@@ -877,6 +784,8 @@ async function reprocessJob({ userId, jobId, sourceModule = '', password = '' })
         parentJobId: job.id
     });
     if (String(password || '').trim()) await storeJobPassword({ userId, jobId: successor.id, password });
+    if (String(outputPassword || '').trim()) await storeJobSecret({ userId, jobId: successor.id, purpose: 'output_password', value: outputPassword });
+    if (String(ownerPassword || '').trim()) await storeJobSecret({ userId, jobId: successor.id, purpose: 'owner_password', value: ownerPassword });
     enqueueJob(successor.id);
     return await getJobDetail({ userId, jobId: successor.id });
 }
@@ -981,6 +890,7 @@ module.exports = {
     getDocumentProcessingStats: monitoring.getDocumentProcessingStats,
     getJobDetail,
     getJobOutputsArchive,
+    getJobOutputsArchiveStream,
     getOutputDownload,
     getPageImage,
     getQueueStatus,

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const JSZip = require('jszip');
 
 const { query, queryOne } = require('../../db/client');
 const { createZip } = require('./exporters');
@@ -75,6 +76,50 @@ async function getJobOutputsArchive({ userId, jobId, sourceModule = '' }) {
     return { buffer: createZip(entries), fileName: `${base}-全部输出.zip`, mimeType: 'application/zip', count: entries.length };
 }
 
+async function getJobOutputsArchiveStream({ userId, jobId, sourceModule = '' }) {
+    const job = await queryOne('SELECT * FROM document_jobs WHERE id = ? AND user_id = ?', [Number.parseInt(jobId, 10), userId]);
+    if (!job || (sourceModule && job.source_module !== sourceModule)) return null;
+    const outputs = await query('SELECT * FROM document_outputs WHERE job_id = ? AND user_id = ? AND status = ? ORDER BY created_at DESC, id DESC', [job.id, userId, 'ready']);
+    if (!outputs.length) return null;
+    const seen = new Set();
+    let totalBytes = 0;
+    const zip = new JSZip();
+    for (const output of outputs) {
+        const filePath = resolveStoredDocumentPath(output.file_path);
+        if (!filePath) {
+            const error = new Error(`输出文件“${output.file_name || output.id}”路径无效，无法生成完整归档。`);
+            error.status = 409;
+            error.code = 'OUTPUT_INCOMPLETE';
+            throw error;
+        }
+        let stat;
+        try { stat = await fs.promises.stat(filePath); } catch (_) {
+            const error = new Error(`输出文件“${output.file_name || output.id}”不存在或已被清理，无法生成完整归档。`);
+            error.status = 409;
+            error.code = 'OUTPUT_INCOMPLETE';
+            throw error;
+        }
+        totalBytes += stat.size;
+        if (totalBytes > MAX_OUTPUT_ARCHIVE_BYTES) {
+            const error = new Error(`输出归档超过 ${Math.round(MAX_OUTPUT_ARCHIVE_BYTES / 1024 / 1024)}MB 限制，请分批下载。`);
+            error.status = 413;
+            error.code = 'DOCUMENT_OUTPUT_ARCHIVE_TOO_LARGE';
+            throw error;
+        }
+        zip.file(uniqueArchiveFileName(output.file_name || `output-${output.id}`, seen, `output-${output.id}`), fs.createReadStream(filePath));
+    }
+    const file = await queryOne('SELECT original_name FROM document_files WHERE id = ? AND user_id = ?', [job.file_id, userId]);
+    const originalName = String(file?.original_name || `pdf-job-${job.id}`);
+    const base = sanitizeArchiveFileName(path.basename(originalName, path.extname(originalName)), `pdf-job-${job.id}`);
+    return {
+        stream: zip.generateNodeStream({ type: 'nodebuffer', streamFiles: true, compression: 'DEFLATE', compressionOptions: { level: 6 } }),
+        fileName: `${base}-全部输出.zip`,
+        mimeType: 'application/zip',
+        count: outputs.length,
+        totalBytes
+    };
+}
+
 async function getOutputDownload({ userId, outputId, sourceModule = '' }) {
     const output = await queryOne(`
         SELECT o.*
@@ -105,4 +150,4 @@ async function getPageImage({ userId, pageId, sourceModule = '' }) {
     return { filePath, page };
 }
 
-module.exports = { getJobOutputsArchive, getOutputDownload, getPageImage };
+module.exports = { getJobOutputsArchive, getJobOutputsArchiveStream, getOutputDownload, getPageImage };

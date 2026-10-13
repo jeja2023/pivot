@@ -12,7 +12,10 @@
         total: 0,
         capabilities: null,
         timer: null,
-        polling: false
+        polling: false,
+        pagePlan: [],
+        pagePlanHistory: [],
+        pagePlanFuture: []
     };
 
     const FALLBACK_OPERATIONS = {
@@ -29,7 +32,16 @@
         page_numbers: { label: '添加页码', inputMode: 'single-or-batch', supportsPages: true, supportsPageNumbers: true },
         crop: { label: '裁切页面', inputMode: 'single-or-batch', supportsPages: true, supportsCrop: true },
         insert_blank: { label: '插入空白页', inputMode: 'single-or-batch', supportsBlankPage: true },
-        compress: { label: '优化 PDF', inputMode: 'single-or-batch', supportsCompression: true }
+        compress: { label: '优化 PDF', inputMode: 'single-or-batch', supportsCompression: true },
+        protect: { label: '加密保护 PDF', inputMode: 'single', supportsProtection: true },
+        compare: { label: '比较两个 PDF', inputMode: 'exact-two', supportsCompare: true },
+        redact: { label: '永久脱敏（栅格化）', inputMode: 'single-or-batch', supportsRedaction: true },
+        fill_form: { label: '填写 PDF 表单', inputMode: 'single-or-batch', supportsFormFill: true },
+        annotate: { label: '添加轻批注', inputMode: 'single-or-batch', supportsAnnotations: true },
+        pdfa_validate: { label: '验证 PDF/A', inputMode: 'single', supportsPdfa: true },
+        export_docx: { label: '导出可复核 Word', inputMode: 'single-or-batch', supportsDocxExport: true },
+        export_xlsx: { label: '导出可复核 Excel', inputMode: 'single-or-batch', supportsXlsxExport: true },
+        page_plan: { label: '页面工作区编排', inputMode: 'single', supportsPagePlan: true }
     };
 
     const html = window.Pivot.legacy.PivotSafeHtml || {
@@ -92,7 +104,7 @@
     function openDetail() { document.getElementById('pdf-detail-panel')?.classList.remove('hidden'); }
 
     function renderOperationOptions() {
-        return Object.entries(operations()).map(([id, meta]) => `<option value="${esc(id)}">${esc(meta.label || id)}</option>`).join('');
+        return Object.entries(operations()).map(([id, meta]) => `<option value="${esc(id)}" ${meta.available === false ? 'disabled' : ''}>${esc(meta.label || id)}${meta.available === false ? '（当前部署不可用）' : ''}</option>`).join('');
     }
 
     function renderPresetOptions() {
@@ -126,7 +138,15 @@
                         <div class="doc-tool-field-row hidden" data-pdf-option="crop"><label class="doc-tool-field"><span>左边距 pt</span><input id="pdf-crop-left" class="form-input" type="number" min="0" value="0"></label><label class="doc-tool-field"><span>右边距 pt</span><input id="pdf-crop-right" class="form-input" type="number" min="0" value="0"></label><label class="doc-tool-field"><span>上边距 pt</span><input id="pdf-crop-top" class="form-input" type="number" min="0" value="0"></label><label class="doc-tool-field"><span>下边距 pt</span><input id="pdf-crop-bottom" class="form-input" type="number" min="0" value="0"></label><small class="pdf-tool-hint">裁切只改变页面可见区域，不会删除隐藏内容。</small></div>
                         <div class="doc-tool-field-row hidden" data-pdf-option="blank"><label class="doc-tool-field"><span>插入位置</span><input id="pdf-blank-after" class="form-input" type="number" min="0" value="0"></label><label class="doc-tool-field"><span>空白页数量</span><input id="pdf-blank-count" class="form-input" type="number" min="1" max="20" value="1"></label><small class="pdf-tool-hint">0 表示文件开头；其它数字表示在该页之后插入。</small></div>
                         <div class="doc-tool-field-row hidden" data-pdf-option="image-pdf"><label class="doc-tool-field"><span>页面纸张</span><select id="pdf-page-size" class="form-input"><option value="original">保持图片物理尺寸</option><option value="a4">A4</option><option value="a3">A3</option><option value="letter">北美信纸尺寸</option></select></label><label class="doc-tool-field"><span>适配方式</span><select id="pdf-image-fit" class="form-input"><option value="contain">完整显示</option><option value="cover">填满纸张</option></select></label></div>
-                        <label class="doc-tool-field doc-tool-field-wide"><span>PDF 密码</span><input id="pdf-password-input" class="form-input" type="password" autocomplete="off"><small class="pdf-tool-hint">仅用于本次任务，处理结束后会被删除。当前结构处理不支持加密 PDF。</small></label>
+                        <div class="doc-tool-field-row hidden" data-pdf-option="compression"><label class="doc-tool-field"><span>优化方式</span><select id="pdf-compression-mode" class="form-input"><option value="structure">结构无损优化</option><option value="images">嵌入图片 JPEG 优化</option></select></label><label class="doc-tool-field"><span>JPEG 质量</span><input id="pdf-compression-jpeg-quality" class="form-input" type="number" min="1" max="100" value="75"></label><small class="pdf-tool-hint">图像优化只重写可安全优化的嵌入图像；不会把整页截图作为默认压缩方式。系统会展示实际前后体积。</small></div>
+                        <div class="doc-tool-field-row hidden" data-pdf-option="protection"><label class="doc-tool-field"><span>打开密码</span><input id="pdf-output-password" class="form-input" type="password" autocomplete="new-password"></label><label class="doc-tool-field"><span>管理密码</span><input id="pdf-owner-password" class="form-input" type="password" autocomplete="new-password"></label><label class="doc-tool-field pdf-tool-checkbox"><input id="pdf-protect-print" type="checkbox" checked><span>允许打印</span></label><label class="doc-tool-field pdf-tool-checkbox"><input id="pdf-protect-modify" type="checkbox" checked><span>允许修改</span></label><small class="pdf-tool-hint">密码只在任务执行期保存在加密临时存储中，不出现在任务详情或日志。</small></div>
+                        <div class="doc-tool-field-row hidden" data-pdf-option="compare"><label class="doc-tool-field"><span>比较分辨率</span><input id="pdf-compare-dpi" class="form-input" type="number" min="72" max="300" value="144"></label><small class="pdf-tool-hint">请选择两份 PDF。输出包含逐页视觉差异图与可复核 JSON 报告。</small></div>
+                        <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="redaction"><span>永久脱敏区域（JSON）</span><textarea id="pdf-redact-regions" class="form-input" rows="3" placeholder='[{"page":1,"x":0.1,"y":0.1,"width":0.3,"height":0.08,"label":"身份证号"}]'></textarea><small class="pdf-tool-hint">坐标为页面左上角起的 0-1 比例。结果会生成栅格化副本，移除原文、表单、批注、附件和签名；请先核对区域。</small></label>
+                        <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="annotations"><span>轻批注（JSON）</span><textarea id="pdf-annotations" class="form-input" rows="3" placeholder='[{"page":1,"type":"highlight","x":0.1,"y":0.1,"width":0.3,"height":0.06,"content":"请复核"}]'></textarea><small class="pdf-tool-hint">支持 highlight 和 note；坐标为页面左上角起的 0-1 比例。</small></label>
+                        <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="form"><span>表单字段值（JSON）</span><textarea id="pdf-form-values" class="form-input" rows="3" placeholder='{"申请人":"张三","确认":true}'></textarea><small class="pdf-tool-hint">字段名必须与原 AcroForm 字段一致；保留交互表单，不自动扁平化。</small></label>
+                        <div class="doc-tool-field-row hidden" data-pdf-option="pdfa"><label class="doc-tool-field"><span>验证 profile</span><select id="pdf-pdfa-profile" class="form-input"><option value="0">自动识别</option><option value="1b">PDF/A-1b</option><option value="2b">PDF/A-2b</option><option value="3b">PDF/A-3b</option><option value="4">PDF/A-4</option></select></label><small class="pdf-tool-hint">只生成 veraPDF 验证报告；没有通过验证绝不标记为 PDF/A 合规。</small></div>
+                        <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="page-plan"><span>页面编排（JSON）</span><textarea id="pdf-page-plan" class="form-input" rows="3" placeholder='[{"sourcePage":2,"rotation":0},{"sourcePage":1,"rotation":90},{"blank":true}]'></textarea><small class="pdf-tool-hint">可用源页重排、旋转或插入空白页。执行会创建新版本，原件保持不变。</small></label>
+                        <label class="doc-tool-field doc-tool-field-wide"><span>PDF 密码</span><input id="pdf-password-input" class="form-input" type="password" autocomplete="off"><small class="pdf-tool-hint">仅用于本次任务，处理结束后会被删除。加密 PDF 需要部署 qpdf；请在提交前确认已有处理授权。</small></label>
                         <div class="doc-tool-actions"><button id="pdf-submit-btn" class="btn-primary" type="submit">创建任务</button><button id="pdf-refresh-btn" class="btn-secondary" type="button">刷新</button></div>
                     </form>
                     <div class="doc-tool-filter"><label class="doc-tool-field doc-tool-field-wide"><span>状态</span><select id="pdf-status-filter" class="form-input"><option value="">全部任务</option><option value="queued">排队中</option><option value="processing">处理中</option><option value="succeeded">已完成</option><option value="partial_success">部分完成</option><option value="needs_review">待复核</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label></div>
@@ -135,6 +155,7 @@
             </div>
             <section id="pdf-detail-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-detail-title"><div class="workspace-modal doc-tool-dialog pdf-detail-dialog"><div class="workspace-modal-header"><div><h3 id="pdf-detail-title">PDF 处理详情</h3><p id="pdf-detail-subtitle">查看任务摘要、页面和输出文件。</p></div><button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-detail>关闭</button></div><div id="pdf-detail" class="workspace-modal-body doc-tool-modal-body pdf-detail"></div></div></section>
             <section id="pdf-page-preview-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-page-preview-title"><div class="workspace-modal doc-tool-dialog pdf-page-preview-dialog"><div class="workspace-modal-header"><div><h3 id="pdf-page-preview-title">PDF 页面预览</h3><p>预览来自受控页面资源，可返回任务详情继续处理。</p></div><button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-preview>返回详情</button></div><div class="workspace-modal-body pdf-page-preview-body"><img id="pdf-page-preview-image" alt="PDF 页面预览"></div></div></section>
+            <section id="pdf-page-plan-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-page-plan-title"><div class="workspace-modal doc-tool-dialog pdf-page-plan-dialog"><div class="workspace-modal-header"><div><h3 id="pdf-page-plan-title">页面工作区</h3><p id="pdf-page-plan-summary">拖动前请先用前移、后移、旋转或插入空白页调整草稿。</p></div><button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-page-plan>关闭</button></div><div class="workspace-modal-body pdf-page-plan-body"><div class="pdf-page-plan-actions"><button class="btn-secondary" type="button" data-pdf-plan-undo>撤销</button><button class="btn-secondary" type="button" data-pdf-plan-redo>重做</button><button class="btn-secondary" type="button" data-pdf-plan-blank>末尾插入空白页</button><button class="btn-primary" type="button" data-pdf-plan-apply>创建页面编排版本</button></div><div id="pdf-page-plan-list" class="pdf-page-plan-list"></div><p class="pdf-tool-hint">最多保留 20 步草稿历史。提交会以原始输入创建新版本；不覆盖旧结果或原件。</p></div></div></section>
         `);
         view.dataset.ready = '1';
         bindEvents(view);
@@ -156,8 +177,18 @@
         show('crop', Boolean(meta.supportsCrop));
         show('blank', Boolean(meta.supportsBlankPage));
         show('image-pdf', selected === 'images_to_pdf');
+        show('compression', Boolean(meta.supportsCompression));
+        show('protection', Boolean(meta.supportsProtection));
+        show('compare', Boolean(meta.supportsCompare));
+        show('redaction', Boolean(meta.supportsRedaction));
+        show('annotations', Boolean(meta.supportsAnnotations));
+        show('form', Boolean(meta.supportsFormFill));
+        show('pdfa', Boolean(meta.supportsPdfa));
+        show('page-plan', Boolean(meta.supportsPagePlan));
         const hint = document.getElementById('pdf-file-hint');
-        if (hint) hint.textContent = meta.inputMode === 'combine' ? `${meta.label}需要组合多个文件，文件顺序将决定输出顺序。` : (meta.inputMode === 'single' ? `${meta.label}一次只能处理一个文件。` : '默认一次处理一个文件；选择批量后会分别生成每个文件的结果。');
+        if (hint) hint.textContent = meta.available === false
+            ? (meta.unavailableReason || `${meta.label}在当前部署不可用。`)
+            : (meta.inputMode === 'combine' ? `${meta.label}需要组合多个文件，文件顺序将决定输出顺序。` : (meta.inputMode === 'exact-two' ? `${meta.label}需要且只能选择两份 PDF。` : (meta.inputMode === 'single' ? `${meta.label}一次只能处理一个文件。` : '默认一次处理一个文件；选择批量后会分别生成每个文件的结果。')));
     }
 
     function applyPreset(presetId) {
@@ -239,7 +270,7 @@
     function renderPages(detail) {
         const pages = detail?.pages || [];
         if (!pages.length) return '';
-        return `<section class="pdf-detail-section"><h4>页面与 OCR 复核</h4><div class="pdf-page-grid">${pages.map(page => `<button class="btn-secondary pdf-page-card" type="button" data-pdf-page-preview="${esc(page.id)}"><img src="${API}/pages/${encodeURIComponent(page.id)}/image" alt="第 ${Number(page.pageNumber || 1)} 页预览" loading="lazy"><span>第 ${Number(page.pageNumber || 1)} 页${page.confidence === null ? '' : ` · ${Math.round(Number(page.confidence || 0) * 100)}%`}</span></button>`).join('')}</div></section>`;
+        return `<section class="pdf-detail-section"><div class="pdf-detail-section-head"><h4>页面与 OCR 复核</h4><button class="btn-secondary doc-tool-row-action" type="button" data-pdf-open-page-plan>打开页面工作区</button></div><div class="pdf-page-grid">${pages.map(page => `<button class="btn-secondary pdf-page-card" type="button" data-pdf-page-preview="${esc(page.id)}"><img src="${API}/pages/${encodeURIComponent(page.id)}/image" alt="第 ${Number(page.pageNumber || 1)} 页预览" loading="lazy"><span>第 ${Number(page.pageNumber || 1)} 页${page.confidence === null ? '' : ` · ${Math.round(Number(page.confidence || 0) * 100)}%`}</span></button>`).join('')}</div></section>`;
     }
 
     function previewPage(pageId) {
@@ -249,6 +280,53 @@
         image.src = `${API}/pages/${encodeURIComponent(pageId)}/image`;
         panel.classList.remove('hidden');
         image.focus?.();
+    }
+
+    function clonePagePlan(plan) { return JSON.parse(JSON.stringify(Array.isArray(plan) ? plan : [])); }
+    function planSourcePages() { return (state.detail?.pages || []).map(page => ({ sourcePage: Number(page.pageNumber || 0), rotation: 0, pageId: page.id, blank: false })).filter(item => item.sourcePage > 0); }
+    function rememberPagePlan() {
+        state.pagePlanHistory.push(clonePagePlan(state.pagePlan));
+        if (state.pagePlanHistory.length > 20) state.pagePlanHistory.shift();
+        state.pagePlanFuture = [];
+    }
+    function updatePagePlan(mutator) {
+        rememberPagePlan();
+        mutator(state.pagePlan);
+        renderPagePlan();
+    }
+    function pagePlanItemImage(item) {
+        if (item.blank) return '<div class="pdf-page-plan-blank" aria-label="空白页">空白页</div>';
+        return `<img src="${API}/pages/${encodeURIComponent(item.pageId || '')}/image" alt="源页 ${Number(item.sourcePage || 0)}" loading="lazy">`;
+    }
+    function renderPagePlan() {
+        const list = document.getElementById('pdf-page-plan-list');
+        const summary = document.getElementById('pdf-page-plan-summary');
+        if (!list || !summary) return;
+        const deleted = Math.max(planSourcePages().length - state.pagePlan.filter(item => !item.blank).length, 0);
+        summary.textContent = `当前输出 ${state.pagePlan.length} 页；删除 ${deleted} 页；草稿可撤销 ${state.pagePlanHistory.length} 步。`;
+        const planCardsHtml = state.pagePlan.map((item, index) => `<article class="pdf-page-plan-card" data-pdf-plan-index="${index}">${pagePlanItemImage(item)}<div class="pdf-page-plan-card-info"><strong>${item.blank ? '空白页' : `源页 ${Number(item.sourcePage || 0)}`}</strong><small>${item.blank ? '将使用相邻页面尺寸' : `旋转 ${Number(item.rotation || 0)}°`}</small></div><div class="pdf-page-plan-card-actions"><button class="btn-secondary" type="button" data-pdf-plan-move="up" data-pdf-plan-index="${index}" ${index === 0 ? 'disabled' : ''}>前移</button><button class="btn-secondary" type="button" data-pdf-plan-move="down" data-pdf-plan-index="${index}" ${index === state.pagePlan.length - 1 ? 'disabled' : ''}>后移</button>${item.blank ? '' : `<button class="btn-secondary" type="button" data-pdf-plan-rotate data-pdf-plan-index="${index}">旋转</button>`}<button class="btn-danger-outline" type="button" data-pdf-plan-delete data-pdf-plan-index="${index}">删除</button></div></article>`).join('');
+        const emptyPlanHtml = '<p class="doc-tool-empty-small">草稿不能为空。请关闭后重新打开页面工作区。</p>';
+        html.setHtml(list, planCardsHtml || emptyPlanHtml);
+    }
+    function openPagePlanEditor() {
+        if (!(state.detail?.pages || []).length) { toast('当前任务没有可用页面预览；请先运行可生成页面预览的处理或重新上传。', 'warning'); return; }
+        state.pagePlan = planSourcePages();
+        state.pagePlanHistory = [];
+        state.pagePlanFuture = [];
+        renderPagePlan();
+        document.getElementById('pdf-page-plan-panel')?.classList.remove('hidden');
+    }
+    async function applyPagePlan() {
+        if (!state.activeJobId || !state.pagePlan.length) { toast('页面编排草稿不能为空。', 'warning'); return; }
+        if (!await confirmAction('创建页面编排版本', '将以当前任务的原始输入创建一个新版本。原始文件和旧结果不会被修改。确定继续吗？')) return;
+        await requestJson(`${API}/jobs/${encodeURIComponent(state.activeJobId)}/reprocess`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config: { operation: 'page_plan', mode: 'single', pagePlan: state.pagePlan.map(({ sourcePage, rotation, blank }) => ({ sourcePage, rotation, blank })) } })
+        });
+        document.getElementById('pdf-page-plan-panel')?.classList.add('hidden');
+        toast('已创建页面编排的新版本。', 'success');
+        await loadJobs({ keepActive: false });
     }
 
     function renderBatchItems(items) {
@@ -314,6 +392,17 @@
         if (element.type === 'checkbox') data.set(name, element.checked ? 'true' : 'false'); else data.set(name, element.value || '');
     }
 
+    function appendJsonValue(data, id, name, fallback) {
+        const element = document.getElementById(id);
+        const raw = String(element?.value || '').trim();
+        if (!raw) return;
+        let value;
+        try { value = JSON.parse(raw); } catch (_error) { throw new Error(`“${element?.previousElementSibling?.textContent || name}”必须是有效 JSON。`); }
+        if (fallback === 'array' && !Array.isArray(value)) throw new Error(`“${name}”必须是 JSON 数组。`);
+        if (fallback === 'object' && (!value || Array.isArray(value) || typeof value !== 'object')) throw new Error(`“${name}”必须是 JSON 对象。`);
+        data.set(name, JSON.stringify(value));
+    }
+
     async function submitJob(form) {
         const files = Array.from(document.getElementById('pdf-files-input')?.files || []);
         if (!files.length) { toast('请选择需要处理的文件。', 'warning'); return; }
@@ -322,8 +411,13 @@
         data.set('operation', currentOperation());
         data.set('mode', document.getElementById('pdf-mode-input')?.value || 'single');
         [
-            ['pdf-pages-input', 'pages'], ['pdf-order-input', 'pageOrder'], ['pdf-rotate-input', 'rotateDegrees'], ['pdf-dpi-input', 'dpi'], ['pdf-max-pages-input', 'maxToolPages'], ['pdf-password-input', 'password'], ['pdf-watermark-text', 'watermarkText'], ['pdf-watermark-position', 'watermarkPosition'], ['pdf-watermark-opacity', 'watermarkOpacity'], ['pdf-page-number-start', 'pageNumberStart'], ['pdf-page-number-position', 'pageNumberPosition'], ['pdf-skip-cover', 'skipCover'], ['pdf-crop-left', 'cropLeft'], ['pdf-crop-right', 'cropRight'], ['pdf-crop-top', 'cropTop'], ['pdf-crop-bottom', 'cropBottom'], ['pdf-blank-after', 'blankPageAfter'], ['pdf-blank-count', 'blankPageCount'], ['pdf-page-size', 'pageSize'], ['pdf-image-fit', 'imageFit']
+            ['pdf-pages-input', 'pages'], ['pdf-order-input', 'pageOrder'], ['pdf-rotate-input', 'rotateDegrees'], ['pdf-dpi-input', 'dpi'], ['pdf-max-pages-input', 'maxToolPages'], ['pdf-password-input', 'password'], ['pdf-watermark-text', 'watermarkText'], ['pdf-watermark-position', 'watermarkPosition'], ['pdf-watermark-opacity', 'watermarkOpacity'], ['pdf-page-number-start', 'pageNumberStart'], ['pdf-page-number-position', 'pageNumberPosition'], ['pdf-skip-cover', 'skipCover'], ['pdf-crop-left', 'cropLeft'], ['pdf-crop-right', 'cropRight'], ['pdf-crop-top', 'cropTop'], ['pdf-crop-bottom', 'cropBottom'], ['pdf-blank-after', 'blankPageAfter'], ['pdf-blank-count', 'blankPageCount'], ['pdf-page-size', 'pageSize'], ['pdf-image-fit', 'imageFit'], ['pdf-compression-mode', 'compressionMode'], ['pdf-compression-jpeg-quality', 'compressionJpegQuality'], ['pdf-output-password', 'outputPassword'], ['pdf-owner-password', 'ownerPassword'], ['pdf-compare-dpi', 'compareDpi'], ['pdf-pdfa-profile', 'pdfaProfile']
         ].forEach(([id, name]) => appendFormValue(data, id, name));
+        data.set('outputPermissions', JSON.stringify({ print: Boolean(document.getElementById('pdf-protect-print')?.checked), modify: Boolean(document.getElementById('pdf-protect-modify')?.checked) }));
+        appendJsonValue(data, 'pdf-redact-regions', 'redactRegions', 'array');
+        appendJsonValue(data, 'pdf-annotations', 'annotations', 'array');
+        appendJsonValue(data, 'pdf-form-values', 'formValues', 'object');
+        appendJsonValue(data, 'pdf-page-plan', 'pagePlan', 'array');
         const button = document.getElementById('pdf-submit-btn');
         const label = button?.textContent;
         if (button) { button.disabled = true; button.textContent = '正在创建'; }
@@ -349,10 +443,13 @@
         const outputs = detail?.outputs || [];
         if (!outputs.length) { toast('该任务暂无可下载输出。', 'warning'); return; }
         if (outputs.length === 1) return downloadOutput(outputs[0].id, outputs[0].fileName);
-        const response = await apiFetch(`${API}/jobs/${encodeURIComponent(jobId)}/outputs/download`);
-        if (!response.ok) { const data = await response.clone().json().catch(() => ({})); throw new Error(data?.error || `下载失败（${response.status}）`); }
-        const url = URL.createObjectURL(await response.blob());
-        const link = document.createElement('a'); link.href = url; link.download = `pdf-job-${jobId}-全部输出.zip`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+        // 服务端以流式 ZIP 返回；使用浏览器原生下载通道，避免客户端先把全部归档读入 Blob。
+        const link = document.createElement('a');
+        link.href = `${API}/jobs/${encodeURIComponent(jobId)}/outputs/download`;
+        link.download = `pdf-job-${jobId}-全部输出.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
     }
 
     async function confirmAction(title, message) {
@@ -389,6 +486,15 @@
             const open = closest('[data-pdf-job-open]'); if (open) return void loadDetail(open.dataset.pdfJobOpen).catch(error => toast(error.message, 'error'));
             if (closest('[data-pdf-close-detail]')) return void closeDetail();
             if (closest('[data-pdf-close-preview]')) return void document.getElementById('pdf-page-preview-panel')?.classList.add('hidden');
+            if (closest('[data-pdf-close-page-plan]')) return void document.getElementById('pdf-page-plan-panel')?.classList.add('hidden');
+            if (closest('[data-pdf-open-page-plan]')) return void openPagePlanEditor();
+            if (closest('[data-pdf-plan-undo]')) { if (state.pagePlanHistory.length) { state.pagePlanFuture.push(clonePagePlan(state.pagePlan)); state.pagePlan = state.pagePlanHistory.pop(); renderPagePlan(); } return; }
+            if (closest('[data-pdf-plan-redo]')) { if (state.pagePlanFuture.length) { state.pagePlanHistory.push(clonePagePlan(state.pagePlan)); state.pagePlan = state.pagePlanFuture.pop(); renderPagePlan(); } return; }
+            if (closest('[data-pdf-plan-blank]')) return void updatePagePlan(plan => plan.push({ blank: true, sourcePage: 0, rotation: 0 }));
+            if (closest('[data-pdf-plan-apply]')) return void applyPagePlan().catch(error => toast(error.message || '页面编排创建失败。', 'error'));
+            const move = closest('[data-pdf-plan-move]'); if (move) return void updatePagePlan(plan => { const index = Number(move.dataset.pdfPlanIndex); const target = move.dataset.pdfPlanMove === 'up' ? index - 1 : index + 1; if (Number.isInteger(index) && target >= 0 && Boolean(plan[target])) [plan[index], plan[target]] = [plan[target], plan[index]]; });
+            const rotatePlan = closest('[data-pdf-plan-rotate]'); if (rotatePlan) return void updatePagePlan(plan => { const item = plan[Number(rotatePlan.dataset.pdfPlanIndex)]; if (item) item.rotation = (Number(item.rotation || 0) + 90) % 360; });
+            const deletePlan = closest('[data-pdf-plan-delete]'); if (deletePlan) return void updatePagePlan(plan => { const index = Number(deletePlan.dataset.pdfPlanIndex); if (plan.length > 1 && Number.isInteger(index)) plan.splice(index, 1); else toast('页面编排不能删除为零页。', 'warning'); });
             if (closest('#pdf-refresh-btn')) return void loadJobs({ keepActive: true }).catch(error => toast(error.message, 'error'));
             const output = closest('[data-pdf-output-download]'); if (output) return void downloadOutput(output.dataset.pdfOutputDownload, output.dataset.outputName).catch(error => toast(error.message, 'error'));
             const dispatch = closest('[data-pdf-output-dispatch]'); if (dispatch) return void dispatchOutput(dispatch.dataset.pdfOutputDispatch, dispatch.dataset.pdfDispatchTarget).catch(error => toast(error.message, 'error'));

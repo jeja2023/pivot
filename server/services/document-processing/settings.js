@@ -91,8 +91,42 @@ function normalizeConfig(config = {}) {
     const validPositions = new Set(['top-left', 'top-center', 'top-right', 'center', 'bottom-left', 'bottom-center', 'bottom-right']);
     const watermarkPosition = validPositions.has(String(safe.watermarkPosition || '').toLowerCase()) ? String(safe.watermarkPosition).toLowerCase() : 'center';
     const pageNumberPosition = validPositions.has(String(safe.pageNumberPosition || '').toLowerCase()) ? String(safe.pageNumberPosition).toLowerCase() : 'bottom-center';
+    const asObject = (value, fallback = {}) => {
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+        if (typeof value === 'string' && value.length <= 200_000) return parseJson(value, fallback);
+        return fallback;
+    };
+    const asArray = (value, limit = 100) => {
+        const source = Array.isArray(value) ? value : (typeof value === 'string' && value.length <= 200_000 ? parseJson(value, []) : []);
+        return Array.isArray(source) ? source.slice(0, limit) : [];
+    };
+    const redactRegions = asArray(safe.redactRegions, 100).map(region => ({
+        page: Math.max(1, Math.min(Number.parseInt(region?.page, 10) || 1, 300)),
+        x: Math.max(0, Math.min(Number(region?.x || 0), 1)),
+        y: Math.max(0, Math.min(Number(region?.y || 0), 1)),
+        width: Math.max(0, Math.min(Number(region?.width || 0), 1)),
+        height: Math.max(0, Math.min(Number(region?.height || 0), 1)),
+        label: String(region?.label || '').slice(0, 80)
+    })).filter(region => region.width > 0 && region.height > 0);
+    const annotations = asArray(safe.annotations, 100).map(annotation => ({
+        page: Math.max(1, Math.min(Number.parseInt(annotation?.page, 10) || 1, 300)),
+        type: ['highlight', 'note'].includes(String(annotation?.type || '').toLowerCase()) ? String(annotation.type).toLowerCase() : 'highlight',
+        x: Math.max(0, Math.min(Number(annotation?.x || 0), 1)),
+        y: Math.max(0, Math.min(Number(annotation?.y || 0), 1)),
+        width: Math.max(0, Math.min(Number(annotation?.width || 0), 1)),
+        height: Math.max(0, Math.min(Number(annotation?.height || 0), 1)),
+        content: String(annotation?.content || '').slice(0, 2000)
+    })).filter(annotation => annotation.width > 0 && annotation.height > 0);
+    const pagePlan = asArray(safe.pagePlan, 400).map(item => ({
+        sourcePage: Math.max(0, Math.min(Number.parseInt(item?.sourcePage, 10) || 0, 300)),
+        rotation: [0, 90, 180, 270].includes(Number(item?.rotation)) ? Number(item.rotation) : 0,
+        blank: Boolean(item?.blank),
+        width: Math.min(Math.max(Number(item?.width || 0), 0), 2000),
+        height: Math.min(Math.max(Number(item?.height || 0), 0), 2000)
+    })).filter(item => item.blank || item.sourcePage > 0);
+    const outputPermissions = asObject(safe.outputPermissions, {});
     return {
-        configVersion: 2,
+        configVersion: 3,
         language: String(safe.language || safe.lang || 'ch').slice(0, 24),
         engine: normalizeEngine(safe.engine || defaults.engine || 'http'),
         dpi: Math.min(Math.max(Number.parseInt(safe.dpi, 10) || 220, 72), 600),
@@ -131,6 +165,24 @@ function normalizeConfig(config = {}) {
         imageFit: String(safe.imageFit || '').toLowerCase() === 'cover' ? 'cover' : 'contain',
         imageDpi: Math.min(Math.max(Number.parseInt(safe.imageDpi, 10) || 220, 72), 600),
         pageMargin: Math.min(Math.max(Number(safe.pageMargin || 24), 0), 200),
+        compressionMode: ['structure', 'images'].includes(String(safe.compressionMode || '').toLowerCase()) ? String(safe.compressionMode).toLowerCase() : 'structure',
+        compressionJpegQuality: Math.min(Math.max(Number.parseInt(safe.compressionJpegQuality, 10) || 75, 1), 100),
+        redactRegions,
+        annotations,
+        formValues: asObject(safe.formValues, {}),
+        pdfaProfile: ['0', '1a', '1b', '2a', '2b', '2u', '3a', '3b', '3u', '4', '4e', '4f'].includes(String(safe.pdfaProfile || '0').toLowerCase()) ? String(safe.pdfaProfile || '0').toLowerCase() : '0',
+        compareDpi: Math.min(Math.max(Number.parseInt(safe.compareDpi, 10) || 144, 72), 300),
+        replaceText: asArray(safe.replaceText, 50).map(item => ({
+            find: String(item?.find || '').slice(0, 200),
+            replace: String(item?.replace || '').slice(0, 200)
+        })).filter(item => item.find),
+        pagePlan,
+        outputPermissions: {
+            print: outputPermissions.print !== false,
+            modify: outputPermissions.modify !== false
+        },
+        requiresOutputPassword: Boolean(String(safe.outputPassword || '').trim() || safe.requiresOutputPassword),
+        requiresOwnerPassword: Boolean(String(safe.ownerPassword || '').trim() || safe.requiresOwnerPassword),
         sourceFileIds: Array.isArray(safe.sourceFileIds)
             ? safe.sourceFileIds.map(id => Number.parseInt(id, 10)).filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 50)
             : []
@@ -142,6 +194,9 @@ function publicConfig(config) {
     delete safe.password;
     delete safe.secretRef;
     delete safe.secret_ref;
+    delete safe.outputPassword;
+    delete safe.ownerPassword;
+    delete safe.certificatePassword;
     return safe;
 }
 

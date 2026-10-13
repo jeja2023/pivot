@@ -7,7 +7,7 @@ const {
     dispatchPdfJobResult,
     getPdfToolCapabilities,
     getJobDetail,
-    getJobOutputsArchive,
+    getJobOutputsArchiveStream,
     getOutputDownload,
     getPageImage,
     listJobs,
@@ -49,8 +49,24 @@ function readPdfToolConfig(body = {}) {
         pageSize: body.pageSize,
         imageFit: body.imageFit,
         imageDpi: body.imageDpi,
-        pageMargin: body.pageMargin
+        pageMargin: body.pageMargin,
+        compressionMode: body.compressionMode,
+        compressionJpegQuality: body.compressionJpegQuality,
+        outputPassword: body.outputPassword,
+        ownerPassword: body.ownerPassword,
+        outputPermissions: body.outputPermissions,
+        redactRegions: body.redactRegions,
+        annotations: body.annotations,
+        formValues: body.formValues,
+        pdfaProfile: body.pdfaProfile,
+        compareDpi: body.compareDpi,
+        replaceText: body.replaceText,
+        pagePlan: body.pagePlan
     };
+}
+
+function definedPdfToolConfig(config = {}) {
+    return Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined));
 }
 
 function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
@@ -99,13 +115,16 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
     }));
 
     router.post('/jobs/:id/retry', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password });
+        const detail = await retryJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password, outputPassword: req.body?.outputPassword, ownerPassword: req.body?.ownerPassword });
         if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
         return res.json({ success: true, ...detail });
     }));
 
     router.post('/jobs/:id/reprocess', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await reprocessJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password });
+        const configPatch = req.body?.config && typeof req.body.config === 'object' && !Array.isArray(req.body.config)
+            ? req.body.config
+            : definedPdfToolConfig(readPdfToolConfig(req.body || {}));
+        const detail = await reprocessJob({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools', password: req.body?.password, outputPassword: req.body?.outputPassword, ownerPassword: req.body?.ownerPassword, configPatch });
         if (!detail) return res.status(404).json({ error: 'PDF 工具任务不存在' });
         logAction?.(req, 'PDF 工具再次处理', `来源任务: ${req.params.id}，新任务: ${detail.job.id}`);
         return res.json({ success: true, ...detail });
@@ -137,12 +156,15 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
     }));
 
     router.get('/jobs/:id/outputs/download', authMiddleware, asyncHandler(async (req, res) => {
-        const archive = await getJobOutputsArchive({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
+        const archive = await getJobOutputsArchiveStream({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
         if (!archive) return res.status(404).json({ error: 'PDF 工具输出不存在或已过期' });
         res.setHeader('Content-Type', archive.mimeType);
-        res.setHeader('Content-Length', archive.buffer.length);
         res.attachment(archive.fileName);
-        return res.send(archive.buffer);
+        archive.stream.once('error', error => {
+            if (!res.headersSent) res.status(500).json({ error: '归档流生成失败' });
+            else res.destroy(error);
+        });
+        return archive.stream.pipe(res);
     }));
 
     router.get('/outputs/:id/download', authMiddleware, asyncHandler(async (req, res) => {

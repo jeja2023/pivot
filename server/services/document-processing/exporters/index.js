@@ -35,6 +35,7 @@ function outputTypeMeta(type) {
     if (type === OUTPUT_TYPES.JSON) return { extension: '.json', mimeType: 'application/json; charset=utf-8' };
     if (type === OUTPUT_TYPES.HTML) return { extension: '.html', mimeType: 'text/html; charset=utf-8' };
     if (type === OUTPUT_TYPES.DOCX) return { extension: '.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+    if (type === OUTPUT_TYPES.XLSX) return { extension: '.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
     if (type === OUTPUT_TYPES.SEARCHABLE_PDF) return { extension: '.pdf', mimeType: 'application/pdf' };
     return { extension: '.txt', mimeType: 'text/plain; charset=utf-8' };
 }

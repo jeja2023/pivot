@@ -21,6 +21,7 @@ const OUTPUT_TYPES = Object.freeze({
     JSON: 'json',
     HTML: 'html',
     DOCX: 'docx',
+    XLSX: 'xlsx',
     SEARCHABLE_PDF: 'searchable_pdf'
 });
 

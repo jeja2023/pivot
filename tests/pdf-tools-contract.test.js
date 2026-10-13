@@ -42,8 +42,12 @@ test('PDF 产品升级包含隔离凭据、严格校验和工作区接线', () =
     assert.match(jobs, /document_job_items/);
     assert.match(validation, /INVALID_PAGE_ORDER/);
     assert.match(validation, /UNSUPPORTED_INPUT_COUNT/);
+    assert.match(validation, /PAGE_PLAN/);
+    assert.match(validation, /PDFA_VALIDATE/);
     assert.match(client, /pdf-preset-select/);
     assert.match(client, /pdf-page-preview-panel/);
+    assert.match(client, /pdf-page-plan-panel/);
+    assert.match(client, /pdf-redact-regions/);
     assert.match(client, /data-pdf-output-dispatch/);
     ['document_job_items', 'document_job_secrets', 'document_artifact_refs'].forEach(table => assert.match(migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`)));
 });

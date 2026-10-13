@@ -14,7 +14,16 @@ const PDF_TOOL_OPERATIONS = Object.freeze({
     PAGE_NUMBERS: 'page_numbers',
     CROP: 'crop',
     INSERT_BLANK: 'insert_blank',
-    COMPRESS: 'compress'
+    COMPRESS: 'compress',
+    PROTECT: 'protect',
+    COMPARE: 'compare',
+    REDACT: 'redact',
+    FILL_FORM: 'fill_form',
+    ANNOTATE: 'annotate',
+    PDFA_VALIDATE: 'pdfa_validate',
+    EXPORT_DOCX: 'export_docx',
+    EXPORT_XLSX: 'export_xlsx'
+    ,PAGE_PLAN: 'page_plan'
 });
 
 const OPERATION_ALIASES = Object.freeze({
@@ -23,7 +32,16 @@ const OPERATION_ALIASES = Object.freeze({
     'images-to-pdf': PDF_TOOL_OPERATIONS.IMAGES_TO_PDF,
     'pdf-to-images': PDF_TOOL_OPERATIONS.PDF_TO_IMAGES,
     page_numbers: PDF_TOOL_OPERATIONS.PAGE_NUMBERS,
-    page_number: PDF_TOOL_OPERATIONS.PAGE_NUMBERS
+    page_number: PDF_TOOL_OPERATIONS.PAGE_NUMBERS,
+    protect_pdf: PDF_TOOL_OPERATIONS.PROTECT,
+    compare_pdf: PDF_TOOL_OPERATIONS.COMPARE,
+    redact_pdf: PDF_TOOL_OPERATIONS.REDACT,
+    fill_form: PDF_TOOL_OPERATIONS.FILL_FORM,
+    pdfa: PDF_TOOL_OPERATIONS.PDFA_VALIDATE,
+    pdf_a_validate: PDF_TOOL_OPERATIONS.PDFA_VALIDATE,
+    pdf_to_word: PDF_TOOL_OPERATIONS.EXPORT_DOCX,
+    pdf_to_excel: PDF_TOOL_OPERATIONS.EXPORT_XLSX
+    ,organize_pages: PDF_TOOL_OPERATIONS.PAGE_PLAN
 });
 
 const PDF_OPERATION_META = Object.freeze({
@@ -40,7 +58,16 @@ const PDF_OPERATION_META = Object.freeze({
     [PDF_TOOL_OPERATIONS.PAGE_NUMBERS]: { label: '添加页码', inputMode: 'single-or-batch', accept: 'pdf', supportsPages: true, supportsPageNumbers: true },
     [PDF_TOOL_OPERATIONS.CROP]: { label: '裁切页面', inputMode: 'single-or-batch', accept: 'pdf', supportsPages: true, supportsCrop: true },
     [PDF_TOOL_OPERATIONS.INSERT_BLANK]: { label: '插入空白页', inputMode: 'single-or-batch', accept: 'pdf', supportsBlankPage: true },
-    [PDF_TOOL_OPERATIONS.COMPRESS]: { label: '优化 PDF', inputMode: 'single-or-batch', accept: 'pdf', supportsCompression: true }
+    [PDF_TOOL_OPERATIONS.COMPRESS]: { label: '优化 PDF', inputMode: 'single-or-batch', accept: 'pdf', supportsCompression: true },
+    [PDF_TOOL_OPERATIONS.PROTECT]: { label: '加密保护 PDF', inputMode: 'single', accept: 'pdf', requiresQpdf: true, supportsProtection: true },
+    [PDF_TOOL_OPERATIONS.COMPARE]: { label: '比较两个 PDF', inputMode: 'exact-two', accept: 'pdf', supportsCompare: true },
+    [PDF_TOOL_OPERATIONS.REDACT]: { label: '永久脱敏（栅格化）', inputMode: 'single-or-batch', accept: 'pdf', supportsRedaction: true },
+    [PDF_TOOL_OPERATIONS.FILL_FORM]: { label: '填写 PDF 表单', inputMode: 'single-or-batch', accept: 'pdf', supportsFormFill: true },
+    [PDF_TOOL_OPERATIONS.ANNOTATE]: { label: '添加轻批注', inputMode: 'single-or-batch', accept: 'pdf', supportsAnnotations: true },
+    [PDF_TOOL_OPERATIONS.PDFA_VALIDATE]: { label: '验证 PDF/A', inputMode: 'single', accept: 'pdf', requiresVeraPdf: true, supportsPdfa: true },
+    [PDF_TOOL_OPERATIONS.EXPORT_DOCX]: { label: '导出可复核 Word', inputMode: 'single-or-batch', accept: 'pdf', supportsDocxExport: true },
+    [PDF_TOOL_OPERATIONS.EXPORT_XLSX]: { label: '导出可复核 Excel', inputMode: 'single-or-batch', accept: 'pdf', supportsXlsxExport: true }
+    ,[PDF_TOOL_OPERATIONS.PAGE_PLAN]: { label: '页面工作区编排', inputMode: 'single', accept: 'pdf', supportsPagePlan: true }
 });
 
 function operationError(message, code = 'INVALID_OPERATION') {
@@ -140,6 +167,9 @@ function assertPdfInputFiles({ operation, files = [], mode = '' } = {}) {
     }
     if (meta.inputMode === 'single' && list.length !== 1) {
         throw operationError(`${meta.label}一次只能处理一个文件。`, 'UNSUPPORTED_INPUT_COUNT');
+    }
+    if (meta.inputMode === 'exact-two' && list.length !== 2) {
+        throw operationError(`${meta.label}需要且只能选择两份 PDF。`, 'UNSUPPORTED_INPUT_COUNT');
     }
     if (meta.inputMode === 'single-or-batch' && list.length > 1 && !isBatch) {
         throw operationError(`${meta.label}默认一次只能处理一个文件；如需分别处理多份文件，请选择“批量分别处理”。`, 'UNSUPPORTED_INPUT_COUNT');

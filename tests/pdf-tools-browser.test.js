@@ -52,6 +52,8 @@ async function createPdfPage(browser) {
                     { id: 'page_numbers', label: '添加页码', inputMode: 'single-or-batch', supportsPages: true, supportsPageNumbers: true },
                     { id: 'crop', label: '裁切页面', inputMode: 'single-or-batch', supportsPages: true, supportsCrop: true },
                     { id: 'insert_blank', label: '插入空白页', inputMode: 'single-or-batch', supportsBlankPage: true }
+                    ,{ id: 'redact', label: '永久脱敏（栅格化）', inputMode: 'single-or-batch', supportsRedaction: true }
+                    ,{ id: 'page_plan', label: '页面工作区编排', inputMode: 'single', supportsPagePlan: true }
                 ],
                 presets: [{ id: 'internal-watermark', label: '内部材料水印', operation: 'watermark', config: { watermarkText: '内部资料', watermarkOpacity: 0.18 } }],
                 engines: { cjkFont: { available: true, message: '字体可用' } }
@@ -84,12 +86,21 @@ test('PDF 工具浏览器工作区呈现排队状态、扩展操作和结果详�
         await expect(page.locator('[data-pdf-option="crop"]')).toBeVisible();
         await page.locator('#pdf-operation-select').selectOption('insert_blank');
         await expect(page.locator('[data-pdf-option="blank"]')).toBeVisible();
+        await page.locator('#pdf-operation-select').selectOption('redact');
+        await expect(page.locator('[data-pdf-option="redaction"]')).toBeVisible();
         await page.evaluate(detail => { window.pdfFixtureDetail = detail; }, fixtureDetail());
         await page.locator('[data-pdf-job-open="101"]').click();
         await expect(page.locator('#pdf-detail-panel')).toBeVisible();
         await expect(page.locator('#pdf-detail')).toContainText('文件预检');
         await expect(page.locator('#pdf-detail')).toContainText('批量结果');
         await expect(page.locator('[data-pdf-output-dispatch="301"]')).toHaveCount(2);
+        await page.locator('[data-pdf-open-page-plan]').click();
+        await expect(page.locator('#pdf-page-plan-panel')).toBeVisible();
+        await expect(page.locator('#pdf-page-plan-list')).toContainText('源页 1');
+        await page.locator('[data-pdf-plan-blank]').click();
+        await expect(page.locator('#pdf-page-plan-list')).toContainText('空白页');
+        await page.locator('[data-pdf-plan-undo]').click();
+        await expect(page.locator('#pdf-page-plan-list')).not.toContainText('空白页');
         await page.locator('[data-pdf-page-preview="11"]').click();
         await expect(page.locator('#pdf-page-preview-panel')).toBeVisible();
         assert.equal(await page.locator('#pdf-page-preview-image').getAttribute('src'), '/api/apps/pdf-tools/pages/11/image');

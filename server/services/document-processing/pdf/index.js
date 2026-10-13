@@ -4,6 +4,8 @@ const path = require('path');
 const sharp = require('sharp');
 const {
     PDFDocument,
+    PDFArray,
+    PDFName,
     degrees,
     rgb,
     TextRenderingMode,
@@ -30,6 +32,9 @@ const {
     parsePageSelection,
     requirePdfOperation
 } = require('./validation');
+const { decryptPdfToBuffer, getQpdfHealth, isPdfEncrypted, optimizePdf } = require('./engines/qpdf');
+const { getVeraPdfHealth } = require('./engines/verapdf');
+const { createAdvancedPdfOperations } = require('./operations/advanced');
 
 const MAX_PDF_BUFFER_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_MAX_BUFFER_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
 const MAX_IMAGE_PIXELS = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_MAX_IMAGE_PIXELS || String(80 * 1024 * 1024), 10) || 80 * 1024 * 1024, 1_000_000), 250 * 1024 * 1024);
@@ -85,18 +90,35 @@ async function requireImageFile(file) {
 }
 
 function normalizePdfLoadError(error) {
+    if (error?.code) return error;
     const text = String(error?.message || error || '');
-    if (/encrypted|password/i.test(text)) return pdfError('当前 PDF 结构处理暂不支持加密文件。请先使用授权工具解除保护后再处理。', 'PDF_ENCRYPTION_UNSUPPORTED');
+    if (/encrypted|password/i.test(text)) {
+        const qpdf = getQpdfHealth();
+        return qpdf.available
+            ? pdfError('该 PDF 已加密，请提供授权密码后重试。', 'PDF_PASSWORD_REQUIRED')
+            : pdfError('当前 PDF 结构处理暂不支持加密文件。请先使用授权工具解除保护后再处理。', 'PDF_ENCRYPTION_UNSUPPORTED');
+    }
     return error;
 }
 
-async function loadPdf(file) {
+async function loadPdf(file, { password = '', userId = 0 } = {}) {
     const filePath = await requirePdfFile(file);
     try {
         return await PDFDocument.load(await readBoundedBinary(filePath));
     } catch (error) {
+        if (/encrypted|password/i.test(String(error?.message || error || '')) && password) {
+            try {
+                return await PDFDocument.load(await decryptPdfToBuffer({ sourcePath: filePath, password, userId }));
+            } catch (decryptionError) {
+                throw normalizePdfLoadError(decryptionError);
+            }
+        }
         throw normalizePdfLoadError(error);
     }
+}
+
+function pdfLoadOptions(job, config = {}) {
+    return { password: String(config.password || ''), userId: job?.user_id || 0 };
 }
 
 async function ensureNotCancelled(isCancelled) {
@@ -135,7 +157,7 @@ async function savePdfOutput({ pdf, job, file, suffix, outputType, quality = {} 
 }
 
 async function splitPdf({ job, file, config, onProgress, isCancelled }) {
-    const source = await loadPdf(file);
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
     const { indexes } = getSelectedIndexes(source, config);
     const outputs = [];
     for (let i = 0; i < indexes.length; i += 1) {
@@ -162,7 +184,7 @@ async function mergePdf({ job, file, files, config, onProgress, isCancelled }) {
     let copiedPages = 0;
     for (let i = 0; i < pdfFiles.length; i += 1) {
         await ensureNotCancelled(isCancelled);
-        const source = await loadPdf(pdfFiles[i]);
+        const source = await loadPdf(pdfFiles[i], pdfLoadOptions(job, config));
         const count = source.getPageCount();
         assertPdfPageCount(copiedPages + count, config.maxToolPages);
         const copied = await target.copyPages(source, Array.from({ length: count }, (_item, index) => index));
@@ -180,7 +202,7 @@ async function mergePdf({ job, file, files, config, onProgress, isCancelled }) {
 }
 
 async function rotatePdf({ job, file, config, onProgress, isCancelled }) {
-    const source = await loadPdf(file);
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
     const { pageCount, indexes } = getSelectedIndexes(source, config);
     const selected = new Set(indexes);
     assertPdfPageCount(pageCount, config.maxToolPages);
@@ -206,7 +228,7 @@ async function rotatePdf({ job, file, config, onProgress, isCancelled }) {
 }
 
 async function deletePdfPages({ job, file, config, onProgress, isCancelled }) {
-    const source = await loadPdf(file);
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
     const { pageCount, indexes } = getSelectedIndexes(source, config, { defaultAll: false });
     if (!indexes.length) throw pdfError('请填写需要删除的页码范围。', 'INVALID_PAGE_RANGE');
     const selected = new Set(indexes);
@@ -228,7 +250,7 @@ async function deletePdfPages({ job, file, config, onProgress, isCancelled }) {
 }
 
 async function reorderPdf({ job, file, config, onProgress, isCancelled }) {
-    const source = await loadPdf(file);
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
     const order = parsePageOrder(config.pageOrder || config.pages, source.getPageCount(), { limit: config.maxToolPages });
     await ensureNotCancelled(isCancelled);
     const target = await PDFDocument.create();
@@ -240,6 +262,53 @@ async function reorderPdf({ job, file, config, onProgress, isCancelled }) {
         processedFiles: 1,
         processedPages: copied.length,
         requestedPages: copied.length
+    };
+}
+
+async function applyPagePlan({ job, file, config, onProgress, isCancelled }) {
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
+    const sourceCount = source.getPageCount();
+    const plan = Array.isArray(config.pagePlan) ? config.pagePlan : [];
+    if (!plan.length) throw pdfError('页面工作区未提交可执行的页面编排。', 'PAGE_PLAN_REQUIRED');
+    assertPdfPageCount(plan.length, config.maxToolPages);
+    const target = await PDFDocument.create();
+    const changes = { copied: 0, rotated: 0, blanks: 0 };
+    for (let index = 0; index < plan.length; index += 1) {
+        await ensureNotCancelled(isCancelled);
+        const item = plan[index];
+        if (item.blank) {
+            const previous = index > 0 ? plan[index - 1] : null;
+            let size = PAPER_SIZES.a4;
+            if (previous?.sourcePage > 0 && previous.sourcePage <= sourceCount) {
+                const reference = source.getPage(previous.sourcePage - 1);
+                size = [reference.getWidth(), reference.getHeight()];
+            } else if (item.width > 0 && item.height > 0) {
+                size = [item.width, item.height];
+            }
+            target.addPage(size);
+            changes.blanks += 1;
+        } else {
+            const pageNumber = Number(item.sourcePage || 0);
+            if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > sourceCount) {
+                throw pdfError(`页面工作区包含无效的源页码 ${pageNumber}。`, 'INVALID_PAGE_PLAN');
+            }
+            const [copied] = await target.copyPages(source, [pageNumber - 1]);
+            const rotation = Number(item.rotation || 0);
+            if (rotation) {
+                const current = copied.getRotation().angle || 0;
+                copied.setRotation(degrees((current + rotation) % 360));
+                changes.rotated += 1;
+            }
+            target.addPage(copied);
+            changes.copied += 1;
+        }
+        await onProgress?.(15 + Math.floor(((index + 1) / plan.length) * 75), { processedPages: index + 1, requestedPages: plan.length });
+    }
+    return {
+        outputs: [await savePdfOutput({ pdf: target, job, file, suffix: '页面编排结果', outputType: 'page_plan_pdf', quality: { complete: true, pagePlan: plan, changes } })],
+        processedFiles: 1,
+        processedPages: plan.length,
+        requestedPages: plan.length
     };
 }
 
@@ -264,7 +333,7 @@ async function extractPdfTextOutput({ job, file }) {
 
 async function pdfToImages({ job, file, config, onProgress, isCancelled }) {
     const filePath = await requirePdfFile(file);
-    const source = await loadPdf(file);
+    const source = await loadPdf(file, pdfLoadOptions(job, config));
     const { indexes } = getSelectedIndexes(source, config);
     const selected = indexes.map(index => index + 1);
     const dpi = Math.min(Math.max(Number.parseInt(config.dpi, 10) || 220, 72), 600);
@@ -373,7 +442,7 @@ function textPosition(page, text, font, size, position = 'center', margin = 36) 
 }
 
 async function watermarkPdf({ job, file, config, onProgress, isCancelled }) {
-    const pdf = await loadPdf(file);
+    const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     const { pageCount, indexes } = getSelectedIndexes(pdf, config);
     const font = await getCjkFont(pdf);
     const text = String(config.watermarkText || '机密').trim().slice(0, 120);
@@ -399,7 +468,7 @@ async function watermarkPdf({ job, file, config, onProgress, isCancelled }) {
 }
 
 async function pageNumbersPdf({ job, file, config, onProgress, isCancelled }) {
-    const pdf = await loadPdf(file);
+    const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     const { pageCount, indexes } = getSelectedIndexes(pdf, config);
     const font = await getCjkFont(pdf);
     const selected = new Set(indexes);
@@ -442,7 +511,7 @@ function cropBoxFromConfig(page, config) {
 }
 
 async function cropPdf({ job, file, config, onProgress, isCancelled }) {
-    const pdf = await loadPdf(file);
+    const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     const { pageCount, indexes } = getSelectedIndexes(pdf, config);
     const selected = new Set(indexes);
     for (let index = 0; index < pageCount; index += 1) {
@@ -462,7 +531,7 @@ async function cropPdf({ job, file, config, onProgress, isCancelled }) {
 }
 
 async function insertBlankPdf({ job, file, config, onProgress, isCancelled }) {
-    const pdf = await loadPdf(file);
+    const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     const originalCount = pdf.getPageCount();
     assertPdfPageCount(originalCount, config.maxToolPages);
     const count = Math.min(Math.max(Number.parseInt(config.blankPageCount, 10) || 1, 1), 20);
@@ -486,10 +555,19 @@ async function insertBlankPdf({ job, file, config, onProgress, isCancelled }) {
 async function compressPdf({ job, file, config, onProgress, isCancelled }) {
     const sourcePath = await requirePdfFile(file);
     const sourceBytes = await readBoundedBinary(sourcePath);
-    const pdf = await loadPdf(file);
+    const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     assertPdfPageCount(pdf.getPageCount(), config.maxToolPages);
     await ensureNotCancelled(isCancelled);
-    const bytes = await pdf.save({ useObjectStreams: true, updateFieldAppearances: false, objectsPerTick: 50 });
+    const qpdf = getQpdfHealth();
+    const bytes = qpdf.available
+        ? await optimizePdf({
+            sourcePath,
+            userId: job.user_id,
+            password: config.password,
+            optimizeImages: config.compressionMode === 'images',
+            jpegQuality: config.compressionJpegQuality
+        })
+        : await pdf.save({ useObjectStreams: true, updateFieldAppearances: false, objectsPerTick: 50 });
     const output = await writeBinaryOutput({
         userId: job.user_id,
         fileId: file.id,
@@ -505,7 +583,12 @@ async function compressPdf({ job, file, config, onProgress, isCancelled }) {
             outputBytes: bytes.length,
             savedBytes: Math.max(sourceBytes.length - bytes.length, 0),
             savedRatio: sourceBytes.length ? Math.max(0, (sourceBytes.length - bytes.length) / sourceBytes.length) : 0,
-            notice: bytes.length >= sourceBytes.length ? '本次结构优化未减少文件体积，已保留独立输出供核对。' : ''
+            engine: qpdf.available ? qpdf.version : 'pdf-lib fallback',
+            compressionMode: config.compressionMode || 'structure',
+            jpegQuality: config.compressionMode === 'images' ? config.compressionJpegQuality : null,
+            notice: bytes.length >= sourceBytes.length
+                ? '本次优化未减少文件体积，已保留独立输出供核对。'
+                : (qpdf.available ? '' : '部署未安装 qpdf，已使用基础结构保存；未执行 qpdf 图像优化。')
         }
     });
     await onProgress?.(90, { processedPages: pdf.getPageCount(), requestedPages: pdf.getPageCount() });
@@ -606,7 +689,31 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
     });
 }
 
-async function preflightPdfFile(file, { maxPages = 300 } = {}) {
+function inspectPdfStructure(pdf) {
+    let fieldCount = 0;
+    let signatureFieldCount = 0;
+    let annotationCount = 0;
+    try {
+        const fields = pdf.getForm().getFields();
+        fieldCount = fields.length;
+        signatureFieldCount = fields.filter(field => /signature/i.test(field.constructor?.name || '')).length;
+    } catch (_error) { /* no AcroForm */ }
+    try {
+        annotationCount = pdf.getPages().reduce((total, page) => total + (page.node.lookupMaybe(PDFName.of('Annots'), PDFArray)?.size?.() || 0), 0);
+    } catch (_error) { /* informational only */ }
+    return {
+        forms: fieldCount > 0,
+        formFieldCount: fieldCount,
+        signatures: signatureFieldCount > 0,
+        signatureFieldCount,
+        annotations: annotationCount > 0,
+        annotationCount,
+        bookmarks: Boolean(pdf.catalog.get(PDFName.of('Outlines'))),
+        attachments: Boolean(pdf.catalog.get(PDFName.of('Names')))
+    };
+}
+
+async function preflightPdfFile(file, { maxPages = 300, password = '', userId = 0 } = {}) {
     const summary = {
         fileId: file?.id || null,
         originalName: file?.original_name || file?.originalName || '',
@@ -614,16 +721,31 @@ async function preflightPdfFile(file, { maxPages = 300 } = {}) {
         supported: false,
         pageCount: 0,
         warnings: [],
-        capabilities: { structural: true, encryptedStructural: false }
+        capabilities: { structural: true, encryptedStructural: getQpdfHealth().available },
+        encrypted: false,
+        requiresPassword: false,
+        structure: null
     };
     try {
         if (summary.kind === 'pdf') {
-            const pdf = await loadPdf(file);
+            const sourcePath = await requirePdfFile(file);
+            summary.encrypted = Boolean(isPdfEncrypted(sourcePath));
+            summary.requiresPassword = summary.encrypted && !password;
+            if (summary.requiresPassword) {
+                summary.supported = false;
+                summary.code = getQpdfHealth().available ? 'PDF_PASSWORD_REQUIRED' : 'PDF_ENCRYPTION_UNSUPPORTED';
+                summary.warnings.push(getQpdfHealth().available ? '该文件已加密，提交授权密码后可进行预检和处理。' : '该文件已加密，当前部署未安装 qpdf，无法进行结构处理。');
+                return summary;
+            }
+            const pdf = await loadPdf(file, { password, userId });
             summary.pageCount = pdf.getPageCount();
             summary.supported = summary.pageCount > 0 && summary.pageCount <= normalizePageLimit(maxPages);
             if (summary.pageCount > normalizePageLimit(maxPages)) summary.warnings.push(`文件共 ${summary.pageCount} 页，超过当前单次 ${normalizePageLimit(maxPages)} 页限制。`);
             const first = pdf.getPage(0);
             summary.pageSize = { width: first.getWidth(), height: first.getHeight(), unit: 'pt' };
+            summary.structure = inspectPdfStructure(pdf);
+            if (summary.structure.signatures) summary.warnings.push('检测到签名字段。对页面或内容做任何改写都会使现有数字签名失效。');
+            if (summary.structure.forms) summary.warnings.push(`检测到 ${summary.structure.formFieldCount} 个表单字段。结构编辑前请确认交互行为。`);
         } else if (summary.kind === 'image') {
             const filePath = await requireImageFile(file);
             const image = await sharp(filePath).metadata();
@@ -653,23 +775,48 @@ async function getPdfPageMetrics(file) {
 
 function getPdfToolCapabilities() {
     const font = verifyCjkFont();
+    const qpdf = getQpdfHealth();
+    const verapdf = getVeraPdfHealth();
     return {
-        operations: Object.entries(PDF_OPERATION_META).map(([id, meta]) => ({ id, ...meta })),
+        operations: Object.entries(PDF_OPERATION_META).map(([id, meta]) => ({
+            id,
+            ...meta,
+            available: !(meta.requiresQpdf && !qpdf.available) && !(meta.requiresVeraPdf && !verapdf.available),
+            unavailableReason: meta.requiresQpdf && !qpdf.available
+                ? '当前部署未安装 qpdf。'
+                : (meta.requiresVeraPdf && !verapdf.available ? '当前部署未安装 veraPDF。' : '')
+        })),
         presets: [
             { id: 'merge-submission', label: '材料合并归档', operation: PDF_TOOL_OPERATIONS.MERGE, config: {} },
             { id: 'scan-searchable', label: '扫描件生成可搜索 PDF', operation: PDF_TOOL_OPERATIONS.SEARCHABLE_PDF, config: { dpi: 220, maxToolPages: 100 } },
             { id: 'internal-watermark', label: '内部材料水印', operation: PDF_TOOL_OPERATIONS.WATERMARK, config: { watermarkText: '内部资料', watermarkPosition: 'center', watermarkOpacity: 0.18, watermarkRotate: -45 } },
             { id: 'formal-page-numbers', label: '正式材料页码', operation: PDF_TOOL_OPERATIONS.PAGE_NUMBERS, config: { pageNumberPosition: 'bottom-center', pageNumberStart: 1, skipCover: true } },
-            { id: 'archive-optimize', label: '归档前结构优化', operation: PDF_TOOL_OPERATIONS.COMPRESS, config: {} }
+            { id: 'archive-optimize', label: '归档前结构优化', operation: PDF_TOOL_OPERATIONS.COMPRESS, config: { compressionMode: 'structure' } },
+            { id: 'secure-redaction', label: '永久脱敏（栅格化）', operation: PDF_TOOL_OPERATIONS.REDACT, config: {} }
         ],
         limits: { maxFiles: 20, maxPages: 300, maxImagePixels: MAX_IMAGE_PIXELS, maxBufferBytes: MAX_PDF_BUFFER_BYTES },
         engines: {
-            structuralPdf: { available: true, encryptedInput: false, message: '加密 PDF 的结构处理当前不可用。' },
+            structuralPdf: { available: true, encryptedInput: qpdf.available, message: qpdf.available ? 'qpdf 已就绪，可处理授权密码的结构操作。' : '加密 PDF 的结构处理当前不可用。' },
+            qpdf: { available: qpdf.available, version: qpdf.version || '', message: qpdf.message || '' },
+            veraPdf: { available: verapdf.available, version: verapdf.version || '', message: verapdf.message || '' },
             cjkFont: { available: font.available, message: font.reason },
             ocr: { requiredForSearchablePdf: true }
         }
     };
 }
+
+const advancedOperations = createAdvancedPdfOperations({
+    assertPdfPageCount,
+    baseName,
+    ensureNotCancelled,
+    getCjkFont,
+    loadPdf,
+    pdfError,
+    pdfLoadOptions,
+    requirePdfFile,
+    savePdfOutput,
+    writeBinaryOutput
+});
 
 async function processPdfToolOperation({ job, file, files = [], config = {}, onProgress, isCancelled }) {
     const operation = requirePdfOperation(config.operation);
@@ -683,6 +830,7 @@ async function processPdfToolOperation({ job, file, files = [], config = {}, onP
     if (operation === PDF_TOOL_OPERATIONS.ROTATE) return { operation, ...(await rotatePdf(context)) };
     if (operation === PDF_TOOL_OPERATIONS.DELETE_PAGES) return { operation, ...(await deletePdfPages(context)) };
     if (operation === PDF_TOOL_OPERATIONS.REORDER) return { operation, ...(await reorderPdf(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.PAGE_PLAN) return { operation, ...(await applyPagePlan(context)) };
     if (operation === PDF_TOOL_OPERATIONS.PDF_TO_IMAGES) return { operation, ...(await pdfToImages(context)) };
     if (operation === PDF_TOOL_OPERATIONS.IMAGES_TO_PDF) return { operation, ...(await imagesToPdf(context)) };
     if (operation === PDF_TOOL_OPERATIONS.WATERMARK) return { operation, ...(await watermarkPdf(context)) };
@@ -690,6 +838,14 @@ async function processPdfToolOperation({ job, file, files = [], config = {}, onP
     if (operation === PDF_TOOL_OPERATIONS.CROP) return { operation, ...(await cropPdf(context)) };
     if (operation === PDF_TOOL_OPERATIONS.INSERT_BLANK) return { operation, ...(await insertBlankPdf(context)) };
     if (operation === PDF_TOOL_OPERATIONS.COMPRESS) return { operation, ...(await compressPdf(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.PROTECT) return { operation, ...(await advancedOperations.protectPdfOutput(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.REDACT) return { operation, ...(await advancedOperations.redactPdf(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.FILL_FORM) return { operation, ...(await advancedOperations.fillPdfForm(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.ANNOTATE) return { operation, ...(await advancedOperations.annotatePdf(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.PDFA_VALIDATE) return { operation, ...(await advancedOperations.validatePdfAOutput(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.EXPORT_DOCX) return { operation, ...(await advancedOperations.exportPdfDocx(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.EXPORT_XLSX) return { operation, ...(await advancedOperations.exportPdfXlsx(context)) };
+    if (operation === PDF_TOOL_OPERATIONS.COMPARE) return { operation, ...(await advancedOperations.comparePdf(context)) };
     if (operation === PDF_TOOL_OPERATIONS.SEARCHABLE_PDF) throw pdfError('可搜索 PDF 需要通过 OCR 处理链路生成。', 'OCR_REQUIRED', 409);
     return { operation, ...(await extractPdfTextOutput(context)) };
 }
