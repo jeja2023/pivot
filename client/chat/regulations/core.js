@@ -160,7 +160,14 @@
         function toast(message, type) { if (typeof showToast === 'function') showToast(message, type); }
 
         async function fetchJson(url, options = {}) {
-            const res = await apiFetch(url, options);
+            const requestOptions = { ...options };
+            if (requestOptions.body && typeof requestOptions.body === 'string' && !(requestOptions.body instanceof FormData)) {
+                requestOptions.headers = {
+                    'Content-Type': 'application/json',
+                    ...(requestOptions.headers || {})
+                };
+            }
+            const res = await apiFetch(url, requestOptions);
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data?.error?.message || data?.error || `请求失败（${res.status}）`);
             return data;

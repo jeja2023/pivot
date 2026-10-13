@@ -175,6 +175,7 @@
                         try {
                             const resp = await fetchJson(`${API}/category-folders`, {
                                 method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ name: trimmed, description: String(description || '').trim() })
                             });
                             toast(resp.message || '分类目录创建成功', 'success');

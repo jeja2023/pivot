@@ -110,8 +110,12 @@ function registerDocumentRoutes(router, deps) {
 
         router.post('/category-folders', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
-            const name = String(req.body?.name || '').trim();
-            const description = String(req.body?.description || '').trim();
+            let body = req.body;
+            if (typeof body === 'string') {
+                try { body = JSON.parse(body); } catch (_) {}
+            }
+            const name = String(body?.name || '').trim();
+            const description = String(body?.description || '').trim();
             const result = await createRegulationCategory({ name, description, userId: req.user.id });
             logAction(req, '法规查询创建分类目录', `分类：${name}`);
             res.status(201).json(result);
