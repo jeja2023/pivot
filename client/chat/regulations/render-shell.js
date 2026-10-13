@@ -53,12 +53,11 @@
                                         <button id="regulations-open-search-btn" class="btn-primary regulations-search-entry-btn" type="button">检索</button>
                                         <button id="regulations-ai-open-btn" class="btn-secondary regulations-ai-entry-btn" type="button">AI问答</button>
                                         <button id="regulations-bookmarks-btn" class="btn-secondary" type="button">我的收藏</button>
-                                        <button id="regulations-folders-btn" class="btn-secondary" type="button">分类目录</button>
+                                        <button id="regulations-folders-btn" class="btn-secondary is-active" type="button" aria-current="page">分类目录</button>
                                         <button id="regulations-refresh-btn" class="btn-secondary" type="button">刷新</button>
                                         ${canImport ? '<button id="regulations-open-upload-btn" class="btn-secondary" type="button">导入文档</button>' : ''}
                                         ${canBatch ? '<button id="regulations-quality-btn" class="btn-secondary" type="button">质量概览</button>' : ''}
                                         ${canDeleteDocuments() ? '<button id="regulations-recycle-bin-btn" class="btn-secondary" type="button">回收站</button>' : ''}
-                                        ${canBatch ? '<button id="regulations-batch-mode-btn" class="btn-secondary" type="button" aria-pressed="false">批量处理</button>' : ''}
                                     </div>
                                     ${canImport ? renderAdminPanel() : ''}
                                     ${renderRegulationDialogs()}

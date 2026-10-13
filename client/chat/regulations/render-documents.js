@@ -60,27 +60,61 @@
             function renderActiveFolderIndex() {
                 const target = document.getElementById('regulations-folder-index');
                 if (!target) return;
-                const folder = state.activeFolder;
-                if (state.libraryView !== 'documents' || !folder) {
+                if (state.libraryView !== 'documents') {
                     target.classList.add('hidden');
                     PivotSafeHtml.setHtml(target, '');
                     return;
                 }
                 target.classList.remove('hidden');
+                const folder = state.activeFolder;
+                const canBatch = canManage();
+                const folderTitle = folder ? folder.title : '全部法规';
+                const subTitle = folder ? '分类目录' : '文档目录';
+                const descText = folder
+                    ? '目录由当前数据库实时生成，可继续检索、批量治理或打开具体法规。'
+                    : '展示法规库内全部法规文档，可进行检索、批量治理或查看正文。';
+                const statsHtml = folder ? `
+                    <div class="regulations-folder-stats">
+                        <span>${Number(state.total || 0)} 份法规</span>
+                        <span>${Number(folder.articleCount || 0)} 条文</span>
+                        <span>已核验现行 ${Number(folder.effectiveCount || 0)}</span>
+                        <span>待治理 ${Number(folder.needsReviewCount || 0)}</span>
+                    </div>
+                ` : '';
                 PivotSafeHtml.setHtml(target, `
-                    <div class="regulations-folder-heading"><div><h3>${esc(folder.title)} · 分类目录</h3><p>目录由当前数据库实时生成，可继续检索、批量治理或打开具体法规。</p></div><button type="button" class="btn-secondary" data-regulation-folder-back>返回分类目录</button></div>
-                    <div class="regulations-folder-stats"><span>${Number(state.total || 0)} 份法规</span><span>${Number(folder.articleCount || 0)} 条文</span><span>已核验现行 ${Number(folder.effectiveCount || 0)}</span><span>待治理 ${Number(folder.needsReviewCount || 0)}</span></div>
+                    <div class="regulations-folder-heading">
+                        <div>
+                            <h3>${esc(folderTitle)} · ${subTitle}</h3>
+                            <p>${descText}</p>
+                        </div>
+                        <div class="regulations-folder-actions">
+                            ${canBatch ? `<button id="regulations-batch-mode-btn" class="btn-secondary" type="button" aria-pressed="${state.batchMode ? 'true' : 'false'}">${state.batchMode ? '退出批量处理' : '批量处理'}</button>` : ''}
+                            <button type="button" class="btn-secondary" data-regulation-folder-back>返回分类目录</button>
+                        </div>
+                    </div>
+                    ${statsHtml}
                 `);
             }
             function renderDocuments() {
-                        const target = document.getElementById('regulations-doc-list');
-                        if (!target) return;
-                        renderCategoryDirectory();
-                        renderActiveFolderIndex();
-                        if (state.libraryView === 'folders') {
-                            renderRegulationsSummary();
-                            return;
-                        }
+                const target = document.getElementById('regulations-doc-list');
+                if (!target) return;
+                renderCategoryDirectory();
+                renderActiveFolderIndex();
+                const foldersBtn = document.getElementById('regulations-folders-btn');
+                if (foldersBtn) {
+                    const isFolders = state.libraryView === 'folders';
+                    foldersBtn.classList.toggle('is-active', isFolders);
+                    foldersBtn.setAttribute('aria-pressed', isFolders ? 'true' : 'false');
+                    if (isFolders) {
+                        foldersBtn.setAttribute('aria-current', 'page');
+                    } else {
+                        foldersBtn.removeAttribute('aria-current');
+                    }
+                }
+                if (state.libraryView === 'folders') {
+                    renderRegulationsSummary();
+                    return;
+                }
                         const canSelect = canManage() && state.batchMode;
                         if (!state.documents.length) {
                             PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center">暂无法规文档</td></tr>`);

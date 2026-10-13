@@ -123,6 +123,7 @@
                         state.page = 1;
                         state.libraryView = 'folders';
                         state.activeFolder = null;
+                        state.batchMode = false;
                         state.selectedDocumentIds.clear();
                         state.selectedDocumentTitles.clear();
                         renderDocuments();
@@ -149,7 +150,17 @@
 
                     async function returnToCategoryFolders() {
                         if (state.busy) return;
+                        if (state.libraryView === 'folders') {
+                            toast('当前已在分类目录首页', 'info');
+                            return;
+                        }
+                        if (state.batchMode) {
+                            state.batchMode = false;
+                            state.selectedDocumentIds.clear();
+                            state.selectedDocumentTitles.clear();
+                        }
                         await loadCategoryFolders();
+                        toast('已返回分类目录', 'info');
                     }
 
                     async function loadDocuments({ keepActive = true, page = state.page } = {}) {
