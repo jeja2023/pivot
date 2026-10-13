@@ -59,7 +59,7 @@
                             <p>分类目录为动态索引页，展示该分类中的法规、版本和治理状态，不会生成重复的法规文档。</p>
                         </div>
                         <div class="regulations-folder-actions">
-                            <span>${folders.length} 个分类</span>
+                            <span class="regulations-folder-count">${folders.length} 个分类</span>
                             ${canAdd ? '<button type="button" class="btn-primary" id="regulations-create-folder-btn" data-regulation-create-folder>+ 新建分类</button>' : ''}
                         </div>
                     </div>

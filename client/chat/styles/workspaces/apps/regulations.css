@@ -208,7 +208,7 @@
 
 .regulations-folder-heading {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
     padding: 14px 16px;
@@ -220,10 +220,20 @@
 .regulations-folder-actions {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
     flex-shrink: 0;
 }
 
+.regulations-folder-actions .regulations-folder-count,
+.regulations-folder-actions > span {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.regulations-folder-actions .btn-primary,
 .regulations-folder-actions .btn-secondary {
     height: 32px;
     min-width: 64px;
