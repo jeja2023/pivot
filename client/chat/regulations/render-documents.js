@@ -21,6 +21,7 @@
     const renderDocumentsPagination = (...args) => ns.renderDocumentsPagination?.(...args);
             function renderCategoryDirectory() {
                 const target = document.getElementById('regulations-folder-directory');
+                const folderIndex = document.getElementById('regulations-folder-index');
                 const tableWrap = document.getElementById('regulations-doc-table-wrap');
                 const pagination = document.getElementById('regulations-pagination');
                 if (!target) return;
@@ -31,6 +32,8 @@
                     return;
                 }
                 target.classList.remove('hidden');
+                folderIndex?.classList.add('hidden');
+                if (folderIndex) PivotSafeHtml.setHtml(folderIndex, '');
                 tableWrap?.classList.add('hidden');
                 pagination?.classList.add('hidden');
                 const folders = Array.isArray(state.categoryFolders) ? state.categoryFolders : [];
@@ -73,11 +76,11 @@
                         const target = document.getElementById('regulations-doc-list');
                         if (!target) return;
                         renderCategoryDirectory();
+                        renderActiveFolderIndex();
                         if (state.libraryView === 'folders') {
                             renderRegulationsSummary();
                             return;
                         }
-                        renderActiveFolderIndex();
                         const canSelect = canManage() && state.batchMode;
                         if (!state.documents.length) {
                             PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center">暂无法规文档</td></tr>`);
