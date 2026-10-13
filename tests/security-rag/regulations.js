@@ -108,9 +108,9 @@ test('regulation list, facets, search and saved searches work correctly', async 
     const docs = await listRegulationDocuments({ query: 'Test', includeArchived: true });
     assert.ok(Array.isArray(docs.data));
 
-    const saved = await createSavedSearch({ userId: 1, name: 'My Search', query: 'Regulation' });
+    const saved = await createSavedSearch({ userId: 1, name: '常用法规检索', query: '现行有效' });
     assert.ok(saved && saved.id);
-    assert.equal(saved.name, 'My Search');
+    assert.equal(saved.name, '常用法规检索');
 
     const searches = await listSavedSearches({ userId: 1 });
     assert.ok(searches.some(s => s.id === saved.id));

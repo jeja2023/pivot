@@ -22,7 +22,8 @@
                     }
 
                     function summarizeSavedSearch(search) {
-                        const parts = [search.query, search.category, search.jurisdiction]
+                        const rawQuery = search.query === 'Regulation' ? '现行法规' : search.query;
+                        const parts = [rawQuery, search.category, search.jurisdiction]
                             .map(item => String(item || '').trim())
                             .filter(Boolean);
                         return parts.length ? parts.join(' / ') : '全部法规';
@@ -44,15 +45,17 @@
                                 <span>${searches.length} 项</span>
                             </div>
                             <div class="regulations-saved-search-list">
-                                ${searches.map(search => `
+                                ${searches.map(search => {
+                                    const searchName = search.name === 'My Search' ? '常用法规检索' : (search.name || '未命名检索');
+                                    return `
                                     <div class="regulations-saved-search-item">
                                         <button class="regulations-saved-search-chip" type="button" data-regulation-saved-search="${esc(search.id)}">
-                                            <strong>${esc(search.name || '未命名检索')}</strong>
+                                            <strong>${esc(searchName)}</strong>
                                             <span>${esc(summarizeSavedSearch(search))}</span>
                                         </button>
                                         <button class="regulations-saved-search-delete" type="button" data-regulation-delete-saved-search="${esc(search.id)}" aria-label="删除保存检索">删除</button>
                                     </div>
-                                `).join('')}
+                                `;}).join('')}
                             </div>
                         `);
                     }
