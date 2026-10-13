@@ -1514,12 +1514,166 @@
     line-height: 1.55;
 }
 
-#regulations-detail-admin-actions {
+/* 法规原文弹窗头部与操作栏重构 */
+.workspace-modal.regulations-detail-dialog {
+    width: min(1200px, calc(100vw - 32px));
+    max-height: calc(100vh - 40px);
+}
+
+.workspace-modal.regulations-detail-dialog .workspace-modal-header.regulations-detail-modal-header {
+    height: auto;
+    min-height: 56px;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    box-sizing: border-box;
+}
+
+.regulations-detail-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+
+.regulations-detail-title-group h3 {
+    margin: 0;
+    font-size: 1.08rem;
+    font-weight: 800;
+    color: var(--text-main);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.regulations-detail-doc-badge {
     display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.regulations-detail-badge-title {
+    display: inline-block;
+    max-width: 460px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 10px;
+}
+
+.regulations-detail-badge-version {
+    display: inline-block;
+    white-space: nowrap;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--primary);
+    background: var(--surface);
+    border: 1px solid var(--primary);
+    border-radius: 6px;
+    padding: 2px 7px;
+}
+
+.regulations-detail-toolbar {
+    background: var(--bg-side);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 18px;
+    box-sizing: border-box;
+}
+
+.regulations-detail-actions-wrap {
+    display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
+    gap: 8px 12px;
+    width: 100%;
+}
+
+.regulations-toolbar-left-group,
+.regulations-toolbar-right-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
+}
+
+.regulations-toolbar-cluster {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface);
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.regulations-toolbar-cluster .btn-secondary {
+    height: 26px;
+    min-width: auto;
+    padding: 0 9px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border-radius: 5px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-main);
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.regulations-toolbar-cluster .btn-secondary:hover {
+    border-color: var(--border);
+    background: var(--bg-side);
+    color: var(--primary);
+}
+
+.regulations-toolbar-cluster.admin-cluster {
+    border-color: var(--border);
+    background: var(--surface);
+}
+
+.regulations-toolbar-cluster.admin-cluster .btn-secondary:hover {
+    color: var(--primary);
+}
+
+.regulations-effective-date-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+.regulations-effective-date-control .form-input {
+    width: 124px;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 0.74rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-sizing: border-box;
+}
+
+.regulations-effective-date-control .btn-secondary {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.74rem;
+    border-radius: 4px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
 }
 
 .regulations-admin-form label,

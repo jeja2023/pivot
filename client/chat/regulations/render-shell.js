@@ -137,14 +137,15 @@
                             </section>
                             <section id="regulations-detail-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-detail-title">
                                 <div class="workspace-modal regulations-admin-dialog regulations-detail-dialog">
-                                    <div class="workspace-modal-header">
-                                        <div>
+                                    <div class="workspace-modal-header regulations-detail-modal-header">
+                                        <div class="regulations-detail-title-group">
                                             <h3 id="regulations-detail-title">法规原文</h3>
+                                            <span id="regulations-detail-doc-badge" class="regulations-detail-doc-badge"></span>
                                         </div>
-                                        <div class="regulations-detail-head-actions">
-                                            <span id="regulations-detail-admin-actions"></span>
-                                            <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-detail>关闭</button>
-                                        </div>
+                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-detail>关闭</button>
+                                    </div>
+                                    <div id="regulations-detail-toolbar" class="regulations-detail-toolbar">
+                                        <div id="regulations-detail-admin-actions" class="regulations-detail-actions-wrap"></div>
                                     </div>
                                     <div id="regulations-detail-forms"></div>
                                     <div id="regulations-detail-body" class="workspace-modal-body regulations-dialog-body"></div>

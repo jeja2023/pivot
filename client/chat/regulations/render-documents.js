@@ -178,8 +178,10 @@
                         const detail = state.detail;
                         const adminActions = document.getElementById('regulations-detail-admin-actions');
                         const formsHost = document.getElementById('regulations-detail-forms');
+                        const docBadge = document.getElementById('regulations-detail-doc-badge');
                         if (!detail?.document) {
                             PivotSafeHtml.setHtml(target, '<div class="regulations-placeholder">请选择法规文档查看正文。</div>');
+                            if (docBadge) PivotSafeHtml.setHtml(docBadge, '');
                             if (adminActions) PivotSafeHtml.setHtml(adminActions, '');
                             if (formsHost) PivotSafeHtml.setHtml(formsHost, '');
                             return;
@@ -187,29 +189,63 @@
                         const doc = detail.document;
                         const articles = Array.isArray(detail.articles) ? detail.articles : [];
                         const title = cleanDisplayTitle(doc.title || '未命名法规');
+                        const verLabel = detail.currentVersion?.version_label || doc.current_version_label || '';
+                        if (docBadge) {
+                            PivotSafeHtml.setHtml(docBadge, `
+                                <span class="regulations-detail-badge-title" title="${esc(title)}">${esc(title)}</span>
+                                ${verLabel ? `<span class="regulations-detail-badge-version">${esc(verLabel)}</span>` : ''}
+                            `);
+                        }
                         const indexStatus = String(detail.currentVersion?.index_status || 'lexical_ready');
                         const indexLabels = { vector_ready: '向量索引已就绪', indexing: '正在建立向量索引', retry_wait: '向量索引等待重试', lexical_ready: '当前使用关键词检索' };
                         const indexNotice = indexStatus === 'vector_ready' ? '' : `<div class="regulations-index-notice"><strong>${esc(indexLabels[indexStatus] || '索引状态待核验')}</strong><span>${esc(detail.currentVersion?.index_error || '法规正文已可使用关键词检索；可在向量服务恢复后手动重建索引。')}</span></div>`;
-                        // 管理员可在详情弹窗内编辑信息、追加版本；引用网络对所有人可见（只读）
+                        // 结构化渲染顶部操作栏：划分为时间适用、演进对比、协同追溯和治理管理集群
                         if (adminActions) {
-                            const graphBtn = `<button class="btn-secondary" type="button" data-regulation-graph="${esc(doc.id)}">引用网络</button>`;
-                            const timelineBtn = (Array.isArray(detail.versions) && detail.versions.length >= 1)
-                                ? `<button class="btn-secondary" type="button" data-regulation-timeline="${esc(doc.id)}">修订时间线</button>` : '';
-                            const compareBtn = (Array.isArray(detail.versions) && detail.versions.length >= 2)
-                                ? `<button class="btn-secondary" type="button" data-regulation-compare="${esc(doc.id)}">版本对比</button>` : '';
-                            const effectiveDateControl = `<label class="regulations-effective-date-control"><span>适用日期</span><input id="regulations-effective-date" class="form-input" type="date" aria-label="按日期查看适用版本"><button class="btn-secondary" type="button" data-regulation-effective-date="${esc(doc.id)}">查看</button></label>`;
-                            const auditBtn = canManage() ? `<button class="btn-secondary" type="button" data-regulation-access-log="${esc(doc.id)}">访问记录</button>` : '';
-                            const aiAuditBtn = `<button class="btn-secondary" type="button" data-regulation-ai-logs="${esc(doc.id)}">问答记录</button>`;
-                            const followBtn = `<button class="btn-secondary" type="button" data-regulation-subscribe="${esc(doc.id)}">关注更新</button>`;
-                            const bookmarkBtn = `<button class="btn-secondary" type="button" data-regulation-bookmark="${esc(doc.id)}">收藏法规</button>`;
-                            const reindexBtn = canManage() && detail.currentVersion?.id
-                                ? `<button class="btn-secondary" type="button" data-regulation-reindex-document="${esc(doc.id)}" data-regulation-reindex-version="${esc(detail.currentVersion.id)}">重建向量索引</button>`
-                                : '';
-                            const obligationBtn = `<button class="btn-secondary" type="button" data-regulation-obligations="${esc(doc.id)}">义务清单</button>`;
-                            PivotSafeHtml.setHtml(adminActions, effectiveDateControl + graphBtn + timelineBtn + compareBtn + followBtn + bookmarkBtn + obligationBtn + aiAuditBtn + auditBtn + reindexBtn + (canManage() ? `
-                                <button class="btn-secondary" type="button" data-regulation-edit="${esc(doc.id)}">编辑信息</button>
-                                <button class="btn-secondary" type="button" data-regulation-add-version="${esc(doc.id)}">追加版本</button>
-                            ` : ''));
+                            const effectiveDateControl = `
+                                <div class="regulations-toolbar-cluster">
+                                    <label class="regulations-effective-date-control">
+                                        <span>适用日期</span>
+                                        <input id="regulations-effective-date" class="form-input" type="date" aria-label="按日期查看适用版本">
+                                        <button class="btn-secondary" type="button" data-regulation-effective-date="${esc(doc.id)}">查看</button>
+                                    </label>
+                                </div>
+                            `;
+                            const versionCluster = (Array.isArray(detail.versions) && detail.versions.length >= 1) ? `
+                                <div class="regulations-toolbar-cluster">
+                                    <button class="btn-secondary" type="button" data-regulation-timeline="${esc(doc.id)}">修订时间线</button>
+                                    ${detail.versions.length >= 2 ? `<button class="btn-secondary" type="button" data-regulation-compare="${esc(doc.id)}">版本对比</button>` : ''}
+                                </div>
+                            ` : '';
+                            const relationCluster = `
+                                <div class="regulations-toolbar-cluster">
+                                    <button class="btn-secondary" type="button" data-regulation-graph="${esc(doc.id)}">引用网络</button>
+                                    <button class="btn-secondary" type="button" data-regulation-ai-logs="${esc(doc.id)}">问答记录</button>
+                                    <button class="btn-secondary" type="button" data-regulation-obligations="${esc(doc.id)}">义务清单</button>
+                                </div>
+                            `;
+                            const collabCluster = `
+                                <div class="regulations-toolbar-cluster">
+                                    <button class="btn-secondary" type="button" data-regulation-subscribe="${esc(doc.id)}">关注更新</button>
+                                    <button class="btn-secondary" type="button" data-regulation-bookmark="${esc(doc.id)}">收藏法规</button>
+                                    ${canManage() ? `<button class="btn-secondary" type="button" data-regulation-access-log="${esc(doc.id)}">访问记录</button>` : ''}
+                                </div>
+                            `;
+                            const adminCluster = canManage() ? `
+                                <div class="regulations-toolbar-cluster admin-cluster">
+                                    ${detail.currentVersion?.id ? `<button class="btn-secondary" type="button" data-regulation-reindex-document="${esc(doc.id)}" data-regulation-reindex-version="${esc(detail.currentVersion.id)}">重建向量索引</button>` : ''}
+                                    <button class="btn-secondary" type="button" data-regulation-edit="${esc(doc.id)}">编辑信息</button>
+                                    <button class="btn-secondary" type="button" data-regulation-add-version="${esc(doc.id)}">追加版本</button>
+                                </div>
+                            ` : '';
+                            PivotSafeHtml.setHtml(adminActions, `
+                                <div class="regulations-toolbar-left-group">
+                                    ${effectiveDateControl}
+                                    ${versionCluster}
+                                    ${relationCluster}
+                                    ${collabCluster}
+                                </div>
+                                ${adminCluster ? `<div class="regulations-toolbar-right-group">${adminCluster}</div>` : ''}
+                            `);
                         }
                         if (formsHost) {
                             PivotSafeHtml.setHtml(formsHost, canManage() ? renderInlineEditor(doc, detail.currentVersion) + renderVersionUploader(doc) : '');
