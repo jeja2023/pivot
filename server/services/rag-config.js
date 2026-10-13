@@ -42,11 +42,14 @@ function normalizeEmbeddingMode(_value) {
     return EMBEDDING_MODES.http;
 }
 
-function getEmbeddingConfig(userId = null) {
-    const userMode = getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingMode);
-    const userUrl = getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiUrl);
-    const userKey = getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiKey);
-    const userModel = getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingModel);
+function getEmbeddingConfig(userId = null, { allowUserSettings = true } = {}) {
+    // 个人向量配置适合个人知识库；共享法规库必须由唯一的系统配置生成和检索，
+    // 否则不同管理员会把同一批条文写入不兼容的向量空间。
+    const useUserSettings = allowUserSettings && Boolean(userId);
+    const userMode = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingMode) : undefined;
+    const userUrl = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiUrl) : undefined;
+    const userKey = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiKey) : undefined;
+    const userModel = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingModel) : undefined;
     const storedMode = getSettingValue(RAG_CONFIG_KEYS.embeddingMode);
     const storedUrl = getSettingValue(RAG_CONFIG_KEYS.embeddingApiUrl);
     const storedKey = getSettingValue(RAG_CONFIG_KEYS.embeddingApiKey);
@@ -78,6 +81,10 @@ function getEmbeddingConfig(userId = null) {
             model: userModel ? 'user' : (storedModel ? 'settings' : (process.env.EMBEDDING_MODEL ? 'env' : 'default'))
         }
     };
+}
+
+function getSystemEmbeddingConfig() {
+    return getEmbeddingConfig(null, { allowUserSettings: false });
 }
 
 function getEmbeddingProfile(config = {}) {
@@ -227,6 +234,7 @@ module.exports = {
     EMBEDDING_MODES,
     RAG_CONFIG_KEYS,
     getEmbeddingConfig,
+    getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getPublicEmbeddingConfig,
     getRagConfig,

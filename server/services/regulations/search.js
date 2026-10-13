@@ -4,12 +4,13 @@ const {
     execute,
     cosineSimilarity,
     generateEmbeddings,
+    formatEmbeddingQuery,
     normalizeRegulationField,
     normalizeRegulationId,
     normalizeRegulationAlias,
     normalizeSearchText
 } = require('./shared');
-const { getEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
+const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
 
 const MAX_REGULATION_SEARCH_RESULTS = 50;
 const MAX_REGULATION_RETRIEVAL_CANDIDATES = 300;
@@ -262,7 +263,7 @@ function mergeRegulationCandidates(lexical, semantic, limit) {
 
 // 混合检索采用“词法、向量独立召回 + 倒数排名融合”。词法命中没有向量时仍会保留，
 // 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
-async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false, userId = 0 } = {}) {
+async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit);
     const sharedOptions = { query: normalizedQuery, documentId, category, issuingBody, jurisdiction, status, includeArchived };
@@ -274,9 +275,13 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
 
     // 并行发起词法检索与查询向量生成；将向量超时严格限制在 4 秒内，
     // 避免远端向量服务异常或排队将整个请求拖延至看门狗超时。
+    // 法规库是共享资料：不使用搜索者的个人 Embedding 配置，确保查询向量与
+    // 后台写入条文的系统向量 profile 永远一致。
+    const embeddingConfig = getSystemEmbeddingConfig();
+    const queryEmbeddingInput = formatEmbeddingQuery(normalizedQuery, embeddingConfig);
     const [lexicalResult, vectorResult] = await Promise.allSettled([
         searchRegulationArticles({ ...sharedOptions, limit: MAX_REGULATION_RETRIEVAL_CANDIDATES, candidateMode: true }),
-        generateEmbeddings([normalizedQuery], null, null, userId, { source: 'regulations_search', timeoutMs: 4000 })
+        generateEmbeddings([queryEmbeddingInput], embeddingConfig.mode, embeddingConfig.http, null, { source: 'regulations_search', timeoutMs: 4000 })
     ]);
 
     const lexical = lexicalResult.status === 'fulfilled' && Array.isArray(lexicalResult.value) ? lexicalResult.value : [];
@@ -297,7 +302,7 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
     try {
         semantic = await searchRegulationArticlesByVector(queryVector, {
             ...sharedOptions,
-            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId)),
+            embeddingProfile: getEmbeddingProfile(embeddingConfig),
             limit: MAX_REGULATION_RETRIEVAL_CANDIDATES
         });
     } catch (semanticError) {

@@ -11,7 +11,7 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.2.15
+## 最新版本：0.2.16
 
 本版本面向千份级法规文档库，补齐分类导航、范围批量治理和向量索引失败控制：
 
@@ -421,6 +421,15 @@ EMBEDDING_API_KEY=
 EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_REQUEST_TIMEOUT_MS=30000
 RAG_INDEX_EMBEDDING_TIMEOUT_MS=120000
+# 纯 CPU 部署的法规向量重建建议：先以单请求、单版本队列运行并观察模型服务负载
+RAG_EMBEDDING_MAX_CONCURRENCY=1
+RAG_EMBEDDING_BATCH_MAX_INPUTS=4
+RAG_EMBEDDING_BATCH_MAX_TOKENS=8000
+REGULATION_INDEX_RECOVERY_BATCH_SIZE=1
+REGULATION_INDEX_RECOVERY_INTERVAL_MS=5000
+# 使用 Alibaba-NLP/gte-Qwen2-1.5B-instruct 时，法规查询会自动补 Instruct/Query 模板；
+# 仅需在需要覆盖默认检索指令时填写此项。
+RAG_EMBEDDING_QUERY_INSTRUCTION=
 RAG_CANDIDATE_LIMIT=300
 RAG_CACHE_TTL_MS=300000
 RAG_CACHE_MAX_ITEMS=500
@@ -453,6 +462,8 @@ GPU_VRAM_CRITICAL_THRESHOLD=0.95
 GPU_VRAM_REJECT_THRESHOLD=0.97
 GPU_VRAM_RECOVER_THRESHOLD=0.90
 ```
+
+法规库属于共享资料，导入、重建和检索统一使用“系统设置”的 Embedding 地址、密钥和模型；管理员个人 Embedding 设置不会再把同一法规库切分到不同向量空间。切换模型、模型版本、分块策略或向量维度后，在法规分类内点击“批量处理”并执行“重建全库向量”（或当前分类重建）。该操作只清空当前版本的旧向量并进入可恢复后台队列，不会重新 OCR/解析原文件；重建期间始终保留关键词检索。
 
 ## 验证与运维命令
 

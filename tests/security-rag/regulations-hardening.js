@@ -12,6 +12,7 @@ const {
     findRegulationVersionEffectiveOn,
     getReadableRegulationArticle,
     getRegulationIndexRetryDelayMs,
+    queueRegulationLibraryReindex,
     isRegulationEmbeddingErrorRetryable,
     listRegulationDocuments,
     listRegulationCategoryFolders,
@@ -181,6 +182,25 @@ test('法规向量索引对配置错误停止重试，对临时故障使用有�
     const reindexed = await requestRegulationVersionReindex({ documentId, versionId: version.versionId, userId: 1 });
     assert.equal(reindexed.index_status, 'retry_wait');
     assert.equal(Number(reindexed.index_attempts), 0);
+});
+
+test('全库向量重建只排队当前有效版本，清空旧向量且不重新解析原文', async () => {
+    const first = createDocument('全库重建法规甲', { category: '全库队列测试' });
+    const second = createDocument('全库重建法规乙', { category: '全库队列测试' });
+    const archived = createDocument('不应重建的归档法规', { category: '全库队列测试', status: 'archived' });
+    const firstVersion = addVersion(first, 'v1', [{ content: '第一条 当前版本向量应清空。', embedding: '[1,0,0]' }]);
+    const secondVersion = addVersion(second, 'v1', [{ content: '第一条 第二份当前版本。', embedding: '[0,1,0]' }]);
+    const archivedVersion = addVersion(archived, 'v1', [{ content: '第一条 归档版本不应入队。', embedding: '[0,0,1]' }]);
+
+    const result = await queueRegulationLibraryReindex({ category: '全库队列测试' });
+    assert.equal(result.queuedVersions, 2);
+    assert.equal(result.clearedArticles, 2);
+    assert.equal(result.scope, '全库队列测试');
+    assert.equal(db.prepare('SELECT embedding FROM regulation_articles WHERE id = ?').get(firstVersion.articleIds[0]).embedding, null);
+    assert.equal(db.prepare('SELECT embedding FROM regulation_articles WHERE id = ?').get(secondVersion.articleIds[0]).embedding, null);
+    assert.equal(db.prepare('SELECT embedding FROM regulation_articles WHERE id = ?').get(archivedVersion.articleIds[0]).embedding, '[0,0,1]');
+    assert.equal(db.prepare('SELECT index_status FROM regulation_versions WHERE id = ?').get(firstVersion.versionId).index_status, 'retry_wait');
+    assert.equal(db.prepare('SELECT index_status FROM regulation_versions WHERE id = ?').get(archivedVersion.versionId).index_status, 'lexical_ready');
 });
 
 test('混合结果融合保留无向量关键词命中并按排名稳定排序', () => {

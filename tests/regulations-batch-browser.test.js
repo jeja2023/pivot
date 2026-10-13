@@ -113,6 +113,21 @@ test('法规批量删除浏览器交互与布局', { timeout: 60000 }, async t =
             await page.close();
         });
 
+        await t.test('批量处理可将当前分类加入可恢复的向量重建队列', async () => {
+            const page = await createBatchPage(browser);
+            await page.evaluate(() => {
+                const ns = window.Pivot.legacy.PivotRegulationsInternal;
+                ns.state.activeFolder = { title: '法律', category: '法律', isUncategorized: false };
+                ns.syncDocumentSelection();
+            });
+            await expect(page.locator('#regulations-reindex-scope-btn')).toHaveText('重建“法律”向量');
+            await page.locator('#regulations-reindex-scope-btn').click();
+            assert.deepEqual(await page.evaluate(() => window.testReindexRequests), [{ category: '法律' }]);
+            await expect(page.locator('#regulations-selected-count')).toHaveText('已选 0 项');
+            assert.match(await page.evaluate(() => window.testToasts.at(-1).message), /已排队 2 个当前版本/);
+            await page.close();
+        });
+
         await t.test('普通用户和业务管理员不显示批量删除，admin 的窄屏工具栏不溢出', async () => {
             for (const user of [{ username: 'ordinary', role: 'user' }, { username: 'manager', role: 'admin', permissionTier: 'manager' }]) {
                 const page = await createPage(browser, { user });

@@ -26,6 +26,7 @@ const {
 } = require('../security-helpers');
 const { refreshAppSettingsCache } = require('../../server/services/app-settings');
 const { refreshUserSettingsCacheForUser } = require('../../server/services/user-settings');
+const { getSystemEmbeddingConfig } = require('../../server/services/rag-config');
 
 test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', async () => {
     const previousEnv = {
@@ -138,6 +139,12 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', asyn
         assert.equal(personal.http.apiKey, 'user-key');
         assert.equal(personal.http.model, 'user-model');
         assert.equal(personal.source.url, 'user');
+
+        const system = getSystemEmbeddingConfig();
+        assert.equal(system.http.url, 'https://system.example/v1');
+        assert.equal(system.http.apiKey, 'system-key');
+        assert.equal(system.http.model, 'system-model');
+        assert.notEqual(system.source.url, 'user');
 
         const publicPersonal = getPublicEmbeddingConfig(userInfo.lastInsertRowid);
         assert.equal(publicPersonal.isPersonal, true);

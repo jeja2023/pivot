@@ -101,6 +101,15 @@
                         uploadVersion(event.target);
                         return;
                     }
+                    if (event.target?.id === 'regulations-create-folder-form') {
+                        event.preventDefault();
+                        const name = event.target.querySelector('#regulations-new-folder-name')?.value
+                            || event.target.querySelector('[name="name"]')?.value;
+                        const description = event.target.querySelector('#regulations-new-folder-desc')?.value
+                            || event.target.querySelector('[name="description"]')?.value;
+                        ns.createCategoryFolder?.({ name, description });
+                        return;
+                    }
                     if (event.target?.id === 'regulations-compare-form') {
                         event.preventDefault();
                         runCompare(event.target);
@@ -180,6 +189,10 @@
                         ns.selectAllFolderDocuments?.();
                         return;
                     }
+                    if (event.target.closest('#regulations-reindex-scope-btn')) {
+                        ns.reindexCurrentScope?.();
+                        return;
+                    }
                     if (event.target.closest('[data-regulations-close-batch-result]') || event.target.id === 'regulations-batch-result-panel') {
                         document.getElementById('regulations-batch-result-panel')?.classList.add('hidden');
                         return;
@@ -219,12 +232,50 @@
                         returnToCategoryFolders().catch(e => toast(e.message || '加载分类目录失败', 'error'));
                         return;
                     }
+                    if (event.target.closest('[data-regulation-create-folder]')) {
+                        ns.openCreateFolderDialog?.();
+                        return;
+                    }
+                    if (event.target.closest('[data-regulations-close-create-folder]')) {
+                        ns.closeCreateFolderDialog?.();
+                        return;
+                    }
+                    const presetCatBtn = event.target.closest('[data-regulation-preset-cat]');
+                    if (presetCatBtn) {
+                        const input = document.getElementById('regulations-new-folder-name');
+                        if (input) {
+                            input.value = presetCatBtn.dataset.regulationPresetCat || '';
+                            input.focus();
+                        }
+                        return;
+                    }
+                    const deleteFolderBtn = event.target.closest('[data-regulation-folder-delete]');
+                    if (deleteFolderBtn) {
+                        ns.deleteCategoryFolder?.(deleteFolderBtn.dataset.regulationFolderDelete);
+                        return;
+                    }
+                    const importFolderBtn = event.target.closest('[data-regulation-import-folder]');
+                    if (importFolderBtn) {
+                        const category = importFolderBtn.dataset.regulationImportFolder;
+                        const panel = document.getElementById('regulations-admin-panel');
+                        panel?.classList.remove('hidden');
+                        if (panel) focusFirstField(panel);
+                        const form = document.getElementById('regulations-upload-form');
+                        if (form && category) {
+                            const catInput = form.querySelector('[name="category"]');
+                            if (catInput) catInput.value = category;
+                        }
+                        syncImportHint(form);
+                        loadImportJobs().catch(e => toast(e.message || '加载导入任务失败', 'error'));
+                        return;
+                    }
                     const folder = event.target.closest('[data-regulation-folder-title]');
                     if (folder) {
                         openCategoryFolder({
                             title: folder.dataset.regulationFolderTitle,
                             category: folder.dataset.regulationFolderCategory,
                             isUncategorized: folder.dataset.regulationFolderUncategorized === 'true',
+                            isCustom: folder.dataset.regulationFolderCustom === 'true',
                             documentCount: folder.dataset.regulationFolderDocuments,
                             articleCount: folder.dataset.regulationFolderArticles,
                             effectiveCount: folder.dataset.regulationFolderEffective,
@@ -253,7 +304,7 @@
                         closeSearchDialog();
                         return;
                     }
-                    if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel', 'regulations-access-log-panel', 'regulations-ai-log-panel', 'regulations-bookmarks-panel', 'regulations-recycle-bin-panel', 'regulations-quality-panel', 'regulations-obligation-panel', 'regulations-location-panel'].includes(event.target.id)) {
+                    if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel', 'regulations-access-log-panel', 'regulations-ai-log-panel', 'regulations-bookmarks-panel', 'regulations-recycle-bin-panel', 'regulations-quality-panel', 'regulations-obligation-panel', 'regulations-location-panel', 'regulations-create-folder-panel'].includes(event.target.id)) {
                         closeDialogs();
                         return;
                     }

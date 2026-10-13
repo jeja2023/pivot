@@ -101,7 +101,8 @@ const migrationModules = [
     require('./regulations-ai-audit'),
     require('./regulations-batch-audit'),
     require('./regulations-bookmarks'),
-    require('./regulations-index-retries')
+    require('./regulations-index-retries'),
+    require('./regulations-categories')
 ];
 
 module.exports = migrationModules

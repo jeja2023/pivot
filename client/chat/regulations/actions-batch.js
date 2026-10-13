@@ -59,6 +59,12 @@
             folderSelectButton.textContent = folderTitle ? `全选“${folderTitle}”` : '全选全部法规';
             folderSelectButton.disabled = locked;
         }
+        const scopeReindexButton = document.getElementById('regulations-reindex-scope-btn');
+        if (scopeReindexButton) {
+            const folderTitle = state.activeFolder?.title;
+            scopeReindexButton.textContent = folderTitle ? `重建“${folderTitle}”向量` : '重建全库向量';
+            scopeReindexButton.disabled = locked;
+        }
         ns.syncBatchEditFields?.();
     }
 
@@ -121,6 +127,32 @@
             toast(`已选择当前范围的 ${state.selectedDocumentIds.size} 份法规`, 'success');
         } catch (error) {
             toast(error.message || '全选当前范围失败', 'error');
+        }
+    }
+
+    async function reindexCurrentScope() {
+        if (!canManage() || !state.batchMode || state.busy || state.batchDeletePending) return;
+        const folder = state.activeFolder;
+        const scopeLabel = folder?.title ? `“${folder.title}”分类` : '全库当前法规';
+        const confirmation = `将清空${scopeLabel}当前版本的旧向量，并在后台使用系统统一模型重新建立索引。期间关键词检索保持可用；服务重启后任务会继续。确认重建？`;
+        if (!(await regulationConfirm('批量重建向量索引', confirmation))) return;
+        ns.setBusy(true, '正在将法规加入向量重建队列…');
+        try {
+            const body = folder?.isUncategorized
+                ? { uncategorized: true }
+                : (folder?.category ? { category: folder.category } : {});
+            const response = await fetchJson(`${API}/documents/reindex`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const result = response?.result || {};
+            toast(`已排队 ${Number(result.queuedVersions || 0)} 个当前版本，已清空 ${Number(result.clearedArticles || 0)} 条旧向量；可继续使用关键词检索`, 'success');
+            await ns.loadDocuments?.({ keepActive: true, page: state.page });
+        } catch (error) {
+            toast(error.message || '批量重建向量索引失败', 'error');
+        } finally {
+            ns.setBusy(false);
         }
     }
 
@@ -257,6 +289,7 @@
         selectDocument,
         selectAllDocuments,
         selectAllFolderDocuments,
+        reindexCurrentScope,
         clearDocumentSelection,
         deleteSelectedDocuments,
         revertRegulationBatch,

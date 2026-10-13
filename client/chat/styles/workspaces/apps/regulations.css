@@ -148,13 +148,6 @@
     white-space: nowrap;
 }
 
-.regulations-toolbar #regulations-folders-btn.is-active {
-    background: var(--bg-side);
-    border-color: var(--primary);
-    color: var(--primary);
-    box-shadow: inset 0 0 0 1px var(--primary);
-}
-
 .regulations-checkline {
     display: inline-flex;
     align-items: center;
@@ -294,6 +287,78 @@
 
 .regulations-folder-card small {
     font-size: 0.74rem;
+}
+
+.regulations-folder-card-add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    background: transparent;
+    cursor: pointer;
+    text-align: center;
+    min-height: 126px;
+    padding: 16px;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.regulations-folder-card-add:hover {
+    border-color: var(--primary);
+    background: var(--bg-side);
+}
+
+.regulations-folder-card-add strong {
+    color: var(--primary);
+    font-size: 0.95rem;
+}
+
+.regulations-folder-card-add span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.regulations-preset-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.regulations-preset-tags .btn-secondary {
+    height: 26px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.regulations-preset-tags .btn-secondary:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.regulations-create-folder-dialog {
+    max-width: 520px;
+}
+
+.regulations-create-folder-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.regulations-empty-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
 }
 
 .regulations-folder-stats {

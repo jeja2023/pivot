@@ -3,6 +3,8 @@ const test = require('node:test');
 
 const {
     assertEmbeddingResponseOk,
+    formatEmbeddingQuery,
+    isGteQwenInstructModel,
     normalizeEmbeddingVectors
 } = require('../server/services/rag-index/embedding-client');
 
@@ -28,5 +30,17 @@ test('Embedding 上游 HTTP 错误保留状态与错误码，而非伪装成向�
             && error.status === 400
             && /HTTP 400/.test(error.message)
             && /Arrearage/.test(error.message)
+    );
+});
+
+test('gte-Qwen2-Instruct 查询使用指令模板，法规正文模型不受影响', () => {
+    const config = { http: { model: 'Alibaba-NLP/gte-Qwen2-1.5B-instruct' } };
+    assert.equal(isGteQwenInstructModel(config.http.model), true);
+    assert.match(formatEmbeddingQuery('劳动合同的试用期上限', config), /^Instruct: Given a Chinese legal query/);
+    assert.match(formatEmbeddingQuery('劳动合同的试用期上限', config), /\nQuery: 劳动合同的试用期上限$/);
+    assert.equal(formatEmbeddingQuery('普通检索', { http: { model: 'bge-m3' } }), '普通检索');
+    assert.equal(
+        formatEmbeddingQuery('普通检索', { http: { model: 'bge-m3' } }, { instruction: 'Retrieve relevant passages.' }),
+        'Instruct: Retrieve relevant passages.\nQuery: 普通检索'
     );
 });

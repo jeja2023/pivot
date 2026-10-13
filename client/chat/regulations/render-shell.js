@@ -53,7 +53,6 @@
                                         <button id="regulations-open-search-btn" class="btn-primary regulations-search-entry-btn" type="button">检索</button>
                                         <button id="regulations-ai-open-btn" class="btn-secondary regulations-ai-entry-btn" type="button">AI问答</button>
                                         <button id="regulations-bookmarks-btn" class="btn-secondary" type="button">我的收藏</button>
-                                        <button id="regulations-folders-btn" class="btn-secondary is-active" type="button" aria-current="page">分类目录</button>
                                         <button id="regulations-refresh-btn" class="btn-secondary" type="button">刷新</button>
                                         ${canImport ? '<button id="regulations-open-upload-btn" class="btn-secondary" type="button">导入文档</button>' : ''}
                                         ${canBatch ? '<button id="regulations-quality-btn" class="btn-secondary" type="button">质量概览</button>' : ''}
@@ -420,6 +419,40 @@
                                         <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-preview>关闭</button>
                                     </div>
                                     <div id="regulations-preview-body" class="workspace-modal-body regulations-preview-body"></div>
+                                </div>
+                            </section>
+                            <section id="regulations-create-folder-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true">
+                                <div class="workspace-modal regulations-admin-dialog regulations-create-folder-dialog">
+                                    <div class="workspace-modal-header">
+                                        <div><h3>新建法规分类目录</h3><p>创建新的分类目录，便于集中归类、批量治理和检索法规文档。</p></div>
+                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-create-folder>关闭</button>
+                                    </div>
+                                    <form id="regulations-create-folder-form" class="workspace-modal-body regulations-create-folder-form">
+                                        <div class="regulations-form-grid">
+                                            <label>
+                                                <span>分类目录名称 <em class="text-danger">*</em></span>
+                                                <input id="regulations-new-folder-name" name="name" class="form-input" required maxlength="50" placeholder="如：地方性法规、部门规章、司法解释、团体标准">
+                                            </label>
+                                            <div class="regulations-preset-tags">
+                                                <span>快捷推荐：</span>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="行政法规">行政法规</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="地方性法规">地方性法规</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="部门规章">部门规章</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="司法解释">司法解释</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="团体标准">团体标准</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="行业标准">行业标准</button>
+                                                <button type="button" class="btn-secondary" data-regulation-preset-cat="企业制度">企业制度</button>
+                                            </div>
+                                            <label>
+                                                <span>分类说明（选填）</span>
+                                                <textarea id="regulations-new-folder-desc" name="description" class="form-input" maxlength="200" rows="3" placeholder="可选填写该分类目录的归类范围或治理说明"></textarea>
+                                            </label>
+                                        </div>
+                                        <div class="regulations-admin-actions">
+                                            <button type="button" class="btn-secondary" data-regulations-close-create-folder>取消</button>
+                                            <button type="submit" class="btn-primary" id="regulations-create-folder-submit">确认创建</button>
+                                        </div>
+                                    </form>
                                 </div>
                             </section>
                         `;

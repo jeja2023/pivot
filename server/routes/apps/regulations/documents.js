@@ -17,10 +17,13 @@ const {
     diffRegulationVersions,
     findRegulationDuplicateByHash,
     getRegulationCitationGraph,
+    getRegulationIndexSummary,
     getRegulationDocumentById,
     getRegulationDocumentDetail,
     getRegulationVersionStorageById,
     hashUploadedFile,
+    createRegulationCategory,
+    deleteRegulationCategory,
     listRegulationDocuments,
     listRegulationCategoryFolders,
     listDeletedRegulationDocuments,
@@ -41,6 +44,7 @@ const {
     rebuildRegulationCrossLinks,
     recordRegulationAccess,
     requestRegulationVersionReindex,
+    queueRegulationLibraryReindex,
     retryRegulationImportJob,
     revertRegulationDocumentBatch,
     reviewRegulationObligation,
@@ -102,6 +106,23 @@ function registerDocumentRoutes(router, deps) {
         router.get('/category-folders', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
             res.json({ folders: await listRegulationCategoryFolders({ includeArchived }) });
+        }));
+
+        router.post('/category-folders', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const name = String(req.body?.name || '').trim();
+            const description = String(req.body?.description || '').trim();
+            const result = await createRegulationCategory({ name, description, userId: req.user.id });
+            logAction(req, '法规查询创建分类目录', `分类：${name}`);
+            res.status(201).json(result);
+        }));
+
+        router.delete('/category-folders/:category', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const name = decodeURIComponent(req.params.category || '').trim();
+            const result = await deleteRegulationCategory({ name });
+            logAction(req, '法规查询删除分类目录', `分类：${name}`);
+            res.json(result);
         }));
 
         router.get('/documents/folder-selection', authMiddleware, asyncHandler(async (req, res) => {
@@ -638,9 +659,27 @@ function registerDocumentRoutes(router, deps) {
                 return res.status(404).json({ error: { message: '法规版本不存在或不可重新建立索引', type: 'invalid_request_error' } });
             }
             await startRegulationIndexRecoveryRunner();
-            await triggerRegulationIndexRecovery();
+            void triggerRegulationIndexRecovery();
             logAction(req, '法规查询重新建立向量索引', `文档 ${req.params.id}，版本 ${req.params.versionId}`);
             res.status(202).json({ version });
+        }));
+
+        router.get('/index-summary', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            res.json({ summary: await getRegulationIndexSummary() });
+        }));
+
+        router.post('/documents/reindex', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await queueRegulationLibraryReindex({
+                category: req.body?.category,
+                uncategorized: req.body?.uncategorized === true || req.body?.uncategorized === 'true'
+            });
+            await startRegulationIndexRecoveryRunner();
+            void triggerRegulationIndexRecovery();
+            const scope = result.scope === 'all' ? '全库' : (result.scope === 'uncategorized' ? '未分类' : `分类：${result.scope}`);
+            logAction(req, '法规查询批量重建向量索引', `${scope}，已排队 ${result.queuedVersions} 个当前版本，清空 ${result.clearedArticles} 条旧向量`);
+            res.status(202).json({ result });
         }));
     
         router.post('/documents/batch-update', authMiddleware, asyncHandler(async (req, res) => {

@@ -11,6 +11,7 @@
             <span id="regulations-selected-count" aria-live="polite">已选 0 项</span>
             <span class="regulations-batch-scope-hint">选择会跨页保留；表头复选框仅操作当前页</span>
             <button id="regulations-select-folder-btn" class="btn-secondary" type="button" disabled>全选当前范围</button>
+            <button id="regulations-reindex-scope-btn" class="btn-secondary" type="button" disabled>重建当前范围向量</button>
             <button id="regulations-clear-selection-btn" class="btn-secondary" type="button" disabled>取消选择</button>
             <button id="regulations-batch-edit-btn" class="btn-secondary" type="button" disabled>批量修改</button>
             ${canDeleteDocuments() ? '<button id="regulations-batch-delete-btn" class="btn-secondary btn-danger-outline" type="button" disabled>批量删除</button>' : ''}

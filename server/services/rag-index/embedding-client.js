@@ -22,6 +22,7 @@ const queryEmbeddingCache = new Map();
 const queryEmbeddingInFlight = new Map();
 const QUERY_EMBEDDING_CACHE_TTL_MS = 30 * 1000;
 const QUERY_EMBEDDING_CACHE_MAX = 256;
+const DEFAULT_GTE_QWEN_LEGAL_QUERY_INSTRUCTION = 'Given a Chinese legal query, retrieve relevant legal provisions that directly answer the query.';
 
 function queryEmbeddingCacheKey(text, userId, config, httpConfig) {
     return crypto.createHash('sha256').update(JSON.stringify({
@@ -58,6 +59,28 @@ function clampInteger(value, fallback, min, max) {
 
 function getEmbeddingMaxConcurrency() {
     return clampInteger(process.env.RAG_EMBEDDING_MAX_CONCURRENCY, 2, 1, 16);
+}
+
+function isGteQwenInstructModel(model) {
+    return /gte[-_]?qwen(?:2)?[a-z0-9._-]*-instruct(?:$|[/:])/i.test(String(model || '').trim());
+}
+
+function normalizeEmbeddingInstruction(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 500);
+}
+
+// GTE-Qwen Instruct 系列的查询与文档编码格式不同：文档保持原文，查询需要带
+// Instruct 前缀。这里仅构造查询输入，不会污染入库的法规条文正文。
+function formatEmbeddingQuery(text, embeddingConfig = {}, options = {}) {
+    const query = String(text || '').trim();
+    if (!query) return '';
+    const http = embeddingConfig?.http || embeddingConfig?.cloud || embeddingConfig || {};
+    const configuredInstruction = options.instruction === undefined
+        ? process.env.RAG_EMBEDDING_QUERY_INSTRUCTION
+        : options.instruction;
+    const instruction = normalizeEmbeddingInstruction(configuredInstruction)
+        || (isGteQwenInstructModel(http.model) ? DEFAULT_GTE_QWEN_LEGAL_QUERY_INSTRUCTION : '');
+    return instruction ? `Instruct: ${instruction}\nQuery: ${query}` : query;
 }
 
 function drainEmbeddingRequestWaiters() {
@@ -587,14 +610,17 @@ module.exports = {
     DEFAULT_EMBEDDING_REQUEST_TIMEOUT_MS,
     DEFAULT_RAG_INDEX_EMBEDDING_TIMEOUT_MS,
     MAX_EMBEDDING_REQUEST_TIMEOUT_MS,
+    DEFAULT_GTE_QWEN_LEGAL_QUERY_INSTRUCTION,
     KEYWORD_FALLBACK_MIN_SCORE,
     normalizeTimeoutMs,
     getEmbeddingRequestTimeoutMs,
+    formatEmbeddingQuery,
     getRagIndexEmbeddingTimeoutMs,
     formatDurationMs,
     wrapEmbeddingRequestError,
     normalizeVectorValues,
     normalizeEmbeddingVectors,
+    isGteQwenInstructModel,
     normalizeEmbeddingVector,
     embeddingResponseError,
     assertEmbeddingResponseOk,

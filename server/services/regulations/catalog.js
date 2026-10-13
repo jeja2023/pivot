@@ -1,6 +1,7 @@
 const {
     query,
     queryOne,
+    execute,
     normalizeRegulationField,
     normalizeRegulationDateValue,
     normalizeRegulationId,
@@ -218,6 +219,69 @@ async function listRegulationDocuments({
     };
 }
 
+async function createRegulationCategory({ name = '', description = '', userId = 0 } = {}) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) {
+        const error = new Error('分类名称不能为空');
+        error.statusCode = 400;
+        throw error;
+    }
+    if (trimmed.length > 50) {
+        const error = new Error('分类名称不能超过 50 个字符');
+        error.statusCode = 400;
+        throw error;
+    }
+    try {
+        const existing = await queryOne('SELECT id FROM regulation_categories WHERE name = ?', [trimmed]);
+        if (existing) {
+            const error = new Error(`分类“${trimmed}”已存在`);
+            error.statusCode = 409;
+            throw error;
+        }
+        await execute(`
+            INSERT INTO regulation_categories (name, description, created_by_user)
+            VALUES (?, ?, ?)
+        `, [trimmed, String(description || '').trim(), Number(userId) || 0]);
+    } catch (e) {
+        if (e.statusCode) throw e;
+        if (e.code === '23505' || e.message?.includes('duplicate key') || e.message?.includes('UNIQUE')) {
+            const error = new Error(`分类“${trimmed}”已存在`);
+            error.statusCode = 409;
+            throw error;
+        }
+        throw e;
+    }
+    return {
+        category: {
+            title: trimmed,
+            category: trimmed,
+            description: String(description || '').trim(),
+            documentCount: 0,
+            articleCount: 0,
+            effectiveCount: 0,
+            needsReviewCount: 0,
+            isCustom: true
+        }
+    };
+}
+
+async function deleteRegulationCategory({ name = '' } = {}) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) {
+        const error = new Error('分类名称不能为空');
+        error.statusCode = 400;
+        throw error;
+    }
+    const doc = await queryOne('SELECT id, title FROM regulation_documents WHERE category = ? AND deleted_at IS NULL LIMIT 1', [trimmed]);
+    if (doc) {
+        const error = new Error(`分类“${trimmed}”下仍有法规文档（如《${doc.title}》），请先移除或修改文档分类后再删除`);
+        error.statusCode = 409;
+        throw error;
+    }
+    await execute('DELETE FROM regulation_categories WHERE name = ?', [trimmed]);
+    return { success: true };
+}
+
 async function listRegulationCategoryFolders({ includeArchived = false } = {}) {
     const visibility = includeArchived ? 'd.deleted_at IS NULL' : "d.deleted_at IS NULL AND d.status <> 'archived'";
     const rows = await query(`
@@ -235,14 +299,60 @@ async function listRegulationCategoryFolders({ includeArchived = false } = {}) {
         GROUP BY COALESCE(NULLIF(TRIM(d.category), ''), '未分类'), COALESCE(NULLIF(TRIM(d.category), ''), '')
         ORDER BY CASE WHEN COALESCE(NULLIF(TRIM(d.category), ''), '') = '' THEN 1 ELSE 0 END, title ASC
     `);
-    return rows.map(row => ({
-        ...row,
-        isUncategorized: !row.category,
-        documentCount: Number(row.document_count || 0),
-        articleCount: Number(row.article_count || 0),
-        effectiveCount: Number(row.effective_count || 0),
-        needsReviewCount: Number(row.needs_review_count || 0)
-    }));
+
+    let customCategories = [];
+    try {
+        customCategories = await query(`
+            SELECT name, description, created_at, updated_at
+            FROM regulation_categories
+            ORDER BY sort_order ASC, name ASC
+        `);
+    } catch (_e) {
+        // 兼容未建表或轻量测试环境
+    }
+
+    const folderMap = new Map();
+    rows.forEach(row => {
+        folderMap.set(row.category, {
+            ...row,
+            isUncategorized: !row.category,
+            documentCount: Number(row.document_count || 0),
+            articleCount: Number(row.article_count || 0),
+            effectiveCount: Number(row.effective_count || 0),
+            needsReviewCount: Number(row.needs_review_count || 0),
+            isCustom: false
+        });
+    });
+
+    customCategories.forEach(custom => {
+        const catName = custom.name;
+        if (folderMap.has(catName)) {
+            const existing = folderMap.get(catName);
+            existing.isCustom = true;
+            existing.description = custom.description || '';
+        } else {
+            folderMap.set(catName, {
+                title: catName,
+                category: catName,
+                description: custom.description || '',
+                documentCount: 0,
+                articleCount: 0,
+                effectiveCount: 0,
+                needsReviewCount: 0,
+                latestUpdatedAt: custom.updated_at || custom.created_at || '',
+                isUncategorized: false,
+                isCustom: true
+            });
+        }
+    });
+
+    const result = Array.from(folderMap.values());
+    result.sort((a, b) => {
+        if (a.isUncategorized) return 1;
+        if (b.isUncategorized) return -1;
+        return a.title.localeCompare(b.title, 'zh-Hans-CN');
+    });
+    return result;
 }
 
 async function listRegulationFolderDocumentSelection({ category = '', uncategorized = false, includeArchived = false, limit = 2000 } = {}) {
@@ -295,8 +405,15 @@ async function listRegulationFacets({ includeArchived = false } = {}) {
         `);
         return rows.map(row => row.value).filter(Boolean);
     };
+    const categoriesFromDocs = await pick('category');
+    let customCatNames = [];
+    try {
+        const customRows = await query('SELECT name FROM regulation_categories ORDER BY sort_order ASC, name ASC');
+        customCatNames = customRows.map(r => r.name).filter(Boolean);
+    } catch (_e) {}
+    const allCategories = [...new Set([...categoriesFromDocs, ...customCatNames])].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
     return {
-        categories: await pick('category'),
+        categories: allCategories,
         legalLevels: await pick('legal_level'),
         issuingBodies: await pick('issuing_body'),
         jurisdictions: await pick('jurisdiction')
@@ -407,6 +524,8 @@ async function getReadableRegulationArticle(articleId, { includeArchived = false
 
 module.exports = {
     countRegulationArticlesByVersionId,
+    createRegulationCategory,
+    deleteRegulationCategory,
     getRegulationDocumentById,
     getRegulationDocumentDetail,
     getReadableRegulationArticle,

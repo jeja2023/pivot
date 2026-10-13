@@ -40,7 +40,8 @@ const {
     getRegulationDocumentById,
     getRegulationVersionById
 } = require('./catalog');
-const { getEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
+const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
+const { getRagIndexEmbeddingTimeoutMs } = require('../rag-index/embedding-client');
 const { notifyRegulationSubscribers } = require('./governance');
 const { saveRegulationArticleLocations } = require('./locations');
 const { logger: defaultLogger } = require('../../logger');
@@ -255,9 +256,10 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                     source: 'regulations_import',
                     versionId,
                     embeddingProfile: normalizeRegulationField(
-                        metadata.embeddingProfile || metadata.embedding_profile || getEmbeddingProfile(getEmbeddingConfig(userId)),
+                        getEmbeddingProfile(getSystemEmbeddingConfig()),
                         120
-                    )
+                    ),
+                    embeddingConfig: getSystemEmbeddingConfig()
                 });
             } catch (_err) {}
         });
@@ -452,6 +454,36 @@ async function updateRegulationVersionGovernance({ documentId, versionId, userId
 const REGULATION_EMBED_BATCH_SIZE = 5;
 const REGULATION_EMBED_MAX_CHARS = 2000;
 const REGULATION_INDEX_MAX_ATTEMPTS = 5;
+const REGULATION_INDEX_RECOVERY_DEFAULT_INTERVAL_MS = 5_000;
+const REGULATION_INDEX_RECOVERY_DEFAULT_BATCH_SIZE = 3;
+
+function clampRegulationIndexSetting(value, fallback, min, max) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(parsed)) return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+
+function getRegulationIndexRecoverySettings() {
+    return {
+        intervalMs: clampRegulationIndexSetting(
+            process.env.REGULATION_INDEX_RECOVERY_INTERVAL_MS,
+            REGULATION_INDEX_RECOVERY_DEFAULT_INTERVAL_MS,
+            1_000,
+            300_000
+        ),
+        batchSize: clampRegulationIndexSetting(
+            process.env.REGULATION_INDEX_RECOVERY_BATCH_SIZE,
+            REGULATION_INDEX_RECOVERY_DEFAULT_BATCH_SIZE,
+            1,
+            50
+        )
+    };
+}
+
+function getRegulationEmbeddingTarget() {
+    const config = getSystemEmbeddingConfig();
+    return { config, profile: getEmbeddingProfile(config) };
+}
 
 function isRegulationEmbeddingErrorRetryable(error) {
     const code = String(error?.code || '').toLowerCase();
@@ -481,7 +513,12 @@ async function beginRegulationEmbeddingAttempt(versionId) {
     `, [now, now, versionId]);
 }
 
-async function embedRegulationArticles(articles, { userId = 0, source = 'regulations_import', versionId = null, embeddingProfile = '' } = {}) {
+async function embedRegulationArticles(articles, {
+    source = 'regulations_import',
+    versionId = null,
+    embeddingProfile = '',
+    embeddingConfig = null
+} = {}) {
     if (!Array.isArray(articles) || !articles.length) return;
     // 仅对有 id、有正文的条文生成向量；单条截断以规避向量模型的最大 token 限制
     const targets = articles
@@ -493,14 +530,21 @@ async function embedRegulationArticles(articles, { userId = 0, source = 'regulat
         }
         return;
     }
+    const target = embeddingConfig
+        ? { config: embeddingConfig, profile: embeddingProfile || getEmbeddingProfile(embeddingConfig) }
+        : getRegulationEmbeddingTarget();
+    const profile = normalizeRegulationField(embeddingProfile || target.profile, 120);
     const indexAttempt = await beginRegulationEmbeddingAttempt(versionId);
     for (let i = 0; i < targets.length; i += REGULATION_EMBED_BATCH_SIZE) {
         const batch = targets.slice(i, i + REGULATION_EMBED_BATCH_SIZE);
         try {
-            const vectors = await generateEmbeddings(batch.map(t => t.text), null, null, userId, { source, timeoutMs: 30000 });
+            const vectors = await generateEmbeddings(batch.map(t => t.text), target.config.mode, target.config.http, null, {
+                source,
+                timeoutMs: getRagIndexEmbeddingTimeoutMs()
+            });
             for (let idx = 0; idx < batch.length; idx++) {
                 if (Array.isArray(vectors?.[idx])) {
-                    await execute('UPDATE regulation_articles SET embedding = ?, embedding_profile = ? WHERE id = ?', [JSON.stringify(vectors[idx]), embeddingProfile, batch[idx].id]);
+                    await execute('UPDATE regulation_articles SET embedding = ?, embedding_profile = ? WHERE id = ?', [JSON.stringify(vectors[idx]), profile, batch[idx].id]);
                 }
             }
         } catch (err) {
@@ -540,14 +584,15 @@ async function recoverRegulationArticleEmbeddings({ limit = 20 } = {}) {
         ORDER BY v.updated_at ASC, v.id ASC
         LIMIT ?
     `, [safeLimit]);
+    const target = getRegulationEmbeddingTarget();
     let recovered = 0;
     for (const version of versions) {
         const articles = await query('SELECT id, content FROM regulation_articles WHERE version_id = ? ORDER BY sort_order, id', [version.id]);
         await embedRegulationArticles(articles, {
-            userId: Number(version.uploaded_by_user || 0),
             source: 'regulations_recovery',
             versionId: version.id,
-            embeddingProfile: normalizeRegulationField(version.embedding_profile || getEmbeddingProfile(getEmbeddingConfig(version.uploaded_by_user)), 120)
+            embeddingProfile: target.profile,
+            embeddingConfig: target.config
         });
         recovered += 1;
     }
@@ -561,17 +606,92 @@ async function requestRegulationVersionReindex({ documentId, versionId, userId: 
     const document = await getRegulationDocumentById(documentIdValue, { includeArchived: true });
     if (!document || document.deleted_at) return null;
     const now = getBeijingTimestamp();
-    const changed = await execute(`
-        UPDATE regulation_versions
-        SET index_status = 'retry_wait', index_error = '', index_attempts = 0,
-            index_next_retry_at = ?, updated_at = ?
-        WHERE id = ? AND document_id = ?
-    `, [now, now, versionIdValue, documentIdValue]);
-    if (!Number(changed || 0)) return null;
+    const target = getRegulationEmbeddingTarget();
+    const changed = await transaction(async trx => {
+        const cleared = await trx.execute(
+            "UPDATE regulation_articles SET embedding = NULL, embedding_profile = '' WHERE version_id = ?",
+            [versionIdValue]
+        );
+        const result = await trx.execute(`
+            UPDATE regulation_versions
+            SET index_status = 'retry_wait', index_error = '', index_attempts = 0,
+                index_max_attempts = ${REGULATION_INDEX_MAX_ATTEMPTS}, index_next_retry_at = ?,
+                index_last_attempt_at = NULL, embedding_profile = ?, updated_at = ?
+            WHERE id = ? AND document_id = ?
+        `, [now, target.profile, now, versionIdValue, documentIdValue]);
+        return { changed: result, clearedArticles: cleared };
+    });
+    if (!Number(changed.changed || 0)) return null;
     return await getRegulationVersionById(versionIdValue);
 }
 
-function createRegulationIndexRecoveryRunner({ intervalMs = 60_000, logger = defaultLogger, setIntervalFn = setInterval, clearIntervalFn = clearInterval } = {}) {
+// 全库（或单个分类）重建只作用于每份法规的当前版本。旧向量被清空后，词法检索仍
+// 可立即使用；队列状态落在 regulation_versions，重启服务后会从未完成位置继续。
+async function queueRegulationLibraryReindex({ category = '', uncategorized = false } = {}) {
+    const normalizedCategory = normalizeRegulationField(category, 120);
+    const clauses = [
+        'd.current_version_id = v.id',
+        'd.deleted_at IS NULL',
+        "d.status <> 'archived'"
+    ];
+    const scopeParams = [];
+    if (uncategorized) clauses.push("COALESCE(TRIM(d.category), '') = ''");
+    else if (normalizedCategory) {
+        clauses.push('d.category = ?');
+        scopeParams.push(normalizedCategory);
+    }
+    const now = getBeijingTimestamp();
+    const target = getRegulationEmbeddingTarget();
+    const result = await transaction(async trx => {
+        const queued = await trx.query(`
+            UPDATE regulation_versions v
+            SET index_status = 'retry_wait', index_error = '', index_attempts = 0,
+                index_max_attempts = ${REGULATION_INDEX_MAX_ATTEMPTS}, index_next_retry_at = ?,
+                index_last_attempt_at = NULL, embedding_profile = ?, updated_at = ?
+            FROM regulation_documents d
+            WHERE ${clauses.join(' AND ')}
+            RETURNING v.id
+        `, [now, target.profile, now, ...scopeParams]);
+        const versionIds = queued.map(row => Number(row.id)).filter(Number.isSafeInteger);
+        if (!versionIds.length) return { queuedVersions: 0, clearedArticles: 0 };
+        const clearedArticles = await trx.execute(`
+            UPDATE regulation_articles
+            SET embedding = NULL, embedding_profile = ''
+            WHERE version_id IN (${versionIds.map(() => '?').join(', ')})
+        `, versionIds);
+        return { queuedVersions: versionIds.length, clearedArticles: Number(clearedArticles || 0) };
+    });
+    return {
+        ...result,
+        embeddingProfile: target.profile,
+        scope: uncategorized ? 'uncategorized' : (normalizedCategory || 'all')
+    };
+}
+
+async function getRegulationIndexSummary() {
+    const row = await queryOne(`
+        SELECT
+            COUNT(*) AS total_versions,
+            COUNT(*) FILTER (WHERE v.index_status = 'vector_ready') AS vector_ready,
+            COUNT(*) FILTER (WHERE v.index_status IN ('retry_wait', 'indexing')) AS pending,
+            COUNT(*) FILTER (WHERE v.index_status = 'lexical_ready') AS lexical_ready
+        FROM regulation_documents d
+        JOIN regulation_versions v ON v.id = d.current_version_id
+        WHERE d.deleted_at IS NULL AND d.status <> 'archived'
+    `);
+    return {
+        totalVersions: Number(row?.total_versions || 0),
+        vectorReady: Number(row?.vector_ready || 0),
+        pending: Number(row?.pending || 0),
+        lexicalReady: Number(row?.lexical_ready || 0),
+        embeddingProfile: getRegulationEmbeddingTarget().profile
+    };
+}
+
+function createRegulationIndexRecoveryRunner({ intervalMs, batchSize, logger = defaultLogger, setIntervalFn = setInterval, clearIntervalFn = clearInterval } = {}) {
+    const defaults = getRegulationIndexRecoverySettings();
+    const safeIntervalMs = clampRegulationIndexSetting(intervalMs, defaults.intervalMs, 1_000, 300_000);
+    const safeBatchSize = clampRegulationIndexSetting(batchSize, defaults.batchSize, 1, 50);
     let started = false;
     let timer = null;
     let running = false;
@@ -579,7 +699,7 @@ function createRegulationIndexRecoveryRunner({ intervalMs = 60_000, logger = def
         if (running) return { skipped: true };
         running = true;
         try {
-            return await recoverRegulationArticleEmbeddings({ limit: 20 });
+            return await recoverRegulationArticleEmbeddings({ limit: safeBatchSize });
         } catch (error) {
             logger.warn({ err: error.message }, '法规向量索引恢复巡检失败');
             return { error: error.message };
@@ -590,8 +710,8 @@ function createRegulationIndexRecoveryRunner({ intervalMs = 60_000, logger = def
     async function start() {
         if (started) return { started, running };
         started = true;
-        await tick();
-        timer = setIntervalFn(() => { void tick(); }, Math.max(Number(intervalMs) || 60_000, 10_000));
+        void tick();
+        timer = setIntervalFn(() => { void tick(); }, safeIntervalMs);
         timer?.unref?.();
         return { started, running };
     }
@@ -600,7 +720,7 @@ function createRegulationIndexRecoveryRunner({ intervalMs = 60_000, logger = def
         if (timer) clearIntervalFn(timer);
         timer = null;
     }
-    return { start, stop, tick, getRuntimeStatus: () => ({ started, running }) };
+    return { start, stop, tick, getRuntimeStatus: () => ({ started, running, intervalMs: safeIntervalMs, batchSize: safeBatchSize }) };
 }
 
 let regulationIndexRecoveryRunner = null;
@@ -683,9 +803,12 @@ module.exports = {
     createRegulationIndexRecoveryRunner,
     findRegulationDuplicateByHash,
     getRegulationIndexRetryDelayMs,
+    getRegulationIndexRecoverySettings,
+    getRegulationIndexSummary,
     isRegulationEmbeddingErrorRetryable,
     recoverRegulationArticleEmbeddings,
     requestRegulationVersionReindex,
+    queueRegulationLibraryReindex,
     restoreRegulationDocument,
     resolveRegulationVersionDownloadPath,
     saveRegulationDocumentVersion,

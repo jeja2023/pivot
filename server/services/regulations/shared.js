@@ -11,7 +11,7 @@ const { normalizeUploadedOriginalName } = require('../../upload');
 const { buildRagSearchContent, buildRagSearchTerms, normalizeSearchText } = require('../rag-tokenizer');
 const { chunkDocument } = require('../rag-chunker');
 const { getChunkSizeForDocType } = require('../rag-config');
-const { generateEmbeddings, cosineSimilarity } = require('../rag-index/embedding-client');
+const { generateEmbeddings, cosineSimilarity, formatEmbeddingQuery } = require('../rag-index/embedding-client');
 const { toProjectRelativePath } = require('../../security');
 const { clearDirSizeCache } = require('../dir-size-cache');
 
@@ -294,6 +294,7 @@ module.exports = {
     getChunkSizeForDocType,
     generateEmbeddings,
     cosineSimilarity,
+    formatEmbeddingQuery,
     toProjectRelativePath,
     clearDirSizeCache,
     projectRoot,

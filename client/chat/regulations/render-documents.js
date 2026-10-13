@@ -43,7 +43,7 @@
                     ? folders.map(folder => {
                         const folderTitle = esc(folder.title || fallbackTitle);
                         return `
-                            <button type="button" class="btn-secondary regulations-folder-card" data-regulation-folder-category="${esc(folder.category || '')}" data-regulation-folder-uncategorized="${folder.isUncategorized ? 'true' : 'false'}" data-regulation-folder-title="${folderTitle}" data-regulation-folder-documents="${Number(folder.documentCount || 0)}" data-regulation-folder-articles="${Number(folder.articleCount || 0)}" data-regulation-folder-effective="${Number(folder.effectiveCount || 0)}" data-regulation-folder-review="${Number(folder.needsReviewCount || 0)}" data-regulation-folder-updated="${esc(folder.latestUpdatedAt || '')}">
+                            <button type="button" class="btn-secondary regulations-folder-card" data-regulation-folder-category="${esc(folder.category || '')}" data-regulation-folder-uncategorized="${folder.isUncategorized ? 'true' : 'false'}" data-regulation-folder-custom="${folder.isCustom ? 'true' : 'false'}" data-regulation-folder-title="${folderTitle}" data-regulation-folder-documents="${Number(folder.documentCount || 0)}" data-regulation-folder-articles="${Number(folder.articleCount || 0)}" data-regulation-folder-effective="${Number(folder.effectiveCount || 0)}" data-regulation-folder-review="${Number(folder.needsReviewCount || 0)}" data-regulation-folder-updated="${esc(folder.latestUpdatedAt || '')}">
                                 <strong>${folderTitle}</strong>
                                 <span>${Number(folder.documentCount || 0)} 份法规 · ${Number(folder.articleCount || 0)} 条文</span>
                                 <small>已核验现行 ${Number(folder.effectiveCount || 0)} · 待治理 ${Number(folder.needsReviewCount || 0)}</small>
@@ -51,9 +51,27 @@
                         `;
                     }).join('')
                     : `<div class="regulations-empty compact">${emptyText}</div>`;
+                const canAdd = canManage();
                 PivotSafeHtml.setHtml(target, `
-                    <div class="regulations-folder-heading"><div><h3>法规分类目录</h3><p>分类目录为动态索引页，展示该分类中的法规、版本和治理状态，不会生成重复的法规文档。</p></div><span>${folders.length} 个分类</span></div>
-                    <div class="regulations-folder-grid">${folderListHtml}</div>
+                    <div class="regulations-folder-heading">
+                        <div>
+                            <h3>法规分类目录</h3>
+                            <p>分类目录为动态索引页，展示该分类中的法规、版本和治理状态，不会生成重复的法规文档。</p>
+                        </div>
+                        <div class="regulations-folder-actions">
+                            <span>${folders.length} 个分类</span>
+                            ${canAdd ? '<button type="button" class="btn-primary" id="regulations-create-folder-btn" data-regulation-create-folder>+ 新建分类</button>' : ''}
+                        </div>
+                    </div>
+                    <div class="regulations-folder-grid">
+                        ${folderListHtml}
+                        ${canAdd ? `
+                            <button type="button" class="btn-secondary regulations-folder-card regulations-folder-card-add" data-regulation-create-folder aria-label="新建法规分类目录">
+                                <strong>+ 新建分类目录</strong>
+                                <span>自定义法规层级与业务分类</span>
+                            </button>
+                        ` : ''}
+                    </div>
                 `);
             }
 
@@ -68,6 +86,7 @@
                 target.classList.remove('hidden');
                 const folder = state.activeFolder;
                 const canBatch = canManage();
+                const canDeleteFolder = canManage() && folder && folder.isCustom && Number(folder.documentCount || 0) === 0;
                 const folderTitle = folder ? folder.title : '全部法规';
                 const subTitle = folder ? '分类目录' : '文档目录';
                 const descText = folder
@@ -89,6 +108,7 @@
                         </div>
                         <div class="regulations-folder-actions">
                             ${canBatch ? `<button id="regulations-batch-mode-btn" class="btn-secondary" type="button" aria-pressed="${state.batchMode ? 'true' : 'false'}">${state.batchMode ? '退出批量处理' : '批量处理'}</button>` : ''}
+                            ${canDeleteFolder ? `<button type="button" class="btn-secondary text-danger" data-regulation-folder-delete="${esc(folder.category || '')}">删除分类</button>` : ''}
                             <button type="button" class="btn-secondary" data-regulation-folder-back>返回分类目录</button>
                         </div>
                     </div>
@@ -115,10 +135,17 @@
                     renderRegulationsSummary();
                     return;
                 }
-                        const canSelect = canManage() && state.batchMode;
-                        if (!state.documents.length) {
-                            PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center">暂无法规文档</td></tr>`);
-                        } else {
+                const canSelect = canManage() && state.batchMode;
+                if (!state.documents.length) {
+                    const folderCat = state.activeFolder?.category;
+                    const canImportThisCategory = canManage() && folderCat;
+                    const emptyAction = canImportThisCategory ? `
+                        <div class="regulations-empty-actions">
+                            <button type="button" class="btn-primary" data-regulation-import-folder="${esc(folderCat)}">导入此分类法规</button>
+                        </div>
+                    ` : '';
+                    PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center"><div class="regulations-empty compact">暂无法规文档${emptyAction}</div></td></tr>`);
+                } else {
                             const startIndex = (Math.max(Number(state.page || 1), 1) - 1) * Math.max(Number(state.pageSize || REGULATIONS_PAGE_SIZE), 1);
                             PivotSafeHtml.setHtml(target, state.documents.map((doc, index) => {
                                 const title = esc(cleanDisplayTitle(doc.title || '未命名法规'));

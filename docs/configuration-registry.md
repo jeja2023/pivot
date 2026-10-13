@@ -69,6 +69,19 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 法规索引与 Embedding
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `EMBEDDING_REQUEST_TIMEOUT_MS` | integer | `30000` | 1000–600000 | 单次 Embedding HTTP 请求超时。法规交互检索仍受更短的 4 秒降级保护。 |
+| `RAG_INDEX_EMBEDDING_TIMEOUT_MS` | integer | `120000` | 1000–600000 | 后台索引单次 Embedding 请求的超时上限；不改变前台关键词检索可用性。 |
+| `RAG_EMBEDDING_MAX_CONCURRENCY` | integer | `2` | 1–16 | 进程内所有 Embedding HTTP 请求的最大并发。纯 CPU 部署建议从 1 开始测量后再提高。 |
+| `RAG_EMBEDDING_BATCH_MAX_INPUTS` | integer | `16` | 1–128 | 一次 Embedding HTTP 请求最多包含的文本数；服务端模型批次上限仍以其自身配置为准。 |
+| `RAG_EMBEDDING_BATCH_MAX_TOKENS` | integer | `12000` | 256–1000000 | 一次 Embedding HTTP 请求的估算 Token 总预算。 |
+| `RAG_EMBEDDING_QUERY_INSTRUCTION` | string | `` | 逗号分隔的语言标记 | 可选查询 Embedding 指令。留空时 gte-Qwen2-Instruct 自动使用中文法规检索指令；文档入库正文不会添加该前缀。 |
+| `REGULATION_INDEX_RECOVERY_INTERVAL_MS` | integer | `5000` | 1000–300000 | 法规向量队列巡检间隔。队列状态已持久化，重启服务后会继续处理。 |
+| `REGULATION_INDEX_RECOVERY_BATCH_SIZE` | integer | `3` | 1–50 | 每轮法规向量队列连续处理的当前版本数。纯 CPU 部署建议设为 1。 |
+
 ## 数据分析
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

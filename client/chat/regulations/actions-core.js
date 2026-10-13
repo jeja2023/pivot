@@ -94,6 +94,7 @@
                         document.getElementById('regulations-quality-panel')?.classList.add('hidden');
                         document.getElementById('regulations-obligation-panel')?.classList.add('hidden');
                         document.getElementById('regulations-location-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-create-folder-panel')?.classList.add('hidden');
                         if (state.importJobsTimer) {
                             window.clearTimeout(state.importJobsTimer);
                             state.importJobsTimer = null;
@@ -136,6 +137,7 @@
                             title: String(folder.title || '未分类'),
                             category: String(folder.category || ''),
                             isUncategorized: Boolean(folder.isUncategorized || !folder.category),
+                            isCustom: Boolean(folder.isCustom),
                             documentCount: Number(folder.documentCount || folder.document_count || 0),
                             articleCount: Number(folder.articleCount || folder.article_count || 0),
                             effectiveCount: Number(folder.effectiveCount || folder.effective_count || 0),
@@ -146,6 +148,64 @@
                         state.selectedDocumentIds.clear();
                         state.selectedDocumentTitles.clear();
                         await loadDocuments({ keepActive: false, page: 1 });
+                    }
+
+                    function openCreateFolderDialog() {
+                        const panel = document.getElementById('regulations-create-folder-panel');
+                        const input = document.getElementById('regulations-new-folder-name');
+                        const desc = document.getElementById('regulations-new-folder-desc');
+                        if (!panel) return;
+                        if (input) input.value = '';
+                        if (desc) desc.value = '';
+                        panel.classList.remove('hidden');
+                        window.setTimeout(() => input?.focus(), 0);
+                    }
+
+                    function closeCreateFolderDialog() {
+                        document.getElementById('regulations-create-folder-panel')?.classList.add('hidden');
+                    }
+
+                    async function createCategoryFolder({ name, description } = {}) {
+                        const trimmed = String(name || '').trim();
+                        if (!trimmed) {
+                            toast('请输入分类目录名称', 'warning');
+                            return;
+                        }
+                        setBusy(true);
+                        try {
+                            const resp = await fetchJson(`${API}/category-folders`, {
+                                method: 'POST',
+                                body: JSON.stringify({ name: trimmed, description: String(description || '').trim() })
+                            });
+                            toast(resp.message || '分类目录创建成功', 'success');
+                            closeCreateFolderDialog();
+                            setBusy(false);
+                            await loadCategoryFolders();
+                            ns.loadFacets?.();
+                        } catch (e) {
+                            setBusy(false);
+                            toast(e.message || '创建分类目录失败', 'error');
+                        }
+                    }
+
+                    async function deleteCategoryFolder(category) {
+                        const targetCategory = String(category || '').trim();
+                        if (!targetCategory) return;
+                        const ok = await regulationConfirm('删除分类目录', `确定要删除分类目录「${targetCategory}」吗？\n该操作仅能删除没有关联法规文档的自定义分类。`);
+                        if (!ok) return;
+                        setBusy(true);
+                        try {
+                            const resp = await fetchJson(`${API}/category-folders/${encodeURIComponent(targetCategory)}`, {
+                                method: 'DELETE'
+                            });
+                            toast(resp.message || '分类目录已删除', 'success');
+                            setBusy(false);
+                            await returnToCategoryFolders();
+                            ns.loadFacets?.();
+                        } catch (e) {
+                            setBusy(false);
+                            toast(e.message || '删除分类目录失败', 'error');
+                        }
                     }
 
                     async function returnToCategoryFolders() {
@@ -414,6 +474,10 @@
                         loadCategoryFolders,
                         openCategoryFolder,
                         returnToCategoryFolders,
+                        openCreateFolderDialog,
+                        closeCreateFolderDialog,
+                        createCategoryFolder,
+                        deleteCategoryFolder,
             syncSearchControls,
             fetchArticleMatches,
             runSearch,

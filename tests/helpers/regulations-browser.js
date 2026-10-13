@@ -29,6 +29,7 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
             { title: '部门规章', category: '部门规章', documentCount: 1, articleCount: 10, effectiveCount: 0, needsReviewCount: 1, latestUpdatedAt: '2026-10-11 12:00:00', isUncategorized: false }
         ];
         window.testRequests = [];
+        window.testReindexRequests = [];
         window.testUpdates = [];
         window.testBatchUndo = [];
         window.testFailures = [];
@@ -64,6 +65,27 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
                 return { format: 'md', markdown: '# 测试法规报告' };
             }
             if (url.includes('/category-folders')) {
+                if (options.method === 'POST') {
+                    const payload = JSON.parse(options.body || '{}');
+                    const name = String(payload.name || '').trim();
+                    const newFolder = {
+                        category: name,
+                        title: name,
+                        documentCount: 0,
+                        articleCount: 0,
+                        effectiveCount: 0,
+                        needsReviewCount: 0,
+                        isCustom: true,
+                        description: payload.description || ''
+                    };
+                    window.testCategoryFolders.push(newFolder);
+                    return { success: true, message: '分类目录创建成功', category: newFolder };
+                }
+                if (options.method === 'DELETE') {
+                    const category = decodeURIComponent(url.split('/category-folders/')[1]?.split('?')[0] || '');
+                    window.testCategoryFolders = window.testCategoryFolders.filter(f => f.category !== category);
+                    return { success: true, message: '分类目录已删除' };
+                }
                 return { folders: window.testCategoryFolders };
             }
             if (url.includes('/documents/folder-selection')) {
@@ -195,6 +217,11 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
                     updated.push(document);
                 }
                 return { total: payload.ids.length, updated, failed, batchId: updated.length ? '测试批量记录-1' : null };
+            }
+            if (url.endsWith('/documents/reindex')) {
+                const payload = JSON.parse(options.body || '{}');
+                window.testReindexRequests.push(payload);
+                return { result: { queuedVersions: 2, clearedArticles: 20, scope: payload.category || (payload.uncategorized ? 'uncategorized' : 'all') } };
             }
             if (url.endsWith('/batch-revert')) {
                 const payload = JSON.parse(options.body || '{}');
