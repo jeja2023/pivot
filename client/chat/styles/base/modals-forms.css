@@ -691,7 +691,11 @@ body.auth-active {
     margin-bottom: clamp(12px, 1.9vh, 16px) !important;
 }
 #auth-container .auth-password-field .form-input {
+    margin-bottom: 0;
     padding-right: 52px !important;
+}
+#auth-container #auth-submit {
+    width: 100%;
 }
 #auth-container .btn-toggle-pw {
     position: absolute;

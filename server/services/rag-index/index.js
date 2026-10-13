@@ -24,7 +24,7 @@ const {
 } = require('./retrieval-scope-builder');
 const { attachCitationKeys: attachCitationKeysBase } = require('./citation-keys');
 const {
-    getEmbeddingConfig,
+    getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getRagConfig,
     getHybridRetrievalConfig,
@@ -33,6 +33,7 @@ const {
 const { ensureKnowledgeVectorIndex } = require('../knowledge-vector-index');
 const { chunkText, chunkDocument, detectDocType } = require('../rag-chunker');
 const { recordSlowRagRetrieval } = require('../observability');
+const { rerankCandidates } = require('../rerank-client');
 const {
     applyFeedbackRanking,
     attachCitationConfidence,
@@ -67,8 +68,24 @@ const {
     generateEmbeddings,
     generateEmbeddingsAdaptive,
     buildEmbeddingInputBatches,
+    formatEmbeddingQuery,
     cosineSimilarity
 } = require('./embedding-client');
+
+async function applyExternalRerank(candidates, query, source) {
+    return (await rerankCandidates(query, candidates, { source })).candidates;
+}
+
+async function generateKnowledgeQueryEmbedding(query, userId, user = null) {
+    const embeddingConfig = getSystemEmbeddingConfig();
+    return await generateEmbedding(
+        formatEmbeddingQuery(query, embeddingConfig),
+        embeddingConfig.mode,
+        embeddingConfig.http,
+        null,
+        { user, source: 'knowledge_search' }
+    );
+}
 
 // 为聊天热路径中的已解析 chunk embedding 设置有界缓存：反复解析
 // 同一批 TEXT-JSON 向量并重新计算 L2 范数成本较高。
@@ -301,7 +318,7 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
     if (!Array.isArray(queryVector) || !queryVector.length || limit <= 0) return [];
     const scopeFilter = buildRetrievalScopeSql(scope, 'd', user);
     const queryNorm = computeVectorNorm(queryVector);
-    const embeddingProfile = getEmbeddingProfile(getEmbeddingConfig(userId));
+    const embeddingProfile = getEmbeddingProfile(getSystemEmbeddingConfig());
     const top = [];
     let chunks = [];
     try {
@@ -563,7 +580,7 @@ async function debugRetrieveContext(userId, query, {
     let confidenceRejectionReason = '';
     try {
         const [vector, graphCandidates, feedbackSignals] = await Promise.all([
-            Array.isArray(queryVector) ? Promise.resolve(queryVector) : generateEmbedding(normalizedQuery, null, null, userId, { user }),
+            Array.isArray(queryVector) ? Promise.resolve(queryVector) : generateKnowledgeQueryEmbedding(normalizedQuery, userId, user),
             selectChunksByIds(userId, graphContext.chunkIds, safeCandidateLimit, normalizedScope, user),
             loadRagFeedbackSignals(userId, normalizedQuery)
         ]);
@@ -572,6 +589,7 @@ async function debugRetrieveContext(userId, query, {
         scored = applyFeedbackRanking(scoreCandidatesHybrid(candidates, vector, hybrid), feedbackSignals);
         scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
+        gated = await applyExternalRerank(gated, normalizedQuery, 'knowledge_debug_hybrid');
         const confidenceGate = rejectLowConfidenceResults(gated, {
             scoreThreshold: config.scoreThreshold,
             minRerankScore: config.rerankThreshold,
@@ -603,7 +621,8 @@ async function debugRetrieveContext(userId, query, {
             })), fallbackFeedbackSignals);
         gated = scored.filter(item => item.denseScore > config.scoreThreshold);
         scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
-        const confidenceGate = rejectLowConfidenceResults(scored.filter(item => item.denseScore > config.scoreThreshold), {
+        gated = await applyExternalRerank(scored.filter(item => item.denseScore > config.scoreThreshold), normalizedQuery, 'knowledge_debug_keyword');
+        const confidenceGate = rejectLowConfidenceResults(gated, {
             scoreThreshold: config.scoreThreshold,
             minRerankScore: config.rerankThreshold,
             minCitationConfidence: config.citationConfidenceThreshold
@@ -695,7 +714,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         let chunks = lexicalCandidates;
         try {
             const [queryVector, graphCandidates, feedbackSignals] = await Promise.all([
-                Array.isArray(options.queryVector) ? Promise.resolve(options.queryVector) : generateEmbedding(normalizedQuery, null, null, userId, { user: options.user || null }),
+                Array.isArray(options.queryVector) ? Promise.resolve(options.queryVector) : generateKnowledgeQueryEmbedding(normalizedQuery, userId, options.user || null),
                 selectChunksByIds(userId, graphContext.chunkIds, config.candidateLimit, retrievalScope, options.user || null),
                 loadRagFeedbackSignals(userId, normalizedQuery)
             ]);
@@ -711,7 +730,8 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);
             // 软门控、rerank 和可信度拒答后再做 MMR 去重，取最终 topK。
-            const gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
+            let gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
+            gated = await applyExternalRerank(gated, normalizedQuery, 'knowledge_retrieval_hybrid');
             const confidenceGate = rejectLowConfidenceResults(gated, {
                 scoreThreshold: config.scoreThreshold,
                 minRerankScore: config.rerankThreshold,
@@ -730,6 +750,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
             topChunks = applyFeedbackRanking(scoreKeywordChunks(chunks, normalizedQuery)
                 .sort((a, b) => b.score - a.score), feedbackSignals);
             topChunks = rerankHybridCandidates(topChunks, normalizedQuery, { scoreThreshold: config.scoreThreshold });
+            topChunks = await applyExternalRerank(topChunks, normalizedQuery, 'knowledge_retrieval_keyword');
             const confidenceGate = rejectLowConfidenceResults(topChunks, {
                 scoreThreshold: config.scoreThreshold,
                 minRerankScore: config.rerankThreshold,
@@ -784,7 +805,7 @@ function buildEnrichedChunkText(content, headingPath) {
 async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
     const ragConfig = getRagConfig({}, userId);
-    const embeddingConfig = getEmbeddingConfig(userId);
+    const embeddingConfig = getSystemEmbeddingConfig();
     const embeddingProfile = getEmbeddingProfile(embeddingConfig);
     const docRow = await knowledgeRepository.getDocumentName(docId);
     const docName = docRow.name || '';
@@ -814,7 +835,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
             const batch = chunks.slice(indexed, indexed + enrichedBatch.length);
             let vectors = null;
             try {
-                vectors = await generateEmbeddingsAdaptive(enrichedBatch, null, null, userId, {
+                vectors = await generateEmbeddingsAdaptive(enrichedBatch, embeddingConfig.mode, embeddingConfig.http, null, {
                     timeoutMs: indexEmbeddingTimeoutMs,
                     source: 'rag_ingest_embedding',
                     user,
@@ -884,7 +905,7 @@ async function indexDocumentChunks(docId, text, { onProgress, userId = null, use
 }
 
 module.exports = {
-    getEmbeddingConfig,
+    getSystemEmbeddingConfig,
     generateEmbedding,
     generateEmbeddings,
     generateEmbeddingsAdaptive,

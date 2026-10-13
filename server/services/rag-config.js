@@ -15,7 +15,14 @@ const RAG_CONFIG_KEYS = {
     embeddingMode: 'rag_embedding_mode',
     embeddingApiUrl: 'rag_embedding_api_url',
     embeddingApiKey: 'rag_embedding_api_key',
-    embeddingModel: 'rag_embedding_model'
+    embeddingModel: 'rag_embedding_model',
+    rerankEnabled: 'rag_rerank_enabled',
+    rerankApiUrl: 'rag_rerank_api_url',
+    rerankApiKey: 'rag_rerank_api_key',
+    rerankModel: 'rag_rerank_model',
+    rerankProtocol: 'rag_rerank_protocol',
+    rerankCandidateLimit: 'rag_rerank_candidate_limit',
+    rerankTimeoutMs: 'rag_rerank_timeout_ms'
 };
 
 const EMBEDDING_MODES = {
@@ -58,7 +65,7 @@ function getEmbeddingConfig(userId = null, { allowUserSettings = true } = {}) {
     const http = {
         url: userUrl || storedUrl || process.env.EMBEDDING_API_URL || '',
         apiKey: '',
-        model: userModel || storedModel || process.env.EMBEDDING_MODEL || 'nomic-embed-text'
+        model: userModel || storedModel || process.env.EMBEDDING_MODEL || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct'
     };
     let apiKey = '';
     try {
@@ -104,6 +111,78 @@ function getPublicEmbeddingConfig(userId = null) {
         isPersonal: config.source.url === 'user' || config.source.model === 'user' || config.source.apiKey === 'user',
         source: config.source
     };
+}
+
+function normalizeBoolean(value, fallback = false) {
+    if (value === undefined || value === null || String(value).trim() === '') return fallback;
+    return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
+function normalizeRerankProtocol(value) {
+    return String(value || '').trim().toLowerCase() === 'llama_cpp' ? 'llama_cpp' : 'tei';
+}
+
+function getRerankConfig() {
+    const storedKey = getSettingValue(RAG_CONFIG_KEYS.rerankApiKey);
+    let apiKey = '';
+    try {
+        apiKey = storedKey ? decryptSecret(storedKey, 'rag.rerank_api_key') : (process.env.RERANK_API_KEY || '');
+    } catch (_) {
+        apiKey = '';
+    }
+    const enabled = normalizeBoolean(
+        getSettingValue(RAG_CONFIG_KEYS.rerankEnabled) ?? process.env.RERANK_ENABLED,
+        false
+    );
+    const http = {
+        url: String(getSettingValue(RAG_CONFIG_KEYS.rerankApiUrl) || process.env.RERANK_API_URL || '').trim(),
+        apiKey,
+        model: String(getSettingValue(RAG_CONFIG_KEYS.rerankModel) || process.env.RERANK_MODEL || 'BAAI/bge-reranker-v2-m3').trim(),
+        protocol: normalizeRerankProtocol(getSettingValue(RAG_CONFIG_KEYS.rerankProtocol) || process.env.RERANK_PROTOCOL),
+        candidateLimit: clampInteger(
+            getSettingValue(RAG_CONFIG_KEYS.rerankCandidateLimit) ?? process.env.RERANK_CANDIDATE_LIMIT,
+            30,
+            1,
+            100
+        ),
+        timeoutMs: clampInteger(
+            getSettingValue(RAG_CONFIG_KEYS.rerankTimeoutMs) ?? process.env.RERANK_TIMEOUT_MS,
+            1800,
+            200,
+            30000
+        )
+    };
+    return {
+        enabled: enabled && Boolean(http.url),
+        configured: Boolean(http.url),
+        http
+    };
+}
+
+function getPublicRerankConfig() {
+    const config = getRerankConfig();
+    return {
+        enabled: config.enabled,
+        configured: config.configured,
+        apiUrl: config.http.url,
+        model: config.http.model,
+        protocol: config.http.protocol,
+        candidateLimit: config.http.candidateLimit,
+        timeoutMs: config.http.timeoutMs,
+        hasApiKey: Boolean(config.http.apiKey)
+    };
+}
+
+function getRerankProfile(config = getRerankConfig()) {
+    const http = config?.http || {};
+    return [
+        config?.enabled ? 'enabled' : 'disabled',
+        String(http.model || '').trim().toLowerCase(),
+        String(http.protocol || '').trim().toLowerCase(),
+        String(http.url || '').trim().toLowerCase(),
+        Number(http.candidateLimit || 0),
+        Number(http.timeoutMs || 0)
+    ].join(':');
 }
 
 function getRagConfig(overrides = {}, userId = null) {
@@ -222,10 +301,31 @@ function toRagSettingValue(key, value) {
         return String(value || '').trim();
     }
     if (key === RAG_CONFIG_KEYS.embeddingModel) {
-        return String(value || '').trim() || 'nomic-embed-text';
+        return String(value || '').trim() || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct';
     }
     if (key === RAG_CONFIG_KEYS.embeddingApiKey) {
         return encryptSecret(String(value || '').trim(), 'rag.embedding_api_key');
+    }
+    if (key === RAG_CONFIG_KEYS.rerankEnabled) {
+        return normalizeBoolean(value) ? 'true' : 'false';
+    }
+    if (key === RAG_CONFIG_KEYS.rerankApiUrl) {
+        return String(value || '').trim();
+    }
+    if (key === RAG_CONFIG_KEYS.rerankModel) {
+        return String(value || '').trim() || 'BAAI/bge-reranker-v2-m3';
+    }
+    if (key === RAG_CONFIG_KEYS.rerankProtocol) {
+        return normalizeRerankProtocol(value);
+    }
+    if (key === RAG_CONFIG_KEYS.rerankCandidateLimit) {
+        return String(clampInteger(value, 30, 1, 100));
+    }
+    if (key === RAG_CONFIG_KEYS.rerankTimeoutMs) {
+        return String(clampInteger(value, 1800, 200, 30000));
+    }
+    if (key === RAG_CONFIG_KEYS.rerankApiKey) {
+        return encryptSecret(String(value || '').trim(), 'rag.rerank_api_key');
     }
     return String(value ?? '');
 }
@@ -237,11 +337,15 @@ module.exports = {
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getPublicEmbeddingConfig,
+    getPublicRerankConfig,
     getRagConfig,
+    getRerankConfig,
+    getRerankProfile,
     getHybridRetrievalConfig,
     getChunkSizeForDocType,
     getUserSettingValue,
     getUserSettingValueAsync,
     normalizeEmbeddingMode,
+    normalizeRerankProtocol,
     toRagSettingValue
 };

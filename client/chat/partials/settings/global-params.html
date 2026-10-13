@@ -360,7 +360,7 @@
                                     </div>
 
                                     <!-- 右侧：通信密钥 -->
-                                    <div class="stealth-secret-card">
+                                    <form class="stealth-secret-card" onsubmit="return false;" autocomplete="off">
                                         <div class="stealth-secret-header">
                                             <label for="runtime-setting-stealth-secret">客户端通信密钥 (Stealth Secret)</label>
                                             <small class="runtime-key-note">远程客户端连接时填入 desktop-config.json 或连接配置窗口中</small>
@@ -370,7 +370,7 @@
                                                 <svg class="secret-lock-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                                                 </svg>
-                                                <input id="runtime-setting-stealth-secret" type="password" class="form-input stealth-secret-field" readonly placeholder="未生成通信密钥">
+                                                <input id="runtime-setting-stealth-secret" name="stealth_secret" type="password" class="form-input stealth-secret-field" readonly placeholder="未生成通信密钥" autocomplete="off">
                                             </div>
                                             <div class="secret-btn-group">
                                                 <button type="button" id="runtime-setting-stealth-secret-toggle" class="btn-secondary btn-param-action" title="切换明文/密文显示">
@@ -393,7 +393,7 @@
                                                 </button>
                                             </div>
                                         </div>
-                                    </div>
+                                    </form>
                                 </div>
                             </section>
 

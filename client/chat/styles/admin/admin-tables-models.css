@@ -1,5 +1,6 @@
 /* 拆自 admin.css。 */
 /* 管理端通用表格、用户/模型/附件列与模型弹窗样式。 */
+@import url("./admin-retrieval-modals.css");
 .table-container {
     flex: 1;
     overflow: auto;
@@ -88,6 +89,104 @@
 .models-table td:nth-child(10) button {
     height: 24px;
     line-height: 1;
+}
+
+.retrieval-model-services {
+    margin: 0 0 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary, #f8fafc);
+    text-align: left;
+}
+
+.retrieval-model-services-head,
+.retrieval-model-services-body {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: left;
+}
+
+.retrieval-model-services-head {
+    margin-bottom: 12px;
+    text-align: left;
+}
+
+.retrieval-model-services-head > div {
+    text-align: left;
+}
+
+.retrieval-model-services-head h4 {
+    margin: 0 0 3px;
+    color: var(--text-main);
+    font-size: 0.92rem;
+    font-weight: 700;
+    text-align: left;
+}
+
+.retrieval-model-services-head p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.4;
+    text-align: left;
+}
+
+.retrieval-model-services-body {
+    align-items: stretch;
+    text-align: left;
+}
+
+.retrieval-model-service-card {
+    display: grid;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 5px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-primary, #fff);
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.retrieval-model-service-card strong {
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-align: left;
+}
+
+.retrieval-model-service-card span,
+.retrieval-model-service-card small {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.retrieval-model-service-card.is-ready { border-color: var(--success); }
+.retrieval-model-service-card.is-warning { border-color: var(--warning); }
+.retrieval-model-service-card.is-loading { color: var(--text-muted); text-align: left; }
+
+.retrieval-model-service-config {
+    justify-self: start;
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+    .retrieval-model-services-head,
+    .retrieval-model-services-body { flex-direction: column; text-align: left; }
+    .retrieval-model-service-card { width: 100%; text-align: left; }
 }
 
 .users-table .col-id { width: 56px; }
@@ -480,6 +579,7 @@
     box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.035);
 }
 .model-modal-actions button { flex: 1; height: 38px; font-weight: 600; font-size: 0.82rem; }
+.retrieval-config-modal .model-modal-actions button { flex: 0 0 auto !important; width: auto !important; white-space: nowrap !important; }
 
 @media (max-width: 760px) {
     .model-modal-header {

@@ -8,6 +8,34 @@
     width: 100%;
 }
 
+.knowledge-retrieval-model-summary {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    gap: 7px;
+    min-height: 30px;
+    box-sizing: border-box;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.knowledge-retrieval-model-summary strong {
+    color: var(--text-main);
+}
+
+.knowledge-retrieval-model-summary .btn-secondary {
+    min-height: 22px;
+    height: 22px;
+    padding: 0 7px;
+    font-size: 0.68rem;
+    line-height: 1;
+}
+
 .knowledge-panel .rag-summary {
     display: inline-flex;
     align-items: center;
@@ -101,10 +129,11 @@
 }
 
 .knowledge-toolbar {
-    flex: 0 0 auto;
-    justify-content: space-between;
+    display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+    gap: 8px 10px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 8px;
@@ -119,11 +148,12 @@
 }
 
 .knowledge-toolbar-filters {
-    flex: 1 1 320px;
+    flex: 0 0 auto;
 }
 
 .knowledge-toolbar-actions {
     justify-content: flex-end;
+    margin-left: auto;
 }
 
 .knowledge-toolbar-actions > button,
@@ -787,6 +817,11 @@
         width: 100%;
     }
 
+    .knowledge-retrieval-model-summary {
+        width: 100%;
+        justify-content: space-between;
+    }
+
     .knowledge-toolbar-actions {
         justify-content: flex-start;
     }
@@ -904,77 +939,9 @@
     to { transform: rotate(360deg); }
 }
 
-/* 知识库检索配置模态框骨架 */
-#rag-embedding-modal .model-modal {
-    width: min(500px, 100%);
-    max-height: 100%;
-    padding: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-lg);
-    background: #ffffff;
-}
+/* 知识库检索配置模态框骨架统一引用 */
+@import url("../admin/admin-retrieval-modals.css");
 
-#rag-embedding-modal .model-modal-header {
-    flex: 0 0 auto;
-    padding: 18px 24px 14px;
-    background: #f8fafc;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-}
-
-#rag-embedding-modal .model-modal-header h3 {
-    margin: 0;
-    font-size: 1.1rem;
-    color: var(--text-main);
-    line-height: 1.2;
-}
-
-#rag-embedding-modal .model-modal-desc {
-    margin: 4px 0 0;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    line-height: 1.35;
-}
-
-#rag-embedding-modal .model-form {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: 18px 24px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    overflow: auto;
-    text-align: left;
-}
-
-#rag-embedding-modal .model-form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-}
-
-#rag-embedding-modal .model-form .form-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-#rag-embedding-modal .model-modal-actions {
-    flex: 0 0 auto;
-    display: flex;
-    gap: 10px;
-    margin-top: 8px;
-}
-
-#rag-embedding-modal .model-modal-actions button {
-    flex: 1;
-    height: 38px;
-    font-weight: 600;
-    font-size: 0.82rem;
-}
 
 /* 知识使用与治理：从资料列表中按需进入，不在首页常驻占用浏览空间。 */
 .knowledge-product-open {

@@ -24,7 +24,7 @@ function createLexicalReadyScheduler({ query, scheduleKnowledgeDocumentIndexing 
     };
 }
 
-function createEmbeddingProfileMismatchScheduler({ query, scheduleKnowledgeDocumentIndexing, getEmbeddingConfig, getEmbeddingProfile }) {
+function createEmbeddingProfileMismatchScheduler({ query, scheduleKnowledgeDocumentIndexing, getSystemEmbeddingConfig, getEmbeddingProfile }) {
     return async function scheduleEmbeddingProfileMismatchedDocuments({ limit = 50 } = {}) {
         const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 500));
         const rows = await query(`
@@ -40,7 +40,7 @@ function createEmbeddingProfileMismatchScheduler({ query, scheduleKnowledgeDocum
         let scheduled = 0;
         let upToDate = 0;
         for (const row of rows) {
-            const config = getEmbeddingConfig(row.user_id);
+            const config = getSystemEmbeddingConfig();
             if (!String(config?.http?.url || '').trim()) {
                 upToDate += 1;
                 continue;

@@ -11,6 +11,7 @@ const {
     normalizeSearchText
 } = require('./shared');
 const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
+const { rerankCandidates } = require('../rerank-client');
 
 const MAX_REGULATION_SEARCH_RESULTS = 50;
 const MAX_REGULATION_RETRIEVAL_CANDIDATES = 300;
@@ -261,6 +262,15 @@ function mergeRegulationCandidates(lexical, semantic, limit) {
         .slice(0, limit);
 }
 
+async function rerankRegulationCandidates(query, candidates) {
+    const result = await rerankCandidates(query, candidates, { source: 'regulations_search' });
+    if (!result.applied) return result.candidates;
+    return result.candidates.map(item => ({
+        ...item,
+        retrieval: `${item.retrieval || 'hybrid'}_reranked`
+    }));
+}
+
 // 混合检索采用“词法、向量独立召回 + 倒数排名融合”。词法命中没有向量时仍会保留，
 // 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
 async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
@@ -295,7 +305,8 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
     }
 
     if (!Array.isArray(queryVector) || !queryVector.length) {
-        return lexical.slice(0, safeLimit).map(item => ({ ...item, retrieval: 'keyword' }));
+        const ranked = await rerankRegulationCandidates(normalizedQuery, lexical);
+        return ranked.slice(0, safeLimit).map(item => ({ ...item, retrieval: item.retrieval || 'keyword' }));
     }
 
     let semantic = [];
@@ -310,10 +321,13 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
     }
 
     if (!semantic.length) {
-        return lexical.slice(0, safeLimit).map(item => ({ ...item, retrieval: 'keyword' }));
+        const ranked = await rerankRegulationCandidates(normalizedQuery, lexical);
+        return ranked.slice(0, safeLimit).map(item => ({ ...item, retrieval: item.retrieval || 'keyword' }));
     }
 
-    return mergeRegulationCandidates(lexical, semantic, safeLimit);
+    const rerankWindow = Math.min(MAX_REGULATION_RETRIEVAL_CANDIDATES, Math.max(safeLimit * 5, 30));
+    const merged = mergeRegulationCandidates(lexical, semantic, rerankWindow);
+    return (await rerankRegulationCandidates(normalizedQuery, merged)).slice(0, safeLimit);
 }
 
 // 相似条文推荐：优先使用 pgvector，在向量不可用时退回同分类或同发布机构。
@@ -430,6 +444,7 @@ module.exports = {
     findSimilarRegulationArticles,
     listSavedSearches,
     mergeRegulationCandidates,
+    rerankRegulationCandidates,
     searchRegulationArticles,
     searchRegulationArticlesHybrid
 };

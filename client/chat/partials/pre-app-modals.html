@@ -89,21 +89,21 @@
                 <form class="form-group" id="auth-form" autocomplete="on">
                     <div class="auth-input-wrapper">
                         <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
-                        <input type="text" id="username" class="form-input" placeholder="请输入用户名">
+                        <input type="text" id="username" name="username" autocomplete="username" class="form-input" placeholder="请输入用户名" required>
                     </div>
                     <div class="reg-only hidden">
                         <div class="auth-input-wrapper">
                             <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m16 11 2 2 4-4"/></svg>
-                            <input type="text" id="nickname" class="form-input" placeholder="显示名称 (仅限中文姓名)">
+                            <input type="text" id="nickname" name="nickname" autocomplete="name" class="form-input" placeholder="显示名称 (仅限中文姓名)">
                         </div>
                         <div class="auth-input-wrapper">
                             <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h1"/><path d="M9 13h1"/><path d="M9 17h1"/></svg>
-                            <input type="text" id="unit" class="form-input" placeholder="工作单位">
+                            <input type="text" id="unit" name="unit" autocomplete="organization" class="form-input" placeholder="工作单位">
                         </div>
                     </div>
                     <div class="auth-input-wrapper auth-password-field">
                         <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                        <input type="password" id="password" class="form-input" placeholder="请输入密码" style="margin-bottom: 0; padding-right: 45px;">
+                        <input type="password" id="password" name="password" autocomplete="current-password" class="form-input" placeholder="请输入密码" required>
                         <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="password" data-icon-id="eye-icon-auth" title="显示/隐藏明文">
                             <svg id="eye-icon-auth" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -113,7 +113,7 @@
                     </div>
                     <div class="reg-only hidden auth-input-wrapper auth-password-field">
                         <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-                        <input type="password" id="confirm-password" class="form-input" placeholder="确认密码" style="margin-bottom: 0; padding-right: 45px;">
+                        <input type="password" id="confirm-password" name="confirm-password" autocomplete="new-password" class="form-input" placeholder="确认密码">
                         <button type="button" class="btn-toggle-pw" data-auth-password-toggle data-input-id="confirm-password" data-icon-id="eye-icon-auth-conf" title="显示/隐藏明文">
                             <svg id="eye-icon-auth-conf" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -121,11 +121,11 @@
                             </svg>
                         </button>
                     </div>
+                    <button id="auth-submit" type="submit" class="btn-primary">
+                        <span>进入系统</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+                    </button>
                 </form>
-                <button id="auth-submit" class="btn-primary" style="width: 100%;">
-                    <span>进入系统</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-                </button>
                 <p class="auth-switch-row">
                     <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
                 </p>
@@ -217,7 +217,7 @@
                 <h3 id="model-modal-title">添加新模型</h3>
                 <p class="model-modal-desc">配置 OpenAI 兼容格式的大模型接口</p>
             </div>
-            <div class="model-form">
+            <form class="model-form" onsubmit="return false;" autocomplete="off">
                 <div class="model-form-scroll">
                     <input type="hidden" id="m-id">
                     <div class="form-item">
@@ -227,7 +227,7 @@
                     <div class="form-item">
                         <label>接口密钥（API Key，可选）</label>
                         <div style="position: relative;">
-                            <input type="password" id="m-key" class="form-input" placeholder="若无需则留空"
+                            <input type="password" id="m-key" name="model_key" autocomplete="off" class="form-input" placeholder="若无需则留空"
                                 style="padding-right: 45px;">
                             <button type="button" class="btn-toggle-pw" data-static-action="toggle-model-key" title="显示/隐藏明文">
                                 <svg id="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
@@ -367,7 +367,7 @@
                         style="border-color: var(--primary); color: var(--primary); width: auto; padding: 0 15px;">测试连接</button>
                     <button id="m-submit-btn" class="btn-primary">保存配置</button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -378,15 +378,15 @@
                 <h3 id="user-modal-title">添加用户</h3>
                 <p class="model-modal-desc">维护系统账号、角色与启用状态</p>
             </div>
-            <div class="model-form">
+            <form class="model-form" onsubmit="return false;" autocomplete="off">
                 <input type="hidden" id="u-id">
                 <div class="form-item">
                     <label>用户名</label>
-                    <input type="text" id="u-username" class="form-input" placeholder="3-32 位字母、数字或符号">
+                    <input type="text" id="u-username" name="username" autocomplete="username" class="form-input" placeholder="3-32 位字母、数字或符号">
                 </div>
                 <div class="form-item" id="u-password-wrap">
                     <label>初始密码</label>
-                    <input type="password" id="u-password" class="form-input" placeholder="至少 8 位，包含字母和数字">
+                    <input type="password" id="u-password" name="new_password" autocomplete="new-password" class="form-input" placeholder="至少 8 位，包含字母和数字">
                 </div>
                 <div class="form-item">
                     <label>显示名称</label>
@@ -414,7 +414,7 @@
                     <button id="modal-user-cancel" class="btn-secondary">取消</button>
                     <button id="modal-user-save" class="btn-primary">保存用户</button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 

@@ -7,6 +7,7 @@ const AUDIT_ACTION_LABELS = {
     RAG_DOCUMENT_REINDEX: '知识库文档重新索引',
     RAG_DOCUMENT_RETRY_FAILED: '知识库失败文档重试',
     RAG_EMBEDDING_TEST: '向量模型连接测试',
+    '重排序模型连接测试': '重排序模型连接测试',
     RAG_FEEDBACK: '知识库召回反馈',
     SYSTEM_ERROR: '系统错误',
     UPDATE_MEMORY_THRESHOLD: '修改长期记忆相似度阈值',

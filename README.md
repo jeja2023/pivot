@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.2.15-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.2.19-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -11,15 +11,15 @@
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.2.16
+## 最新版本：0.2.19
 
-本版本面向千份级法规文档库，补齐分类导航、范围批量治理和向量索引失败控制：
+本版本聚焦首屏认证体验与共享检索服务的配置边界：
 
-- **分类目录优先**：法规库首页先显示分类文件夹与动态统计，点击分类才进入对应法规列表；目录由数据库实时生成，不会产生重复的目录文档。
-- **一键范围全选**：批量处理支持一键选择当前分类或全部法规，单次可安全处理最多 2,000 份，并继续提供审计和撤销保护。
-- **向量失败可控降级**：向量服务问题不阻断法规入库；系统保留关键词检索，对临时故障有限退避重试，对配置错误停止自动重试，管理员可手动重建索引。
+- **认证与表单规范化**：减少未登录首屏的无效鉴权请求，消除密码输入框缺少表单或自动填充属性的浏览器告警，并完善弹窗关闭时的无障碍焦点管理。
+- **检索模型统一配置**：法规库和知识库共用向量生成、重排序与检索策略配置；知识库仅展示当前状态并跳转至模型配置页。
+- **三个独立配置弹窗**：向量服务、重排序服务和检索策略分别在独立弹窗中配置、测试和保存；每次保存只更新当前服务或策略，动态状态卡按钮在重新加载后仍可用。
 
-（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.2.15 发布记录](docs/releases/v0.2.15-法规目录索引与批量索引治理.md)。）
+（详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.2.19 发布记录](docs/releases/v0.2.19-前端无障碍焦点与认证表单规范化.md)。）
 
 国产化桌面客户端当前正式支持 Linux AMD64 和 ARM64 的 UOS/Debian 构建；构建命令、离线依赖、原生模块验收和 LoongArch64 限制见 [统信 UOS 与龙芯客户端打包指南](docs/统信UOS与龙芯3A6000客户端打包指南.md)。龙芯 LoongArch64 当前不会生成正式安装包。
 
@@ -418,7 +418,7 @@ MCP_DATABASE_TEST_TIMEOUT_MS=10000
 EMBEDDING_MODE=http
 EMBEDDING_API_URL=
 EMBEDDING_API_KEY=
-EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_MODEL=Alibaba-NLP/gte-Qwen2-1.5B-instruct
 EMBEDDING_REQUEST_TIMEOUT_MS=30000
 RAG_INDEX_EMBEDDING_TIMEOUT_MS=120000
 # 纯 CPU 部署的法规向量重建建议：先以单请求、单版本队列运行并观察模型服务负载
@@ -430,6 +430,14 @@ REGULATION_INDEX_RECOVERY_INTERVAL_MS=5000
 # 使用 Alibaba-NLP/gte-Qwen2-1.5B-instruct 时，法规查询会自动补 Instruct/Query 模板；
 # 仅需在需要覆盖默认检索指令时填写此项。
 RAG_EMBEDDING_QUERY_INSTRUCTION=
+# 外部 Cross-Encoder 重排序（推荐独立部署 BAAI/bge-reranker-v2-m3；异常自动退回混合排序）
+RERANK_ENABLED=false
+RERANK_API_URL=
+RERANK_API_KEY=
+RERANK_MODEL=BAAI/bge-reranker-v2-m3
+RERANK_PROTOCOL=tei
+RERANK_CANDIDATE_LIMIT=30
+RERANK_TIMEOUT_MS=1800
 RAG_CANDIDATE_LIMIT=300
 RAG_CACHE_TTL_MS=300000
 RAG_CACHE_MAX_ITEMS=500
@@ -463,7 +471,9 @@ GPU_VRAM_REJECT_THRESHOLD=0.97
 GPU_VRAM_RECOVER_THRESHOLD=0.90
 ```
 
-法规库属于共享资料，导入、重建和检索统一使用“系统设置”的 Embedding 地址、密钥和模型；管理员个人 Embedding 设置不会再把同一法规库切分到不同向量空间。切换模型、模型版本、分块策略或向量维度后，在法规分类内点击“批量处理”并执行“重建全库向量”（或当前分类重建）。该操作只清空当前版本的旧向量并进入可恢复后台队列，不会重新 OCR/解析原文件；重建期间始终保留关键词检索。
+法规库属于共享资料，导入、重建和检索统一使用“系统设置”的 Embedding 地址、密钥和模型；管理员个人 Embedding 设置不会再把同一法规库切分到不同向量空间。生产推荐 `Alibaba-NLP/gte-Qwen2-1.5B-instruct`（1536 维）作为法规与知识库的统一向量模型；法规与知识库查询都会使用 Instruct/Query 模板，入库正文保持原文。切换模型、模型版本、分块策略或向量维度后，在法规分类内点击“批量处理”并执行“重建全库向量”（或当前分类重建），知识库则在“批量治理”执行“全库重建向量”。这些操作均进入可恢复后台队列，不会重新 OCR/解析原文件；重建期间始终保留关键词检索。
+
+可选的外部 Cross-Encoder 重排序推荐使用 `BAAI/bge-reranker-v2-m3` 的局域网 `/rerank` 服务。TEI 服务设置 `RERANK_PROTOCOL=tei`，llama.cpp 服务设置 `RERANK_PROTOCOL=llama_cpp`；它只会处理已经通过权限过滤、词法和向量融合后的前 30 个候选。服务超时、失败或熔断时会自动保留既有排序，不影响检索可用性。
 
 ## 验证与运维命令
 
@@ -582,4 +592,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.2.15
+**当前版本**：v0.2.19

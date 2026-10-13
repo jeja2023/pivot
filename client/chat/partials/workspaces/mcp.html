@@ -238,7 +238,7 @@
             <button id="mcp-edit-close-btn" class="btn-secondary workspace-modal-close" type="button"
                 aria-label="关闭工具服务配置">关闭</button>
         </div>
-        <div class="mcp-edit-form">
+        <form class="mcp-edit-form" onsubmit="return false;" autocomplete="off">
             <input type="hidden" id="mcp-edit-id">
             <select id="mcp-edit-source-type" class="form-input" aria-label="工具服务类型" disabled>
                 <option value="external">外部工具服务（技术同事提供）</option>
@@ -254,8 +254,8 @@
             <div id="mcp-edit-external-fields" class="mcp-field-group">
                 <input id="mcp-edit-url" class="form-input" type="url"
                     placeholder="外部工具服务地址，由他人提供，例如 http://localhost:8787/mcp" aria-label="外部工具服务地址" autocomplete="url">
-                <input id="mcp-edit-key" class="form-input" type="password" placeholder="访问密钥，可选；没有就留空"
-                    aria-label="访问密钥" autocomplete="new-password">
+                <input id="mcp-edit-key" name="mcp_key" class="form-input" type="password" placeholder="访问密钥，可选；没有就留空"
+                    aria-label="访问密钥" autocomplete="off">
                 <div class="mcp-form-row">
                     <input id="mcp-edit-health-check-url" class="form-input" type="url" placeholder="健康检查 URL，可选"
                         aria-label="健康检查地址" autocomplete="url">
@@ -297,9 +297,9 @@
                     aria-label="数据库名称或 SQLite 文件路径" required>
                 <div class="mcp-form-tip">localhost / 127.0.0.1 指 Pivot 服务器，不是你的电脑；生产库建议使用只读账号。</div>
                 <div class="mcp-form-row">
-                    <input id="mcp-edit-db-user" class="form-input" placeholder="用户名" aria-label="数据库用户名"
+                    <input id="mcp-edit-db-user" name="db_username" class="form-input" placeholder="用户名" aria-label="数据库用户名"
                         autocomplete="username">
-                    <input id="mcp-edit-db-password" class="form-input" type="password" placeholder="密码"
+                    <input id="mcp-edit-db-password" name="db_password" class="form-input" type="password" placeholder="密码"
                         aria-label="数据库密码" autocomplete="current-password">
                 </div>
                 <div class="mcp-form-row">
@@ -354,7 +354,7 @@
                     autocomplete="url">
                 <div class="mcp-form-row">
                     <input id="mcp-edit-im-auth-header" class="form-input" placeholder="认证 Header，默认 Authorization">
-                    <input id="mcp-edit-im-token" class="form-input" type="password" placeholder="Token / 密钥，可选">
+                    <input id="mcp-edit-im-token" name="im_token" class="form-input" type="password" placeholder="Token / 密钥，可选" autocomplete="off">
                 </div>
                 <textarea id="mcp-edit-im-allowed-targets" class="form-input"
                     placeholder="允许发送目标，每行一个；可写 user:zhangsan 或 group:ops" aria-label="允许发送目标"></textarea>
@@ -383,7 +383,7 @@
                 <button id="mcp-edit-save-btn" class="btn-primary" type="button">保存修改</button>
                 <button id="mcp-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
             </div>
-        </div>
+        </form>
     </div>
 </div>
 

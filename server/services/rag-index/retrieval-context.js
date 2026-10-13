@@ -2,7 +2,7 @@
 // 这里不负责召回或模型调用，只把排序结果转换成可审计、可注入的上下文。
 const { query, queryOne } = require('../../db/client');
 const { normalizeCacheQuery } = require('../rag-cache');
-const { getHybridRetrievalConfig } = require('../rag-config');
+const { getHybridRetrievalConfig, getRerankProfile } = require('../rag-config');
 const { calculateCitationConfidence } = require('./ranking');
 const { buildRagSearchTerms } = require('../rag-tokenizer');
 
@@ -98,6 +98,7 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
         `c=${Number(config.candidateLimit || 0)}`,
         `s=${Number(config.scoreThreshold || 0).toFixed(3)}`,
         `rr=${Number(config.rerankThreshold || 0).toFixed(3)}`,
+        `xr=${getRerankProfile()}`,
         `cc=${Number(config.citationConfidenceThreshold || 0).toFixed(3)}`,
         `rrf=${hybrid.rrfK}:${hybrid.wDense}:${hybrid.wFts}`,
         `mmr=${hybrid.mmrLambda}:${hybrid.ftsRankFloor}`,

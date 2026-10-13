@@ -87,7 +87,9 @@ async function loadSettings() {
         window.Pivot.legacy.applyUploadRuntimeLimits?.(data.uploadLimits);
         updateRuntimeSettingsForm(data.runtimeConfig);
         updateApiAccessState(data.apiAccessEnabled === true);
-        updateEmbeddingSettingsForm(data.embeddingConfig);
+        updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        window.Pivot.legacy.renderRetrievalModelServices?.(data);
+        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
         setSettingsLoadState('', '');
         return true;
     } catch (error) {
@@ -128,6 +130,13 @@ function updateRagChunkOverlapLimit() {
     const maxOverlap = Math.max(0, Math.floor(chunkSize / 2));
     overlapInput.max = String(maxOverlap);
     if (Number(overlapInput.value) > maxOverlap) overlapInput.value = String(maxOverlap);
+    const helpEl = document.getElementById('rag-chunk-overlap-help');
+    if (helpEl) {
+        const overlap = Number.parseInt(overlapInput.value, 10) || 0;
+        const ratio = chunkSize > 0 ? Math.round((overlap / chunkSize) * 100) : 0;
+        const isHigh = ratio > 50;
+        PivotSafeHtml.setHtml(helpEl, `重叠字符数最多为分块长度的一半（≤ ${maxOverlap} 字符，当前 <span class="retrieval-ratio-badge ${isHigh ? 'is-warning' : ''}">${ratio}% 重叠率</span>），保持段落衔接并减少边界语义丢失。`);
+    }
 }
 
 function validateRagSettings() {
@@ -714,7 +723,7 @@ window.Pivot.legacy.fetchEmbeddingModels = async () => {
     }
 };
 
-function updateEmbeddingSettingsForm(embeddingConfig = {}) {
+function updateEmbeddingSettingsForm(embeddingConfig = {}, rerankConfig = {}) {
     const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -722,6 +731,14 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
     const embeddingStatusEl = document.getElementById('setting-rag-embedding-status');
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     const embeddingModelSelectContainer = document.getElementById('setting-rag-embedding-model-select-container');
+    const rerankEnabled = document.getElementById('setting-rag-rerank-enabled');
+    const rerankUrl = document.getElementById('setting-rag-rerank-url');
+    const rerankModel = document.getElementById('setting-rag-rerank-model');
+    const rerankProtocol = document.getElementById('setting-rag-rerank-protocol');
+    const rerankCandidates = document.getElementById('setting-rag-rerank-candidate-limit');
+    const rerankTimeout = document.getElementById('setting-rag-rerank-timeout-ms');
+    const rerankKey = document.getElementById('setting-rag-rerank-key');
+    const rerankStatus = document.getElementById('setting-rag-rerank-status');
     if (embeddingModeInput) embeddingModeInput.value = 'http';
     if (embeddingUrlInput) embeddingUrlInput.value = embeddingConfig?.apiUrl || '';
     if (embeddingModelInput) embeddingModelInput.value = embeddingConfig?.model || 'nomic-embed-text';
@@ -736,10 +753,80 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}) {
         const source = embeddingConfig?.isPersonal ? '个人配置'
             : embeddingConfig?.source?.url === 'settings' ? '系统默认'
             : '环境变量/默认值';
-        embeddingStatusEl.innerText = `HTTP 服务 · ${keyStatus} · 来源：${source}`;
+        embeddingStatusEl.innerText = isSuperAdminUser()
+            ? `HTTP 服务 · ${keyStatus} · 来源：${source} · 法规与知识库共享此系统模型`
+            : `HTTP 服务 · ${keyStatus} · 来源：${source} · 法规与知识库使用管理员配置的共享模型`;
     }
-    setSettingsInitialValues('#setting-rag-embedding-url, #setting-rag-embedding-model');
+    const canEditRerank = isSuperAdminUser();
+    if (rerankEnabled) { rerankEnabled.checked = rerankConfig?.enabled === true; rerankEnabled.disabled = !canEditRerank; }
+    if (rerankUrl) { rerankUrl.value = rerankConfig?.apiUrl || ''; rerankUrl.disabled = !canEditRerank; }
+    if (rerankModel) { rerankModel.value = rerankConfig?.model || 'BAAI/bge-reranker-v2-m3'; rerankModel.disabled = !canEditRerank; }
+    if (rerankProtocol) { rerankProtocol.value = rerankConfig?.protocol === 'llama_cpp' ? 'llama_cpp' : 'tei'; rerankProtocol.disabled = !canEditRerank; }
+    if (rerankCandidates) { rerankCandidates.value = rerankConfig?.candidateLimit ?? 30; rerankCandidates.disabled = !canEditRerank; }
+    if (rerankTimeout) { rerankTimeout.value = rerankConfig?.timeoutMs ?? 1800; rerankTimeout.disabled = !canEditRerank; }
+    if (rerankKey) {
+        rerankKey.value = '';
+        rerankKey.disabled = !canEditRerank;
+        rerankKey.placeholder = rerankConfig?.hasApiKey ? '••••••••（已配置，输入新密钥可覆盖）' : '留空则保留原配置';
+    }
+    if (rerankStatus) rerankStatus.innerText = rerankConfig?.configured
+        ? `外部重排序 · ${rerankConfig.enabled ? '已启用' : '已配置但未启用'} · ${rerankConfig.protocol === 'llama_cpp' ? 'llama.cpp' : 'TEI'} 协议 · 前 ${rerankConfig.candidateLimit || 30} 个候选 · ${rerankConfig.timeoutMs || 1800}ms 超时`
+        : '外部重排序未配置；将继续使用本地确定性排序。';
+    setSettingsInitialValues('#setting-rag-embedding-url, #setting-rag-embedding-model, #setting-rag-rerank-url, #setting-rag-rerank-protocol, #setting-rag-rerank-model, #setting-rag-rerank-candidate-limit, #setting-rag-rerank-timeout-ms');
 }
+
+window.Pivot.legacy.updateEmbeddingSettingsForm = updateEmbeddingSettingsForm;
+
+function setRetrievalModelModalVisibility(modal, open, options = {}) {
+    if (!modal) return;
+    if (typeof window.Pivot.legacy.setKnowledgeModalVisibility === 'function') {
+        window.Pivot.legacy.setKnowledgeModalVisibility(modal, open, options);
+        return;
+    }
+    modal.classList.toggle('hidden', !open);
+    modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) window.setTimeout(() => modal.querySelector(options.focusSelector || 'button, input, select, textarea')?.focus(), 0);
+}
+
+const RETRIEVAL_CONFIG_SECTIONS = {
+    embedding: {
+        modalId: 'rag-embedding-modal',
+        saveLabel: '保存向量服务',
+        focusSelector: '#setting-rag-embedding-url'
+    },
+    rerank: {
+        modalId: 'rag-rerank-modal',
+        saveLabel: '保存重排序服务',
+        focusSelector: '#setting-rag-rerank-url'
+    },
+    policy: {
+        modalId: 'rag-retrieval-policy-modal',
+        saveLabel: '保存检索策略',
+        focusSelector: '#setting-rag-score-threshold'
+    }
+};
+
+function getRetrievalConfigSection(section) {
+    const value = String(section || '').trim();
+    return Object.hasOwn(RETRIEVAL_CONFIG_SECTIONS, value) ? value : 'embedding';
+}
+
+function openRetrievalModelConfigSection(section) {
+    const safeSection = getRetrievalConfigSection(section);
+    const config = RETRIEVAL_CONFIG_SECTIONS[safeSection];
+    const modal = document.getElementById(config.modalId);
+    if (!modal) {
+        showToast('检索模型配置面板尚未就绪，请刷新页面后重试', 'error');
+        return false;
+    }
+    if (safeSection === 'policy') {
+        updateRagChunkOverlapLimit();
+    }
+    setRetrievalModelModalVisibility(modal, true, { focusSelector: config.focusSelector });
+    return true;
+}
+
+window.Pivot.legacy.openRetrievalModelConfigSection = openRetrievalModelConfigSection;
 
 window.Pivot.legacy.saveSettings = async () => {
     const scoreInput = document.getElementById('setting-rag-score-threshold');
@@ -769,7 +856,9 @@ window.Pivot.legacy.saveSettings = async () => {
         if (candidateInput) candidateInput.value = data.ragConfig?.candidateLimit ?? candidateInput.value;
         if (chunkSizeInput) chunkSizeInput.value = data.ragConfig?.chunkSize ?? chunkSizeInput.value;
         if (chunkOverlapInput) chunkOverlapInput.value = data.ragConfig?.chunkOverlap ?? chunkOverlapInput.value;
-        updateEmbeddingSettingsForm(data.embeddingConfig);
+        updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        window.Pivot.legacy.renderRetrievalModelServices?.(data);
+        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
         setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
         showToast(isSuperAdminUser() ? '系统设置已保存' : '个人设置已保存');
     } catch (e) {
@@ -777,41 +866,64 @@ window.Pivot.legacy.saveSettings = async () => {
     }
 };
 
-window.Pivot.legacy.saveEmbeddingSettings = async () => {
-    const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
-    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
-    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
-    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
-    const saveBtn = document.getElementById('rag-embedding-save-btn');
-    const modal = document.getElementById('rag-embedding-modal');
-    if (!embeddingUrlInput || !embeddingModelInput) return;
+window.Pivot.legacy.saveEmbeddingSettings = async (requestedSection = 'embedding') => {
+    const section = getRetrievalConfigSection(requestedSection);
+    const config = RETRIEVAL_CONFIG_SECTIONS[section];
+    const modal = document.getElementById(config.modalId);
+    const saveBtn = modal?.querySelector(`[data-retrieval-config-save="${section}"]`);
+    if (!modal) return;
     if (saveBtn) saveBtn.disabled = true;
     try {
-        updateRagChunkOverlapLimit();
-        validateRagSettings();
         const scoreInput = document.getElementById('setting-rag-score-threshold');
         const topKInput = document.getElementById('setting-rag-top-k');
         const candidateInput = document.getElementById('setting-rag-candidate-limit');
         const chunkSizeInput = document.getElementById('setting-rag-chunk-size');
         const chunkOverlapInput = document.getElementById('setting-rag-chunk-overlap');
 
-        const payload = {
-            rag_embedding_mode: 'http',
-            rag_embedding_api_url: embeddingUrlInput.value.trim(),
-            rag_embedding_model: getEmbeddingModelValue()
-        };
-        
-        if (scoreInput) payload.rag_score_threshold = scoreInput.value;
-        if (topKInput) payload.rag_top_k = topKInput.value;
-        if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
-        if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
-        if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
-
-        if (embeddingModeInput) embeddingModeInput.value = 'http';
-        if (embeddingKeyInput && embeddingKeyInput.value.trim()) {
-            payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
+        if (section === 'policy') {
+            updateRagChunkOverlapLimit();
+            validateRagSettings();
         }
-        const endpoint = isSuperAdminUser() ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
+
+        const payload = {};
+        if (section === 'embedding') {
+            const embeddingModeInput = document.getElementById('setting-rag-embedding-mode');
+            const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
+            const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
+            const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
+            if (!embeddingUrlInput || !embeddingModelInput) throw new Error('向量服务配置面板尚未就绪');
+            payload.rag_embedding_mode = 'http';
+            payload.rag_embedding_api_url = embeddingUrlInput.value.trim();
+            payload.rag_embedding_model = getEmbeddingModelValue();
+            if (embeddingModeInput) embeddingModeInput.value = 'http';
+            if (embeddingKeyInput?.value.trim()) payload.rag_embedding_api_key = embeddingKeyInput.value.trim();
+        }
+
+        if (section === 'rerank') {
+            const rerankEnabled = document.getElementById('setting-rag-rerank-enabled');
+            const rerankUrl = document.getElementById('setting-rag-rerank-url');
+            const rerankModel = document.getElementById('setting-rag-rerank-model');
+            const rerankProtocol = document.getElementById('setting-rag-rerank-protocol');
+            const rerankCandidates = document.getElementById('setting-rag-rerank-candidate-limit');
+            const rerankTimeout = document.getElementById('setting-rag-rerank-timeout-ms');
+            const rerankKey = document.getElementById('setting-rag-rerank-key');
+            payload.rag_rerank_enabled = rerankEnabled?.checked === true;
+            payload.rag_rerank_api_url = rerankUrl?.value.trim() || '';
+            payload.rag_rerank_model = rerankModel?.value.trim() || 'BAAI/bge-reranker-v2-m3';
+            payload.rag_rerank_protocol = rerankProtocol?.value === 'llama_cpp' ? 'llama_cpp' : 'tei';
+            payload.rag_rerank_candidate_limit = rerankCandidates?.value || '30';
+            payload.rag_rerank_timeout_ms = rerankTimeout?.value || '1800';
+            if (rerankKey?.value.trim()) payload.rag_rerank_api_key = rerankKey.value.trim();
+        }
+
+        if (section === 'policy') {
+            if (scoreInput) payload.rag_score_threshold = scoreInput.value;
+            if (topKInput) payload.rag_top_k = topKInput.value;
+            if (candidateInput) payload.rag_candidate_limit = candidateInput.value;
+            if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
+            if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
+        }
+        const endpoint = `${API_BASE}/admin/settings`;
         const res = await apiFetch(endpoint, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -819,10 +931,14 @@ window.Pivot.legacy.saveEmbeddingSettings = async () => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '检索配置保存失败');
-        updateEmbeddingSettingsForm(data.embeddingConfig);
-        setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
-        showToast(isSuperAdminUser() ? '系统检索配置已保存' : '个人检索配置已保存');
-        if (modal) window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false);
+        updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        window.Pivot.legacy.renderRetrievalModelServices?.(data);
+        window.Pivot.legacy.renderKnowledgeRetrievalModelSummary?.(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+        if (section === 'policy') {
+            setSettingsInitialValues('#setting-rag-score-threshold, #setting-rag-top-k, #setting-rag-candidate-limit, #setting-rag-chunk-size, #setting-rag-chunk-overlap');
+        }
+        showToast(`${config.saveLabel}成功`, 'success');
+        setRetrievalModelModalVisibility(modal, false);
     } catch (e) {
         showToast(e.message || '检索配置保存失败', 'error');
     } finally {
@@ -874,37 +990,86 @@ window.Pivot.legacy.testEmbeddingConnection = async () => {
     }
 };
 
+window.Pivot.legacy.testRerankConnection = async () => {
+    const apiUrl = document.getElementById('setting-rag-rerank-url')?.value.trim() || '';
+    const apiKey = document.getElementById('setting-rag-rerank-key')?.value.trim() || '';
+    const model = document.getElementById('setting-rag-rerank-model')?.value.trim() || '';
+    const protocol = document.getElementById('setting-rag-rerank-protocol')?.value === 'llama_cpp' ? 'llama_cpp' : 'tei';
+    const candidateLimit = document.getElementById('setting-rag-rerank-candidate-limit')?.value || '30';
+    const timeoutMs = document.getElementById('setting-rag-rerank-timeout-ms')?.value || '1800';
+    const testBtn = document.getElementById('rag-rerank-test-btn');
+    if (!apiUrl) return showToast('请先填写重排序服务地址', 'error');
+    if (testBtn) testBtn.disabled = true;
+    showToast('正在测试重排序服务，请稍候…', 'info');
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/settings/test-rerank`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiUrl, apiKey, model, protocol, candidateLimit, timeoutMs })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success !== true) throw new Error(data.error || '重排序服务测试失败');
+        showToast(`重排序服务连接成功，已验证 ${data.ranked || 0} 个测试候选`, 'success');
+    } catch (error) {
+        showToast(error.message || '重排序服务测试失败', 'error');
+    } finally {
+        if (testBtn) testBtn.disabled = false;
+    }
+};
+
 window.Pivot.legacy.bindEmbeddingModalEvents = function() {
-    const openBtn = document.getElementById('rag-embedding-modal-open-btn');
-    const cancelBtn = document.getElementById('rag-embedding-modal-cancel');
+    const serviceCards = document.getElementById('retrieval-model-services-body');
     const testBtn = document.getElementById('rag-embedding-test-btn');
+    const rerankTestBtn = document.getElementById('rag-rerank-test-btn');
     const fetchModelsBtn = document.getElementById('rag-embedding-fetch-models-btn');
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
-    const modal = document.getElementById('rag-embedding-modal');
-    const modeSelect = document.getElementById('setting-rag-embedding-mode');
-    if (!openBtn || !modal) return;
+    const modals = Object.entries(RETRIEVAL_CONFIG_SECTIONS).map(([section, config]) => ({
+        section,
+        modal: document.getElementById(config.modalId)
+    })).filter(item => item.modal);
+    if (!modals.length) return;
 
-    if (openBtn.dataset.boundEmbeddingOpen !== '1') {
-        openBtn.dataset.boundEmbeddingOpen = '1';
-        openBtn.addEventListener('click', () => {
-            window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#setting-rag-score-threshold' });
+    // 服务卡片会在加载、保存和分页后重新渲染。委托给稳定的父容器，避免新按钮
+    // 因渲染时序而失去点击事件。
+    if (serviceCards && serviceCards.dataset.boundRetrievalModelActions !== '1') {
+        serviceCards.dataset.boundRetrievalModelActions = '1';
+        serviceCards.dataset.boundEmbeddingOpen = '1';
+        serviceCards.addEventListener('click', event => {
+            const openButton = event.target?.closest?.('[data-retrieval-model-config-open]');
+            if (!openButton || !serviceCards.contains(openButton)) return;
+            event.preventDefault();
+            openRetrievalModelConfigSection(openButton.dataset.retrievalModelConfigOpen);
         });
     }
-    if (cancelBtn && cancelBtn.dataset.boundEmbeddingCancel !== '1') {
-        cancelBtn.dataset.boundEmbeddingCancel = '1';
-        cancelBtn.addEventListener('click', () => window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, false));
-    }
-    
+    document.querySelectorAll('[data-retrieval-modal-cancel]').forEach(button => {
+        if (button.dataset.boundRetrievalModalCancel === '1') return;
+        button.dataset.boundRetrievalModalCancel = '1';
+        button.addEventListener('click', () => {
+            const section = getRetrievalConfigSection(button.dataset.retrievalModalCancel);
+            setRetrievalModelModalVisibility(document.getElementById(RETRIEVAL_CONFIG_SECTIONS[section].modalId), false);
+        });
+    });
+    document.querySelectorAll('[data-retrieval-config-save]').forEach(button => {
+        if (button.dataset.boundRetrievalConfigSave === '1') return;
+        button.dataset.boundRetrievalConfigSave = '1';
+        button.addEventListener('click', () => window.Pivot.legacy.saveEmbeddingSettings(button.dataset.retrievalConfigSave));
+    });
+    modals.forEach(({ modal }) => {
+        if (modal.dataset.boundRetrievalModalOverlay === '1') return;
+        modal.dataset.boundRetrievalModalOverlay = '1';
+        modal.addEventListener('click', event => {
+            if (event.target === modal) setRetrievalModelModalVisibility(modal, false);
+        });
+    });
     if (testBtn) {
         testBtn.onclick = () => window.Pivot.legacy.testEmbeddingConnection();
     }
+    if (rerankTestBtn) {
+        rerankTestBtn.onclick = () => window.Pivot.legacy.testRerankConnection();
+    }
     if (fetchModelsBtn) {
         fetchModelsBtn.onclick = () => window.Pivot.legacy.fetchEmbeddingModels();
-    }
-    const saveBtn = document.getElementById('rag-embedding-save-btn');
-    if (saveBtn) {
-        saveBtn.onclick = () => window.Pivot.legacy.saveEmbeddingSettings();
     }
     if (embeddingModelSelect) {
         embeddingModelSelect.onchange = (e) => {
@@ -912,8 +1077,6 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
                 embeddingModelInput.value = e.target.value;
             }
         };
-    }
-    if (modeSelect) {
     }
     const keyToggle = document.getElementById('rag-embedding-key-toggle');
     const keyInput = document.getElementById('setting-rag-embedding-key');
@@ -924,10 +1087,40 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
             keyToggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)';
         };
     }
+    const rerankKeyToggle = document.getElementById('rag-rerank-key-toggle');
+    const rerankKeyInput = document.getElementById('setting-rag-rerank-key');
+    if (rerankKeyToggle && rerankKeyInput) {
+        rerankKeyToggle.onclick = () => {
+            const isPassword = rerankKeyInput.type === 'password';
+            rerankKeyInput.type = isPassword ? 'text' : 'password';
+            rerankKeyToggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)';
+        };
+    }
+    document.querySelectorAll('[data-embedding-preset-model]').forEach(chip => {
+        if (chip.dataset.boundPreset === '1') return;
+        chip.dataset.boundPreset = '1';
+        chip.addEventListener('click', () => {
+            if (embeddingModelInput) {
+                embeddingModelInput.value = chip.dataset.embeddingPresetModel;
+                embeddingModelInput.focus();
+            }
+        });
+    });
+    document.querySelectorAll('[data-rerank-preset-model]').forEach(chip => {
+        if (chip.dataset.boundPreset === '1') return;
+        chip.dataset.boundPreset = '1';
+        chip.addEventListener('click', () => {
+            const rerankModelInput = document.getElementById('setting-rag-rerank-model');
+            if (rerankModelInput) {
+                rerankModelInput.value = chip.dataset.rerankPresetModel;
+                rerankModelInput.focus();
+            }
+        });
+    });
 };
 
 document.addEventListener('input', event => {
-    if (event.target?.id === 'setting-rag-chunk-size') updateRagChunkOverlapLimit();
+    if (event.target?.id === 'setting-rag-chunk-size' || event.target?.id === 'setting-rag-chunk-overlap') updateRagChunkOverlapLimit();
 });
 
 window.Pivot.legacy.bindRagDebugModalEvents = function() {

@@ -145,11 +145,17 @@ document.getElementById('auth-toggle')?.addEventListener('click', () => {
     if (authSubmitLabel) authSubmitLabel.innerText = isLogin ? '进入系统' : '立即注册';
     else if (authSubmit) authSubmit.innerText = isLogin ? '进入系统' : '立即注册';
     const passwordInput = document.getElementById('password');
-    if (passwordInput) passwordInput.placeholder = isLogin ? '请输入密码' : '密码（至少8位，包含字母和数字）';
+    if (passwordInput) {
+        passwordInput.placeholder = isLogin ? '请输入密码' : '密码（至少8位，包含字母和数字）';
+        passwordInput.autocomplete = isLogin ? 'current-password' : 'new-password';
+    }
     document.querySelectorAll('.reg-only').forEach(el => el.classList.toggle('hidden', isLogin));
 });
 
-document.getElementById('auth-submit')?.addEventListener('click', async () => {
+let isAuthSubmitting = false;
+document.getElementById('auth-submit')?.addEventListener('click', async (e) => {
+    e?.preventDefault?.();
+    if (isAuthSubmitting) return;
     const usernameInput = document.getElementById('username');
     const passwordInput = document.getElementById('password');
     const nicknameInput = document.getElementById('nickname');
@@ -179,6 +185,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
     const path = isLogin ? '/auth/login' : '/auth/register';
     const body = isLogin ? { username, password } : { username, password, nickname, unit };
 
+    isAuthSubmitting = true;
     try {
         const res = await apiFetch(API_BASE + path, {
             method: 'POST',
@@ -198,7 +205,11 @@ document.getElementById('auth-submit')?.addEventListener('click', async () => {
             showToast('注册成功，请登录');
             document.getElementById('auth-toggle').click();
         }
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        isAuthSubmitting = false;
+    }
 });
 
 window.Pivot.legacy.logout = async () => {

@@ -14,6 +14,7 @@ const { assertSafeOutboundUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
+    getPublicRerankConfig,
     getEmbeddingConfig,
     getRagConfig,
     toRagSettingValue
@@ -66,7 +67,14 @@ const allowedSettings = new Set([
     RAG_CONFIG_KEYS.embeddingMode,
     RAG_CONFIG_KEYS.embeddingApiUrl,
     RAG_CONFIG_KEYS.embeddingApiKey,
-    RAG_CONFIG_KEYS.embeddingModel
+    RAG_CONFIG_KEYS.embeddingModel,
+    RAG_CONFIG_KEYS.rerankEnabled,
+    RAG_CONFIG_KEYS.rerankApiUrl,
+    RAG_CONFIG_KEYS.rerankApiKey,
+    RAG_CONFIG_KEYS.rerankModel,
+    RAG_CONFIG_KEYS.rerankProtocol,
+    RAG_CONFIG_KEYS.rerankCandidateLimit,
+    RAG_CONFIG_KEYS.rerankTimeoutMs
 ]);
 
 const userEmbeddingSettings = new Set([
@@ -183,6 +191,8 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             memoryConfig: getMemoryConfig(settings),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
+            retrievalModelConfig: getPublicEmbeddingConfig(),
+            rerankConfig: getPublicRerankConfig(),
             uploadLimits: {
                 maxAttachmentsPerMessage: uploadRuntimeConfig.maxAttachmentsPerMessage,
                 maxImagesPerMessage: uploadRuntimeConfig.maxImagesPerMessage
@@ -255,7 +265,8 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         res.json({
             success: true,
             ragConfig: getRagConfig({}, req.user?.id),
-            embeddingConfig: getPublicEmbeddingConfig(req.user?.id)
+            embeddingConfig: getPublicEmbeddingConfig(req.user?.id),
+            rerankConfig: getPublicRerankConfig()
         });
     }));
 
@@ -363,9 +374,12 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {
                 await assertSafeOutboundUrl(value, req.user);
             }
-            if (key === RAG_CONFIG_KEYS.embeddingApiKey && !value) continue;
+            if (key === RAG_CONFIG_KEYS.rerankApiUrl && value) {
+                await assertSafeOutboundUrl(value, req.user);
+            }
+            if ((key === RAG_CONFIG_KEYS.embeddingApiKey || key === RAG_CONFIG_KEYS.rerankApiKey) && !value) continue;
             await setAppSettingAsync(key, value, { updatedBy: req.user.id });
-            changed.push(key === RAG_CONFIG_KEYS.embeddingApiKey ? `${key}=********` : `${key}=${value}`);
+            changed.push([RAG_CONFIG_KEYS.embeddingApiKey, RAG_CONFIG_KEYS.rerankApiKey].includes(key) ? `${key}=********` : `${key}=${value}`);
         }
 
         if (changed.length > 0) {
@@ -384,6 +398,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             runtimeConfig: buildRuntimeConfigSnapshot(),
             apiAccessEnabled: getApiAccessSetting(),
             embeddingConfig: getPublicEmbeddingConfig(),
+            rerankConfig: getPublicRerankConfig(),
             defaultModelId: settings.default_model_id?.value || null,
             personalDefaultModelId: req.user?.default_model_id || null,
             settings: getPublicSettings()

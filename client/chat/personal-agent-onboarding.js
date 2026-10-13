@@ -47,10 +47,19 @@
         if (!state.profile || force) {
             const data = await request('/agents/profile'); state.profile = data.profile; populate(state.profile);
         }
-        state.step = 1; render(); root.classList.remove('hidden'); root.setAttribute('aria-hidden', 'false');
+        state.step = 1; render(); root.classList.remove('hidden'); root.setAttribute('aria-hidden', 'false'); root.removeAttribute('inert');
         await event('onboarding_started', { source: force ? 'resume' : 'personal_workbench' });
     }
-    function close() { const root = modal(); root?.classList.add('hidden'); root?.setAttribute('aria-hidden', 'true'); }
+    function close() {
+        const root = modal();
+        if (!root) return;
+        if (root.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
+        root.classList.add('hidden');
+        root.setAttribute('aria-hidden', 'true');
+        root.setAttribute('inert', '');
+    }
     async function next() {
         await saveCurrentStep();
         if (state.step < 4) { state.step += 1; render(); return; }

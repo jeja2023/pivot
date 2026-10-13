@@ -101,78 +101,267 @@
         </div>
     </div>
 
-    <!-- 向量模型配置弹窗 -->
-    <div id="rag-embedding-modal" class="modal-overlay hidden" data-knowledge-modal aria-hidden="true" style="z-index: 5500;">
+    <!-- 检索服务单独配置：知识库 (RAG) 配置与向量服务。每个弹窗只编辑、测试和保存自身字段。 -->
+    <div id="rag-embedding-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
         <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="rag-embedding-title">
             <div class="model-modal-header">
-                <h3 id="rag-embedding-title">知识库 (RAG) 配置</h3>
-                <p class="model-modal-desc">设置系统全局的检索参数与向量模型（Embedding）服务，影响文档分片与召回效果。</p>
-            </div>
-            <div class="model-form">
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label for="setting-rag-score-threshold">相似度阈值</label>
-                        <input type="number" id="setting-rag-score-threshold" class="form-input" min="0" max="1" step="0.05" placeholder="推荐 0.4">
+                <div class="retrieval-header-content">
+                    <div class="retrieval-header-title-wrap">
+                        <span class="retrieval-header-icon" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+                        </span>
+                        <h3 id="rag-embedding-title">配置向量生成服务</h3>
+                        <span class="retrieval-badge retrieval-badge-blue">Embedding</span>
                     </div>
-                    <div class="form-item">
-                        <label for="setting-rag-top-k">命中数量 (Top K)</label>
-                        <input type="number" id="setting-rag-top-k" class="form-input" min="1" max="10" step="1" placeholder="推荐 3">
-                    </div>
-                </div>
-                <div class="form-item">
-                    <label for="setting-rag-candidate-limit">候选数量 (Candidate Limit)</label>
-                    <input type="number" id="setting-rag-candidate-limit" class="form-input" min="20" max="1000" step="10" placeholder="推荐 300">
-                </div>
-                <div class="model-form-row">
-                    <div class="form-item">
-                        <label for="setting-rag-chunk-size">分块最大长度 (Chunk Size)</label>
-                        <input type="number" id="setting-rag-chunk-size" class="form-input" min="200" max="2000" step="50" placeholder="推荐 500">
-                    </div>
-                    <div class="form-item">
-                        <label for="setting-rag-chunk-overlap">重叠字符数 (Overlap)</label>
-                        <input type="number" id="setting-rag-chunk-overlap" class="form-input" min="0" max="1000" step="25" placeholder="推荐 100" aria-describedby="rag-chunk-overlap-help">
-                    </div>
-                </div>
-                <p id="rag-chunk-overlap-help" class="model-modal-desc">重叠字符数最多为分块长度的一半，可减少段落边界的信息丢失。</p>
-                <hr style="border: 0; border-top: 1px solid var(--border); margin: 5px 0;">
-                <input type="hidden" id="setting-rag-embedding-mode" value="http">
-                <div class="form-item">
-                    <label for="setting-rag-embedding-url">Embedding Base URL</label>
-                    <input type="text" id="setting-rag-embedding-url" class="form-input" placeholder="例如：https://api.deepseek.com/v1 或 http://127.0.0.1:11434/api/embed">
-                </div>
-                <div class="form-item">
-                        <label for="setting-rag-embedding-key">API Key</label>
-                    <div style="position: relative; display: flex; align-items: center;">
-                        <input type="password" id="setting-rag-embedding-key" class="form-input" placeholder="输入 API Key (留空则保留原配置)" style="padding-right: 40px;">
-                        <button type="button" id="rag-embedding-key-toggle" class="btn-icon" aria-label="显示或隐藏 API Key" title="显示或隐藏 API Key" style="position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: var(--text-muted); display: flex; align-items: center;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-icon">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="form-item">
-                    <label for="setting-rag-embedding-model">Embedding 模型</label>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="text" id="setting-rag-embedding-model" class="form-input" placeholder="例如：bge-m3" style="flex: 1;">
-                        <button type="button" id="rag-embedding-fetch-models-btn" class="btn-secondary" title="从 API 获取模型列表" style="padding: 0 12px; height: 38px;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path>
-                            </svg>
-                        </button>
-                    </div>
-                    <div id="setting-rag-embedding-model-select-container" class="hidden" style="margin-top: 8px;">
-                        <select id="setting-rag-embedding-model-select" class="form-input" style="font-size: 0.85rem; height: 32px; padding: 4px 10px;"></select>
-                    </div>
-                </div>
-                <p id="setting-rag-embedding-status" class="model-modal-desc" style="margin: 0;"></p>
-                <div class="model-modal-actions">
-                    <button id="rag-embedding-modal-cancel" class="btn-secondary" type="button" data-knowledge-modal-close>取消</button>
-                    <button id="rag-embedding-test-btn" class="btn-secondary" type="button">测试连接</button>
-                    <button id="rag-embedding-save-btn" class="btn-primary" type="button">保存检索配置</button>
+                    <p class="model-modal-desc">设置法规库与知识库共用的文本向量模型与服务接口，用于语义检索与文档分块表征。</p>
                 </div>
             </div>
+            <form class="model-form retrieval-model-config-form" onsubmit="return false;" autocomplete="off">
+                <div class="retrieval-callout-card retrieval-callout-info">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    <span><strong>全局共用规范</strong>：法规库与知识库使用同一系统向量模型。调整配置后，新文档切片将使用新模型，已有向量在重构前继续有效。</span>
+                </div>
+                <section class="retrieval-config-section" aria-labelledby="embedding-service-title">
+                    <div class="retrieval-config-section-head"><h4 id="embedding-service-title">向量生成服务</h4><p>法规库与知识库使用同一系统向量模型。</p></div>
+                    <input type="hidden" id="setting-rag-embedding-mode" value="http">
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="setting-rag-embedding-url">
+                            <span>服务地址 (Embedding Base URL)</span>
+                            <span class="retrieval-field-hint">支持 OpenAI 兼容 API、TEI 或 vLLM</span>
+                        </label>
+                        <input type="text" id="setting-rag-embedding-url" class="form-input" placeholder="例如：http://10.0.0.20:8080/v1 或 https://api.openai.com/v1">
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="setting-rag-embedding-key">
+                            <span>服务密钥 (API Key)</span>
+                            <span class="retrieval-field-hint">后端受控加密存储</span>
+                        </label>
+                        <span class="retrieval-secret-input">
+                            <input type="password" id="setting-rag-embedding-key" name="embedding_key" autocomplete="new-password" class="form-input" placeholder="留空则保留原配置">
+                            <button type="button" id="rag-embedding-key-toggle" class="retrieval-secret-toggle" aria-label="显示或隐藏向量服务密钥" title="显示或隐藏密钥">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                        </span>
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="setting-rag-embedding-model">
+                            <span>向量模型 (Embedding 模型)</span>
+                            <span class="retrieval-field-hint">指定模型标识或从服务端探测</span>
+                        </label>
+                        <span class="retrieval-model-input">
+                            <input type="text" id="setting-rag-embedding-model" class="form-input" placeholder="Alibaba-NLP/gte-Qwen2-1.5B-instruct">
+                            <button type="button" id="rag-embedding-fetch-models-btn" class="retrieval-fetch-btn" title="从服务读取可用模型列表">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                <span>读取列表</span>
+                            </button>
+                        </span>
+                        <div class="retrieval-preset-chips">
+                            <span class="retrieval-preset-label">推荐预设:</span>
+                            <button type="button" class="retrieval-preset-chip" data-embedding-preset-model="Alibaba-NLP/gte-Qwen2-1.5B-instruct">gte-Qwen2-1.5B</button>
+                            <button type="button" class="retrieval-preset-chip" data-embedding-preset-model="BAAI/bge-large-zh-v1.5">bge-large-zh</button>
+                            <button type="button" class="retrieval-preset-chip" data-embedding-preset-model="text-embedding-3-small">text-embedding-3-small</button>
+                            <button type="button" class="retrieval-preset-chip" data-embedding-preset-model="nomic-embed-text">nomic-embed-text</button>
+                        </div>
+                    </div>
+                    <div id="setting-rag-embedding-model-select-container" class="hidden retrieval-model-select">
+                        <select id="setting-rag-embedding-model-select" class="form-input"></select>
+                    </div>
+                    <p id="setting-rag-embedding-status" class="model-modal-desc retrieval-config-status"></p>
+                </section>
+                <div class="model-modal-actions retrieval-config-actions">
+                    <div class="retrieval-actions-right">
+                        <button class="btn-secondary" type="button" data-retrieval-modal-cancel="embedding" data-knowledge-modal-close>取消</button>
+                        <button id="rag-embedding-test-btn" class="btn-secondary" type="button">测试连接</button>
+                        <button class="btn-primary" type="button" data-retrieval-config-save="embedding">保存向量服务</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="rag-rerank-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
+        <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="rag-rerank-title">
+            <div class="model-modal-header">
+                <div class="retrieval-header-content">
+                    <div class="retrieval-header-title-wrap">
+                        <span class="retrieval-header-icon" aria-hidden="true" style="color: #9333ea;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                        </span>
+                        <h3 id="rag-rerank-title">配置重排序服务</h3>
+                        <span class="retrieval-badge retrieval-badge-purple">Reranker</span>
+                    </div>
+                    <p class="model-modal-desc">设置 Cross-Encoder 精排服务，对初筛候选切片进行二次打分，仅作用于权限过滤后的候选集。</p>
+                </div>
+            </div>
+            <form class="model-form retrieval-model-config-form" onsubmit="return false;" autocomplete="off">
+                <div class="retrieval-switch-card">
+                    <div class="retrieval-switch-info">
+                        <span class="retrieval-switch-title">启用外部重排序 (Cross-Encoder)</span>
+                        <span class="retrieval-switch-desc">服务异常或请求超时时，系统将无感知自动回退本地确定性排序</span>
+                    </div>
+                    <label class="retrieval-switch-toggle" for="setting-rag-rerank-enabled">
+                        <input type="checkbox" id="setting-rag-rerank-enabled">
+                        <span class="retrieval-switch-slider"></span>
+                    </label>
+                </div>
+                <section class="retrieval-config-section" aria-labelledby="rerank-service-title">
+                    <div class="retrieval-config-section-head"><h4 id="rerank-service-title">重排序服务</h4><p>服务异常时系统自动回退本地确定性排序。</p></div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="setting-rag-rerank-url">
+                            <span>服务地址 (API URL)</span>
+                            <span class="retrieval-field-hint">支持 HuggingFace TEI 或 llama.cpp</span>
+                        </label>
+                        <input type="text" id="setting-rag-rerank-url" class="form-input" placeholder="例如：http://10.0.0.20:8081">
+                    </div>
+                    <div class="retrieval-config-grid">
+                        <div class="retrieval-field-item">
+                            <label class="retrieval-field-label" for="setting-rag-rerank-protocol">服务协议</label>
+                            <select id="setting-rag-rerank-protocol" class="form-input">
+                                <option value="tei">TEI 兼容接口 (/rerank)</option>
+                                <option value="llama_cpp">llama.cpp 兼容接口 (/v1/rerank)</option>
+                            </select>
+                        </div>
+                        <div class="retrieval-field-item">
+                            <label class="retrieval-field-label" for="setting-rag-rerank-model">重排序模型</label>
+                            <input type="text" id="setting-rag-rerank-model" class="form-input" placeholder="BAAI/bge-reranker-v2-m3">
+                        </div>
+                    </div>
+                    <div class="retrieval-preset-chips" style="margin-top: -4px;">
+                        <span class="retrieval-preset-label">推荐预设:</span>
+                        <button type="button" class="retrieval-preset-chip" data-rerank-preset-model="BAAI/bge-reranker-v2-m3">bge-reranker-v2-m3</button>
+                        <button type="button" class="retrieval-preset-chip" data-rerank-preset-model="BAAI/bge-reranker-large">bge-reranker-large</button>
+                        <button type="button" class="retrieval-preset-chip" data-rerank-preset-model="cross-encoder/ms-marco-MiniLM-L-6-v2">ms-marco-MiniLM</button>
+                    </div>
+                    <div class="retrieval-config-grid">
+                        <div class="retrieval-field-item">
+                            <label class="retrieval-field-label" for="setting-rag-rerank-candidate-limit">
+                                <span>重排候选数</span>
+                                <span class="retrieval-field-hint">推荐 30 (上限 100)</span>
+                            </label>
+                            <input type="number" id="setting-rag-rerank-candidate-limit" class="form-input" min="1" max="100" step="1" placeholder="推荐 30">
+                        </div>
+                        <div class="retrieval-field-item">
+                            <label class="retrieval-field-label" for="setting-rag-rerank-timeout-ms">
+                                <span>超时上限 (毫秒)</span>
+                                <span class="retrieval-field-hint">推荐 1800 ms</span>
+                            </label>
+                            <input type="number" id="setting-rag-rerank-timeout-ms" class="form-input" min="200" max="30000" step="100" placeholder="推荐 1800">
+                        </div>
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="setting-rag-rerank-key">
+                            <span>服务密钥 (API Key)</span>
+                            <span class="retrieval-field-hint">留空则保留原配置</span>
+                        </label>
+                        <span class="retrieval-secret-input">
+                            <input type="password" id="setting-rag-rerank-key" name="rerank_key" autocomplete="new-password" class="form-input" placeholder="留空则保留原配置">
+                            <button type="button" id="rag-rerank-key-toggle" class="retrieval-secret-toggle" aria-label="显示或隐藏重排序服务密钥" title="显示或隐藏密钥">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="eye-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                        </span>
+                    </div>
+                    <p id="setting-rag-rerank-status" class="model-modal-desc retrieval-config-status"></p>
+                </section>
+                <div class="model-modal-actions retrieval-config-actions">
+                    <div class="retrieval-actions-right">
+                        <button class="btn-secondary" type="button" data-retrieval-modal-cancel="rerank" data-knowledge-modal-close>取消</button>
+                        <button id="rag-rerank-test-btn" class="btn-secondary" type="button">测试连接</button>
+                        <button class="btn-primary" type="button" data-retrieval-config-save="rerank">保存重排序服务</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="rag-retrieval-policy-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
+        <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="rag-retrieval-policy-title">
+            <div class="model-modal-header">
+                <div class="retrieval-header-content">
+                    <div class="retrieval-header-title-wrap">
+                        <span class="retrieval-header-icon" aria-hidden="true" style="color: #059669;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                        </span>
+                        <h3 id="rag-retrieval-policy-title">配置检索策略</h3>
+                        <span class="retrieval-badge retrieval-badge-emerald">Strategy</span>
+                    </div>
+                    <p class="model-modal-desc">调整语义过滤阈值、上下文注入命中数与知识库文档分块切片规则，法规库与知识库共用此策略。</p>
+                </div>
+            </div>
+            <form class="model-form retrieval-model-config-form" onsubmit="return false;" autocomplete="off">
+                <section class="retrieval-config-section retrieval-config-policy" aria-labelledby="retrieval-policy-section-title">
+                    <div class="retrieval-config-section-head"><h4 id="retrieval-policy-section-title">检索策略</h4><p>法规库与知识库共用此策略。</p></div>
+                    
+                    <!-- 分组 1: 检索召回与相关度过滤 -->
+                    <div class="retrieval-policy-group">
+                        <div class="retrieval-policy-group-head">
+                            <span class="retrieval-policy-group-title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                                召回与过滤参数
+                            </span>
+                            <span class="retrieval-policy-group-tag">影响检索灵敏度与注入条数</span>
+                        </div>
+                        <div class="retrieval-config-grid">
+                            <div class="retrieval-field-item">
+                                <label class="retrieval-field-label" for="setting-rag-score-threshold">
+                                    <span>相似度阈值</span>
+                                    <span class="retrieval-field-hint">0.0 ~ 1.0 (推荐 0.40)</span>
+                                </label>
+                                <input type="number" id="setting-rag-score-threshold" class="form-input" min="0" max="1" step="0.05" placeholder="推荐 0.4">
+                            </div>
+                            <div class="retrieval-field-item">
+                                <label class="retrieval-field-label" for="setting-rag-top-k">
+                                    <span>命中数量 (Top-K)</span>
+                                    <span class="retrieval-field-hint">1 ~ 10 条 (推荐 3)</span>
+                                </label>
+                                <input type="number" id="setting-rag-top-k" class="form-input" min="1" max="10" step="1" placeholder="推荐 3">
+                            </div>
+                        </div>
+                        <div class="retrieval-field-item">
+                            <label class="retrieval-field-label" for="setting-rag-candidate-limit">
+                                <span>候选召回上限</span>
+                                <span class="retrieval-field-hint">20 ~ 1000 条 (推荐 300)</span>
+                            </label>
+                            <input type="number" id="setting-rag-candidate-limit" class="form-input" min="20" max="1000" step="10" placeholder="推荐 300">
+                        </div>
+                    </div>
+
+                    <!-- 分组 2: 文档分块与切分重叠度 -->
+                    <div class="retrieval-policy-group">
+                        <div class="retrieval-policy-group-head">
+                            <span class="retrieval-policy-group-title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                                文档切片与分块
+                            </span>
+                            <span class="retrieval-policy-group-tag">作用于新上传或重新索引的文档</span>
+                        </div>
+                        <div class="retrieval-config-grid">
+                            <div class="retrieval-field-item">
+                                <label class="retrieval-field-label" for="setting-rag-chunk-size">
+                                    <span>分块最大长度</span>
+                                    <span class="retrieval-field-hint">200 ~ 2000 字符 (推荐 500)</span>
+                                </label>
+                                <input type="number" id="setting-rag-chunk-size" class="form-input" min="200" max="2000" step="50" placeholder="推荐 500">
+                            </div>
+                            <div class="retrieval-field-item">
+                                <label class="retrieval-field-label" for="setting-rag-chunk-overlap">
+                                    <span>重叠字符数</span>
+                                    <span class="retrieval-field-hint">最多为分块长度一半</span>
+                                </label>
+                                <input type="number" id="setting-rag-chunk-overlap" class="form-input" min="0" max="1000" step="25" placeholder="推荐 100" aria-describedby="rag-chunk-overlap-help">
+                            </div>
+                        </div>
+                        <div id="rag-chunk-overlap-help" class="retrieval-overlap-info">
+                            重叠字符数最多为分块长度的一半（≤ 250 字符，当前 <span class="retrieval-ratio-badge">20% 重叠率</span>），保持段落衔接并减少边界语义丢失。
+                        </div>
+                    </div>
+                </section>
+                <div class="model-modal-actions retrieval-config-actions">
+                    <div class="retrieval-actions-right">
+                        <button class="btn-secondary" type="button" data-retrieval-modal-cancel="policy" data-knowledge-modal-close>取消</button>
+                        <button class="btn-primary" type="button" data-retrieval-config-save="policy">保存检索策略</button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
 

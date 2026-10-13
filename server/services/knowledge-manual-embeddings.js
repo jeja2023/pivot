@@ -3,7 +3,7 @@
 // 人工文章没有原始上传文件，不能复用文件解析 Worker。这里直接对它已经存在
 // 的检索块补齐向量；失败时仍保留 lexical_ready，不让审核发布被外部模型阻塞。
 const { query, execute } = require('../db/client');
-const { getEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
+const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
 const { generateEmbeddingsAdaptive } = require('./rag-index/embedding-client');
 const { ensureKnowledgeVectorIndex } = require('./knowledge-vector-index');
 const { buildRagSearchContent } = require('./rag-tokenizer');
@@ -23,7 +23,7 @@ async function hydrateManualKnowledgeArticleEmbeddings({ legacyDocId, userId, us
         FROM knowledge_chunks WHERE doc_id = ? ORDER BY chunk_index ASC, id ASC
     `, [docId]);
     if (!chunks.length) return { indexed: 0, missing: 0, status: 'skipped', reason: 'no_chunks' };
-    const config = getEmbeddingConfig(ownerId);
+    const config = getSystemEmbeddingConfig();
     if (!String(config?.http?.url || '').trim()) {
         await execute(`
             UPDATE knowledge_docs SET status = 'lexical_ready', updated_at = now() AT TIME ZONE 'Asia/Shanghai'
@@ -34,7 +34,7 @@ async function hydrateManualKnowledgeArticleEmbeddings({ legacyDocId, userId, us
     const profile = getEmbeddingProfile(config);
     let vectors = [];
     try {
-        vectors = await generateEmbeddingsAdaptive(chunks.map(chunk => `${chunk.heading_path || ''}\n${chunk.content || ''}`.trim()), null, null, ownerId, {
+        vectors = await generateEmbeddingsAdaptive(chunks.map(chunk => `${chunk.heading_path || ''}\n${chunk.content || ''}`.trim()), config.mode, config.http, null, {
             user,
             allowPartial: true,
             source: 'knowledge_manual_article_embedding'
@@ -104,7 +104,7 @@ async function recoverManualKnowledgeArticleEmbeddings({ limit = 50, logger = de
     let failed = 0;
     for (const row of rows) {
         try {
-            const config = getEmbeddingConfig(row.user_id);
+            const config = getSystemEmbeddingConfig();
             if (!String(config?.http?.url || '').trim()) {
                 lexicalReady += 1;
                 continue;

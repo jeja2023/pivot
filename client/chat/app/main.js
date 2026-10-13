@@ -305,7 +305,7 @@ function bindMountedWorkspaceControls(name) {
     bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
     bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');
     bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
-    bind('rag-embedding-save-btn', () => window.Pivot.legacy.saveEmbeddingSettings());
+    bind('rag-system-reindex-btn', () => window.Pivot.legacy.reindexAllKnowledgeDocs?.());
     bind('model-add-btn', () => window.Pivot.legacy.openModelModal());
     bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
     bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());
@@ -365,7 +365,7 @@ bind('ops-refresh-btn', () => window.Pivot.legacy.loadOpsSummary());
 bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
 bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');
 bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
-bind('rag-embedding-save-btn', () => window.Pivot.legacy.saveEmbeddingSettings());
+bind('rag-system-reindex-btn', () => window.Pivot.legacy.reindexAllKnowledgeDocs?.());
 bind('model-add-btn', () => window.Pivot.legacy.openModelModal());
 bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
 bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());

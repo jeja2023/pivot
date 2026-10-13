@@ -81,6 +81,15 @@
 | `RAG_EMBEDDING_QUERY_INSTRUCTION` | string | `` | 逗号分隔的语言标记 | 可选查询 Embedding 指令。留空时 gte-Qwen2-Instruct 自动使用中文法规检索指令；文档入库正文不会添加该前缀。 |
 | `REGULATION_INDEX_RECOVERY_INTERVAL_MS` | integer | `5000` | 1000–300000 | 法规向量队列巡检间隔。队列状态已持久化，重启服务后会继续处理。 |
 | `REGULATION_INDEX_RECOVERY_BATCH_SIZE` | integer | `3` | 1–50 | 每轮法规向量队列连续处理的当前版本数。纯 CPU 部署建议设为 1。 |
+| `RERANK_ENABLED` | boolean | `false` | true / false | 是否启用外部 Cross-Encoder 重排序。仅重排已完成权限过滤的有限候选，服务异常时自动回退。 |
+| `RERANK_API_URL` | string | `` | 逗号分隔的语言标记 | 外部 Reranker Base URL 或完整 /rerank 地址；建议使用局域网 TEI 服务。 |
+| `RERANK_API_KEY` | string | `` | 逗号分隔的语言标记 | 外部 Reranker 服务的可选认证密钥；生产优先在系统设置安全保存，环境变量仅用于首次初始化。 |
+| `RERANK_MODEL` | string | `BAAI/bge-reranker-v2-m3` | 逗号分隔的语言标记 | 外部 Reranker 模型标识，用于调用审计与服务兼容。 |
+| `RERANK_PROTOCOL` | enum | `tei` | tei、llama_cpp | 外部 Reranker 接口协议：tei 使用 texts；llama_cpp 使用 documents。 |
+| `RERANK_CANDIDATE_LIMIT` | integer | `30` | 1–100 | 单次 Cross-Encoder 重排序的最大候选数；不扩大已授权的召回集合。 |
+| `RERANK_TIMEOUT_MS` | integer | `1800` | 200–30000 | 外部重排序单次请求超时；超时后保留已有混合检索排序。 |
+| `RERANK_CIRCUIT_FAILURE_THRESHOLD` | integer | `3` | 1–20 | 外部重排序连续失败达到该次数后开启熔断，避免异常服务拖慢检索。 |
+| `RERANK_CIRCUIT_COOLDOWN_MS` | integer | `30000` | 1000–300000 | 外部重排序熔断冷却时长；冷却期内直接使用现有检索排序。 |
 
 ## 数据分析
 

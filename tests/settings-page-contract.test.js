@@ -104,6 +104,40 @@ test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {
     assert.doesNotMatch(signingConfig, /res\.json\([^\n]*privateKey/);
 });
 
+test('检索模型服务统一从模型配置页进入，知识库仅展示状态与跳转入口', () => {
+    const modelsHtml = read('client/chat/partials/settings/models.html');
+    const knowledgeHtml = read('client/chat/partials/workspaces/knowledge.html');
+    const extraModalsHtml = read('client/chat/partials/admin-extra-modals.html');
+    const modelsJs = read('client/chat/models.js');
+    const settingsJs = read('client/chat/admin-settings.js');
+    const settingsRoute = read('server/routes/settings.js');
+
+    assert.match(modelsHtml, /id="retrieval-model-services"/);
+    assert.match(modelsJs, /data-retrieval-model-config-open/);
+    assert.match(knowledgeHtml, /id="knowledge-retrieval-model-summary"/);
+    assert.match(knowledgeHtml, /id="knowledge-retrieval-model-settings-btn"/);
+    assert.doesNotMatch(knowledgeHtml, /id="rag-embedding-modal-open-btn"/);
+    assert.match(modelsJs, /function renderRetrievalModelServices/);
+    assert.match(modelsJs, /updateEmbeddingSettingsForm\?\.\(settings\.retrievalModelConfig/);
+    assert.match(settingsJs, /window\.Pivot\.legacy\.updateEmbeddingSettingsForm = updateEmbeddingSettingsForm/);
+    assert.match(settingsJs, /function openRetrievalModelConfigSection\(section\)/);
+    assert.match(settingsJs, /window\.Pivot\.legacy\.openRetrievalModelConfigSection = openRetrievalModelConfigSection/);
+    assert.match(settingsJs, /serviceCards\.addEventListener\('click', event => \{/);
+    assert.match(settingsJs, /event\.target\?\.closest\?\.\('\[data-retrieval-model-config-open\]'\)/);
+    assert.match(settingsJs, /modalId: 'rag-embedding-modal'/);
+    assert.match(settingsJs, /modalId: 'rag-rerank-modal'/);
+    assert.match(settingsJs, /modalId: 'rag-retrieval-policy-modal'/);
+    assert.match(settingsJs, /data-retrieval-config-save/);
+    assert.doesNotMatch(settingsJs, /data-retrieval-config-tab/);
+    assert.match(extraModalsHtml, /id="rag-embedding-modal"[\s\S]*?data-retrieval-config-save="embedding"/);
+    assert.match(extraModalsHtml, /id="rag-rerank-modal"[\s\S]*?data-retrieval-config-save="rerank"/);
+    assert.match(extraModalsHtml, /id="rag-retrieval-policy-modal"[\s\S]*?data-retrieval-config-save="policy"/);
+    assert.doesNotMatch(extraModalsHtml, /retrieval-config-tabs/);
+    assert.match(settingsRoute, /retrievalModelConfig: getPublicEmbeddingConfig\(\)/);
+    assert.match(read('server/routes/rag.js'), /\/settings\/test-rerank/);
+    assert.match(settingsJs, /testRerankConnection/);
+});
+
 test('审计日志读取不会等待整个异步写入队列', () => {
     const route = read('server/routes/admin-users.js');
     assert.doesNotMatch(route, /const \{ flushAllWrites \} = require\('\.\.\/services\/db-write-queue'\)/);

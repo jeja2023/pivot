@@ -21,6 +21,10 @@
                             <option value="">全部标签</option>
                         </select>
                     </div>
+                    <div id="knowledge-retrieval-model-summary" class="knowledge-retrieval-model-summary" aria-live="polite">
+                        <span>检索模型服务：正在加载…</span>
+                        <button id="knowledge-retrieval-model-settings-btn" class="btn-secondary admin-root-only hidden" type="button" title="前往模型配置调整检索配置">前往模型配置</button>
+                    </div>
                     <div class="knowledge-toolbar-actions">
                         <button id="rag-refresh-btn" class="btn-secondary knowledge-refresh-btn" title="刷新知识库" aria-label="刷新知识库">刷新</button>
                         <button id="rag-upload-btn" class="btn-primary knowledge-upload-btn" type="button">上传文档</button>
@@ -36,7 +40,6 @@
                         <details class="knowledge-action-menu">
                             <summary class="btn-secondary">检索与图谱</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="检索与图谱">
-                                <button id="rag-embedding-modal-open-btn" class="btn-secondary" type="button" role="menuitem">检索配置</button>
                                 <button id="rag-debug-modal-open-btn" class="btn-secondary" type="button" role="menuitem">召回测试</button>
                                 <button id="rag-graph-open-btn" class="btn-secondary" type="button" role="menuitem">知识图谱</button>
                             </div>
@@ -45,6 +48,7 @@
                             <summary class="btn-secondary">批量治理</summary>
                             <div class="knowledge-action-menu-panel" role="menu" aria-label="批量治理">
                                 <button id="rag-batch-reindex-btn" class="btn-secondary" type="button" role="menuitem">批量重建</button>
+                                <button id="rag-system-reindex-btn" class="btn-secondary admin-root-only hidden" type="button" role="menuitem">全库重建向量</button>
                                 <button id="rag-batch-delete-btn" class="btn-secondary" type="button" role="menuitem">批量删除</button>
                                 <button id="rag-retry-failed-btn" class="btn-secondary" type="button" role="menuitem">重试失败</button>
                                 <button id="rag-audit-btn" class="btn-secondary admin-root-only hidden" type="button" role="menuitem">删除审计</button>

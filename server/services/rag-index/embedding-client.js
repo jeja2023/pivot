@@ -344,7 +344,7 @@ async function requestEmbedding(text, httpConfig, options = {}) {
     const targetUrl = resolveEmbeddingUrl(url);
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     try {
-        const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(text, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(text, model || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct', EMBEDDING_MODES.http, targetUrl), {
             user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
@@ -371,7 +371,7 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
     const timeoutMs = getEmbeddingRequestTimeoutMs(options.timeoutMs);
     const requestOne = async (input) => {
         try {
-            const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(input, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+            const res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(input, model || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct', EMBEDDING_MODES.http, targetUrl), {
                 user: options.user || {},
                 headers: {
                     Authorization: apiKey ? `Bearer ${apiKey}` : undefined,
@@ -396,7 +396,7 @@ async function requestEmbeddings(inputs, httpConfig, options = {}) {
 
     let res;
     try {
-        res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(safeInputs, model || 'nomic-embed-text', EMBEDDING_MODES.http, targetUrl), {
+        res = await withEmbeddingRequestSlot(() => safeJsonPost(targetUrl, buildEmbeddingPayload(safeInputs, model || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct', EMBEDDING_MODES.http, targetUrl), {
             user: options.user || {},
             headers: {
                 Authorization: apiKey ? `Bearer ${apiKey}` : undefined,

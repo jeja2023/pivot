@@ -9,7 +9,7 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
-const { getRagConfig, getEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
+const { getRagConfig, getSystemEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
 const { getGraphSummary, refreshGraphEntityEvidenceForDocument } = require('./knowledge-graph');
 const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeIndexStage } = require('./rag-index-staging');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
@@ -519,7 +519,7 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
             legacyDocId: normalizedDocId,
             userId,
             indexStatus,
-            embeddingProfile: getEmbeddingProfile(getEmbeddingConfig(userId)),
+            embeddingProfile: getEmbeddingProfile(getSystemEmbeddingConfig()),
             enqueueLifecycle: async (trx, product) => await enqueueKnowledgeSourceLifecycleEvent({
                 userId, legacyDocId: normalizedDocId, documentId: product.documentId,
                 eventType: 'source_reindexed', payload: { sourceHash, versionId: product.versionId }
@@ -623,6 +623,29 @@ async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
     }
     if (scheduled > 0) clearRagCacheForUser(userId);
     return { requested: ids.length, scheduled, skipped, alreadyProcessing, items };
+}
+
+// 仅供系统管理员在切换共享 Embedding 模型后使用。按文档所属用户重新进入既有
+// 持久化队列，保留原文件与权限范围，不会把任意用户文档暴露给调用者。
+async function reindexAllKnowledgeDocuments({ limit = 2000 } = {}) {
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 2000, 1), 5000);
+    const rows = await query(`
+        SELECT id, user_id
+        FROM knowledge_docs
+        WHERE deleted_at IS NULL AND source_path IS NOT NULL AND source_path <> ''
+        ORDER BY id ASC
+        LIMIT ?
+    `, [safeLimit + 1]);
+    const truncated = rows.length > safeLimit;
+    const selected = rows.slice(0, safeLimit);
+    let scheduled = 0;
+    let alreadyProcessing = 0;
+    for (const row of selected) {
+        const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -5 });
+        if (result.started) scheduled += 1;
+        if (result.reason === 'already_processing') alreadyProcessing += 1;
+    }
+    return { scanned: selected.length, scheduled, alreadyProcessing, truncated, limit: safeLimit };
 }
 
 async function setKnowledgeDocumentCollection({ docId, userId, collectionId = null }) {
@@ -902,7 +925,7 @@ const scheduleLexicalReadyKnowledgeDocuments = createLexicalReadyScheduler({
 const scheduleEmbeddingProfileMismatchedDocuments = createEmbeddingProfileMismatchScheduler({
     query,
     scheduleKnowledgeDocumentIndexing,
-    getEmbeddingConfig,
+    getSystemEmbeddingConfig,
     getEmbeddingProfile
 });
 
@@ -967,6 +990,7 @@ module.exports = {
     processKnowledgeDocument,
     readKnowledgeDocumentFromPath,
     recoverStaleKnowledgeDocumentIndexes,
+    reindexAllKnowledgeDocuments,
     scheduleEmbeddingProfileMismatchedDocuments,
     scheduleLexicalReadyKnowledgeDocuments,
     createKnowledgeEmbeddingRecoveryRunner,

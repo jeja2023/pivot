@@ -365,7 +365,12 @@ function initChatToolsMenu() {
 }
 initChatToolsMenu();
 document.addEventListener('DOMContentLoaded', initChatToolsMenu);
-loadChatModeCapabilities().catch(() => {});
+if (typeof currentUser !== 'undefined' && currentUser) {
+    loadChatModeCapabilities().catch(() => {});
+}
+document.addEventListener('pivot:app-shown', () => {
+    loadChatModeCapabilities().catch(() => {});
+});
 window.Pivot.exposeModule('chat.inputMenu', {
     isAutoRouteAvailable: () => window.Pivot.moduleApi('chat.autoRoute').isAvailable?.() !== false,
     getAutoRouteEnabled: () => window.Pivot.moduleApi('chat.autoRoute').getAutoRouteEnabled?.() !== false,

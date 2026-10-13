@@ -73,6 +73,31 @@ window.Pivot?.exposeModule?.('rag.documents', {
     { globalName: 'syncRagSelectAllState', exportName: 'syncRagSelectAllState' }
 ]);
 
+window.Pivot.legacy.renderKnowledgeRetrievalModelSummary = function(embeddingConfig = {}, rerankConfig = {}) {
+    const target = document.getElementById('knowledge-retrieval-model-summary');
+    if (!target) return;
+    const label = target.querySelector('span');
+    const model = String(embeddingConfig?.model || '').trim() || '未配置';
+    const rerank = rerankConfig?.enabled === true
+        ? `重排序：${String(rerankConfig.model || '已启用').trim() || '已启用'}`
+        : '重排序：本地排序';
+    if (label) {
+        label.textContent = `检索模型：${model} · ${rerank}`;
+        label.title = embeddingConfig?.apiUrl ? `Embedding：${embeddingConfig.apiUrl}；${rerank}` : rerank;
+    }
+    document.getElementById('knowledge-retrieval-model-settings-btn')?.classList.toggle('hidden', !isSuperAdminUser());
+};
+
+window.Pivot.legacy.openRetrievalModelServices = async function() {
+    if (!isSuperAdminUser()) {
+        showToast('检索模型服务由 admin 权限层级统一维护', 'info');
+        return;
+    }
+    await window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false });
+    await window.Pivot.legacy.switchTab?.('models', { skipDirtyCheck: true });
+    window.setTimeout(() => document.querySelector('[data-retrieval-model-config-open="embedding"]')?.focus(), 0);
+};
+
 if (!document.documentElement.dataset.knowledgeModalEscapeBound) {
     document.documentElement.dataset.knowledgeModalEscapeBound = '1';
     document.addEventListener('keydown', event => {
@@ -631,7 +656,6 @@ async function openKnowledgeWorkbench() {
             window.Pivot.moduleApi?.('workspaces.styleLoader')?.ensureWorkspaceStyles?.('settings')?.catch?.(() => {});
             return window.Pivot.legacy.loadSettings?.() || Promise.resolve();
         })
-        .then(() => window.Pivot.legacy.bindEmbeddingModalEvents?.())
         .catch(e => {
             console.error('加载知识库配置脚本失败', e);
             showToast('知识库配置脚本加载失败，请刷新页面后重试', 'error');
@@ -643,6 +667,11 @@ async function openKnowledgeWorkbench() {
     panel.querySelectorAll('.admin-root-only').forEach(el => {
         el.classList.toggle('hidden', !isSuperAdminUser());
     });
+    const retrievalSettingsButton = document.getElementById('knowledge-retrieval-model-settings-btn');
+    if (retrievalSettingsButton && retrievalSettingsButton.dataset.bound !== '1') {
+        retrievalSettingsButton.dataset.bound = '1';
+        retrievalSettingsButton.addEventListener('click', () => window.Pivot.legacy.openRetrievalModelServices?.());
+    }
     window.Pivot.legacy.bindRagDebugModalEvents?.();
     // 配置脚本、设置接口和文档接口同时开始；文档表无需等待配置资源即可绘制。
     await Promise.allSettled([
@@ -927,6 +956,31 @@ window.Pivot.legacy.batchReindexKnowledgeDocs = async () => {
         window.Pivot.legacy.loadKnowledgeDocs();
     } catch (e) {
         showToast(e.message || '批量重建失败', 'error');
+    } finally {
+        ragActionLocks.delete(lockKey);
+    }
+};
+
+window.Pivot.legacy.reindexAllKnowledgeDocs = async () => {
+    const user = window.Pivot.legacy.currentUser || {};
+    if (String(user.permissionTier || user.role || '').toLowerCase() !== 'admin') return showToast('仅 admin 权限层级可重建全部知识库向量', 'error');
+    const confirmed = await ragConfirm('重建全部知识库向量', '将把全部有原文件的知识库文档重新加入后台索引队列。原文、权限与关键词检索不受影响；确认继续？');
+    if (!confirmed) return;
+    const lockKey = 'system-reindex';
+    if (ragActionLocks.has(lockKey)) return;
+    ragActionLocks.add(lockKey);
+    try {
+        const res = await apiFetch(`${API_BASE}/rag/admin/docs/reindex-all`, {
+            method: 'POST',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 2000 })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || '全库重建失败');
+        showToast(`已将 ${data.scheduled || 0}/${data.scanned || 0} 个知识库文档加入重建队列${data.truncated ? '；范围超过 2,000 个，请等待本轮完成后再次执行' : ''}`);
+        window.Pivot.legacy.loadKnowledgeDocs();
+    } catch (error) {
+        showToast(error.message || '全库重建失败', 'error');
     } finally {
         ragActionLocks.delete(lockKey);
     }

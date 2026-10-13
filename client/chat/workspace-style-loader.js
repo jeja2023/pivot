@@ -245,9 +245,16 @@ function isAutomationWorkspaceTrigger(target) {
 }
 
 if (typeof document !== 'undefined') {
-    // 自动化入口会在个人工作台、导航和快捷操作之间频繁切换。只预取其
-    // 样式（不挂载样式表）可避免首次打开时出现无样式框架，并保留其余工作区按需加载。
-    preloadWorkspaceStyles('agent').catch(() => {});
+    // 自动化入口会在个人工作台、导航和快捷操作之间频繁切换。仅在应用展示（已登录）
+    // 后预取其样式，避免登录页面停留期间触发浏览器 link preload 未使用告警。
+    const triggerAgentPreload = () => {
+        preloadWorkspaceStyles('agent').catch(() => {});
+    };
+    if (typeof currentUser !== 'undefined' && currentUser) {
+        triggerAgentPreload();
+    } else {
+        document.addEventListener('pivot:app-shown', triggerAgentPreload, { once: true });
+    }
     document.addEventListener('pointerover', event => {
         if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
     }, { passive: true });

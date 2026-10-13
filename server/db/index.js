@@ -55,7 +55,13 @@ async function initPostgresDatabase() {
     await ensureSetting('rag_chunk_overlap', process.env.RAG_CHUNK_OVERLAP || '100');
     await ensureSetting('rag_embedding_mode', 'http');
     await ensureSetting('rag_embedding_api_url', process.env.EMBEDDING_API_URL || '');
-    await ensureSetting('rag_embedding_model', process.env.EMBEDDING_MODEL || 'nomic-embed-text');
+    await ensureSetting('rag_embedding_model', process.env.EMBEDDING_MODEL || 'Alibaba-NLP/gte-Qwen2-1.5B-instruct');
+    await ensureSetting('rag_rerank_enabled', process.env.RERANK_ENABLED || 'false');
+    await ensureSetting('rag_rerank_api_url', process.env.RERANK_API_URL || '');
+    await ensureSetting('rag_rerank_model', process.env.RERANK_MODEL || 'BAAI/bge-reranker-v2-m3');
+    await ensureSetting('rag_rerank_protocol', process.env.RERANK_PROTOCOL || 'tei');
+    await ensureSetting('rag_rerank_candidate_limit', process.env.RERANK_CANDIDATE_LIMIT || '30');
+    await ensureSetting('rag_rerank_timeout_ms', process.env.RERANK_TIMEOUT_MS || '1800');
     await ensureSetting('allow_public_registration', process.env.ALLOW_PUBLIC_REGISTRATION === 'true' ? 'true' : 'false');
     await ensureSetting('api_access_enabled', process.env.API_ACCESS_ENABLED === 'false' ? 'false' : 'true');
     await ensureSetting('memory_threshold', process.env.MEMORY_THRESHOLD || '12000');

@@ -1,0 +1,682 @@
+/* 检索模型服务配置弹窗规范化样式 (向量服务、重排序服务、检索策略) */
+
+.retrieval-config-modal {
+    z-index: 5500;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: retrievalModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.retrieval-config-modal.hidden {
+    display: none !important;
+}
+
+.retrieval-config-modal .model-modal {
+    width: min(580px, calc(100vw - 32px));
+    max-height: min(88vh, 760px);
+    border-radius: 16px;
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.05);
+    background: var(--surface, #ffffff);
+    animation: retrievalModalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#rag-retrieval-policy-modal .model-modal {
+    width: min(640px, calc(100vw - 32px));
+}
+
+/* 弹窗头部 */
+.retrieval-config-modal .model-modal-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px 16px;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%);
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+body.dark-mode .retrieval-config-modal .model-modal-header {
+    background: linear-gradient(180deg, #242528 0%, #1e1f21 100%);
+}
+
+.retrieval-header-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.retrieval-header-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.retrieval-header-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--surface, #ffffff);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    color: var(--primary, #10a37f);
+    flex-shrink: 0;
+}
+
+body.dark-mode .retrieval-header-icon {
+    background: #2d2d2e;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.retrieval-config-modal .model-modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+}
+
+.retrieval-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    line-height: 1.4;
+}
+
+.retrieval-badge-blue {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.retrieval-badge-purple {
+    background: rgba(168, 85, 247, 0.1);
+    color: #9333ea;
+    border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.retrieval-badge-emerald {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+body.dark-mode .retrieval-badge-blue {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+body.dark-mode .retrieval-badge-purple {
+    background: rgba(168, 85, 247, 0.2);
+    color: #c084fc;
+    border-color: rgba(168, 85, 247, 0.4);
+}
+
+body.dark-mode .retrieval-badge-emerald {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+}
+
+.retrieval-config-modal .model-modal-desc {
+    margin: 5px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1.45;
+}
+
+.retrieval-close-btn {
+    display: none !important;
+}
+
+/* 提示通知卡片 */
+.retrieval-callout-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    border: 1px solid transparent;
+}
+
+.retrieval-callout-card svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.retrieval-callout-info {
+    background: rgba(59, 130, 246, 0.06);
+    border-color: rgba(59, 130, 246, 0.18);
+    color: #1e40af;
+}
+
+.retrieval-callout-purple {
+    background: rgba(168, 85, 247, 0.06);
+    border-color: rgba(168, 85, 247, 0.18);
+    color: #6b21a8;
+}
+
+.retrieval-callout-emerald {
+    background: rgba(16, 185, 129, 0.06);
+    border-color: rgba(16, 185, 129, 0.18);
+    color: #065f46;
+}
+
+body.dark-mode .retrieval-callout-info {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+}
+
+body.dark-mode .retrieval-callout-purple {
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #d8b4fe;
+}
+
+body.dark-mode .retrieval-callout-emerald {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #6ee7b7;
+}
+
+/* 表单容器 */
+.retrieval-config-modal .model-form {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    text-align: left;
+}
+
+.retrieval-config-modal .retrieval-config-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+/* 隐藏重复的冗余 section 标题 */
+.retrieval-config-modal .retrieval-config-section-head {
+    display: none;
+}
+
+/* 表单字段项 */
+.retrieval-field-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.retrieval-field-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-main, #334155);
+}
+
+.retrieval-field-hint {
+    font-size: 0.72rem;
+    font-weight: normal;
+    color: var(--text-muted, #94a3b8);
+}
+
+/* 输入框通用 */
+.retrieval-config-modal .form-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #0f172a);
+    font-size: 0.84rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+}
+
+.retrieval-config-modal .form-input:focus {
+    border-color: var(--primary, #10a37f);
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.15);
+    outline: none;
+}
+
+.retrieval-config-modal .form-input::placeholder {
+    color: #94a3b8;
+    font-size: 0.8rem;
+}
+
+/* 密钥输入框与密码切换按钮 */
+.retrieval-config-modal .retrieval-secret-input {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.retrieval-config-modal .retrieval-secret-input .form-input {
+    padding-right: 42px;
+}
+
+.retrieval-config-modal .retrieval-secret-toggle {
+    position: absolute;
+    right: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+
+.retrieval-config-modal .retrieval-secret-toggle:hover {
+    color: var(--primary, #10a37f);
+    background: rgba(0, 0, 0, 0.05);
+}
+
+body.dark-mode .retrieval-config-modal .retrieval-secret-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* 模型输入框组合 (输入框 + 读取列表按钮) */
+.retrieval-config-modal .retrieval-model-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.retrieval-config-modal .retrieval-model-input .form-input {
+    flex: 1 1 auto;
+}
+
+.retrieval-config-modal .retrieval-fetch-btn {
+    flex: 0 0 auto;
+    height: 38px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 8px;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #334155);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.retrieval-config-modal .retrieval-fetch-btn:hover {
+    border-color: var(--primary, #10a37f);
+    color: var(--primary, #10a37f);
+    background: var(--bg-side, #f8fafc);
+}
+
+/* 快速预设标签 */
+.retrieval-preset-chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.retrieval-preset-label {
+    font-size: 0.72rem;
+    color: var(--text-muted, #94a3b8);
+    margin-right: 2px;
+}
+
+.retrieval-preset-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    font-size: 0.72rem;
+    border-radius: 6px;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--bg-side, #f8fafc);
+    color: var(--text-main, #475569);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.retrieval-preset-chip:hover {
+    border-color: var(--primary, #10a37f);
+    background: rgba(16, 163, 127, 0.08);
+    color: var(--primary, #10a37f);
+}
+
+/* 读取模型下拉容器 */
+.retrieval-config-modal .retrieval-model-select {
+    margin-top: 6px;
+    animation: retrievalModalFadeIn 0.2s ease;
+}
+
+.retrieval-config-modal .retrieval-model-select select {
+    width: 100%;
+}
+
+/* 重排序服务启用开关卡片 */
+.retrieval-switch-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--bg-side, #f8fafc);
+    transition: all 0.2s ease;
+}
+
+body.dark-mode .retrieval-switch-card {
+    background: #242528;
+}
+
+.retrieval-switch-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.retrieval-switch-title {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text-main, #0f172a);
+}
+
+.retrieval-switch-desc {
+    font-size: 0.74rem;
+    color: var(--text-muted, #64748b);
+}
+
+.retrieval-switch-toggle {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.retrieval-switch-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.retrieval-switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    transition: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 24px;
+}
+
+body.dark-mode .retrieval-switch-slider {
+    background-color: #4b5563;
+}
+
+.retrieval-switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.retrieval-switch-toggle input:checked + .retrieval-switch-slider {
+    background-color: var(--primary, #10a37f);
+}
+
+.retrieval-switch-toggle input:focus + .retrieval-switch-slider {
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.2);
+}
+
+.retrieval-switch-toggle input:checked + .retrieval-switch-slider:before {
+    transform: translateX(20px);
+}
+
+/* 两列并排栅格 */
+.retrieval-config-modal .retrieval-config-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+/* 检索策略分组卡片 */
+.retrieval-policy-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--bg-side, #f8fafc);
+}
+
+body.dark-mode .retrieval-policy-group {
+    background: #242528;
+}
+
+.retrieval-policy-group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.retrieval-policy-group-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-main, #334155);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.retrieval-policy-group-tag {
+    font-size: 0.7rem;
+    font-weight: normal;
+    color: var(--text-muted, #94a3b8);
+}
+
+.retrieval-overlap-info {
+    font-size: 0.74rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1.45;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--surface, #ffffff);
+    border: 1px dashed var(--border, #cbd5e1);
+}
+
+body.dark-mode .retrieval-overlap-info {
+    background: #1e1f21;
+}
+
+.retrieval-ratio-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    font-weight: 600;
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    margin: 0 2px;
+}
+
+.retrieval-ratio-badge.is-warning {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+}
+
+/* 状态展示卡片 */
+.retrieval-config-modal .retrieval-config-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--bg-side, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    font-size: 0.76rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1.4;
+    margin: 0;
+}
+
+body.dark-mode .retrieval-config-modal .retrieval-config-status {
+    background: #242528;
+}
+
+.retrieval-config-modal .retrieval-config-status:empty {
+    display: none;
+}
+
+/* 底部操作栏 */
+.retrieval-config-modal .model-modal-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 16px 24px;
+    background: var(--surface, #ffffff);
+    border-top: 1px solid var(--border, #e2e8f0);
+    flex-wrap: nowrap;
+}
+
+.retrieval-actions-left {
+    display: none !important;
+}
+
+.retrieval-actions-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+.retrieval-config-modal .model-modal-actions button,
+.retrieval-config-actions button,
+.retrieval-config-modal [data-retrieval-config-save],
+.retrieval-config-modal [data-retrieval-modal-cancel],
+.retrieval-config-modal #rag-probe-vector-btn,
+.retrieval-config-modal #rag-rerank-test-btn {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: max-content !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    height: 38px;
+    padding: 0 18px !important;
+    font-size: 0.84rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+/* 动画定义 */
+@keyframes retrievalModalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes retrievalModalSlideUp {
+    from { opacity: 0; transform: translateY(14px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 移动端与小屏幕自适应 */
+@media (max-width: 640px) {
+    .retrieval-config-modal {
+        padding: 12px;
+    }
+    .retrieval-config-modal .model-modal {
+        width: 100%;
+        max-height: 94vh;
+        border-radius: 12px;
+    }
+    .retrieval-config-modal .model-modal-header {
+        padding: 16px 18px 12px;
+    }
+    .retrieval-config-modal .model-form {
+        padding: 14px 18px;
+        gap: 12px;
+    }
+    .retrieval-config-modal .retrieval-config-grid {
+        grid-template-columns: 1fr;
+    }
+    .retrieval-config-modal .model-modal-actions {
+        flex-direction: column-reverse;
+        padding: 12px 18px;
+        gap: 8px;
+    }
+    .retrieval-actions-right {
+        width: 100%;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .retrieval-config-modal .model-modal-actions button,
+    .retrieval-config-actions button,
+    .retrieval-config-modal [data-retrieval-config-save],
+    .retrieval-config-modal [data-retrieval-modal-cancel],
+    .retrieval-config-modal #rag-probe-vector-btn,
+    .retrieval-config-modal #rag-rerank-test-btn {
+        width: 100% !important;
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+    }
+}

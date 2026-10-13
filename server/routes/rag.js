@@ -8,7 +8,7 @@ const { asyncHandler, getClientIp } = require('../http');
 const { createKnowledgeUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware } = require('../upload');
 const { clearRagCacheForUser } = require('../services/rag-cache');
 const { enqueueAuditLog } = require('../services/db-write-queue');
-const { redactAuditDetails } = require('../security');
+const { assertSafeOutboundUrl, redactAuditDetails } = require('../security');
 const {
     batchDeleteKnowledgeDocuments,
     batchReindexKnowledgeDocuments,
@@ -26,6 +26,7 @@ const {
     getKnowledgeIndexQueueStatus,
     getRagFeedbackSummary,
     recordRagFeedback,
+    reindexAllKnowledgeDocuments,
     scheduleFailedKnowledgeDocumentsForUser,
     scheduleKnowledgeDocumentIndexing,
     setKnowledgeDocumentCollection,
@@ -45,6 +46,7 @@ const {
     debugRetrieveContext
 } = require('../services/rag-index');
 const { getEmbeddingConfig } = require('../services/rag-config');
+const { testRerankConnection } = require('../services/rerank-client');
 const {
     confirmRelation,
     garbageCollectKnowledgeGraph,
@@ -423,6 +425,14 @@ ragRouter.post('/docs/batch-reindex', authMiddleware, asyncHandler(async (req, r
     return res.json({ success: true, ...result });
 }));
 
+ragRouter.post('/admin/docs/reindex-all', authMiddleware, asyncHandler(async (req, res) => {
+    if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有 admin 权限层级可以重建全部知识库向量。' });
+    const result = await reindexAllKnowledgeDocuments({ limit: req.body?.limit });
+    auditRagAction(req, '知识库全量重建索引', result);
+    req.log?.info(result, '知识库全量重建索引');
+    return res.status(202).json({ success: true, ...result });
+}));
+
 ragRouter.post('/upload', authMiddleware, upload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请上传文件' });
 
@@ -535,6 +545,23 @@ ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (r
         success: result.success 
     });
     return res.json(result);
+}));
+
+ragRouter.post('/settings/test-rerank', authMiddleware, asyncHandler(async (req, res) => {
+    if (!isSuperAdmin(req.user)) return res.status(403).json({ success: false, error: '只有 admin 权限层级可以测试重排序服务。' });
+    const apiUrl = String(req.body?.apiUrl || '').trim();
+    if (!apiUrl) return res.status(400).json({ success: false, error: '请填写重排序服务地址。' });
+    await assertSafeOutboundUrl(apiUrl, req.user);
+    const result = await testRerankConnection({
+        apiUrl,
+        apiKey: req.body?.apiKey,
+        model: req.body?.model,
+        protocol: req.body?.protocol,
+        candidateLimit: req.body?.candidateLimit,
+        timeoutMs: req.body?.timeoutMs
+    });
+    auditRagAction(req, '重排序模型连接测试', { apiUrl, protocol: req.body?.protocol, success: result.success === true });
+    return res.status(result.success ? 200 : 502).json(result);
 }));
 
 ragRouter.post('/feedback', authMiddleware, asyncHandler(async (req, res) => {
