@@ -21,6 +21,11 @@ services:
     env_file:
       - .env
 
+    # 正式镜像在构建阶段已安装 qpdf；空值时使用镜像内固定路径。
+    # 如部署方使用受控自定义二进制，可在 .env 显式覆盖该路径。
+    environment:
+      DOCUMENT_QPDF_PATH: ${DOCUMENT_QPDF_PATH:-/usr/bin/qpdf}
+
     # 默认 CPU-only，可在 GPU 主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控。
 
     # 数据持久化：保证数据库和上传文件在容器重建后仍然保留

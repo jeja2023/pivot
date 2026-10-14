@@ -62,6 +62,13 @@ test('Docker image ships a Chromium runtime for agent.browser instead of silentl
     assert.match(dockerfile, /PIVOT_CHROMIUM_PATH=\/usr\/bin\/chromium/);
 });
 
+test('Ubuntu production image packages qpdf and Compose resolves its in-image absolute path', () => {
+    assert.match(dockerfile, /chromium qpdf/);
+    assert.match(dockerfile, /DOCUMENT_QPDF_PATH=\/usr\/bin\/qpdf/);
+    assert.match(dockerfile, /qpdf --version/);
+    assert.match(compose, /DOCUMENT_QPDF_PATH:\s*\$\{DOCUMENT_QPDF_PATH:-\/usr\/bin\/qpdf\}/);
+});
+
 test('默认 Compose 可运行于 CPU 主机，GPU 透传由独立覆盖层启用', () => {
     assert.doesNotMatch(compose, /^\s*gpus:\s*all\s*$/m);
     assert.match(gpuCompose, /^\s*gpus:\s*all\s*$/m);

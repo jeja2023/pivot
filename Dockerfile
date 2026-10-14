@@ -27,10 +27,10 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
-# 运行镜像只安装运行期组件、pg_dump 和 Agent Browser 所需 Chromium，
+# 运行镜像只安装运行期组件、qpdf、pg_dump 和 Agent Browser 所需 Chromium，
 # 不携带编译器及开发头文件。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  tzdata postgresql-common ca-certificates python3 chromium \
+  tzdata postgresql-common ca-certificates python3 chromium qpdf \
   && yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh \
   && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
   && rm -rf /var/lib/apt/lists/*
@@ -44,6 +44,7 @@ ENV NODE_ENV=production \
   UV_THREADPOOL_SIZE=16 \
   PIVOT_BUILD_REVISION=${PIVOT_BUILD_REVISION} \
   PIVOT_CHROMIUM_PATH=/usr/bin/chromium \
+  DOCUMENT_QPDF_PATH=/usr/bin/qpdf \
   PYTHON=python3
 
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
@@ -59,6 +60,7 @@ COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.
 RUN node scripts/build_chat_css.js && \
   node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
   python3 --version && \
+  qpdf --version && \
   pg_dump --version
 
 # 预建默认持久化目录。宿主机 bind mount 也必须允许 UID/GID 1000 写入。
