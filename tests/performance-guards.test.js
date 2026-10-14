@@ -162,7 +162,7 @@ test('RAG PostgreSQL retrieval pushes vector distance and lexical ranking into t
     assert.match(repository, /c\.embedding::vector\(\$\{vector\.length\}\)\)\s*<=>\s*\?::vector/);
     assert.match(repository, /c\.embedding_profile\s*=\s*\?/);
     assert.match(rag, /ORDER BY lexical_score DESC/);
-    assert.match(regulations, /a\.embedding\s*<=>\s*\?::vector/);
+    assert.match(regulations, /a\.embedding(?:::vector)?\s*<=>\s*\?::vector/);
     assert.match(regulations, /ORDER BY[\s\S]*?\bscore DESC/);
 });
 

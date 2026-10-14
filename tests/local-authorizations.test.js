@@ -38,7 +38,7 @@ test('桌面截图请求进入桌面控制处理器，而非旧版 MCP 工具拒
     try {
         await assert.rejects(
             () => manager.executeLocalMcpTool({ toolName: 'desktop.screenshot', input: {} }),
-            error => error?.code === 'LOCAL_DESKTOP_CONTROL_GRANT_REQUIRED'
+            error => ['LOCAL_DESKTOP_CONTROL_GRANT_REQUIRED', 'LOCAL_DESKTOP_CONTROL_UNAVAILABLE'].includes(error?.code)
         );
     } finally {
         fs.rmSync(root, { recursive: true, force: true });

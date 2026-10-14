@@ -44,7 +44,7 @@ test('法规治理界面可查看质量、切换订阅并人工审核义务', { 
         await page.locator('[data-regulation-bookmark-save="81"]').click();
         assert.equal(await page.evaluate(() => window.testBookmarks[0].topic), '人事');
         await page.locator('[data-regulation-bookmark-delete="81"]').click();
-        await expect(page.locator('#regulations-bookmarks-body')).toContainText('暂无收藏');
+        await expect(page.locator('#regulations-bookmarks-body')).toContainText('暂无法规收藏');
         await page.locator('[data-regulations-close-bookmarks]').click();
         await page.evaluate(() => document.getElementById('regulations-detail-panel').classList.remove('hidden'));
 

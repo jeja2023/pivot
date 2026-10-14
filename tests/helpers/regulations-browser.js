@@ -384,7 +384,7 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
             return { data: documents.slice(offset, offset + limit), total: documents.length, limit };
         };
     });
-    const modules = ['render-base', 'render-batch', 'render-shell', 'render-documents', 'render-results', 'actions-core', 'actions-batch', 'actions-batch-edit'];
+    const modules = ['render-base', 'render-batch', 'render-shell', 'render-documents', 'render-results', 'actions-core', 'actions-batch', 'actions-batch-edit', 'actions-bookmarks'];
     if (includeAdvanced) modules.push('actions-import', 'actions-governance', 'actions-advanced');
     modules.push('events');
     for (const file of modules) {

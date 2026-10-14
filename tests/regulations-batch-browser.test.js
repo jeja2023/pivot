@@ -141,10 +141,12 @@ test('法规批量删除浏览器交互与布局', { timeout: 60000 }, async t =
                 const page = await createBatchPage(browser, { width });
                 const rects = await page.locator('.regulations-batch-actions').evaluate(element => {
                     const toolbar = element.getBoundingClientRect();
-                    return [...element.children].map(child => {
-                        const rect = child.getBoundingClientRect();
-                        return { left: rect.left, right: rect.right, toolbarLeft: toolbar.left, toolbarRight: toolbar.right };
-                    });
+                    return [...element.children]
+                        .filter(child => !child.classList.contains('hidden') && window.getComputedStyle(child).display !== 'none')
+                        .map(child => {
+                            const rect = child.getBoundingClientRect();
+                            return { left: rect.left, right: rect.right, toolbarLeft: toolbar.left, toolbarRight: toolbar.right };
+                        });
                 });
                 assert.ok(rects.every(rect => rect.left >= rect.toolbarLeft && rect.right <= rect.toolbarRight));
                 assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
