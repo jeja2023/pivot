@@ -96,7 +96,7 @@
         function renderRichText(content) {
             const text = String(content || '').trim();
             if (!text) return '';
-            const markdownFn = window.Pivot?.legacy?.renderMarkdown || window.renderMarkdown || (typeof renderMarkdown === 'function' ? renderMarkdown : null);
+            const markdownFn = window.Pivot?.legacy?.renderMarkdown || (typeof renderMarkdown === 'function' ? renderMarkdown : null);
             if (typeof markdownFn === 'function') {
                 try {
                     const htmlText = markdownFn(text);
