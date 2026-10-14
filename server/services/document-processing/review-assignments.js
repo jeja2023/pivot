@@ -72,14 +72,24 @@ async function listReviewAssignments({ userId, jobId, ownerOnly = false }) {
 async function listReviewCandidates({ ownerUserId, jobId }) {
     const job = await queryOne('SELECT j.*, u.unit FROM document_jobs j JOIN users u ON u.id = j.user_id WHERE j.id = ? AND j.user_id = ? AND j.source_module = ?', [Number(jobId), ownerUserId, 'ocr_app']);
     if (!job) return null;
+    const ownerUnit = String(job.unit || '').trim();
+    if (!ownerUnit) {
+        const empty = [];
+        empty.ownerUnit = '';
+        empty.reason = 'NO_OWNER_UNIT';
+        return empty;
+    }
     const rows = await query(`
         SELECT id, username, nickname, unit
         FROM users
         WHERE id <> ? AND deleted_at IS NULL AND COALESCE(status, 'active') != 'disabled'
           AND unit = ?
         ORDER BY username ASC LIMIT 100
-    `, [ownerUserId, job.unit || '']);
-    return rows.map(row => ({ id: row.id, username: row.username, nickname: row.nickname || '', unit: row.unit || '' }));
+    `, [ownerUserId, ownerUnit]);
+    const candidates = rows.map(row => ({ id: row.id, username: row.username, nickname: row.nickname || '', unit: row.unit || '' }));
+    candidates.ownerUnit = ownerUnit;
+    candidates.reason = rows.length ? '' : 'NO_COLLEAGUES';
+    return candidates;
 }
 
 async function markReviewInProgress({ userId, jobId }) {

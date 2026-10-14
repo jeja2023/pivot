@@ -618,11 +618,7 @@ window.Pivot.legacy.saveSettings = async () => {
         if (chunkSizeInput) payload.rag_chunk_size = chunkSizeInput.value;
         if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
         const endpoint = isSuperAdminUser() ? `${API_BASE}/admin/settings` : `${API_BASE}/settings/embedding`;
-        const res = await apiFetch(endpoint, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        const res = await apiFetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '系统设置保存失败');
         if (scoreInput) scoreInput.value = data.ragConfig?.scoreThreshold ?? scoreInput.value;
@@ -662,11 +658,7 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
         if (section === 'ocr') {
             const serviceUrlInput = document.getElementById('setting-ocr-service-url');
             const serviceUrl = serviceUrlInput?.value.trim() || '';
-            const res = await apiFetch(`${API_BASE}/settings/ocr`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serviceUrl })
-            });
+            const res = await apiFetch(`${API_BASE}/settings/ocr`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceUrl }) });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'OCR 服务保存失败');
             window.Pivot.ocrConfig = data.settings || { serviceUrl, engine: 'http' };
@@ -721,11 +713,7 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
             if (chunkOverlapInput) payload.rag_chunk_overlap = chunkOverlapInput.value;
         }
         const endpoint = `${API_BASE}/admin/settings`;
-        const res = await apiFetch(endpoint, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        const res = await apiFetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '检索配置保存失败');
         updateEmbeddingSettingsForm(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
@@ -742,204 +730,142 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
         if (saveBtn) saveBtn.disabled = false;
     }
 };
-async function testEmbeddingConnection(options = {}) {
-    const { fromCard = false, button = null } = options;
-    const testBtn = button || document.getElementById('rag-embedding-test-btn');
-    const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
-    const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
-    const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
-    
-    let apiUrl = '';
-    let model = '';
-    let apiKey = '';
+function updateRetrievalCardStatus(serviceKey, isReady, statusText = '') {
+    const card = document.querySelector(`[data-retrieval-model-test="${serviceKey}"]`)?.closest('.retrieval-model-service-card');
+    if (!card) return;
+    card.classList.toggle('is-ready', isReady);
+    card.classList.toggle('is-warning', !isReady);
+    const statusSmall = card.querySelector('small');
+    if (statusSmall && statusText) {
+        statusSmall.textContent = statusText;
+        statusSmall.title = statusText;
+    }
+}
 
+async function runRetrievalTest(options, defaultBtnId, runner) {
+    const { fromCard = false, button = null } = options;
+    const testBtn = button || document.getElementById(defaultBtnId);
+    const origText = testBtn?.textContent;
+    if (testBtn) {
+        testBtn.disabled = true;
+        if (fromCard) testBtn.textContent = '测试中…';
+    }
+    try {
+        await runner();
+    } finally {
+        if (testBtn) {
+            testBtn.disabled = false;
+            if (origText) testBtn.textContent = origText;
+        }
+    }
+}
+
+async function testEmbeddingConnection(options = {}) {
+    const { fromCard = false } = options;
+    let apiUrl = '', model = '', apiKey = '';
     if (!fromCard) {
-        if (!embeddingUrlInput || !embeddingModelInput) return;
-        const rawUrl = embeddingUrlInput.value.trim();
-        const rawKey = embeddingKeyInput?.value.trim() || '';
+        const urlInput = document.getElementById('setting-rag-embedding-url');
+        const modelInput = document.getElementById('setting-rag-embedding-model');
+        if (!urlInput || !modelInput) return;
+        const rawUrl = urlInput.value.trim();
+        const rawKey = document.getElementById('setting-rag-embedding-key')?.value.trim() || '';
         apiUrl = rawUrl === '********' ? '' : rawUrl;
         apiKey = rawKey === '********' ? '' : rawKey;
         model = getEmbeddingModelValue();
     }
-
-    const payload = {
-        mode: 'http',
-        apiUrl,
-        model,
-        apiKey
-    };
-
-    const origText = testBtn?.textContent;
-    if (testBtn) {
-        testBtn.disabled = true;
-        if (fromCard) testBtn.textContent = '测试中…';
-    }
-    showToast('正在测试向量连接，请稍候...', 'info');
-    
-    try {
-        const res = await apiFetch(`${API_BASE}/rag/settings/test-embedding`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await res.text();
-            throw new Error(`连接测试请求失败（返回了 HTML）：${text.slice(0, 100)}...`);
-        }
-
-        const data = await res.json();
-        if (data.success) {
-            showToast(`连接测试成功！向量维度：${data.dimension}，耗时：${data.durationMs}ms`, 'success');
-            const card = document.querySelector('[data-retrieval-model-test="embedding"]')?.closest('.retrieval-model-service-card');
-            if (card) {
-                card.classList.remove('is-warning');
-                card.classList.add('is-ready');
+    await runRetrievalTest(options, 'rag-embedding-test-btn', async () => {
+        showToast('正在测试向量连接，请稍候...', 'info');
+        try {
+            const res = await apiFetch(`${API_BASE}/rag/settings/test-embedding`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'http', apiUrl, model, apiKey })
+            });
+            const contentType = res.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await res.text();
+                throw new Error(`连接测试请求失败（返回了 HTML）：${text.slice(0, 100)}...`);
             }
-        } else {
-            throw new Error(data.error || '连接测试失败');
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || '连接测试失败');
+            showToast(`连接测试成功！向量维度：${data.dimension}，耗时：${data.durationMs}ms`, 'success');
+            updateRetrievalCardStatus('embedding', true);
+        } catch (e) {
+            showToast(e.message, 'error');
+            updateRetrievalCardStatus('embedding', false);
         }
-    } catch (e) {
-        showToast(e.message, 'error');
-        console.error('测试连接失败:', e);
-        const card = document.querySelector('[data-retrieval-model-test="embedding"]')?.closest('.retrieval-model-service-card');
-        if (card) {
-            card.classList.remove('is-ready');
-            card.classList.add('is-warning');
-        }
-    } finally {
-        if (testBtn) {
-            testBtn.disabled = false;
-            if (origText) testBtn.textContent = origText;
-        }
-    }
-};
+    });
+}
 
 async function testRerankConnection(options = {}) {
-    const { fromCard = false, button = null } = options;
-    const testBtn = button || document.getElementById('rag-rerank-test-btn');
+    const { fromCard = false } = options;
     const rawUrl = document.getElementById('setting-rag-rerank-url')?.value.trim() || '';
     const rawKey = document.getElementById('setting-rag-rerank-key')?.value.trim() || '';
-    let apiUrl = rawUrl === '********' ? '' : rawUrl;
-    let apiKey = rawKey === '********' ? '' : rawKey;
+    let apiUrl = fromCard ? '' : (rawUrl === '********' ? '' : rawUrl);
+    let apiKey = fromCard ? '' : (rawKey === '********' ? '' : rawKey);
     const model = document.getElementById('setting-rag-rerank-model')?.value.trim() || '';
     const protocol = document.getElementById('setting-rag-rerank-protocol')?.value === 'llama_cpp' ? 'llama_cpp' : 'tei';
     const candidateLimit = document.getElementById('setting-rag-rerank-candidate-limit')?.value || '30';
     const timeoutMs = document.getElementById('setting-rag-rerank-timeout-ms')?.value || '1800';
+    if (!fromCard && !rawUrl) return showToast('请先填写重排序服务地址', 'error');
 
-    if (fromCard) {
-        apiUrl = '';
-        apiKey = '';
-    } else if (!rawUrl) {
-        return showToast('请先填写重排序服务地址', 'error');
-    }
-
-    const origText = testBtn?.textContent;
-    if (testBtn) {
-        testBtn.disabled = true;
-        if (fromCard) testBtn.textContent = '测试中…';
-    }
-    showToast('正在测试重排序服务，请稍候…', 'info');
-    try {
-        const res = await apiFetch(`${API_BASE}/rag/settings/test-rerank`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apiUrl, apiKey, model, protocol, candidateLimit, timeoutMs })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success !== true) throw new Error(data.error || '重排序服务测试失败');
-        const durationText = data.durationMs ? `，耗时：${data.durationMs}ms` : '';
-        showToast(`重排序服务连接成功，已验证 ${data.ranked || 0} 个测试候选${durationText}`, 'success');
-        const card = document.querySelector('[data-retrieval-model-test="rerank"]')?.closest('.retrieval-model-service-card');
-        if (card) {
-            card.classList.remove('is-warning');
-            card.classList.add('is-ready');
+    await runRetrievalTest(options, 'rag-rerank-test-btn', async () => {
+        showToast('正在测试重排序服务，请稍候…', 'info');
+        try {
+            const res = await apiFetch(`${API_BASE}/rag/settings/test-rerank`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiUrl, apiKey, model, protocol, candidateLimit, timeoutMs })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.success !== true) throw new Error(data.error || '重排序服务测试失败');
+            const durationText = data.durationMs ? `，耗时：${data.durationMs}ms` : '';
+            showToast(`重排序服务连接成功，已验证 ${data.ranked || 0} 个测试候选${durationText}`, 'success');
+            updateRetrievalCardStatus('rerank', true);
+        } catch (error) {
+            showToast(error.message || '重排序服务测试失败', 'error');
+            updateRetrievalCardStatus('rerank', false);
         }
-    } catch (error) {
-        showToast(error.message || '重排序服务测试失败', 'error');
-        const card = document.querySelector('[data-retrieval-model-test="rerank"]')?.closest('.retrieval-model-service-card');
-        if (card) {
-            card.classList.remove('is-ready');
-            card.classList.add('is-warning');
-        }
-    } finally {
-        if (testBtn) {
-            testBtn.disabled = false;
-            if (origText) testBtn.textContent = origText;
-        }
-    }
-};
+    });
+}
 
 async function testOcrConnection(options = {}) {
-    const { fromCard = false, button = null } = options;
-    const testBtn = button || document.getElementById('ocr-service-test-btn');
+    const { fromCard = false } = options;
     const rawUrl = document.getElementById('setting-ocr-service-url')?.value.trim() || '';
-    let serviceUrl = rawUrl === '********' ? '' : rawUrl;
+    let serviceUrl = fromCard ? '' : (rawUrl === '********' ? '' : rawUrl);
     const statusEl = document.getElementById('setting-ocr-test-status');
+    if (!fromCard && !rawUrl) return showToast('请先填写 OCR 服务地址', 'error');
 
-    if (fromCard) {
-        serviceUrl = '';
-    } else if (!rawUrl) {
-        return showToast('请先填写 OCR 服务地址', 'error');
-    }
-
-    const origText = testBtn?.textContent;
-    if (testBtn) {
-        testBtn.disabled = true;
-        if (fromCard) testBtn.textContent = '测试中…';
-    }
-    if (statusEl) {
-        statusEl.className = 'model-modal-desc retrieval-config-status is-loading';
-        statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…';
-    }
-    showToast('正在检测 OCR 服务连接…', 'info');
-    try {
-        const res = await apiFetch(`${API_BASE}/settings/ocr-test`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ serviceUrl })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
-        if (!res.ok || data.success !== true) throw new Error(data.message || data.error || 'OCR 服务连接失败');
+    await runRetrievalTest(options, 'ocr-service-test-btn', async () => {
         if (statusEl) {
-            statusEl.className = 'model-modal-desc retrieval-config-status is-success';
-            statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。';
+            statusEl.className = 'model-modal-desc retrieval-config-status is-loading';
+            statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…';
         }
-        showToast('OCR 服务连接成功', 'success');
-        const card = document.querySelector('[data-retrieval-model-test="ocr"]')?.closest('.retrieval-model-service-card');
-        if (card) {
-            card.classList.remove('is-warning');
-            card.classList.add('is-ready');
-            const statusSmall = card.querySelector('small');
-            if (statusSmall) {
-                statusSmall.textContent = '服务可用 · 连通测试成功';
-                statusSmall.title = '服务可用 · 连通测试成功';
+        showToast('正在检测 OCR 服务连接…', 'info');
+        try {
+            const res = await apiFetch(`${API_BASE}/settings/ocr-test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serviceUrl })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
+            if (!res.ok || data.success !== true) throw new Error(data.message || data.error || 'OCR 服务连接失败');
+            if (statusEl) {
+                statusEl.className = 'model-modal-desc retrieval-config-status is-success';
+                statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。';
             }
-        }
-    } catch (error) {
-        if (statusEl) {
-            statusEl.className = 'model-modal-desc retrieval-config-status is-error';
-            statusEl.textContent = `连接失败：${error.message}`;
-        }
-        showToast(error.message || 'OCR 服务连接失败', 'error');
-        const card = document.querySelector('[data-retrieval-model-test="ocr"]')?.closest('.retrieval-model-service-card');
-        if (card) {
-            card.classList.remove('is-ready');
-            card.classList.add('is-warning');
-            const statusSmall = card.querySelector('small');
-            if (statusSmall) {
-                statusSmall.textContent = `不可用：${error.message}`;
-                statusSmall.title = `不可用：${error.message}`;
+            showToast('OCR 服务连接成功', 'success');
+            updateRetrievalCardStatus('ocr', true, '服务可用 · 连通测试成功');
+        } catch (error) {
+            if (statusEl) {
+                statusEl.className = 'model-modal-desc retrieval-config-status is-error';
+                statusEl.textContent = `连接失败：${error.message}`;
             }
+            showToast(error.message || 'OCR 服务连接失败', 'error');
+            updateRetrievalCardStatus('ocr', false, `不可用：${error.message}`);
         }
-    } finally {
-        if (testBtn) {
-            testBtn.disabled = false;
-            if (origText) testBtn.textContent = origText;
-        }
-    }
+    });
 }
 
 window.Pivot.legacy.bindEmbeddingModalEvents = function() {
@@ -997,31 +923,16 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     modals.forEach(({ modal }) => {
         if (modal.dataset.boundRetrievalModalOverlay === '1') return;
         modal.dataset.boundRetrievalModalOverlay = '1';
-        modal.addEventListener('click', event => {
-            if (event.target === modal) setRetrievalModelModalVisibility(modal, false);
-        });
+        modal.addEventListener('click', event => { if (event.target === modal) setRetrievalModelModalVisibility(modal, false); });
     });
-    if (testBtn) {
-        testBtn.onclick = () => testEmbeddingConnection();
-    }
+    if (testBtn) testBtn.onclick = () => testEmbeddingConnection();
     if (rerankTestBtn) rerankTestBtn.onclick = () => testRerankConnection();
     if (ocrTestBtn) ocrTestBtn.onclick = () => testOcrConnection();
     if (fetchModelsBtn) fetchModelsBtn.onclick = () => fetchEmbeddingModels();
-    if (embeddingModelSelect) {
-        embeddingModelSelect.onchange = (e) => {
-            if (embeddingModelInput && e.target.value) embeddingModelInput.value = e.target.value;
-        };
-    }
+    if (embeddingModelSelect) embeddingModelSelect.onchange = (e) => { if (embeddingModelInput && e.target.value) embeddingModelInput.value = e.target.value; };
     const bindPasswordToggle = (toggleId, inputId) => {
-        const toggle = document.getElementById(toggleId);
-        const input = document.getElementById(inputId);
-        if (toggle && input) {
-            toggle.onclick = () => {
-                const isPassword = input.type === 'password';
-                input.type = isPassword ? 'text' : 'password';
-                toggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)';
-            };
-        }
+        const toggle = document.getElementById(toggleId), input = document.getElementById(inputId);
+        if (toggle && input) toggle.onclick = () => { const isPassword = input.type === 'password'; input.type = isPassword ? 'text' : 'password'; toggle.style.color = isPassword ? 'var(--primary)' : 'var(--text-muted)'; };
     };
     bindPasswordToggle('rag-embedding-key-toggle', 'setting-rag-embedding-key');
     bindPasswordToggle('rag-rerank-key-toggle', 'setting-rag-rerank-key');
@@ -1031,10 +942,7 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
             chip.dataset.boundPreset = '1';
             chip.addEventListener('click', () => {
                 const targetInput = document.querySelector(inputSelector);
-                if (targetInput) {
-                    targetInput.value = chip.dataset[dataKey];
-                    targetInput.focus();
-                }
+                if (targetInput) { targetInput.value = chip.dataset[dataKey]; targetInput.focus(); }
             });
         });
     };

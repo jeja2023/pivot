@@ -1,4 +1,29 @@
 ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22
+ARG VERAPDF_VERSION=1.30.3
+ARG VERAPDF_RELEASE_SERIES=1.30
+# 官方 Greenfield CLI-only 安装包的 SHA-256；更新版本必须同时更新 URL、摘要和回归契约。
+ARG VERAPDF_INSTALLER_SHA256=b512bf24945503a33fc10738ecffc1f2dccaaf8593a448e94ee9ac86a9559a59
+
+FROM ${NODE_IMAGE} AS verapdf
+WORKDIR /tmp/verapdf
+ARG VERAPDF_VERSION
+ARG VERAPDF_RELEASE_SERIES
+ARG VERAPDF_INSTALLER_SHA256
+
+# veraPDF 在运行期只需要 JRE。此阶段使用官方无交互安装器，只选择 CLI，
+# 下载摘要不匹配、安装失败或 CLI 无法启动均会阻断镜像构建。
+COPY docker/verapdf-auto-install.xml /tmp/verapdf-auto-install.xml
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates curl default-jre-headless unzip \
+  && curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+    "https://software.verapdf.org/releases/${VERAPDF_RELEASE_SERIES}/verapdf-greenfield-${VERAPDF_VERSION}-installer.zip" \
+    --output /tmp/verapdf-installer.zip \
+  && echo "${VERAPDF_INSTALLER_SHA256}  /tmp/verapdf-installer.zip" | sha256sum -c - \
+  && unzip -q /tmp/verapdf-installer.zip -d /tmp/verapdf-installer \
+  && java -jar "/tmp/verapdf-installer/verapdf-greenfield-${VERAPDF_VERSION}/verapdf-izpack-installer-${VERAPDF_VERSION}.jar" /tmp/verapdf-auto-install.xml \
+  && test -x /opt/verapdf/verapdf \
+  && /opt/verapdf/verapdf --version | grep -F "veraPDF ${VERAPDF_VERSION}" \
+  && rm -rf /opt/verapdf/Uninstaller /tmp/verapdf /tmp/verapdf-installer /tmp/verapdf-installer.zip /var/lib/apt/lists/*
 
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
@@ -27,10 +52,10 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
-# 运行镜像只安装运行期组件、qpdf、pg_dump 和 Agent Browser 所需 Chromium，
+# 运行镜像只安装运行期组件、qpdf、veraPDF JRE、pg_dump 和 Agent Browser 所需 Chromium，
 # 不携带编译器及开发头文件。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  tzdata postgresql-common ca-certificates python3 chromium qpdf \
+  tzdata postgresql-common ca-certificates default-jre-headless python3 chromium qpdf \
   && yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh \
   && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
   && rm -rf /var/lib/apt/lists/*
@@ -45,9 +70,11 @@ ENV NODE_ENV=production \
   PIVOT_BUILD_REVISION=${PIVOT_BUILD_REVISION} \
   PIVOT_CHROMIUM_PATH=/usr/bin/chromium \
   DOCUMENT_QPDF_PATH=/usr/bin/qpdf \
+  DOCUMENT_VERAPDF_PATH=/opt/verapdf/verapdf \
   PYTHON=python3
 
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=verapdf --chown=node:node /opt/verapdf /opt/verapdf
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
@@ -61,6 +88,8 @@ RUN node scripts/build_chat_css.js && \
   node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
   python3 --version && \
   qpdf --version && \
+  java -version && \
+  /opt/verapdf/verapdf --version && \
   pg_dump --version
 
 # 预建默认持久化目录。宿主机 bind mount 也必须允许 UID/GID 1000 写入。

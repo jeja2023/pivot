@@ -28,6 +28,7 @@
     const deleteSelectedDocuments = (...args) => ns.deleteSelectedDocuments?.(...args);
     const focusArticle = (...args) => ns.focusArticle?.(...args);
     const showSimilarArticles = (...args) => ns.showSimilarArticles?.(...args);
+    const stripMarkdownFormatting = (...args) => ns.stripMarkdownFormatting?.(...args);
     const showCitationGraph = (...args) => ns.showCitationGraph?.(...args);
     const showVersionTimeline = (...args) => ns.showVersionTimeline?.(...args);
     const previewRegulationImport = (...args) => ns.previewRegulationImport?.(...args);
@@ -131,6 +132,25 @@
                 });
                 root.addEventListener('keydown', event => {
                     if (event.key === 'Escape') {
+                        const detailPanel = document.getElementById('regulations-detail-panel');
+                        if (detailPanel && !detailPanel.classList.contains('hidden')) {
+                            detailPanel.classList.add('hidden');
+                            detailPanel.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                            if (state.openedFromAi) {
+                                state.openedFromAi = false;
+                                const aiPanel = document.getElementById('regulations-ai-panel');
+                                aiPanel?.classList.remove('hidden');
+                                document.getElementById('regulations-ai-question')?.focus();
+                                return;
+                            }
+                            if (state.openedFromSearch) {
+                                state.openedFromSearch = false;
+                                const searchPanel = document.getElementById('regulations-search-panel');
+                                searchPanel?.classList.remove('hidden');
+                                return;
+                            }
+                            return;
+                        }
                         closeDialogs();
                         return;
                     }
@@ -252,6 +272,8 @@
                     }
                     const docOpener = event.target.closest('[data-regulation-open-doc]');
                     if (docOpener) {
+                        state.openedFromAi = false;
+                        state.openedFromSearch = false;
                         loadDetail(docOpener.dataset.regulationOpenDoc).catch(e => toast(e.message || '加载法规详情失败', 'error'));
                         return;
                     }
@@ -376,7 +398,26 @@
                         closeSearchDialog();
                         return;
                     }
-                    if (['regulations-admin-panel', 'regulations-detail-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel', 'regulations-access-log-panel', 'regulations-ai-log-panel', 'regulations-bookmarks-panel', 'regulations-recycle-bin-panel', 'regulations-quality-panel', 'regulations-citation-governance-panel', 'regulations-obligation-panel', 'regulations-location-panel', 'regulations-create-folder-panel'].includes(event.target.id)) {
+                    if (event.target.id === 'regulations-detail-panel') {
+                        const detailPanel = document.getElementById('regulations-detail-panel');
+                        detailPanel?.classList.add('hidden');
+                        detailPanel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                        if (state.openedFromAi) {
+                            state.openedFromAi = false;
+                            const aiPanel = document.getElementById('regulations-ai-panel');
+                            aiPanel?.classList.remove('hidden');
+                            document.getElementById('regulations-ai-question')?.focus();
+                            return;
+                        }
+                        if (state.openedFromSearch) {
+                            state.openedFromSearch = false;
+                            const searchPanel = document.getElementById('regulations-search-panel');
+                            searchPanel?.classList.remove('hidden');
+                            return;
+                        }
+                        return;
+                    }
+                    if (['regulations-admin-panel', 'regulations-ai-panel', 'regulations-similar-panel', 'regulations-graph-panel', 'regulations-timeline-panel', 'regulations-preview-panel', 'regulations-annotation-panel', 'regulations-access-log-panel', 'regulations-ai-log-panel', 'regulations-bookmarks-panel', 'regulations-recycle-bin-panel', 'regulations-quality-panel', 'regulations-citation-governance-panel', 'regulations-obligation-panel', 'regulations-location-panel', 'regulations-create-folder-panel'].includes(event.target.id)) {
                         closeDialogs();
                         return;
                     }
@@ -430,10 +471,27 @@
                         return;
                     }
                     if (event.target.closest('[data-regulations-close-detail]')) {
-                        document.getElementById('regulations-detail-panel')?.classList.add('hidden');
+                        const detailPanel = document.getElementById('regulations-detail-panel');
+                        detailPanel?.classList.add('hidden');
+                        detailPanel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                        if (state.openedFromAi) {
+                            state.openedFromAi = false;
+                            const aiPanel = document.getElementById('regulations-ai-panel');
+                            aiPanel?.classList.remove('hidden');
+                            document.getElementById('regulations-ai-question')?.focus();
+                            return;
+                        }
+                        if (state.openedFromSearch) {
+                            state.openedFromSearch = false;
+                            const searchPanel = document.getElementById('regulations-search-panel');
+                            searchPanel?.classList.remove('hidden');
+                            return;
+                        }
                         return;
                     }
                     if (event.target.closest('[data-regulations-close-ai]')) {
+                        ns.stopRegulationAi?.({ silent: true });
+                        state.openedFromAi = false;
                         document.getElementById('regulations-ai-panel')?.classList.add('hidden');
                         return;
                     }
@@ -475,8 +533,16 @@
                     }
                     const match = event.target.closest('[data-regulation-match-doc]');
                     if (match) {
-                        closeSearchDialog();
-                        document.getElementById('regulations-ai-panel')?.classList.add('hidden');
+                        const isFromAi = !!match.closest('#regulations-ai-panel') || (state.openedFromAi && !match.closest('#regulations-search-panel'));
+                        const isFromSearch = !isFromAi && (!!match.closest('#regulations-search-panel') || state.openedFromSearch);
+                        state.openedFromAi = isFromAi;
+                        state.openedFromSearch = isFromSearch;
+                        if (!isFromSearch) {
+                            closeSearchDialog();
+                        }
+                        if (!isFromAi) {
+                            document.getElementById('regulations-ai-panel')?.classList.add('hidden');
+                        }
                         document.getElementById('regulations-similar-panel')?.classList.add('hidden');
                         loadDetail(match.dataset.regulationMatchDoc, match.dataset.regulationMatchVersion || '').then(() => {
                             focusArticle(match.dataset.regulationMatchArticle);
@@ -793,7 +859,10 @@
                         const idx = parseInt(copyAiBtn.dataset.regulationsAiCopy, 10);
                         const turn = state.aiTurns[idx];
                         if (turn?.answer) {
-                            navigator.clipboard.writeText(turn.answer).then(() => {
+                            const textToCopy = typeof stripMarkdownFormatting === 'function'
+                                ? stripMarkdownFormatting(turn.answer)
+                                : turn.answer;
+                            navigator.clipboard.writeText(textToCopy).then(() => {
                                 toast('已复制回答内容', 'success');
                             }).catch(() => {
                                 toast('复制失败', 'error');

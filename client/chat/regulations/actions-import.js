@@ -22,6 +22,8 @@
     const loadDetail = (...args) => ns.loadDetail?.(...args);
     const syncFileInputState = (...args) => ns.syncFileInputState?.(...args);
     const renderAiAnswer = (...args) => ns.renderAiAnswer?.(...args);
+    const stripMarkdownFormatting = (...args) => ns.stripMarkdownFormatting?.(...args);
+    const renderAiCardAnswer = (...args) => ns.renderAiCardAnswer?.(...args);
             async function uploadDocument(form) {
                         const fileInput = form.querySelector('#regulations-upload-file');
                         const fileCount = Number(fileInput?.files?.length || 0);
@@ -310,7 +312,15 @@
                                         full += chunk;
                                         turn.answer = full;
                                         const target = document.getElementById(`regulations-ai-answer-${turnIndex}`);
-                                        if (target) target.textContent = full;
+                                        if (target) {
+                                            if (typeof renderAiCardAnswer === 'function') {
+                                                PivotSafeHtml.setHtml(target, renderAiCardAnswer(full));
+                                            } else if (typeof stripMarkdownFormatting === 'function') {
+                                                target.textContent = stripMarkdownFormatting(full);
+                                            } else {
+                                                target.textContent = full;
+                                            }
+                                        }
                                         document.getElementById('regulations-ai-answer')?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'auto' });
                                     }
                                 });
@@ -325,11 +335,13 @@
                                 }
                                 if (streamError) throw streamError;
                             }
-                            turn.answer = full.trim() || 'AI 未返回有效内容';
+                            const finalAnswer = typeof stripMarkdownFormatting === 'function' ? stripMarkdownFormatting(full) : full;
+                            turn.answer = finalAnswer.trim() || 'AI 未返回有效内容';
                             turn.sources = sources;
                         } catch (error) {
                             if (controller.signal.aborted || error?.name === 'AbortError') {
-                                turn.answer = full.trim() || '已停止生成，尚未返回内容。';
+                                const stoppedAnswer = typeof stripMarkdownFormatting === 'function' ? stripMarkdownFormatting(full) : full;
+                                turn.answer = stoppedAnswer.trim() || '已停止生成，尚未返回内容。';
                                 if (!state.aiStopSilently) toast('已停止生成回答', 'info');
                             } else {
                                 state.aiTurns.splice(turnIndex, 1);

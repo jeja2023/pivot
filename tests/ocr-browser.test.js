@@ -41,11 +41,11 @@ function fixtureDetail() {
     };
 }
 
-async function createOcrPage(browser) {
+async function createOcrPage(browser, options = {}) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.setContent('<style>.hidden{display:none!important}.apps-workspace-body{min-height:700px}</style><main class="apps-workspace-body"></main><div id="apps-home-view"></div><div id="official-writing-view"></div><div id="data-analysis-view"></div><div id="regulations-view"></div><div id="pdf-tools-view"></div><button id="apps-back-btn"></button>');
     await page.addStyleTag({ path: style });
-    await page.evaluate(detail => {
+    await page.evaluate(({ detail, desktopSupportedTypes }) => {
         const escape = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         window.Pivot = { legacy: {
             PivotSafeHtml: { escapeHtml: escape, setHtml: (element, value) => { element.innerHTML = String(value || ''); } },
@@ -58,6 +58,14 @@ async function createOcrPage(browser) {
         window.setAppsTitle = () => {};
         window.showToast = (message, type) => { window.ocrToasts = [...(window.ocrToasts || []), { message, type }]; };
         window.setInterval = callback => { window.ocrPoll = callback; return 1; };
+        if (Array.isArray(desktopSupportedTypes)) {
+            window.pivotDesktop = {
+                getLocalAuthorizationStatus: async () => ({ supportedTypes: desktopSupportedTypes }),
+                requestLocalAuthorization: async () => ({ canceled: false }),
+                revokeLocalAuthorization: async () => ({}),
+                executeLocalMcpTool: async () => ({})
+            };
+        }
         window.ocrCalls = [];
         window.ocrFixtureDetail = detail;
         window.apiFetch = async (url, options = {}) => {
@@ -68,7 +76,7 @@ async function createOcrPage(browser) {
             if (url.includes('/jobs?')) return json({ data: [{ id: 101, status: 'queued', progress: 0, file: { originalName: '排队材料.pdf' }, config: {} }], total: 1 });
             return json({ success: true });
         };
-    }, fixtureDetail());
+    }, { detail: fixtureDetail(), desktopSupportedTypes: options.desktopSupportedTypes });
     await page.addScriptTag({ path: path.join(root, 'client/common/vendor/purify.min.js') });
     await page.addScriptTag({ path: path.join(root, 'client/chat/safe-html.js') });
     await page.addScriptTag({ path: path.join(root, 'client/chat/apps-workbench-ocr-review-views.js') });
@@ -90,6 +98,22 @@ test('OCR 工作区展示排队状态、处理范围、未知置信度和全部�
         await expect(page.locator('.ocr-block-list .ocr-block-row')).toHaveCount(125);
         await expect(page.locator('.ocr-block-list .ocr-block-row').first()).toContainText('未知');
         await expect(page.locator('.ocr-block-list .ocr-block-row').first()).toHaveClass(/is-unknown/);
+        await page.close();
+    } finally {
+        await browser.close();
+    }
+});
+
+test('旧桌面客户端缺少本机能力时提示升级，不调用不支持的 IPC 授权', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await createOcrPage(browser, { desktopSupportedTypes: ['local_database', 'local_report_dir'] });
+        await page.locator('#ocr-authorize-watch-btn').click();
+        await expect.poll(async () => page.evaluate(() => window.ocrToasts?.at(-1)?.message || '')).toContain('请升级至 Pivot v0.2.23');
+        const grantCalls = await page.evaluate(() => window.ocrCalls.filter(([url]) => url.includes('pivot-local-auth:grant')));
+        assert.equal(grantCalls.length, 0);
+        await page.locator('#ocr-desktop-screenshot-btn').click();
+        await expect.poll(async () => page.evaluate(() => window.ocrToasts?.at(-1)?.message || '')).toContain('请升级至 Pivot v0.2.23');
         await page.close();
     } finally {
         await browser.close();

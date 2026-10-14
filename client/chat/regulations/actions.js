@@ -1,7 +1,7 @@
 (function () {
     const ns = window.Pivot.legacy.PivotRegulationsInternal;
     if (!ns) throw new Error('法规库核心模块未加载');
-    if (ns.actionsReadyPromise || (ns.actionsCoreReady && ns.actionsImportReady && ns.actionsBatchReady && ns.actionsBatchEditReady && ns.actionsGovernanceReady && ns.actionsAdvancedReady)) return;
+    if (ns.actionsReadyPromise || (ns.actionsCoreReady && ns.actionsImportReady && ns.actionsBatchReady && ns.actionsBatchEditReady && ns.actionsGovernanceReady && ns.actionsBookmarksReady && ns.actionsAdvancedReady)) return;
     function loadScriptOnce(src) {
         if (window.Pivot?.loadScriptOnce) return window.Pivot.loadScriptOnce(src);
         return new Promise((resolve, reject) => {
@@ -30,6 +30,7 @@
         '/chat/regulations/actions-batch.js',
         '/chat/regulations/actions-batch-edit.js',
         '/chat/regulations/actions-governance.js',
+        '/chat/regulations/actions-bookmarks.js',
         '/chat/regulations/actions-advanced.js'
     ];
     ns.actionsReadyPromise = (async () => {

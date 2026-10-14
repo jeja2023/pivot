@@ -3,7 +3,7 @@
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.renderResultsReady) return;
 
-    const { state, esc, highlightText, renderRichText } = ns;
+    const { state, esc, highlightText, renderRichText, stripMarkdownFormatting, renderAiCardAnswer } = ns;
             function getSearchModeLabel(mode = state.searchMode) {
                         return mode === 'keyword' ? '关键词' : '混合检索';
                     }
@@ -283,15 +283,20 @@
                             const sources = Array.isArray(turn.sources) ? turn.sources : [];
                             const direct = sources.filter(s => !s.viaLink);
                             const related = sources.filter(s => s.viaLink);
-                            const renderSourceBtn = source => `
-                                <button class="btn-secondary regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}">
-                                    <span class="regulations-ai-source-label">
-                                        <span class="regulations-ai-source-name">${esc(source.label || '相关条文')}</span>
-                                        ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
-                                    </span>
-                                    ${source.excerpt ? `<span class="regulations-ai-source-excerpt">${esc(source.excerpt)}</span>` : ''}
-                                </button>
-                            `;
+                            const renderSourceBtn = source => {
+                                const excerptText = source.excerpt
+                                    ? (typeof stripMarkdownFormatting === 'function' ? stripMarkdownFormatting(source.excerpt) : source.excerpt)
+                                    : '';
+                                return `
+                                    <button class="regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}" title="点击查看此法条原文">
+                                        <span class="regulations-ai-source-label">
+                                            <span class="regulations-ai-source-name">${esc(source.label || '相关条文')}</span>
+                                            ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
+                                        </span>
+                                        ${excerptText ? `<span class="regulations-ai-source-excerpt">${esc(excerptText)}</span>` : ''}
+                                    </button>
+                                `;
+                            };
                             const groupsHtml = sources.length ? `
                                 <div class="regulations-ai-sources">
                                     ${direct.length ? `
@@ -310,6 +315,32 @@
                                     ` : ''}
                                 </div>
                             ` : '';
+
+                            const rawAnswer = turn.answer || '';
+                            let bodyHtml = '';
+                            if (isStreaming) {
+                                if (rawAnswer) {
+                                    bodyHtml = typeof renderAiCardAnswer === 'function'
+                                        ? renderAiCardAnswer(rawAnswer)
+                                        : esc(rawAnswer);
+                                } else {
+                                    bodyHtml = `
+                                        <div class="regulations-ai-streaming-placeholder">
+                                            <div class="regulations-ai-pulse-wave" aria-hidden="true">
+                                                <span class="regulations-ai-pulse-dot"></span>
+                                                <span class="regulations-ai-pulse-dot"></span>
+                                                <span class="regulations-ai-pulse-dot"></span>
+                                            </div>
+                                            <span class="regulations-ai-loading-text">正在检索法规条文并分析生成回答…</span>
+                                        </div>
+                                    `;
+                                }
+                            } else {
+                                bodyHtml = typeof renderAiCardAnswer === 'function'
+                                    ? renderAiCardAnswer(rawAnswer)
+                                    : renderRichText(rawAnswer);
+                            }
+
                             return `
                                 <div class="regulations-ai-turn">
                                     <div class="regulations-ai-question">
@@ -319,10 +350,9 @@
                                         <div class="regulations-ai-card-header">
                                             <span class="regulations-ai-card-avatar" aria-hidden="true">AI</span>
                                             <strong class="regulations-ai-card-title">法规问答答复</strong>
-                                            <span class="regulations-ai-card-tag">基于条文检索</span>
+                                            <span class="regulations-ai-card-tag">${isStreaming ? '分析生成中…' : '基于条文检索'}</span>
                                         </div>
-                                        <div id="regulations-ai-answer-${turnIndex}" class="regulations-article-body regulations-ai-card-body">${isStreaming ? esc(turn.answer || '正在生成回答…') : renderRichText(turn.answer)}</div>
-                                        ${isStreaming ? '<div class="regulations-ai-loading-text">正在检索法规条文并生成回答…</div>' : ''}
+                                        <div id="regulations-ai-answer-${turnIndex}" class="regulations-article-body regulations-ai-card-body">${bodyHtml}</div>
                                         ${groupsHtml}
                                         ${isStreaming ? '' : `<div class="regulations-ai-turn-actions">
                                             <button class="btn-secondary regulations-ai-copy-btn" type="button" data-regulations-ai-copy="${turnIndex}" title="复制此条回答">

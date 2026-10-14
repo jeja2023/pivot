@@ -85,7 +85,62 @@
             }).join('');
         }
 
-        return { coverageSummary, renderBlocks, renderPageList, renderPagePreview };
+        function renderReviewerPanel(job) {
+            if (!state.isReviewerPanelOpen || !job) return '';
+            const candidates = Array.isArray(state.reviewCandidates) ? state.reviewCandidates : [];
+            const info = state.reviewPanelInfo || {};
+            if (!candidates.length) {
+                const ownerUnit = info.ownerUnit || '';
+                const emptyDesc = info.reason === 'NO_OWNER_UNIT' || !ownerUnit
+                    ? '当前账号尚未设置所属单位。文字识别的协同复核机制要求在同单位内流转，请先在右上角个人设置或管理后台设置组织单位。'
+                    : ('当前所属单位「' + ownerUnit + '」暂无其他已激活的用户账号。分派复核需要同单位的其他同事参与，请在用户管理中创建或配置同事账号。');
+                return [
+                    '<section class="ocr-reviewer-panel ocr-reviewer-panel-empty">',
+                    '    <div class="ocr-text-head">',
+                    '        <strong>分派复核人</strong>',
+                    '        <span>组织协同复核</span>',
+                    '    </div>',
+                    '    <div class="ocr-reviewer-empty-state">',
+                    '        <div class="ocr-reviewer-empty-icon">',
+                    '            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
+                    '        </div>',
+                    '        <div class="ocr-reviewer-empty-content">',
+                    '            <strong>当前暂无可分派的复核同事</strong>',
+                    '            <p>' + esc(emptyDesc) + '</p>',
+                    '        </div>',
+                    '    </div>',
+                    '    <div class="ocr-review-actions">',
+                    '        <button class="btn-secondary" type="button" data-ocr-close-reviewers>关闭</button>',
+                    '    </div>',
+                    '</section>'
+                ].join('');
+            }
+            const candidateItems = candidates.map(candidate => {
+                const checked = state.selectedReviewerIds.has(String(candidate.id)) ? 'checked' : '';
+                return [
+                    '<label class="ocr-reviewer-item">',
+                    '    <input type="checkbox" data-ocr-reviewer-id="' + esc(candidate.id) + '" ' + checked + '>',
+                    '    <span>' + esc(candidate.nickname || candidate.username) + '</span>',
+                    '    <em>' + esc(candidate.unit || '') + '</em>',
+                    '</label>'
+                ].join('');
+            }).join('');
+            return [
+                '<section class="ocr-reviewer-panel">',
+                '    <div class="ocr-text-head">',
+                '        <strong>分派复核人</strong>',
+                '        <span>仅显示同单位的可用用户（共 ' + candidates.length + ' 位）</span>',
+                '    </div>',
+                '    <div class="ocr-reviewer-list">' + candidateItems + '</div>',
+                '    <div class="ocr-review-actions">',
+                '        <button class="btn-primary" type="button" data-ocr-save-reviewers="' + esc(job.id) + '">确认分派</button>',
+                '        <button class="btn-secondary" type="button" data-ocr-close-reviewers>取消</button>',
+                '    </div>',
+                '</section>'
+            ].join('');
+        }
+
+        return { coverageSummary, renderBlocks, renderPageList, renderPagePreview, renderReviewerPanel };
     }
 
     pivotLegacy.PivotOcrReviewViews = { create };

@@ -17,6 +17,8 @@
         capabilities: null,
         drafts: {},
         reviewCandidates: [],
+        reviewPanelInfo: null,
+        isReviewerPanelOpen: false,
         selectedReviewerIds: new Set(),
         regionSelection: null,
         regionCandidate: null,
@@ -437,6 +439,10 @@
         const draft = page ? draftForPage(page.id) : null;
         const text = draft?.text ?? review?.revisedText ?? page?.text ?? '';
         const coverage = reviewViews.coverageSummary(job);
+        const canCancel = job.allowedActions?.cancel === true || ['queued', 'processing', 'pending'].includes(job.status);
+        const canRetry = job.allowedActions?.retry === true || ['failed', 'partial_success', 'cancelled'].includes(job.status);
+        const canDelete = job.allowedActions?.delete !== false && !['queued', 'processing'].includes(job.status);
+        const hasOutputs = (detail.outputs || []).length > 0 || (detail.pages || []).some(p => (p.text || '').trim()) || ['succeeded', 'partial_success', 'needs_review'].includes(job.status);
         html.setHtml(box, `
             <section class="ocr-detail-head">
                 <div>
@@ -447,30 +453,60 @@
                     ${job.errorMessage ? `<em>${esc(job.errorMessage)}</em>` : ''}
                 </div>
                 <div class="ocr-detail-actions">
-                    <button class="btn-secondary" type="button" data-ocr-job-retry="${esc(job.id)}">重试</button>
-                    <button class="btn-secondary" type="button" data-ocr-job-cancel="${esc(job.id)}">取消</button>
-                    <button class="btn-danger-outline" type="button" data-ocr-job-delete="${esc(job.id)}">删除</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="text">TXT</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="markdown">Markdown</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="json">JSON</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="html">HTML</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="docx">DOCX</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="xlsx">Excel</button>
-                    <button class="btn-secondary" type="button" data-ocr-export="searchable_pdf">可检索PDF</button>
-                    <button class="btn-secondary" type="button" data-ocr-share="knowledge">\u5165\u77e5\u8bc6\u5e93</button>
-                    <button class="btn-secondary" type="button" data-ocr-share="regulations">\u5165\u6cd5\u89c4\u5e93</button>
-                    <button class="btn-secondary" type="button" data-ocr-share="official-writing">\u5165\u516c\u6587\u6750\u6599</button>
-                    <button class="btn-secondary" type="button" data-ocr-share="chat">\u653e\u5165\u804a\u5929</button>
-                    <button class="btn-secondary" type="button" data-ocr-extract-fields="${esc(job.id)}">提取公文字段</button>
-                    ${job.isOwner ? `<button class="btn-secondary" type="button" data-ocr-open-reviewers="${esc(job.id)}">分派复核</button>` : ''}
+                    ${hasOutputs ? `
+                        <details class="ocr-action-menu ocr-export-menu">
+                            <summary class="btn-secondary ocr-action-menu-summary" title="导出多种格式识别结果">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span>导出</span>
+                                <svg class="ocr-menu-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </summary>
+                            <div class="ocr-action-menu-panel">
+                                <div class="ocr-menu-group-label">常用文本</div>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="text"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg><span>TXT 纯文本</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="markdown"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path><path d="M7 15V9l3 3 3-3v6"></path><path d="M17 12l2 2 2-2"></path></svg><span>Markdown 文档</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="json"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg><span>JSON 结构数据</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="html"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg><span>HTML 网页</span></button>
+                                <div class="ocr-menu-divider"></div>
+                                <div class="ocr-menu-group-label">排版与文档</div>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="docx"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg><span>DOCX Word 文档</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="xlsx"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg><span>Excel 电子表格</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-export="searchable_pdf"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><circle cx="11" cy="14" r="2"></circle><line x1="13" y1="16" x2="15.5" y2="18.5"></line></svg><span>可检索双层 PDF</span></button>
+                            </div>
+                        </details>
+                        <details class="ocr-action-menu ocr-share-menu">
+                            <summary class="btn-secondary ocr-action-menu-summary" title="将结果流转到知识库、法规库或协同应用">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                                <span>流转联动</span>
+                                <svg class="ocr-menu-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </summary>
+                            <div class="ocr-action-menu-panel">
+                                <div class="ocr-menu-group-label">存入资料库</div>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-share="knowledge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>入知识库</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-share="regulations"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span>入法规库</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-share="official-writing"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg><span>入公文材料</span></button>
+                                <div class="ocr-menu-divider"></div>
+                                <div class="ocr-menu-group-label">应用联动</div>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-share="chat"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span>放入当前聊天</span></button>
+                                <button class="btn-secondary ocr-menu-item" type="button" data-ocr-extract-fields="${esc(job.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg><span>提取公文字段</span></button>
+                            </div>
+                        </details>
+                    ` : ''}
+                    ${job.isOwner ? `<button class="btn-secondary ${state.isReviewerPanelOpen ? 'is-active' : ''}" type="button" data-ocr-open-reviewers="${esc(job.id)}">分派复核</button>` : ''}
                     ${!job.isOwner && job.status === 'needs_review' ? `<button class="btn-secondary" type="button" data-ocr-complete-review="${esc(job.id)}">完成我的复核</button>` : ''}
                     ${state.regionSelection?.pageId === String(page?.id || '') ? `<button class="btn-secondary" type="button" data-ocr-recognize-region="${esc(page.id)}">识别选区</button>` : ''}
+                    ${canRetry ? `<button class="btn-secondary" type="button" data-ocr-job-retry="${esc(job.id)}">重试</button>` : ''}
+                    ${canCancel ? `<button class="btn-secondary" type="button" data-ocr-job-cancel="${esc(job.id)}">取消</button>` : ''}
+                    ${canDelete ? `<button class="btn-danger-outline" type="button" data-ocr-job-delete="${esc(job.id)}">删除</button>` : ''}
                 </div>
             </section>
             <section class="ocr-output-strip">${renderOutputs(detail.outputs || [])}</section>
             <section id="ocr-field-result" class="ocr-field-result hidden" aria-live="polite"></section>
             ${state.regionCandidate ? `<section class="ocr-region-result"><strong>区域识别候选</strong><p>${esc(state.regionCandidate.text || '未识别到文字')}</p><span>${state.regionCandidate.confidence === null || state.regionCandidate.confidence === undefined ? '置信度未知' : `置信度 ${Math.round(state.regionCandidate.confidence * 100)}%`} · 请人工确认后复制到正文。</span></section>` : ''}
-            ${state.reviewCandidates.length ? `<section class="ocr-reviewer-panel"><div class="ocr-text-head"><strong>分派复核人</strong><span>仅显示同单位的可用用户</span></div><div class="ocr-reviewer-list">${state.reviewCandidates.map(candidate => `<label class="ocr-reviewer-item"><input type="checkbox" data-ocr-reviewer-id="${esc(candidate.id)}" ${state.selectedReviewerIds.has(String(candidate.id)) ? 'checked' : ''}><span>${esc(candidate.nickname || candidate.username)}</span><em>${esc(candidate.unit || '')}</em></label>`).join('')}</div><div class="ocr-review-actions"><button class="btn-primary" type="button" data-ocr-save-reviewers="${esc(job.id)}">确认分派</button><button class="btn-secondary" type="button" data-ocr-close-reviewers>取消</button></div></section>` : ''}
+            ${reviewViews.renderReviewerPanel(job)}
             <section class="ocr-review-grid">
                 <aside class="ocr-page-list">${reviewViews.renderPageList(detail.pages || [])}</aside>
                 <div class="ocr-preview-pane">
@@ -578,7 +614,12 @@
         const requestId = ++state.detailRequestId;
         const data = await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`);
         if (requestId !== state.detailRequestId) return null;
-        if (String(state.activeJobId || '') && String(state.activeJobId) !== String(data.job?.id || jobId)) state.drafts = {};
+        if (String(state.activeJobId || '') && String(state.activeJobId) !== String(data.job?.id || jobId)) {
+            state.drafts = {};
+            state.isReviewerPanelOpen = false;
+            state.reviewCandidates = [];
+            state.reviewPanelInfo = null;
+        }
         state.detail = data;
         state.activeJobId = String(data.job?.id || jobId);
         if (!data.pages?.some(page => String(page.id) === String(state.activePageId))) {
@@ -797,6 +838,21 @@
             submitUpload(form, files).catch(error => toast(error.message || '粘贴图片识别失败', 'error'));
         });
         view.addEventListener('click', event => {
+            // 点击下拉菜单项时自动收起菜单
+            const menuItem = event.target.closest('.ocr-action-menu-panel button');
+            if (menuItem) {
+                const parentMenu = menuItem.closest('.ocr-action-menu');
+                if (parentMenu) parentMenu.open = false;
+            }
+            if (!event.target.closest('.ocr-action-menu')) {
+                view.querySelectorAll('.ocr-action-menu[open]').forEach(menu => { menu.open = false; });
+            } else {
+                const activeMenu = event.target.closest('.ocr-action-menu');
+                view.querySelectorAll('.ocr-action-menu[open]').forEach(menu => {
+                    if (menu !== activeMenu) menu.open = false;
+                });
+            }
+
             const open = event.target.closest('[data-ocr-job-open]');
             if (open) {
                 loadDetail(open.dataset.ocrJobOpen).catch(e => toast(e.message || '任务详情加载失败', 'error'));
@@ -853,31 +909,18 @@
                 return;
             }
             const exportBtn = event.target.closest('[data-ocr-export]');
-            if (exportBtn) {
-                ocrActions.exportOutput(exportBtn.dataset.ocrExport).catch(e => toast(e.message || '导出失败', 'error'));
-                return;
-            }
+            if (exportBtn) return ocrActions.exportOutput(exportBtn.dataset.ocrExport).catch(e => toast(e.message || '导出失败', 'error'));
             const fields = event.target.closest('[data-ocr-extract-fields]');
-            if (fields) {
-                ocrActions.extractFields(fields.dataset.ocrExtractFields).catch(error => toast(error.message || '字段提取失败', 'error'));
-                return;
-            }
+            if (fields) return ocrActions.extractFields(fields.dataset.ocrExtractFields).catch(error => toast(error.message || '字段提取失败', 'error'));
             const region = event.target.closest('[data-ocr-recognize-region]');
-            if (region) {
-                ocrActions.recognizeSelectedRegion(region.dataset.ocrRecognizeRegion).catch(error => toast(error.message || '区域识别失败', 'error'));
-                return;
-            }
+            if (region) return ocrActions.recognizeSelectedRegion(region.dataset.ocrRecognizeRegion).catch(error => toast(error.message || '区域识别失败', 'error'));
             const reviewers = event.target.closest('[data-ocr-open-reviewers]');
-            if (reviewers) {
-                ocrActions.openReviewers(reviewers.dataset.ocrOpenReviewers).catch(error => toast(error.message || '加载复核人失败', 'error'));
-                return;
-            }
+            if (reviewers) return ocrActions.openReviewers(reviewers.dataset.ocrOpenReviewers).catch(error => toast(error.message || '加载复核人失败', 'error'));
             const completeReview = event.target.closest('[data-ocr-complete-review]');
             if (completeReview) {
-                requestJson(`${API}/jobs/${encodeURIComponent(completeReview.dataset.ocrCompleteReview)}/review-complete`, { method: 'POST' })
+                return requestJson(`${API}/jobs/${encodeURIComponent(completeReview.dataset.ocrCompleteReview)}/review-complete`, { method: 'POST' })
                     .then(data => { toast(data.review?.doubleConfirmed ? '双人复核已完成' : '已完成个人复核，等待第二位复核人确认', 'success'); return loadDetail(state.activeJobId, { silent: true }); })
                     .catch(error => toast(error.message || '完成复核失败', 'error'));
-                return;
             }
             const reviewer = event.target.closest('[data-ocr-reviewer-id]');
             if (reviewer) {
@@ -887,46 +930,26 @@
                 return;
             }
             const saveReviewersButton = event.target.closest('[data-ocr-save-reviewers]');
-            if (saveReviewersButton) {
-                ocrActions.saveReviewers(saveReviewersButton.dataset.ocrSaveReviewers).catch(error => toast(error.message || '分派复核人失败', 'error'));
-                return;
-            }
+            if (saveReviewersButton) return ocrActions.saveReviewers(saveReviewersButton.dataset.ocrSaveReviewers).catch(error => toast(error.message || '分派复核人失败', 'error'));
             if (event.target.closest('[data-ocr-close-reviewers]')) {
+                state.isReviewerPanelOpen = false;
                 state.reviewCandidates = [];
+                state.reviewPanelInfo = null;
                 state.selectedReviewerIds = new Set();
-                renderDetail();
-                return;
+                return renderDetail();
             }
             const output = event.target.closest('[data-ocr-output-download]');
-            if (output) {
-                ocrActions.downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
-                return;
-            }
-
+            if (output) return ocrActions.downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
             const save = event.target.closest('[data-ocr-page-save]');
-            if (save) {
-                saveReview(save.dataset.ocrPageSave).catch(e => toast(e.message || '保存复核失败', 'error'));
-                return;
-            }
+            if (save) return saveReview(save.dataset.ocrPageSave).catch(e => toast(e.message || '保存复核失败', 'error'));
             const feedback = event.target.closest('[data-ocr-submit-feedback]');
-            if (feedback) {
-                ocrActions.submitFeedback(feedback.dataset.ocrSubmitFeedback).catch(error => toast(error.message || '提交纠错反馈失败', 'error'));
-                return;
-            }
+            if (feedback) return ocrActions.submitFeedback(feedback.dataset.ocrSubmitFeedback).catch(error => toast(error.message || '提交纠错反馈失败', 'error'));
             const remove = event.target.closest('[data-ocr-job-delete]');
-            if (remove) {
-                ocrActions.deleteJob(remove.dataset.ocrJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
-                return;
-            }
+            if (remove) return ocrActions.deleteJob(remove.dataset.ocrJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
             const retry = event.target.closest('[data-ocr-job-retry]');
-            if (retry) {
-                ocrActions.retryJob(retry.dataset.ocrJobRetry).catch(e => toast(e.message || '重试失败', 'error'));
-                return;
-            }
+            if (retry) return ocrActions.retryJob(retry.dataset.ocrJobRetry).catch(e => toast(e.message || '重试失败', 'error'));
             const cancel = event.target.closest('[data-ocr-job-cancel]');
-            if (cancel) {
-                ocrActions.cancelJob(cancel.dataset.ocrJobCancel).catch(e => toast(e.message || '取消失败', 'error'));
-            }
+            if (cancel) return ocrActions.cancelJob(cancel.dataset.ocrJobCancel).catch(e => toast(e.message || '取消失败', 'error'));
         });
     }
 

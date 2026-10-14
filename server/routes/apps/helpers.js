@@ -258,11 +258,19 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             }
             return undefined;
         }
-        const errorMsg = e.response?.data?.error?.message || e.message;
+        let errorMsg = e.response?.data?.error?.message || e.message;
+        const status = e.response?.status || 500;
+        if (status === 524 || String(errorMsg).includes('524')) {
+            errorMsg = `上游 AI 模型服务网关响应超时（HTTP 524，等待超过 2 分钟未返回数据）。这通常是由于当前第三方模型提供商（${modelCfg?.name || '当前模型'}）排队严重或服务器过载导致。建议在弹窗右上角切换其他可用模型后重试。`;
+        } else if (status === 504 || e.code === 'ECONNABORTED' || String(errorMsg).includes('timeout')) {
+            errorMsg = `上游 AI 模型服务连接超时。建议在弹窗右上角切换其他可用模型后重试。`;
+        } else if (status === 502 || status === 503) {
+            errorMsg = `上游 AI 模型服务暂时不可用（HTTP ${status}）。建议切换其他模型后重试。`;
+        }
         logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
         recordModelFailure(modelCfg, e);
         if (!res.headersSent) {
-            return res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
+            return res.status(status).json({ error: { message: errorMsg, type: 'api_error' } });
         }
         if (!res.writableEnded) res.end();
         return undefined;

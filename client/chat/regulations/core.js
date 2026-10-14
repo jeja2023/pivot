@@ -25,6 +25,8 @@
             filters: { category: '', issuingBody: '', jurisdiction: '', status: '', includeArchived: false },
             aiAnswer: '', aiSources: [], aiTurns: [], aiBusy: false, aiAbortController: null, aiStopSilently: false,
             aiScope: 'library',
+            openedFromAi: false,
+            openedFromSearch: false,
             importJobs: [], importJobsTimer: null,
             importPreview: null,
             facets: { categories: [], legalLevels: [], issuingBodies: [], jurisdictions: [] },
@@ -49,13 +51,55 @@
 
         function esc(value) { return html.escapeHtml(value); }
 
+        // 去除 Markdown 格式符号（如 #、**、*、`、~~、> 等），保留纯净文本排版与规范列表符
+        function stripMarkdownFormatting(content) {
+            if (!content) return '';
+            let text = String(content);
+            // 移除代码围栏
+            text = text.replace(/^```[a-zA-Z0-9_-]*\s*$/gm, '');
+            // 移除行首 Markdown 标题标记（如 #、## 等）
+            text = text.replace(/^#{1,6}\s+/gm, '');
+            // 移除引用符号 >
+            text = text.replace(/^>\s*/gm, '');
+            // 统一无序列表符号为规范圆点 •
+            text = text.replace(/^\s*[-*+]\s+/gm, '• ');
+            // 移除加粗与斜体标记 ** 或 * 或 __ 或 _
+            text = text.replace(/\*\*([^*\n]+?)\*\*/g, '$1');
+            text = text.replace(/__([^_\n]+?)__/g, '$1');
+            text = text.replace(/\*([^*\n]+?)\*/g, '$1');
+            text = text.replace(/_([^_\n]+?)_/g, '$1');
+            // 清理可能残留的孤立双星号
+            text = text.replace(/\*\*/g, '');
+            // 移除行内代码标记 `code`
+            text = text.replace(/`([^`\n]+?)`/g, '$1');
+            // 移除 Markdown 链接 [text](url) -> text
+            text = text.replace(/\[([^\]]+?)\]\([^)]+?\)/g, '$1');
+            // 移除删除线 ~~text~~
+            text = text.replace(/~~([^~\n]+?)~~/g, '$1');
+            // 移除连续3个以上的分割线 --- 或 ***
+            text = text.replace(/^[-*_]{3,}\s*$/gm, '');
+            return text.trim();
+        }
+
+        // 法规 AI 回答专属渲染：去除 Markdown 格式符号后按结构化段落呈现
+        function renderAiCardAnswer(content) {
+            const cleanText = stripMarkdownFormatting(content);
+            if (!cleanText) return '';
+            const paragraphs = cleanText.split(/\n{2,}/);
+            return paragraphs.map(p => {
+                const lines = p.split('\n').map(line => esc(line.trim())).filter(Boolean);
+                return `<p>${lines.join('<br>')}</p>`;
+            }).join('');
+        }
+
         // 将正文按 Markdown 渲染为带排版的 HTML，渲染器不可用时回退为转义纯文本
         function renderRichText(content) {
             const text = String(content || '').trim();
             if (!text) return '';
-            if (typeof window.Pivot.legacy.renderMarkdown === 'function') {
+            const markdownFn = window.Pivot?.legacy?.renderMarkdown || window.renderMarkdown || (typeof renderMarkdown === 'function' ? renderMarkdown : null);
+            if (typeof markdownFn === 'function') {
                 try {
-                    const htmlText = window.Pivot.legacy.renderMarkdown(text);
+                    const htmlText = markdownFn(text);
                     if (htmlText) return htmlText;
                 } catch (_) { /* 渲染失败时回退到纯文本展示 */ }
             }
@@ -200,6 +244,8 @@
         PRESETS,
         esc,
         renderRichText,
+        stripMarkdownFormatting,
+        renderAiCardAnswer,
         stripMarkdownTitleLine,
         cleanDisplayTitle,
         cleanArticleTitle,

@@ -8,5 +8,8 @@
 | libvips（由 sharp 预编译二进制携带） | 图片编解码与变换 | LGPL-3.0-or-later |
 | KaTeX | 公式排版 | MIT |
 | ECharts | 图表渲染 | Apache-2.0 |
+| veraPDF Greenfield CLI | PDF/A 与 PDF/UA 合规验证 | GPL-3.0-or-later 或 MPL-2.0 |
 
 libvips 以动态链接库形式与应用分发；用户可以替换该动态库。项目未修改 libvips 本身。有关源代码和许可信息，请访问组件各自的上游发布页或本发行包内的相关许可文件。
+
+Docker 发行镜像中的 veraPDF CLI 来自 veraPDF 官方固定版本安装包，构建时校验 SHA-256 后以 CLI-only 模式安装。veraPDF 仅用于验证，不执行 PDF/A 转换；其完整许可与源代码获取方式见 [veraPDF 官方项目](https://github.com/veraPDF/veraPDF-apps)。

@@ -185,7 +185,11 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     router.get('/jobs/:id/reviewer-candidates', authMiddleware, asyncHandler(async (req, res) => {
         const candidates = await listReviewCandidates({ ownerUserId: req.user.id, jobId: req.params.id });
         if (!candidates) return res.status(404).json({ error: '文字识别任务不存在或无权分派复核人' });
-        return res.json({ candidates });
+        return res.json({
+            candidates,
+            ownerUnit: candidates.ownerUnit || '',
+            reason: candidates.reason || ''
+        });
     }));
 
     router.put('/jobs/:id/reviewers', authMiddleware, asyncHandler(async (req, res) => {

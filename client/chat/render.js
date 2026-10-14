@@ -525,4 +525,9 @@ function renderMarkdown(content, options = {}) {
     return rawHtml;
 }
 
+window.renderMarkdown = renderMarkdown;
+if (window.Pivot && window.Pivot.legacy) {
+    window.Pivot.legacy.renderMarkdown = renderMarkdown;
+}
+
 

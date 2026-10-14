@@ -44,6 +44,25 @@
                     function openDetailDialog() {
                         const panel = document.getElementById('regulations-detail-panel');
                         panel?.classList.remove('hidden');
+                        if (state.openedFromAi) {
+                            panel?.classList.add('regulations-detail-from-ai');
+                            panel?.classList.remove('regulations-detail-from-search');
+                        } else if (state.openedFromSearch) {
+                            panel?.classList.add('regulations-detail-from-search');
+                            panel?.classList.remove('regulations-detail-from-ai');
+                        } else {
+                            panel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                        }
+                        const closeBtn = panel?.querySelector('[data-regulations-close-detail]');
+                        if (closeBtn) {
+                            if (state.openedFromAi) {
+                                closeBtn.textContent = '‹ 返回法规问答';
+                            } else if (state.openedFromSearch) {
+                                closeBtn.textContent = '‹ 返回条文检索';
+                            } else {
+                                closeBtn.textContent = '关闭';
+                            }
+                        }
                     }
 
                     function syncAiScopeControl() {
@@ -63,6 +82,11 @@
 
                     function openAiDialog(scope = '') {
                         if (scope === 'document' && state.detail?.document?.id) state.aiScope = 'document';
+                        const detailPanel = document.getElementById('regulations-detail-panel');
+                        detailPanel?.classList.add('hidden');
+                        detailPanel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                        state.openedFromAi = false;
+                        state.openedFromSearch = false;
                         const panel = document.getElementById('regulations-ai-panel');
                         panel?.classList.remove('hidden');
                         syncAiScopeControl();
@@ -79,6 +103,12 @@
                     function closeDialogs() {
                         // 关闭问答弹窗即取消仍在传输的流，避免后台继续占用模型连接。
                         ns.stopRegulationAi?.({ silent: true });
+                        state.openedFromAi = false;
+                        state.openedFromSearch = false;
+                        const detailPanel = document.getElementById('regulations-detail-panel');
+                        detailPanel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
+                        const closeBtn = detailPanel?.querySelector('[data-regulations-close-detail]');
+                        if (closeBtn) closeBtn.textContent = '关闭';
                         document.getElementById('regulations-admin-panel')?.classList.add('hidden');
                         closeSearchDialog();
                         document.getElementById('regulations-import-result-panel')?.classList.add('hidden');
@@ -287,13 +317,26 @@
                         syncAiScopeControl();
                     }
 
-                    // 跳转到指定条文并短暂高亮，便于在长文档里定位
+                    // 跳转到指定条文并高亮显目蓝色，便于在长文档里精准定位与突出展示
                     function focusArticle(articleId) {
-                        const target = document.getElementById(`regulation-article-${articleId}`);
-                        if (!target) return;
-                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        target.classList.add('regulations-article-flash');
-                        window.setTimeout(() => target.classList.remove('regulations-article-flash'), 1800);
+                        if (!articleId) return;
+                        let attempts = 0;
+                        const apply = () => {
+                            const target = document.getElementById(`regulation-article-${articleId}`);
+                            if (!target) {
+                                if (++attempts < 6) {
+                                    window.setTimeout(apply, 60);
+                                }
+                                return;
+                            }
+                            document.querySelectorAll('.regulations-article-flash, .regulations-article-focused').forEach(el => {
+                                el.classList.remove('regulations-article-flash', 'regulations-article-focused');
+                            });
+                            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            target.classList.add('regulations-article-focused', 'regulations-article-flash');
+                            window.setTimeout(() => target.classList.remove('regulations-article-flash'), 2500);
+                        };
+                        apply();
                     }
 
                     function readSearchControls() {

@@ -7,6 +7,7 @@ const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'ut
 const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
 const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
 const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
+const veraPdfInstall = fs.readFileSync(path.join(__dirname, '..', 'docker', 'verapdf-auto-install.xml'), 'utf8');
 
 test('Dockerfile relies on lockfile-provided DuckDB native binding and fails closed when absent', () => {
     assert.match(dockerfile, /ARG TARGETARCH/);
@@ -67,6 +68,20 @@ test('Ubuntu production image packages qpdf and Compose resolves its in-image ab
     assert.match(dockerfile, /DOCUMENT_QPDF_PATH=\/usr\/bin\/qpdf/);
     assert.match(dockerfile, /qpdf --version/);
     assert.match(compose, /DOCUMENT_QPDF_PATH:\s*\$\{DOCUMENT_QPDF_PATH:-\/usr\/bin\/qpdf\}/);
+});
+
+test('Ubuntu production image packages hash-pinned veraPDF CLI and JRE without GUI or sample plugins', () => {
+    assert.match(dockerfile, /ARG VERAPDF_VERSION=1\.30\.3/);
+    assert.match(dockerfile, /ARG VERAPDF_INSTALLER_SHA256=b512bf24945503a33fc10738ecffc1f2dccaaf8593a448e94ee9ac86a9559a59/);
+    assert.match(dockerfile, /default-jre-headless/);
+    assert.match(dockerfile, /sha256sum -c -/);
+    assert.match(dockerfile, /COPY --from=verapdf --chown=node:node \/opt\/verapdf \/opt\/verapdf/);
+    assert.match(dockerfile, /DOCUMENT_VERAPDF_PATH=\/opt\/verapdf\/verapdf/);
+    assert.match(dockerfile, /\/opt\/verapdf\/verapdf --version/);
+    assert.match(compose, /DOCUMENT_VERAPDF_PATH:\s*\$\{DOCUMENT_VERAPDF_PATH:-\/opt\/verapdf\/verapdf\}/);
+    assert.match(veraPdfInstall, /name="veraPDF CLI" selected="true"/);
+    assert.match(veraPdfInstall, /name="veraPDF GUI" selected="false"/);
+    assert.match(veraPdfInstall, /name="veraPDF Sample Plugins" selected="false"/);
 });
 
 test('默认 Compose 可运行于 CPU 主机，GPU 透传由独立覆盖层启用', () => {

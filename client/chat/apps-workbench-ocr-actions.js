@@ -3,6 +3,21 @@
     if (!pivotLegacy) return;
 
     function create({ api, state, requestJson, toast, renderDetail, loadDetail, loadJobs, closeDetailPanel, submitUpload }) {
+        async function requireDesktopCapability(type, label) {
+            const desktop = window.pivotDesktop;
+            if (typeof desktop?.getLocalAuthorizationStatus !== 'function') {
+                throw new Error(`当前桌面客户端不支持${label}，请升级 Pivot 客户端后重试。`);
+            }
+            const status = await desktop.getLocalAuthorizationStatus();
+            const supportedTypes = Array.isArray(status?.supportedTypes) ? status.supportedTypes : [];
+            if (!supportedTypes.includes(type)) {
+                const error = new Error(`当前桌面客户端不支持${label}，请升级至 Pivot v0.2.23 或更高版本后重试。`);
+                error.code = 'PIVOT_DESKTOP_CLIENT_UPDATE_REQUIRED';
+                throw error;
+            }
+            return status;
+        }
+
         async function extractFields(jobId) {
             const data = await requestJson(`${api}/jobs/${encodeURIComponent(jobId)}/fields`);
             const fields = data.fields?.fields || {};
@@ -17,10 +32,30 @@
         }
 
         async function openReviewers(jobId) {
+            if (state.isReviewerPanelOpen && String(state.activeJobId) === String(jobId)) {
+                state.isReviewerPanelOpen = false;
+                renderDetail();
+                return;
+            }
             const data = await requestJson(`${api}/jobs/${encodeURIComponent(jobId)}/reviewer-candidates`);
-            state.reviewCandidates = Array.isArray(data.candidates) ? data.candidates : [];
+            const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+            state.reviewCandidates = candidates;
+            state.reviewPanelInfo = {
+                ownerUnit: data.ownerUnit || '',
+                reason: data.reason || (candidates.length ? '' : 'NO_COLLEAGUES')
+            };
             state.selectedReviewerIds = new Set();
+            state.isReviewerPanelOpen = true;
             renderDetail();
+            if (!candidates.length) {
+                if (data.reason === 'NO_OWNER_UNIT' || !data.ownerUnit) {
+                    toast('当前账号未设置所属单位，无法分派复核人。请在用户管理中配置单位。', 'warning');
+                } else {
+                    toast(`所属单位「${data.ownerUnit}」暂无可分派的协同同事。`, 'info');
+                }
+            } else {
+                toast(`已加载 ${candidates.length} 位同单位复核候选人，请勾选后分派`, 'info');
+            }
         }
 
         async function saveReviewers(jobId) {
@@ -30,7 +65,9 @@
                 return;
             }
             await requestJson(`${api}/jobs/${encodeURIComponent(jobId)}/reviewers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewerUserIds }) });
+            state.isReviewerPanelOpen = false;
             state.reviewCandidates = [];
+            state.reviewPanelInfo = null;
             state.selectedReviewerIds = new Set();
             toast('复核人已分派', 'success');
             await loadDetail(jobId, { silent: true });
@@ -55,6 +92,7 @@
 
         async function captureDesktopScreenshot() {
             if (typeof window.pivotDesktop?.executeLocalMcpTool !== 'function') throw new Error('当前不是支持本机截图的桌面客户端，请直接粘贴图片或上传文件。');
+            await requireDesktopCapability('local_desktop_control', '截取已授权窗口');
             const result = await window.pivotDesktop.executeLocalMcpTool({ toolName: 'desktop.screenshot', input: {} });
             const screenshot = result?.screenshot;
             if (!screenshot?.dataBase64 || !String(screenshot.mimeType || '').startsWith('image/')) throw new Error('未获得有效截图，请确认已授权当前前台窗口。');
@@ -68,6 +106,7 @@
 
         async function authorizeWatchDirectory() {
             if (typeof window.pivotDesktop?.requestLocalAuthorization !== 'function') throw new Error('当前不是支持本机目录授权的桌面客户端。');
+            await requireDesktopCapability('local_ocr_watch_dir', '监控目录授权');
             const result = await window.pivotDesktop.requestLocalAuthorization('local_ocr_watch_dir');
             if (result?.canceled) return false;
             toast('已授权文字识别监控目录；新文件稳定写入后将自动创建任务', 'success');
@@ -76,6 +115,7 @@
 
         async function revokeWatchDirectory() {
             if (typeof window.pivotDesktop?.revokeLocalAuthorization !== 'function') throw new Error('当前不是支持本机目录授权的桌面客户端。');
+            await requireDesktopCapability('local_ocr_watch_dir', '监控目录监听');
             await window.pivotDesktop.revokeLocalAuthorization('local_ocr_watch_dir');
             toast('已停止文字识别目录监听', 'success');
         }
@@ -121,6 +161,8 @@
                 state.activeJobId = '';
                 state.activePageId = '';
                 state.detail = null;
+                state.isReviewerPanelOpen = false;
+                state.reviewPanelInfo = null;
                 closeDetailPanel();
             }
             toast('任务已删除', 'success');

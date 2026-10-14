@@ -11,6 +11,7 @@
         '/chat/regulations/actions-batch.js',
         '/chat/regulations/actions-batch-edit.js',
         '/chat/regulations/actions-governance.js',
+        '/chat/regulations/actions-bookmarks.js',
         '/chat/regulations/actions-advanced.js',
         '/chat/regulations/events.js'
     ];
