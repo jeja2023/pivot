@@ -60,8 +60,8 @@ async function initPostgresDatabase() {
     await ensureSetting('rag_rerank_api_url', process.env.RERANK_API_URL || '');
     await ensureSetting('rag_rerank_model', process.env.RERANK_MODEL || 'BAAI/bge-reranker-v2-m3');
     await ensureSetting('rag_rerank_protocol', process.env.RERANK_PROTOCOL || 'tei');
-    await ensureSetting('rag_rerank_candidate_limit', process.env.RERANK_CANDIDATE_LIMIT || '30');
-    await ensureSetting('rag_rerank_timeout_ms', process.env.RERANK_TIMEOUT_MS || '1800');
+    await ensureSetting('rag_rerank_candidate_limit', process.env.RERANK_CANDIDATE_LIMIT || '20');
+    await ensureSetting('rag_rerank_timeout_ms', process.env.RERANK_TIMEOUT_MS || '5000');
     await ensureSetting('allow_public_registration', process.env.ALLOW_PUBLIC_REGISTRATION === 'true' ? 'true' : 'false');
     await ensureSetting('api_access_enabled', process.env.API_ACCESS_ENABLED === 'false' ? 'false' : 'true');
     await ensureSetting('memory_threshold', process.env.MEMORY_THRESHOLD || '12000');

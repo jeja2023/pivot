@@ -25,6 +25,7 @@
         const ids = state.documents.map(doc => String(doc.id));
         const selectedCount = state.selectedDocumentIds.size;
         const selectedVisibleCount = ids.filter(id => state.selectedDocumentIds.has(id)).length;
+        const governanceScope = String(state.governanceScope || '');
         const enabled = canManage() && state.batchMode;
         const locked = state.busy || state.batchDeletePending || !enabled;
         const modeButton = document.getElementById('regulations-batch-mode-btn');
@@ -56,14 +57,28 @@
         const folderSelectButton = document.getElementById('regulations-select-folder-btn');
         if (folderSelectButton) {
             const folderTitle = state.activeFolder?.title;
-            folderSelectButton.textContent = folderTitle ? `全选“${folderTitle}”` : '全选全部法规';
+            folderSelectButton.textContent = governanceScope ? '全选当前治理队列' : (folderTitle ? `全选“${folderTitle}”` : '全选全部法规');
             folderSelectButton.disabled = locked;
+        }
+        const governanceAction = document.getElementById('regulations-governance-batch-action-btn');
+        if (governanceAction) {
+            const labels = {
+                metadata: '批量处理选中元数据',
+                maintainer: '批量指派选中维护人',
+                version: '批量处理选中版本',
+                index: '一键重建选中索引',
+                location: '一键重建选中定位'
+            };
+            governanceAction.textContent = labels[governanceScope] || '处理选中待办';
+            governanceAction.classList.toggle('hidden', !governanceScope);
+            governanceAction.disabled = locked || !selectedCount;
         }
         const scopeReindexButton = document.getElementById('regulations-reindex-scope-btn');
         if (scopeReindexButton) {
             const folderTitle = state.activeFolder?.title;
             scopeReindexButton.textContent = folderTitle ? `重建“${folderTitle}”向量` : '重建全库向量';
-            scopeReindexButton.disabled = locked;
+            scopeReindexButton.classList.toggle('hidden', Boolean(governanceScope));
+            scopeReindexButton.disabled = locked || Boolean(governanceScope);
         }
         ns.syncBatchEditFields?.();
     }
@@ -108,6 +123,7 @@
     async function selectAllFolderDocuments() {
         if (!canManage() || !state.batchMode || state.busy || state.batchDeletePending) return;
         const params = new URLSearchParams({ limit: '2000' });
+        if (state.governanceScope) params.set('governanceScope', state.governanceScope);
         if (state.activeFolder?.isUncategorized) params.set('uncategorized', 'true');
         else if (state.activeFolder?.category) params.set('category', state.activeFolder.category);
         try {
@@ -151,6 +167,87 @@
             await ns.loadDocuments?.({ keepActive: true, page: state.page });
         } catch (error) {
             toast(error.message || '批量重建向量索引失败', 'error');
+        } finally {
+            ns.setBusy(false);
+        }
+    }
+
+    function selectedDocumentTitles() {
+        return new Map(getSelectedDocuments().map(document => [String(document.id), document.title || `文档 ${document.id}`]));
+    }
+
+    function showGovernanceBatchResult(titleText, result, titles, summary) {
+        const body = document.getElementById('regulations-batch-result-body');
+        if (!body) return;
+        const title = document.getElementById('regulations-batch-result-title');
+        if (title) title.textContent = titleText;
+        const failed = Array.isArray(result?.failed) ? result.failed : [];
+        PivotSafeHtml.setHtml(body, `
+            <p>${esc(summary)}</p>
+            ${failed.length ? `<div class="table-container workspace-table-wrap"><table class="data-table compact-table"><thead><tr><th>法规</th><th>未处理原因</th></tr></thead><tbody>${failed.map(item => `<tr><td>${esc(titles.get(String(item.documentId)) || `文档 ${item.documentId}`)}</td><td>${esc(item.message || '处理失败，请稍后重试')}</td></tr>`).join('')}</tbody></table></div>` : ''}
+        `);
+        document.getElementById('regulations-batch-result-panel')?.classList.remove('hidden');
+    }
+
+    async function runGovernanceBatchAction() {
+        const scope = String(state.governanceScope || '');
+        if (!scope || !canManage() || !state.batchMode || state.busy || state.batchDeletePending) return;
+        if (['metadata', 'maintainer', 'version'].includes(scope)) {
+            await ns.openBatchEditDialog?.();
+            return;
+        }
+        const selected = getSelectedDocuments();
+        if (!selected.length) {
+            toast('请先选择待处理的法规', 'warning');
+            return;
+        }
+        const titles = selectedDocumentTitles();
+        const isIndex = scope === 'index';
+        const actionLabel = isIndex ? '批量重建向量索引' : '批量重建条文来源定位';
+        const confirmation = isIndex
+            ? `将把选中的 ${selected.length} 份法规当前版本重新加入向量索引队列；不会重新 OCR 或解析原文件。确认继续？`
+            : `将依据选中的 ${selected.length} 份法规当前版本已抽取正文重建页码与字符定位；正文缺失的法规会保留为待办。确认继续？`;
+        if (!(await regulationConfirm(actionLabel, confirmation))) return;
+        ns.setBusy(true, isIndex ? '正在批量加入向量索引队列…' : '正在批量重建条文来源定位…');
+        try {
+            // 定位重建会为每条条文写入页码与字符范围。按 100 份法规分批提交，
+            // 避免 1,000+ 份法规的单个 HTTP 请求被代理超时；索引重建则保持单条
+            // 集合 SQL，以最快速度进入可恢复队列。
+            const chunks = isIndex
+                ? [selected]
+                : Array.from({ length: Math.ceil(selected.length / 100) }, (_, index) => selected.slice(index * 100, (index + 1) * 100));
+            const result = { total: selected.length, queuedVersions: 0, clearedArticles: 0, queuedDocumentIds: [], rebuilt: [], rebuiltArticles: 0, failed: [] };
+            for (let index = 0; index < chunks.length; index += 1) {
+                const chunk = chunks[index];
+                if (!isIndex && chunks.length > 1) ns.setBusy(true, `正在重建条文来源定位（${index + 1}/${chunks.length}）…`);
+                const response = await fetchJson(`${API}/documents/${isIndex ? 'batch-reindex' : 'batch-rebuild-locations'}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: chunk.map(document => document.id) })
+                });
+                const partial = response?.result || {};
+                result.queuedVersions += Number(partial.queuedVersions || 0);
+                result.clearedArticles += Number(partial.clearedArticles || 0);
+                result.queuedDocumentIds.push(...(Array.isArray(partial.queuedDocumentIds) ? partial.queuedDocumentIds : []));
+                result.rebuilt.push(...(Array.isArray(partial.rebuilt) ? partial.rebuilt : []));
+                result.rebuiltArticles += Number(partial.rebuiltArticles || 0);
+                result.failed.push(...(Array.isArray(partial.failed) ? partial.failed : []));
+            }
+            const completedIds = isIndex
+                ? (result.queuedDocumentIds || [])
+                : (result.rebuilt || []).map(item => item.documentId);
+            completedIds.forEach(id => {
+                state.selectedDocumentIds.delete(String(id));
+                state.selectedDocumentTitles.delete(String(id));
+            });
+            const summary = isIndex
+                ? `已将 ${Number(result.queuedVersions || 0)} / ${selected.length} 个当前版本加入索引队列，并清空 ${Number(result.clearedArticles || 0)} 条旧向量。`
+                : `已完成 ${Array.isArray(result.rebuilt) ? result.rebuilt.length : 0} / ${selected.length} 份法规的定位重建，共生成 ${Number(result.rebuiltArticles || 0)} 条定位。`;
+            showGovernanceBatchResult(actionLabel, result, titles, summary);
+            toast(summary, Array.isArray(result.failed) && result.failed.length ? 'warning' : 'success');
+            await ns.loadDocuments?.({ keepActive: true, page: state.page });
+        } catch (error) {
+            toast(error.message || `${actionLabel}失败`, 'error');
         } finally {
             ns.setBusy(false);
         }
@@ -290,6 +387,7 @@
         selectAllDocuments,
         selectAllFolderDocuments,
         reindexCurrentScope,
+        runGovernanceBatchAction,
         clearDocumentSelection,
         deleteSelectedDocuments,
         revertRegulationBatch,

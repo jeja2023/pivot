@@ -1,8 +1,32 @@
 const { assert, db, test, vm } = require('../security-helpers');
 const fs = require('node:fs');
 const path = require('node:path');
-const { updateRegulationDocument, updateRegulationDocuments, deleteRegulationDocument, listRegulationDocumentChangeLogs, revertRegulationDocumentBatch } = require('../../server/services/regulations');
+const {
+    updateRegulationDocument,
+    updateRegulationDocuments,
+    deleteRegulationDocument,
+    listRegulationDocumentChangeLogs,
+    reindexRegulationDocuments,
+    rebuildRegulationDocumentLocations,
+    revertRegulationDocumentBatch
+} = require('../../server/services/regulations');
 const { createDocument, createRegulationBatchServer } = require('../helpers/regulations-server');
+
+function attachCurrentVersion(documentId, { indexStatus = 'lexical_ready', extractedText = '第一条 批量治理测试正文。' } = {}) {
+    const now = new Date().toISOString();
+    const versionId = Number(db.prepare(`
+        INSERT INTO regulation_versions (
+            document_id, version_label, source_name, source_path, source_size, source_format,
+            extracted_text, effect_status, review_status, parse_status, index_status, uploaded_by_user, created_at, updated_at
+        ) VALUES (?, 'v1', 'batch.txt', 'uploads/regulations/batch.txt', 1, 'txt', ?, 'unverified', 'pending', 'ready', ?, 1, ?, ?)
+    `).run(documentId, extractedText, indexStatus, now, now).lastInsertRowid);
+    const articleId = Number(db.prepare(`
+        INSERT INTO regulation_articles (document_id, version_id, sort_order, article_label, content, status, created_at)
+        VALUES (?, ?, 1, '第一条', '第一条 批量治理测试正文。', 'active', ?)
+    `).run(documentId, versionId, now).lastInsertRowid);
+    db.prepare('UPDATE regulation_documents SET current_version_id = ?, version_count = 1, article_count = 1 WHERE id = ?').run(versionId, documentId);
+    return { versionId, articleId };
+}
 
 test('法规批量修改仅更新指定字段、保留各文档其它信息并记录操作者', async () => {
     const first = createDocument('批量修改法规甲');
@@ -44,6 +68,61 @@ test('法规批量修改可撤销，但不会覆盖此后被更新过的文档',
     assert.match(result.failed[0].message, /已发生变化/);
     assert.equal(db.prepare('SELECT category FROM regulation_documents WHERE id = ?').get(first).category, '法律');
     assert.equal(db.prepare('SELECT category FROM regulation_documents WHERE id = ?').get(second).category, '地方性法规');
+});
+
+test('法规批量修改支持元数据审核与维护人分派，并保留可撤销审计', async () => {
+    const first = createDocument('批量治理法规甲');
+    const second = createDocument('批量治理法规乙');
+    const batch = await updateRegulationDocuments({
+        documentIds: [first, second],
+        userId: 1,
+        patch: {
+            legalLevel: '法律',
+            officialSourceUrl: 'https://authority.example/regulations',
+            maintainerUserId: '1',
+            metadataReviewStatus: 'approved'
+        }
+    });
+    assert.equal(batch.updated.length, 2);
+    assert.deepEqual(batch.fields, ['法规层级', '权威来源地址', '维护人', '元数据审核状态']);
+    const rows = [first, second].map(id => db.prepare('SELECT * FROM regulation_documents WHERE id = ?').get(id));
+    assert.ok(rows.every(row => row.legal_level === '法律' && row.official_source_url === 'https://authority.example/regulations'));
+    assert.ok(rows.every(row => Number(row.maintainer_user_id) === 1 && row.metadata_review_status === 'approved'));
+    const reverted = await revertRegulationDocumentBatch({ batchId: batch.batchId, userId: 1 });
+    assert.equal(reverted.reverted.length, 2);
+    const revertedRows = [first, second].map(id => db.prepare('SELECT * FROM regulation_documents WHERE id = ?').get(id));
+    assert.ok(revertedRows.every(row => row.legal_level === '' && row.official_source_url === '' && row.maintainer_user_id == null && row.metadata_review_status === 'unreviewed'));
+});
+
+test('法规批量治理可更新当前版本，并对选中项重建索引和条文定位', async () => {
+    const first = createDocument('批量版本治理法规甲');
+    const second = createDocument('批量版本治理法规乙');
+    const firstVersion = attachCurrentVersion(first);
+    const secondVersion = attachCurrentVersion(second);
+    const governance = await updateRegulationDocuments({
+        documentIds: [first, second],
+        userId: 1,
+        patch: { effectStatus: 'effective', reviewStatus: 'approved' }
+    });
+    assert.equal(governance.updated.length, 2);
+    assert.deepEqual(governance.fields, ['效力状态', '版本审核状态']);
+    assert.ok([firstVersion.versionId, secondVersion.versionId].every(versionId => {
+        const row = db.prepare('SELECT effect_status, review_status FROM regulation_versions WHERE id = ?').get(versionId);
+        return row.effect_status === 'effective' && row.review_status === 'approved';
+    }));
+    const reindex = await reindexRegulationDocuments({ documentIds: [first, second] });
+    assert.equal(reindex.queuedVersions, 2);
+    assert.deepEqual(new Set(reindex.queuedDocumentIds), new Set([first, second]));
+    assert.ok([firstVersion.versionId, secondVersion.versionId].every(versionId => db.prepare('SELECT index_status FROM regulation_versions WHERE id = ?').get(versionId).index_status === 'retry_wait'));
+    const locations = await rebuildRegulationDocumentLocations({ documentIds: [first, second] });
+    assert.equal(locations.rebuilt.length, 2);
+    assert.ok([firstVersion.articleId, secondVersion.articleId].every(articleId => db.prepare('SELECT COUNT(*) AS count FROM regulation_article_locations WHERE article_id = ?').get(articleId).count > 0));
+    const reverted = await revertRegulationDocumentBatch({ batchId: governance.batchId, userId: 1 });
+    assert.equal(reverted.reverted.length, 2);
+    assert.ok([firstVersion.versionId, secondVersion.versionId].every(versionId => {
+        const row = db.prepare('SELECT effect_status, review_status FROM regulation_versions WHERE id = ?').get(versionId);
+        return row.effect_status === 'unverified' && row.review_status === 'pending';
+    }));
 });
 
 test('法规批量修改先校验全部字段和文档 ID，非法请求不修改任何文档', async () => {

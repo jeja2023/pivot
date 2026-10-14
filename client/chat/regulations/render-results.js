@@ -22,11 +22,10 @@
                     }
 
                     function summarizeSavedSearch(search) {
-                        const rawQuery = search.query === 'Regulation' ? '现行法规' : search.query;
-                        const parts = [rawQuery, search.category, search.jurisdiction]
+                        const parts = [search.query, search.category, search.jurisdiction]
                             .map(item => String(item || '').trim())
                             .filter(Boolean);
-                        return parts.length ? parts.join(' / ') : '全部法规';
+                        return parts.length ? parts.join(' · ') : '全部条件';
                     }
 
                     function renderSavedSearches() {
@@ -41,19 +40,30 @@
                         target.classList.remove('hidden');
                         PivotSafeHtml.setHtml(target, `
                             <div class="regulations-saved-searches-head">
-                                <strong>保存检索</strong>
-                                <span>${searches.length} 项</span>
+                                <div class="regulations-saved-searches-title">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                                    </svg>
+                                    <strong>常用检索预设</strong>
+                                    <span>${searches.length} 项</span>
+                                </div>
+                                <span class="regulations-saved-searches-tip">点击一键应用</span>
                             </div>
                             <div class="regulations-saved-search-list">
                                 ${searches.map(search => {
-                                    const searchName = search.name === 'My Search' ? '常用法规检索' : (search.name || '未命名检索');
+                                    const searchName = search.name || '常用预设';
                                     return `
-                                    <div class="regulations-saved-search-item">
-                                        <button class="regulations-saved-search-chip" type="button" data-regulation-saved-search="${esc(search.id)}">
+                                    <div class="regulations-saved-search-item" title="点击应用此检索条件并执行检索">
+                                        <button class="btn-secondary regulations-saved-search-chip" type="button" data-regulation-saved-search="${esc(search.id)}">
                                             <strong>${esc(searchName)}</strong>
                                             <span>${esc(summarizeSavedSearch(search))}</span>
                                         </button>
-                                        <button class="regulations-saved-search-delete" type="button" data-regulation-delete-saved-search="${esc(search.id)}" aria-label="删除保存检索">删除</button>
+                                        <button class="btn-secondary regulations-saved-search-delete" type="button" data-regulation-delete-saved-search="${esc(search.id)}" title="删除此预设" aria-label="删除此预设">
+                                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                                            </svg>
+                                        </button>
                                     </div>
                                 `;}).join('')}
                             </div>
@@ -61,27 +71,148 @@
                     }
 
                     function renderSearchResults() {
-                        const targets = Array.from(document.querySelectorAll('[data-regulations-search-results]'));
-                        if (!targets.length) return;
+                        const target = document.getElementById('regulations-modal-search-results');
+                        if (!target) return;
+                        const aiTarget = document.getElementById('regulations-ai-search-results');
+                        if (aiTarget) aiTarget.classList.add('hidden');
+
                         const hasQuery = !!String(state.query || '').trim();
                         const hasFilters = !!(state.filters.category || state.filters.issuingBody || state.filters.jurisdiction || state.filters.status);
                         const hasMatches = Array.isArray(state.matches) && state.matches.length > 0;
-                        const emptyText = hasQuery || hasFilters ? '暂无符合条件的条文' : '搜索后显示相关条文';
                         const modeText = hasQuery ? ` · ${getSearchModeLabel()}` : (hasFilters ? ' · 条件筛选' : '');
-                        const resultsHtml = `
-                            <div class="regulations-section-head compact"><strong>条文命中</strong><span>${state.matches.length} 条${modeText}</span></div>
-                            ${state.matches.map(match => `
-                                <button class="btn-secondary regulations-match" type="button" data-regulation-match-doc="${esc(match.document_id)}" data-regulation-match-version="${esc(match.version_id || '')}" data-regulation-match-article="${esc(match.article_id)}">
-                                    <strong>${esc(match.document_title || '未命名法规')}</strong>
-                                    <span>${esc([match.article_label, match.article_title].filter(Boolean).join(' '))}${renderMatchScore(match)}</span>
-                                    <p>${highlightText(match.excerpt || match.content || '', state.query)}</p>
-                                </button>
-                            `).join('') || `<div class="regulations-empty compact">${esc(emptyText)}</div>`}
-                        `;
-                        targets.forEach(target => {
-                            target.classList.toggle('hidden', !hasQuery && !hasFilters && !hasMatches);
-                            PivotSafeHtml.setHtml(target, (!hasQuery && !hasFilters && !hasMatches) ? '' : resultsHtml);
-                        });
+
+                        let resultsHtml = '';
+                        if (!state.hasSearched) {
+                            resultsHtml = `
+                                <div class="regulations-search-results-head">
+                                    <div class="regulations-search-results-title-group">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-search-head-icon" aria-hidden="true">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        </svg>
+                                        <strong>条文命中匹配</strong>
+                                        <span class="regulations-search-count-badge muted">等待检索</span>
+                                    </div>
+                                    <span class="regulations-search-results-head-hint">在左侧设置条件后点击检索</span>
+                                </div>
+                                <div class="regulations-search-guide-empty">
+                                    <div class="regulations-search-guide-icon" aria-hidden="true">
+                                        <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                            <line x1="11" y1="8" x2="11" y2="14"></line>
+                                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                                        </svg>
+                                    </div>
+                                    <h4 class="regulations-search-guide-title">条文检索命中区</h4>
+                                    <p class="regulations-search-guide-desc">在左侧输入关键词或组合筛选条件后，点击「检索」按钮，匹配的法律法规条文将在此实时展现。</p>
+                                    <div class="regulations-search-guide-tips">
+                                        <div class="regulations-search-guide-tip">
+                                            <span class="regulations-search-guide-dot"></span>
+                                            <span>支持<strong>混合语义</strong>与<strong>精准关键词</strong>两种检索模式</span>
+                                        </div>
+                                        <div class="regulations-search-guide-tip">
+                                            <span class="regulations-search-guide-dot"></span>
+                                            <span>支持按分类、发布机构、适用范围与状态多维联合过滤</span>
+                                        </div>
+                                        <div class="regulations-search-guide-tip">
+                                            <span class="regulations-search-guide-dot"></span>
+                                            <span>点击命中条文卡片可直接<strong>直达法规正文</strong>对应条款位置</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        } else if (!hasMatches) {
+                            const emptyDesc = hasQuery
+                                ? `未检索到与「${esc(state.query)}」相关的条文`
+                                : '未检索到符合当前筛选条件的条文';
+                            resultsHtml = `
+                                <div class="regulations-search-results-head">
+                                    <div class="regulations-search-results-title-group">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-search-head-icon" aria-hidden="true">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        </svg>
+                                        <strong>条文命中匹配</strong>
+                                        <span class="regulations-search-count-badge">0 条${modeText}</span>
+                                    </div>
+                                    <span class="regulations-search-results-head-hint">建议调整检索条件</span>
+                                </div>
+                                <div class="regulations-search-empty-state">
+                                    <div class="regulations-search-empty-icon" aria-hidden="true">
+                                        <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                            <line x1="8" y1="11" x2="14" y2="11"></line>
+                                        </svg>
+                                    </div>
+                                    <h4>未找到匹配条文</h4>
+                                    <p>${esc(emptyDesc)}，建议尝试缩减检索词、切换检索模式或减少筛选条件后重试。</p>
+                                </div>
+                            `;
+                        } else {
+                            resultsHtml = `
+                                <div class="regulations-search-results-head">
+                                    <div class="regulations-search-results-title-group">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-search-head-icon" aria-hidden="true">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        </svg>
+                                        <strong>条文命中匹配</strong>
+                                        <span class="regulations-search-count-badge">${state.matches.length} 条命中${modeText}</span>
+                                    </div>
+                                    <span class="regulations-search-results-head-hint">点击卡片直达正文对应位置</span>
+                                </div>
+                                <div class="regulations-search-results-list">
+                                    ${state.matches.map(match => {
+                                        const excerpt = highlightText(match.excerpt || match.content || '', state.query);
+                                        return `
+                                            <button class="btn-secondary regulations-match" type="button" data-regulation-match-doc="${esc(match.document_id)}" data-regulation-match-version="${esc(match.version_id || '')}" data-regulation-match-article="${esc(match.article_id)}" title="点击跳转至法规正文对应条款并高亮">
+                                                <div class="regulations-match-header">
+                                                    <div class="regulations-match-doc-badge">
+                                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-match-doc-icon" aria-hidden="true">
+                                                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                                                        </svg>
+                                                        <strong class="regulations-match-doc-title">${esc(match.document_title || '未命名法规')}</strong>
+                                                    </div>
+                                                    <div class="regulations-match-tags">
+                                                        ${match.article_label ? `<span class="regulations-match-article-tag">${esc(match.article_label)}</span>` : ''}
+                                                        ${renderMatchScore(match)}
+                                                    </div>
+                                                </div>
+                                                ${match.article_title ? `
+                                                    <div class="regulations-match-title-row">
+                                                        <span class="regulations-match-article-title">${esc(match.article_title)}</span>
+                                                    </div>
+                                                ` : ''}
+                                                <div class="regulations-match-body">
+                                                    <p class="regulations-match-excerpt">${excerpt}</p>
+                                                </div>
+                                                <div class="regulations-match-footer">
+                                                    <span class="regulations-match-hint">匹配条文定位</span>
+                                                    <span class="regulations-match-arrow" aria-hidden="true">
+                                                        查看正文
+                                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                            <polyline points="9 18 15 12 9 6"></polyline>
+                                                        </svg>
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            `;
+                        }
+
+                        target.classList.remove('hidden');
+                        PivotSafeHtml.setHtml(target, resultsHtml);
                     }
                     function renderAiAnswer() {
                         const target = document.getElementById('regulations-ai-answer');

@@ -3,9 +3,12 @@
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsGovernanceReady) return;
 
-    const { API, state, esc, toast, fetchJson, regulationConfirm, fmtDate } = ns;
+    const { API, state, esc, toast, fetchJson, regulationConfirm, fmtDate, canManage } = ns;
     const setBusy = (...args) => ns.setBusy?.(...args);
     const collectForm = (...args) => ns.collectForm?.(...args);
+    const loadDocuments = (...args) => ns.loadDocuments?.(...args);
+    const loadDetail = (...args) => ns.loadDetail?.(...args);
+    let citationSelectedIds = new Set();
 
     async function showAnnotations(articleId) {
         const panel = document.getElementById('regulations-annotation-panel');
@@ -79,26 +82,400 @@
             const data = await fetchJson(`${API}/articles/${encodeURIComponent(articleId)}/locations`);
             const locations = Array.isArray(data.locations) ? data.locations : [];
             const source = data.source || {};
+            const article = data.article || {};
             const firstPage = Number(locations[0]?.page_number || 1);
             const sourceAction = source.downloadUrl ? `
                 <div class="regulations-admin-actions regulations-source-actions">
                     ${source.previewUrl ? `<a class="btn-secondary" href="${esc(source.previewUrl)}#page=${firstPage}" target="_blank" rel="noopener">打开来源 PDF（第 ${firstPage} 页）</a>` : ''}
                     <a class="btn-secondary" href="${esc(source.downloadUrl)}" target="_blank" rel="noopener">下载同版本原文件${source.fileName ? `：${esc(source.fileName)}` : ''}</a>
                 </div>` : '';
+            const rebuildAction = !locations.length && canManage?.() && article.documentId && article.versionId
+                ? `<div class="regulations-admin-actions"><button type="button" class="btn-primary" data-regulation-rebuild-locations-document="${esc(article.documentId)}" data-regulation-rebuild-locations-version="${esc(article.versionId)}">重新生成来源定位</button></div>`
+                : '';
             PivotSafeHtml.setHtml(body, locations.length ? `
                 <div class="table-container workspace-table-wrap">
                     <table class="data-table compact-table">
                         <thead><tr><th>页码</th><th>字符范围</th><th>定位置信度</th></tr></thead>
                         <tbody>${locations.map(location => `<tr><td>第 ${Number(location.page_number || 1)} 页</td><td>${Number(location.char_start || 0)} - ${Number(location.char_end || 0)}</td><td>${Math.round(Number(location.confidence || 0) * 100)}%</td></tr>`).join('')}</tbody>
                     </table>
-                </div>${sourceAction}` : `<div class="regulations-empty compact">该条文尚未生成可用来源定位。重新导入或完成页级文字识别后可补全。</div>${sourceAction}`);
+                </div>${sourceAction}` : `<div class="regulations-empty compact">该条文尚未生成可用来源定位。可根据当前版本已抽取正文重新生成；正文缺失时请补充原始文件并重新解析。</div>${rebuildAction}${sourceAction}`);
         } catch (error) {
             PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(error.message || '加载条文来源定位失败')}</div>`);
         }
     }
 
-    function renderQualityMetric(label, value, hint = '') {
-        return `<div class="regulations-quality-metric"><strong>${esc(value)}</strong><span>${esc(label)}</span>${hint ? `<small>${esc(hint)}</small>` : ''}</div>`;
+    const GOVERNANCE_SCOPE_CONFIG = {
+        metadata: {
+            title: '元数据待审核法规',
+            description: '补齐法规层级、权威来源等字段，并确认元数据审核状态。',
+            notice: '处理元数据',
+            focus: '[name="legalLevel"]'
+        },
+        maintainer: {
+            title: '缺少维护人法规',
+            description: '为法规指派明确维护人，后续版本、来源和效力变更由维护人持续治理。',
+            notice: '指派维护人',
+            focus: '[name="maintainerUserId"]'
+        },
+        version: {
+            title: '待治理法规',
+            description: '仅显示当前版本效力待核验、审核未通过或缺少当前版本的法规；请逐条确认后保存。',
+            notice: '确认效力与审核状态',
+            focus: '[name="effectStatus"]'
+        },
+        index: {
+            title: '索引未完成法规',
+            description: '检查当前版本向量索引状态；可重新加入索引队列，不会重新 OCR 或解析原文件。',
+            notice: '重建向量索引',
+            focus: ''
+        },
+        location: {
+            title: '条文缺少定位法规',
+            description: '根据当前版本已抽取正文重新生成页码与字符位置；正文缺失时需补充原文件并重新解析。',
+            notice: '重建来源定位',
+            focus: ''
+        }
+    };
+
+    function normalizeGovernanceScope(scope) {
+        return Object.hasOwn(GOVERNANCE_SCOPE_CONFIG, scope) ? scope : 'version';
+    }
+
+    function governanceScopeConfig(scope = state.governanceScope) {
+        return GOVERNANCE_SCOPE_CONFIG[normalizeGovernanceScope(scope)];
+    }
+
+    function renderQualityMetric(label, value, hint = '', action = '') {
+        return `<div class="regulations-quality-metric"><strong>${esc(value)}</strong><span>${esc(label)}</span>${hint ? `<small>${esc(hint)}</small>` : ''}${action}</div>`;
+    }
+
+    async function loadGovernanceAssignees() {
+        if (!canManage?.()) return [];
+        const data = await fetchJson(`${API}/assignees`);
+        state.governanceAssignees = Array.isArray(data.assignees) ? data.assignees : [];
+        return state.governanceAssignees;
+    }
+
+    async function openGovernanceWorklist(scope = 'version') {
+        if (!canManage?.()) return;
+        const config = governanceScopeConfig(scope);
+        state.governanceScope = normalizeGovernanceScope(scope);
+        state.governancePending = state.governanceScope === 'version';
+        state.libraryView = 'documents';
+        state.activeFolder = null;
+        state.page = 1;
+        state.batchMode = false;
+        state.selectedDocumentIds.clear();
+        state.selectedDocumentTitles.clear();
+        document.getElementById('regulations-quality-panel')?.classList.add('hidden');
+        try {
+            await loadDocuments({ keepActive: false, page: 1 });
+            toast(`已打开${config.title}队列，请${config.notice}`, 'info');
+        } catch (error) {
+            toast(error.message || `加载${config.title}失败`, 'error');
+        }
+    }
+
+    async function openDocumentGovernance(documentId, versionId = '', scope = state.governanceScope) {
+        if (!documentId || !canManage?.()) return;
+        const config = governanceScopeConfig(scope);
+        try {
+            // 编辑表单始终会回传维护人字段；所有治理入口先加载候选项，避免
+            // 从“版本待治理”进入时因下拉框为空而把既有维护人误保存为空。
+            await loadGovernanceAssignees();
+            await loadDetail(documentId, versionId);
+            const editForm = document.getElementById('regulations-edit-form');
+            const versionForm = document.getElementById('regulations-version-form');
+            if (!editForm) return;
+            editForm.classList.remove('hidden');
+            versionForm?.classList.add('hidden');
+            window.setTimeout(() => editForm.querySelector(config.focus || '[name="title"]')?.focus(), 0);
+        } catch (error) {
+            toast(error.message || `打开${config.title}表单失败`, 'error');
+        }
+    }
+
+    async function openVersionGovernance(documentId, versionId = '') {
+        return await openDocumentGovernance(documentId, versionId, 'version');
+    }
+
+    async function requestRegulationLocationRebuild(documentId, versionId) {
+        if (!documentId || !versionId || !canManage?.()) return;
+        if (!(await regulationConfirm('重建条文来源定位', '将依据当前版本已抽取正文重新生成条文页码与字符定位；不会重新上传或修改法规正文。确认继续？'))) return;
+        setBusy(true, '正在重建条文来源定位…');
+        try {
+            const data = await fetchJson(`${API}/documents/${encodeURIComponent(documentId)}/versions/${encodeURIComponent(versionId)}/rebuild-locations`, { method: 'POST' });
+            toast(`已生成 ${Number(data.result?.rebuilt || 0)} 条来源定位`, 'success');
+            await loadDocuments({ keepActive: true, page: state.page });
+            if (String(state.activeId) === String(documentId)) await loadDetail(documentId, versionId);
+        } catch (error) {
+            toast(error.message || '重建条文来源定位失败', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function citationReviewLabel(status) {
+        return ({ approved: '已确认', rejected: '已标记外部/不采用', pending: '待审核', auto: '待审核' })[String(status || '').toLowerCase()] || '待审核';
+    }
+
+    function citationRelationBadge(type) {
+        const key = String(type || '').toLowerCase();
+        if (key === 'depend') {
+            return '<span class="regulations-relation-badge relation-depend" title="从属/法律依据关系">依据</span>';
+        }
+        if (key === 'cite') {
+            return '<span class="regulations-relation-badge relation-cite" title="引用/参见条文">引用</span>';
+        }
+        if (key === 'supersede') {
+            return '<span class="regulations-relation-badge relation-supersede" title="废止/替代关系">废止</span>';
+        }
+        if (key === 'amend') {
+            return '<span class="regulations-relation-badge relation-amend" title="修正/修订关系">修正</span>';
+        }
+        const fallbackRelation = esc(type || '引用');
+        const customTitle = `引用关系类型：${fallbackRelation}`;
+        return `<span class="regulations-relation-badge relation-other" title="${customTitle}">${fallbackRelation}</span>`;
+    }
+
+    function citationConfidenceBadge(confidence) {
+        const pct = Math.round(Number(confidence || 0) * 100);
+        if (pct >= 80) {
+            return `<span class="regulations-conf-badge conf-high" title="高置信度（≥80%），可安全批量确认">${pct}%</span>`;
+        }
+        if (pct >= 60) {
+            return `<span class="regulations-conf-badge conf-mid" title="中置信度（60%~79%），建议人工核验">${pct}%</span>`;
+        }
+        return `<span class="regulations-conf-badge conf-low" title="低置信度（<60%），需人工仔细核查">${pct}%</span>`;
+    }
+
+    function citationStatusBadge(status) {
+        const s = String(status || '').toLowerCase();
+        if (s === 'approved') {
+            return '<span class="regulations-review-status-badge status-approved"><span class="regulations-status-dot"></span>已确认</span>';
+        }
+        if (s === 'rejected') {
+            return '<span class="regulations-review-status-badge status-rejected"><span class="regulations-status-dot"></span>已标记外部</span>';
+        }
+        return '<span class="regulations-review-status-badge status-pending"><span class="regulations-status-dot"></span>待审核</span>';
+    }
+
+    function renderCitationGovernanceRows(rows, type) {
+        if (!rows.length) return '<tr><td colspan="8" class="text-center regulations-citation-empty-td">当前没有需要处理的引用</td></tr>';
+        return rows.map((item, index) => {
+            const selected = citationSelectedIds.has(String(item.id));
+            const action = type === 'unresolved'
+                ? `<button type="button" class="btn-secondary regulations-row-action regulations-citation-btn-external" data-regulation-citation-review="rejected" data-regulation-citation-id="${esc(item.id)}" title="确属外部资料，标记为外部引用">标记外部引用</button>`
+                : `<button type="button" class="btn-secondary regulations-row-action regulations-citation-btn-approve" data-regulation-citation-review="approved" data-regulation-citation-id="${esc(item.id)}" title="确认此引用关系">确认</button><button type="button" class="btn-secondary regulations-row-action regulations-citation-btn-reject" data-regulation-citation-review="rejected" data-regulation-citation-id="${esc(item.id)}" title="驳回此引用关系">驳回</button>`;
+
+            const docTitle = item.document_title || '未命名法规';
+            const articleParts = [item.source_article_label, item.source_article_title].filter(Boolean);
+            const articleText = articleParts.join(' ') || '未定位条文';
+            const fullSourceTooltip = `${docTitle} · ${articleText}`;
+
+            const targetLabel = item.target_label || '-';
+            const evidenceTooltip = item.evidence_excerpt ? `${targetLabel} (依据: ${item.evidence_excerpt})` : targetLabel;
+
+            let articleLabelHtml = '';
+            if (item.source_article_label) {
+                articleLabelHtml = `<span class="regulations-citation-article-label">${esc(item.source_article_label)}</span>`;
+            }
+            let articleNameHtml = '';
+            if (item.source_article_title) {
+                articleNameHtml = `<span class="regulations-citation-article-name">${esc(item.source_article_title)}</span>`;
+            } else if (!item.source_article_label) {
+                articleNameHtml = '<span class="regulations-citation-article-name">未定位条文</span>';
+            }
+
+            return `<tr class="${selected ? 'selected' : ''}">
+                <td class="col-checkbox"><input type="checkbox" aria-label="选择引用 ${esc(item.target_label || item.id)}" data-regulation-citation-select="${esc(item.id)}" ${selected ? 'checked' : ''}></td>
+                <td class="col-index text-center"><span class="regulations-table-index">${index + 1}</span></td>
+                <td class="col-source">
+                    <div class="regulations-citation-source-cell" title="${esc(fullSourceTooltip)}">
+                        <div class="regulations-citation-doc-title">${esc(docTitle)}</div>
+                        <div class="regulations-citation-article-info">
+                            ${articleLabelHtml}
+                            ${articleNameHtml}
+                        </div>
+                    </div>
+                </td>
+                <td class="col-target">
+                    <div class="regulations-citation-target-cell" title="${esc(evidenceTooltip)}">
+                        <span class="regulations-citation-target-text">${esc(targetLabel)}</span>
+                    </div>
+                </td>
+                <td class="col-relation text-center">${citationRelationBadge(item.relation_type)}</td>
+                <td class="col-confidence text-center">${citationConfidenceBadge(item.confidence)}</td>
+                <td class="col-status text-center">${citationStatusBadge(item.review_status)}</td>
+                <td class="col-actions text-center"><div class="regulations-row-actions">${action}</div></td>
+            </tr>`;
+        }).join('');
+    }
+
+    function syncCitationSelection() {
+        const panel = document.getElementById('regulations-citation-governance-panel');
+        if (!panel) return;
+        const checkboxes = Array.from(panel.querySelectorAll('[data-regulation-citation-select]'));
+        const visibleIds = checkboxes.map(input => String(input.dataset.regulationCitationSelect));
+        citationSelectedIds = new Set([...citationSelectedIds].filter(id => visibleIds.includes(String(id))));
+        checkboxes.forEach(input => { input.checked = citationSelectedIds.has(String(input.dataset.regulationCitationSelect)); });
+        const selectAll = panel.querySelector('[data-regulation-citation-select-all]');
+        if (selectAll) {
+            selectAll.checked = Boolean(visibleIds.length) && visibleIds.every(id => citationSelectedIds.has(id));
+            selectAll.indeterminate = visibleIds.some(id => citationSelectedIds.has(id)) && !selectAll.checked;
+            selectAll.disabled = !visibleIds.length;
+        }
+        panel.querySelectorAll('[data-regulation-citation-review-selected]').forEach(button => {
+            button.disabled = !citationSelectedIds.size;
+            button.textContent = `${button.dataset.regulationCitationReviewSelected === 'approved' ? '确认' : (panel.dataset.citationGovernanceType === 'unresolved' ? '标记外部' : '驳回')}选中（${citationSelectedIds.size}）`;
+        });
+    }
+
+    function toggleCitationSelection(id, checked) {
+        const key = String(id || '');
+        if (!key) return;
+        if (checked) citationSelectedIds.add(key);
+        else citationSelectedIds.delete(key);
+        const panel = document.getElementById('regulations-citation-governance-panel');
+        if (panel) {
+            const row = panel.querySelector(`[data-regulation-citation-select="${key}"]`)?.closest('tr');
+            if (row) row.classList.toggle('selected', Boolean(checked));
+        }
+        syncCitationSelection();
+    }
+
+    function selectAllCitationGovernance(checked) {
+        const panel = document.getElementById('regulations-citation-governance-panel');
+        if (!panel) return;
+        panel.querySelectorAll('[data-regulation-citation-select]').forEach(input => {
+            const key = String(input.dataset.regulationCitationSelect || '');
+            if (checked) citationSelectedIds.add(key);
+            else citationSelectedIds.delete(key);
+            input.closest('tr')?.classList.toggle('selected', Boolean(checked));
+        });
+        syncCitationSelection();
+    }
+
+    async function showCitationGovernance(type = 'unresolved') {
+        if (!canManage?.()) return;
+        const safeType = type === 'review' ? 'review' : 'unresolved';
+        const panel = document.getElementById('regulations-citation-governance-panel');
+        const title = document.getElementById('regulations-citation-governance-title');
+        const subtitle = document.getElementById('regulations-citation-governance-subtitle');
+        const typeBadge = document.getElementById('regulations-citation-type-badge');
+        const body = document.getElementById('regulations-citation-governance-body');
+        if (!panel || !body) return;
+        citationSelectedIds = new Set();
+        panel.dataset.citationGovernanceType = safeType;
+        if (title) title.textContent = safeType === 'review' ? '引用审核队列' : '未解析引用队列';
+        if (typeBadge) {
+            typeBadge.textContent = safeType === 'review' ? '库内待审核' : '跨法规待回连';
+            typeBadge.className = `regulations-citation-type-tag ${safeType === 'review' ? 'tag-review' : 'tag-unresolved'}`;
+        }
+        if (subtitle) subtitle.textContent = safeType === 'review'
+            ? '仅列出已成功回连到库内条文、但尚未人工确认的当前版本引用；可安全批量确认高置信项。'
+            : '仅列出尚未回连的当前版本跨法规引用；先重建回连，确属外部资料时可标记为外部引用。';
+        panel.classList.remove('hidden');
+        PivotSafeHtml.setHtml(body, '<div class="regulations-loading">正在加载引用治理队列…</div>');
+        try {
+            const data = await fetchJson(`${API}/citation-governance?type=${encodeURIComponent(safeType)}&limit=200`);
+            const rows = Array.isArray(data.data) ? data.data : [];
+            const actions = safeType === 'review'
+                ? '<button type="button" class="btn-primary regulations-citation-approve-high-btn" data-regulation-citation-approve-high>一键确认高置信引用（≥80%）</button><button type="button" class="btn-secondary" data-regulation-citation-review-selected="approved" disabled>确认选中（0）</button><button type="button" class="btn-secondary" data-regulation-citation-review-selected="rejected" disabled>驳回选中（0）</button>'
+                : '<button type="button" class="btn-secondary regulations-citation-rebuild-btn" data-regulation-citation-rebuild>一键重建全库引用回连</button><button type="button" class="btn-secondary" data-regulation-citation-review-selected="rejected" disabled>标记外部选中（0）</button>';
+            PivotSafeHtml.setHtml(body, `
+                <div class="regulations-citation-governance-head">
+                    <div class="regulations-citation-stat-wrap">
+                        <span class="regulations-citation-stat-label">当前显示</span>
+                        <span class="regulations-citation-stat-number">${rows.length}</span>
+                        <span class="regulations-citation-stat-divider">/</span>
+                        <span class="regulations-citation-stat-total">${Number(data.total || 0)} 条</span>
+                    </div>
+                    <div class="regulations-admin-actions">${actions}</div>
+                </div>
+                <div class="table-container workspace-table-wrap regulations-citation-table-wrap">
+                    <table class="data-table compact-table regulations-citation-table">
+                        <thead>
+                            <tr>
+                                <th class="col-checkbox"><input type="checkbox" aria-label="全选当前引用治理队列" data-regulation-citation-select-all></th>
+                                <th class="col-index text-center">序号</th>
+                                <th class="col-source">来源法规 / 条文</th>
+                                <th class="col-target">引用目标</th>
+                                <th class="col-relation text-center">关系</th>
+                                <th class="col-confidence text-center">置信度</th>
+                                <th class="col-status text-center">状态</th>
+                                <th class="col-actions text-center">处理</th>
+                            </tr>
+                        </thead>
+                        <tbody>${renderCitationGovernanceRows(rows, safeType)}</tbody>
+                    </table>
+                </div>
+            `);
+            syncCitationSelection();
+        } catch (error) {
+            PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(error.message || '加载引用治理队列失败')}</div>`);
+        }
+    }
+
+    async function rebuildCitationLinks() {
+        if (!(await regulationConfirm('重建全库引用回连', '系统将按当前法规版本重新匹配库内别名和条文，不会改动原法规正文。确认继续？'))) return;
+        setBusy(true, '正在重建跨法规引用回连…');
+        try {
+            const result = await fetchJson(`${API}/cross-links/rebuild`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+            toast(`引用回连完成：已匹配 ${Number(result.resolved || 0)} 条`, 'success');
+            await showCitationGovernance('unresolved');
+        } catch (error) {
+            toast(error.message || '重建引用回连失败', 'error');
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function reviewCitationLinks(ids, reviewStatus) {
+        const list = Array.isArray(ids) ? ids : [ids];
+        if (!list.filter(Boolean).length) return;
+        try {
+            const data = await fetchJson(`${API}/citation-governance/review`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: list, reviewStatus })
+            });
+            toast(`已处理 ${Number(data.result?.updated || 0)} 条引用`, 'success');
+            await showCitationGovernance(document.getElementById('regulations-citation-governance-panel')?.dataset.citationGovernanceType || 'review');
+        } catch (error) {
+            toast(error.message || '处理引用失败', 'error');
+        }
+    }
+
+    async function reviewSelectedCitationLinks(reviewStatus) {
+        const ids = [...citationSelectedIds];
+        if (!ids.length) {
+            toast('请先勾选需要处理的引用', 'warning');
+            return;
+        }
+        const panel = document.getElementById('regulations-citation-governance-panel');
+        const unresolved = panel?.dataset.citationGovernanceType === 'unresolved';
+        const action = reviewStatus === 'approved' ? '确认' : (unresolved ? '标记为外部/不采用' : '驳回');
+        if (!(await regulationConfirm(`批量${action}引用`, `将${action}选中的 ${ids.length} 条引用关系。该操作只作用于当前法规版本，确认继续？`))) return;
+        await reviewCitationLinks(ids, reviewStatus);
+    }
+
+    async function approveHighConfidenceCitationLinks() {
+        if (!(await regulationConfirm('批量确认高置信引用', '仅确认已回连到库内条文且置信度不低于 80% 的引用；未解析和低置信引用仍保留人工复核。确认继续？'))) return;
+        setBusy(true, '正在批量确认高置信引用…');
+        try {
+            const data = await fetchJson(`${API}/citation-governance/approve-high-confidence`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ minConfidence: 0.8, limit: 2000 })
+            });
+            toast(`已确认 ${Number(data.result?.updated || 0)} 条高置信引用`, 'success');
+            await showCitationGovernance('review');
+        } catch (error) {
+            toast(error.message || '批量确认引用失败', 'error');
+        } finally {
+            setBusy(false);
+        }
     }
 
     async function showQualitySummary() {
@@ -118,13 +495,13 @@
             PivotSafeHtml.setHtml(body, `
                 <div class="regulations-quality-grid">
                     ${renderQualityMetric('法规文档', documents.total)}
-                    ${renderQualityMetric('元数据待审核', documents.metadataNeedsReview, '含缺少层级、来源或审核信息')}
-                    ${renderQualityMetric('缺少维护人', documents.missingMaintainer)}
-                    ${renderQualityMetric('版本待治理', versions.governanceNeedsReview, '效力或审核状态未确认')}
-                    ${renderQualityMetric('索引未完成', versions.indexingIncomplete)}
-                    ${renderQualityMetric('未解析引用', links.unresolved)}
-                    ${renderQualityMetric('引用待审核', links.needsReview)}
-                    ${renderQualityMetric('条文缺少定位', locations.articlesWithoutLocation)}
+                    ${renderQualityMetric('元数据待审核', documents.metadataNeedsReview, '含缺少层级、来源或审核信息', Number(documents.metadataNeedsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="metadata">处理元数据</button>' : '')}
+                    ${renderQualityMetric('缺少维护人', documents.missingMaintainer, '指派责任人后可持续维护', Number(documents.missingMaintainer || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="maintainer">指派维护人</button>' : '')}
+                    ${renderQualityMetric('版本待治理', versions.governanceNeedsReview, '效力或审核状态未确认', Number(versions.governanceNeedsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="version">处理版本</button>' : '')}
+                    ${renderQualityMetric('索引未完成', versions.indexingIncomplete, '可重新加入向量索引队列', Number(versions.indexingIncomplete || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="index">重建索引</button>' : '')}
+                    ${renderQualityMetric('未解析引用', links.unresolved, '可重建回连或标记为外部引用', Number(links.unresolved || 0) ? '<button type="button" class="btn-secondary" data-regulation-citation-governance="unresolved">处理引用</button>' : '')}
+                    ${renderQualityMetric('引用待审核', links.needsReview, '高置信引用可批量确认', Number(links.needsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-citation-governance="review">审核引用</button>' : '')}
+                    ${renderQualityMetric('条文缺少定位', locations.articlesWithoutLocation, '按当前正文重建页码与字符位置', Number(locations.articlesWithoutLocation || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="location">重建定位</button>' : '')}
                     ${renderQualityMetric('义务待审核', obligations.needsReview)}
                 </div>
                 <div class="regulations-quality-note">“现行有效”仅表示已由管理员填写并审核的版本状态；请继续以权威来源和组织正式意见为准。</div>
@@ -180,18 +557,201 @@
         }
     }
 
+    function renderRegulationBookmarksView() {
+        const body = document.getElementById('regulations-bookmarks-body');
+        if (!body) return;
+        const bookmarks = Array.isArray(state.regulationBookmarks) ? state.regulationBookmarks : [];
+        PivotSafeHtml.setHtml(body, renderRegulationBookmarks(bookmarks));
+    }
+
     function renderRegulationBookmarks(bookmarks) {
-        if (!bookmarks.length) return '<div class="regulations-empty compact">暂无收藏。打开法规原文后，点击“收藏法规”即可加入这里。</div>';
-        return `<div class="regulations-bookmark-list">${bookmarks.map(item => `
-            <article class="regulations-bookmark-item">
-                <div><strong>${esc(item.document_title || '未命名法规')}</strong><span>${esc([item.category, item.issuing_body, item.current_version_label].filter(Boolean).join(' · ') || '未设置分类')}</span></div>
-                <label>专题<input class="form-input" data-regulation-bookmark-topic="${esc(item.id)}" value="${esc(item.topic || '')}" maxlength="80" placeholder="如 人事、采购、财务"></label>
-                <div class="regulations-admin-actions">
-                    <button type="button" class="btn-secondary" data-regulation-bookmark-open="${esc(item.document_id)}">打开法规</button>
-                    <button type="button" class="btn-secondary" data-regulation-bookmark-save="${esc(item.id)}" data-regulation-bookmark-document="${esc(item.document_id)}">保存专题</button>
-                    <button type="button" class="btn-secondary" data-regulation-bookmark-delete="${esc(item.id)}">取消收藏</button>
+        if (!bookmarks.length) {
+            return `
+                <div class="regulations-bookmarks-empty">
+                    <div class="regulations-bookmarks-empty-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </div>
+                    <h4>暂无法规收藏</h4>
+                    <p>在查看任意法规正文详情时，点击顶部的「收藏法规」按钮即可收录到此处。收藏内容仅对当前账号可见，并支持按专题归类整理。</p>
                 </div>
-            </article>`).join('')}</div>`;
+            `;
+        }
+
+        const topicCounts = new Map();
+        let untaggedCount = 0;
+        bookmarks.forEach(item => {
+            const t = (item.topic || '').trim();
+            if (t) {
+                topicCounts.set(t, (topicCounts.get(t) || 0) + 1);
+            } else {
+                untaggedCount++;
+            }
+        });
+
+        const activeTopic = state.bookmarkActiveTopic || '';
+        const searchQuery = (state.bookmarkSearchQuery || '').trim().toLowerCase();
+
+        const filtered = bookmarks.filter(item => {
+            const itemTopic = (item.topic || '').trim();
+            if (activeTopic === '__untagged__') {
+                if (itemTopic) return false;
+            } else if (activeTopic) {
+                if (itemTopic !== activeTopic) return false;
+            }
+            if (searchQuery) {
+                const title = (item.document_title || '').toLowerCase();
+                const category = (item.category || '').toLowerCase();
+                const body = (item.issuing_body || '').toLowerCase();
+                const topic = itemTopic.toLowerCase();
+                if (!title.includes(searchQuery) && !category.includes(searchQuery) && !body.includes(searchQuery) && !topic.includes(searchQuery)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        const topicsArray = Array.from(topicCounts.entries());
+
+        return `
+            <div class="regulations-bookmarks-toolbar">
+                <div class="regulations-bookmarks-topics-wrap">
+                    <span class="regulations-bookmarks-topics-label">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                        <span>专题：</span>
+                    </span>
+                    <div class="regulations-bookmarks-topic-chips">
+                        <button type="button" class="btn-secondary regulations-bookmarks-topic-chip ${!activeTopic ? 'active' : ''}" data-regulation-bookmark-topic-filter="">
+                            全部 (${bookmarks.length})
+                        </button>
+                        ${topicsArray.map(([t, count]) => `
+                            <button type="button" class="btn-secondary regulations-bookmarks-topic-chip ${activeTopic === t ? 'active' : ''}" data-regulation-bookmark-topic-filter="${esc(t)}">
+                                ${esc(t)} (${count})
+                            </button>
+                        `).join('')}
+                        ${untaggedCount > 0 ? `
+                            <button type="button" class="btn-secondary regulations-bookmarks-topic-chip ${activeTopic === '__untagged__' ? 'active' : ''}" data-regulation-bookmark-topic-filter="__untagged__">
+                                未设专题 (${untaggedCount})
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <div class="regulations-bookmarks-search-box">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-bookmarks-search-icon" aria-hidden="true">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" class="form-input regulations-bookmarks-search-input" placeholder="筛选法规名称或专题..." value="${esc(state.bookmarkSearchQuery || '')}" data-regulation-bookmark-search>
+                </div>
+            </div>
+            <div class="regulations-bookmarks-meta-bar">
+                <div class="regulations-bookmarks-count-info">
+                    <span>已收藏 <strong>${bookmarks.length}</strong> 部法规</span>
+                    ${(activeTopic || searchQuery) ? `<span class="regulations-bookmarks-count-sub">（当前匹配 <strong>${filtered.length}</strong> 部）</span>` : ''}
+                </div>
+                <span class="regulations-bookmarks-tip">点击法规名称或「打开法规」即可直达正文</span>
+            </div>
+            ${filtered.length === 0 ? `
+                <div class="regulations-bookmarks-empty compact">
+                    <p>未找到符合条件的收藏法规${activeTopic ? `（专题：${activeTopic === '__untagged__' ? '未设专题' : activeTopic}）` : ''}${searchQuery ? `（关键词：${searchQuery}）` : ''}。</p>
+                    <button type="button" class="btn-secondary regulations-bookmarks-clear-filter-btn" data-regulation-bookmark-topic-filter="">清除筛选条件</button>
+                </div>
+            ` : `
+                <div class="regulations-bookmark-list">
+                    ${filtered.map(item => `
+                        <article class="regulations-bookmark-card" data-bookmark-id="${esc(item.id)}">
+                            <div class="regulations-bookmark-card-main">
+                                <div class="regulations-bookmark-card-header">
+                                    <div class="regulations-bookmark-title-group">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="regulations-bookmark-doc-icon" aria-hidden="true">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        </svg>
+                                        <button type="button" class="btn-secondary regulations-bookmark-title-btn" data-regulation-bookmark-open="${esc(item.document_id)}" title="点击查看法规正文详情">
+                                            ${esc(item.document_title || '未命名法规')}
+                                        </button>
+                                        ${item.category ? `<span class="regulations-bookmark-badge category">${esc(item.category)}</span>` : ''}
+                                        ${item.jurisdiction ? `<span class="regulations-bookmark-badge jurisdiction">${esc(item.jurisdiction)}</span>` : ''}
+                                    </div>
+                                    <button type="button" class="btn-secondary regulations-bookmark-open-btn" data-regulation-bookmark-open="${esc(item.document_id)}" title="查看该法规正文详情">
+                                        <span>打开法规</span>
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <polyline points="9 18 15 12 9 6"></polyline>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="regulations-bookmark-meta-row">
+                                    ${item.issuing_body ? `
+                                        <span class="regulations-bookmark-meta-item">
+                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M3 21h18"></path>
+                                                <path d="M5 21V7l8-4v18"></path>
+                                                <path d="M19 21V11l-6-3"></path>
+                                            </svg>
+                                            <span>${esc(item.issuing_body)}</span>
+                                        </span>
+                                    ` : ''}
+                                    ${item.current_version_label ? `
+                                        <span class="regulations-bookmark-meta-item">
+                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                                            </svg>
+                                            <span>${esc(item.current_version_label)}</span>
+                                        </span>
+                                    ` : ''}
+                                    ${item.created_at ? `
+                                        <span class="regulations-bookmark-meta-item text-muted">
+                                            <span>收藏于 ${esc(fmtDate(item.created_at))}</span>
+                                        </span>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <div class="regulations-bookmark-card-footer">
+                                <div class="regulations-bookmark-topic-box">
+                                    <div class="regulations-bookmark-topic-label">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                                            <circle cx="7" cy="7" r="1"></circle>
+                                        </svg>
+                                        <span>所属专题：</span>
+                                    </div>
+                                    <div class="regulations-bookmark-topic-input-wrap">
+                                        <input class="form-input regulations-bookmark-topic-input" data-regulation-bookmark-topic="${esc(item.id)}" value="${esc(item.topic || '')}" maxlength="80" placeholder="如 人事、采购、财务、合规">
+                                        <button type="button" class="btn-secondary regulations-bookmark-save-btn" data-regulation-bookmark-save="${esc(item.id)}" data-regulation-bookmark-document="${esc(item.document_id)}" title="保存此法规的专题标签">
+                                            保存专题
+                                        </button>
+                                    </div>
+                                    <div class="regulations-bookmark-quick-tags">
+                                        <span class="regulations-bookmark-quick-label">常用：</span>
+                                        <button type="button" class="btn-secondary regulations-bookmark-quick-tag" data-regulation-quick-topic="合规" data-target-id="${esc(item.id)}" data-target-doc="${esc(item.document_id)}">合规</button>
+                                        <button type="button" class="btn-secondary regulations-bookmark-quick-tag" data-regulation-quick-topic="采购" data-target-id="${esc(item.id)}" data-target-doc="${esc(item.document_id)}">采购</button>
+                                        <button type="button" class="btn-secondary regulations-bookmark-quick-tag" data-regulation-quick-topic="财务" data-target-id="${esc(item.id)}" data-target-doc="${esc(item.document_id)}">财务</button>
+                                        <button type="button" class="btn-secondary regulations-bookmark-quick-tag" data-regulation-quick-topic="人事" data-target-id="${esc(item.id)}" data-target-doc="${esc(item.document_id)}">人事</button>
+                                    </div>
+                                </div>
+                                <div class="regulations-bookmark-delete-wrap">
+                                    <button type="button" class="btn-secondary regulations-bookmark-delete-btn" data-regulation-bookmark-delete="${esc(item.id)}" title="从我的法规收藏中取消收藏此法规">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <polyline points="3 6 5 6 21 6"></polyline>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        </svg>
+                                        <span>取消收藏</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </article>
+                    `).join('')}
+                </div>
+            `}
+        `;
     }
 
     async function showRegulationBookmarks() {
@@ -202,23 +762,45 @@
         PivotSafeHtml.setHtml(body, '<div class="regulations-loading">正在读取收藏法规…</div>');
         try {
             const data = await fetchJson(`${API}/bookmarks`);
-            PivotSafeHtml.setHtml(body, renderRegulationBookmarks(Array.isArray(data.bookmarks) ? data.bookmarks : []));
+            state.regulationBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks : [];
+            state.bookmarkActiveTopic = '';
+            state.bookmarkSearchQuery = '';
+            renderRegulationBookmarksView();
         } catch (error) {
             PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(error.message || '加载收藏法规失败')}</div>`);
         }
     }
 
-    async function saveRegulationBookmarkTopic(bookmarkId, documentId) {
-        const field = document.querySelector(`[data-regulation-bookmark-topic="${String(bookmarkId).replace(/"/g, '\\"')}"]`);
-        if (!bookmarkId || !documentId || !field) return;
+    function handleBookmarkTopicFilter(topic) {
+        state.bookmarkActiveTopic = topic || '';
+        renderRegulationBookmarksView();
+    }
+
+    function handleBookmarkSearch(query) {
+        state.bookmarkSearchQuery = query || '';
+        renderRegulationBookmarksView();
+    }
+
+    async function saveRegulationBookmarkTopic(bookmarkId, documentId, customTopic = null) {
+        let topicVal = customTopic;
+        if (topicVal === null) {
+            const field = document.querySelector(`[data-regulation-bookmark-topic="${String(bookmarkId).replace(/"/g, '\\"')}"]`);
+            if (!field) return;
+            topicVal = field.value.trim();
+        }
+        if (!bookmarkId || !documentId) return;
         try {
             await fetchJson(`${API}/documents/${encodeURIComponent(documentId)}/bookmarks`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ topic: field.value.trim() })
+                body: JSON.stringify({ topic: topicVal })
             });
             toast('收藏专题已保存', 'success');
-            await showRegulationBookmarks();
+            if (Array.isArray(state.regulationBookmarks)) {
+                const item = state.regulationBookmarks.find(b => String(b.id) === String(bookmarkId));
+                if (item) item.topic = topicVal;
+            }
+            renderRegulationBookmarksView();
         } catch (error) {
             toast(error.message || '保存收藏专题失败', 'error');
         }
@@ -229,7 +811,10 @@
         try {
             await fetchJson(`${API}/bookmarks/${encodeURIComponent(bookmarkId)}`, { method: 'DELETE' });
             toast('已取消收藏法规', 'success');
-            await showRegulationBookmarks();
+            if (Array.isArray(state.regulationBookmarks)) {
+                state.regulationBookmarks = state.regulationBookmarks.filter(b => String(b.id) !== String(bookmarkId));
+            }
+            renderRegulationBookmarksView();
         } catch (error) {
             toast(error.message || '取消收藏失败', 'error');
         }
@@ -246,10 +831,35 @@
             const data = await fetchJson(`${API}/recycle-bin?limit=100`);
             const rows = Array.isArray(data.data) ? data.data : [];
             PivotSafeHtml.setHtml(body, rows.length ? `
-                <div class="table-container workspace-table-wrap"><table class="data-table compact-table">
-                    <thead><tr><th>法规</th><th>分类</th><th>删除时间</th><th>操作</th></tr></thead>
-                    <tbody>${rows.map(item => `<tr><td>${esc(item.title || '-')}</td><td>${esc(item.category || '-')}</td><td>${esc(fmtDate(item.deleted_at))}</td><td><button type="button" class="btn-secondary" data-regulation-restore="${esc(item.id)}">恢复</button></td></tr>`).join('')}</tbody>
-                </table></div>` : '<div class="regulations-empty compact">回收站为空。</div>');
+                <div class="table-container workspace-table-wrap regulations-recycle-bin-table-wrap">
+                    <table class="data-table compact-table regulations-recycle-bin-table">
+                        <thead>
+                            <tr>
+                                <th class="col-index text-center">序号</th>
+                                <th class="col-title">法规名称</th>
+                                <th class="col-category text-center">分类</th>
+                                <th class="col-date text-center">删除时间</th>
+                                <th class="col-actions text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows.map((item, index) => {
+                            const title = item.title || '未命名法规';
+                            const category = item.category || '-';
+                            const dateStr = fmtDate(item.deleted_at);
+                            return `<tr>
+                                <td class="col-index text-center"><span class="regulations-table-index">${index + 1}</span></td>
+                                <td class="col-title"><span class="regulations-recycle-title" title="${esc(title)}">${esc(title)}</span></td>
+                                <td class="col-category text-center"><span class="regulations-recycle-category-pill">${esc(category)}</span></td>
+                                <td class="col-date text-center"><span class="regulations-recycle-date">${esc(dateStr)}</span></td>
+                                <td class="col-actions text-center">
+                                    <div class="regulations-row-actions">
+                                        <button type="button" class="btn-secondary regulations-row-action regulations-restore-btn" data-regulation-restore="${esc(item.id)}" title="恢复此法规至目录与检索">恢复</button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                        }).join('')}</tbody>
+                    </table>
+                </div>` : '<div class="regulations-empty compact">回收站为空。</div>');
         } catch (error) {
             PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(error.message || '加载法规回收站失败')}</div>`);
         }
@@ -445,9 +1055,24 @@
         showArticleLocations,
         renderQualityMetric,
         showQualitySummary,
+        loadGovernanceAssignees,
+        openGovernanceWorklist,
+        openDocumentGovernance,
+        openVersionGovernance,
+        requestRegulationLocationRebuild,
+        showCitationGovernance,
+        rebuildCitationLinks,
+        reviewCitationLinks,
+            reviewSelectedCitationLinks,
+            selectAllCitationGovernance,
+            toggleCitationSelection,
+        approveHighConfidenceCitationLinks,
         toggleRegulationSubscription,
         toggleRegulationBookmark,
         renderRegulationBookmarks,
+        renderRegulationBookmarksView,
+        handleBookmarkTopicFilter,
+        handleBookmarkSearch,
         showRegulationBookmarks,
         saveRegulationBookmarkTopic,
         deleteRegulationBookmark,

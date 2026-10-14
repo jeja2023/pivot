@@ -15,6 +15,7 @@ const shared = require('./shared');
 
 module.exports = {
     analyzeRegulationChangeImpact: analysis.analyzeRegulationChangeImpact,
+    approveHighConfidenceRegulationCitationLinks: links.approveHighConfidenceRegulationCitationLinks,
     listRegulationAiAnswerLogs: aiAudit.listRegulationAiAnswerLogs,
     buildRegulationAiContext: analysis.buildRegulationAiContext,
     buildRegulationSearchExcerpt: search.buildRegulationSearchExcerpt,
@@ -42,13 +43,16 @@ module.exports = {
     deriveRegulationTitleFromFilename: shared.deriveRegulationTitleFromFilename,
     deriveRegulationVersionLabelFromFilename: shared.deriveRegulationVersionLabelFromFilename,
     rebuildRegulationCrossLinks: links.rebuildRegulationCrossLinks,
+    reviewRegulationCitationLinks: links.reviewRegulationCitationLinks,
     resolveRegulationCrossLinks: links.resolveRegulationCrossLinks,
     recordRegulationAccess: collaboration.recordRegulationAccess,
     recordRegulationAiAnswer: aiAudit.recordRegulationAiAnswer,
     revertRegulationDocumentBatch: documentBatch.revertRegulationDocumentBatch,
     recoverRegulationArticleEmbeddings: mutations.recoverRegulationArticleEmbeddings,
+    rebuildRegulationArticleLocations: mutations.rebuildRegulationArticleLocations,
     requestRegulationVersionReindex: mutations.requestRegulationVersionReindex,
     queueRegulationLibraryReindex: mutations.queueRegulationLibraryReindex,
+    queueRegulationDocumentsReindex: mutations.queueRegulationDocumentsReindex,
     reviewRegulationObligation: governance.reviewRegulationObligation,
     saveRegulationAliases: shared.saveRegulationAliases,
     saveRegulationBookmark: bookmarks.saveRegulationBookmark,
@@ -73,6 +77,7 @@ module.exports = {
     listRegulationCategoryFolders: catalog.listRegulationCategoryFolders,
     listRegulationBookmarks: bookmarks.listRegulationBookmarks,
     listRegulationArticleLocations: locations.listRegulationArticleLocations,
+    listRegulationCitationGovernance: links.listRegulationCitationGovernance,
     listRegulationObligations: governance.listRegulationObligations,
     listRegulationAssignees: governance.listRegulationAssignees,
     listRegulationQualitySummary: governance.listRegulationQualitySummary,
@@ -103,5 +108,7 @@ module.exports = {
     updateRegulationDocument: mutations.updateRegulationDocument,
     updateRegulationVersionGovernance: mutations.updateRegulationVersionGovernance,
     updateRegulationDocuments: documentBatch.updateRegulationDocuments,
+    rebuildRegulationDocumentLocations: documentBatch.rebuildRegulationDocumentLocations,
+    reindexRegulationDocuments: documentBatch.reindexRegulationDocuments,
     unsubscribeFromRegulation: governance.unsubscribeFromRegulation
 };

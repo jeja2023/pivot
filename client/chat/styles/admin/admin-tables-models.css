@@ -179,11 +179,47 @@
 
 .retrieval-model-service-config {
     justify-self: start;
-    min-height: 28px;
-    padding: 0 10px;
+    min-height: 26px;
+    padding: 0 9px;
     font-size: 0.72rem;
     font-weight: 600;
     margin-top: 4px;
+}
+
+.retrieval-model-service-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.retrieval-model-service-actions .btn-secondary {
+    min-height: 26px;
+    height: 26px;
+    padding: 0 9px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 6px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+}
+
+.retrieval-model-service-test {
+    border-color: var(--primary) !important;
+    color: var(--primary) !important;
+}
+
+.retrieval-model-service-test:hover {
+    background: var(--primary-subtle, rgba(16, 163, 127, 0.08)) !important;
+}
+
+.retrieval-model-service-test:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 @media (max-width: 760px) {

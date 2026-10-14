@@ -38,7 +38,7 @@ async function recognizePage(imagePath, options = {}) {
     }
 }
 
-async function getOcrEngineStatus() {
+async function getOcrEngineStatus(options = {}) {
     const defaultEngine = normalizeEngine();
     const entries = await Promise.all(Object.entries(ADAPTERS).map(async ([engine, adapter]) => {
         const meta = ENGINE_META[engine] || {};
@@ -47,7 +47,7 @@ async function getOcrEngineStatus() {
                 engine,
                 default: engine === defaultEngine,
                 ...meta,
-                ...await adapter.checkAvailability()
+                ...await adapter.checkAvailability(options)
             }];
         } catch (error) {
             return [engine, {

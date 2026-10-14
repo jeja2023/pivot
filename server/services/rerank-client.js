@@ -141,7 +141,7 @@ async function rerankCandidates(query, candidates, { config = getRerankConfig(),
     }
 }
 
-async function testRerankConnection({ apiUrl = '', apiKey = '', model = '', protocol = 'tei', candidateLimit = 3, timeoutMs = 3000 } = {}) {
+async function testRerankConnection({ apiUrl = '', apiKey = '', model = '', protocol = 'tei', candidateLimit = 3, timeoutMs = 5000 } = {}) {
     const config = {
         enabled: true,
         http: {

@@ -5,7 +5,7 @@
     const API = '/api/apps/regulations';
         const FILE_ACCEPT = '.txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm,.png,.jpg,.jpeg,.webp,.bmp';
         const SUPPORTED_FORMATS = 'TXT、Markdown、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV、JSON、HTML/HTM';
-        const REGULATIONS_PAGE_SIZE = 20;
+        const REGULATIONS_PAGE_SIZE = 15;
         const html = window.Pivot.legacy.PivotSafeHtml || {
             escapeHtml(value) {
                 return String(value ?? '')
@@ -19,6 +19,8 @@
 
         const state = {
             documents: [], total: 0, activeId: '', detail: null, matches: [], query: '',
+            hasSearched: false,
+            effectiveAt: '',
             searchMode: 'hybrid', savedSearches: [],
             filters: { category: '', issuingBody: '', jurisdiction: '', status: '', includeArchived: false },
             aiAnswer: '', aiSources: [], aiTurns: [], aiBusy: false, aiAbortController: null, aiStopSilently: false,
@@ -27,6 +29,7 @@
             importPreview: null,
             facets: { categories: [], legalLevels: [], issuingBodies: [], jurisdictions: [] },
             libraryView: 'folders', activeFolder: null, categoryFolders: [],
+            governancePending: false, governanceScope: '', governanceAssignees: [],
             page: 1, pageSize: REGULATIONS_PAGE_SIZE,
             selectedDocumentIds: new Set(), selectedDocumentTitles: new Map(), batchMode: false, batchDeletePending: false,
             diffView: null,

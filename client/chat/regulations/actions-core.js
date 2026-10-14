@@ -25,6 +25,8 @@
                     function openSearchDialog() {
                         const panel = document.getElementById('regulations-search-panel');
                         panel?.classList.remove('hidden');
+                        state.matches = [];
+                        state.hasSearched = false;
                         syncSearchControls();
                         renderSavedSearches();
                         renderSearchResults();
@@ -33,6 +35,9 @@
 
                     function closeSearchDialog() {
                         document.getElementById('regulations-search-panel')?.classList.add('hidden');
+                        state.matches = [];
+                        state.hasSearched = false;
+                        renderSearchResults();
                         renderDocuments();
                     }
 
@@ -75,7 +80,7 @@
                         // 关闭问答弹窗即取消仍在传输的流，避免后台继续占用模型连接。
                         ns.stopRegulationAi?.({ silent: true });
                         document.getElementById('regulations-admin-panel')?.classList.add('hidden');
-                        document.getElementById('regulations-search-panel')?.classList.add('hidden');
+                        closeSearchDialog();
                         document.getElementById('regulations-import-result-panel')?.classList.add('hidden');
                         document.getElementById('regulations-batch-result-panel')?.classList.add('hidden');
                         ns.closeBatchEditDialog?.();
@@ -92,6 +97,7 @@
                         document.getElementById('regulations-bookmarks-panel')?.classList.add('hidden');
                         document.getElementById('regulations-recycle-bin-panel')?.classList.add('hidden');
                         document.getElementById('regulations-quality-panel')?.classList.add('hidden');
+                        document.getElementById('regulations-citation-governance-panel')?.classList.add('hidden');
                         document.getElementById('regulations-obligation-panel')?.classList.add('hidden');
                         document.getElementById('regulations-location-panel')?.classList.add('hidden');
                         document.getElementById('regulations-create-folder-panel')?.classList.add('hidden');
@@ -124,6 +130,8 @@
                         state.page = 1;
                         state.libraryView = 'folders';
                         state.activeFolder = null;
+                        state.governancePending = false;
+                        state.governanceScope = '';
                         state.batchMode = false;
                         state.selectedDocumentIds.clear();
                         state.selectedDocumentTitles.clear();
@@ -144,6 +152,8 @@
                             needsReviewCount: Number(folder.needsReviewCount || folder.needs_review_count || 0),
                             latestUpdatedAt: folder.latestUpdatedAt || folder.latest_updated_at || ''
                         };
+                        state.governancePending = false;
+                        state.governanceScope = '';
                         state.page = 1;
                         state.selectedDocumentIds.clear();
                         state.selectedDocumentTitles.clear();
@@ -233,6 +243,8 @@
                         params.set('limit', String(pageSize));
                         params.set('offset', String((requestedPage - 1) * pageSize));
                         appendActiveFolderParams(params);
+                        if (state.governanceScope && canManage()) params.set('governanceScope', state.governanceScope);
+                        else if (state.governancePending && canManage()) params.set('governancePending', 'true');
                         const data = await fetchJson(`${API}/documents?${params.toString()}`);
                         const incoming = Array.isArray(data.data) ? data.data : [];
                         state.total = Number(data.total || 0);
@@ -269,6 +281,7 @@
                         const data = await fetchJson(url);
                         state.activeId = data.detail?.document?.id || id;
                         state.detail = data.detail || null;
+                        state.effectiveAt = effectiveAt || '';
                         renderDocuments();
                         renderDetail();
                         syncAiScopeControl();
@@ -327,6 +340,7 @@
 
                     async function runSearch() {
                         readSearchControls();
+                        state.hasSearched = true;
                         try {
                             state.matches = await fetchArticleMatches();
                         } catch (err) {
@@ -351,21 +365,30 @@
                         const parts = [state.query, state.filters.category, state.filters.issuingBody, state.filters.jurisdiction, state.filters.status]
                             .map(item => String(item || '').trim())
                             .filter(Boolean);
-                        return parts.length ? parts.join(' / ').slice(0, 60) : '全部法规';
+                        return parts.length ? parts.join(' / ').slice(0, 60) : '未命名预设';
                     }
 
                     async function saveCurrentSearch() {
                         readSearchControls();
                         if (!state.query && !state.filters.category && !state.filters.issuingBody && !state.filters.jurisdiction && !state.filters.status) {
-                            toast('请先输入检索词或筛选条件', 'warning');
+                            toast('请先输入检索词或设置筛选条件', 'warning');
+                            return;
+                        }
+                        const existingDuplicate = (state.savedSearches || []).find(item =>
+                            String(item.query || '').trim() === String(state.query || '').trim() &&
+                            String(item.category || '').trim() === String(state.filters.category || '').trim() &&
+                            String(item.jurisdiction || '').trim() === String(state.filters.jurisdiction || '').trim()
+                        );
+                        if (existingDuplicate) {
+                            toast(`已存在相同条件的常用检索预设「${existingDuplicate.name || '常用预设'}」，无需重复保存`, 'info');
                             return;
                         }
                         const fallback = buildSavedSearchDefaultName();
                         const name = typeof window.prompt === 'function'
-                            ? window.prompt('保存为常用检索', fallback)
+                            ? window.prompt('保存为常用检索预设（输入预设名称以便后续一键快速筛选）：', fallback)
                             : fallback;
                         if (!String(name || '').trim()) return;
-                        setBusy(true, '正在保存检索...');
+                        setBusy(true, '正在保存检索预设...');
                         try {
                             await fetchJson(`${API}/saved-searches`, {
                                 method: 'POST',
@@ -377,10 +400,10 @@
                                     jurisdiction: state.filters.jurisdiction
                                 })
                             });
-                            toast('检索已保存', 'success');
+                            toast('常用检索预设已保存', 'success');
                             await loadSavedSearches();
                         } catch (e) {
-                            toast(e.message || '保存检索失败', 'error');
+                            toast(e.message || '保存检索预设失败', 'error');
                         } finally {
                             setBusy(false);
                         }
@@ -400,17 +423,13 @@
 
                     async function deleteSavedSearch(searchId) {
                         if (!searchId) return;
-                        if (!(await regulationConfirm('删除保存检索', '确定删除这个保存检索吗？'))) return;
-                        setBusy(true, '正在删除保存检索...');
                         try {
                             await fetchJson(`${API}/saved-searches/${encodeURIComponent(searchId)}`, { method: 'DELETE' });
                             state.savedSearches = state.savedSearches.filter(item => String(item.id) !== String(searchId));
                             renderSavedSearches();
-                            toast('保存检索已删除', 'success');
+                            toast('常用预设已删除', 'info');
                         } catch (e) {
-                            toast(e.message || '删除保存检索失败', 'error');
-                        } finally {
-                            setBusy(false);
+                            toast(e.message || '删除预设失败', 'error');
                         }
                     }
 

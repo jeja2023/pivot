@@ -261,7 +261,9 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                     ),
                     embeddingConfig: getSystemEmbeddingConfig()
                 });
-            } catch (_err) {}
+            } catch (error) {
+                await recordUnexpectedRegulationEmbeddingFailure(versionId, error).catch(() => {});
+            }
         });
         return {
             document: await getRegulationDocumentById(normalizedDocId, { includeArchived: true }),
@@ -337,6 +339,19 @@ async function updateRegulationDocument({ documentId, userId, patch = {} }) {
     const nextVersionLabel = hasVersionLabel
         ? normalizeRegulationField(patch.versionLabel ?? patch.version_label ?? '', 80)
         : '';
+    const hasMaintainer = Object.prototype.hasOwnProperty.call(patch, 'maintainerUserId')
+        || Object.prototype.hasOwnProperty.call(patch, 'maintainer_user_id');
+    const requestedMaintainerId = hasMaintainer
+        ? normalizeRegulationId(patch.maintainerUserId ?? patch.maintainer_user_id)
+        : null;
+    if (requestedMaintainerId) {
+        const assignee = await queryOne('SELECT id FROM users WHERE id = ? AND deleted_at IS NULL AND status = \'active\'', [requestedMaintainerId]);
+        if (!assignee) {
+            const error = new Error('维护人不存在或已停用，请重新选择');
+            error.statusCode = 400;
+            throw error;
+        }
+    }
     const next = {
         title: normalizeRegulationField(patch.title ?? doc.title, 120) || doc.title,
         category: normalizeRegulationField(patch.category ?? doc.category, 120),
@@ -347,7 +362,10 @@ async function updateRegulationDocument({ documentId, userId, patch = {} }) {
         subject_tags: normalizeRegulationTags(patch.subjectTags ?? patch.subject_tags ?? doc.subject_tags),
         summary: normalizeRegulationSummary(patch.summary ?? doc.summary),
         status: normalizeRegulationStatus(patch.status ?? doc.status),
-        metadata_review_status: normalizeRegulationReviewStatus(patch.metadataReviewStatus ?? patch.metadata_review_status ?? doc.metadata_review_status, 'unreviewed')
+        metadata_review_status: normalizeRegulationReviewStatus(patch.metadataReviewStatus ?? patch.metadata_review_status ?? doc.metadata_review_status, 'unreviewed'),
+        maintainer_user_id: hasMaintainer
+            ? (requestedMaintainerId || null)
+            : (normalizeRegulationId(doc.maintainer_user_id) || null)
     };
     const now = getBeijingTimestamp();
     await execute(`
@@ -361,6 +379,7 @@ async function updateRegulationDocument({ documentId, userId, patch = {} }) {
             subject_tags = ?::jsonb,
             summary = ?,
             status = ?,
+            maintainer_user_id = ?,
             metadata_review_status = ?,
             metadata_reviewed_by_user = CASE WHEN ? = 'approved' THEN ? ELSE metadata_reviewed_by_user END,
             metadata_reviewed_at = CASE WHEN ? = 'approved' THEN ? ELSE metadata_reviewed_at END,
@@ -377,6 +396,7 @@ async function updateRegulationDocument({ documentId, userId, patch = {} }) {
         JSON.stringify(next.subject_tags),
         next.summary,
         next.status,
+        next.maintainer_user_id,
         next.metadata_review_status,
         next.metadata_review_status,
         userId || 0,
@@ -448,6 +468,52 @@ async function updateRegulationVersionGovernance({ documentId, versionId, userId
     return updated;
 }
 
+async function rebuildRegulationArticleLocations({ documentId, versionId }) {
+    const normalizedDocumentId = normalizeRegulationId(documentId);
+    const normalizedVersionId = normalizeRegulationId(versionId);
+    if (!normalizedDocumentId || !normalizedVersionId) return null;
+    const document = await getRegulationDocumentById(normalizedDocumentId, { includeArchived: true });
+    if (!document || document.deleted_at) return null;
+    const version = await queryOne(
+        'SELECT id, extracted_text FROM regulation_versions WHERE id = ? AND document_id = ?',
+        [normalizedVersionId, normalizedDocumentId]
+    );
+    if (!version) return null;
+    const extractedText = normalizeRegulationText(version.extracted_text || '');
+    if (!extractedText) {
+        const error = new Error('当前版本没有可用正文，无法生成来源定位；请补充原始文件后重新解析。');
+        error.statusCode = 409;
+        throw error;
+    }
+    const articles = await query(`
+        SELECT id, sort_order AS "sortOrder", article_label AS "articleLabel", content
+        FROM regulation_articles
+        WHERE document_id = ? AND version_id = ?
+        ORDER BY sort_order ASC, id ASC
+    `, [normalizedDocumentId, normalizedVersionId]);
+    if (!articles.length) {
+        const error = new Error('当前版本尚未解析出条文，无法生成来源定位。');
+        error.statusCode = 409;
+        throw error;
+    }
+    const rebuilt = await transaction(async trx => {
+        await trx.execute(`
+            DELETE FROM regulation_article_locations
+            WHERE article_id IN (
+                SELECT id FROM regulation_articles WHERE document_id = ? AND version_id = ?
+            )
+        `, [normalizedDocumentId, normalizedVersionId]);
+        const articleIdsBySortOrder = new Map(articles.map(article => [Number(article.sortOrder), article.id]));
+        return await saveRegulationArticleLocations({
+            articleIdsBySortOrder,
+            articles,
+            extractedText,
+            executor: trx.execute.bind(trx)
+        });
+    });
+    return { documentId: normalizedDocumentId, versionId: normalizedVersionId, articleCount: articles.length, rebuilt };
+}
+
 // #2 为条文生成向量（可选，失败不阻断）
 // 复用知识库同一处向量模型配置（getEmbeddingConfig）；与知识库一致按小批发送，
 // 避免把整部法律的条文一次性塞进单个请求导致向量服务返回 400。
@@ -501,13 +567,31 @@ function getRegulationIndexRetryAt(attempts, now = new Date()) {
     return getBeijingTimestamp(new Date(now.getTime() + getRegulationIndexRetryDelayMs(attempts)));
 }
 
+async function recordUnexpectedRegulationEmbeddingFailure(versionId, error) {
+    const version = await queryOne('SELECT index_attempts, index_max_attempts FROM regulation_versions WHERE id = ?', [versionId]);
+    if (!version) return;
+    const attempts = Math.max(Number(version.index_attempts || 0), 1);
+    const maxAttempts = Math.max(Number(version.index_max_attempts || REGULATION_INDEX_MAX_ATTEMPTS), 1);
+    const retryable = isRegulationEmbeddingErrorRetryable(error) && attempts < maxAttempts;
+    const nextRetryAt = retryable ? getRegulationIndexRetryAt(attempts) : null;
+    const status = retryable ? 'retry_wait' : 'lexical_ready';
+    const reason = String(error?.message || '向量索引任务异常').slice(0, 900);
+    const suffix = retryable
+        ? `（将在 ${nextRetryAt} 重试，第 ${attempts}/${maxAttempts} 次）`
+        : '（已降级为关键词检索，请修复向量服务后人工重建索引。）';
+    await execute(
+        'UPDATE regulation_versions SET index_status = ?, index_error = ?, index_next_retry_at = ?, updated_at = ? WHERE id = ?',
+        [status, `${reason}${suffix}`.slice(0, 1000), nextRetryAt, getBeijingTimestamp(), versionId]
+    );
+}
+
 async function beginRegulationEmbeddingAttempt(versionId) {
     if (!versionId) return null;
     const now = getBeijingTimestamp();
     return await queryOne(`
         UPDATE regulation_versions
         SET index_status = 'indexing', index_attempts = COALESCE(index_attempts, 0) + 1,
-            index_last_attempt_at = ?, index_next_retry_at = NULL, updated_at = ?
+            index_error = '', index_last_attempt_at = ?, index_next_retry_at = NULL, updated_at = ?
         WHERE id = ?
         RETURNING index_attempts, index_max_attempts
     `, [now, now, versionId]);
@@ -567,7 +651,7 @@ async function embedRegulationArticles(articles, {
         }
     }
     if (versionId) {
-        await execute("UPDATE regulation_versions SET index_status = 'vector_ready', index_error = '', index_next_retry_at = NULL, updated_at = ? WHERE id = ?", [getBeijingTimestamp(), versionId]);
+        await execute("UPDATE regulation_versions SET index_status = 'vector_ready', index_error = '', index_next_retry_at = NULL, embedding_profile = ?, updated_at = ? WHERE id = ?", [profile, getBeijingTimestamp(), versionId]);
     }
 }
 
@@ -666,6 +750,44 @@ async function queueRegulationLibraryReindex({ category = '', uncategorized = fa
         embeddingProfile: target.profile,
         scope: uncategorized ? 'uncategorized' : (normalizedCategory || 'all')
     };
+}
+
+// 质量治理队列中的索引修复按管理员明确勾选的法规执行。与分类/全库重建
+// 使用同一套可恢复索引状态，但避免把未选中的法规意外加入队列。
+async function queueRegulationDocumentsReindex({ documentIds = [] } = {}) {
+    const ids = [...new Set((Array.isArray(documentIds) ? documentIds : [])
+        .map(normalizeRegulationId)
+        .filter(Boolean))].slice(0, 2000);
+    if (!ids.length) return { queuedVersions: 0, clearedArticles: 0, documentIds: [] };
+    const now = getBeijingTimestamp();
+    const target = getRegulationEmbeddingTarget();
+    const result = await transaction(async trx => {
+        const queued = await trx.query(`
+            UPDATE regulation_versions v
+            SET index_status = 'retry_wait', index_error = '', index_attempts = 0,
+                index_max_attempts = ${REGULATION_INDEX_MAX_ATTEMPTS}, index_next_retry_at = ?,
+                index_last_attempt_at = NULL, embedding_profile = ?, updated_at = ?
+            FROM regulation_documents d
+            WHERE d.id IN (${ids.map(() => '?').join(', ')})
+              AND d.current_version_id = v.id
+              AND d.deleted_at IS NULL
+              AND d.status <> 'archived'
+            RETURNING v.id, v.document_id
+        `, [now, target.profile, now, ...ids]);
+        const versionIds = queued.map(row => Number(row.id)).filter(Number.isSafeInteger);
+        if (!versionIds.length) return { queuedVersions: 0, clearedArticles: 0, documentIds: [] };
+        const clearedArticles = await trx.execute(`
+            UPDATE regulation_articles
+            SET embedding = NULL, embedding_profile = ''
+            WHERE version_id IN (${versionIds.map(() => '?').join(', ')})
+        `, versionIds);
+        return {
+            queuedVersions: versionIds.length,
+            clearedArticles: Number(clearedArticles || 0),
+            documentIds: [...new Set(queued.map(row => Number(row.document_id)).filter(Number.isSafeInteger))]
+        };
+    });
+    return { ...result, embeddingProfile: target.profile };
 }
 
 async function getRegulationIndexSummary() {
@@ -807,8 +929,10 @@ module.exports = {
     getRegulationIndexSummary,
     isRegulationEmbeddingErrorRetryable,
     recoverRegulationArticleEmbeddings,
+    rebuildRegulationArticleLocations,
     requestRegulationVersionReindex,
     queueRegulationLibraryReindex,
+    queueRegulationDocumentsReindex,
     restoreRegulationDocument,
     resolveRegulationVersionDownloadPath,
     saveRegulationDocumentVersion,

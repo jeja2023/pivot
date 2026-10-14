@@ -45,7 +45,7 @@ const {
     testEmbeddingConnection,
     debugRetrieveContext
 } = require('../services/rag-index');
-const { getEmbeddingConfig } = require('../services/rag-config');
+const { getEmbeddingConfig, getRerankConfig } = require('../services/rag-config');
 const { testRerankConnection } = require('../services/rerank-client');
 const {
     confirmRelation,
@@ -531,36 +531,58 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
 }));
 ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (req, res) => {
     const savedConfig = getEmbeddingConfig(req.user.id).http;
+    const rawUrl = String(req.body?.apiUrl || '').trim();
+    const rawKey = String(req.body?.apiKey || '').trim();
+    const isUsingSavedUrl = !rawUrl || rawUrl === '********';
+    if (!isUsingSavedUrl) {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ success: false, error: '只有系统管理员可测试自定义向量服务地址。' });
+        await assertSafeOutboundUrl(rawUrl, req.user);
+    }
     const config = {
         mode: req.body?.mode || 'http',
-        apiUrl: req.body?.apiUrl || savedConfig.url,
+        apiUrl: isUsingSavedUrl ? savedConfig.url : rawUrl,
         model: req.body?.model || savedConfig.model,
-        apiKey: (req.body?.apiKey && req.body.apiKey.trim()) ? req.body.apiKey.trim() : savedConfig.apiKey
+        apiKey: (!rawKey || rawKey === '********') ? savedConfig.apiKey : rawKey
     };
+    if (!config.apiUrl) {
+        return res.status(400).json({ success: false, error: '未配置向量生成服务地址。' });
+    }
     
     const result = await testEmbeddingConnection(config, req.user);
     auditRagAction(req, '向量模型连接测试', {
         mode: config.mode, 
-        apiUrl: config.apiUrl,
+        apiUrl: isUsingSavedUrl ? '********' : config.apiUrl,
         success: result.success 
     });
     return res.json(result);
 }));
 
 ragRouter.post('/settings/test-rerank', authMiddleware, asyncHandler(async (req, res) => {
-    if (!isSuperAdmin(req.user)) return res.status(403).json({ success: false, error: '只有 admin 权限层级可以测试重排序服务。' });
-    const apiUrl = String(req.body?.apiUrl || '').trim();
-    if (!apiUrl) return res.status(400).json({ success: false, error: '请填写重排序服务地址。' });
+    const savedConfig = getRerankConfig().http || {};
+    let apiUrl = String(req.body?.apiUrl || '').trim();
+    const isUsingSavedUrl = !apiUrl || apiUrl === '********';
+    if (isUsingSavedUrl) {
+        apiUrl = savedConfig.url || '';
+    } else {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ success: false, error: '只有系统管理员可测试自定义重排序服务地址。' });
+    }
+    if (!apiUrl) return res.status(400).json({ success: false, error: '未配置重排序服务地址。' });
     await assertSafeOutboundUrl(apiUrl, req.user);
+    const rawKey = req.body?.apiKey;
+    const apiKey = (!rawKey || rawKey === '********') ? savedConfig.apiKey : rawKey.trim();
+    const model = req.body?.model || savedConfig.model;
+    const protocol = req.body?.protocol || savedConfig.protocol;
+    const candidateLimit = req.body?.candidateLimit || savedConfig.candidateLimit;
+    const timeoutMs = req.body?.timeoutMs || savedConfig.timeoutMs;
     const result = await testRerankConnection({
         apiUrl,
-        apiKey: req.body?.apiKey,
-        model: req.body?.model,
-        protocol: req.body?.protocol,
-        candidateLimit: req.body?.candidateLimit,
-        timeoutMs: req.body?.timeoutMs
+        apiKey,
+        model,
+        protocol,
+        candidateLimit,
+        timeoutMs
     });
-    auditRagAction(req, '重排序模型连接测试', { apiUrl, protocol: req.body?.protocol, success: result.success === true });
+    auditRagAction(req, '重排序模型连接测试', { apiUrl: isUsingSavedUrl ? '********' : apiUrl, protocol, success: result.success === true });
     return res.status(result.success ? 200 : 502).json(result);
 }));
 

@@ -83,27 +83,38 @@ async function listRegulationQualitySummary() {
     const [documents, versions, links, locations, obligations] = await Promise.all([
         queryOne(`
             SELECT COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE legal_level = '' OR official_source_url = '' OR metadata_review_status <> 'approved') AS metadata_needs_review,
+                   COUNT(*) FILTER (WHERE COALESCE(legal_level, '') = '' OR COALESCE(official_source_url, '') = '' OR COALESCE(metadata_review_status, 'unreviewed') <> 'approved') AS metadata_needs_review,
                    COUNT(*) FILTER (WHERE maintainer_user_id IS NULL) AS missing_maintainer
-            FROM regulation_documents WHERE deleted_at IS NULL
+            FROM regulation_documents WHERE deleted_at IS NULL AND status <> 'archived'
         `),
         queryOne(`
             SELECT COUNT(*) AS total,
-                   COUNT(*) FILTER (WHERE effect_status = 'unverified' OR review_status <> 'approved') AS governance_needs_review,
-                   COUNT(*) FILTER (WHERE index_status <> 'vector_ready') AS indexing_incomplete,
-                   COUNT(*) FILTER (WHERE parse_status <> 'ready') AS parsing_incomplete
-            FROM regulation_versions
+                   COUNT(*) FILTER (WHERE v.id IS NULL OR v.effect_status = 'unverified' OR COALESCE(v.review_status, 'pending') <> 'approved') AS governance_needs_review,
+                   COUNT(*) FILTER (WHERE v.id IS NULL OR COALESCE(v.index_status, '') <> 'vector_ready') AS indexing_incomplete,
+                   COUNT(*) FILTER (WHERE v.id IS NULL OR COALESCE(v.parse_status, '') <> 'ready') AS parsing_incomplete
+            FROM regulation_documents d
+            LEFT JOIN regulation_versions v ON v.id = d.current_version_id
+            WHERE d.deleted_at IS NULL AND d.status <> 'archived'
         `),
         queryOne(`
-            SELECT COUNT(*) FILTER (WHERE target_label LIKE '《%' AND target_article_id IS NULL) AS unresolved,
-                   COUNT(*) FILTER (WHERE review_status <> 'approved') AS relation_needs_review
-            FROM regulation_article_links
+            SELECT COUNT(*) FILTER (
+                       WHERE l.target_label LIKE '《%'
+                         AND l.target_article_id IS NULL
+                         AND COALESCE(l.review_status, 'auto') <> 'rejected'
+                   ) AS unresolved,
+                   COUNT(*) FILTER (
+                       WHERE l.target_article_id IS NOT NULL
+                         AND COALESCE(l.review_status, 'auto') NOT IN ('approved', 'rejected')
+                   ) AS relation_needs_review
+            FROM regulation_article_links l
+            JOIN regulation_documents d ON d.id = l.document_id
+            WHERE d.deleted_at IS NULL AND d.status <> 'archived' AND l.version_id = d.current_version_id
         `),
         queryOne(`
             SELECT COUNT(*) AS total,
                    COUNT(DISTINCT a.id) FILTER (WHERE l.id IS NULL) AS articles_without_location
             FROM regulation_articles a
-            JOIN regulation_documents d ON d.id = a.document_id AND d.deleted_at IS NULL
+            JOIN regulation_documents d ON d.id = a.document_id AND d.deleted_at IS NULL AND d.status <> 'archived'
             LEFT JOIN regulation_article_locations l ON l.article_id = a.id
             WHERE a.version_id = d.current_version_id
         `),

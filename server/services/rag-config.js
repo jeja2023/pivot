@@ -141,13 +141,13 @@ function getRerankConfig() {
         protocol: normalizeRerankProtocol(getSettingValue(RAG_CONFIG_KEYS.rerankProtocol) || process.env.RERANK_PROTOCOL),
         candidateLimit: clampInteger(
             getSettingValue(RAG_CONFIG_KEYS.rerankCandidateLimit) ?? process.env.RERANK_CANDIDATE_LIMIT,
-            30,
+            20,
             1,
             100
         ),
         timeoutMs: clampInteger(
             getSettingValue(RAG_CONFIG_KEYS.rerankTimeoutMs) ?? process.env.RERANK_TIMEOUT_MS,
-            1800,
+            5000,
             200,
             30000
         )
@@ -319,10 +319,10 @@ function toRagSettingValue(key, value) {
         return normalizeRerankProtocol(value);
     }
     if (key === RAG_CONFIG_KEYS.rerankCandidateLimit) {
-        return String(clampInteger(value, 30, 1, 100));
+        return String(clampInteger(value, 20, 1, 100));
     }
     if (key === RAG_CONFIG_KEYS.rerankTimeoutMs) {
-        return String(clampInteger(value, 1800, 200, 30000));
+        return String(clampInteger(value, 5000, 200, 30000));
     }
     if (key === RAG_CONFIG_KEYS.rerankApiKey) {
         return encryptSecret(String(value || '').trim(), 'rag.rerank_api_key');

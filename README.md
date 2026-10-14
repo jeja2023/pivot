@@ -18,6 +18,8 @@
 - **操作按钮对称网格对齐**：文字识别工作区侧边栏 4 个核心操作按钮重构为 `repeat(2, minmax(0, 1fr))` 双列对称网格布局，消除折行错位并补齐原生悬停气泡提示。
 - **OCR 模型服务收拢系统设置**：移除业务侧栏内联配置，在「系统设置 → 模型配置（基础模型与算法服务）」中新增独立的「OCR 识别服务」状态卡片与独立配置测试弹窗。
 - **服务状态感知与跨工作区联动**：业务侧栏提供轻量化服务告警条与一键跳转系统设置引导，异常即时感知，正常状态自动静默。
+- **法规质量治理闭环**：法规质量概览的元数据、维护人、索引、引用、定位与版本待办均可由管理员进入对应队列完成处理；统计仅以未归档法规的当前版本为准，避免历史版本造成重复计数。
+- **质量治理批量化**：各治理队列均提供一键全选和选中项批量操作；元数据、维护人、版本状态可批量修改并留存可撤销审计，索引、来源定位和引用审核提供安全的一键/批量执行路径。
 
 （详细版本变更与历史演进说明请参阅 [CHANGELOG.md](CHANGELOG.md)；本版本说明请参阅 [v0.2.23 发布记录](docs/releases/v0.2.23-文字识别按钮对齐与OCR模型服务收拢系统设置.md)。）
 
@@ -436,8 +438,8 @@ RERANK_API_URL=
 RERANK_API_KEY=
 RERANK_MODEL=BAAI/bge-reranker-v2-m3
 RERANK_PROTOCOL=tei
-RERANK_CANDIDATE_LIMIT=30
-RERANK_TIMEOUT_MS=1800
+RERANK_CANDIDATE_LIMIT=20
+RERANK_TIMEOUT_MS=5000
 RAG_CANDIDATE_LIMIT=300
 RAG_CACHE_TTL_MS=300000
 RAG_CACHE_MAX_ITEMS=500

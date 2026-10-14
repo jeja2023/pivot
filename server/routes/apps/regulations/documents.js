@@ -4,6 +4,7 @@ const {
     isAdmin,
     SUPPORTED_UPLOAD_LABEL,
     analyzeRegulationChangeImpact,
+    approveHighConfidenceRegulationCitationLinks,
     cancelRegulationImportJob,
     cleanupTempUpload,
     cleanupTempUploads,
@@ -30,6 +31,7 @@ const {
     listRegulationBookmarks,
     listRegulationDocumentChangeLogs,
     listRegulationAiAnswerLogs,
+    listRegulationCitationGovernance,
     listRegulationFacets,
     listRegulationFolderDocumentSelection,
     listRegulationObligations,
@@ -42,6 +44,10 @@ const {
     prepareRegulationUploadMetadata,
     readRegulationMetadata,
     rebuildRegulationCrossLinks,
+    rebuildRegulationArticleLocations,
+    rebuildRegulationDocumentLocations,
+    reindexRegulationDocuments,
+    reviewRegulationCitationLinks,
     recordRegulationAccess,
     requestRegulationVersionReindex,
     queueRegulationLibraryReindex,
@@ -89,6 +95,9 @@ function registerDocumentRoutes(router, deps) {
 
     router.get('/documents', authMiddleware, asyncHandler(async (req, res) => {
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
+            const governancePending = req.query.governancePending === 'true' || req.query.governance_pending === 'true';
+            const governanceScope = String(req.query.governanceScope || req.query.governance_scope || '').trim();
+            if ((governancePending || governanceScope) && !requireRegulationsAdmin(req, res)) return;
             const result = await listRegulationDocuments({
                 query: req.query.query || '',
                 category: req.query.category || '',
@@ -96,6 +105,8 @@ function registerDocumentRoutes(router, deps) {
                 jurisdiction: req.query.jurisdiction || '',
                 status: req.query.status || '',
                 uncategorized: req.query.uncategorized === 'true',
+                governancePending,
+                governanceScope,
                 includeArchived,
                 limit: req.query.limit,
                 offset: req.query.offset
@@ -132,9 +143,11 @@ function registerDocumentRoutes(router, deps) {
         router.get('/documents/folder-selection', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
             const includeArchived = isAdmin(req.user) && req.query.includeArchived === 'true';
+            const governanceScope = String(req.query.governanceScope || req.query.governance_scope || '').trim();
             res.json(await listRegulationFolderDocumentSelection({
                 category: req.query.category || '',
                 uncategorized: req.query.uncategorized === 'true',
+                governanceScope,
                 includeArchived,
                 limit: req.query.limit
             }));
@@ -186,6 +199,43 @@ function registerDocumentRoutes(router, deps) {
         router.get('/quality-summary', authMiddleware, asyncHandler(async (req, res) => {
             if (!requireRegulationsAdmin(req, res)) return;
             res.json({ summary: await listRegulationQualitySummary() });
+        }));
+
+        router.get('/assignees', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            res.json({ assignees: await listRegulationAssignees() });
+        }));
+
+        router.get('/citation-governance', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            res.json(await listRegulationCitationGovernance({
+                type: req.query.type,
+                limit: req.query.limit,
+                offset: req.query.offset
+            }));
+        }));
+
+        router.put('/citation-governance/review', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await reviewRegulationCitationLinks({
+                linkIds: req.body?.ids || req.body?.linkIds || req.body?.link_ids,
+                reviewStatus: req.body?.reviewStatus || req.body?.review_status
+            });
+            if (!result.ids.length || !result.reviewStatus) {
+                return res.status(400).json({ error: { message: '请选择要处理的引用，并指定审核结论', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询审核引用关系', `结论 ${result.reviewStatus}，处理 ${result.updated} 条`);
+            res.json({ result });
+        }));
+
+        router.post('/citation-governance/approve-high-confidence', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await approveHighConfidenceRegulationCitationLinks({
+                minConfidence: req.body?.minConfidence || req.body?.min_confidence,
+                limit: req.body?.limit
+            });
+            logAction(req, '法规查询批量确认高置信引用', `阈值 ${result.minConfidence}，确认 ${result.updated} / 候选 ${result.candidates}`);
+            res.json({ result });
         }));
 
         router.get('/subscriptions', authMiddleware, asyncHandler(async (req, res) => {
@@ -666,6 +716,35 @@ function registerDocumentRoutes(router, deps) {
             void triggerRegulationIndexRecovery();
             logAction(req, '法规查询重新建立向量索引', `文档 ${req.params.id}，版本 ${req.params.versionId}`);
             res.status(202).json({ version });
+        }));
+
+        router.post('/documents/:id/versions/:versionId/rebuild-locations', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await rebuildRegulationArticleLocations({
+                documentId: req.params.id,
+                versionId: req.params.versionId
+            });
+            if (!result) {
+                return res.status(404).json({ error: { message: '法规版本不存在或不可生成来源定位', type: 'invalid_request_error' } });
+            }
+            logAction(req, '法规查询重建条文来源定位', `文档 ${req.params.id}，版本 ${req.params.versionId}，定位 ${result.rebuilt} 条`);
+            res.json({ result });
+        }));
+
+        router.post('/documents/batch-reindex', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await reindexRegulationDocuments({ documentIds: req.body?.ids || req.body?.documentIds || req.body?.document_ids });
+            await startRegulationIndexRecoveryRunner();
+            void triggerRegulationIndexRecovery();
+            logAction(req, '法规查询批量重建选中向量索引', `成功排队 ${result.queuedVersions} / 选中 ${result.total}，失败 ${result.failed.length}`);
+            res.status(202).json({ result });
+        }));
+
+        router.post('/documents/batch-rebuild-locations', authMiddleware, asyncHandler(async (req, res) => {
+            if (!requireRegulationsAdmin(req, res)) return;
+            const result = await rebuildRegulationDocumentLocations({ documentIds: req.body?.ids || req.body?.documentIds || req.body?.document_ids });
+            logAction(req, '法规查询批量重建条文来源定位', `成功 ${result.rebuilt.length} / 选中 ${result.total}，定位 ${result.rebuiltArticles} 条，失败 ${result.failed.length}`);
+            res.json({ result });
         }));
 
         router.get('/index-summary', authMiddleware, asyncHandler(async (req, res) => {

@@ -167,10 +167,116 @@ async function rebuildRegulationCrossLinks(documentId = null) {
     return { resolved: total, versions: versions.length };
 }
 
+function normalizeCitationGovernanceType(value) {
+    return String(value || '').trim().toLowerCase() === 'review' ? 'review' : 'unresolved';
+}
+
+function normalizeCitationReviewStatus(value) {
+    const status = String(value || '').trim().toLowerCase();
+    return ['approved', 'rejected', 'pending'].includes(status) ? status : '';
+}
+
+function normalizeCitationLinkIds(value, max = 1000) {
+    const source = Array.isArray(value) ? value : [value];
+    return [...new Set(source.map(item => normalizeRegulationId(item)).filter(Boolean))].slice(0, max);
+}
+
+function citationGovernanceScope(type) {
+    const common = `
+        d.deleted_at IS NULL
+        AND d.status <> 'archived'
+        AND l.version_id = d.current_version_id
+    `;
+    if (type === 'review') {
+        return `${common}
+            AND l.target_article_id IS NOT NULL
+            AND COALESCE(l.review_status, 'auto') NOT IN ('approved', 'rejected')`;
+    }
+    return `${common}
+        AND l.target_label LIKE '《%'
+        AND l.target_article_id IS NULL
+        AND COALESCE(l.review_status, 'auto') <> 'rejected'`;
+}
+
+async function listRegulationCitationGovernance({ type = 'unresolved', limit = 100, offset = 0 } = {}) {
+    const safeType = normalizeCitationGovernanceType(type);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 200);
+    const safeOffset = Math.max(Number.parseInt(offset, 10) || 0, 0);
+    const scope = citationGovernanceScope(safeType);
+    const [rows, totalRow] = await Promise.all([
+        query(`
+            SELECT l.id, l.document_id, l.version_id, l.source_article_id, l.target_label,
+                   l.target_document_id, l.target_article_id, l.target_version_id,
+                   l.relation_type, l.evidence_excerpt, l.review_status, l.confidence,
+                   d.title AS document_title, a.article_label AS source_article_label,
+                   a.article_title AS source_article_title
+            FROM regulation_article_links l
+            JOIN regulation_documents d ON d.id = l.document_id
+            LEFT JOIN regulation_articles a ON a.id = l.source_article_id
+            WHERE ${scope}
+            ORDER BY l.confidence DESC, l.id DESC
+            LIMIT ? OFFSET ?
+        `, [safeLimit, safeOffset]),
+        queryOne(`
+            SELECT COUNT(*) AS total
+            FROM regulation_article_links l
+            JOIN regulation_documents d ON d.id = l.document_id
+            WHERE ${scope}
+        `)
+    ]);
+    return {
+        type: safeType,
+        data: rows,
+        total: Number(totalRow?.total || 0),
+        limit: safeLimit,
+        offset: safeOffset
+    };
+}
+
+async function reviewRegulationCitationLinks({ linkIds, reviewStatus }) {
+    const ids = normalizeCitationLinkIds(linkIds);
+    const status = normalizeCitationReviewStatus(reviewStatus);
+    if (!ids.length || !status) return { updated: 0, ids: [] };
+    const placeholders = ids.map(() => '?').join(',');
+    const updated = await execute(`
+        UPDATE regulation_article_links l
+        SET review_status = ?
+        FROM regulation_documents d
+        WHERE l.document_id = d.id
+          AND d.deleted_at IS NULL
+          AND d.status <> 'archived'
+          AND l.version_id = d.current_version_id
+          AND l.id IN (${placeholders})
+    `, [status, ...ids]);
+    return { updated: Number(updated || 0), ids, reviewStatus: status };
+}
+
+async function approveHighConfidenceRegulationCitationLinks({ minConfidence = 0.8, limit = 2000 } = {}) {
+    const confidence = Math.min(Math.max(Number(minConfidence) || 0.8, 0.5), 1);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 2000, 1), 5000);
+    const scope = citationGovernanceScope('review');
+    const rows = await query(`
+        SELECT l.id
+        FROM regulation_article_links l
+        JOIN regulation_documents d ON d.id = l.document_id
+        WHERE ${scope} AND COALESCE(l.confidence, 0) >= ?
+        ORDER BY l.confidence DESC, l.id ASC
+        LIMIT ?
+    `, [confidence, safeLimit]);
+    const result = await reviewRegulationCitationLinks({
+        linkIds: rows.map(row => row.id),
+        reviewStatus: 'approved'
+    });
+    return { ...result, minConfidence: confidence, candidates: rows.length };
+}
+
 module.exports = {
     classifyCiteRelation,
+    approveHighConfidenceRegulationCitationLinks,
     extractRegulationLinks,
+    listRegulationCitationGovernance,
     parseCrossLinkLabel,
     rebuildRegulationCrossLinks,
+    reviewRegulationCitationLinks,
     resolveRegulationCrossLinks
 };

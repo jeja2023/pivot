@@ -21,14 +21,39 @@
         form.querySelectorAll('[data-regulations-close-batch-edit]').forEach(button => { button.disabled = locked; });
     }
 
-    function openBatchEditDialog() {
+    function renderBatchMaintainerOptions() {
+        const field = document.querySelector('#regulations-batch-edit-form [name="maintainerUserId"]');
+        if (!field) return;
+        const assignees = Array.isArray(state.governanceAssignees) ? state.governanceAssignees : [];
+        field.replaceChildren();
+        const addOption = (value, label) => {
+            const option = document.createElement('option');
+            option.value = String(value || '');
+            option.textContent = label;
+            field.append(option);
+        };
+        addOption('', '未指派');
+        assignees.forEach(item => {
+            const label = [item.nickname || item.username || `用户 ${item.id}`, item.unit].filter(Boolean).join(' · ');
+            addOption(item.id, label);
+        });
+    }
+
+    async function openBatchEditDialog() {
         if (!canManage() || !state.batchMode || state.busy || state.batchDeletePending) return;
         editDocuments = ns.getSelectedDocuments();
         if (!editDocuments.length) {
             toast('请先勾选要修改的法规文档', 'warning');
             return;
         }
+        try {
+            await ns.loadGovernanceAssignees?.();
+        } catch (error) {
+            toast(error.message || '加载维护人列表失败', 'error');
+            return;
+        }
         const form = document.getElementById('regulations-batch-edit-form');
+        renderBatchMaintainerOptions();
         form?.reset();
         syncBatchEditFields();
         const count = document.getElementById('regulations-batch-edit-count');
@@ -110,5 +135,5 @@
         }
     }
 
-    Object.assign(ns, { syncBatchEditFields, openBatchEditDialog, closeBatchEditDialog, saveBatchMetadata, actionsBatchEditReady: true });
+    Object.assign(ns, { syncBatchEditFields, renderBatchMaintainerOptions, openBatchEditDialog, closeBatchEditDialog, saveBatchMetadata, actionsBatchEditReady: true });
 })();

@@ -108,30 +108,34 @@
                                         <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-search>关闭</button>
                                     </div>
                                     <div class="workspace-modal-body regulations-search-modal-body">
-                                        <div class="regulations-admin-group regulations-search-group">
-                                            <div class="regulations-admin-group-head">
-                                                <strong>检索条件</strong>
-                                                <span>支持多字段联合检索</span>
+                                        <div class="regulations-search-sidebar">
+                                            <div class="regulations-admin-group regulations-search-group">
+                                                <div class="regulations-admin-group-head">
+                                                    <strong>检索条件</strong>
+                                                    <span>支持多字段联合检索</span>
+                                                </div>
+                                                <div class="regulations-search-form">
+                                                    <label class="regulations-search-field regulations-search-field-wide"><span>检索内容</span><input id="regulations-query" class="form-input regulations-query-input" type="search" placeholder="搜索法规名称、发布机构或条文" value="${esc(state.query)}"></label>
+                                                    <label class="regulations-search-field"><span>检索模式</span><select id="regulations-search-mode" class="form-input regulations-mode-select" aria-label="检索模式">
+                                                        <option value="hybrid" ${state.searchMode !== 'keyword' ? 'selected' : ''}>混合检索</option>
+                                                        <option value="keyword" ${state.searchMode === 'keyword' ? 'selected' : ''}>关键词</option>
+                                                    </select></label>
+                                                    <label class="regulations-search-field"><span>分类</span><input id="regulations-category-filter" class="form-input regulations-filter-input" placeholder="分类" value="${esc(state.filters.category)}"></label>
+                                                    <label class="regulations-search-field"><span>发布机构</span><input id="regulations-issuing-body-filter" class="form-input regulations-filter-input" placeholder="发布机构" value="${esc(state.filters.issuingBody)}" list="regulations-issuing-body-list"></label>
+                                                    <label class="regulations-search-field"><span>适用范围</span><input id="regulations-jurisdiction-filter" class="form-input regulations-filter-input" placeholder="适用范围" value="${esc(state.filters.jurisdiction)}"></label>
+                                                    <label class="regulations-search-field"><span>管理状态</span><select id="regulations-status-filter" class="form-input regulations-mode-select"><option value="" ${!state.filters.status ? 'selected' : ''}>全部</option><option value="active" ${state.filters.status === 'active' ? 'selected' : ''}>启用</option><option value="archived" ${state.filters.status === 'archived' ? 'selected' : ''}>归档</option></select></label>
+                                                    ${renderSearchArchivedControl()}
+                                                </div>
                                             </div>
-                                            <div class="regulations-search-form">
-                                                <label class="regulations-search-field regulations-search-field-wide"><span>检索内容</span><input id="regulations-query" class="form-input regulations-query-input" type="search" placeholder="搜索法规名称、发布机构或条文" value="${esc(state.query)}"></label>
-                                                <label class="regulations-search-field"><span>检索模式</span><select id="regulations-search-mode" class="form-input regulations-mode-select" aria-label="检索模式">
-                                                    <option value="hybrid" ${state.searchMode !== 'keyword' ? 'selected' : ''}>混合检索</option>
-                                                    <option value="keyword" ${state.searchMode === 'keyword' ? 'selected' : ''}>关键词</option>
-                                                </select></label>
-                                                <label class="regulations-search-field"><span>分类</span><input id="regulations-category-filter" class="form-input regulations-filter-input" placeholder="分类" value="${esc(state.filters.category)}"></label>
-                                                <label class="regulations-search-field"><span>发布机构</span><input id="regulations-issuing-body-filter" class="form-input regulations-filter-input" placeholder="发布机构" value="${esc(state.filters.issuingBody)}" list="regulations-issuing-body-list"></label>
-                                                <label class="regulations-search-field"><span>适用范围</span><input id="regulations-jurisdiction-filter" class="form-input regulations-filter-input" placeholder="适用范围" value="${esc(state.filters.jurisdiction)}"></label>
-                                                <label class="regulations-search-field"><span>管理状态</span><select id="regulations-status-filter" class="form-input regulations-mode-select"><option value="" ${!state.filters.status ? 'selected' : ''}>全部</option><option value="active" ${state.filters.status === 'active' ? 'selected' : ''}>启用</option><option value="archived" ${state.filters.status === 'archived' ? 'selected' : ''}>归档</option></select></label>
-                                                ${renderSearchArchivedControl()}
+                                            <div class="regulations-search-modal-actions">
+                                                <button id="regulations-save-search-btn" class="btn-secondary" type="button" title="将当前筛选条件保存为常用预设，方便后续一键复用">保存为预设</button>
+                                                <button id="regulations-search-btn" class="btn-primary" type="button">检索</button>
                                             </div>
+                                            <div id="regulations-saved-searches" class="regulations-saved-searches hidden"></div>
                                         </div>
-                                        <div class="regulations-search-modal-actions">
-                                            <button id="regulations-save-search-btn" class="btn-secondary" type="button">保存检索</button>
-                                            <button id="regulations-search-btn" class="btn-primary" type="button">检索</button>
+                                        <div class="regulations-search-content">
+                                            <div id="regulations-modal-search-results" class="regulations-search-results regulations-search-modal-results" data-regulations-search-results></div>
                                         </div>
-                                        <div id="regulations-saved-searches" class="regulations-saved-searches hidden"></div>
-                                        <div id="regulations-modal-search-results" class="regulations-search-results regulations-search-modal-results hidden" data-regulations-search-results></div>
                                     </div>
                                 </div>
                             </section>
@@ -276,16 +280,26 @@
                                 </div>
                             </section>
                             <section id="regulations-bookmarks-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-bookmarks-title">
-                                <div class="workspace-modal regulations-admin-dialog">
+                                <div class="workspace-modal regulations-admin-dialog regulations-bookmarks-dialog">
                                     <div class="workspace-modal-header">
-                                        <div><h3 id="regulations-bookmarks-title">我的法规收藏</h3><p>可按专题整理常用法规；收藏只属于当前账号，不会改变法规库元数据。</p></div>
-                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-bookmarks>关闭</button>
+                                        <div class="regulations-bookmarks-header-group">
+                                            <div class="regulations-bookmarks-header-icon" aria-hidden="true">
+                                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                                                </svg>
+                                            </div>
+                                            <div>
+                                                <h3 id="regulations-bookmarks-title">我的法规收藏</h3>
+                                                <p>按专题分类整理常用法规，仅对当前账号可见，不会改变法规库全局元数据。</p>
+                                            </div>
+                                        </div>
+                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-bookmarks title="关闭收藏弹窗">关闭</button>
                                     </div>
                                     <div id="regulations-bookmarks-body" class="workspace-modal-body"></div>
                                 </div>
                             </section>
                             <section id="regulations-recycle-bin-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-recycle-bin-title">
-                                <div class="workspace-modal regulations-admin-dialog">
+                                <div class="workspace-modal regulations-admin-dialog regulations-recycle-bin-dialog">
                                     <div class="workspace-modal-header">
                                         <div><h3 id="regulations-recycle-bin-title">法规回收站</h3><p>仅显示软删除法规；恢复后会重新进入法规目录和检索范围。</p></div>
                                         <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-recycle-bin>关闭</button>
@@ -300,6 +314,21 @@
                                         <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-quality>关闭</button>
                                     </div>
                                     <div id="regulations-quality-body" class="workspace-modal-body"></div>
+                                </div>
+                            </section>
+                            <section id="regulations-citation-governance-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-citation-governance-title">
+                                <div class="workspace-modal regulations-admin-dialog regulations-citation-governance-dialog">
+                                    <div class="workspace-modal-header regulations-citation-modal-header">
+                                        <div class="regulations-citation-header-info">
+                                            <div class="regulations-citation-title-row">
+                                                <h3 id="regulations-citation-governance-title">引用治理队列</h3>
+                                                <span id="regulations-citation-type-badge" class="regulations-citation-type-tag">待审核</span>
+                                            </div>
+                                            <p id="regulations-citation-governance-subtitle">集中处理当前法规版本的未解析与待审核引用。</p>
+                                        </div>
+                                        <button class="btn-secondary workspace-modal-close" type="button" data-regulations-close-citation-governance>关闭</button>
+                                    </div>
+                                    <div id="regulations-citation-governance-body" class="workspace-modal-body"></div>
                                 </div>
                             </section>
                             <section id="regulations-obligation-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-obligation-title">

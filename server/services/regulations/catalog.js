@@ -113,6 +113,8 @@ async function listRegulationDocuments({
     status = '',
     includeArchived = false,
     uncategorized = false,
+    governancePending = false,
+    governanceScope = '',
     limit = 50,
     offset = 0
 } = {}) {
@@ -141,6 +143,30 @@ async function listRegulationDocuments({
         clauses.push('LOWER(d.jurisdiction) LIKE LOWER(?)');
         params.push(`%${normalizeRegulationField(jurisdiction, 255)}%`);
     }
+    const normalizedGovernanceScope = ['metadata', 'maintainer', 'version', 'index', 'location'].includes(String(governanceScope || '').trim())
+        ? String(governanceScope).trim()
+        : (governancePending ? 'version' : '');
+    if (normalizedGovernanceScope === 'version') {
+        // 当前版本缺失、效力尚未核验或审核未通过的法规都需要管理员治理。
+        // 用 COALESCE 兼容历史版本的空审核状态，避免遗漏待处理记录。
+        clauses.push("(v.id IS NULL OR v.effect_status = 'unverified' OR COALESCE(v.review_status, 'pending') <> 'approved')");
+    }
+    if (normalizedGovernanceScope === 'metadata') {
+        clauses.push("(COALESCE(d.legal_level, '') = '' OR COALESCE(d.official_source_url, '') = '' OR COALESCE(d.metadata_review_status, 'unreviewed') <> 'approved')");
+    }
+    if (normalizedGovernanceScope === 'maintainer') clauses.push('d.maintainer_user_id IS NULL');
+    if (normalizedGovernanceScope === 'index') clauses.push("(v.id IS NULL OR COALESCE(v.index_status, '') <> 'vector_ready')");
+    if (normalizedGovernanceScope === 'location') {
+        clauses.push(`EXISTS (
+            SELECT 1 FROM regulation_articles location_article
+            WHERE location_article.document_id = d.id
+              AND location_article.version_id = d.current_version_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM regulation_article_locations location_row
+                  WHERE location_row.article_id = location_article.id
+              )
+        )`);
+    }
 
     const normalizedQuery = normalizeSearchText(searchQuery);
     if (normalizedQuery) {
@@ -167,6 +193,8 @@ async function listRegulationDocuments({
             v.effective_from AS current_effective_from,
             v.effective_to AS current_effective_to,
             v.review_status AS current_review_status,
+            v.index_status AS current_index_status,
+            v.index_error AS current_index_error,
             v.created_at AS current_version_created_at,
             v.updated_at AS current_version_updated_at,
             (
@@ -200,6 +228,7 @@ async function listRegulationDocuments({
     const totalRow = await queryOne(`
         SELECT COUNT(*) AS count
         FROM regulation_documents d
+        LEFT JOIN regulation_versions v ON v.id = d.current_version_id
         ${whereSql}
     `, params);
     const total = Number(totalRow?.count || 0);
@@ -291,7 +320,7 @@ async function listRegulationCategoryFolders({ includeArchived = false } = {}) {
             COUNT(*) AS document_count,
             COALESCE(SUM(d.article_count), 0) AS article_count,
             COUNT(*) FILTER (WHERE v.effect_status = 'effective' AND v.review_status = 'approved') AS effective_count,
-            COUNT(*) FILTER (WHERE v.effect_status = 'unverified' OR v.review_status <> 'approved') AS needs_review_count,
+            COUNT(*) FILTER (WHERE v.id IS NULL OR v.effect_status = 'unverified' OR COALESCE(v.review_status, 'pending') <> 'approved') AS needs_review_count,
             MAX(COALESCE(d.updated_at, d.created_at)) AS latest_updated_at
         FROM regulation_documents d
         LEFT JOIN regulation_versions v ON v.id = d.current_version_id
@@ -355,7 +384,7 @@ async function listRegulationCategoryFolders({ includeArchived = false } = {}) {
     return result;
 }
 
-async function listRegulationFolderDocumentSelection({ category = '', uncategorized = false, includeArchived = false, limit = 2000 } = {}) {
+async function listRegulationFolderDocumentSelection({ category = '', uncategorized = false, includeArchived = false, governanceScope = '', limit = 2000 } = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 2000, 1), 2000);
     const clauses = [includeArchived ? 'd.deleted_at IS NULL' : "d.deleted_at IS NULL AND d.status <> 'archived'"];
     const params = [];
@@ -364,9 +393,32 @@ async function listRegulationFolderDocumentSelection({ category = '', uncategori
         clauses.push('d.category = ?');
         params.push(normalizeRegulationField(category, 255));
     }
+    const normalizedGovernanceScope = ['metadata', 'maintainer', 'version', 'index', 'location'].includes(String(governanceScope || '').trim())
+        ? String(governanceScope).trim()
+        : '';
+    if (normalizedGovernanceScope === 'version') {
+        clauses.push("(v.id IS NULL OR v.effect_status = 'unverified' OR COALESCE(v.review_status, 'pending') <> 'approved')");
+    }
+    if (normalizedGovernanceScope === 'metadata') {
+        clauses.push("(COALESCE(d.legal_level, '') = '' OR COALESCE(d.official_source_url, '') = '' OR COALESCE(d.metadata_review_status, 'unreviewed') <> 'approved')");
+    }
+    if (normalizedGovernanceScope === 'maintainer') clauses.push('d.maintainer_user_id IS NULL');
+    if (normalizedGovernanceScope === 'index') clauses.push("(v.id IS NULL OR COALESCE(v.index_status, '') <> 'vector_ready')");
+    if (normalizedGovernanceScope === 'location') {
+        clauses.push(`EXISTS (
+            SELECT 1 FROM regulation_articles location_article
+            WHERE location_article.document_id = d.id
+              AND location_article.version_id = d.current_version_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM regulation_article_locations location_row
+                  WHERE location_row.article_id = location_article.id
+              )
+        )`);
+    }
     const rows = await query(`
         SELECT d.id, d.title
         FROM regulation_documents d
+        LEFT JOIN regulation_versions v ON v.id = d.current_version_id
         WHERE ${clauses.join(' AND ')}
         ORDER BY d.id ASC
         LIMIT ?

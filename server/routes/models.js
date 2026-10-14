@@ -47,7 +47,7 @@ function canUseStoredModelSecret(model, user) {
 function canTestModel(model, user) {
     if (!model || !user) return false;
     if (model.user_id === user.id) return true;
-    return model.user_id === null && isAdmin(user);
+    return model.user_id === null;
 }
 
 function normalizeChatThinkingEnabledFlag(body = {}) {
@@ -57,17 +57,16 @@ function normalizeChatThinkingEnabledFlag(body = {}) {
 async function getTestableModel(modelId, user) {
     if (!modelId || !user?.id) return null;
     const isNumeric = /^\d+$/.test(String(modelId));
-    const canTestGlobal = isAdmin(user) ? 1 : 0;
     let model;
     if (isNumeric) {
         model = await queryOne(
-            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
-            [modelId, modelId, user.id, canTestGlobal]
+            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR user_id IS NULL)",
+            [modelId, modelId, user.id]
         );
     } else {
         model = await queryOne(
-            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR (user_id IS NULL AND ? = 1))",
-            [modelId, user.id, canTestGlobal]
+            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR user_id IS NULL)",
+            [modelId, user.id]
         );
     }
     if (!model) return null;
@@ -220,7 +219,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 return res.json({ success: false, requestId: testId, error: `${storedModel.secret_error}，请重新保存该模型的 API Key` });
             }
             // 允许请求中的新值覆盖数据库值，除非请求值为掩码或空
-            if (!url) url = storedModel.url;
+            if (!url || url === '********' || (!isAdmin(req.user) && !storedModel.user_id)) url = storedModel.url;
             if (!api_key || api_key === '********') api_key = storedModel.api_key;
             if (!model_name) model_name = storedModel.model_name;
         }

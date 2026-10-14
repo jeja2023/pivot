@@ -103,6 +103,7 @@ const migrationModules = [
     require('./regulations-bookmarks'),
     require('./regulations-index-retries'),
     require('./regulations-categories'),
+    require('./regulations-vector-column-compatibility'),
     require('./pdf-tool-product-upgrade'),
     require('./ocr-product-upgrade'),
     require('./ocr-async-exports')

@@ -573,6 +573,10 @@ function getRetrievalConfigSection(section) {
 }
 
 function openRetrievalModelConfigSection(section) {
+    if (!isSuperAdminUser()) {
+        showToast('基础模型与算法服务由系统管理员统一维护', 'info');
+        return false;
+    }
     const safeSection = getRetrievalConfigSection(section);
     const config = RETRIEVAL_CONFIG_SECTIONS[safeSection];
     const modal = document.getElementById(config.modalId);
@@ -738,22 +742,38 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
         if (saveBtn) saveBtn.disabled = false;
     }
 };
-async function testEmbeddingConnection() {
+async function testEmbeddingConnection(options = {}) {
+    const { fromCard = false, button = null } = options;
+    const testBtn = button || document.getElementById('rag-embedding-test-btn');
     const embeddingUrlInput = document.getElementById('setting-rag-embedding-url');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
     const embeddingKeyInput = document.getElementById('setting-rag-embedding-key');
-    const testBtn = document.getElementById('rag-embedding-test-btn');
     
-    if (!embeddingUrlInput || !embeddingModelInput) return;
-    
+    let apiUrl = '';
+    let model = '';
+    let apiKey = '';
+
+    if (!fromCard) {
+        if (!embeddingUrlInput || !embeddingModelInput) return;
+        const rawUrl = embeddingUrlInput.value.trim();
+        const rawKey = embeddingKeyInput?.value.trim() || '';
+        apiUrl = rawUrl === '********' ? '' : rawUrl;
+        apiKey = rawKey === '********' ? '' : rawKey;
+        model = getEmbeddingModelValue();
+    }
+
     const payload = {
         mode: 'http',
-        apiUrl: embeddingUrlInput.value.trim(),
-        model: getEmbeddingModelValue(),
-        apiKey: embeddingKeyInput?.value.trim() || ''
+        apiUrl,
+        model,
+        apiKey
     };
 
-    if (testBtn) testBtn.disabled = true;
+    const origText = testBtn?.textContent;
+    if (testBtn) {
+        testBtn.disabled = true;
+        if (fromCard) testBtn.textContent = '测试中…';
+    }
     showToast('正在测试向量连接，请稍候...', 'info');
     
     try {
@@ -772,27 +792,54 @@ async function testEmbeddingConnection() {
         const data = await res.json();
         if (data.success) {
             showToast(`连接测试成功！向量维度：${data.dimension}，耗时：${data.durationMs}ms`, 'success');
+            const card = document.querySelector('[data-retrieval-model-test="embedding"]')?.closest('.retrieval-model-service-card');
+            if (card) {
+                card.classList.remove('is-warning');
+                card.classList.add('is-ready');
+            }
         } else {
             throw new Error(data.error || '连接测试失败');
         }
     } catch (e) {
         showToast(e.message, 'error');
         console.error('测试连接失败:', e);
+        const card = document.querySelector('[data-retrieval-model-test="embedding"]')?.closest('.retrieval-model-service-card');
+        if (card) {
+            card.classList.remove('is-ready');
+            card.classList.add('is-warning');
+        }
     } finally {
-        if (testBtn) testBtn.disabled = false;
+        if (testBtn) {
+            testBtn.disabled = false;
+            if (origText) testBtn.textContent = origText;
+        }
     }
 };
 
-async function testRerankConnection() {
-    const apiUrl = document.getElementById('setting-rag-rerank-url')?.value.trim() || '';
-    const apiKey = document.getElementById('setting-rag-rerank-key')?.value.trim() || '';
+async function testRerankConnection(options = {}) {
+    const { fromCard = false, button = null } = options;
+    const testBtn = button || document.getElementById('rag-rerank-test-btn');
+    const rawUrl = document.getElementById('setting-rag-rerank-url')?.value.trim() || '';
+    const rawKey = document.getElementById('setting-rag-rerank-key')?.value.trim() || '';
+    let apiUrl = rawUrl === '********' ? '' : rawUrl;
+    let apiKey = rawKey === '********' ? '' : rawKey;
     const model = document.getElementById('setting-rag-rerank-model')?.value.trim() || '';
     const protocol = document.getElementById('setting-rag-rerank-protocol')?.value === 'llama_cpp' ? 'llama_cpp' : 'tei';
     const candidateLimit = document.getElementById('setting-rag-rerank-candidate-limit')?.value || '30';
     const timeoutMs = document.getElementById('setting-rag-rerank-timeout-ms')?.value || '1800';
-    const testBtn = document.getElementById('rag-rerank-test-btn');
-    if (!apiUrl) return showToast('请先填写重排序服务地址', 'error');
-    if (testBtn) testBtn.disabled = true;
+
+    if (fromCard) {
+        apiUrl = '';
+        apiKey = '';
+    } else if (!rawUrl) {
+        return showToast('请先填写重排序服务地址', 'error');
+    }
+
+    const origText = testBtn?.textContent;
+    if (testBtn) {
+        testBtn.disabled = true;
+        if (fromCard) testBtn.textContent = '测试中…';
+    }
     showToast('正在测试重排序服务，请稍候…', 'info');
     try {
         const res = await apiFetch(`${API_BASE}/rag/settings/test-rerank`, {
@@ -802,36 +849,96 @@ async function testRerankConnection() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.success !== true) throw new Error(data.error || '重排序服务测试失败');
-        showToast(`重排序服务连接成功，已验证 ${data.ranked || 0} 个测试候选`, 'success');
+        const durationText = data.durationMs ? `，耗时：${data.durationMs}ms` : '';
+        showToast(`重排序服务连接成功，已验证 ${data.ranked || 0} 个测试候选${durationText}`, 'success');
+        const card = document.querySelector('[data-retrieval-model-test="rerank"]')?.closest('.retrieval-model-service-card');
+        if (card) {
+            card.classList.remove('is-warning');
+            card.classList.add('is-ready');
+        }
     } catch (error) {
         showToast(error.message || '重排序服务测试失败', 'error');
+        const card = document.querySelector('[data-retrieval-model-test="rerank"]')?.closest('.retrieval-model-service-card');
+        if (card) {
+            card.classList.remove('is-ready');
+            card.classList.add('is-warning');
+        }
     } finally {
-        if (testBtn) testBtn.disabled = false;
+        if (testBtn) {
+            testBtn.disabled = false;
+            if (origText) testBtn.textContent = origText;
+        }
     }
 };
 
-async function testOcrConnection() {
-    const serviceUrl = document.getElementById('setting-ocr-service-url')?.value.trim() || '';
-    const testBtn = document.getElementById('ocr-service-test-btn');
+async function testOcrConnection(options = {}) {
+    const { fromCard = false, button = null } = options;
+    const testBtn = button || document.getElementById('ocr-service-test-btn');
+    const rawUrl = document.getElementById('setting-ocr-service-url')?.value.trim() || '';
+    let serviceUrl = rawUrl === '********' ? '' : rawUrl;
     const statusEl = document.getElementById('setting-ocr-test-status');
-    if (!serviceUrl) return showToast('请先填写 OCR 服务地址', 'error');
-    if (testBtn) testBtn.disabled = true;
-    if (statusEl) { statusEl.className = 'model-modal-desc retrieval-config-status is-loading'; statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…'; }
+
+    if (fromCard) {
+        serviceUrl = '';
+    } else if (!rawUrl) {
+        return showToast('请先填写 OCR 服务地址', 'error');
+    }
+
+    const origText = testBtn?.textContent;
+    if (testBtn) {
+        testBtn.disabled = true;
+        if (fromCard) testBtn.textContent = '测试中…';
+    }
+    if (statusEl) {
+        statusEl.className = 'model-modal-desc retrieval-config-status is-loading';
+        statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…';
+    }
     showToast('正在检测 OCR 服务连接…', 'info');
     try {
         const res = await apiFetch(`${API_BASE}/settings/ocr-test`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceUrl })
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serviceUrl })
         });
         const data = await res.json().catch(() => ({}));
         if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
         if (!res.ok || data.success !== true) throw new Error(data.message || data.error || 'OCR 服务连接失败');
-        if (statusEl) { statusEl.className = 'model-modal-desc retrieval-config-status is-success'; statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。'; }
+        if (statusEl) {
+            statusEl.className = 'model-modal-desc retrieval-config-status is-success';
+            statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。';
+        }
         showToast('OCR 服务连接成功', 'success');
+        const card = document.querySelector('[data-retrieval-model-test="ocr"]')?.closest('.retrieval-model-service-card');
+        if (card) {
+            card.classList.remove('is-warning');
+            card.classList.add('is-ready');
+            const statusSmall = card.querySelector('small');
+            if (statusSmall) {
+                statusSmall.textContent = '服务可用 · 连通测试成功';
+                statusSmall.title = '服务可用 · 连通测试成功';
+            }
+        }
     } catch (error) {
-        if (statusEl) { statusEl.className = 'model-modal-desc retrieval-config-status is-error'; statusEl.textContent = `连接失败：${error.message}`; }
+        if (statusEl) {
+            statusEl.className = 'model-modal-desc retrieval-config-status is-error';
+            statusEl.textContent = `连接失败：${error.message}`;
+        }
         showToast(error.message || 'OCR 服务连接失败', 'error');
+        const card = document.querySelector('[data-retrieval-model-test="ocr"]')?.closest('.retrieval-model-service-card');
+        if (card) {
+            card.classList.remove('is-ready');
+            card.classList.add('is-warning');
+            const statusSmall = card.querySelector('small');
+            if (statusSmall) {
+                statusSmall.textContent = `不可用：${error.message}`;
+                statusSmall.title = `不可用：${error.message}`;
+            }
+        }
     } finally {
-        if (testBtn) testBtn.disabled = false;
+        if (testBtn) {
+            testBtn.disabled = false;
+            if (origText) testBtn.textContent = origText;
+        }
     }
 }
 
@@ -855,6 +962,19 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
         serviceCards.dataset.boundRetrievalModelActions = '1';
         serviceCards.dataset.boundEmbeddingOpen = '1';
         serviceCards.addEventListener('click', event => {
+            const testButton = event.target?.closest?.('[data-retrieval-model-test]');
+            if (testButton && serviceCards.contains(testButton)) {
+                event.preventDefault();
+                const serviceKey = testButton.dataset.retrievalModelTest;
+                if (serviceKey === 'embedding') {
+                    testEmbeddingConnection({ fromCard: true, button: testButton });
+                } else if (serviceKey === 'rerank') {
+                    testRerankConnection({ fromCard: true, button: testButton });
+                } else if (serviceKey === 'ocr') {
+                    testOcrConnection({ fromCard: true, button: testButton });
+                }
+                return;
+            }
             const openButton = event.target?.closest?.('[data-retrieval-model-config-open]');
             if (!openButton || !serviceCards.contains(openButton)) return;
             event.preventDefault();

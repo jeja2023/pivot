@@ -97,8 +97,8 @@
 | `RERANK_API_KEY` | string | `` | 逗号分隔的语言标记 | 外部 Reranker 服务的可选认证密钥；生产优先在系统设置安全保存，环境变量仅用于首次初始化。 |
 | `RERANK_MODEL` | string | `BAAI/bge-reranker-v2-m3` | 逗号分隔的语言标记 | 外部 Reranker 模型标识，用于调用审计与服务兼容。 |
 | `RERANK_PROTOCOL` | enum | `tei` | tei、llama_cpp | 外部 Reranker 接口协议：tei 使用 texts；llama_cpp 使用 documents。 |
-| `RERANK_CANDIDATE_LIMIT` | integer | `30` | 1–100 | 单次 Cross-Encoder 重排序的最大候选数；不扩大已授权的召回集合。 |
-| `RERANK_TIMEOUT_MS` | integer | `1800` | 200–30000 | 外部重排序单次请求超时；超时后保留已有混合检索排序。 |
+| `RERANK_CANDIDATE_LIMIT` | integer | `20` | 1–100 | 单次 Cross-Encoder 重排序的最大候选数；默认 20 兼顾 GPU 服务延迟和精度，不扩大已授权的召回集合。 |
+| `RERANK_TIMEOUT_MS` | integer | `5000` | 200–30000 | 外部重排序单次请求超时；默认 5 秒覆盖模型冷启动和短暂排队，超时后保留已有混合检索排序。 |
 | `RERANK_CIRCUIT_FAILURE_THRESHOLD` | integer | `3` | 1–20 | 外部重排序连续失败达到该次数后开启熔断，避免异常服务拖慢检索。 |
 | `RERANK_CIRCUIT_COOLDOWN_MS` | integer | `30000` | 1000–300000 | 外部重排序熔断冷却时长；冷却期内直接使用现有检索排序。 |
 

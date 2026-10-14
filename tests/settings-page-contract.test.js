@@ -266,3 +266,29 @@ test('长期记忆与审计日志数据表格默认按每页 20 条分页', () =
     assert.match(statsJs, /pageState\.logsLimit\s*\|\|\s*20/);
     assert.match(settingsJs, /tab === 'logs'/);
 });
+
+test('非管理员与非个人配置模型查看模型配置时向量生成与OCR等服务URL脱敏', () => {
+    const settingsRoute = read('server/routes/settings.js');
+    const modelsJs = read('client/chat/models.js');
+    const knowledgeSummaryJs = read('client/chat/knowledge-retrieval-summary.js');
+    const adminSettingsJs = read('client/chat/admin-settings.js');
+
+    // 服务端路由对非超管返回脱敏后的 URL
+    assert.match(settingsRoute, /if \(!isSuperAdmin\(req\.user\)\) \{/);
+    assert.match(settingsRoute, /payload\.retrievalModelConfig = \{[\s\S]*?apiUrl: '\*\*\*\*\*\*\*\*'/);
+    assert.match(settingsRoute, /payload\.ocrConfig = \{[\s\S]*?serviceUrl: payload\.ocrConfig\.serviceUrl \? '\*\*\*\*\*\*\*\*' : ''/);
+    assert.match(settingsRoute, /payload\.rerankConfig = \{[\s\S]*?apiUrl: '\*\*\*\*\*\*\*\*'/);
+
+    // 前端模型管理卡片对非个人配置脱敏显示
+    assert.match(modelsJs, /canViewEmbeddingUrl = isSuperAdmin \|\| \(Boolean\(embedding\.isPersonal\) && embedding\.source\?\.url === 'user'\)/);
+    assert.match(modelsJs, /canViewOcrUrl = isSuperAdmin/);
+    assert.match(modelsJs, /displayOcrUrl = canViewOcrUrl/);
+    assert.match(modelsJs, /isOcrConfigured \? '\*\*\*\*\*\*\*\*' : '未配置服务地址'/);
+
+    // 知识库摘要提示脱敏
+    assert.match(knowledgeSummaryJs, /canView = isSuperAdminUser\(\) \|\| \(Boolean\(embeddingConfig\?\.isPersonal\) && embeddingConfig\?\.source\?\.url === 'user'\)/);
+
+    // 配置弹窗受控拦截
+    assert.match(adminSettingsJs, /function openRetrievalModelConfigSection\(section\) \{\s*if \(!isSuperAdminUser\(\)\)/);
+});
+

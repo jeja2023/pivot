@@ -81,11 +81,22 @@
                 const folder = state.activeFolder;
                 const canBatch = canManage();
                 const canDeleteFolder = canManage() && folder && folder.isCustom && Number(folder.documentCount || 0) === 0;
-                const folderTitle = folder ? folder.title : '全部法规';
-                const subTitle = folder ? '分类目录' : '文档目录';
-                const descText = folder
+                const governanceScope = String(state.governanceScope || '');
+                const governanceConfig = {
+                    metadata: { title: '元数据待审核法规', description: '补齐法规层级、权威来源等字段后确认元数据审核状态。' },
+                    maintainer: { title: '缺少维护人法规', description: '为每份法规指派明确维护人，形成后续维护责任链。' },
+                    version: { title: '待治理法规', description: '仅显示当前版本效力待核验、审核未通过或缺少当前版本的法规；请逐条确认后保存。' },
+                    index: { title: '索引未完成法规', description: '可重新加入向量索引队列；不会重新 OCR 或解析原文件。' },
+                    location: { title: '条文缺少定位法规', description: '依据当前版本已抽取正文重新生成条文页码和字符位置。' }
+                }[governanceScope];
+                const isGovernanceWorklist = Boolean(governanceConfig);
+                const folderTitle = governanceConfig?.title || (folder ? folder.title : '全部法规');
+                const subTitle = isGovernanceWorklist ? '治理队列' : (folder ? '分类目录' : '文档目录');
+                const descText = governanceConfig
+                    ? governanceConfig.description
+                    : (folder
                     ? '目录由当前数据库实时生成，可继续检索、批量治理或打开具体法规。'
-                    : '展示法规库内全部法规文档，可进行检索、批量治理或查看正文。';
+                    : '展示法规库内全部法规文档，可进行检索、批量治理或查看正文。');
                 const statsHtml = folder ? `
                     <div class="regulations-folder-stats">
                         <span>${Number(state.total || 0)} 份法规</span>
@@ -103,7 +114,7 @@
                         <div class="regulations-folder-actions">
                             ${canBatch ? `<button id="regulations-batch-mode-btn" class="btn-secondary" type="button" aria-pressed="${state.batchMode ? 'true' : 'false'}">${state.batchMode ? '退出批量处理' : '批量处理'}</button>` : ''}
                             ${canDeleteFolder ? `<button type="button" class="btn-secondary text-danger" data-regulation-folder-delete="${esc(folder.category || '')}">删除分类</button>` : ''}
-                            <button type="button" class="btn-secondary" data-regulation-folder-back>返回分类目录</button>
+                            <button type="button" class="btn-secondary" data-regulation-folder-back>${isGovernanceWorklist ? '退出治理队列' : '返回分类目录'}</button>
                         </div>
                     </div>
                     ${statsHtml}
@@ -138,7 +149,8 @@
                             <button type="button" class="btn-primary" data-regulation-import-folder="${esc(folderCat)}">导入此分类法规</button>
                         </div>
                     ` : '';
-                    PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center"><div class="regulations-empty compact">暂无法规文档${emptyAction}</div></td></tr>`);
+                    const emptyText = governanceConfig ? `暂无${governanceConfig.title}` : '暂无法规文档';
+                    PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center"><div class="regulations-empty compact">${emptyText}${emptyAction}</div></td></tr>`);
                 } else {
                             const startIndex = (Math.max(Number(state.page || 1), 1) - 1) * Math.max(Number(state.pageSize || REGULATIONS_PAGE_SIZE), 1);
                             PivotSafeHtml.setHtml(target, state.documents.map((doc, index) => {
@@ -185,31 +197,44 @@
                         const title = cleanDisplayTitle(doc.title || '未命名法规');
                         const verLabel = detail.currentVersion?.version_label || doc.current_version_label || '';
                         if (docBadge) {
+                            const effectiveAtBadge = state.effectiveAt ? `<span class="regulations-detail-badge-filtered" title="当前根据适用基准日 ${esc(state.effectiveAt)} 定位有效版本">基准日: ${esc(state.effectiveAt)}</span>` : '';
                             PivotSafeHtml.setHtml(docBadge, `
                                 <span class="regulations-detail-badge-title" title="${esc(title)}">${esc(title)}</span>
                                 ${verLabel ? `<span class="regulations-detail-badge-version">${esc(verLabel)}</span>` : ''}
+                                ${effectiveAtBadge}
                             `);
                         }
                         const indexStatus = String(detail.currentVersion?.index_status || 'lexical_ready');
                         const indexLabels = { vector_ready: '向量索引已就绪', indexing: '正在建立向量索引', retry_wait: '向量索引等待重试', lexical_ready: '当前使用关键词检索' };
                         const indexNotice = indexStatus === 'vector_ready' ? '' : `<div class="regulations-index-notice"><strong>${esc(indexLabels[indexStatus] || '索引状态待核验')}</strong><span>${esc(detail.currentVersion?.index_error || '法规正文已可使用关键词检索；可在向量服务恢复后手动重建索引。')}</span></div>`;
-                        // 结构化渲染顶部操作栏：划分为时间适用、演进对比、协同追溯和治理管理集群
+                        // 结构化渲染顶部操作栏：划分为版本与时效、关联网络、协同追踪和治理管理集群
                         if (adminActions) {
-                            const effectiveDateControl = `
-                                <div class="regulations-toolbar-cluster">
-                                    <label class="regulations-effective-date-control">
-                                        <span>适用日期</span>
-                                        <input id="regulations-effective-date" class="form-input" type="date" aria-label="按日期查看适用版本">
-                                        <button class="btn-secondary" type="button" data-regulation-effective-date="${esc(doc.id)}">查看</button>
-                                    </label>
+                            const isDateFiltered = Boolean(state.effectiveAt);
+                            const hasVersions = Array.isArray(detail.versions) && detail.versions.length >= 1;
+                            const hasMultipleVersions = Array.isArray(detail.versions) && detail.versions.length >= 2;
+                            const versionValidityCluster = `
+                                <div class="regulations-toolbar-cluster regulations-version-validity-cluster${isDateFiltered ? ' is-filtered' : ''}" role="group" aria-label="法规版本与时效">
+                                    <div class="regulations-effective-date-group">
+                                        <label for="regulations-effective-date" class="regulations-effective-date-label" title="选择或输入日期，快速查阅历史上该日期适用的有效版本">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                                            </svg>
+                                            <span>适用日期</span>
+                                        </label>
+                                        <input id="regulations-effective-date" class="form-input regulations-effective-date-input" type="date" value="${esc(state.effectiveAt || '')}" aria-label="按日期查看适用版本" title="选择日期查阅当时有效版本">
+                                        ${isDateFiltered ? `<button class="btn-secondary regulations-effective-date-clear-btn" type="button" data-regulation-effective-date-clear="${esc(doc.id)}" title="清除日期筛选，恢复现行最新版本" aria-label="恢复现行版本">恢复现行</button>` : ''}
+                                        <button class="btn-secondary regulations-effective-date-btn" type="button" data-regulation-effective-date="${esc(doc.id)}" title="定位并查阅指定日期生效版本">查询</button>
+                                    </div>
+                                    ${hasVersions ? `
+                                        <span class="regulations-toolbar-inner-divider" aria-hidden="true"></span>
+                                        <button class="btn-secondary" type="button" data-regulation-timeline="${esc(doc.id)}" title="查看该法规所有历史修订时间线">修订时间线</button>
+                                        ${hasMultipleVersions ? `<button class="btn-secondary" type="button" data-regulation-compare="${esc(doc.id)}" title="对比不同版本条文差异">版本对比</button>` : ''}
+                                    ` : ''}
                                 </div>
                             `;
-                            const versionCluster = (Array.isArray(detail.versions) && detail.versions.length >= 1) ? `
-                                <div class="regulations-toolbar-cluster">
-                                    <button class="btn-secondary" type="button" data-regulation-timeline="${esc(doc.id)}">修订时间线</button>
-                                    ${detail.versions.length >= 2 ? `<button class="btn-secondary" type="button" data-regulation-compare="${esc(doc.id)}">版本对比</button>` : ''}
-                                </div>
-                            ` : '';
                             const relationCluster = `
                                 <div class="regulations-toolbar-cluster">
                                     <button class="btn-secondary" type="button" data-regulation-graph="${esc(doc.id)}">引用网络</button>
@@ -233,8 +258,7 @@
                             ` : '';
                             PivotSafeHtml.setHtml(adminActions, `
                                 <div class="regulations-toolbar-left-group">
-                                    ${effectiveDateControl}
-                                    ${versionCluster}
+                                    ${versionValidityCluster}
                                     ${relationCluster}
                                     ${collabCluster}
                                 </div>
@@ -321,6 +345,15 @@
                     }
 
                     function renderInlineEditor(doc, version = {}) {
+                        const assignees = Array.isArray(state.governanceAssignees) ? state.governanceAssignees : [];
+                        const hasCurrentAssignee = assignees.some(item => Number(item.id) === Number(doc.maintainer_user_id));
+                        const unavailableAssigneeOption = doc.maintainer_user_id && !hasCurrentAssignee
+                            ? `<option value="${esc(doc.maintainer_user_id)}" selected>当前维护人（账户不可用）</option>`
+                            : '';
+                        const assigneeOptions = assignees.map(item => {
+                            const label = [item.nickname || item.username || `用户 ${item.id}`, item.unit].filter(Boolean).join(' · ');
+                            return `<option value="${esc(item.id)}" ${Number(item.id) === Number(doc.maintainer_user_id) ? 'selected' : ''}>${esc(label)}</option>`;
+                        }).join('');
                         return `
                             <form id="regulations-edit-form" class="regulations-inline-form hidden" data-doc-id="${esc(doc.id)}" data-version-id="${esc(version?.id || '')}">
                                 <div class="regulations-dialog-head">
@@ -337,6 +370,8 @@
                                         <label>发布机构（可多个）<input name="issuingBody" class="form-input" maxlength="120" value="${esc(doc.issuing_body || '')}" placeholder="用顿号或逗号分隔"></label>
                                         <label>适用范围<input name="jurisdiction" class="form-input" maxlength="120" value="${esc(doc.jurisdiction || '')}" list="regulations-jurisdiction-list"></label>
                                         <label>主题标签<input name="subjectTags" class="form-input" maxlength="300" value="${esc(Array.isArray(doc.subject_tags) ? doc.subject_tags.join('、') : doc.subject_tags || '')}" placeholder="用顿号或逗号分隔"></label>
+                                        <label>维护人<select name="maintainerUserId" class="form-input"><option value="">未指派</option>${unavailableAssigneeOption}${assigneeOptions}</select></label>
+                                        <label>元数据审核<select name="metadataReviewStatus" class="form-input"><option value="unreviewed" ${doc.metadata_review_status === 'unreviewed' ? 'selected' : ''}>待审核</option><option value="approved" ${doc.metadata_review_status === 'approved' ? 'selected' : ''}>已审核</option><option value="rejected" ${doc.metadata_review_status === 'rejected' ? 'selected' : ''}>驳回</option></select></label>
                                         <label>状态<select name="status" class="form-input">
                                             <option value="active" ${doc.status !== 'archived' ? 'selected' : ''}>启用</option>
                                             <option value="archived" ${doc.status === 'archived' ? 'selected' : ''}>归档</option>

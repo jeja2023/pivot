@@ -65,54 +65,95 @@ function renderModelCapabilityBadges(model) {
 function canTestModelConnection(model) {
     if (!model || !currentUser?.id) return false;
     if (String(model.user_id) === String(currentUser.id)) return true;
-    return !model.user_id && isAdminUser();
+    if (!model.user_id) {
+        if (isAdminUser()) return true;
+        if (!model.allowed_units) return true;
+        const units = String(model.allowed_units).split(',').map(u => u.trim()).filter(Boolean);
+        const userUnit = String(currentUser.unit || '').trim();
+        return Boolean(userUnit && units.includes(userUnit));
+    }
+    return false;
 }
 
 function renderRetrievalModelServices(settings = {}) {
     const target = document.getElementById('retrieval-model-services-body');
     if (!target) return;
+    const isSuperAdmin = isSuperAdminUser();
     const embedding = settings.retrievalModelConfig || settings.embeddingConfig || {};
     const rerank = settings.rerankConfig || {};
     const rag = settings.ragConfig || {};
     const ocr = settings.ocrConfig || window.Pivot?.ocrConfig || {};
-    const ocrUrl = ocr.serviceUrl || 'http://ocr-service:9100';
+
     const ocrEngine = settings.ocrEngineStatus?.http || window.Pivot?.ocrEngineStatus?.http || null;
     const ocrAvailable = ocrEngine ? ocrEngine.available === true : null;
     const ocrReadyClass = ocrAvailable === true ? 'is-ready' : (ocrAvailable === false ? 'is-warning' : '');
     const ocrStatusText = ocrAvailable === true
         ? '服务可用 · 外部 OCR 服务'
         : (ocrAvailable === false ? `连接异常 (${ocrEngine?.error || '无法连接'})` : '外部 OCR 服务 (HTTP)');
+
+    const canViewEmbeddingUrl = isSuperAdmin || (Boolean(embedding.isPersonal) && embedding.source?.url === 'user');
+    const displayEmbeddingUrl = canViewEmbeddingUrl
+        ? (embedding.apiUrl || '未配置服务地址')
+        : (embedding.apiUrl ? '********' : '未配置服务地址');
+    const embeddingUrlTitle = canViewEmbeddingUrl
+        ? displayEmbeddingUrl
+        : (embedding.apiUrl ? '服务地址已脱敏' : '未配置服务地址');
+
+    const canViewOcrUrl = isSuperAdmin;
+    const rawOcrUrl = ocr.serviceUrl || (canViewOcrUrl ? 'http://ocr-service:9100' : '');
+    const isOcrConfigured = Boolean((ocr.serviceUrl && ocr.serviceUrl !== '未配置服务地址') || ocr.configured || ocrAvailable !== null);
+    const displayOcrUrl = canViewOcrUrl
+        ? (rawOcrUrl || '未配置服务地址')
+        : (isOcrConfigured ? '********' : '未配置服务地址');
+    const ocrUrlTitle = canViewOcrUrl
+        ? (rawOcrUrl || '未配置服务地址')
+        : (isOcrConfigured ? '服务地址已脱敏' : '未配置服务地址');
+
     const embeddingReady = Boolean(embedding.apiUrl && embedding.model);
     const rerankReady = rerank.enabled === true;
     const policySummary = `Top ${Number(rag.topK || 0)} · 候选 ${Number(rag.candidateLimit || 0)} · 分块 ${Number(rag.chunkSize || 0)}`;
-    const canConfigure = isSuperAdminUser();
+    const canConfigure = isSuperAdmin;
     const configButton = (section, label) => canConfigure
         ? `<button class="btn-secondary retrieval-model-service-config" type="button" data-retrieval-model-config-open="${section}">${label}</button>`
         : '';
+    const testButton = (serviceKey, label = '测试') => `
+        <button class="btn-secondary retrieval-model-service-test" type="button" data-retrieval-model-test="${serviceKey}">${label}</button>
+    `;
     PivotSafeHtml.setHtml(target, `
         <article class="retrieval-model-service-card ${embeddingReady ? 'is-ready' : 'is-warning'}">
             <strong>向量生成服务</strong>
             <span title="当前向量模型">${escapeHtml(embedding.model || '未配置')}</span>
-            <small title="当前服务地址">${escapeHtml(embedding.apiUrl || '未配置服务地址')}</small>
-            ${configButton('embedding', '配置向量服务')}
+            <small title="${escapeHtml(embeddingUrlTitle)}">${escapeHtml(displayEmbeddingUrl)}</small>
+            <div class="retrieval-model-service-actions">
+                ${testButton('embedding', '测试')}
+                ${configButton('embedding', '配置')}
+            </div>
         </article>
         <article class="retrieval-model-service-card ${rerankReady ? 'is-ready' : 'is-warning'}">
             <strong>重排序服务</strong>
             <span title="当前重排序模型">${escapeHtml(rerank.model || 'BAAI/bge-reranker-v2-m3')}</span>
             <small>${rerank.configured ? `${rerank.enabled ? '已启用' : '已配置，当前未启用'} · ${rerank.protocol === 'llama_cpp' ? 'llama.cpp' : 'TEI'} 协议` : '未配置，使用本地确定性排序'}</small>
-            ${configButton('rerank', '配置重排序服务')}
+            <div class="retrieval-model-service-actions">
+                ${testButton('rerank', '测试')}
+                ${configButton('rerank', '配置')}
+            </div>
         </article>
         <article class="retrieval-model-service-card is-ready">
             <strong>检索策略</strong>
             <span>${escapeHtml(policySummary)}</span>
             <small>策略随系统检索配置保存；法规与知识库共用模型服务。</small>
-            ${configButton('policy', '配置检索策略')}
+            <div class="retrieval-model-service-actions">
+                ${configButton('policy', '配置策略')}
+            </div>
         </article>
         <article class="retrieval-model-service-card ${ocrReadyClass}">
             <strong>OCR 识别服务</strong>
-            <span title="当前服务地址">${escapeHtml(ocrUrl)}</span>
+            <span title="${escapeHtml(ocrUrlTitle)}">${escapeHtml(displayOcrUrl)}</span>
             <small title="${escapeHtml(ocrStatusText)}">${escapeHtml(ocrStatusText)}</small>
-            ${configButton('ocr', '配置 OCR 服务')}
+            <div class="retrieval-model-service-actions">
+                ${testButton('ocr', '测试')}
+                ${configButton('ocr', '配置')}
+            </div>
         </article>
     `);
 }
@@ -135,7 +176,7 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
     renderRetrievalModelServices(settings);
     window.Pivot.legacy.updateEmbeddingSettingsForm?.(settings.retrievalModelConfig || settings.embeddingConfig, settings.rerankConfig);
     window.Pivot.legacy.bindEmbeddingModalEvents?.();
-    if (isSuperAdminUser() && !window.Pivot?.ocrEngineStatus) {
+    if (!window.Pivot?.ocrEngineStatus) {
         apiFetch(`${API_BASE}/apps/ocr/engines`, { headers: authHeaders() })
             .then(res => res.ok ? res.json() : null)
             .then(data => {

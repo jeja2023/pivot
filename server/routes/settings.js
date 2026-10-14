@@ -212,6 +212,35 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             permissions: getPermissionCapabilities(req.user),
             settings: getPublicSettings()
         };
+        if (!isSuperAdmin(req.user)) {
+            if (payload.retrievalModelConfig?.apiUrl) {
+                payload.retrievalModelConfig = {
+                    ...payload.retrievalModelConfig,
+                    apiUrl: '********'
+                };
+            }
+            if (payload.embeddingConfig?.apiUrl && !(payload.embeddingConfig.isPersonal && payload.embeddingConfig.source?.url === 'user')) {
+                payload.embeddingConfig = {
+                    ...payload.embeddingConfig,
+                    apiUrl: '********'
+                };
+            }
+            if (payload.rerankConfig?.apiUrl) {
+                payload.rerankConfig = {
+                    ...payload.rerankConfig,
+                    apiUrl: '********'
+                };
+            }
+            if (payload.ocrConfig) {
+                payload.ocrConfig = {
+                    ...payload.ocrConfig,
+                    serviceUrl: payload.ocrConfig.serviceUrl ? '********' : '',
+                    configured: Boolean(payload.ocrConfig.serviceUrl)
+                };
+            }
+        } else if (payload.ocrConfig) {
+            payload.ocrConfig.configured = Boolean(payload.ocrConfig.serviceUrl);
+        }
         if (isAdmin(req.user)) {
             payload.runtimeConfig = buildRuntimeConfigSnapshot();
             payload.deploymentProfile = getDeploymentProfile();
@@ -246,8 +275,14 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     }));
 
     router.post('/settings/ocr-test', authMiddleware, asyncHandler(async (req, res) => {
-        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足' });
-        const engines = await getOcrEngineStatus();
+        const rawUrl = String(req.body?.serviceUrl || '').trim();
+        const testOptions = {};
+        if (rawUrl && rawUrl !== '********') {
+            if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足：只有管理员可指定新的服务地址进行测试' });
+            await assertSafeOutboundUrl(rawUrl, req.user);
+            testOptions.serviceUrl = rawUrl;
+        }
+        const engines = await getOcrEngineStatus(testOptions);
         const httpEngine = engines.http || {};
         return res.json({
             success: httpEngine.available === true,
@@ -309,11 +344,20 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             clearAllRagCache();
             logAction(req, '修改个人向量模型配置', changed.join('；'));
         }
+        const isSuper = isSuperAdmin(req.user);
+        const userEmbedding = getPublicEmbeddingConfig(req.user?.id);
+        const rerankCfg = getPublicRerankConfig();
+        const maskedUserEmbedding = (!isSuper && userEmbedding?.apiUrl && !(userEmbedding.isPersonal && userEmbedding.source?.url === 'user'))
+            ? { ...userEmbedding, apiUrl: '********' }
+            : userEmbedding;
+        const maskedRerank = (!isSuper && rerankCfg?.apiUrl)
+            ? { ...rerankCfg, apiUrl: '********' }
+            : rerankCfg;
         res.json({
             success: true,
             ragConfig: getRagConfig({}, req.user?.id),
-            embeddingConfig: getPublicEmbeddingConfig(req.user?.id),
-            rerankConfig: getPublicRerankConfig()
+            embeddingConfig: maskedUserEmbedding,
+            rerankConfig: maskedRerank
         });
     }));
 

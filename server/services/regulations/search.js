@@ -209,15 +209,15 @@ async function searchRegulationArticlesByVector(queryVector, options = {}) {
     if (!embeddingProfile) return [];
     try {
         const rows = await query(`
-            SELECT ${buildArticleSelect('1 - (a.embedding <=> ?::vector) AS vector_score')}
+            SELECT ${buildArticleSelect('1 - (a.embedding::vector <=> ?::vector) AS vector_score')}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
             JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
             WHERE ${filters.join(' AND ')}
               AND a.embedding IS NOT NULL
               AND a.embedding_profile = ?
-              AND vector_dims(a.embedding) = ?
-            ORDER BY a.embedding <=> ?::vector ASC, a.id ASC
+              AND vector_dims(a.embedding::vector) = ?
+            ORDER BY a.embedding::vector <=> ?::vector ASC, a.id ASC
             LIMIT ?
         `, [JSON.stringify(queryVector), ...params, embeddingProfile, queryVector.length, JSON.stringify(queryVector), safeLimit]);
         return formatSearchRows(rows, options.query, 'semantic');
@@ -370,13 +370,13 @@ async function findSimilarRegulationArticles({ articleId, limit = 5, includeArch
             SELECT a.id, a.document_id, a.article_label, a.article_title,
                    substr(replace(a.content, '\n', ' '), 1, 200) AS excerpt,
                    d.title AS document_title, d.category, d.issuing_body,
-                   1 - (a.embedding <=> ?::vector) AS similarity
+                   1 - (a.embedding::vector <=> ?::vector) AS similarity
             FROM regulation_articles a
             JOIN regulation_documents d ON d.id = a.document_id AND a.version_id = d.current_version_id
             WHERE a.id != ? AND a.embedding IS NOT NULL
               AND a.embedding_profile = ?
-              AND vector_dims(a.embedding) = ? AND d.deleted_at IS NULL${statusFilter}
-            ORDER BY a.embedding <=> ?::vector ASC, a.id ASC
+              AND vector_dims(a.embedding::vector) = ? AND d.deleted_at IS NULL${statusFilter}
+            ORDER BY a.embedding::vector <=> ?::vector ASC, a.id ASC
             LIMIT ?
         `, [JSON.stringify(sourceVector), aid, source.embedding_profile || '', sourceVector.length, JSON.stringify(sourceVector), Math.min(1000, Math.max(safeLimit * 20, 100))]);
     } catch (error) {

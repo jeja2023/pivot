@@ -22,22 +22,38 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
         window.testDocuments = [1, 2, 3].map(id => ({
             id, title: `测试法规 ${id}`, status: 'active',
             category: id === 2 ? '部门规章' : '法律', issuing_body: `发布机构 ${id}`, jurisdiction: id === 2 ? '北京市' : '全国',
-            current_version_label: '2024 年修订', summary: `摘要 ${id}`
+            current_version_id: 100 + id,
+            current_version_label: '2024 年修订',
+            current_effect_status: id === 1 ? 'unverified' : 'effective',
+            current_review_status: id === 1 ? 'pending' : (id === 3 ? 'rejected' : 'approved'),
+            current_index_status: id === 1 ? 'indexing' : 'vector_ready',
+            legal_level: id === 1 ? '' : '法律',
+            official_source_url: id === 1 ? '' : 'https://authority.example/regulation',
+            metadata_review_status: id === 1 ? 'unreviewed' : 'approved',
+            maintainer_user_id: id === 2 ? 1 : null,
+            location_missing: id === 3,
+            summary: `摘要 ${id}`
         }));
         window.testCategoryFolders = [
             { title: '法律', category: '法律', documentCount: 2, articleCount: 20, effectiveCount: 1, needsReviewCount: 1, latestUpdatedAt: '2026-10-12 12:00:00', isUncategorized: false },
             { title: '部门规章', category: '部门规章', documentCount: 1, articleCount: 10, effectiveCount: 0, needsReviewCount: 1, latestUpdatedAt: '2026-10-11 12:00:00', isUncategorized: false }
         ];
         window.testRequests = [];
+        window.testDocumentListUrls = [];
         window.testReindexRequests = [];
         window.testUpdates = [];
         window.testBatchUndo = [];
         window.testFailures = [];
         window.testConfirmed = true;
+        window.confirm = () => window.testConfirmed;
         window.testImportJobs = [];
         window.testSubscriptionActive = false;
         window.testBookmarks = [];
         window.testRecycleBin = [{ id: 91, title: '已删除测试法规', category: '法律', deleted_at: '2026-10-12 12:00:00' }];
+        window.testCitationLinks = [
+            { id: 801, document_id: 1, version_id: 101, document_title: '测试法规 1', source_article_label: '第一条', target_label: '《外部法规》第三条', relation_type: 'cite', confidence: 0.62, review_status: 'auto', target_article_id: null },
+            { id: 802, document_id: 2, version_id: 102, document_title: '测试法规 2', source_article_label: '第二条', target_label: '《测试法规 1》第一条', relation_type: 'depend', confidence: 0.92, review_status: 'auto', target_article_id: 11 }
+        ];
         window.testObligations = [{
             id: 71, article_label: '第一条', subject: '用人单位', required_action: '完成备案',
             due_rule: '三十日内', review_status: 'pending', status: 'draft'
@@ -91,8 +107,15 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
             if (url.includes('/documents/folder-selection')) {
                 const query = new URLSearchParams(url.split('?')[1]);
                 const category = query.get('category');
+                const governanceScope = query.get('governanceScope') || '';
                 const data = window.testDocuments
-                    .filter(item => !category || item.category === category)
+                    .filter(item => (!category || item.category === category)
+                        && (!governanceScope
+                            || (governanceScope === 'version' && (!item.current_version_id || item.current_effect_status === 'unverified' || item.current_review_status !== 'approved'))
+                            || (governanceScope === 'metadata' && (!item.legal_level || !item.official_source_url || item.metadata_review_status !== 'approved'))
+                            || (governanceScope === 'maintainer' && !item.maintainer_user_id)
+                            || (governanceScope === 'index' && item.current_index_status !== 'vector_ready')
+                            || (governanceScope === 'location' && item.location_missing)))
                     .map(item => ({ id: item.id, title: item.title }));
                 return { data, total: data.length, truncated: false, limit: 2000 };
             }
@@ -102,12 +125,82 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
             }
             if (url.includes('/quality-summary')) {
                 return { summary: {
-                    documents: { total: 3, metadataNeedsReview: 1, missingMaintainer: 1 },
-                    versions: { total: 3, governanceNeedsReview: 2, indexingIncomplete: 0, parsingIncomplete: 0 },
-                    links: { unresolved: 1, needsReview: 2 },
+                    documents: { total: 3, metadataNeedsReview: 1, missingMaintainer: 2 },
+                    versions: { total: 3, governanceNeedsReview: 2, indexingIncomplete: 1, parsingIncomplete: 0 },
+                    links: { unresolved: 1, needsReview: 1 },
                     locations: { total: 3, articlesWithoutLocation: 1 },
                     obligations: { total: window.testObligations.length, needsReview: window.testObligations.filter(item => item.review_status !== 'approved').length }
                 } };
+            }
+            if (url.endsWith('/assignees')) {
+                return { assignees: [{ id: 1, username: 'admin', nickname: '管理员', unit: '法务部' }, { id: 2, username: 'owner', nickname: '法规维护员', unit: '法务部' }] };
+            }
+            if (url.includes('/citation-governance')) {
+                const query = new URLSearchParams(url.split('?')[1]);
+                if (url.endsWith('/approve-high-confidence') && options.method === 'POST') {
+                    window.testCitationLinks.filter(item => item.target_article_id && item.confidence >= 0.8 && item.review_status === 'auto').forEach(item => { item.review_status = 'approved'; });
+                    return { result: { updated: 1, candidates: 1, minConfidence: 0.8 } };
+                }
+                if (url.endsWith('/review') && options.method === 'PUT') {
+                    const payload = JSON.parse(options.body || '{}');
+                    const ids = (Array.isArray(payload.ids) ? payload.ids : []).map(id => String(id));
+                    window.testCitationLinks.filter(item => ids.includes(String(item.id))).forEach(item => { item.review_status = payload.reviewStatus; });
+                    return { result: { updated: payload.ids.length } };
+                }
+                const type = query.get('type') === 'review' ? 'review' : 'unresolved';
+                const data = window.testCitationLinks.filter(item => type === 'review'
+                    ? Boolean(item.target_article_id) && !['approved', 'rejected'].includes(item.review_status)
+                    : !item.target_article_id && item.review_status !== 'rejected');
+                return { type, data, total: data.length, limit: 200, offset: 0 };
+            }
+            if (url.endsWith('/cross-links/rebuild') && options.method === 'POST') {
+                return { resolved: 0, versions: 3 };
+            }
+            const governanceUpdate = url.match(/\/documents\/(\d+)\/versions\/(\d+)\/governance$/);
+            if (governanceUpdate && options.method === 'PUT') {
+                const payload = JSON.parse(options.body || '{}');
+                const document = window.testDocuments.find(item => item.id === Number(governanceUpdate[1]));
+                if (document) {
+                    if (payload.effectStatus !== undefined) document.current_effect_status = payload.effectStatus;
+                    if (payload.reviewStatus !== undefined) document.current_review_status = payload.reviewStatus;
+                }
+                return { version: { id: Number(governanceUpdate[2]), effect_status: document?.current_effect_status, review_status: document?.current_review_status } };
+            }
+            const rebuildLocations = url.match(/\/documents\/(\d+)\/versions\/(\d+)\/rebuild-locations$/);
+            if (rebuildLocations && options.method === 'POST') {
+                const document = window.testDocuments.find(item => item.id === Number(rebuildLocations[1]));
+                if (document) document.location_missing = false;
+                return { result: { documentId: Number(rebuildLocations[1]), versionId: Number(rebuildLocations[2]), rebuilt: 10 } };
+            }
+            const reindex = url.match(/\/documents\/(\d+)\/versions\/(\d+)\/reindex$/);
+            if (reindex && options.method === 'POST') {
+                const document = window.testDocuments.find(item => item.id === Number(reindex[1]));
+                if (document) document.current_index_status = 'vector_ready';
+                return { version: { id: Number(reindex[2]), index_status: 'vector_ready' } };
+            }
+            const documentUpdate = url.match(/\/documents\/(\d+)$/);
+            if (documentUpdate && options.method === 'PUT') {
+                const payload = JSON.parse(options.body || '{}');
+                const document = window.testDocuments.find(item => item.id === Number(documentUpdate[1]));
+                if (document) {
+                    Object.entries(payload).forEach(([key, value]) => {
+                        const field = ({ legalLevel: 'legal_level', officialSourceUrl: 'official_source_url', metadataReviewStatus: 'metadata_review_status', maintainerUserId: 'maintainer_user_id', issuingBody: 'issuing_body' })[key] || key;
+                        document[field] = value;
+                    });
+                }
+                return { document };
+            }
+            const detailRequest = url.match(/\/documents\/(\d+)(?:\?|$)/);
+            if (detailRequest && options.method !== 'PUT') {
+                const document = window.testDocuments.find(item => item.id === Number(detailRequest[1]));
+                const currentVersion = document ? {
+                    id: document.current_version_id,
+                    version_label: document.current_version_label,
+                    effect_status: document.current_effect_status,
+                    review_status: document.current_review_status,
+                    source_url: '', published_at: '', effective_from: '', effective_to: ''
+                } : null;
+                return { detail: document ? { document, currentVersion, versions: [currentVersion], articles: [] } : null };
             }
             if (url.includes('/ai-logs')) {
                 return { data: [{
@@ -212,11 +305,40 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
                     }
                     const document = window.testDocuments.find(doc => doc.id === id);
                     for (const [key, value] of Object.entries(payload.patch)) {
-                        document[key === 'issuingBody' ? 'issuing_body' : key] = value;
+                        const field = ({
+                            issuingBody: 'issuing_body',
+                            legalLevel: 'legal_level',
+                            officialSourceUrl: 'official_source_url',
+                            metadataReviewStatus: 'metadata_review_status',
+                            maintainerUserId: 'maintainer_user_id',
+                            effectStatus: 'current_effect_status',
+                            reviewStatus: 'current_review_status'
+                        })[key] || key;
+                        document[field] = value;
                     }
                     updated.push(document);
                 }
                 return { total: payload.ids.length, updated, failed, batchId: updated.length ? '测试批量记录-1' : null };
+            }
+            if (url.endsWith('/documents/batch-reindex') && options.method === 'POST') {
+                const payload = JSON.parse(options.body || '{}');
+                const queuedDocumentIds = (payload.ids || []).map(Number).filter(id => {
+                    const document = window.testDocuments.find(item => item.id === id && item.current_version_id);
+                    if (!document) return false;
+                    document.current_index_status = 'retry_wait';
+                    return true;
+                });
+                return { result: { total: (payload.ids || []).length, queuedVersions: queuedDocumentIds.length, queuedDocumentIds, clearedArticles: queuedDocumentIds.length * 10, failed: [] } };
+            }
+            if (url.endsWith('/documents/batch-rebuild-locations') && options.method === 'POST') {
+                const payload = JSON.parse(options.body || '{}');
+                const rebuilt = (payload.ids || []).map(Number).flatMap(id => {
+                    const document = window.testDocuments.find(item => item.id === id && item.current_version_id);
+                    if (!document) return [];
+                    document.location_missing = false;
+                    return [{ documentId: id, rebuilt: 10 }];
+                });
+                return { result: { total: (payload.ids || []).length, rebuilt, rebuiltArticles: rebuilt.reduce((sum, item) => sum + item.rebuilt, 0), failed: [] } };
             }
             if (url.endsWith('/documents/reindex')) {
                 const payload = JSON.parse(options.body || '{}');
@@ -242,13 +364,22 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
                 return { total: ids.length, deleted, failed };
             }
             if (window.testRefreshError) throw new Error('列表刷新失败');
+            window.testDocumentListUrls.push(url);
             const params = new URLSearchParams(url.split('?')[1]);
             const offset = Number(params.get('offset'));
             const limit = Number(params.get('limit'));
             const category = params.get('category');
             const uncategorized = params.get('uncategorized') === 'true';
+            const governancePending = params.get('governancePending') === 'true';
+            const governanceScope = params.get('governanceScope') || (governancePending ? 'version' : '');
             const documents = window.testDocuments.filter(document => (
-                uncategorized ? !document.category : (!category || document.category === category)
+                (uncategorized ? !document.category : (!category || document.category === category))
+                && (!governanceScope
+                    || (governanceScope === 'version' && (!document.current_version_id || document.current_effect_status === 'unverified' || document.current_review_status !== 'approved'))
+                    || (governanceScope === 'metadata' && (!document.legal_level || !document.official_source_url || document.metadata_review_status !== 'approved'))
+                    || (governanceScope === 'maintainer' && !document.maintainer_user_id)
+                    || (governanceScope === 'index' && document.current_index_status !== 'vector_ready')
+                    || (governanceScope === 'location' && document.location_missing))
             ));
             return { data: documents.slice(offset, offset + limit), total: documents.length, limit };
         };

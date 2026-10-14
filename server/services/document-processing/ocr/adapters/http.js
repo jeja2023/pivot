@@ -143,11 +143,17 @@ async function recognizePage(imagePath, options = {}) {
     }
 }
 
-async function checkAvailability() {
-    const serviceUrl = getServiceUrl();
+async function checkAvailability(options = {}) {
+    const serviceUrl = options.serviceUrl ? normalizeOcrServiceUrl(options.serviceUrl) : getServiceUrl();
     try {
-        const response = await axios.get(buildUrl('/health'), {
-            ...(await buildSafeOcrRequestOptions(getHealthTimeoutMs(), 1024 * 1024)),
+        const parsed = new URL(serviceUrl);
+        const allowExplicitLoopback = isLoopbackHost(parsed.hostname);
+        await assertSafeOutboundHost(parsed.hostname, { blockPrivate: false, allowExplicitLoopback });
+        const response = await axios.get(`${serviceUrl}/health`, {
+            timeout: getHealthTimeoutMs(),
+            maxContentLength: 1024 * 1024,
+            proxy: false,
+            ...createSafeHttpAgents({ blockPrivate: false, allowExplicitLoopback }),
             headers: { Accept: 'application/json' },
             validateStatus: status => status >= 200 && status < 300
         });

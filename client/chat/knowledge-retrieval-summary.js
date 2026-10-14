@@ -12,7 +12,9 @@
             : '重排序：本地排序';
         if (label) {
             label.textContent = `检索模型：${model} · ${rerank}`;
-            label.title = embeddingConfig?.apiUrl ? `Embedding：${embeddingConfig.apiUrl}；${rerank}` : rerank;
+            const canView = isSuperAdminUser() || (Boolean(embeddingConfig?.isPersonal) && embeddingConfig?.source?.url === 'user');
+            const displayUrl = canView ? (embeddingConfig?.apiUrl || '') : (embeddingConfig?.apiUrl ? '********' : '');
+            label.title = displayUrl ? `Embedding：${displayUrl}；${rerank}` : rerank;
         }
         document.getElementById('knowledge-retrieval-model-settings-btn')?.classList.toggle('hidden', !isSuperAdminUser());
     }
