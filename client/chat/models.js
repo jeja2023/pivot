@@ -65,14 +65,7 @@ function renderModelCapabilityBadges(model) {
 function canTestModelConnection(model) {
     if (!model || !currentUser?.id) return false;
     if (String(model.user_id) === String(currentUser.id)) return true;
-    if (!model.user_id) {
-        if (isAdminUser()) return true;
-        if (!model.allowed_units) return true;
-        const units = String(model.allowed_units).split(',').map(u => u.trim()).filter(Boolean);
-        const userUnit = String(currentUser.unit || '').trim();
-        return Boolean(userUnit && units.includes(userUnit));
-    }
-    return false;
+    return !model.user_id && isAdminUser();
 }
 
 function renderRetrievalModelServices(settings = {}) {
