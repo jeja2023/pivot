@@ -215,10 +215,6 @@
         }
     }
 
-    function citationReviewLabel(status) {
-        return ({ approved: '已确认', rejected: '已标记外部/不采用', pending: '待审核', auto: '待审核' })[String(status || '').toLowerCase()] || '待审核';
-    }
-
     function citationRelationBadge(type) {
         const key = String(type || '').toLowerCase();
         if (key === 'depend') {

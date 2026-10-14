@@ -631,34 +631,6 @@
         return data;
     }
 
-    async function saveSettings(form) {
-        if (!canManageOcrSettings()) return;
-        const input = document.getElementById('ocr-service-url-input');
-        const serviceUrl = String(input?.value || '').trim();
-        const btn = document.getElementById('ocr-settings-save-btn');
-        const text = btn?.textContent || '';
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = '保存中';
-        }
-        try {
-            const data = await requestJson(`${API}/settings`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serviceUrl })
-            });
-            state.settings = data.settings || {};
-            renderSettings();
-            toast('OCR 服务地址已保存', 'success');
-            await loadEngines();
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = text;
-            }
-            if (form) form.dataset.dirty = '0';
-        }
-    }
     async function submitUpload(form, suppliedFiles = null) {
         const files = suppliedFiles ? Array.from(suppliedFiles) : Array.from(document.getElementById('ocr-file-input')?.files || []);
         if (!files.length) {

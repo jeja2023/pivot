@@ -57,7 +57,7 @@
         return String(value || '-');
     }
 
-    function renderQueue(rows = [], reviewStatus = 'pending', total = rows.length, page = 1, totalPages = 1) {
+    function renderQueue(rows = [], reviewStatus = 'pending', _total = rows.length, page = 1, _totalPages = 1) {
         const body = document.getElementById('route-feedback-review-list');
         if (!body) return;
         const fragment = document.createDocumentFragment();

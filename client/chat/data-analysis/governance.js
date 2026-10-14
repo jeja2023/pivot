@@ -1,7 +1,7 @@
 (function () {
     const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
-    const { API, state, esc, fmtNumber, activeDataset } = app;
+    const { API, state, esc, fmtNumber } = app;
 
     const byId = id => document.getElementById(id);
     const fetchJson = (...args) => app.fetchJson(...args);

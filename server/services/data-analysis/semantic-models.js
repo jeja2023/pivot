@@ -1,19 +1,15 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const { query, queryOne, execute, transaction } = require('../../db/client');
-const { computeNextCronDate } = require('../cron-expression');
 const { canAccessSharedResource, normalizeShareScope, normalizeShareSettings } = require('../unit-visibility');
 const { filterExistingShareUserIds } = require('../share-targets');
 const { readTypedEnv } = require('../../config/env-registry');
 const {
     analysisId,
     exportRoot,
-    ensureAnalysisDirs,
     resolveInside,
     toProjectRelative,
-    fromProjectRelative,
     jsonParse,
     sqlIdent,
     sqlLiteral,

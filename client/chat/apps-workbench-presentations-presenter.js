@@ -922,7 +922,7 @@
         });
     }
 
-    async function generateLayoutVariants(state, { renderEditor, toast } = {}) {
+    async function generateLayoutVariants(state, { renderEditor: _renderEditor, toast } = {}) {
         const slide = state.active?.content?.slides?.find(item => item.id === state.selectedSlideId) || state.active?.content?.slides?.[0];
         if (!state.active?.id || !slide) return;
         const target = byId('presentation-layout-variants');

@@ -27,8 +27,6 @@ const {
     withAnalysisSlot,
     bestEffortRemove,
     normalizeDatasetName,
-    MAX_PREVIEW_ROWS,
-    DATA_ANALYSIS_QUERY_TIMEOUT_MS,
     getBeijingTimestamp: sharedTimestamp
 } = require('./shared');
 const { profileViaSql } = require('./profile');
@@ -41,7 +39,6 @@ const ALERT_OPERATORS = new Set(['gt', 'gte', 'lt', 'lte', 'eq', 'neq']);
 const MAX_VIEW_CONFIG_BYTES = 64 * 1024;
 const MAX_DASHBOARD_ITEMS = 60;
 const MAX_ALERTS_PER_USER = 100;
-const MAX_SCHEDULES_PER_USER = 100;
 const MIN_SCHEDULE_INTERVAL_MINUTES = 5;
 const MAX_SCHEDULE_INTERVAL_MINUTES = 24 * 60;
 

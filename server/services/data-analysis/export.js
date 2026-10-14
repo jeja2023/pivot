@@ -9,7 +9,6 @@ const {
     ensureAnalysisDirs,
     getDatasetForUser,
     resolveAnalysisUser,
-    jsonParse,
     getDatasetPaths,
     resolveInside,
     analysisId,

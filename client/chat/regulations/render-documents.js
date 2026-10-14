@@ -81,14 +81,7 @@
                 const folder = state.activeFolder;
                 const canBatch = canManage();
                 const canDeleteFolder = canManage() && folder && folder.isCustom && Number(folder.documentCount || 0) === 0;
-                const governanceScope = String(state.governanceScope || '');
-                const governanceConfig = {
-                    metadata: { title: '元数据待审核法规', description: '补齐法规层级、权威来源等字段后确认元数据审核状态。' },
-                    maintainer: { title: '缺少维护人法规', description: '为每份法规指派明确维护人，形成后续维护责任链。' },
-                    version: { title: '待治理法规', description: '仅显示当前版本效力待核验、审核未通过或缺少当前版本的法规；请逐条确认后保存。' },
-                    index: { title: '索引未完成法规', description: '可重新加入向量索引队列；不会重新 OCR 或解析原文件。' },
-                    location: { title: '条文缺少定位法规', description: '依据当前版本已抽取正文重新生成条文页码和字符位置。' }
-                }[governanceScope];
+                const governanceConfig = getGovernanceWorklistConfig(state.governanceScope);
                 const isGovernanceWorklist = Boolean(governanceConfig);
                 const folderTitle = governanceConfig?.title || (folder ? folder.title : '全部法规');
                 const subTitle = isGovernanceWorklist ? '治理队列' : (folder ? '分类目录' : '文档目录');
@@ -120,6 +113,18 @@
                     ${statsHtml}
                 `);
             }
+
+            function getGovernanceWorklistConfig(scope) {
+                const key = String(scope || '');
+                return {
+                    metadata: { title: '元数据待审核法规', description: '补齐法规层级、权威来源等字段后确认元数据审核状态。' },
+                    maintainer: { title: '缺少维护人法规', description: '为每份法规指派明确维护人，形成后续维护责任链。' },
+                    version: { title: '待治理法规', description: '仅显示当前版本效力待核验、审核未通过或缺少当前版本的法规；请逐条确认后保存。' },
+                    index: { title: '索引未完成法规', description: '可重新加入向量索引队列；不会重新 OCR 或解析原文件。' },
+                    location: { title: '条文缺少定位法规', description: '依据当前版本已抽取正文重新生成条文页码和字符位置。' }
+                }[key] || null;
+            }
+
             function renderDocuments() {
                 const target = document.getElementById('regulations-doc-list');
                 if (!target) return;
@@ -149,6 +154,7 @@
                             <button type="button" class="btn-primary" data-regulation-import-folder="${esc(folderCat)}">导入此分类法规</button>
                         </div>
                     ` : '';
+                    const governanceConfig = getGovernanceWorklistConfig(state.governanceScope);
                     const emptyText = governanceConfig ? `暂无${governanceConfig.title}` : '暂无法规文档';
                     PivotSafeHtml.setHtml(target, `<tr><td colspan="${canSelect ? 11 : 10}" class="text-center"><div class="regulations-empty compact">${emptyText}${emptyAction}</div></td></tr>`);
                 } else {
