@@ -47,7 +47,7 @@ function canUseStoredModelSecret(model, user) {
 function canTestModel(model, user) {
     if (!model || !user) return false;
     if (model.user_id === user.id) return true;
-    return model.user_id === null && isAdmin(user);
+    return model.user_id === null;
 }
 
 function normalizeChatThinkingEnabledFlag(body = {}) {

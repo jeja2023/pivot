@@ -677,7 +677,7 @@ test('non-root admin creates private chat models and cannot delete global models
     }
 });
 
-test('visible global models can be tested by admins but not regular users', async () => {
+test('visible global models can be tested by permitted users without exposing ownership controls', async () => {
     const suffix = Date.now().toString(36);
     const axios = require('axios');
     const originalGet = axios.get;
@@ -689,8 +689,13 @@ test('visible global models can be tested by admins but not regular users', asyn
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
     `).run(`global_test_user_${suffix}`, 'hash', 'Global Test User', 'OPS', 'user', 'active');
+    const unauthInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`global_test_unauth_${suffix}`, 'hash', 'Global Test Unauth', 'HR', 'user', 'active');
     const adminUser = { id: Number(adminInfo.lastInsertRowid), username: `global_test_admin_${suffix}`, role: 'admin', unit: 'QA' };
     const normalUser = { id: Number(userInfo.lastInsertRowid), username: `global_test_user_${suffix}`, role: 'user', unit: 'OPS' };
+    const unauthUser = { id: Number(unauthInfo.lastInsertRowid), username: `global_test_unauth_${suffix}`, role: 'user', unit: 'HR' };
     const modelInfo = db.prepare(`
         INSERT INTO models (user_id, name, url, api_key, model_name, allowed_units, created_at)
         VALUES (NULL, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
@@ -735,9 +740,21 @@ test('visible global models can be tested by admins but not regular users', asyn
             user: normalUser,
             log: { debug() {}, info() {}, error() {}, warn() {} }
         }, userTestRes);
-        assert.equal(userTestRes.statusCode, 403);
+        assert.equal(userTestRes.statusCode, 200);
+        assert.equal(userTestRes.body.success, true);
+
+        const unauthRouter = makeRouter(unauthUser);
+        const unauthTestRoute = unauthRouter.stack.find(layer => layer.route?.path === '/models/test');
+        const unauthTestRes = makeRes();
+        await runExpressHandlers(unauthTestRoute.route.stack.map(layer => layer.handle), {
+            body: { id: String(modelInfo.lastInsertRowid), source: 'manual' },
+            user: unauthUser,
+            log: { debug() {}, info() {}, error() {}, warn() {} }
+        }, unauthTestRes);
+        assert.equal(unauthTestRes.statusCode, 403);
 
         assert.deepEqual(seenAuthHeaders, [
+            `Bearer global-secret-${suffix}`,
             `Bearer global-secret-${suffix}`
         ]);
 
@@ -752,7 +769,7 @@ test('visible global models can be tested by admins but not regular users', asyn
     } finally {
         axios.get = originalGet;
         db.prepare('DELETE FROM models WHERE id = ?').run(modelInfo.lastInsertRowid);
-        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(adminUser.id, normalUser.id);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?, ?)').run(adminUser.id, normalUser.id, unauthUser.id);
     }
 });
 
