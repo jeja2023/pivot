@@ -15,6 +15,246 @@
     margin-top: 4px;
 }
 
+/* 右侧数据表格上方工具栏与状态筛选 */
+.pdf-tools-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.pdf-toolbar-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pdf-toolbar-heading h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+}
+
+.pdf-list-summary-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.06);
+    color: var(--text-muted, #475569);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.pdf-toolbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* 一体化精致筛选胶囊控件 */
+.pdf-filter-pill-control {
+    display: inline-flex;
+    align-items: stretch;
+    height: 32px;
+    box-sizing: border-box;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    transition: all 0.15s ease;
+    overflow: hidden;
+}
+
+.pdf-filter-pill-control:hover {
+    border-color: #94a3b8;
+}
+
+.pdf-filter-pill-control:focus-within {
+    border-color: var(--primary, #2563eb);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+
+.pdf-filter-pill-prefix {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 9px;
+    background: #f8fafc;
+    border-right: 1px solid var(--border, #e2e8f0);
+    color: var(--text-muted, #64748b);
+    font-size: 0.74rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.pdf-filter-pill-prefix svg {
+    color: #94a3b8;
+    flex-shrink: 0;
+}
+
+.pdf-filter-pill-control:hover .pdf-filter-pill-prefix svg {
+    color: var(--text-muted, #64748b);
+}
+
+.pdf-filter-pill-body {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-width: 90px;
+}
+
+.pdf-filter-pill-select {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: unset !important;
+    margin: 0 !important;
+    padding: 0 24px 0 9px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    color: var(--text-main, #1e293b) !important;
+    cursor: pointer !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    line-height: 30px !important;
+}
+
+.pdf-filter-pill-select:hover {
+    background: rgba(248, 250, 252, 0.6) !important;
+}
+
+.pdf-filter-pill-arrow {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    transition: color 0.15s ease;
+}
+
+.pdf-filter-pill-control:focus-within .pdf-filter-pill-arrow {
+    color: var(--primary, #2563eb);
+}
+
+.pdf-toolbar-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #cbd5e1);
+    background: #ffffff;
+    color: var(--text-muted, #475569);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pdf-toolbar-refresh-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+    color: var(--text-main, #0f172a);
+}
+
+.pdf-toolbar-refresh-btn svg {
+    color: #64748b;
+    transition: transform 0.3s ease;
+}
+
+.pdf-toolbar-refresh-btn:hover svg {
+    transform: rotate(45deg);
+}
+
+.pdf-quick-presets {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-side);
+}
+
+.pdf-quick-presets-head strong,
+.pdf-quick-presets-head small {
+    display: block;
+}
+
+.pdf-quick-presets-head strong {
+    color: var(--text-main);
+    font-size: 0.78rem;
+}
+
+.pdf-quick-presets-head strong span {
+    margin-left: 4px;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.pdf-quick-presets-head small,
+.pdf-quick-preset-empty {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
+
+.pdf-quick-presets-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pdf-quick-preset {
+    min-height: 28px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--primary);
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 750;
+    line-height: 1;
+}
+
+.pdf-quick-preset:hover,
+.pdf-quick-preset:focus-visible {
+    border-color: var(--primary);
+    background: var(--bg-side);
+    outline: none;
+}
+
+.pdf-quick-preset.is-active {
+    border-color: var(--primary);
+    color: var(--surface);
+    background: var(--primary);
+}
+
 .pdf-tool-checkbox {
     align-items: center;
     flex-direction: row;
@@ -31,151 +271,712 @@
     display: none;
 }
 
-.pdf-detail-section {
-    margin-top: 16px;
+/* ==========================================================================
+   PDF 任务详情弹窗全局统一布局与视觉样式 (PDF Task Detail Modal Standard Styles)
+   ========================================================================== */
+
+/* 1. 弹窗容器尺寸与外框 */
+.workspace-modal.pdf-detail-dialog {
+    width: min(1080px, calc(100vw - 32px));
+    height: min(780px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+    background: #ffffff;
+    overflow: hidden;
 }
 
-.pdf-detail-section h4 {
-    margin: 0 0 8px;
+/* 2. 弹窗头部与副标题 */
+.pdf-detail-dialog .workspace-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    background: #ffffff;
+    flex-shrink: 0;
+}
+
+.pdf-detail-dialog .workspace-modal-header > div {
+    min-width: 0;
+}
+
+.pdf-detail-dialog .workspace-modal-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
     color: var(--text-main);
-    font-size: 0.94rem;
+    line-height: 1.35;
+    max-width: min(600px, 60vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.pdf-detail-section-head,
-.pdf-page-plan-actions,
-.pdf-page-plan-card-actions {
+.pdf-detail-dialog .workspace-modal-header p {
+    margin: 4px 0 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.pdf-header-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.pdf-header-badge.is-op {
+    background: rgba(15, 23, 42, 0.06);
+    color: var(--text-main, #334155);
+}
+
+.pdf-header-progress {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--primary, #2563eb);
+}
+
+.pdf-sub-time {
+    font-size: 0.72rem;
+    color: var(--text-muted, #94a3b8);
+    margin-left: 2px;
+}
+
+/* 3. 弹窗主体容器 */
+.doc-tool-modal-body.pdf-detail {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px 20px 24px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    background: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* 4. 概览状态与快捷操作 Hero 卡片 */
+.pdf-detail-overview-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.pdf-overview-status-wrap {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+}
+
+.pdf-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.pdf-status-pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+
+.pdf-overview-op-badge {
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: rgba(241, 245, 249, 0.9);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    color: var(--text-main, #334155);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.pdf-overview-err-banner {
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.pdf-detail-actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
 }
 
-.pdf-detail-section-head {
+.pdf-detail-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 34px;
+    min-height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pdf-detail-download-main {
+    background: var(--primary, #2563eb);
+    color: #ffffff;
+    border: 1px solid var(--primary, #2563eb);
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+}
+
+.pdf-detail-download-main:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+}
+
+.pdf-detail-delete-btn {
+    border-color: rgba(239, 68, 68, 0.3) !important;
+    color: #dc2626 !important;
+    background: transparent;
+}
+
+.pdf-detail-delete-btn:hover {
+    background: #fef2f2 !important;
+    border-color: #ef4444 !important;
+    color: #b91c1c !important;
+}
+
+/* 5. 指标统计微卡片网格 */
+.pdf-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+}
+
+.pdf-metric-card {
+    display: flex;
+    flex-direction: column;
     justify-content: space-between;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.pdf-metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    border-color: #cbd5e1;
+}
+
+.pdf-metric-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted, #64748b);
+    font-size: 0.74rem;
+    font-weight: 600;
     margin-bottom: 8px;
 }
 
-.pdf-detail-section-head h4 {
-    margin-bottom: 0;
+.pdf-metric-icon {
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.85;
 }
 
-.pdf-detail-section p {
-    margin: 0;
-    color: var(--text-muted);
-}
-
-.pdf-detail-list {
-    display: grid;
-    gap: 6px;
-    margin: 8px 0 0;
-    padding-left: 20px;
-}
-
-.pdf-detail-list li {
-    color: var(--text-main);
-    line-height: 1.5;
-}
-
-.pdf-output-list {
-    align-content: flex-start;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
-    background: var(--surface);
-}
-
-.pdf-output-list .doc-tool-output-btn {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.pdf-output-item {
-    display: grid;
-    min-width: min(100%, 260px);
-    gap: 7px;
-}
-
-.pdf-output-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.pdf-result-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.pdf-result-grid div {
-    display: flex;
-    min-height: 56px;
-    flex-direction: column;
-    justify-content: center;
-    gap: 3px;
-    padding: 9px 11px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
-    background: var(--surface);
-}
-
-.pdf-result-grid span {
-    color: var(--text-muted);
-    font-size: 0.72rem;
+.pdf-metric-val {
+    font-size: 1.45rem;
     font-weight: 700;
+    color: var(--text-main, #0f172a);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
 }
 
-.pdf-result-grid strong {
-    overflow: hidden;
-    color: var(--text-main);
+.pdf-metric-card.is-danger .pdf-metric-val {
+    color: #ef4444;
+}
+
+/* 6. Section 通用头部与容器 */
+.pdf-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.pdf-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.pdf-section-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
     font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-main, #1e293b);
+    letter-spacing: -0.01em;
+}
+
+.pdf-section-title svg {
+    color: var(--primary, #3b82f6);
+    flex-shrink: 0;
+}
+
+.pdf-section-tag {
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: rgba(241, 245, 249, 0.95);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    color: var(--text-muted, #64748b);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+/* 7. 文件预检列表卡片 */
+.pdf-preflight-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.pdf-preflight-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.pdf-preflight-row-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.pdf-preflight-file-icon {
+    display: inline-flex;
+    color: #64748b;
+    flex-shrink: 0;
+}
+
+.pdf-preflight-filename {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main, #1e293b);
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: min(440px, 45vw);
+}
+
+.pdf-preflight-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.pdf-preflight-page-pill {
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: var(--text-muted, #475569);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.pdf-preflight-warning-pill {
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #fffbeb;
+    border: 1px solid #fef3c7;
+    color: #b45309;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+/* 8. 成果输出文件列表卡片 */
+.pdf-output-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pdf-output-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.pdf-output-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.pdf-output-card-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+
+.pdf-file-format-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.pdf-file-format-badge.is-docx {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #dbeafe;
+}
+.pdf-file-format-badge.is-xlsx {
+    background: #f0fdf4;
+    color: #15803d;
+    border: 1px solid #dcfce7;
+}
+.pdf-file-format-badge.is-pdf {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fee2e2;
+}
+.pdf-file-format-badge.is-zip {
+    background: #fffbeb;
+    color: #d97706;
+    border: 1px solid #fef3c7;
+}
+.pdf-file-format-badge.is-img {
+    background: #f5f3ff;
+    color: #7c3aed;
+    border: 1px solid #ede9fe;
+}
+.pdf-file-format-badge.is-file {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+}
+
+.pdf-output-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.pdf-output-name {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: min(380px, 38vw);
+    line-height: 1.35;
+}
+
+.pdf-output-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted, #64748b);
+}
+
+.pdf-output-size {
+    font-weight: 600;
+    color: #475569;
+}
+
+.pdf-output-kind {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #f1f5f9;
+    font-size: 0.7rem;
+    color: #64748b;
+}
+
+.pdf-output-card-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.pdf-output-dl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--primary, #2563eb);
+    color: #ffffff;
+    border: 1px solid var(--primary, #2563eb);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pdf-output-dl-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(37, 99, 235, 0.25);
+}
+
+.pdf-output-dispatch-btns {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pdf-output-dispatch-btn {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #334155);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pdf-output-dispatch-btn:hover {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    color: var(--primary, #2563eb);
+}
+
+.pdf-detail-empty-card {
+    padding: 24px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px dashed var(--border, #cbd5e1);
+    color: var(--text-muted, #94a3b8);
+    text-align: center;
+    font-size: 0.82rem;
+}
+
+/* 9. 批量结果明细列表卡片 */
+.pdf-batch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.pdf-batch-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.pdf-batch-row-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.pdf-batch-filename {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main, #1e293b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pdf-batch-err-box {
+    font-size: 0.75rem;
+    color: #dc2626;
+    background: #fef2f2;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+/* 10. 页面与 OCR 复核卡片 */
+.pdf-pages-section {
+    margin-top: 4px;
+}
+
+.pdf-pages-plan-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    font-weight: 600;
 }
 
 .pdf-page-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
     gap: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid var(--border, #e2e8f0);
 }
 
 .pdf-page-card {
-    display: grid;
-    min-width: 0;
-    gap: 7px;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
-    color: var(--text-main);
-    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 8px;
+    background: #f8fafc;
+    cursor: pointer;
+    transition: all 0.15s ease;
     text-align: left;
 }
 
-.pdf-page-card:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
+.pdf-page-card:hover {
+    border-color: var(--primary, #2563eb);
+    background: #ffffff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
-.pdf-page-card img {
+.pdf-page-card-thumb {
+    position: relative;
     width: 100%;
-    min-height: 104px;
-    max-height: 176px;
-    object-fit: contain;
-    border: 1px solid var(--border);
-    background: var(--surface-hover, var(--surface));
+    min-height: 110px;
+    max-height: 160px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(226, 232, 240, 0.6);
 }
 
-.pdf-page-card span {
-    overflow: hidden;
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.pdf-page-card-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.pdf-page-zoom-hint {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.35);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.pdf-page-card:hover .pdf-page-zoom-hint {
+    opacity: 1;
+}
+
+.pdf-page-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 0 2px;
+}
+
+.pdf-page-num {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--text-main, #334155);
+}
+
+.pdf-page-conf {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #16a34a;
+    background: #f0fdf4;
+    padding: 1px 5px;
+    border-radius: 4px;
 }
 
 .pdf-page-preview-dialog {
@@ -262,15 +1063,55 @@
     background: var(--surface);
 }
 
-@media (max-width: 760px) {
-    .pdf-result-grid,
-    .pdf-page-grid,
-    .pdf-page-plan-list {
-        grid-template-columns: 1fr;
+@media (max-width: 768px) {
+    .workspace-modal.pdf-detail-dialog {
+        width: calc(100vw - 16px) !important;
+        max-height: 92vh !important;
     }
 
-    .pdf-output-list {
-        align-items: stretch;
+    .pdf-detail-overview-card {
         flex-direction: column;
+        align-items: stretch;
+    }
+
+    .pdf-detail-actions {
+        width: 100%;
+    }
+
+    .pdf-detail-action-btn {
+        flex: 1 1 auto;
+    }
+
+    .pdf-metric-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .pdf-output-card {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .pdf-output-card-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .pdf-output-dl-btn,
+    .pdf-output-dispatch-btns,
+    .pdf-output-dispatch-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .pdf-preflight-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .pdf-page-grid,
+    .pdf-page-plan-list {
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     }
 }

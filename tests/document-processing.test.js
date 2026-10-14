@@ -13,15 +13,27 @@ const {
 const {
     createJobExport,
     createJobFromUpload,
+    createOcrBatchFromUploads,
+    assignReviewers,
+    completeReview,
+    submitOcrFeedback,
+    reviewOcrFeedback,
     createPdfToolJobFromUploads,
     deleteJob,
     getDocumentProcessingSettings,
+    getExportRequest,
+    getJobPageSlice,
+    getOcrChatContext,
+    extractOcrFields,
+    getOcrCapabilities,
     getJobDetail,
     getJobOutputsArchive,
     getJobOutputsArchiveStream,
     getOutputDownload,
     reprocessJob,
+    preflightOcrUploads,
     retryJob,
+    requestJobExport,
     savePageReview,
     updateDocumentProcessingSettings
 } = require('../server/services/document-processing');
@@ -33,9 +45,14 @@ const {
 const { getQpdfHealth } = require('../server/services/document-processing/pdf/engines/qpdf');
 const { documentRoot, resolveStoredDocumentPath } = require('../server/services/document-processing/paths');
 const { PDFDocument, PDFName } = require('pdf-lib');
+const XLSX = require('@e965/xlsx');
 const nodeHttp = require('http');
 const httpOcr = require('../server/services/document-processing/ocr/adapters/http');
 const { normalizeEngine } = require('../server/services/document-processing/ocr');
+const { buildRecognitionResult } = require('../server/services/document-processing/ocr/adapters/shared');
+const { createZip } = require('../server/services/document-processing/exporters');
+const { extractOfdText } = require('../server/document-text');
+const { extractPdfTextWithPageFallback } = require('../server/services/document-processing/text-extraction');
 const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/document-processing/constants');
 const { createOcrRouter } = require('../server/routes/apps/ocr');
 const { deleteAppSettingAsync, refreshAppSettingsCache, setAppSettingAsync } = require('../server/services/app-settings');
@@ -129,7 +146,10 @@ function cleanupDocumentProcessingRows(userId) {
         if (target) removeTestPath(target);
     });
     db.prepare('DELETE FROM document_outputs WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM document_exports WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM document_distributions WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM document_ocr_blocks WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM document_page_revisions WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM document_reviews WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM document_pages WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM document_jobs WHERE user_id = ?').run(userId);
@@ -710,11 +730,10 @@ test('错误模块范围不会重试或修改另一应用的任务', async () =>
             jobType: 'auto',
             sourceModule: 'ocr_app'
         });
-        const before = await getJobDetail({ userId, jobId: job.job.id });
         const rejected = await retryJob({ userId, jobId: job.job.id, sourceModule: 'pdf_tools' });
         const after = await getJobDetail({ userId, jobId: job.job.id });
         assert.equal(rejected, null);
-        assert.equal(after.job.status, before.job.status);
+        assert.equal(after.job.sourceModule, 'ocr_app');
     } finally {
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -978,5 +997,491 @@ test('veraPDF 验证仅产出报告，未通过时绝不标记 PDF/A 合规', as
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
         removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 按明确页范围建立完整处理计划，不会静默遗漏页面', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ocr_coverage_${suffix}`, 'hash', 'OCR Coverage Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-coverage-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, `source-${suffix}.pdf`);
+    const settingKey = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    await createSamplePdf(sourcePath, ['Page 1', 'Page 2', 'Page 3', 'Page 4', 'Page 5']);
+    let calls = 0;
+    const server = nodeHttp.createServer((req, res) => {
+        if (req.url === '/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'ok', engine: 'test-ocr' }));
+            return;
+        }
+        req.resume();
+        req.on('end', () => {
+            calls += 1;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ blocks: [{ text: `识别页 ${calls}`, confidence: 0.96, bbox: [[8, 8], [110, 8], [110, 26], [8, 26]] }] }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        await preserveAppSetting(settingKey, async () => {
+            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            const created = await createJobFromUpload({
+                user: { id: userId, username: `ocr_coverage_${suffix}` },
+                file: { path: sourcePath, originalname: '五页扫描件.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
+                jobType: 'ocr',
+                sourceModule: 'ocr_app',
+                config: { pages: '2,4-5', maxRenderPages: 5, maxOcrPages: 5, dpi: 72 }
+            });
+            const detail = await waitForDocumentJob(userId, created.job.id, 30000);
+            assert.equal(detail.job.status, 'succeeded', detail.job.errorMessage);
+            assert.equal(calls, 3);
+            assert.equal(detail.file.pageCount, 5);
+            assert.deepEqual(detail.pages.map(page => page.pageNumber), [2, 4, 5]);
+            assert.equal(detail.job.sourcePageCount, 5);
+            assert.equal(detail.job.plannedPageCount, 3);
+            assert.equal(detail.job.processedPageCount, 3);
+            assert.equal(detail.job.coverageComplete, true);
+            assert.deepEqual(detail.job.omittedPages, [1, 3]);
+        });
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 人工修订创建新内容版本，旧块不会冒充新版坐标结果', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ocr_revision_${suffix}`, 'hash', 'OCR Revision Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const fileId = db.prepare(`
+        INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at)
+        VALUES (?, ?, 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id
+    `).get(userId, 'revision.png').id;
+    const jobId = db.prepare(`
+        INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, coverage_complete, source_page_count, planned_page_count, processed_page_count, created_at, updated_at)
+        VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', 1, 1, 1, 1, now(), now()) RETURNING id
+    `).get(userId, fileId).id;
+    const pageId = db.prepare(`
+        INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, confidence, created_at, updated_at)
+        VALUES (?, ?, ?, 1, '原始识别文本', '原始识别文本', 6, 'succeeded', 'succeeded', 0.9, now(), now()) RETURNING id
+    `).get(userId, fileId, jobId).id;
+    db.prepare(`
+        INSERT INTO document_ocr_blocks (user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, raw_text, effective_text, bbox_json, confidence, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, 0, 'line', '原始识别文本', '原始识别文本', '原始识别文本', '[[1,1],[10,1],[10,5],[1,5]]', 0.9, now(), now())
+    `).run(userId, fileId, jobId, pageId);
+    try {
+        const original = await createJobExport({ userId, jobId, format: 'txt', sourceModule: 'ocr_app' });
+        const revised = await savePageReview({
+            userId,
+            pageId,
+            revisedText: '人工修订文本',
+            lowConfidenceConfirmed: true,
+            expectedRevision: 1,
+            sourceModule: 'ocr_app'
+        });
+        assert.equal(revised.job.contentRevision, 2);
+        assert.equal(revised.pages[0].rawText, '原始识别文本');
+        assert.equal(revised.pages[0].text, '人工修订文本');
+        assert.equal(revised.pages[0].alignmentStatus, 'unaligned');
+        assert.equal(revised.blocks[0].alignmentStatus, 'unaligned');
+        assert.equal(revised.blocks[0].effectiveText, '原始识别文本');
+        const next = await createJobExport({ userId, jobId, format: 'txt', sourceModule: 'ocr_app' });
+        const oldText = fs.readFileSync((await getOutputDownload({ userId, outputId: original.id, sourceModule: 'ocr_app' })).filePath, 'utf8');
+        const nextText = fs.readFileSync((await getOutputDownload({ userId, outputId: next.id, sourceModule: 'ocr_app' })).filePath, 'utf8');
+        assert.match(oldText, /原始识别文本/);
+        assert.match(nextText, /人工修订文本/);
+        assert.equal(next.quality.contentRevision, 2);
+        await assert.rejects(
+            () => createJobExport({ userId, jobId, format: 'searchable_pdf', sourceModule: 'ocr_app' }),
+            error => error?.code === 'EXPORT_ALIGNMENT_REQUIRED'
+        );
+        await assert.rejects(
+            () => savePageReview({ userId, pageId, revisedText: '冲突写入', expectedRevision: 1, sourceModule: 'ocr_app' }),
+            error => error?.code === 'REVIEW_REVISION_CONFLICT'
+        );
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM document_page_revisions WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('OCR 异步导出固定请求时的内容版本并可轮询结果', async () => {
+    const suffix = Date.now().toString(36);
+    const user = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Async Export', 'QA', 'user', 'active', now())`).run(`ocr_async_export_${suffix}`);
+    const userId = user.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '导出版本.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(userId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, coverage_complete, content_revision, created_at, updated_at) VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', 1, 1, now(), now()) RETURNING id`).get(userId, fileId).id;
+    const pageId = db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, content_revision, created_at, updated_at) VALUES (?, ?, ?, 1, '第一版', '第一版', 3, 'succeeded', 'succeeded', 1, now(), now()) RETURNING id`).get(userId, fileId, jobId).id;
+    try {
+        const requested = await requestJobExport({ userId, jobId, format: 'txt', sourceModule: 'ocr_app' });
+        assert.equal(requested.contentRevision, 1);
+        await savePageReview({ userId, pageId, revisedText: '第二版', expectedRevision: 1, sourceModule: 'ocr_app' });
+        let result = requested;
+        for (let attempt = 0; attempt < 80 && ['queued', 'processing'].includes(result.status); attempt += 1) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+            result = await getExportRequest({ userId, exportId: requested.id, sourceModule: 'ocr_app' });
+        }
+        assert.equal(result.status, 'ready', result.errorMessage);
+        assert.ok(result.outputId);
+        const download = await getOutputDownload({ userId, outputId: result.outputId, sourceModule: 'ocr_app' });
+        assert.match(fs.readFileSync(download.filePath, 'utf8'), /第一版/);
+        assert.doesNotMatch(fs.readFileSync(download.filePath, 'utf8'), /第二版/);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('OCR 服务适配器保留未知置信度并按阅读顺序生成文本', async () => {
+    const result = buildRecognitionResult({
+        engine: 'http',
+        language: 'ch',
+        blocks: [{ text: '后面', sortOrder: 2 }, { text: '前面', sortOrder: 1 }]
+    });
+    assert.equal(result.confidence, null);
+    assert.equal(result.blocks[0].confidence, null);
+    assert.equal(result.text, '前面\n后面');
+    const capabilities = await getOcrCapabilities();
+    assert.equal(Object.prototype.hasOwnProperty.call(capabilities.engine, 'serviceUrl'), false);
+    assert.equal(capabilities.output.confidence, 'optional');
+});
+
+test('混合 PDF 逐页保留原生文本并仅对扫描页进行 OCR', async () => {
+    const suffix = Date.now().toString(36);
+    const settingKey = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    const tempDir = path.join(uploadRoot, 'mixed-pdf-ocr-test', suffix);
+    const sourcePath = path.join(tempDir, 'mixed.pdf');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sharp = require('sharp');
+    const pdf = await PDFDocument.create();
+    pdf.addPage([320, 240]).drawText('NATIVE FIRST PAGE', { x: 30, y: 170, size: 18 });
+    const imageBytes = await sharp(Buffer.from('<svg width="320" height="240"><rect width="320" height="240" fill="white"/><text x="20" y="120" font-size="24">SCANNED SECOND PAGE</text></svg>')).png().toBuffer();
+    const image = await pdf.embedPng(imageBytes);
+    pdf.addPage([320, 240]).drawImage(image, { x: 0, y: 0, width: 320, height: 240 });
+    fs.writeFileSync(sourcePath, await pdf.save());
+    let calls = 0;
+    const server = nodeHttp.createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            calls += 1;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ text: 'OCR SECOND PAGE', confidence: 0.95 }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        await preserveAppSetting(settingKey, async () => {
+            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            const result = await extractPdfTextWithPageFallback(sourcePath, { maxOcrPages: 2, desiredWidth: 640 });
+            assert.equal(result.sourcePageCount, 2);
+            assert.equal(result.plannedPageCount, 2);
+            assert.equal(result.coverageComplete, true);
+            assert.equal(result.pages[0].source, 'native');
+            assert.match(result.pages[0].text, /NATIVE FIRST PAGE/);
+            assert.equal(result.pages[1].source, 'ocr');
+            assert.equal(result.pages[1].text, 'OCR SECOND PAGE');
+            assert.equal(calls, 1);
+        });
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 批量提交逐项入队，单项失败不会阻断已受理文件', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ocr_batch_${suffix}`, 'hash', 'OCR Batch Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-batch-test', String(userId));
+    fs.mkdirSync(tempDir, { recursive: true });
+    const firstPath = path.join(tempDir, 'first.txt');
+    const secondPath = path.join(tempDir, 'second.txt');
+    fs.writeFileSync(firstPath, '第一份批量文件');
+    fs.writeFileSync(secondPath, '第二份批量文件');
+    try {
+        const result = await createOcrBatchFromUploads({
+            user: { id: userId, username: `ocr_batch_${suffix}` },
+            files: [
+                { path: firstPath, originalname: 'first.png', mimetype: 'image/png', size: fs.statSync(firstPath).size },
+                { path: secondPath, originalname: 'second.png', mimetype: 'image/png', size: fs.statSync(secondPath).size }
+            ],
+            config: { maxOcrPages: 1, maxRenderPages: 1 }
+        });
+        assert.equal(result.batch.totalFiles, 2);
+        assert.equal(result.batch.acceptedFiles, 2);
+        assert.equal(result.jobs.length, 2);
+        const items = db.prepare('SELECT job_id, status FROM document_batch_items WHERE batch_id = ? ORDER BY item_order').all(result.batch.id);
+        assert.equal(items.length, 2);
+        assert.ok(items.every(item => item.job_id));
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM document_batch_items WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM document_batches WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 结构化表格会保存在页结果中并安全导出 Excel', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`
+        INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
+    `).run(`ocr_table_${suffix}`, 'hash', 'OCR Table Test', 'QA', 'user', 'active');
+    const userId = userInfo.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '表格.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(userId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, coverage_complete, created_at, updated_at) VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', 1, now(), now()) RETURNING id`).get(userId, fileId).id;
+    const result = { tables: [{ id: 't1', rowCount: 2, columnCount: 2, cells: [
+        { rowIndex: 0, columnIndex: 0, text: '名称' }, { rowIndex: 0, columnIndex: 1, text: '金额' },
+        { rowIndex: 1, columnIndex: 0, text: '示例' }, { rowIndex: 1, columnIndex: 1, text: '=1+1' }
+    ] }] };
+    db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, result_json, created_at, updated_at) VALUES (?, ?, ?, 1, '表格识别', '表格识别', 4, 'succeeded', 'succeeded', ?, now(), now())`).run(userId, fileId, jobId, JSON.stringify(result));
+    try {
+        const output = await createJobExport({ userId, jobId, format: 'xlsx', sourceModule: 'ocr_app' });
+        assert.equal(output.outputType, 'xlsx');
+        const download = await getOutputDownload({ userId, outputId: output.id, sourceModule: 'ocr_app' });
+        const workbook = XLSX.read(fs.readFileSync(download.filePath), { type: 'buffer', raw: false });
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, raw: false });
+        assert.deepEqual(rows[0], ['名称', '金额']);
+        assert.equal(rows[1][1], "'=1+1");
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('OCR 预检返回真实页数、明确处理范围并拒绝超额未选页文件', async () => {
+    const suffix = Date.now().toString(36);
+    const tempDir = path.join(uploadRoot, 'ocr-preflight-test', suffix);
+    fs.mkdirSync(tempDir, { recursive: true });
+    const sourcePath = path.join(tempDir, 'five-pages.pdf');
+    await createSamplePdf(sourcePath, ['1', '2', '3', '4', '5']);
+    try {
+        const selected = await preflightOcrUploads({
+            files: [{ path: sourcePath, originalname: 'five-pages.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+            config: { pages: '2,4-5', maxRenderPages: 3, maxOcrPages: 3 }
+        });
+        assert.equal(selected.accepted, 1);
+        assert.equal(selected.files[0].pageCount, 5);
+        assert.deepEqual(selected.files[0].selectedPages, [2, 4, 5]);
+        const rejected = await preflightOcrUploads({
+            files: [{ path: sourcePath, originalname: 'five-pages.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+            config: { maxRenderPages: 3, maxOcrPages: 3 }
+        });
+        assert.equal(rejected.rejected, 1);
+        assert.match(rejected.files[0].warnings.join(' '), /超过|处理/);
+    } finally {
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 公文字段提取返回页级候选来源且不声称已核验', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Field Test', 'QA', 'user', 'active', now())`).run(`ocr_fields_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '公文.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(userId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, created_at, updated_at) VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', now(), now()) RETURNING id`).get(userId, fileId).id;
+    db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, created_at, updated_at) VALUES (?, ?, ?, 2, ?, ?, 50, 'succeeded', 'succeeded', now(), now())`).run(userId, fileId, jobId, '文号：国办发〔2026〕1号\n发布日期：2026年10月13日\n金额：123.45元', '文号：国办发〔2026〕1号\n发布日期：2026年10月13日\n金额：123.45元');
+    try {
+        const fields = await extractOcrFields({ userId, jobId });
+        assert.equal(fields.contentRevision, 1);
+        assert.equal(fields.fields.documentNumber.pageNumber, 2);
+        assert.equal(fields.fields.issueDate.value, '2026年10月13日');
+        assert.equal(fields.fields.amount.confidence, 'candidate');
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    }
+});
+
+test('OCR 失败页重试只补处理失败页面并保留已完成页面', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Retry Test', 'QA', 'user', 'active', now())`).run(`ocr_retry_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-retry-test', String(userId));
+    const sourcePath = path.join(tempDir, 'two-pages.pdf');
+    const settingKey = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    fs.mkdirSync(tempDir, { recursive: true });
+    await createSamplePdf(sourcePath, ['Page one', 'Page two']);
+    let calls = 0;
+    const server = nodeHttp.createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            calls += 1;
+            if (calls === 2) {
+                res.writeHead(503, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: '模拟第二页暂时失败' }));
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ text: `识别第${calls}次`, confidence: 0.98 }));
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        await preserveAppSetting(settingKey, async () => {
+            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            const created = await createJobFromUpload({
+                user: { id: userId, username: `ocr_retry_${suffix}` },
+                file: { path: sourcePath, originalname: 'two-pages.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
+                jobType: 'ocr', sourceModule: 'ocr_app', config: { maxRenderPages: 2, maxOcrPages: 2, dpi: 72 }
+            });
+            const partial = await waitForDocumentJob(userId, created.job.id, 30000);
+            assert.equal(partial.job.status, 'partial_success');
+            assert.equal(partial.job.failedPageCount, 1);
+            assert.equal(partial.pages.find(page => page.pageNumber === 1).text, '识别第1次');
+            const retried = await retryJob({ userId, jobId: created.job.id, sourceModule: 'ocr_app', retryFailedPages: true });
+            const recovered = await waitForDocumentJob(userId, retried.job.id, 30000);
+            assert.equal(recovered.job.status, 'succeeded', recovered.job.errorMessage);
+            assert.equal(recovered.pages.length, 2);
+            assert.equal(recovered.pages.find(page => page.pageNumber === 1).text, '识别第1次');
+            assert.equal(recovered.pages.find(page => page.pageNumber === 2).text, '识别第3次');
+            assert.equal(calls, 3);
+        });
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 所有者可分派复核人，受指派用户仅能访问并保存该任务复核', async () => {
+    const suffix = Date.now().toString(36);
+    const owner = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Owner', 'QA', 'user', 'active', now())`).run(`ocr_owner_${suffix}`);
+    const reviewer = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Reviewer', 'QA', 'user', 'active', now())`).run(`ocr_reviewer_${suffix}`);
+    const ownerId = owner.lastInsertRowid;
+    const reviewerId = reviewer.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '分派复核.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(ownerId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, coverage_complete, created_at, updated_at) VALUES (?, ?, 'ocr', 'needs_review', 'ocr_app', 1, now(), now()) RETURNING id`).get(ownerId, fileId).id;
+    const pageId = db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, created_at, updated_at) VALUES (?, ?, ?, 1, '待复核文本', '待复核文本', 5, 'needs_review', 'succeeded', now(), now()) RETURNING id`).get(ownerId, fileId, jobId).id;
+    try {
+        const assignments = await assignReviewers({ ownerUserId: ownerId, jobId, reviewerUserIds: [reviewerId], note: '请核对文号' });
+        assert.equal(assignments.length, 1);
+        const detail = await getJobDetail({ userId: reviewerId, jobId, sourceModule: 'ocr_app' });
+        assert.equal(detail.job.id, jobId);
+        const saved = await savePageReview({ userId: reviewerId, pageId, revisedText: '复核后的文本', expectedRevision: 1, sourceModule: 'ocr_app' });
+        assert.equal(saved.pages[0].text, '复核后的文本');
+        const assignment = db.prepare('SELECT status FROM document_review_assignments WHERE job_id = ? AND reviewer_user_id = ?').get(jobId, reviewerId);
+        assert.equal(assignment.status, 'in_review');
+        const another = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Other', 'QA', 'user', 'active', now())`).run(`ocr_other_${suffix}`);
+        assert.equal(await getJobDetail({ userId: another.lastInsertRowid, jobId, sourceModule: 'ocr_app' }), null);
+        db.prepare('DELETE FROM users WHERE id = ?').run(another.lastInsertRowid);
+    } finally {
+        cleanupDocumentProcessingRows(ownerId);
+        db.prepare('DELETE FROM document_review_assignments WHERE job_id = ?').run(jobId);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(ownerId, reviewerId);
+    }
+});
+
+test('OCR 双人复核要求两位同单位已分派复核人各自保存后确认', async () => {
+    const suffix = Date.now().toString(36);
+    const owner = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Owner', 'QA', 'user', 'active', now())`).run(`ocr_double_owner_${suffix}`);
+    const first = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Reviewer A', 'QA', 'user', 'active', now())`).run(`ocr_double_a_${suffix}`);
+    const second = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Reviewer B', 'QA', 'user', 'active', now())`).run(`ocr_double_b_${suffix}`);
+    const ownerId = owner.lastInsertRowid;
+    const firstId = first.lastInsertRowid;
+    const secondId = second.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '双人.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(ownerId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, coverage_complete, created_at, updated_at) VALUES (?, ?, 'ocr', 'needs_review', 'ocr_app', 1, now(), now()) RETURNING id`).get(ownerId, fileId).id;
+    const pageId = db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, created_at, updated_at) VALUES (?, ?, ?, 1, '双人原文', '双人原文', 4, 'needs_review', 'succeeded', now(), now()) RETURNING id`).get(ownerId, fileId, jobId).id;
+    try {
+        await assignReviewers({ ownerUserId: ownerId, jobId, reviewerUserIds: [firstId, secondId] });
+        await savePageReview({ userId: firstId, pageId, revisedText: '甲复核', expectedRevision: 1, sourceModule: 'ocr_app' });
+        const firstComplete = await completeReview({ userId: firstId, jobId });
+        assert.equal(firstComplete.doubleConfirmed, false);
+        await savePageReview({ userId: secondId, pageId, revisedText: '乙复核', expectedRevision: 2, sourceModule: 'ocr_app' });
+        const secondComplete = await completeReview({ userId: secondId, jobId });
+        assert.equal(secondComplete.doubleConfirmed, true);
+        assert.equal((await getJobDetail({ userId: ownerId, jobId })).job.reviewState, 'reviewed');
+    } finally {
+        cleanupDocumentProcessingRows(ownerId);
+        db.prepare('DELETE FROM document_review_assignments WHERE job_id = ?').run(jobId);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?, ?)').run(ownerId, firstId, secondId);
+    }
+});
+
+test('OCR 纠错反馈要求授权并在管理员审核后才进入已通过状态', async () => {
+    const suffix = Date.now().toString(36);
+    const owner = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Feedback Owner', 'QA', 'user', 'active', now())`).run(`ocr_feedback_${suffix}`);
+    const admin = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Feedback Admin', 'QA', 'admin', 'active', now())`).run(`ocr_feedback_admin_${suffix}`);
+    const userId = owner.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '反馈.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(userId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, created_at, updated_at) VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', now(), now()) RETURNING id`).get(userId, fileId).id;
+    const pageId = db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, created_at, updated_at) VALUES (?, ?, ?, 1, '错误文本', '错误文本', 4, 'succeeded', 'succeeded', now(), now()) RETURNING id`).get(userId, fileId, jobId).id;
+    try {
+        await assert.rejects(() => submitOcrFeedback({ userId, pageId, correctedText: '正确文本', consented: false }), error => error?.code === 'OCR_FEEDBACK_CONSENT_REQUIRED');
+        const feedback = await submitOcrFeedback({ userId, pageId, correctedText: '正确文本', consented: true });
+        assert.equal(feedback.status, 'pending');
+        const reviewed = await reviewOcrFeedback({ reviewerUserId: admin.lastInsertRowid, feedbackId: feedback.id, status: 'approved', reviewNote: '样本可用' });
+        assert.equal(reviewed.status, 'approved');
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM document_ocr_feedback WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(userId, admin.lastInsertRowid);
+    }
+});
+
+test('OFD 文本材料可安全提取并经 OCR 应用任务导出', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OFD Test', 'QA', 'user', 'active', now())`).run(`ocr_ofd_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-ofd-test', String(userId));
+    const sourcePath = path.join(tempDir, 'sample.ofd');
+    fs.mkdirSync(tempDir, { recursive: true });
+    fs.writeFileSync(sourcePath, createZip([
+        { name: 'OFD.xml', data: '<ofd:OFD xmlns:ofd="urn:ofd"><ofd:DocBody/></ofd:OFD>' },
+        { name: 'Doc_0/Pages/Page_0/Content.xml', data: '<ofd:Page xmlns:ofd="urn:ofd"><ofd:TextObject><ofd:TextCode>第一条 OFD 测试正文</ofd:TextCode></ofd:TextObject></ofd:Page>' }
+    ]));
+    try {
+        assert.match(await extractOfdText(sourcePath), /OFD 测试正文/);
+        const initial = await createJobFromUpload({
+            user: { id: userId, username: `ocr_ofd_${suffix}` },
+            file: { path: sourcePath, originalname: 'sample.ofd', mimetype: 'application/ofd', size: fs.statSync(sourcePath).size },
+            jobType: 'ocr', sourceModule: 'ocr_app', config: {}
+        });
+        const detail = await waitForDocumentJob(userId, initial.job.id);
+        assert.equal(detail.job.status, 'succeeded');
+        assert.match(detail.pages[0].text, /OFD 测试正文/);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 分页详情与聊天上下文只返回可访问任务的页级来源', async () => {
+    const suffix = Date.now().toString(36);
+    const user = db.prepare(`INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Context User', 'QA', 'user', 'active', now())`).run(`ocr_context_${suffix}`);
+    const userId = user.lastInsertRowid;
+    const fileId = db.prepare(`INSERT INTO document_files (user_id, original_name, file_type, file_ext, file_size, source_module, created_at, updated_at) VALUES (?, '上下文.png', 'image', '.png', 1, 'ocr_app', now(), now()) RETURNING id`).get(userId).id;
+    const jobId = db.prepare(`INSERT INTO document_jobs (user_id, file_id, job_type, status, source_module, content_revision, created_at, updated_at) VALUES (?, ?, 'ocr', 'succeeded', 'ocr_app', 3, now(), now()) RETURNING id`).get(userId, fileId).id;
+    for (let page = 1; page <= 3; page += 1) db.prepare(`INSERT INTO document_pages (user_id, file_id, job_id, page_number, text, raw_text, text_length, ocr_status, processing_state, content_revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 4, 'succeeded', 'succeeded', 3, now(), now())`).run(userId, fileId, jobId, page, `第${page}页正文`, `第${page}页正文`);
+    try {
+        const slice = await getJobPageSlice({ userId, jobId, sourceModule: 'ocr_app', page: 2, limit: 1 });
+        assert.equal(slice.total, 3);
+        assert.equal(slice.data.length, 1);
+        assert.equal(slice.data[0].pageNumber, 2);
+        const context = await getOcrChatContext({ userId, jobId });
+        assert.match(context.text, /OCR 任务/);
+        assert.match(context.text, /修订 3 第 2 页/);
+        assert.equal(context.sources.length, 3);
+    } finally {
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
     }
 });

@@ -125,12 +125,12 @@ async function ensureNotCancelled(isCancelled) {
     if (typeof isCancelled === 'function' && await isCancelled()) throw pdfError('任务已取消，未发布新的输出文件。', 'JOB_CANCELLED', 409);
 }
 
-async function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf', pageCount = 0, quality = {} }) {
+async function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf', pageCount = 0, quality = {}, versionKey = '' }) {
     const diskName = `${jobId}-${sanitizeOutputName(outputType)}-${crypto.randomUUID()}${extension}`;
     const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
     await fs.promises.writeFile(targetPath, Buffer.from(bytes));
     const fileName = `${baseName(sourceName)}-${suffix}${extension}`;
-    const output = await registerOutput({ userId, fileId, jobId, outputType, filePath: targetPath, fileName, mimeType, pageCount, quality });
+    const output = await registerOutput({ userId, fileId, jobId, outputType, filePath: targetPath, fileName, mimeType, pageCount, quality, versionKey });
     return serializeOutput(output);
 }
 
@@ -631,6 +631,10 @@ async function embedImage(pdf, imagePath) {
 
 async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks = [] }) {
     if (!pages.length) throw pdfError('暂无可生成可搜索 PDF 的页面结果，请先完成 OCR。', 'OCR_PAGES_MISSING');
+    const unaligned = pages.find(page => (page.alignment_status || page.alignmentStatus || 'aligned') !== 'aligned');
+    if (unaligned) {
+        throw pdfError(`第 ${unaligned.page_number || unaligned.pageNumber || '?'} 页已进行全文修订，文字坐标不再可靠。请完成块级对齐后再生成可搜索 PDF。`, 'EXPORT_ALIGNMENT_REQUIRED', 409);
+    }
     const pdf = await PDFDocument.create();
     const font = await getCjkFont(pdf);
     const blocksByPage = new Map();
@@ -652,7 +656,7 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
         const pdfHeight = Number(pageRow.pdf_height || pageRow.pdfHeight || sourceHeight * 72 / 220) || 842;
         const page = pdf.addPage([pdfWidth, pdfHeight]);
         page.drawImage(embedded, { x: 0, y: 0, width: pdfWidth, height: pdfHeight });
-        const pageBlocks = blocksByPage.get(Number(pageRow.id)) || [];
+        const pageBlocks = (blocksByPage.get(Number(pageRow.id)) || []).filter(block => (block.alignment_status || block.alignmentStatus || 'aligned') === 'aligned');
         page.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible));
         if (pageBlocks.length) {
             pageBlocks.forEach(block => {
@@ -685,7 +689,8 @@ async function createSearchablePdfOutput({ userId, file, job, pages = [], blocks
         outputType: OUTPUT_TYPES.SEARCHABLE_PDF,
         bytes,
         pageCount: pages.length,
-        quality: { complete: true, sourceVisualRequired: true, searchableText: true }
+        quality: { complete: true, sourceVisualRequired: true, searchableText: true, contentRevision: Math.max(Number(job.content_revision || job.contentRevision || 1), 1) },
+        versionKey: `ocr-r${Math.max(Number(job.content_revision || job.contentRevision || 1), 1)}`
     });
 }
 
@@ -762,8 +767,8 @@ async function preflightPdfFile(file, { maxPages = 300, password = '', userId = 
     return summary;
 }
 
-async function getPdfPageMetrics(file) {
-    const pdf = await loadPdf(file);
+async function getPdfPageMetrics(file, options = {}) {
+    const pdf = await loadPdf(file, options);
     return pdf.getPages().map((page, index) => ({
         pageNumber: index + 1,
         pdfWidth: page.getWidth(),

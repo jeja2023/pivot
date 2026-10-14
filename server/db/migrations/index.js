@@ -103,7 +103,9 @@ const migrationModules = [
     require('./regulations-bookmarks'),
     require('./regulations-index-retries'),
     require('./regulations-categories'),
-    require('./pdf-tool-product-upgrade')
+    require('./pdf-tool-product-upgrade'),
+    require('./ocr-product-upgrade'),
+    require('./ocr-async-exports')
 ];
 
 module.exports = migrationModules

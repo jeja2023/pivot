@@ -323,6 +323,18 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         maxFields: 4,
         errorMessage: '数据分析仅支持 CSV、XLS/XLSX 或 SQLite 数据库文件'
     });
+    // PDF 工具的可选参数较多。保留明确且有界的独立 multipart 字段预算，
+    // 兼容已发布客户端，同时不放宽其它上传接口的通用 20 字段上限。
+    const pdfToolsUpload = createSafeUpload({
+        extensions: new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp']),
+        maxFields: 32,
+        errorMessage: 'PDF 工具仅支持 PDF 或常见图片文件'
+    });
+    const securePdfToolsUpload = {
+        array(field, maxCount) {
+            return [pdfToolsUpload.array(field, maxCount), uploadSecurityMiddleware];
+        }
+    };
 
     router.use('/apps/regulations', createRegulationsRouter({
         authMiddleware,
@@ -346,7 +358,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         upload
     }));
 
-    router.use('/apps/pdf-tools', createPdfToolsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
+    router.use('/apps/pdf-tools', createPdfToolsRouter({ authMiddleware, logAction, uploadLimiter, upload: securePdfToolsUpload }));
 
     router.use(createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, upload }));
 

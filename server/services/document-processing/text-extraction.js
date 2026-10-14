@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { extractDocumentText, renderPdfPages, truncateExtractedText } = require('../../document-text');
+const { extractDocumentText, extractPdfTextByPage, renderPdfPages, truncateExtractedText } = require('../../document-text');
 const { normalizeEngine, recognizePage } = require('./ocr');
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
@@ -63,6 +63,51 @@ async function ocrPdfFile(filePath, options = {}) {
     }
 }
 
+async function extractPdfTextWithPageFallback(filePath, options = {}) {
+    const safe = normalizeOcrOptions(options);
+    const nativePages = await extractPdfTextByPage(filePath, { password: safe.password });
+    const pageLimit = Math.min(safe.maxOcrPages, nativePages.length);
+    const selectedPages = nativePages.slice(0, pageLimit);
+    const missingPageNumbers = selectedPages.filter(page => !String(page.text || '').trim()).map(page => page.pageNumber);
+    const rendered = missingPageNumbers.length
+        ? await renderPdfPages(filePath, { password: safe.password, desiredWidth: safe.desiredWidth, maxPages: pageLimit })
+        : [];
+    const renderedByPage = new Map(rendered.map(page => [Number(page.page), page]));
+    const tmpDir = missingPageNumbers.length ? await fs.promises.mkdtemp(path.join(os.tmpdir(), 'pivot-mixed-pdf-ocr-')) : '';
+    const imagePaths = [];
+    try {
+        const pages = [];
+        for (const nativePage of selectedPages) {
+            const originalText = String(nativePage.text || '').trim();
+            if (originalText) {
+                pages.push({ pageNumber: nativePage.pageNumber, text: originalText, source: 'native' });
+                continue;
+            }
+            const renderedPage = renderedByPage.get(nativePage.pageNumber);
+            if (!renderedPage?.data) {
+                pages.push({ pageNumber: nativePage.pageNumber, text: '', source: 'unavailable', error: '页面渲染失败' });
+                continue;
+            }
+            const imagePath = path.join(tmpDir, `page-${String(nativePage.pageNumber).padStart(4, '0')}.png`);
+            await fs.promises.writeFile(imagePath, renderedPage.data);
+            imagePaths.push(imagePath);
+            const text = await ocrImageFile(imagePath, safe);
+            pages.push({ pageNumber: nativePage.pageNumber, text, source: 'ocr' });
+        }
+        const omittedPages = nativePages.slice(pageLimit).map(page => page.pageNumber);
+        return {
+            pages,
+            sourcePageCount: nativePages.length,
+            plannedPageCount: selectedPages.length,
+            omittedPages,
+            coverageComplete: omittedPages.length === 0 && pages.every(page => page.source !== 'unavailable')
+        };
+    } finally {
+        await Promise.all(imagePaths.map(imagePath => fs.promises.rm(imagePath, { force: true }).catch(() => {})));
+        if (tmpDir) await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
 async function extractDocumentTextWithOcrFallback(filePath, mimeType = '', originalName = '', options = {}) {
     const name = originalName || filePath || '';
     const ext = path.extname(String(name)).toLowerCase();
@@ -70,17 +115,24 @@ async function extractDocumentTextWithOcrFallback(filePath, mimeType = '', origi
         return ocrImageFile(filePath, options);
     }
 
+    if (ext === '.pdf' || String(mimeType || '').toLowerCase() === 'application/pdf') {
+        if (options.ocrFallback === false) return extractDocumentText(filePath, mimeType, name, options);
+        const result = await extractPdfTextWithPageFallback(filePath, options);
+        const body = result.pages.map(page => String(page.text || '').trim()).filter(Boolean).join('\n\n').trim();
+        if (result.omittedPages.length) {
+            return `${body}${body ? '\n\n' : ''}[第 ${result.omittedPages.join(', ')} 页未在当前 OCR 页数上限内处理]`;
+        }
+        return body;
+    }
     const text = await extractDocumentText(filePath, mimeType, name, options);
     if (String(text || '').trim() || options.ocrFallback === false) return text || '';
-    if (ext === '.pdf' || String(mimeType || '').toLowerCase() === 'application/pdf') {
-        return ocrPdfFile(filePath, options);
-    }
     return text || '';
 }
 
 module.exports = {
     IMAGE_EXTENSIONS,
     extractDocumentTextWithOcrFallback,
+    extractPdfTextWithPageFallback,
     isImageDocument,
     ocrImageFile,
     ocrPdfFile,

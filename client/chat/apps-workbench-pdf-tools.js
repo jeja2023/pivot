@@ -13,6 +13,7 @@
         capabilities: null,
         timer: null,
         polling: false,
+        activePresetId: '',
         pagePlan: [],
         pagePlanHistory: [],
         pagePlanFuture: []
@@ -107,9 +108,32 @@
         return Object.entries(operations()).map(([id, meta]) => `<option value="${esc(id)}" ${meta.available === false ? 'disabled' : ''}>${esc(meta.label || id)}${meta.available === false ? '（当前部署不可用）' : ''}</option>`).join('');
     }
 
-    function renderPresetOptions() {
-        const presets = state.capabilities?.presets || [];
-        return ['<option value="">不使用预设</option>', ...presets.map(item => `<option value="${esc(item.id)}">${esc(item.label)}</option>`)].join('');
+    function availablePresets() {
+        return (state.capabilities?.presets || []).filter(item => {
+            const meta = operations()[item?.operation];
+            return item?.id && meta && meta.available !== false;
+        });
+    }
+
+    function renderQuickPresetButtons() {
+        const presets = availablePresets();
+        if (!presets.length) return '<span class="pdf-quick-preset-empty">暂无可用快速方案</span>';
+        return presets.map(item => {
+            const active = String(state.activePresetId) === String(item.id);
+            const operationName = operationLabel(item.operation);
+            return `<button type="button" class="btn-secondary pdf-quick-preset${active ? ' is-active' : ''}" data-pdf-quick-preset="${esc(item.id)}" aria-pressed="${active ? 'true' : 'false'}" title="填入${esc(operationName)}的推荐参数">${esc(item.label)}</button>`;
+        }).join('');
+    }
+
+    function renderQuickPresets() {
+        const target = document.getElementById('pdf-quick-presets');
+        if (target) html.setHtml(target, renderQuickPresetButtons());
+    }
+
+    function clearActivePreset() {
+        if (!state.activePresetId) return;
+        state.activePresetId = '';
+        renderQuickPresets();
     }
 
     function ensureView() {
@@ -124,10 +148,10 @@
         html.setHtml(view, `
             <div class="pdf-tools-layout doc-tool-layout">
                 <aside class="workspace-panel doc-tool-sidebar pdf-tools-sidebar">
-                    <form id="pdf-tools-form" class="doc-tool-form">
-                        <label class="doc-tool-field doc-tool-field-wide"><span>常用预设</span><select id="pdf-preset-select" class="form-input">${renderPresetOptions()}</select><small class="pdf-tool-hint">预设会填入处理方式和常用参数，仍可在提交前调整。</small></label>
+                    <form id="pdf-tools-form" class="doc-tool-form" novalidate>
                         <label class="doc-tool-field doc-tool-field-wide"><span>处理方式</span><select id="pdf-operation-select" class="form-input" name="operation">${renderOperationOptions()}</select></label>
-                        <label class="doc-tool-field doc-tool-field-wide"><span>文件</span><input id="pdf-files-input" class="form-input" type="file" name="files" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp" multiple required><small id="pdf-file-hint" class="pdf-tool-hint">合并与图片转 PDF 可组合多个文件；其它操作默认单文件。</small></label>
+                        <section class="pdf-quick-presets" aria-labelledby="pdf-quick-presets-title"><div class="pdf-quick-presets-head"><div><strong id="pdf-quick-presets-title">快速方案 <span>可选</span></strong><small>一键填入常用处理方式与推荐参数，之后仍可自行调整。</small></div></div><div id="pdf-quick-presets" class="pdf-quick-presets-list" role="group" aria-label="PDF 快速方案">正在读取可用方案…</div></section>
+                        <label class="doc-tool-field doc-tool-field-wide"><span>文件</span><input id="pdf-files-input" class="form-input" type="file" name="files" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp" multiple><small id="pdf-file-hint" class="pdf-tool-hint">合并与图片转 PDF 可组合多个文件；其它操作默认单文件。</small></label>
                         <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="batch"><span>多文件处理方式</span><select id="pdf-mode-input" class="form-input"><option value="single">一次处理一个文件</option><option value="batch">批量分别处理每个文件</option></select></label>
                         <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="pages"><span>页面范围</span><input id="pdf-pages-input" class="form-input" name="pages" type="text" placeholder="例如 1-3,5"><small class="pdf-tool-hint">范围必须在文件实际页数内；留空表示全部页面。</small></label>
                         <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="order"><span>完整页面顺序</span><input id="pdf-order-input" class="form-input" name="pageOrder" type="text" placeholder="例如 3,1,2"><small class="pdf-tool-hint">重排必须包含每一页且不能重复。</small></label>
@@ -147,11 +171,61 @@
                         <div class="doc-tool-field-row hidden" data-pdf-option="pdfa"><label class="doc-tool-field"><span>验证 profile</span><select id="pdf-pdfa-profile" class="form-input"><option value="0">自动识别</option><option value="1b">PDF/A-1b</option><option value="2b">PDF/A-2b</option><option value="3b">PDF/A-3b</option><option value="4">PDF/A-4</option></select></label><small class="pdf-tool-hint">只生成 veraPDF 验证报告；没有通过验证绝不标记为 PDF/A 合规。</small></div>
                         <label class="doc-tool-field doc-tool-field-wide hidden" data-pdf-option="page-plan"><span>页面编排（JSON）</span><textarea id="pdf-page-plan" class="form-input" rows="3" placeholder='[{"sourcePage":2,"rotation":0},{"sourcePage":1,"rotation":90},{"blank":true}]'></textarea><small class="pdf-tool-hint">可用源页重排、旋转或插入空白页。执行会创建新版本，原件保持不变。</small></label>
                         <label class="doc-tool-field doc-tool-field-wide"><span>PDF 密码</span><input id="pdf-password-input" class="form-input" type="password" autocomplete="off"><small class="pdf-tool-hint">仅用于本次任务，处理结束后会被删除。加密 PDF 需要部署 qpdf；请在提交前确认已有处理授权。</small></label>
-                        <div class="doc-tool-actions"><button id="pdf-submit-btn" class="btn-primary" type="submit">创建任务</button><button id="pdf-refresh-btn" class="btn-secondary" type="button">刷新</button></div>
+                        <div class="doc-tool-actions"><button id="pdf-submit-btn" class="btn-primary" type="submit">创建任务</button></div>
                     </form>
-                    <div class="doc-tool-filter"><label class="doc-tool-field doc-tool-field-wide"><span>状态</span><select id="pdf-status-filter" class="form-input"><option value="">全部任务</option><option value="queued">排队中</option><option value="processing">处理中</option><option value="succeeded">已完成</option><option value="partial_success">部分完成</option><option value="needs_review">待复核</option><option value="failed">失败</option><option value="cancelled">已取消</option></select></label></div>
                 </aside>
-                <main class="workspace-panel doc-tool-main pdf-tools-main"><div class="workspace-toolbar doc-tool-toolbar"><div class="doc-tool-toolbar-title"><h4>PDF 处理任务</h4><span id="pdf-list-summary">0 个任务</span></div><span id="pdf-capability-summary" class="pdf-capability-summary"></span></div><div class="table-container workspace-table-wrap doc-tool-table-wrap"><table class="data-table compact-table doc-tool-table pdf-job-table"><thead><tr><th class="text-center">序号</th><th>文件</th><th>处理方式</th><th class="text-center">状态</th><th class="text-center">进度</th><th>更新时间</th><th class="text-center">操作</th></tr></thead><tbody id="pdf-job-table-body"></tbody></table></div><div id="pdf-job-pagination" class="pagination workspace-pagination"></div></main>
+                <main class="workspace-panel doc-tool-main pdf-tools-main">
+                    <div class="workspace-toolbar doc-tool-toolbar pdf-tools-toolbar">
+                        <div class="doc-tool-toolbar-title">
+                            <div class="pdf-toolbar-heading">
+                                <h4>PDF 处理任务</h4>
+                                <span id="pdf-list-summary" class="pdf-list-summary-tag">0 个任务</span>
+                            </div>
+                            <span id="pdf-capability-summary" class="pdf-capability-summary"></span>
+                        </div>
+                        <div class="pdf-toolbar-actions">
+                            <div class="pdf-filter-pill-control">
+                                <label class="pdf-filter-pill-prefix" for="pdf-status-filter">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                                    </svg>
+                                    <span>状态</span>
+                                </label>
+                                <div class="pdf-filter-pill-body">
+                                    <select id="pdf-status-filter" class="form-input pdf-filter-pill-select" aria-label="按状态筛选">
+                                        <option value="">全部</option>
+                                        <option value="queued">排队中</option>
+                                        <option value="processing">处理中</option>
+                                        <option value="succeeded">已完成</option>
+                                        <option value="partial_success">部分完成</option>
+                                        <option value="needs_review">待复核</option>
+                                        <option value="failed">失败</option>
+                                        <option value="cancelled">已取消</option>
+                                    </select>
+                                    <span class="pdf-filter-pill-arrow" aria-hidden="true">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
+                            <button id="pdf-refresh-btn" class="btn-secondary pdf-toolbar-refresh-btn" type="button" title="刷新任务列表">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="1 4 1 10 7 10"></polyline>
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container workspace-table-wrap doc-tool-table-wrap">
+                        <table class="data-table compact-table doc-tool-table pdf-job-table">
+                            <thead><tr><th class="text-center">序号</th><th>文件</th><th>处理方式</th><th class="text-center">状态</th><th class="text-center">进度</th><th>更新时间</th><th class="text-center">操作</th></tr></thead>
+                            <tbody id="pdf-job-table-body"></tbody>
+                        </table>
+                    </div>
+                    <div id="pdf-job-pagination" class="pagination workspace-pagination"></div>
+                </main>
             </div>
             <section id="pdf-detail-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-detail-title"><div class="workspace-modal doc-tool-dialog pdf-detail-dialog"><div class="workspace-modal-header"><div><h3 id="pdf-detail-title">PDF 处理详情</h3><p id="pdf-detail-subtitle">查看任务摘要、页面和输出文件。</p></div><button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-detail>关闭</button></div><div id="pdf-detail" class="workspace-modal-body doc-tool-modal-body pdf-detail"></div></div></section>
             <section id="pdf-page-preview-panel" class="doc-tool-detail-panel hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-page-preview-title"><div class="workspace-modal doc-tool-dialog pdf-page-preview-dialog"><div class="workspace-modal-header"><div><h3 id="pdf-page-preview-title">PDF 页面预览</h3><p>预览来自受控页面资源，可返回任务详情继续处理。</p></div><button class="btn-secondary workspace-modal-close" type="button" data-pdf-close-preview>返回详情</button></div><div class="workspace-modal-body pdf-page-preview-body"><img id="pdf-page-preview-image" alt="PDF 页面预览"></div></div></section>
@@ -192,8 +266,14 @@
     }
 
     function applyPreset(presetId) {
-        const preset = (state.capabilities?.presets || []).find(item => item.id === presetId);
+        const preset = availablePresets().find(item => item.id === presetId);
         if (!preset) return;
+        if (String(state.activePresetId) === String(preset.id)) {
+            // 再次点击当前方案即转为“自定义”：保留已经填入的值，只取消方案标记。
+            state.activePresetId = '';
+            renderQuickPresets();
+            return;
+        }
         const operationSelect = document.getElementById('pdf-operation-select');
         if (operationSelect && operations()[preset.operation]) operationSelect.value = preset.operation;
         const fieldIds = {
@@ -208,6 +288,8 @@
             const input = document.getElementById(fieldIds[key]);
             if (input) input.value = String(value);
         });
+        state.activePresetId = preset.id;
+        renderQuickPresets();
         syncOperationOptions();
     }
 
@@ -243,12 +325,23 @@
         if (pager && typeof window.Pivot.legacy.renderWorkspacePagination === 'function') window.Pivot.legacy.renderWorkspacePagination(pager, { total: state.total, page: state.page, limit: state.limit, onPageChange: next => { state.page = Math.max(Number(next) || 1, 1); loadJobs({ keepActive: false }).catch(error => toast(error.message, 'error')); } });
     }
 
+    function getFileFormatBadge(filename) {
+        const ext = String(filename || '').split('.').pop().toLowerCase();
+        if (['doc', 'docx'].includes(ext)) return { text: 'DOCX', type: 'docx' };
+        if (['xls', 'xlsx', 'csv'].includes(ext)) return { text: 'XLSX', type: 'xlsx' };
+        if (ext === 'pdf') return { text: 'PDF', type: 'pdf' };
+        if (['zip', 'rar', 'tar', 'gz', '7z'].includes(ext)) return { text: 'ZIP', type: 'zip' };
+        if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) return { text: 'IMG', type: 'img' };
+        return { text: ext ? ext.toUpperCase().slice(0, 4) : 'FILE', type: 'file' };
+    }
+
     function detailActions(detail) {
         const allowed = detail?.job?.allowedActions || {};
         const jobId = detail?.job?.id;
         if (!jobId) return '';
+        const outputs = detail.outputs || [];
         return [
-            allowed.download && (detail.outputs || []).length ? `<button class="btn-secondary" type="button" data-pdf-job-download="${esc(jobId)}">下载结果</button>` : '',
+            allowed.download && outputs.length > 1 ? `<button class="btn-primary" type="button" data-pdf-job-download="${esc(jobId)}">下载全部结果</button>` : '',
             allowed.retry ? `<button class="btn-secondary" type="button" data-pdf-job-retry="${esc(jobId)}">重试</button>` : '',
             allowed.reprocess ? `<button class="btn-secondary" type="button" data-pdf-job-reprocess="${esc(jobId)}">再次处理</button>` : '',
             allowed.cancel ? `<button class="btn-secondary" type="button" data-pdf-job-cancel="${esc(jobId)}">取消</button>` : '',
@@ -258,19 +351,110 @@
 
     function renderPreflight(preflight) {
         if (!preflight) return '';
-        const files = (preflight.files || []).map(file => `<li><strong>${esc(file.originalName || '文件')}</strong>：${Number(file.pageCount || 0)} 页${(file.warnings || []).length ? `；${esc((file.warnings || []).join('；'))}` : ''}</li>`).join('');
-        return `<section class="pdf-detail-section"><h4>文件预检</h4><p>共 ${Number(preflight.totalPages || 0)} 页，处理模式：${preflight.mode === 'batch' ? '批量分别处理' : '单次处理'}。</p>${files ? `<ul class="pdf-detail-list">${files}</ul>` : '<p>暂无可用预检信息。</p>'}</section>`;
+        const files = (preflight.files || []).map(file => {
+            const warnings = (file.warnings || []).map(w => `<span class="pdf-preflight-warning-pill">${esc(w)}</span>`).join('');
+            return `
+                <div class="pdf-preflight-row">
+                    <div class="pdf-preflight-row-main">
+                        <span class="pdf-preflight-file-icon">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                        </span>
+                        <strong class="pdf-preflight-filename" title="${esc(file.originalName || '文件')}">${esc(file.originalName || '文件')}</strong>
+                    </div>
+                    <div class="pdf-preflight-row-meta">
+                        <span class="pdf-preflight-page-pill">${Number(file.pageCount || 0)} 页</span>
+                        ${warnings}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        return `
+            <section class="pdf-detail-section pdf-preflight-section">
+                <div class="pdf-section-head">
+                    <h4 class="pdf-section-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                        <span>文件预检</span>
+                    </h4>
+                    <span class="pdf-section-tag">共 ${Number(preflight.totalPages || 0)} 页 · ${preflight.mode === 'batch' ? '批量分别处理' : '单次处理'}</span>
+                </div>
+                ${files ? `<div class="pdf-preflight-list">${files}</div>` : '<div class="pdf-detail-empty-card">暂无可用预检信息。</div>'}
+            </section>
+        `;
     }
 
     function renderOutputs(outputs) {
-        if (!outputs?.length) return '<p class="doc-tool-empty-small">暂无可下载输出。</p>';
-        return `<div class="pdf-output-list">${outputs.map(output => `<div class="pdf-output-item"><button class="btn-secondary doc-tool-output-btn" type="button" data-pdf-output-download="${esc(output.id)}" data-output-name="${esc(output.fileName || '')}">${esc(output.fileName || output.outputType || '输出文件')} · ${formatBytes(output.fileSize)}</button><div class="pdf-output-actions"><button class="btn-secondary doc-tool-row-action" type="button" data-pdf-output-dispatch="${esc(output.id)}" data-pdf-dispatch-target="knowledge">发送到知识库</button><button class="btn-secondary doc-tool-row-action" type="button" data-pdf-output-dispatch="${esc(output.id)}" data-pdf-dispatch-target="regulations">发送到法规导入</button></div></div>`).join('')}</div>`;
+        if (!outputs?.length) return '<div class="pdf-detail-empty-card">暂无可下载输出。</div>';
+        return `
+            <div class="pdf-output-card-list">
+                ${outputs.map(output => {
+                    const name = output.fileName || output.outputType || '输出文件';
+                    const badge = getFileFormatBadge(name);
+                    return `
+                        <div class="pdf-output-card">
+                            <div class="pdf-output-card-main">
+                                <span class="pdf-file-format-badge is-${badge.type}">${badge.text}</span>
+                                <div class="pdf-output-info">
+                                    <strong class="pdf-output-name" title="${esc(name)}">${esc(name)}</strong>
+                                    <div class="pdf-output-meta">
+                                        <span class="pdf-output-size">${formatBytes(output.fileSize)}</span>
+                                        ${output.outputType ? `<span class="pdf-output-kind">${esc(output.outputType)}</span>` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="pdf-output-card-actions">
+                                <button class="btn-primary pdf-output-dl-btn" type="button" data-pdf-output-download="${esc(output.id)}" data-output-name="${esc(name)}" title="下载此文件">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    <span>下载文件</span>
+                                </button>
+                                <div class="pdf-output-dispatch-btns">
+                                    <button class="btn-secondary pdf-output-dispatch-btn" type="button" data-pdf-output-dispatch="${esc(output.id)}" data-pdf-dispatch-target="knowledge" title="流转到知识库">
+                                        <span>发送到知识库</span>
+                                    </button>
+                                    <button class="btn-secondary pdf-output-dispatch-btn" type="button" data-pdf-output-dispatch="${esc(output.id)}" data-pdf-dispatch-target="regulations" title="流转到法规导入">
+                                        <span>发送到法规导入</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
     }
 
     function renderPages(detail) {
         const pages = detail?.pages || [];
         if (!pages.length) return '';
-        return `<section class="pdf-detail-section"><div class="pdf-detail-section-head"><h4>页面与 OCR 复核</h4><button class="btn-secondary doc-tool-row-action" type="button" data-pdf-open-page-plan>打开页面工作区</button></div><div class="pdf-page-grid">${pages.map(page => `<button class="btn-secondary pdf-page-card" type="button" data-pdf-page-preview="${esc(page.id)}"><img src="${API}/pages/${encodeURIComponent(page.id)}/image" alt="第 ${Number(page.pageNumber || 1)} 页预览" loading="lazy"><span>第 ${Number(page.pageNumber || 1)} 页${page.confidence === null ? '' : ` · ${Math.round(Number(page.confidence || 0) * 100)}%`}</span></button>`).join('')}</div></section>`;
+        return `
+            <section class="pdf-detail-section pdf-pages-section">
+                <div class="pdf-section-head">
+                    <h4 class="pdf-section-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        <span>页面与 OCR 复核</span>
+                    </h4>
+                    <button class="btn-secondary doc-tool-row-action pdf-pages-plan-btn" type="button" data-pdf-open-page-plan>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                        <span>打开页面工作区</span>
+                    </button>
+                </div>
+                <div class="pdf-page-grid">
+                    ${pages.map(page => `
+                        <button class="pdf-page-card" type="button" data-pdf-page-preview="${esc(page.id)}" title="点击放大预览第 ${Number(page.pageNumber || 1)} 页">
+                            <div class="pdf-page-card-thumb">
+                                <img src="${API}/pages/${encodeURIComponent(page.id)}/image" alt="第 ${Number(page.pageNumber || 1)} 页预览" loading="lazy">
+                                <span class="pdf-page-zoom-hint">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                                </span>
+                            </div>
+                            <div class="pdf-page-card-footer">
+                                <span class="pdf-page-num">第 ${Number(page.pageNumber || 1)} 页</span>
+                                ${page.confidence === null ? '' : `<span class="pdf-page-conf">${Math.round(Number(page.confidence || 0) * 100)}%</span>`}
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            </section>
+        `;
     }
 
     function previewPage(pageId) {
@@ -331,7 +515,28 @@
 
     function renderBatchItems(items) {
         if (!items?.length) return '';
-        return `<section class="pdf-detail-section"><h4>批量结果</h4><ul class="pdf-detail-list">${items.map(item => `<li><strong>${esc(item.originalName || '文件')}</strong>：${esc(statusLabel(item.status))}${item.errorMessage ? `；${esc(item.errorMessage)}` : ''}</li>`).join('')}</ul></section>`;
+        return `
+            <section class="pdf-detail-section pdf-batch-section">
+                <div class="pdf-section-head">
+                    <h4 class="pdf-section-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+                        <span>批量结果明细</span>
+                    </h4>
+                    <span class="pdf-section-tag">共 ${items.length} 个文件</span>
+                </div>
+                <div class="pdf-batch-list">
+                    ${items.map(item => `
+                        <div class="pdf-batch-row">
+                            <div class="pdf-batch-row-main">
+                                <strong class="pdf-batch-filename" title="${esc(item.originalName || '文件')}">${esc(item.originalName || '文件')}</strong>
+                                <span class="doc-tool-badge ${statusTone(item.status)}">${esc(statusLabel(item.status))}</span>
+                            </div>
+                            ${item.errorMessage ? `<div class="pdf-batch-err-box">${esc(item.errorMessage)}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
     }
 
     function renderDetail() {
@@ -341,13 +546,87 @@
         if (!box || !title || !subtitle) return;
         const detail = state.detail;
         if (!detail?.job) {
-            title.textContent = 'PDF 处理详情'; subtitle.textContent = '选择任务查看摘要、页面和输出文件。'; html.setHtml(box, '<div class="doc-tool-empty-detail">请选择一个 PDF 任务。</div>'); return;
+            title.textContent = 'PDF 处理详情';
+            html.setHtml(subtitle, '选择任务查看摘要、页面和输出文件。');
+            html.setHtml(box, '<div class="doc-tool-empty-detail">请选择一个 PDF 任务。</div>');
+            return;
         }
         const result = detail.job.result || {};
-        title.textContent = detail.file?.originalName || `任务 ${detail.job.id}`;
-        subtitle.textContent = `${operationLabel(detail.job.config?.operation)} · ${statusLabel(detail.job.status)} · ${Number(detail.job.progress || 0)}%`;
-        const metrics = [['请求页', result.requestedPages], ['已处理页', result.processedPages], ['成功文件', result.processedFiles], ['失败文件', result.failedFiles], ['输出', (detail.outputs || []).length]].filter(([, value]) => value !== undefined && value !== null && value !== 0);
-        html.setHtml(box, `<section class="pdf-detail-head"><div><span class="doc-tool-badge ${statusTone(detail.job.status)}">${statusLabel(detail.job.status)}</span>${detail.job.errorMessage ? `<em>${esc(detail.job.errorMessage)}</em>` : ''}</div><div class="pdf-detail-actions">${detailActions(detail)}</div></section><div class="pdf-result-grid">${metrics.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>${renderPreflight(detail.preflight)}${renderBatchItems(detail.items?.length ? detail.items : result.items)}${renderPages(detail)}<section class="pdf-detail-section"><h4>输出文件</h4>${renderOutputs(detail.outputs || [])}</section>`);
+        const fileName = detail.file?.originalName || `任务 ${detail.job.id}`;
+        title.textContent = fileName;
+        title.title = fileName;
+
+        const opLabel = operationLabel(detail.job.config?.operation);
+        const statLabel = statusLabel(detail.job.status);
+        const progressVal = Number(detail.job.progress || 0);
+        const timeLabel = formatTime(detail.job.updatedAt || detail.job.createdAt);
+        html.setHtml(subtitle, `
+            <span class="pdf-header-badge is-op">${esc(opLabel)}</span>
+            <span class="pdf-header-badge ${statusTone(detail.job.status)}">${esc(statLabel)}</span>
+            <span class="pdf-header-progress">进度 ${progressVal}%</span>
+            <span class="pdf-sub-time">${esc(timeLabel)}</span>
+        `);
+
+        const metricConfigs = [
+            { key: 'requestedPages', label: '请求页数', value: result.requestedPages, icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>' },
+            { key: 'processedPages', label: '已处理页', value: result.processedPages, icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>' },
+            { key: 'processedFiles', label: '成功文件', value: result.processedFiles, icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>' },
+            { key: 'failedFiles', label: '失败文件', value: result.failedFiles, icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>', isError: true },
+            { key: 'outputs', label: '生成输出', value: (detail.outputs || []).length, icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>' }
+        ];
+        const activeMetrics = metricConfigs.filter(m => m.value !== undefined && m.value !== null && m.value !== 0);
+
+        const metricsHtml = activeMetrics.length ? `
+            <div class="pdf-metric-grid">
+                ${activeMetrics.map(m => `
+                    <div class="pdf-metric-card ${m.isError ? 'is-danger' : ''}">
+                        <div class="pdf-metric-head">
+                            <span class="pdf-metric-icon">${m.icon}</span>
+                            <span class="pdf-metric-label">${esc(m.label)}</span>
+                        </div>
+                        <div class="pdf-metric-val">${esc(m.value)}</div>
+                    </div>
+                `).join('')}
+            </div>
+        ` : '';
+
+        const actionsHtml = detailActions(detail);
+
+        const summaryBarHtml = `
+            <section class="pdf-detail-overview-card">
+                <div class="pdf-overview-status-wrap">
+                    <span class="doc-tool-badge ${statusTone(detail.job.status)} pdf-status-badge">
+                        <span class="pdf-status-pulse-dot"></span>
+                        ${esc(statLabel)}
+                    </span>
+                    <span class="pdf-overview-op-badge">${esc(opLabel)}</span>
+                    ${detail.job.errorMessage ? `<div class="pdf-overview-err-banner">${esc(detail.job.errorMessage)}</div>` : ''}
+                </div>
+                ${actionsHtml ? `<div class="pdf-detail-actions">${actionsHtml}</div>` : ''}
+            </section>
+        `;
+
+        const outputsSectionHtml = `
+            <section class="pdf-detail-section pdf-outputs-section">
+                <div class="pdf-section-head">
+                    <h4 class="pdf-section-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                        <span>输出文件</span>
+                    </h4>
+                    <span class="pdf-section-tag">${(detail.outputs || []).length} 个产物</span>
+                </div>
+                ${renderOutputs(detail.outputs || [])}
+            </section>
+        `;
+
+        html.setHtml(box, `
+            ${summaryBarHtml}
+            ${metricsHtml}
+            ${renderPreflight(detail.preflight)}
+            ${renderBatchItems(detail.items?.length ? detail.items : result.items)}
+            ${renderPages(detail)}
+            ${outputsSectionHtml}
+        `);
     }
 
     function render() { renderJobs(); renderDetail(); }
@@ -360,8 +639,7 @@
             html.setHtml(select, renderOperationOptions());
             select.value = operations()[current] ? current : 'merge';
         }
-        const presetSelect = document.getElementById('pdf-preset-select');
-        if (presetSelect) html.setHtml(presetSelect, renderPresetOptions());
+        renderQuickPresets();
         syncOperationOptions();
     }
 
@@ -386,10 +664,15 @@
         return data;
     }
 
-    function appendFormValue(data, id, name) {
+    function appendOptionalFormValue(data, id, name) {
         const element = document.getElementById(id);
         if (!element) return;
-        if (element.type === 'checkbox') data.set(name, element.checked ? 'true' : 'false'); else data.set(name, element.value || '');
+        if (element.type === 'checkbox') {
+            if (element.checked) data.set(name, 'true');
+            return;
+        }
+        const value = String(element.value || '').trim();
+        if (value) data.set(name, value);
     }
 
     function appendJsonValue(data, id, name, fallback) {
@@ -405,19 +688,42 @@
 
     async function submitJob(form) {
         const files = Array.from(document.getElementById('pdf-files-input')?.files || []);
-        if (!files.length) { toast('请选择需要处理的文件。', 'warning'); return; }
+        if (!files.length) {
+            toast('请选择需要处理的文件。', 'warning');
+            document.getElementById('pdf-files-input')?.focus();
+            return;
+        }
         const data = new FormData();
         files.forEach(file => data.append('files', file));
-        data.set('operation', currentOperation());
-        data.set('mode', document.getElementById('pdf-mode-input')?.value || 'single');
-        [
-            ['pdf-pages-input', 'pages'], ['pdf-order-input', 'pageOrder'], ['pdf-rotate-input', 'rotateDegrees'], ['pdf-dpi-input', 'dpi'], ['pdf-max-pages-input', 'maxToolPages'], ['pdf-password-input', 'password'], ['pdf-watermark-text', 'watermarkText'], ['pdf-watermark-position', 'watermarkPosition'], ['pdf-watermark-opacity', 'watermarkOpacity'], ['pdf-page-number-start', 'pageNumberStart'], ['pdf-page-number-position', 'pageNumberPosition'], ['pdf-skip-cover', 'skipCover'], ['pdf-crop-left', 'cropLeft'], ['pdf-crop-right', 'cropRight'], ['pdf-crop-top', 'cropTop'], ['pdf-crop-bottom', 'cropBottom'], ['pdf-blank-after', 'blankPageAfter'], ['pdf-blank-count', 'blankPageCount'], ['pdf-page-size', 'pageSize'], ['pdf-image-fit', 'imageFit'], ['pdf-compression-mode', 'compressionMode'], ['pdf-compression-jpeg-quality', 'compressionJpegQuality'], ['pdf-output-password', 'outputPassword'], ['pdf-owner-password', 'ownerPassword'], ['pdf-compare-dpi', 'compareDpi'], ['pdf-pdfa-profile', 'pdfaProfile']
-        ].forEach(([id, name]) => appendFormValue(data, id, name));
-        data.set('outputPermissions', JSON.stringify({ print: Boolean(document.getElementById('pdf-protect-print')?.checked), modify: Boolean(document.getElementById('pdf-protect-modify')?.checked) }));
-        appendJsonValue(data, 'pdf-redact-regions', 'redactRegions', 'array');
-        appendJsonValue(data, 'pdf-annotations', 'annotations', 'array');
-        appendJsonValue(data, 'pdf-form-values', 'formValues', 'object');
-        appendJsonValue(data, 'pdf-page-plan', 'pagePlan', 'array');
+        const selectedOperation = currentOperation();
+        const meta = operation(selectedOperation);
+        data.set('operation', selectedOperation);
+        if (meta.inputMode === 'single-or-batch') appendOptionalFormValue(data, 'pdf-mode-input', 'mode');
+        if (meta.supportsPages) appendOptionalFormValue(data, 'pdf-pages-input', 'pages');
+        if (meta.supportsOrder) appendOptionalFormValue(data, 'pdf-order-input', 'pageOrder');
+        if (selectedOperation === 'rotate') appendOptionalFormValue(data, 'pdf-rotate-input', 'rotateDegrees');
+        if (meta.supportsDpi) {
+            appendOptionalFormValue(data, 'pdf-dpi-input', 'dpi');
+            appendOptionalFormValue(data, 'pdf-max-pages-input', 'maxToolPages');
+        }
+        if (meta.supportsWatermark) [['pdf-watermark-text', 'watermarkText'], ['pdf-watermark-position', 'watermarkPosition'], ['pdf-watermark-opacity', 'watermarkOpacity']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (meta.supportsPageNumbers) [['pdf-page-number-start', 'pageNumberStart'], ['pdf-page-number-position', 'pageNumberPosition'], ['pdf-skip-cover', 'skipCover']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (meta.supportsCrop) [['pdf-crop-left', 'cropLeft'], ['pdf-crop-right', 'cropRight'], ['pdf-crop-top', 'cropTop'], ['pdf-crop-bottom', 'cropBottom']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (meta.supportsBlankPage) [['pdf-blank-after', 'blankPageAfter'], ['pdf-blank-count', 'blankPageCount']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (selectedOperation === 'images_to_pdf') [['pdf-page-size', 'pageSize'], ['pdf-image-fit', 'imageFit']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (meta.supportsCompression) [['pdf-compression-mode', 'compressionMode'], ['pdf-compression-jpeg-quality', 'compressionJpegQuality']].forEach(([id, name]) => appendOptionalFormValue(data, id, name));
+        if (meta.supportsProtection) {
+            appendOptionalFormValue(data, 'pdf-output-password', 'outputPassword');
+            appendOptionalFormValue(data, 'pdf-owner-password', 'ownerPassword');
+            data.set('outputPermissions', JSON.stringify({ print: Boolean(document.getElementById('pdf-protect-print')?.checked), modify: Boolean(document.getElementById('pdf-protect-modify')?.checked) }));
+        }
+        if (meta.supportsCompare) appendOptionalFormValue(data, 'pdf-compare-dpi', 'compareDpi');
+        if (meta.supportsPdfa) appendOptionalFormValue(data, 'pdf-pdfa-profile', 'pdfaProfile');
+        if (meta.supportsRedaction) appendJsonValue(data, 'pdf-redact-regions', 'redactRegions', 'array');
+        if (meta.supportsAnnotations) appendJsonValue(data, 'pdf-annotations', 'annotations', 'array');
+        if (meta.supportsFormFill) appendJsonValue(data, 'pdf-form-values', 'formValues', 'object');
+        if (meta.supportsPagePlan) appendJsonValue(data, 'pdf-page-plan', 'pagePlan', 'array');
+        appendOptionalFormValue(data, 'pdf-password-input', 'password');
         const button = document.getElementById('pdf-submit-btn');
         const label = button?.textContent;
         if (button) { button.disabled = true; button.textContent = '正在创建'; }
@@ -425,6 +731,8 @@
             const created = await requestJson(`${API}/jobs`, { method: 'POST', body: data });
             state.activeJobId = String(created.job?.id || '');
             form.reset();
+            state.activePresetId = '';
+            renderQuickPresets();
             syncOperationOptions();
             toast('PDF 任务已创建，系统将校验页数和输出完整性。', 'success');
             await loadJobs({ keepActive: true });
@@ -477,12 +785,20 @@
         view.dataset.bound = '1';
         view.addEventListener('submit', event => { if (event.target?.id === 'pdf-tools-form') { event.preventDefault(); submitJob(event.target).catch(error => toast(error.message || '创建任务失败。', 'error')); } });
         view.addEventListener('change', event => {
-            if (event.target?.id === 'pdf-operation-select') syncOperationOptions();
-            if (event.target?.id === 'pdf-preset-select') applyPreset(event.target.value);
+            if (event.target?.id === 'pdf-operation-select') {
+                clearActivePreset();
+                syncOperationOptions();
+            } else if (event.target?.closest?.('#pdf-tools-form') && event.target?.id !== 'pdf-files-input') {
+                clearActivePreset();
+            }
             if (event.target?.id === 'pdf-status-filter') { state.status = event.target.value; state.page = 1; loadJobs({ keepActive: false }).catch(error => toast(error.message, 'error')); }
+        });
+        view.addEventListener('input', event => {
+            if (event.target?.closest?.('#pdf-tools-form') && event.target?.id !== 'pdf-files-input') clearActivePreset();
         });
         view.addEventListener('click', event => {
             const closest = selector => event.target.closest(selector);
+            const quickPreset = closest('[data-pdf-quick-preset]'); if (quickPreset) return void applyPreset(quickPreset.dataset.pdfQuickPreset);
             const open = closest('[data-pdf-job-open]'); if (open) return void loadDetail(open.dataset.pdfJobOpen).catch(error => toast(error.message, 'error'));
             if (closest('[data-pdf-close-detail]')) return void closeDetail();
             if (closest('[data-pdf-close-preview]')) return void document.getElementById('pdf-page-preview-panel')?.classList.add('hidden');

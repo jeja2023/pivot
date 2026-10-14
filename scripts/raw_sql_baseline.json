@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 2180,
+  "total": 2246,
   "entries": [
     {
       "file": "server/auth.js",
@@ -281,6 +281,14 @@
     },
     {
       "file": "server/db/migrations/model-usage-events-fkey-soften.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/ocr-async-exports.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/ocr-product-upgrade.js",
       "count": 1
     },
     {
@@ -913,27 +921,51 @@
     },
     {
       "file": "server/services/document-processing/distribution.js",
-      "count": 2
+      "count": 8
     },
     {
       "file": "server/services/document-processing/downloads.js",
       "count": 8
     },
     {
+      "file": "server/services/document-processing/export-actions.js",
+      "count": 11
+    },
+    {
       "file": "server/services/document-processing/exporters/index.js",
       "count": 1
+    },
+    {
+      "file": "server/services/document-processing/feedback.js",
+      "count": 4
     },
     {
       "file": "server/services/document-processing/files.js",
       "count": 5
     },
     {
+      "file": "server/services/document-processing/job-details.js",
+      "count": 5
+    },
+    {
       "file": "server/services/document-processing/jobs.js",
-      "count": 39
+      "count": 52
     },
     {
       "file": "server/services/document-processing/monitoring.js",
-      "count": 5
+      "count": 6
+    },
+    {
+      "file": "server/services/document-processing/ocr-operations.js",
+      "count": 6
+    },
+    {
+      "file": "server/services/document-processing/regions.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/document-processing/review-assignments.js",
+      "count": 15
     },
     {
       "file": "server/services/document-processing/secrets.js",

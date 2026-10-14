@@ -11,8 +11,8 @@ const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
     ? path.resolve(process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR)
     : path.join(projectRoot, 'uploads');
 const knowledgeUploadRoot = path.join(uploadRoot, 'docs');
-const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm', '.doc', '.docx', '.xls', '.xlsx']);
-const knowledgeExtensions = new Set(['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm', '.png', '.jpg', '.jpeg', '.webp', '.bmp']);
+const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm', '.doc', '.docx', '.xls', '.xlsx', '.ofd']);
+const knowledgeExtensions = new Set(['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ofd', '.csv', '.json', '.html', '.htm', '.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
 const DEFAULT_MULTIPART_LIMITS = Object.freeze({
     fieldNameSize: 80,
@@ -143,7 +143,7 @@ async function verifyUploadedMagic(file) {
     if (ext === '.webp') return actualData.length >= 12 && actualData.subarray(0, 4).toString('ascii') === 'RIFF' && actualData.subarray(8, 12).toString('ascii') === 'WEBP';
     if (ext === '.bmp') return actualData.length >= 2 && actualData[0] === 0x42 && actualData[1] === 0x4d;
     if (ext === '.pdf') return actualData.length >= 5 && actualData.subarray(0, 5).toString('ascii') === '%PDF-';
-    if (ext === '.docx' || ext === '.xlsx' || ext === '.pptx' || ext === '.pptm' || ext === '.ppsm') return actualData.length >= 4 && actualData[0] === 0x50 && actualData[1] === 0x4b && actualData[2] === 0x03 && actualData[3] === 0x04;
+    if (ext === '.docx' || ext === '.xlsx' || ext === '.pptx' || ext === '.pptm' || ext === '.ppsm' || ext === '.ofd') return actualData.length >= 4 && actualData[0] === 0x50 && actualData[1] === 0x4b && actualData[2] === 0x03 && actualData[3] === 0x04;
     if (ext === '.doc' || ext === '.xls') return actualData.length >= 4 && actualData[0] === 0xd0 && actualData[1] === 0xcf && actualData[2] === 0x11 && actualData[3] === 0xe0;
     if (ext === '.sqlite' || ext === '.sqlite3' || ext === '.db') return actualData.length >= 16 && actualData.subarray(0, 16).toString('ascii') === 'SQLite format 3\u0000';
     if (ext === '.zip') return actualData.length >= 4 && actualData.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
@@ -311,5 +311,6 @@ module.exports = {
     createSafeUpload,
     createUploadMiddleware,
     normalizeUploadedOriginalName,
+    removeUploadedFile,
     uploadSecurityMiddleware
 };

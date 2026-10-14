@@ -320,7 +320,7 @@ async function openAdminPanel(options = {}) {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
 
-    const targetTab = options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab();
+    const targetTab = options.tab ? normalizeSettingsTab(options.tab) : (options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab());
     // 展示前预先收拢非目标标签并激活目标标签，杜绝其它标签在初始帧撑大画布触发不必要的纵向滚动条
     SETTINGS_TABS.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.getElementById(`tab-content-${targetTab}`)?.classList.remove('hidden');

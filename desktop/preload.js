@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
     revokeLocalAuthorization(type) {
         return ipcRenderer.invoke('pivot-local-auth:revoke', type);
     },
+    onOcrWatchFile(callback) {
+        if (typeof callback !== 'function') return () => {};
+        const listener = (_event, payload) => callback(payload || {});
+        ipcRenderer.on('pivot-ocr-watch:file', listener);
+        return () => ipcRenderer.removeListener('pivot-ocr-watch:file', listener);
+    },
     async executeLocalMcpTool(task) {
         const response = await ipcRenderer.invoke('pivot-local-auth:execute-tool', task || {});
         if (response && response.success === false) {

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const XLSX = require('@e965/xlsx');
 
 const { queryOne } = require('../../../db/client');
 const { getBeijingTimestamp } = require('../../../time');
@@ -97,7 +98,7 @@ async function registerOutput({ userId, fileId, jobId, outputType, filePath, fil
     ]);
 }
 
-async function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content }) {
+async function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content, pageCount = 0, quality = {}, versionKey = '' }) {
     const meta = outputTypeMeta(outputType);
     const diskName = String(jobId) + '-' + String(outputType) + '-' + Date.now() + meta.extension;
     const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
@@ -111,7 +112,10 @@ async function writeOutputFile({ userId, fileId, jobId, originalName, outputType
         outputType,
         filePath: targetPath,
         fileName,
-        mimeType: meta.mimeType
+        mimeType: meta.mimeType,
+        pageCount,
+        quality,
+        versionKey
     });
 }
 
@@ -126,6 +130,50 @@ function pagesToText(pages = []) {
 function buildMarkdown({ file, text }) {
     const title = baseName(file?.original_name || file?.originalName || 'ocr-result');
     return ['# ' + title, '', String(text || '').trim()].join('\n').trim() + '\n';
+}
+
+function safeSpreadsheetValue(value) {
+    const text = String(value ?? '');
+    return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function tableToRows(table = {}) {
+    const rowCount = Math.min(Math.max(Number(table.rowCount || 0), 0), 10000);
+    const columnCount = Math.min(Math.max(Number(table.columnCount || 0), 0), 200);
+    if (!rowCount || !columnCount) return [];
+    const rows = Array.from({ length: rowCount }, () => Array(columnCount).fill(''));
+    (Array.isArray(table.cells) ? table.cells : []).forEach(cell => {
+        const row = Number.parseInt(cell?.rowIndex, 10);
+        const column = Number.parseInt(cell?.columnIndex, 10);
+        if (!Number.isSafeInteger(row) || !Number.isSafeInteger(column) || !rows[row] || column >= columnCount) return;
+        rows[row][column] = safeSpreadsheetValue(cell.text || '');
+    });
+    return rows;
+}
+
+function buildXlsx({ pages = [] }) {
+    const workbook = XLSX.utils.book_new();
+    const usedNames = new Set();
+    let sheetIndex = 0;
+    pages.forEach((page, pageIndex) => {
+        const result = safeParseJson(page?.result_json, page?.result || {});
+        const tables = Array.isArray(result?.tables) ? result.tables : [];
+        tables.forEach((table, tableIndex) => {
+            const rows = tableToRows(table);
+            if (!rows.length || sheetIndex >= 50) return;
+            let name = `第${Number(page.page_number || page.pageNumber || pageIndex + 1)}页表${tableIndex + 1}`.slice(0, 31);
+            let suffix = 2;
+            while (usedNames.has(name)) name = `${name.slice(0, 28)}-${suffix++}`;
+            usedNames.add(name);
+            XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), name);
+            sheetIndex += 1;
+        });
+    });
+    if (!sheetIndex) {
+        const rows = [['页码', '识别文本'], ...pages.map((page, index) => [Number(page.page_number || page.pageNumber || index + 1), safeSpreadsheetValue(page.text || '')])];
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), '识别文本');
+    }
+    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 }
 
 function parseBlockBbox(block) {
@@ -143,7 +191,8 @@ function buildJson({ file, job, pages = [], blocks = [] }) {
         job: {
             id: job.id,
             jobType: job.job_type || job.jobType || '',
-            status: job.status || ''
+            status: job.status || '',
+            contentRevision: Math.max(Number(job.content_revision || job.contentRevision || 1), 1)
         },
         pages: pages.map(page => ({
             id: page.id,
@@ -151,17 +200,23 @@ function buildJson({ file, job, pages = [], blocks = [] }) {
             width: Number(page.width || 0),
             height: Number(page.height || 0),
             text: page.text || '',
+            rawText: page.raw_text || page.rawText || page.text || '',
             confidence: page.confidence ?? null,
-            ocrStatus: page.ocr_status || page.ocrStatus || ''
+            ocrStatus: page.ocr_status || page.ocrStatus || '',
+            alignmentStatus: page.alignment_status || page.alignmentStatus || 'aligned',
+            contentRevision: Math.max(Number(page.content_revision || page.contentRevision || 1), 1)
         })),
         blocks: blocks.map(block => ({
             id: block.id,
             pageId: block.page_id || block.pageId,
             pageNumber: Number(block.page_number || block.pageNumber || 1),
             sortOrder: Number(block.sort_order || block.sortOrder || 0),
-            text: block.text || '',
+            text: block.effective_text || block.effectiveText || block.text || '',
+            rawText: block.raw_text || block.rawText || block.text || '',
             bbox: parseBlockBbox(block),
-            confidence: Number(block.confidence || 0),
+            confidence: block.confidence ?? null,
+            confidenceSource: block.confidence_source || block.confidenceSource || 'engine',
+            alignmentStatus: block.alignment_status || block.alignmentStatus || 'aligned',
             language: block.language || '',
             engine: block.engine || ''
         }))
@@ -224,7 +279,7 @@ function pct(value, total) {
 
 function groupBlocksByPage(blocks = []) {
     const map = new Map();
-    blocks.forEach(block => {
+    blocks.filter(block => (block.alignment_status || block.alignmentStatus || 'aligned') === 'aligned').forEach(block => {
         const pageId = Number(block.page_id || block.pageId || 0);
         const list = map.get(pageId) || [];
         list.push(block);
@@ -239,15 +294,16 @@ function renderOverlayBlocks({ page, blocks }) {
     return blocks.map(block => {
         const rect = bboxToRect(parseBlockBbox(block));
         if (!rect) return '';
-        const confidence = Number(block.confidence || 0);
-        const classes = confidence > 0 && confidence < 0.75 ? 'ocr-box is-low' : 'ocr-box';
+        const confidence = block.confidence === null || block.confidence === undefined ? null : Number(block.confidence);
+        const classes = confidence === null ? 'ocr-box is-unknown' : (confidence < 0.75 ? 'ocr-box is-low' : 'ocr-box');
         const style = [
             'left:' + pct(rect.x, width),
             'top:' + pct(rect.y, height),
             'width:' + pct(rect.width, width),
             'height:' + pct(rect.height, height)
         ].join(';');
-        return '<span class="' + classes + '" style="' + style + '" title="' + escapeHtml(Math.round(confidence * 100) + '% ' + String(block.text || '').slice(0, 80)) + '"></span>';
+        const label = confidence === null ? '置信度未知' : Math.round(confidence * 100) + '%';
+        return '<span class="' + classes + '" style="' + style + '" title="' + escapeHtml(label + ' ' + String(block.effective_text || block.effectiveText || block.text || '').slice(0, 80)) + '"></span>';
     }).join('');
 }
 
@@ -422,18 +478,26 @@ async function buildDocx({ file, pages = [], text = '' }) {
 
 async function createTextOutputs({ userId, file, job, text = '', pages = [], blocks = [], formats = [OUTPUT_TYPES.TEXT, OUTPUT_TYPES.MARKDOWN, OUTPUT_TYPES.JSON] }) {
     const finalText = String(text || pagesToText(pages) || '').trim();
+    const contentRevision = Math.max(Number(job?.content_revision || job?.contentRevision || 1), 1);
+    const outputMeta = {
+        pageCount: pages.length,
+        quality: { contentRevision, alignment: pages.some(page => (page.alignment_status || page.alignmentStatus) === 'unaligned') ? 'partial' : 'aligned' },
+        versionKey: `ocr-r${contentRevision}`
+    };
     const outputs = [];
     for (const format of formats) {
         if (format === OUTPUT_TYPES.MARKDOWN) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText }), ...outputMeta }));
         } else if (format === OUTPUT_TYPES.JSON) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }), ...outputMeta }));
         } else if (format === OUTPUT_TYPES.HTML) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildHtml({ file, pages, blocks, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildHtml({ file, pages, blocks, text: finalText }), ...outputMeta }));
         } else if (format === OUTPUT_TYPES.DOCX) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildDocx({ file, pages, text: finalText }) }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: await buildDocx({ file, pages, text: finalText }), ...outputMeta }));
+        } else if (format === OUTPUT_TYPES.XLSX) {
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildXlsx({ pages }), ...outputMeta }));
         } else {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: OUTPUT_TYPES.TEXT, content: finalText + '\n' }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: OUTPUT_TYPES.TEXT, content: finalText + '\n', ...outputMeta }));
         }
     }
     return outputs.map(serializeOutput);

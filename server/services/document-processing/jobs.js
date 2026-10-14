@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const fs = require('fs');
 const { query, queryOne, execute } = require('../../db/client');
 const { extractDocumentText, truncateExtractedText } = require('../../document-text');
 const { logger } = require('../../logger');
@@ -20,9 +19,7 @@ const {
     normalizeConfig,
     safeJson,
     sanitizeErrorMessage,
-    serializeBlock,
     serializeJob,
-    serializePage,
     updateDocumentProcessingSettings
 } = require('./settings');
 const {
@@ -30,25 +27,32 @@ const {
     getDocumentFilePathAsync,
     parseJson,
     registerUploadedFile,
-    serializeFile,
     updateDocumentFileMetadata
 } = require('./files');
-const { createTextOutputs, pagesToText, serializeOutput } = require('./exporters');
+const { createTextOutputs, pagesToText } = require('./exporters');
 const { getJobOutputsArchive, getJobOutputsArchiveStream, getOutputDownload, getPageImage } = require('./downloads');
 const { imageFileToPage, renderPdfPagesToFiles } = require('./renderers');
 const { recognizePage } = require('./ocr');
-const { PDF_TOOL_OPERATIONS, assertPdfInputFiles, createSearchablePdfOutput, getPdfPageMetrics, preflightPdfFile, processPdfToolOperation, requirePdfOperation } = require('./pdf');
+const { PDF_TOOL_OPERATIONS, assertPdfInputFiles, createSearchablePdfOutput, getPdfPageMetrics, parsePageSelection, processPdfToolOperation, requirePdfOperation } = require('./pdf');
 const { resolveStoredDocumentPath, safeUnlinkManaged } = require('./paths');
 const { getJobPassword, getJobSecret, removeJobSecrets, storeJobPassword, storeJobSecret } = require('./secrets');
 const { createDocumentDistributionService } = require('./distribution');
 const { createDocumentProcessingMonitoring } = require('./monitoring');
 const { createDocumentExportActions } = require('./export-actions');
 const { createPdfJobProcessor } = require('./job-pdf');
+const { createOcrOperations } = require('./ocr-operations');
+const { createOcrJobProcessor } = require('./ocr-job-processor');
+const { createDocumentJobDetails } = require('./job-details');
+const { buildOcrChatContext } = require('./chat-context');
+const { canAccessDocumentJob, markReviewInProgress } = require('./review-assignments');
+const { createOcrRegionService } = require('./regions');
+const { createOcrFeedbackService } = require('./feedback');
 const queue = [];
 const runningJobs = new Set();
 let runningCount = 0;
 const JOB_LEASE_MS = Math.max(60_000, Number.parseInt(process.env.DOCUMENT_PROCESSING_JOB_LEASE_MS || String(15 * 60 * 1000), 10) || 15 * 60 * 1000);
 const JOB_RECOVERY_BATCH = Math.max(1, Math.min(500, Number.parseInt(process.env.DOCUMENT_PROCESSING_RECOVERY_BATCH || '100', 10) || 100));
+const WORKER_ID = String(process.env.DOCUMENT_PROCESSING_WORKER_ID || `${process.pid}-${crypto.randomUUID()}`).slice(0, 120);
 function jobLeaseCutoff() { return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS)); }
 async function getJobRow(jobId, userId = null) {
     const id = Number.parseInt(jobId, 10);
@@ -72,12 +76,42 @@ async function setJobStatus(jobId, status, patch = {}) {
     const cancelledAt = status === JOB_STATUSES.CANCELLED ? (patch.cancelledAt || now) : current.cancelled_at;
     const terminal = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status);
     const refreshLease = status === JOB_STATUSES.PROCESSING;
+    const leaseUntil = getBeijingTimestamp(new Date(Date.now() + JOB_LEASE_MS));
+    const expectedEpoch = Number.isSafeInteger(Number(patch.executionEpoch)) ? Number(patch.executionEpoch) : null;
     await execute(`
         UPDATE document_jobs
-        SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?, locked_at = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE locked_at END
-        WHERE id = ? AND (status <> ? OR ? = ?)
-    `, [status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt, refreshLease, now, terminal, jobId, JOB_STATUSES.CANCELLED, status, JOB_STATUSES.CANCELLED]);
+        SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?,
+            locked_at = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE locked_at END,
+            lease_until = CASE WHEN ? THEN ? WHEN ? THEN NULL ELSE lease_until END,
+            lease_owner = CASE WHEN ? THEN ? WHEN ? THEN '' ELSE lease_owner END,
+            review_state = CASE WHEN ? THEN 'pending' ELSE review_state END
+        WHERE id = ? AND (status <> ? OR ? = ?) AND execution_epoch = COALESCE(?, execution_epoch)
+    `, [
+        status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt,
+        refreshLease, now, terminal,
+        refreshLease, leaseUntil, terminal,
+        refreshLease, WORKER_ID, terminal,
+        status === JOB_STATUSES.NEEDS_REVIEW,
+        jobId, JOB_STATUSES.CANCELLED, status, JOB_STATUSES.CANCELLED, expectedEpoch
+    ]);
+    await updateOcrBatchForJob(jobId).catch(() => {});
     return await getJobRow(jobId);
+}
+
+async function updateOcrBatchForJob(jobId) {
+    const row = await queryOne(`
+        SELECT j.id, j.user_id, j.status, f.source_ref
+        FROM document_jobs j
+        JOIN document_files f ON f.id = j.file_id AND f.user_id = j.user_id
+        WHERE j.id = ? AND j.source_module = 'ocr_app'
+    `, [jobId]);
+    const batchId = String(row?.source_ref || '').trim();
+    if (!row || !/^[0-9a-f-]{36}$/i.test(batchId)) return;
+    await execute(`
+        UPDATE document_batch_items SET status = ?, updated_at = ?
+        WHERE batch_id = ? AND user_id = ? AND job_id = ?
+    `, [row.status, getBeijingTimestamp(), batchId, row.user_id, row.id]);
+    await ocrOperations.refreshOcrBatch(batchId, row.user_id);
 }
 
 async function isCancelled(jobId) {
@@ -85,30 +119,44 @@ async function isCancelled(jobId) {
     return !row || row.status === JOB_STATUSES.CANCELLED;
 }
 
-async function touchProgress(jobId, progress, resultPatch = null) {
+async function touchProgress(jobId, progress, resultPatch = null, executionEpoch = null) {
     const row = await getJobRow(jobId);
     if (!row || [JOB_STATUSES.CANCELLED, JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW].includes(row.status)) return null;
     const result = resultPatch ? { ...parseJson(row.result_json, {}), ...resultPatch } : parseJson(row.result_json, {});
-    return await setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result });
+    return await setJobStatus(jobId, JOB_STATUSES.PROCESSING, { progress, result, executionEpoch });
 }
 
-async function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, pixelWidth = width, pixelHeight = height, pdfWidth = 0, pdfHeight = 0, rotation = 0, cropBox = {}, imagePath = '', text = '', ocrStatus = 'pending', confidence = null }) {
+async function insertPage({ userId, fileId, jobId, pageNumber, width = 0, height = 0, pixelWidth = width, pixelHeight = height, pdfWidth = 0, pdfHeight = 0, rotation = 0, cropBox = {}, imagePath = '', text = '', rawText = text, ocrStatus = 'pending', processingState = ocrStatus, confidence = null, result = {}, contentRevision = 1, alignmentStatus = 'aligned' }) {
     const now = getBeijingTimestamp();
     return await queryOne(`
         INSERT INTO document_pages (
-            user_id, file_id, job_id, page_number, width, height, pixel_width, pixel_height, pdf_width, pdf_height, rotation, crop_box_json, image_path, text, text_length, ocr_status, confidence, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, file_id, job_id, page_number, width, height, pixel_width, pixel_height, pdf_width, pdf_height, rotation, crop_box_json, image_path, text, raw_text, text_length, ocr_status, processing_state, confidence, result_json, content_revision, alignment_status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *
-    `, [userId, fileId, jobId, pageNumber, width, height, pixelWidth, pixelHeight, pdfWidth, pdfHeight, rotation, safeJson(cropBox), imagePath, text, String(text || '').length, ocrStatus, confidence, now, now]);
+    `, [userId, fileId, jobId, pageNumber, width, height, pixelWidth, pixelHeight, pdfWidth, pdfHeight, rotation, safeJson(cropBox), imagePath, text, rawText, String(text || '').length, ocrStatus, processingState, confidence, safeJson(result), contentRevision, alignmentStatus, now, now]);
 }
 
-async function updatePageText({ pageId, text, ocrStatus, confidence }) {
+async function updatePageText({ pageId, text, rawText = null, ocrStatus, processingState = ocrStatus, confidence, result = null, contentRevision = null, alignmentStatus = null }) {
+    const current = await queryOne('SELECT * FROM document_pages WHERE id = ?', [pageId]);
+    if (!current) return null;
     return await queryOne(`
         UPDATE document_pages
-        SET text = ?, text_length = ?, ocr_status = ?, confidence = ?, updated_at = ?
+        SET text = ?, raw_text = ?, text_length = ?, ocr_status = ?, processing_state = ?, confidence = ?, result_json = ?, content_revision = ?, alignment_status = ?, updated_at = ?
         WHERE id = ?
         RETURNING *
-    `, [String(text || ''), String(text || '').length, ocrStatus, confidence, getBeijingTimestamp(), pageId]);
+    `, [
+        String(text || ''),
+        rawText === null ? current.raw_text : String(rawText || ''),
+        String(text || '').length,
+        ocrStatus,
+        processingState || current.processing_state || ocrStatus,
+        confidence === undefined ? current.confidence : confidence,
+        result === null ? current.result_json : safeJson(result),
+        contentRevision === null ? current.content_revision : contentRevision,
+        alignmentStatus || current.alignment_status || 'aligned',
+        getBeijingTimestamp(),
+        pageId
+    ]);
 }
 
 async function insertOcrBlocks({ userId, fileId, jobId, pageId, pageNumber, blocks = [] }) {
@@ -120,16 +168,61 @@ async function insertOcrBlocks({ userId, fileId, jobId, pageId, pageNumber, bloc
         const batch = blocks.slice(offset, offset + batchSize);
         await execute(`
             INSERT INTO document_ocr_blocks (
-                user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, bbox_json, confidence, language, engine, created_at, updated_at
-            ) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
+                user_id, file_id, job_id, page_id, page_number, sort_order, block_type, text, raw_text, effective_text, stable_key, bbox_json, confidence, confidence_source, alignment_status, result_revision, language, engine, created_at, updated_at
+            ) VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
         `, batch.flatMap((block, index) => [
             userId, fileId, jobId, pageId, pageNumber,
             Number(block.sortOrder ?? (offset + index)),
-            block.blockType || 'line', String(block.text || '').trim(),
-            safeJson(block.bbox || []), Number(block.confidence || 0),
+            block.blockType || 'line', String(block.text || '').trim(), String(block.text || '').trim(), String(block.text || '').trim(),
+            `${pageId}:${Number(block.sortOrder ?? (offset + index))}:${crypto.createHash('sha256').update(String(block.text || '')).digest('hex').slice(0, 16)}`,
+            safeJson(block.bbox || []), block.confidence === null || block.confidence === undefined ? null : Number(block.confidence),
+            block.confidence === null || block.confidence === undefined ? 'unknown' : 'engine', 'aligned', 1,
             block.language || '', block.engine || '', now, now
         ]));
     }
+}
+
+function createCoverage({ sourcePageCount = 0, plannedPages = [], processedPages = [], failedPages = [] } = {}) {
+    const sourceCount = Math.max(Number(sourcePageCount) || 0, 0);
+    const planned = Array.from(new Set(plannedPages.map(page => Number(page)).filter(page => Number.isSafeInteger(page) && page > 0))).sort((a, b) => a - b);
+    const processed = Array.from(new Set(processedPages.map(page => Number(page)).filter(page => planned.includes(page)))).sort((a, b) => a - b);
+    const failed = Array.from(new Set(failedPages.map(page => Number(page)).filter(page => planned.includes(page)))).sort((a, b) => a - b);
+    const omitted = Array.from({ length: sourceCount }, (_item, index) => index + 1).filter(page => !planned.includes(page));
+    return {
+        sourcePageCount: sourceCount,
+        plannedPages: planned,
+        plannedPageCount: planned.length,
+        processedPages: processed,
+        processedPageCount: processed.length,
+        failedPages: failed,
+        failedPageCount: failed.length,
+        omittedPages: omitted,
+        coverageComplete: planned.length > 0 && processed.length + failed.length === planned.length && failed.length === 0
+    };
+}
+
+async function updateJobCoverage(jobId, coverage) {
+    const normalized = createCoverage(coverage);
+    const current = await getJobRow(jobId);
+    if (!current) return normalized;
+    const result = { ...parseJson(current.result_json, {}), coverage: normalized };
+    await execute(`
+        UPDATE document_jobs
+        SET source_page_count = ?, planned_page_count = ?, processed_page_count = ?, failed_page_count = ?,
+            omitted_pages_json = ?, coverage_complete = ?, result_json = ?, updated_at = ?
+        WHERE id = ?
+    `, [
+        normalized.sourcePageCount,
+        normalized.plannedPageCount,
+        normalized.processedPageCount,
+        normalized.failedPageCount,
+        safeJson(normalized.omittedPages),
+        normalized.coverageComplete ? 1 : 0,
+        safeJson(result),
+        getBeijingTimestamp(),
+        jobId
+    ]);
+    return normalized;
 }
 
 async function getPages(jobId) {
@@ -187,6 +280,7 @@ async function cleanupJobArtifacts(jobId) {
     ]);
     await execute('DELETE FROM document_outputs WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_ocr_blocks WHERE job_id = ?', [jobId]);
+    await execute('DELETE FROM document_page_revisions WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_reviews WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_job_items WHERE job_id = ?', [jobId]);
     await execute('DELETE FROM document_pages WHERE job_id = ?', [jobId]);
@@ -266,18 +360,18 @@ async function recoverDocumentProcessingJobs({ limit = JOB_RECOVERY_BATCH } = {}
     const requeued = await execute(`
         UPDATE document_jobs
         SET status = ?, locked_at = NULL, updated_at = ?, error_message = ''
-        WHERE status = ? AND locked_at IS NOT NULL AND locked_at < ? AND attempts < max_attempts
+        WHERE status = ? AND COALESCE(lease_until, locked_at) IS NOT NULL AND COALESCE(lease_until, locked_at) < ? AND attempts < max_attempts
     `, [JOB_STATUSES.QUEUED, now, JOB_STATUSES.PROCESSING, cutoff]);
     const failed = await execute(`
         UPDATE document_jobs
         SET status = ?, locked_at = NULL, completed_at = ?, updated_at = ?,
             error_message = CASE WHEN error_message = '' THEN ? ELSE error_message END
-        WHERE status = ? AND locked_at IS NOT NULL AND locked_at < ? AND attempts >= max_attempts
+        WHERE status = ? AND COALESCE(lease_until, locked_at) IS NOT NULL AND COALESCE(lease_until, locked_at) < ? AND attempts >= max_attempts
     `, [JOB_STATUSES.FAILED, now, now, '任务处理租约已过期且达到最大重试次数。', JOB_STATUSES.PROCESSING, cutoff]);
     const pending = await query(`
         SELECT id
         FROM document_jobs
-        WHERE status = ? AND (locked_at IS NULL OR locked_at < ?)
+        WHERE status = ? AND (locked_at IS NULL OR COALESCE(lease_until, locked_at) < ?)
         ORDER BY created_at ASC, id ASC
         LIMIT ?
     `, [JOB_STATUSES.QUEUED, cutoff, safeLimit]);
@@ -285,7 +379,11 @@ async function recoverDocumentProcessingJobs({ limit = JOB_RECOVERY_BATCH } = {}
     if (requeued || failed || pending.length) {
         logger.info({ requeued, failed, enqueued: pending.length }, '文档处理任务恢复扫描完成');
     }
-    return { requeued, failed, enqueued: pending.length };
+    const exports = await exportActions.recoverPendingExports({ limit: safeLimit }).catch(error => {
+        logger.warn({ err: sanitizeErrorMessage(error) }, '文档异步导出恢复失败');
+        return { recovered: 0 };
+    });
+    return { requeued, failed, enqueued: pending.length, exportsRecovered: exports.recovered };
 }
 
 async function createJobRecord({ userId, fileId, jobType, sourceModule, config, parentJobId = null }) {
@@ -313,6 +411,48 @@ async function createJobFromUpload({ user, file, jobType = JOB_TYPES.AUTO, sourc
     enqueueJob(job.id);
     return await getJobDetail({ userId: user.id, jobId: job.id });
 }
+
+const ocrOperations = createOcrOperations({
+    createJobFromUpload,
+    execute,
+    queryOne,
+    getBeijingTimestamp,
+    isImageExtension,
+    isPdfExtension,
+    JOB_STATUSES,
+    normalizeConfig,
+    parsePageSelection,
+    sanitizeErrorMessage
+});
+
+const { getJobDetail, extractOcrFields, getJobPageSlice, getPageRevisions } = createDocumentJobDetails({
+    canAccessDocumentJob,
+    extractOcrFieldsFromDetail: require('./field-extraction').extractOcrFieldsFromDetail,
+    getBlocks,
+    getDocumentFileForUser,
+    getJobItems,
+    getJobPassword,
+    getJobRow,
+    getOutputs,
+    getPages,
+    getReviews,
+    JOB_STATUSES,
+    parseJson,
+    preflightPdfFile: require('./pdf').preflightPdfFile,
+    serializeBlock: require('./settings').serializeBlock,
+    serializeFile: require('./files').serializeFile,
+    serializeJob,
+    serializeOutput: require('./exporters').serializeOutput,
+    serializePage: require('./settings').serializePage
+});
+
+async function getOcrChatContext({ userId, jobId }) {
+    const detail = await getJobDetail({ userId, jobId, sourceModule: 'ocr_app' });
+    return detail ? buildOcrChatContext(detail) : null;
+}
+
+const ocrRegions = createOcrRegionService({ canAccessDocumentJob, recognizePage });
+const ocrFeedback = createOcrFeedbackService({ canAccessDocumentJob });
 
 async function createPdfToolJobFromUploads({ user, files = [], operation, sourceRef = '', config = {} }) {
     const uploadFiles = Array.isArray(files) ? files.filter(Boolean) : [files].filter(Boolean);
@@ -418,175 +558,6 @@ async function listJobs({ userId, page = 1, limit = 15, status = '', jobType = '
     };
 }
 
-function allowedActions(job) {
-    const status = job?.status || '';
-    return {
-        view: Boolean(job),
-        cancel: [JOB_STATUSES.QUEUED, JOB_STATUSES.PROCESSING].includes(status),
-        retry: [JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status),
-        reprocess: [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.FAILED, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status),
-        download: [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW].includes(status),
-        delete: ![JOB_STATUSES.QUEUED, JOB_STATUSES.PROCESSING].includes(status)
-    };
-}
-
-async function getJobPreflight(job, file) {
-    const config = parseJson(job?.config_json, {});
-    const password = await getJobPassword({ userId: job.user_id, jobId: job.id });
-    const sourceIds = Array.isArray(config.sourceFileIds) && config.sourceFileIds.length ? config.sourceFileIds : [file?.id];
-    const sources = [];
-    for (const sourceId of sourceIds.slice(0, 20)) {
-        const source = await getDocumentFileForUser(sourceId, job.user_id);
-        if (source) sources.push(await preflightPdfFile(source, { maxPages: config.maxToolPages || 300, password, userId: job.user_id }));
-    }
-    return {
-        operation: config.operation || '',
-        mode: config.mode || 'single',
-        files: sources,
-        totalPages: sources.reduce((sum, source) => sum + Number(source.pageCount || 0), 0),
-        warnings: sources.flatMap(source => source.warnings || [])
-    };
-}
-
-async function getJobDetail({ userId, jobId, sourceModule = '' }) {
-    const job = await getJobRow(jobId, userId);
-    if (!job) return null;
-    if (sourceModule && job.source_module !== sourceModule) return null;
-    const file = await getDocumentFileForUser(job.file_id, userId);
-    const pages = await getPages(job.id);
-    const blocks = await getBlocks(job.id);
-    const outputs = await getOutputs(job.id);
-    const reviews = await getReviews(job.id);
-    const items = await getJobItems(job.id);
-    return {
-        job: { ...serializeJob(job), allowedActions: allowedActions(job) },
-        file: serializeFile(file),
-        pages: pages.map(serializePage),
-        blocks: blocks.map(serializeBlock),
-        outputs: outputs.map(serializeOutput),
-        items: items.map(row => ({
-            id: row.id,
-            fileId: row.file_id,
-            itemOrder: Number(row.item_order || 0),
-            status: row.status || '',
-            progress: Number(row.progress || 0),
-            errorCode: row.error_code || '',
-            errorMessage: row.error_message || '',
-            result: parseJson(row.result_json, {})
-        })),
-        reviews: reviews.map(row => ({
-            id: row.id,
-            pageId: row.page_id,
-            reviewStatus: row.review_status,
-            revisedText: row.revised_text,
-            lowConfidenceConfirmed: Boolean(row.low_confidence_confirmed),
-            reviewedAt: row.reviewed_at,
-            updatedAt: row.updated_at
-        })),
-        preflight: job.source_module === 'pdf_tools' ? await getJobPreflight(job, file) : null
-    };
-}
-
-async function preparePagesForJob({ job, file, filePath, config }) {
-    const userId = job.user_id;
-    const ext = file.file_ext;
-    if (isImageExtension(ext)) {
-        const page = await imageFileToPage({ filePath, relativePath: file.file_path, pageNumber: 1 });
-        const row = await insertPage({
-            userId,
-            fileId: file.id,
-            jobId: job.id,
-            ...page,
-            pixelWidth: page.width,
-            pixelHeight: page.height,
-            pdfWidth: Number(page.width || 0) * 72 / Math.max(Number(config.dpi || 220), 72),
-            pdfHeight: Number(page.height || 0) * 72 / Math.max(Number(config.dpi || 220), 72),
-            ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
-        });
-        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: 1, metadata: { image: { width: page.width, height: page.height } } });
-        return [row];
-    }
-    if (isPdfExtension(ext)) {
-        const metrics = await getPdfPageMetrics(file);
-        const rendered = await renderPdfPagesToFiles({
-            filePath,
-            userId,
-            jobId: job.id,
-            options: { password: config.password, maxPages: config.maxRenderPages, desiredWidth: Math.round(config.dpi * 6.4) }
-        });
-        const rows = [];
-        for (const page of rendered) {
-            const metric = metrics.find(item => item.pageNumber === page.pageNumber) || {};
-            rows.push(await insertPage({
-                userId,
-                fileId: file.id,
-                jobId: job.id,
-                pageNumber: page.pageNumber,
-                width: page.width,
-                height: page.height,
-                pixelWidth: page.pixelWidth || page.width,
-                pixelHeight: page.pixelHeight || page.height,
-                pdfWidth: metric.pdfWidth || 0,
-                pdfHeight: metric.pdfHeight || 0,
-                rotation: metric.rotation || 0,
-                cropBox: metric.cropBox || {},
-                imagePath: page.imagePath,
-                ocrStatus: job.job_type === JOB_TYPES.OCR ? 'processing' : 'pending'
-            }));
-        }
-        const requestedPages = Math.min(metrics.length, config.maxRenderPages);
-        if (rows.length !== requestedPages) {
-            throw new Error(`PDF 预览仅生成 ${rows.length}/${requestedPages} 页，未发布不完整的识别结果。`);
-        }
-        await updateDocumentFileMetadata({ fileId: file.id, userId, pageCount: metrics.length, metadata: { pdf: { totalPages: metrics.length, renderedPages: rows.length } } });
-        return rows;
-    }
-    return [];
-}
-
-async function recognizePages({ job, file, pages, config }) {
-    const maxPages = Math.min(pages.length, config.maxOcrPages);
-    const recognizedPages = [];
-    const allBlocks = [];
-    let needsReview = false;
-    for (let index = 0; index < maxPages; index += 1) {
-        if (await isCancelled(job.id)) throw new Error('任务已取消');
-        const page = pages[index];
-        const imagePath = resolveStoredDocumentPath(page.image_path);
-        if (!imagePath || !await fs.promises.access(imagePath, fs.constants.R_OK).then(() => true).catch(() => false)) {
-            throw new Error(`第 ${page.page_number} 页预览图不存在，无法进行 OCR。`);
-        }
-        const result = await recognizePage(imagePath, {
-            language: config.language,
-            engine: config.engine,
-            dpi: config.dpi,
-            timeoutMs: config.timeoutMs,
-            confidenceThreshold: config.confidenceThreshold
-        });
-        const pageNeedsReview = Number(result.confidence || 0) < config.confidenceThreshold;
-        needsReview = needsReview || pageNeedsReview;
-        const updatedPage = await updatePageText({
-            pageId: page.id,
-            text: result.text,
-            ocrStatus: pageNeedsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
-            confidence: result.confidence
-        });
-        await insertOcrBlocks({
-            userId: job.user_id,
-            fileId: file.id,
-            jobId: job.id,
-            pageId: page.id,
-            pageNumber: page.page_number,
-            blocks: result.blocks
-        });
-        recognizedPages.push(updatedPage);
-        allBlocks.push(...result.blocks);
-        await touchProgress(job.id, 35 + Math.floor(((index + 1) / maxPages) * 50), { processedPages: index + 1 });
-    }
-    if (pages.length > maxPages) needsReview = true;
-    return { pages: recognizedPages, blocks: allBlocks, needsReview, truncated: pages.length > maxPages };
-}
-
 async function processTextExtraction({ job, file, filePath, config }) {
     const text = truncateExtractedText(await extractDocumentText(filePath, '', file.original_name, { password: config.password, maxChars: getKnowledgeLimits().extractMaxChars }), getKnowledgeLimits().extractMaxChars);
     const normalizedText = String(text || '').trim();
@@ -609,16 +580,16 @@ async function processTextExtraction({ job, file, filePath, config }) {
     }
 
     if (isPdfExtension(file.file_ext)) {
-        const pages = await preparePagesForJob({ job, file, filePath, config });
+        const pages = await ocrProcessor.preparePagesForJob({ job, file, filePath, config });
         if (job.job_type === JOB_TYPES.OCR) {
-            const recognized = await recognizePages({ job, file, pages, config });
+            const recognized = await ocrProcessor.recognizePages({ job, file, pages, config });
             const finalPages = await getPages(job.id);
             const blocks = await getBlocks(job.id);
             const outputs = await createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
             return {
-                status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
+                status: recognized.failedPages.length ? JOB_STATUSES.PARTIAL_SUCCESS : (recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED),
                 progress: 100,
-                result: { requiresOcr: false, textLength: pagesToText(finalPages).length, outputs, lowConfidence: recognized.needsReview, truncated: recognized.truncated }
+                result: { requiresOcr: false, textLength: pagesToText(finalPages).length, outputs, lowConfidence: recognized.needsReview, failedPages: recognized.failedPages, coverage: recognized.coverage, truncated: false }
             };
         }
         return {
@@ -635,18 +606,31 @@ async function processTextExtraction({ job, file, filePath, config }) {
     };
 }
 
-async function processImageOcr({ job, file, filePath, config }) {
-    const pages = await preparePagesForJob({ job, file, filePath, config });
-    const recognized = await recognizePages({ job, file, pages, config });
-    const finalPages = await getPages(job.id);
-    const blocks = await getBlocks(job.id);
-    const outputs = await createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
-    return {
-        status: recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED,
-        progress: 100,
-        result: { textLength: pagesToText(finalPages).length, outputs, lowConfidence: recognized.needsReview, truncated: recognized.truncated }
-    };
-}
+const ocrProcessor = createOcrJobProcessor({
+    createTextOutputs,
+    getBlocks,
+    getJobRow,
+    getPages,
+    getPdfPageMetrics,
+    imageFileToPage,
+    insertOcrBlocks,
+    insertPage,
+    isCancelled,
+    isImageExtension,
+    isPdfExtension,
+    JOB_STATUSES,
+    JOB_TYPES,
+    parsePageSelection,
+    pagesToText,
+    recognizePage,
+    renderPdfPagesToFiles,
+    resolveStoredDocumentPath,
+    sanitizeErrorMessage,
+    touchProgress,
+    updateDocumentFileMetadata,
+    updateJobCoverage,
+    updatePageText
+});
 
 const processPdfToolJob = createPdfJobProcessor({
     assertPdfInputFiles,
@@ -658,9 +642,9 @@ const processPdfToolJob = createPdfJobProcessor({
     isCancelled,
     JOB_STATUSES,
     PDF_TOOL_OPERATIONS,
-    preparePagesForJob,
+    preparePagesForJob: (...args) => ocrProcessor.preparePagesForJob(...args),
     processPdfToolOperation,
-    recognizePages,
+    recognizePages: (...args) => ocrProcessor.recognizePages(...args),
     recordJobItem,
     requirePdfOperation,
     resetJobItems,
@@ -678,13 +662,15 @@ async function processJob(jobId) {
         return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
     }
     const now = getBeijingTimestamp();
+    const leaseUntil = getBeijingTimestamp(new Date(Date.now() + JOB_LEASE_MS));
     const claimed = await execute(`
         UPDATE document_jobs
-        SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, updated_at = ?
+        SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, lease_until = ?, lease_owner = ?, execution_epoch = execution_epoch + 1, updated_at = ?
         WHERE id = ? AND status = ? AND cancelled_at IS NULL
-    `, [JOB_STATUSES.PROCESSING, 5, now, now, jobId, JOB_STATUSES.QUEUED]);
+    `, [JOB_STATUSES.PROCESSING, 5, now, leaseUntil, WORKER_ID, now, jobId, JOB_STATUSES.QUEUED]);
     if (claimed !== 1) return await getJobRow(jobId);
     const job = await getJobRow(jobId);
+    if (!job) return null;
     const rawConfig = parseJson(job.config_json, {});
     // 兼容旧任务的明文密码：首次实际执行时立即迁移到短期加密密钥表，
     // 然后回写不含密码的公开配置，避免继续经详情接口泄露。
@@ -707,15 +693,18 @@ async function processJob(jobId) {
 
     try {
         if (await isCancelled(jobId)) return await getJobRow(jobId);
-        await cleanupJobArtifacts(jobId);
-        await touchProgress(jobId, 12, { fileType: file.file_type });
+        const retryingFailedPages = parseJson(job.result_json, {}).retryFailedPages === true;
+        if (!retryingFailedPages) await cleanupJobArtifacts(jobId);
+        await touchProgress(jobId, 12, { fileType: file.file_type }, Number(job.execution_epoch));
         let outcome;
         if (job.job_type === JOB_TYPES.PDF_TOOL) {
             outcome = await processPdfToolJob({ job, file, config });
-        } else if (job.job_type === JOB_TYPES.OCR) {
-            outcome = await processImageOcr({ job, file, filePath, config });
+        } else if (job.job_type === JOB_TYPES.OCR && (isImageExtension(file.file_ext) || isPdfExtension(file.file_ext))) {
+            outcome = await ocrProcessor.processImageOcr({ job, file, filePath, config });
+        } else if (job.job_type === JOB_TYPES.OCR && isTextExtractableExtension(file.file_ext)) {
+            outcome = await processTextExtraction({ job, file, filePath, config });
         } else if (job.job_type === JOB_TYPES.AUTO && isImageExtension(file.file_ext)) {
-            const pages = await preparePagesForJob({ job, file, filePath, config });
+            const pages = await ocrProcessor.preparePagesForJob({ job, file, filePath, config });
             outcome = {
                 status: JOB_STATUSES.NEEDS_REVIEW,
                 progress: 100,
@@ -730,25 +719,26 @@ async function processJob(jobId) {
             await cleanupJobArtifacts(jobId);
             return await getJobRow(jobId);
         }
-        return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '' });
+        return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '', executionEpoch: Number(job.execution_epoch) });
     } catch (error) {
         if (await isCancelled(jobId)) {
             await cleanupJobArtifacts(jobId);
             return await getJobRow(jobId);
         }
         const message = sanitizeErrorMessage(error);
-        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() } });
+        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() }, executionEpoch: Number(job.execution_epoch) });
     } finally {
         await removeJobSecrets({ userId: job.user_id, jobId: job.id }).catch(() => {});
     }
 }
 
-async function retryJob({ userId, jobId, sourceModule = '', password = '', outputPassword = '', ownerPassword = '' }) {
+async function retryJob({ userId, jobId, sourceModule = '', password = '', outputPassword = '', ownerPassword = '', retryFailedPages = false }) {
     const job = await getJobRow(jobId, userId);
     if (!job) return null;
     if (sourceModule && job.source_module !== sourceModule) return null;
     const retryableStatuses = [
         JOB_STATUSES.FAILED,
+        JOB_STATUSES.PARTIAL_SUCCESS,
         JOB_STATUSES.NEEDS_REVIEW,
         JOB_STATUSES.CANCELLED
     ];
@@ -760,6 +750,32 @@ async function retryJob({ userId, jobId, sourceModule = '', password = '', outpu
     if (String(password || '').trim()) await storeJobPassword({ userId, jobId: job.id, password });
     if (String(outputPassword || '').trim()) await storeJobSecret({ userId, jobId: job.id, purpose: 'output_password', value: outputPassword });
     if (String(ownerPassword || '').trim()) await storeJobSecret({ userId, jobId: job.id, purpose: 'owner_password', value: ownerPassword });
+    if (retryFailedPages && sourceModule === 'ocr_app') {
+        const failedRows = await query(`
+            SELECT * FROM document_pages WHERE job_id = ? AND user_id = ? AND processing_state = ? ORDER BY page_number ASC
+        `, [job.id, userId, JOB_STATUSES.FAILED]);
+        if (!failedRows.length) {
+            const error = new Error('当前任务没有可重试的失败页面。');
+            error.status = 409;
+            throw error;
+        }
+        await execute(`
+            UPDATE document_pages SET ocr_status = ?, processing_state = ?, updated_at = ?
+            WHERE job_id = ? AND user_id = ? AND processing_state = ?
+        `, ['pending', 'pending', getBeijingTimestamp(), job.id, userId, JOB_STATUSES.FAILED]);
+        const config = parseJson(job.config_json, {});
+        const retryPages = failedRows.map(row => Number(row.page_number)).join(',');
+        config.pages = retryPages;
+        config.pageRanges = retryPages;
+        await execute(`
+            UPDATE document_jobs
+            SET status = ?, progress = 0, error_message = '', cancelled_at = NULL, completed_at = NULL,
+                attempt_token = ?, config_json = ?, result_json = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+        `, [JOB_STATUSES.QUEUED, crypto.randomUUID(), safeJson(normalizeConfig(config)), safeJson({ ...parseJson(job.result_json, {}), retryFailedPages: true, retriedPages: failedRows.map(row => Number(row.page_number)) }), getBeijingTimestamp(), job.id, userId]);
+        enqueueJob(job.id);
+        return await getJobDetail({ userId, jobId: job.id });
+    }
     await execute(`
         UPDATE document_jobs
         SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, attempt_token = ?, updated_at = ?
@@ -831,9 +847,30 @@ async function deleteJob({ userId, jobId, sourceModule = '' }) {
     return deleted;
 }
 
-async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'reviewed', lowConfidenceConfirmed = false }) {
-    const page = await queryOne('SELECT * FROM document_pages WHERE id = ? AND user_id = ?', [Number.parseInt(pageId, 10), userId]);
+async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'reviewed', lowConfidenceConfirmed = false, expectedRevision = null, sourceModule = '' }) {
+    const page = await queryOne(`
+        SELECT p.*, j.status AS job_status, j.source_module, j.content_revision AS job_content_revision,
+            j.coverage_complete, j.result_json AS job_result_json
+        FROM document_pages p
+        JOIN document_jobs j ON j.id = p.job_id AND j.user_id = p.user_id
+        WHERE p.id = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
+    `, sourceModule ? [Number.parseInt(pageId, 10), sourceModule] : [Number.parseInt(pageId, 10)]);
     if (!page) return null;
+    const access = await canAccessDocumentJob({ userId, jobId: page.job_id, sourceModule });
+    if (!access) return null;
+    await markReviewInProgress({ userId, jobId: page.job_id });
+    const currentRevision = Math.max(Number(page.job_content_revision || 1), 1);
+    const expected = Number.parseInt(expectedRevision, 10);
+    if (Number.isSafeInteger(expected) && expected !== currentRevision) {
+        const error = new Error('识别结果已被其他操作更新，请刷新后核对修改再保存。');
+        error.status = 409;
+        error.code = 'REVIEW_REVISION_CONFLICT';
+        throw error;
+    }
+    const nextRevision = currentRevision + 1;
+    const originalText = page.raw_text || page.text || '';
+    const effectiveText = String(revisedText || '').slice(0, 1000000);
+    const alignmentStatus = effectiveText === originalText ? 'aligned' : 'unaligned';
     const now = getBeijingTimestamp();
     const existing = await queryOne('SELECT * FROM document_reviews WHERE page_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1', [page.id, userId]);
     if (existing) {
@@ -841,25 +878,64 @@ async function savePageReview({ userId, pageId, revisedText, reviewStatus = 'rev
             UPDATE document_reviews
             SET review_status = ?, revised_text = ?, low_confidence_confirmed = ?, reviewed_at = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
-        `, [reviewStatus, String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, existing.id, userId]);
+        `, [reviewStatus, effectiveText, lowConfidenceConfirmed ? 1 : 0, now, now, existing.id, userId]);
     } else {
         await execute(`
             INSERT INTO document_reviews (
                 user_id, file_id, job_id, page_id, review_status, original_text, revised_text, low_confidence_confirmed, reviewed_at, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [userId, page.file_id, page.job_id, page.id, reviewStatus, page.text || '', String(revisedText || '').slice(0, 1000000), lowConfidenceConfirmed ? 1 : 0, now, now, now]);
+        `, [userId, page.file_id, page.job_id, page.id, reviewStatus, originalText, effectiveText, lowConfidenceConfirmed ? 1 : 0, now, now, now]);
     }
-    await updatePageText({ pageId: page.id, text: revisedText, ocrStatus: reviewStatus, confidence: lowConfidenceConfirmed ? 1 : page.confidence });
-    const job = await getJobRow(page.job_id, userId);
-    if (job && job.status === JOB_STATUSES.NEEDS_REVIEW) {
-        const lowPagesRow = await queryOne(`
-            SELECT COUNT(*) AS count
-            FROM document_pages
-            WHERE job_id = ? AND ocr_status = ?
-        `, [job.id, JOB_STATUSES.NEEDS_REVIEW]);
-        if (Number(lowPagesRow?.count || 0) === 0) {
-            await setJobStatus(job.id, JOB_STATUSES.SUCCEEDED, { progress: 100, result: { ...parseJson(job.result_json, {}), reviewed: true } });
-        }
+    await updatePageText({
+        pageId: page.id,
+        text: effectiveText,
+        ocrStatus: reviewStatus,
+        processingState: JOB_STATUSES.SUCCEEDED,
+        confidence: page.confidence,
+        result: { ...parseJson(page.result_json, {}), reviewed: true, humanVerified: Boolean(lowConfidenceConfirmed) },
+        contentRevision: nextRevision,
+        alignmentStatus
+    });
+    await execute(`
+        INSERT INTO document_page_revisions (
+            user_id, file_id, job_id, page_id, revision, base_revision, source_kind, raw_text, effective_text,
+            alignment_status, review_status, low_confidence_confirmed, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [userId, page.file_id, page.job_id, page.id, nextRevision, currentRevision, 'review', originalText, effectiveText, alignmentStatus, reviewStatus, lowConfidenceConfirmed ? 1 : 0, now]);
+    if (alignmentStatus === 'unaligned') {
+        await execute(`
+            UPDATE document_ocr_blocks
+            SET effective_text = '', alignment_status = ?, result_revision = ?, updated_at = ?
+            WHERE page_id = ? AND user_id = ?
+        `, ['unaligned', nextRevision, now, page.id, page.user_id]);
+    } else {
+        await execute(`
+            UPDATE document_ocr_blocks
+            SET effective_text = raw_text, alignment_status = ?, result_revision = ?, updated_at = ?
+            WHERE page_id = ? AND user_id = ?
+        `, ['aligned', nextRevision, now, page.id, page.user_id]);
+    }
+    const reviewPending = await queryOne(`
+        SELECT COUNT(*) AS count
+        FROM document_pages
+        WHERE job_id = ? AND (ocr_status IN (?, ?, ?) OR processing_state IN (?, ?, ?))
+    `, [page.job_id, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.FAILED, 'pending', 'pending', JOB_STATUSES.PROCESSING, JOB_STATUSES.FAILED]);
+    const unresolvedCount = Number(reviewPending?.count || 0);
+    const assignmentCount = await queryOne(`
+        SELECT COUNT(*) AS count FROM document_review_assignments
+        WHERE job_id = ? AND status IN ('assigned', 'in_review', 'approved')
+    `, [page.job_id]);
+    const requiresAssignedReview = Number(assignmentCount?.count || 0) > 0;
+    const nextReviewState = unresolvedCount === 0 && !requiresAssignedReview ? 'reviewed' : 'pending';
+    const result = { ...parseJson(page.job_result_json, {}), reviewed: unresolvedCount === 0, contentRevision: nextRevision };
+    await execute(`
+        UPDATE document_jobs
+        SET content_revision = ?, review_state = ?, result_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+    `, [nextRevision, nextReviewState, safeJson(result), now, page.job_id, page.user_id]);
+    const job = await getJobRow(page.job_id);
+    if (job && job.status === JOB_STATUSES.NEEDS_REVIEW && unresolvedCount === 0 && !requiresAssignedReview && Boolean(job.coverage_complete)) {
+        await setJobStatus(job.id, JOB_STATUSES.SUCCEEDED, { progress: 100, result });
     }
     return await getJobDetail({ userId, jobId: page.job_id });
 }
@@ -880,23 +956,36 @@ const exportActions = createDocumentExportActions({ getJobRow, getPages, getBloc
 module.exports = {
     cancelJob,
     createJobExport: exportActions.createJobExport,
+    getExportRequest: exportActions.getExportRequest,
     dispatchPdfJobResult: distribution.dispatchPdfJobResult,
+    createOcrRegionCandidate: ocrRegions.createRegionCandidate,
+    submitOcrFeedback: ocrFeedback.submitFeedback,
+    listOcrFeedback: ocrFeedback.listFeedback,
+    reviewOcrFeedback: ocrFeedback.reviewFeedback,
+    extractOcrFields,
     shareJobResult: distribution.shareJobResult,
     createJobFromUpload,
+    createOcrBatchFromUploads: ocrOperations.createOcrBatchFromUploads,
     createPdfToolJobFromUploads,
     deleteJob,
     enqueueJob,
     getDocumentProcessingSettings,
     getDocumentProcessingStats: monitoring.getDocumentProcessingStats,
     getJobDetail,
+    getJobPageSlice,
+    getPageRevisions,
+    getOcrChatContext,
     getJobOutputsArchive,
     getJobOutputsArchiveStream,
     getOutputDownload,
     getPageImage,
     getQueueStatus,
+    listOcrRegionCandidates: ocrRegions.listRegionCandidates,
     listJobs,
     processJob,
+    preflightOcrUploads: ocrOperations.preflightOcrUploads,
     recoverDocumentProcessingJobs,
+    requestJobExport: exportActions.requestJobExport,
     retryJob,
     reprocessJob,
     updateDocumentProcessingSettings,

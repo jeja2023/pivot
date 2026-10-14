@@ -75,6 +75,10 @@ body.dark-mode .retrieval-config-modal .model-modal-header {
     flex-shrink: 0;
 }
 
+.retrieval-header-icon-ocr {
+    color: var(--info, var(--primary));
+}
+
 body.dark-mode .retrieval-header-icon {
     background: #2d2d2e;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -115,6 +119,12 @@ body.dark-mode .retrieval-header-icon {
     background: rgba(16, 185, 129, 0.1);
     color: #059669;
     border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.retrieval-badge-cyan {
+    background: color-mix(in srgb, var(--info, #0284c7) 12%, transparent);
+    color: var(--info, #0284c7);
+    border: 1px solid color-mix(in srgb, var(--info, #0284c7) 25%, transparent);
 }
 
 body.dark-mode .retrieval-badge-blue {

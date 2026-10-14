@@ -28,9 +28,10 @@ const OUTPUT_TYPES = Object.freeze({
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
 const PDF_EXTENSIONS = new Set(['.pdf']);
 const TEXT_LIKE_EXTENSIONS = new Set(['.txt', '.md', '.csv', '.json', '.html', '.htm']);
-const OFFICE_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx']);
+const OFFICE_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ofd']);
 
 const DEFAULT_OCR_SERVICE_URL = 'http://ocr-service:9100';
+const { readTypedEnv } = require('../../config/env-registry');
 
 const DOCUMENT_PROCESSING_SETTING_KEYS = Object.freeze({
     engine: 'document_processing_ocr_engine',
@@ -71,12 +72,12 @@ function normalizeOcrServiceUrl(value, fallback = DEFAULT_OCR_SERVICE_URL) {
     return parsed.href.replace(/\/+$/, '');
 }
 const DEFAULT_DOCUMENT_PROCESSING_CONFIG = Object.freeze({
-    maxRenderPages: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_RENDER_PAGES || '5', 10) || 5),
-    maxOcrPages: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_OCR_PAGES || '5', 10) || 5),
+    maxRenderPages: readTypedEnv('DOCUMENT_PROCESSING_MAX_RENDER_PAGES'),
+    maxOcrPages: readTypedEnv('DOCUMENT_PROCESSING_MAX_OCR_PAGES'),
     confidenceThreshold: Math.min(Math.max(Number.parseFloat(process.env.DOCUMENT_PROCESSING_CONFIDENCE_THRESHOLD || '0.75') || 0.75, 0), 1),
     ocrTimeoutMs: Math.max(5000, Number.parseInt(process.env.DOCUMENT_PROCESSING_OCR_TIMEOUT_MS || process.env.OCR_SERVICE_TIMEOUT_MS || '120000', 10) || 120000),
-    maxConcurrentJobs: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_CONCURRENT || '2', 10) || 2),
-    outputRetentionDays: Math.max(1, Number.parseInt(process.env.DOCUMENT_PROCESSING_OUTPUT_RETENTION_DAYS || '30', 10) || 30)
+    maxConcurrentJobs: readTypedEnv('DOCUMENT_PROCESSING_MAX_CONCURRENT'),
+    outputRetentionDays: readTypedEnv('DOCUMENT_PROCESSING_OUTPUT_RETENTION_DAYS')
 });
 
 function normalizeJobType(value) {
@@ -88,6 +89,7 @@ function normalizeJobType(value) {
 
 function normalizeJobStatus(value) {
     const status = String(value || '').trim().toLowerCase();
+    if (status === 'pending') return JOB_STATUSES.QUEUED;
     return Object.values(JOB_STATUSES).includes(status) ? status : '';
 }
 

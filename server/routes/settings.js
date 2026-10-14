@@ -54,6 +54,11 @@ const {
     getOrganizationSigningConfigStatus,
     importManagedOrganizationSigningKey
 } = require('../services/agent-skill-signing-configuration');
+const {
+    getDocumentProcessingSettings,
+    updateDocumentProcessingSettings,
+    getOcrEngineStatus
+} = require('../services/document-processing');
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -185,6 +190,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     router.get('/settings', authMiddleware, (req, res) => {
         const settings = getSettings();
         const uploadRuntimeConfig = getUploadRuntimeConfig();
+        const ocrSettings = getDocumentProcessingSettings();
         const payload = {
             ragEnabled: true,
             ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
@@ -193,6 +199,10 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             retrievalModelConfig: getPublicEmbeddingConfig(),
             rerankConfig: getPublicRerankConfig(),
+            ocrConfig: {
+                engine: ocrSettings.engine || 'http',
+                serviceUrl: ocrSettings.serviceUrl || ''
+            },
             uploadLimits: {
                 maxAttachmentsPerMessage: uploadRuntimeConfig.maxAttachmentsPerMessage,
                 maxImagesPerMessage: uploadRuntimeConfig.maxImagesPerMessage
@@ -208,6 +218,43 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         }
         res.json(payload);
     });
+
+    router.get('/settings/ocr', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足' });
+        return res.json({
+            settings: getDocumentProcessingSettings(),
+            engines: await getOcrEngineStatus()
+        });
+    }));
+
+    router.put('/settings/ocr', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有最高管理员可配置 OCR 识别服务' });
+        const { serviceUrl } = req.body || {};
+        if (serviceUrl) {
+            await assertSafeOutboundUrl(serviceUrl, req.user);
+        }
+        const updated = updateDocumentProcessingSettings({
+            patch: { serviceUrl },
+            userId: req.user.id
+        });
+        logAction(req, '修改系统 OCR 识别服务设置', `服务地址: ${updated.serviceUrl}`);
+        return res.json({
+            success: true,
+            settings: updated,
+            engines: await getOcrEngineStatus()
+        });
+    }));
+
+    router.post('/settings/ocr-test', authMiddleware, asyncHandler(async (req, res) => {
+        if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足' });
+        const engines = await getOcrEngineStatus();
+        const httpEngine = engines.http || {};
+        return res.json({
+            success: httpEngine.available === true,
+            engines,
+            message: httpEngine.available ? 'OCR 服务连接成功' : (httpEngine.error || 'OCR 服务连接失败')
+        });
+    }));
 
     router.post('/settings/embedding-models', authMiddleware, asyncHandler(async (req, res) => {
         let { apiUrl, apiKey } = req.body || {};

@@ -14,6 +14,14 @@ function createDocumentProcessingMonitoring({ getQueueStatus }) {
         const jobsByStatusRows = await query('SELECT status, COUNT(*) AS count FROM document_jobs GROUP BY status');
         const jobsByTypeRows = await query('SELECT job_type, COUNT(*) AS count FROM document_jobs GROUP BY job_type');
         const outputs = await queryOne('SELECT COUNT(*) AS count, COALESCE(SUM(file_size), 0) AS bytes FROM document_outputs');
+        const ocrCoverage = await queryOne(`
+            SELECT
+                COUNT(*) FILTER (WHERE source_module = 'ocr_app') AS jobs,
+                COUNT(*) FILTER (WHERE source_module = 'ocr_app' AND coverage_complete = 1) AS complete_coverage,
+                COUNT(*) FILTER (WHERE source_module = 'ocr_app' AND failed_page_count > 0) AS jobs_with_failed_pages,
+                COALESCE(SUM(CASE WHEN source_module = 'ocr_app' THEN failed_page_count ELSE 0 END), 0) AS failed_pages
+            FROM document_jobs
+        `);
         const duration = await queryOne(`
             SELECT AVG(EXTRACT(EPOCH FROM (completed_at::timestamptz - created_at::timestamptz))) AS seconds
             FROM document_jobs
@@ -33,6 +41,12 @@ function createDocumentProcessingMonitoring({ getQueueStatus }) {
             jobsByStatus: rowsToCountObject(jobsByStatusRows),
             jobsByType: rowsToCountObject(jobsByTypeRows, 'job_type'),
             outputs: { count: Number(outputs?.count || 0), bytes: Number(outputs?.bytes || 0) },
+            ocrCoverage: {
+                jobs: Number(ocrCoverage?.jobs || 0),
+                completeCoverage: Number(ocrCoverage?.complete_coverage || 0),
+                jobsWithFailedPages: Number(ocrCoverage?.jobs_with_failed_pages || 0),
+                failedPages: Number(ocrCoverage?.failed_pages || 0)
+            },
             averageDurationSeconds: Number(duration?.seconds || 0),
             recentFailures: recentFailuresRows.map(row => ({
                 id: row.id,

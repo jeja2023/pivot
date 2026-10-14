@@ -74,6 +74,14 @@ function renderRetrievalModelServices(settings = {}) {
     const embedding = settings.retrievalModelConfig || settings.embeddingConfig || {};
     const rerank = settings.rerankConfig || {};
     const rag = settings.ragConfig || {};
+    const ocr = settings.ocrConfig || window.Pivot?.ocrConfig || {};
+    const ocrUrl = ocr.serviceUrl || 'http://ocr-service:9100';
+    const ocrEngine = settings.ocrEngineStatus?.http || window.Pivot?.ocrEngineStatus?.http || null;
+    const ocrAvailable = ocrEngine ? ocrEngine.available === true : null;
+    const ocrReadyClass = ocrAvailable === true ? 'is-ready' : (ocrAvailable === false ? 'is-warning' : '');
+    const ocrStatusText = ocrAvailable === true
+        ? '服务可用 · 外部 OCR 服务'
+        : (ocrAvailable === false ? `连接异常 (${ocrEngine?.error || '无法连接'})` : '外部 OCR 服务 (HTTP)');
     const embeddingReady = Boolean(embedding.apiUrl && embedding.model);
     const rerankReady = rerank.enabled === true;
     const policySummary = `Top ${Number(rag.topK || 0)} · 候选 ${Number(rag.candidateLimit || 0)} · 分块 ${Number(rag.chunkSize || 0)}`;
@@ -100,6 +108,12 @@ function renderRetrievalModelServices(settings = {}) {
             <small>策略随系统检索配置保存；法规与知识库共用模型服务。</small>
             ${configButton('policy', '配置检索策略')}
         </article>
+        <article class="retrieval-model-service-card ${ocrReadyClass}">
+            <strong>OCR 识别服务</strong>
+            <span title="当前服务地址">${escapeHtml(ocrUrl)}</span>
+            <small title="${escapeHtml(ocrStatusText)}">${escapeHtml(ocrStatusText)}</small>
+            ${configButton('ocr', '配置 OCR 服务')}
+        </article>
     `);
 }
 
@@ -117,9 +131,21 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
     }
     const result = await modelRes.json();
     const settings = settingsRes.ok ? await settingsRes.json() : {};
+    if (settings.ocrConfig) window.Pivot.ocrConfig = settings.ocrConfig;
     renderRetrievalModelServices(settings);
     window.Pivot.legacy.updateEmbeddingSettingsForm?.(settings.retrievalModelConfig || settings.embeddingConfig, settings.rerankConfig);
     window.Pivot.legacy.bindEmbeddingModalEvents?.();
+    if (isSuperAdminUser() && !window.Pivot?.ocrEngineStatus) {
+        apiFetch(`${API_BASE}/apps/ocr/engines`, { headers: authHeaders() })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.engines) {
+                    window.Pivot.ocrEngineStatus = data.engines;
+                    renderRetrievalModelServices({ ...settings, ocrEngineStatus: data.engines });
+                }
+            })
+            .catch(() => {});
+    }
     const personalDefaultId = settings.personalDefaultModelId;
     const globalDefaultId = settings.defaultModelId;
     const data = result.data || [];

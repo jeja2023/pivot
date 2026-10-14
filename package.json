@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.2.21",
+  "version": "0.2.23",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -44,6 +44,7 @@
     "preflight:deployment": "node scripts/preflight_deployment.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
+    "evaluate:ocr-quality": "node scripts/evaluate_ocr_quality.js",
     "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=75 --test-coverage-functions=75 --test-coverage-branches=60",

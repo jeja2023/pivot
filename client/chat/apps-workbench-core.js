@@ -603,6 +603,8 @@ async function showOcrAppFromRegistry() {
         await window.Pivot.legacy.showOcrApp();
         return;
     }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-ocr-review-views.js');
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-ocr-actions.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-ocr.js');
     await window.Pivot.legacy.showOcrApp?.();
 }

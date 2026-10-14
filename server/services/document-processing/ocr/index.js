@@ -62,8 +62,40 @@ async function getOcrEngineStatus() {
     return Object.fromEntries(entries);
 }
 
+async function getOcrCapabilities({ includeServiceUrl = false } = {}) {
+    const engines = await getOcrEngineStatus();
+    const active = engines[normalizeEngine()] || {};
+    const response = {
+        protocolVersion: '1',
+        input: {
+            formats: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp'],
+            languages: ['ch', 'en', 'mixed'],
+            maxImageBytes: http.getMaxImageBytes()
+        },
+        output: {
+            text: true,
+            blocks: true,
+            boundingBoxes: true,
+            confidence: 'optional',
+            tables: false,
+            formulas: false,
+            regions: false
+        },
+        engine: {
+            id: active.engine || 'http',
+            label: active.label || engineLabel(active.engine),
+            available: Boolean(active.available),
+            remoteEngine: active.remoteEngine || '',
+            status: active.status || (active.available ? 'ok' : 'unavailable')
+        }
+    };
+    if (includeServiceUrl) response.engine.serviceUrl = active.serviceUrl || http.getServiceUrl();
+    return response;
+}
+
 module.exports = {
     getOcrEngineStatus,
+    getOcrCapabilities,
     normalizeEngine,
     recognizePage
 };

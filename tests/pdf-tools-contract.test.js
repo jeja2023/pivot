@@ -36,6 +36,7 @@ test('PDF 产品升级包含隔离凭据、严格校验和工作区接线', () =
     const jobs = fs.readFileSync(path.join(root, 'server/services/document-processing/jobs.js'), 'utf8');
     const validation = fs.readFileSync(path.join(root, 'server/services/document-processing/pdf/validation.js'), 'utf8');
     const client = fs.readFileSync(path.join(root, 'client/chat/apps-workbench-pdf-tools.js'), 'utf8');
+    const appsRouter = fs.readFileSync(path.join(root, 'server/routes/apps/index.js'), 'utf8');
     const migration = fs.readFileSync(path.join(root, 'server/db/migrations/pdf-tool-product-upgrade.js'), 'utf8');
     assert.match(jobs, /storeJobPassword/);
     assert.match(jobs, /dispatchPdfJobResult/);
@@ -44,10 +45,16 @@ test('PDF 产品升级包含隔离凭据、严格校验和工作区接线', () =
     assert.match(validation, /UNSUPPORTED_INPUT_COUNT/);
     assert.match(validation, /PAGE_PLAN/);
     assert.match(validation, /PDFA_VALIDATE/);
-    assert.match(client, /pdf-preset-select/);
+    assert.match(client, /pdf-quick-presets/);
+    assert.match(client, /data-pdf-quick-preset/);
+    assert.doesNotMatch(client, /pdf-preset-select/);
     assert.match(client, /pdf-page-preview-panel/);
     assert.match(client, /pdf-page-plan-panel/);
     assert.match(client, /pdf-redact-regions/);
     assert.match(client, /data-pdf-output-dispatch/);
+    assert.match(client, /function appendOptionalFormValue/);
+    assert.match(client, /const selectedOperation = currentOperation\(\);/);
+    assert.match(appsRouter, /const pdfToolsUpload = createSafeUpload\(\{[\s\S]*?maxFields: 32/);
+    assert.match(appsRouter, /upload: securePdfToolsUpload/);
     ['document_job_items', 'document_job_secrets', 'document_artifact_refs'].forEach(table => assert.match(migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`)));
 });

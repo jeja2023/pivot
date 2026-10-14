@@ -42,6 +42,16 @@ GET /health
 
 Pivot 只要求 HTTP 状态码为 2xx。`status`、`engine` 用于页面展示和排查。
 
+## 二点一、能力接口（推荐）
+
+外部服务可额外提供：
+
+```http
+GET /capabilities
+```
+
+该接口应返回固定模型版本、支持语言、文字坐标、表格、公式、区域识别与输入限制。未声明的能力必须按“不支持”处理，不能把普通文字识别误认为结构化表格或公式已经可靠解析。
+
 ## 三、识别接口
 
 外部 OCR 服务需要提供：
@@ -78,6 +88,8 @@ Pivot 请求体：
   "language": "ch",
   "text": "完整识别文本",
   "confidence": 0.92,
+  "model": { "id": "pp-ocr", "version": "固定模型版本或权重哈希" },
+  "quality": { "score": 0.88, "reasons": ["blur"] },
   "blocks": [
     {
       "text": "第一行文本",
@@ -90,6 +102,8 @@ Pivot 请求体：
 ```
 
 `blocks` 优先级高于 `text`。如果只返回 `text`，Pivot 会按换行拆成文本块。`bbox` 可为空数组，`confidence` 可省略。
+
+`confidence` 省略时，Pivot 保留为“未知”，不会伪造默认分数。文字块按 `sortOrder` 稳定排序。可选 `tables` 使用 `rowCount`、`columnCount` 和 `cells`；每个单元格包含 `rowIndex`、`columnIndex`、`rowSpan`、`columnSpan`、`text`、可选 `confidence` 与 `bbox`。复杂表格、公式、手写和区域识别只有在服务能力契约及组织样本验证通过后才向用户启用。
 
 ## 五、错误响应
 

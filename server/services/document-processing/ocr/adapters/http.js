@@ -9,12 +9,14 @@ const {
     normalizeOcrServiceUrl
 } = require('../../constants');
 const { buildRecognitionResult } = require('./shared');
+const { readTypedEnv } = require('../../../../config/env-registry');
 
 function getServiceUrl() {
     return normalizeOcrServiceUrl(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl) || process.env.OCR_SERVICE_URL || DEFAULT_OCR_SERVICE_URL);
 }
 
 const DEFAULT_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_OCR_BLOCKS = readTypedEnv('OCR_SERVICE_MAX_BLOCKS');
 
 function formatBytes(value) {
     const size = Number(value || 0);
@@ -81,6 +83,11 @@ function normalizeHttpError(error) {
 
 function normalizeBlocks(data) {
     const blocks = Array.isArray(data?.blocks) ? data.blocks : [];
+    if (blocks.length > MAX_OCR_BLOCKS) {
+        const error = new Error(`OCR 服务返回的文字块数量超过 ${MAX_OCR_BLOCKS} 个限制。`);
+        error.code = 'OCR_RESULT_TOO_LARGE';
+        throw error;
+    }
     if (blocks.length > 0) {
         return blocks.map((block, index) => ({
             ...block,
@@ -90,7 +97,7 @@ function normalizeBlocks(data) {
     }
     return String(data?.text || '')
         .split(/\r?\n/)
-        .map((text, index) => ({ text: text.trim(), confidence: data?.confidence || 0.8, bbox: [], sortOrder: index, engine: 'http' }))
+        .map((text, index) => ({ text: text.trim(), confidence: data?.confidence ?? null, bbox: [], sortOrder: index, engine: 'http' }))
         .filter(block => block.text);
 }
 
@@ -121,10 +128,14 @@ async function recognizePage(imagePath, options = {}) {
             signal: options.signal || null,
             validateStatus: status => status >= 200 && status < 300
         });
+        const normalized = normalizeBlocks(response.data);
         return buildRecognitionResult({
-            blocks: normalizeBlocks(response.data),
+            blocks: normalized,
             engine: 'http',
-            language: response.data?.language || language
+            language: response.data?.language || language,
+            tables: response.data?.tables,
+            quality: response.data?.quality || response.data?.imageQuality || null,
+            model: response.data?.model || (response.data?.modelVersion ? { version: response.data.modelVersion } : null)
         });
     } catch (error) {
         error.message = normalizeHttpError(error);

@@ -898,6 +898,7 @@ if (!gotLock) {
             }
             attachStealthHeaderInterceptor(session.defaultSession);
             createMainWindow(runtimeConfig);
+            localAuthManager.ensureOcrWatchDirectory();
             updaterController = setupAutoUpdater({
                 app,
                 mainWindow,

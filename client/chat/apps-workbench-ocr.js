@@ -14,6 +14,15 @@
         queue: null,
         engines: {},
         settings: null,
+        capabilities: null,
+        drafts: {},
+        reviewCandidates: [],
+        selectedReviewerIds: new Set(),
+        regionSelection: null,
+        regionCandidate: null,
+        regionDrag: null,
+        ocrWatchUnsubscribe: null,
+        detailRequestId: 0,
         timer: null
     };
 
@@ -66,6 +75,7 @@
 
     function statusLabel(status) {
         const map = {
+            queued: '排队中',
             pending: '排队中',
             processing: '处理中',
             succeeded: '已完成',
@@ -80,7 +90,7 @@
         if (status === 'succeeded') return 'is-success';
         if (status === 'failed') return 'is-danger';
         if (status === 'needs_review') return 'is-warning';
-        if (status === 'processing' || status === 'pending') return 'is-info';
+        if (status === 'processing' || status === 'queued' || status === 'pending') return 'is-info';
         return '';
     }
 
@@ -96,6 +106,28 @@
     function reviewForPage(pageId) {
         return (state.detail?.reviews || []).find(item => String(item.pageId) === String(pageId)) || null;
     }
+
+    const reviewViews = window.Pivot.legacy.PivotOcrReviewViews?.create({
+        state,
+        esc,
+        activePage,
+        blocksForPage,
+        statusTone,
+        api: API
+    });
+    if (!reviewViews) throw new Error('文字识别复核视图模块未加载，请刷新页面后重试。');
+    const ocrActions = window.Pivot.legacy.PivotOcrActions?.create({
+        api: API,
+        state,
+        requestJson,
+        toast,
+        renderDetail,
+        loadDetail,
+        loadJobs,
+        closeDetailPanel,
+        submitUpload
+    });
+    if (!ocrActions) throw new Error('文字识别动作模块未加载，请刷新页面后重试。');
 
     function ensureView() {
         let view = document.getElementById('ocr-view');
@@ -113,7 +145,7 @@
                     <form id="ocr-upload-form" class="doc-tool-form">
                         <label class="doc-tool-field doc-tool-field-wide">
                             <span>文件</span>
-                            <input id="ocr-file-input" class="form-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp" required>
+                            <input id="ocr-file-input" class="form-input" type="file" accept=".pdf,.ofd,.png,.jpg,.jpeg,.gif,.webp,.bmp" multiple required>
                         </label>
                         <div class="doc-tool-field-row">
                             <label class="doc-tool-field ocr-engine-admin-only hidden">
@@ -133,56 +165,84 @@
                         </div>
                         <div class="doc-tool-field-row">
                             <label class="doc-tool-field">
-                                <span>DPI</span>
-                                <input id="ocr-dpi-input" class="form-input" type="number" min="72" max="600" value="220">
+                                <span title="PDF 或多页文档渲染为图像时的清晰度（每英寸点数），默认 220">图像分辨率（DPI）</span>
+                                <input id="ocr-dpi-input" class="form-input" type="number" min="72" max="600" value="220" title="渲染清晰度（DPI），默认 220，推荐范围 150-300">
                             </label>
                             <label class="doc-tool-field">
-                                <span>页数上限</span>
+                                <span>本次页数上限</span>
                                 <input id="ocr-pages-input" class="form-input" type="number" min="1" max="100" value="10">
                             </label>
                         </div>
+                        <label class="doc-tool-field doc-tool-field-wide">
+                            <span>处理页范围</span>
+                            <input id="ocr-pages-range-input" class="form-input" type="text" inputmode="text" placeholder="留空处理全部；例如 1-3,5">
+                            <small id="ocr-capability-hint" class="doc-tool-hint">超出本次页数上限时，请填写需要识别的页范围。</small>
+                        </label>
                         <label class="doc-tool-field doc-tool-field-wide">
                             <span>PDF 密码</span>
                             <input id="ocr-password-input" class="form-input" type="password" autocomplete="off">
                         </label>
                         <div class="doc-tool-actions">
-                            <button id="ocr-submit-btn" class="btn-primary" type="submit">创建任务</button>
-                            <button id="ocr-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                            <button id="ocr-submit-btn" class="btn-primary" type="submit" title="创建文字识别任务">创建任务</button>
+                            ${window.pivotDesktop?.executeLocalMcpTool ? '<button id="ocr-desktop-screenshot-btn" class="btn-secondary" type="button" title="截取已授权窗口">截取已授权窗口</button>' : ''}
+                            ${window.pivotDesktop?.requestLocalAuthorization ? '<button id="ocr-authorize-watch-btn" class="btn-secondary" type="button" title="授权监控目录">授权监控目录</button><button id="ocr-revoke-watch-btn" class="btn-secondary" type="button" title="停止目录监听">停止目录监听</button>' : ''}
                         </div>
                     </form>
 
-                    <div class="doc-tool-filter">
-                        <label class="doc-tool-field doc-tool-field-wide">
-                            <span>状态</span>
-                            <select id="ocr-status-filter" class="form-input">
-                                <option value="">全部任务</option>
-                                <option value="pending">排队中</option>
-                                <option value="processing">处理中</option>
-                                <option value="needs_review">待复核</option>
-                                <option value="succeeded">已完成</option>
-                                <option value="failed">失败</option>
-                            </select>
-                        </label>
+                    <div id="ocr-service-alert" class="ocr-service-alert hidden" role="alert">
+                        <div class="ocr-service-alert-body">
+                            <span class="ocr-service-alert-icon" aria-hidden="true">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                            </span>
+                            <div class="ocr-service-alert-content">
+                                <strong>外部 OCR 服务未连接</strong>
+                                <p id="ocr-service-alert-desc">外部识别服务连接失败，请确认服务已启动并在系统设置中配置。</p>
+                            </div>
+                        </div>
+                        <button id="ocr-open-settings-btn" class="btn-secondary ocr-service-alert-btn ocr-engine-admin-only hidden" type="button">前往系统设置配置</button>
                     </div>
-
-                    <div id="ocr-engine-status" class="doc-tool-engine-list ocr-engine-admin-only hidden"></div>
-                    <form id="ocr-settings-form" class="doc-tool-settings hidden" autocomplete="off">
-                        <label class="doc-tool-field doc-tool-field-wide">
-                            <span>服务地址</span>
-                            <input id="ocr-service-url-input" class="form-input" type="url" inputmode="url" placeholder="http://ocr-service:9100">
-                        </label>
-                        <div class="doc-tool-actions">
-                            <button id="ocr-settings-save-btn" class="btn-secondary" type="submit">保存地址</button>
-                            <button id="ocr-settings-refresh-btn" class="btn-secondary" type="button">检测</button>
-                        </div>
-                    </form>
                 </aside>
 
                 <main class="workspace-panel doc-tool-main ocr-main">
-                    <div class="workspace-toolbar doc-tool-toolbar">
+                    <div class="workspace-toolbar doc-tool-toolbar ocr-tools-toolbar">
                         <div class="doc-tool-toolbar-title">
-                            <h4>文字识别任务</h4>
-                            <span id="ocr-list-summary">0 个任务</span>
+                            <div class="ocr-toolbar-heading">
+                                <h4>文字识别任务</h4>
+                                <span id="ocr-list-summary" class="ocr-list-summary-tag">0 个任务</span>
+                            </div>
+                        </div>
+                        <div class="ocr-toolbar-actions">
+                            <div class="ocr-filter-pill-control">
+                                <label class="ocr-filter-pill-prefix" for="ocr-status-filter">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                                    </svg>
+                                    <span>状态</span>
+                                </label>
+                                <div class="ocr-filter-pill-body">
+                                    <select id="ocr-status-filter" class="form-input ocr-filter-pill-select" aria-label="按状态筛选">
+                                        <option value="">全部</option>
+                                        <option value="queued">排队中</option>
+                                        <option value="processing">处理中</option>
+                                        <option value="needs_review">待复核</option>
+                                        <option value="succeeded">已完成</option>
+                                        <option value="failed">失败</option>
+                                        <option value="cancelled">已取消</option>
+                                    </select>
+                                    <span class="ocr-filter-pill-arrow" aria-hidden="true">
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
+                            <button id="ocr-refresh-btn" class="btn-secondary ocr-toolbar-refresh-btn" type="button" title="刷新任务列表">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="1 4 1 10 7 10"></polyline>
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                                </svg>
+                                <span>刷新</span>
+                            </button>
                         </div>
                     </div>
                     <div class="table-container workspace-table-wrap doc-tool-table-wrap">
@@ -238,53 +298,32 @@
     }
 
     function renderSettings() {
-        const form = document.getElementById('ocr-settings-form');
-        if (!form) return;
-        const canManage = canManageOcrSettings();
-        form.classList.toggle('hidden', !canManage);
-        if (!canManage) return;
-        const input = document.getElementById('ocr-service-url-input');
-        if (input && document.activeElement !== input) {
-            input.value = state.settings?.serviceUrl || '';
-        }
-    }
-
-    function compactEngineError(info, _current) {
-        const message = String(info?.error || '不可用');
-        return message;
+        // OCR 服务配置已统一收拢至「系统设置 → 模型配置」
     }
 
     function renderEngines() {
         renderEngineConfigVisibility();
-        const box = document.getElementById('ocr-engine-status');
-        if (!box) return;
-        if (!canViewOcrEngineConfig()) {
-            html.setHtml(box, '');
+        const alertBox = document.getElementById('ocr-service-alert');
+        if (!alertBox) return;
+        const entries = Object.entries(state.engines || {});
+        if (!entries.length) {
+            alertBox.classList.add('hidden');
             return;
         }
-        const entries = Object.entries(state.engines || {});
-        const selectedEngine = document.getElementById('ocr-engine-select')?.value || entries.find(([, info]) => info?.default)?.[0] || 'http';
-        html.setHtml(box, entries.map(([name, info]) => {
-            const current = String(selectedEngine) === String(name);
-            const tone = info?.available
-                ? 'is-success'
-                : (current ? 'is-warning' : 'is-muted');
-            const label = info?.label || name;
-            const status = info?.available
-                ? (current ? '当前可用' : '可用')
-                : (info?.auxiliary ? (current ? '仅辅助，不能批量识别' : '辅助能力') : compactEngineError(info, current));
-            const title = info?.description || info?.error || status;
-            return `
-                <div class="doc-tool-engine ${tone}" title="${esc(title)}">
-                    <strong>${esc(label)}</strong>
-                    <span>${esc(status)}</span>
-                </div>
-            `;
-        }).join('') || '<div class="doc-tool-empty-small">引擎状态未加载</div>');
+        const httpEngine = entries.find(([name]) => name === 'http')?.[1] || state.engines?.http || null;
+        if (!httpEngine || httpEngine.available) {
+            alertBox.classList.add('hidden');
+        } else {
+            alertBox.classList.remove('hidden');
+            const descEl = document.getElementById('ocr-service-alert-desc');
+            if (descEl) {
+                descEl.textContent = httpEngine.error || '外部 OCR 服务连接失败，请确认服务已启动并在系统设置中检查配置。';
+            }
+        }
     }
 
     function renderOcrRowActions(item) {
-        const canCancel = item.status === 'pending' || item.status === 'processing';
+        const canCancel = item.allowedActions?.cancel === true || item.status === 'queued' || item.status === 'processing' || item.status === 'pending';
         return [
             '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-open="' + esc(item.id) + '">查看</button>',
             canCancel ? '<button class="btn-secondary doc-tool-row-action" type="button" data-ocr-job-cancel="' + esc(item.id) + '">取消</button>' : '',
@@ -370,109 +409,16 @@
 
     function renderOutputs(outputs = []) {
         if (!outputs.length) return '<div class="doc-tool-empty-small">暂无输出</div>';
+        const currentRevision = Number(state.detail?.job?.contentRevision || 1);
         return outputs.map(output => `
             <button class="btn-secondary doc-tool-output-btn" type="button" data-ocr-output-download="${esc(output.id)}" data-output-name="${esc(output.fileName || '')}">
-                ${esc(output.outputType || 'output')} · ${formatBytes(output.fileSize)}
+                ${esc(output.outputType || 'output')} · ${formatBytes(output.fileSize)}${Number(output.quality?.contentRevision || 0) && Number(output.quality.contentRevision) !== currentRevision ? ' · 旧版本' : ''}
             </button>
         `).join('');
     }
 
-    function renderPageList(pages = []) {
-        if (!pages.length) return '<div class="doc-tool-empty-small">暂无页面</div>';
-        return pages.map(page => `
-            <button class="ocr-page-pill ${String(activePage()?.id) === String(page.id) ? 'is-active' : ''} ${statusTone(page.ocrStatus)}" type="button" data-ocr-page-id="${esc(page.id)}">
-                <span>第 ${page.pageNumber} 页</span>
-                <em>${page.confidence === null || page.confidence === undefined ? '-' : Math.round(page.confidence * 100) + '%'}</em>
-            </button>
-        `).join('');
-    }
-
-    function confidenceThreshold() {
-        const value = Number(state.detail?.job?.config?.confidenceThreshold);
-        return Number.isFinite(value) && value > 0 ? value : 0.75;
-    }
-
-    function bboxToRect(bbox) {
-        if (!Array.isArray(bbox) || !bbox.length) return null;
-        if (Array.isArray(bbox[0])) {
-            const points = bbox
-                .map(point => Array.isArray(point) ? point : [])
-                .filter(point => Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
-            if (!points.length) return null;
-            const xs = points.map(point => Number(point[0]));
-            const ys = points.map(point => Number(point[1]));
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-            return { x: minX, y: minY, width: Math.max(maxX - minX, 1), height: Math.max(maxY - minY, 1) };
-        }
-        if (bbox.length >= 4) {
-            const x = Number(bbox[0]);
-            const y = Number(bbox[1]);
-            const third = Number(bbox[2]);
-            const fourth = Number(bbox[3]);
-            if (![x, y, third, fourth].every(Number.isFinite)) return null;
-            const width = third > x ? third - x : third;
-            const height = fourth > y ? fourth - y : fourth;
-            return { x, y, width: Math.max(width, 1), height: Math.max(height, 1) };
-        }
-        return null;
-    }
-
-    function pct(value, total) {
-        const n = Number(value || 0);
-        const d = Math.max(Number(total || 0), 1);
-        return Math.min(Math.max((n / d) * 100, 0), 100).toFixed(4) + '%';
-    }
-
-    function renderOverlayBlocks(page) {
-        if (!page) return '';
-        const width = Number(page.width || 0) || 1;
-        const height = Number(page.height || 0) || 1;
-        const threshold = confidenceThreshold();
-        return blocksForPage(page.id).map(block => {
-            const rect = bboxToRect(block.bbox || []);
-            if (!rect) return '';
-            const confidence = Number(block.confidence || 0);
-            const lowClass = confidence > 0 && confidence < threshold ? ' is-low' : '';
-            const style = [
-                'left:' + pct(rect.x, width),
-                'top:' + pct(rect.y, height),
-                'width:' + pct(rect.width, width),
-                'height:' + pct(rect.height, height)
-            ].join(';');
-            const title = Math.round(confidence * 100) + '% ' + String(block.text || '').slice(0, 80);
-            return '<button class="ocr-overlay-box' + lowClass + '" type="button" style="' + style + '" data-ocr-block-id="' + esc(block.id || '') + '" title="' + esc(title) + '"></button>';
-        }).join('');
-    }
-
-    function renderPagePreview(page) {
-        if (!page?.hasImage) return '<div class="doc-tool-empty-detail">\u6682\u65e0\u9875\u9762\u9884\u89c8</div>';
-        const width = Number(page.width || 0) || 1;
-        const height = Number(page.height || 0) || 1;
-        return [
-            '<div class="ocr-preview-canvas" style="aspect-ratio:' + width + '/' + height + '">',
-            '<img alt="\u9875\u9762\u9884\u89c8" src="' + API + '/pages/' + encodeURIComponent(page.id) + '/image">',
-            '<div class="ocr-overlay-layer">' + renderOverlayBlocks(page) + '</div>',
-            '</div>'
-        ].join('');
-    }
-
-    function renderBlocks(pageId) {
-        const blocks = blocksForPage(pageId).slice(0, 120);
-        if (!blocks.length) return '<div class="doc-tool-empty-small">\u6682\u65e0\u6587\u672c\u5757</div>';
-        const threshold = confidenceThreshold();
-        return blocks.map(block => {
-            const confidence = Number(block.confidence || 0);
-            const lowClass = confidence > 0 && confidence < threshold ? ' is-low' : '';
-            return [
-                '<div class="ocr-block-row' + lowClass + '" data-ocr-block-id="' + esc(block.id || '') + '">',
-                '<span>' + Math.round(confidence * 100) + '%</span>',
-                '<p>' + esc(block.text || '') + '</p>',
-                '</div>'
-            ].join('');
-        }).join('');
+    function draftForPage(pageId) {
+        return state.drafts[String(pageId)] || null;
     }
 
     function renderDetail() {
@@ -488,13 +434,16 @@
         setDetailHeader(detail);
         const page = activePage();
         const review = page ? reviewForPage(page.id) : null;
-        const text = review?.revisedText ?? page?.text ?? '';
+        const draft = page ? draftForPage(page.id) : null;
+        const text = draft?.text ?? review?.revisedText ?? page?.text ?? '';
+        const coverage = reviewViews.coverageSummary(job);
         html.setHtml(box, `
             <section class="ocr-detail-head">
                 <div>
                     <strong>${esc(detail.file?.originalName || `任务 ${job.id}`)}</strong>
                     <span class="doc-tool-badge ${statusTone(job.status)}">${statusLabel(job.status)}</span>
                     <span>${Number(job.progress || 0)}%</span>
+                    ${coverage ? `<span class="ocr-coverage-summary">${esc(coverage)}</span>` : ''}
                     ${job.errorMessage ? `<em>${esc(job.errorMessage)}</em>` : ''}
                 </div>
                 <div class="ocr-detail-actions">
@@ -506,33 +455,43 @@
                     <button class="btn-secondary" type="button" data-ocr-export="json">JSON</button>
                     <button class="btn-secondary" type="button" data-ocr-export="html">HTML</button>
                     <button class="btn-secondary" type="button" data-ocr-export="docx">DOCX</button>
+                    <button class="btn-secondary" type="button" data-ocr-export="xlsx">Excel</button>
                     <button class="btn-secondary" type="button" data-ocr-export="searchable_pdf">可检索PDF</button>
                     <button class="btn-secondary" type="button" data-ocr-share="knowledge">\u5165\u77e5\u8bc6\u5e93</button>
                     <button class="btn-secondary" type="button" data-ocr-share="regulations">\u5165\u6cd5\u89c4\u5e93</button>
                     <button class="btn-secondary" type="button" data-ocr-share="official-writing">\u5165\u516c\u6587\u6750\u6599</button>
                     <button class="btn-secondary" type="button" data-ocr-share="chat">\u653e\u5165\u804a\u5929</button>
+                    <button class="btn-secondary" type="button" data-ocr-extract-fields="${esc(job.id)}">提取公文字段</button>
+                    ${job.isOwner ? `<button class="btn-secondary" type="button" data-ocr-open-reviewers="${esc(job.id)}">分派复核</button>` : ''}
+                    ${!job.isOwner && job.status === 'needs_review' ? `<button class="btn-secondary" type="button" data-ocr-complete-review="${esc(job.id)}">完成我的复核</button>` : ''}
+                    ${state.regionSelection?.pageId === String(page?.id || '') ? `<button class="btn-secondary" type="button" data-ocr-recognize-region="${esc(page.id)}">识别选区</button>` : ''}
                 </div>
             </section>
             <section class="ocr-output-strip">${renderOutputs(detail.outputs || [])}</section>
+            <section id="ocr-field-result" class="ocr-field-result hidden" aria-live="polite"></section>
+            ${state.regionCandidate ? `<section class="ocr-region-result"><strong>区域识别候选</strong><p>${esc(state.regionCandidate.text || '未识别到文字')}</p><span>${state.regionCandidate.confidence === null || state.regionCandidate.confidence === undefined ? '置信度未知' : `置信度 ${Math.round(state.regionCandidate.confidence * 100)}%`} · 请人工确认后复制到正文。</span></section>` : ''}
+            ${state.reviewCandidates.length ? `<section class="ocr-reviewer-panel"><div class="ocr-text-head"><strong>分派复核人</strong><span>仅显示同单位的可用用户</span></div><div class="ocr-reviewer-list">${state.reviewCandidates.map(candidate => `<label class="ocr-reviewer-item"><input type="checkbox" data-ocr-reviewer-id="${esc(candidate.id)}" ${state.selectedReviewerIds.has(String(candidate.id)) ? 'checked' : ''}><span>${esc(candidate.nickname || candidate.username)}</span><em>${esc(candidate.unit || '')}</em></label>`).join('')}</div><div class="ocr-review-actions"><button class="btn-primary" type="button" data-ocr-save-reviewers="${esc(job.id)}">确认分派</button><button class="btn-secondary" type="button" data-ocr-close-reviewers>取消</button></div></section>` : ''}
             <section class="ocr-review-grid">
-                <aside class="ocr-page-list">${renderPageList(detail.pages || [])}</aside>
+                <aside class="ocr-page-list">${reviewViews.renderPageList(detail.pages || [])}</aside>
                 <div class="ocr-preview-pane">
-                    ${renderPagePreview(page)}
+                    ${reviewViews.renderPagePreview(page)}
                 </div>
                 <div class="ocr-text-pane">
                     <div class="ocr-text-head">
                         <strong>${page ? `第 ${page.pageNumber} 页文本` : '页面文本'}</strong>
                         <span>${page?.textLength || 0} 字</span>
                     </div>
-                    <textarea id="ocr-review-text" class="form-input ocr-review-textarea" spellcheck="false">${esc(text)}</textarea>
+                    ${(page?.result?.issues || []).length ? `<div class="ocr-issue-summary">待核问题：${esc((page.result.issues || []).map(issue => issue.message || issue.type).slice(0, 3).join('；'))}</div>` : ''}
+                    <textarea id="ocr-review-text" class="form-input ocr-review-textarea" spellcheck="false" data-ocr-review-page="${page ? esc(page.id) : ''}">${esc(text)}</textarea>
                     <div class="ocr-review-actions">
                         <label class="ocr-confirm-low">
-                            <input id="ocr-low-confidence-confirm" type="checkbox" ${review?.lowConfidenceConfirmed ? 'checked' : ''}>
+                            <input id="ocr-low-confidence-confirm" type="checkbox" ${(draft?.lowConfidenceConfirmed ?? review?.lowConfidenceConfirmed) ? 'checked' : ''}>
                             <span>低置信度已确认</span>
                         </label>
                         <button class="btn-primary" type="button" data-ocr-page-save="${page ? esc(page.id) : ''}" ${page ? '' : 'disabled'}>保存复核</button>
+                        <button class="btn-secondary" type="button" data-ocr-submit-feedback="${page ? esc(page.id) : ''}" ${page ? '' : 'disabled'}>授权提交纠错反馈</button>
                     </div>
-                    <div class="ocr-block-list">${page ? renderBlocks(page.id) : ''}</div>
+                    <div class="ocr-block-list">${page ? reviewViews.renderBlocks(page.id) : ''}</div>
                 </div>
             </section>
         `);
@@ -577,6 +536,25 @@
         }
     }
 
+    async function loadCapabilities() {
+        try {
+            const data = await requestJson(`${API}/capabilities`);
+            state.capabilities = data.capabilities || null;
+            const limit = Number(state.capabilities?.limits?.maxOcrPages || 0);
+            const input = document.getElementById('ocr-pages-input');
+            if (input && limit) {
+                input.max = String(limit);
+                if (Number(input.value || 0) > limit) input.value = String(limit);
+            }
+            const hint = document.getElementById('ocr-capability-hint');
+            if (hint && limit) hint.textContent = `一次最多识别 ${limit} 页。范围可填写 1-3,5；系统不会静默省略页面。`;
+            return state.capabilities;
+        } catch (error) {
+            state.capabilities = null;
+            return null;
+        }
+    }
+
     async function loadJobs({ keepActive = true } = {}) {
         const params = new URLSearchParams({ page: String(state.page), limit: String(state.limit) });
         if (state.status) params.set('status', state.status);
@@ -588,6 +566,7 @@
             state.activeJobId = '';
             state.activePageId = '';
             state.detail = null;
+            state.drafts = {};
         }
         renderJobs();
         if (state.activeJobId && isDetailPanelOpen()) await loadDetail(state.activeJobId, { silent: true, openPanel: false });
@@ -596,7 +575,10 @@
 
     async function loadDetail(jobId, { silent = false, openPanel = true } = {}) {
         if (!jobId) return null;
+        const requestId = ++state.detailRequestId;
         const data = await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`);
+        if (requestId !== state.detailRequestId) return null;
+        if (String(state.activeJobId || '') && String(state.activeJobId) !== String(data.job?.id || jobId)) state.drafts = {};
         state.detail = data;
         state.activeJobId = String(data.job?.id || jobId);
         if (!data.pages?.some(page => String(page.id) === String(state.activePageId))) {
@@ -636,20 +618,22 @@
             if (form) form.dataset.dirty = '0';
         }
     }
-    async function submitUpload(form) {
-        const file = document.getElementById('ocr-file-input')?.files?.[0];
-        if (!file) {
+    async function submitUpload(form, suppliedFiles = null) {
+        const files = suppliedFiles ? Array.from(suppliedFiles) : Array.from(document.getElementById('ocr-file-input')?.files || []);
+        if (!files.length) {
             toast('请选择文件', 'warning');
             return;
         }
         const data = new FormData(form);
-        data.set('file', file);
+        data.delete('files');
+        files.forEach(file => data.append('files', file));
         if (canViewOcrEngineConfig()) data.set('engine', document.getElementById('ocr-engine-select')?.value || 'http');
         else data.delete('engine');
         data.set('language', document.getElementById('ocr-language-select')?.value || 'ch');
         data.set('dpi', document.getElementById('ocr-dpi-input')?.value || '220');
         data.set('maxRenderPages', document.getElementById('ocr-pages-input')?.value || '10');
         data.set('maxOcrPages', document.getElementById('ocr-pages-input')?.value || '10');
+        data.set('pages', document.getElementById('ocr-pages-range-input')?.value || '');
         data.set('password', document.getElementById('ocr-password-input')?.value || '');
         const btn = document.getElementById('ocr-submit-btn');
         const text = btn?.textContent || '';
@@ -658,13 +642,21 @@
             btn.textContent = '创建中';
         }
         try {
+            const preflight = await requestJson(`${API}/preflight`, { method: 'POST', body: data });
+            const rejected = Number(preflight.preflight?.rejected || 0);
+            if (rejected) {
+                const message = (preflight.preflight?.files || []).flatMap(item => item.warnings || []).join('；') || '部分文件未通过预检。';
+                throw new Error(message);
+            }
+            const warnings = (preflight.preflight?.files || []).flatMap(item => item.warnings || []);
+            if (warnings.length && typeof window.confirm === 'function' && !window.confirm(`${warnings.join('\n')}\n\n是否继续创建任务？`)) return;
             const created = await requestJson(`${API}/jobs`, { method: 'POST', body: data });
             state.activeJobId = String(created.job?.id || '');
             state.activePageId = '';
             form.reset();
             document.getElementById('ocr-dpi-input').value = '220';
             document.getElementById('ocr-pages-input').value = '10';
-            toast('文字识别任务已创建', 'success');
+            toast(created.batch ? `已创建 ${created.batch.acceptedFiles} 个文字识别任务` : '文字识别任务已创建', 'success');
             await loadJobs({ keepActive: true });
         } finally {
             if (btn) {
@@ -672,35 +664,6 @@
                 btn.textContent = text;
             }
         }
-    }
-
-    async function exportOutput(format) {
-        if (!state.activeJobId) return;
-        const data = await requestJson(`${API}/jobs/${encodeURIComponent(state.activeJobId)}/outputs`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ format })
-        });
-        toast('输出已生成', 'success');
-        await loadDetail(state.activeJobId, { silent: true });
-        if (data.output?.id) await downloadOutput(data.output.id, data.output.fileName);
-    }
-
-    async function downloadOutput(outputId, filename = '') {
-        const res = await apiFetch(`${API}/outputs/${encodeURIComponent(outputId)}/download`);
-        if (!res.ok) {
-            const data = await res.clone().json().catch(() => ({}));
-            throw new Error(data?.error?.message || data?.error || `下载失败（${res.status}）`);
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename || `ocr-output-${outputId}`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
     }
 
     function currentJobText() {
@@ -723,10 +686,12 @@
     }
 
     async function copyText(text) {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+        } catch (_error) {}
         return false;
     }
 
@@ -740,7 +705,6 @@
             textarea.dispatchEvent(new Event('input', { bubbles: true }));
             return true;
         }
-        localStorage.setItem('pivot_ocr_official_writing_material_v1', JSON.stringify({ text, savedAt: new Date().toISOString() }));
         return false;
     }
 
@@ -752,17 +716,21 @@
             return;
         }
         if (target === 'chat') {
-            if (appendToChatInput(text)) toast('\u5df2\u653e\u5165\u804a\u5929\u8f93\u5165\u6846', 'success');
+            const context = await requestJson(`${API}/jobs/${encodeURIComponent(state.activeJobId)}/context`);
+            const contextText = String(context.context?.text || text);
+            if (appendToChatInput(contextText)) toast('\u5df2\u653e\u5165\u804a\u5929\u8f93\u5165\u6846\uff0c\u5df2\u4fdd\u7559\u4efb\u52a1\u548c\u9875\u7801\u6765\u6e90', 'success');
             else {
-                await copyText(text);
-                toast('\u672a\u627e\u5230\u804a\u5929\u8f93\u5165\u6846\uff0c\u5df2\u590d\u5236\u6587\u672c', 'warning');
+                const copied = await copyText(contextText);
+                toast(copied ? '\u672a\u627e\u5230\u804a\u5929\u8f93\u5165\u6846\uff0c\u5df2\u590d\u5236\u5e26\u6765\u6e90\u7684\u6587\u672c' : '\u672a\u627e\u5230\u804a\u5929\u8f93\u5165\u6846\uff0c\u8bf7\u624b\u52a8\u590d\u5236\u6587\u672c', 'warning');
             }
             return;
         }
         if (target === 'official-writing') {
             const direct = appendToOfficialWritingMaterial(text);
-            await copyText(text).catch(() => false);
-            toast(direct ? '\u5df2\u5199\u5165\u516c\u6587\u6750\u6599' : '\u5df2\u4fdd\u5b58\u5230\u516c\u6587\u6750\u6599\u5f85\u53d6\u7528\u533a\u5e76\u590d\u5236', 'success');
+            const copied = direct ? false : await copyText(text);
+            if (direct) toast('\u5df2\u5199\u5165\u516c\u6587\u6750\u6599', 'success');
+            else if (copied) toast('\u672a\u6253\u5f00\u516c\u6587\u6750\u6599\uff0c\u5df2\u590d\u5236\u6587\u672c', 'warning');
+            else toast('\u672a\u6253\u5f00\u516c\u6587\u6750\u6599\uff0c\u4e5f\u65e0\u6cd5\u81ea\u52a8\u590d\u5236\uff0c\u8bf7\u624b\u52a8\u590d\u5236\u6587\u672c', 'warning');
             return;
         }
         const data = await requestJson(API + '/jobs/' + encodeURIComponent(state.activeJobId) + '/share', {
@@ -783,49 +751,18 @@
         await requestJson(`${API}/pages/${encodeURIComponent(pageId)}/review`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ revisedText, lowConfidenceConfirmed, reviewStatus: 'reviewed' })
+            body: JSON.stringify({ revisedText, lowConfidenceConfirmed, reviewStatus: 'reviewed', expectedRevision: state.detail?.job?.contentRevision })
         });
+        delete state.drafts[String(pageId)];
         toast('复核已保存', 'success');
         await loadDetail(state.activeJobId, { silent: true });
     }
 
 
-    async function retryJob(jobId) {
-        await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' });
-        toast('任务已重新排队', 'success');
-        await loadJobs({ keepActive: true });
-    }
-
-    async function cancelJob(jobId) {
-        await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
-        toast('任务已取消');
-        await loadJobs({ keepActive: true });
-    }
-
-    async function deleteJob(jobId) {
-        if (!jobId) return;
-        const confirmed = typeof window.confirm !== 'function' || window.confirm('确定删除该任务及相关文件吗？删除后不可恢复。');
-        if (!confirmed) return;
-        await requestJson(`${API}/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
-        if (String(state.activeJobId) === String(jobId)) {
-            state.activeJobId = '';
-            state.activePageId = '';
-            state.detail = null;
-            closeDetailPanel();
-        }
-        toast('任务已删除', 'success');
-        await loadJobs({ keepActive: false });
-    }
-
     function bindEvents(view) {
         if (view.dataset.bound === '1') return;
         view.dataset.bound = '1';
         view.addEventListener('submit', event => {
-            if (event.target?.id === 'ocr-settings-form') {
-                event.preventDefault();
-                saveSettings(event.target).catch(e => toast(e.message || 'OCR 服务地址保存失败', 'error'));
-                return;
-            }
             if (event.target?.id !== 'ocr-upload-form') return;
             event.preventDefault();
             submitUpload(event.target).catch(e => toast(e.message || '创建任务失败', 'error'));
@@ -843,6 +780,22 @@
                 document.getElementById('ocr-settings-form')?.setAttribute('data-dirty', '1');
             }
         });
+        view.addEventListener('input', event => {
+            if (event.target?.id !== 'ocr-review-text') return;
+            const pageId = event.target.dataset.ocrReviewPage || state.activePageId;
+            if (!pageId) return;
+            const previous = draftForPage(pageId) || {};
+            state.drafts[String(pageId)] = { ...previous, text: event.target.value, lowConfidenceConfirmed: document.getElementById('ocr-low-confidence-confirm')?.checked === true };
+        });
+        ocrActions.bindRegionPointerEvents(view);
+        view.addEventListener('paste', event => {
+            const files = Array.from(event.clipboardData?.files || []).filter(file => String(file.type || '').startsWith('image/'));
+            if (!files.length) return;
+            const form = document.getElementById('ocr-upload-form');
+            if (!form) return;
+            event.preventDefault();
+            submitUpload(form, files).catch(error => toast(error.message || '粘贴图片识别失败', 'error'));
+        });
         view.addEventListener('click', event => {
             const open = event.target.closest('[data-ocr-job-open]');
             if (open) {
@@ -850,11 +803,18 @@
                 return;
             }
             if (event.target.closest('[data-ocr-close-detail]')) {
+                const hasDraft = Object.keys(state.drafts).length > 0;
+                if (hasDraft && typeof window.confirm === 'function' && !window.confirm('当前有未保存的复核修改，仍要关闭吗？')) return;
                 closeDetailPanel();
                 return;
             }
             const page = event.target.closest('[data-ocr-page-id]');
             if (page) {
+                const currentInput = document.getElementById('ocr-review-text');
+                if (state.activePageId && currentInput) {
+                    const previous = draftForPage(state.activePageId) || {};
+                    state.drafts[String(state.activePageId)] = { ...previous, text: currentInput.value, lowConfidenceConfirmed: document.getElementById('ocr-low-confidence-confirm')?.checked === true };
+                }
                 state.activePageId = page.dataset.ocrPageId;
                 renderDetail();
                 return;
@@ -865,8 +825,20 @@
                 if (canManageOcrSettings()) loadSettings();
                 return;
             }
-            if (event.target.closest('#ocr-settings-refresh-btn')) {
-                loadEngines();
+            if (event.target.closest('#ocr-desktop-screenshot-btn')) {
+                ocrActions.captureDesktopScreenshot().catch(error => toast(error.message || '本机截图识别失败', 'error'));
+                return;
+            }
+            if (event.target.closest('#ocr-authorize-watch-btn')) {
+                ocrActions.authorizeWatchDirectory().catch(error => toast(error.message || '授权监控目录失败', 'error'));
+                return;
+            }
+            if (event.target.closest('#ocr-revoke-watch-btn')) {
+                ocrActions.revokeWatchDirectory().catch(error => toast(error.message || '停止目录监听失败', 'error'));
+                return;
+            }
+            if (event.target.closest('#ocr-open-settings-btn')) {
+                window.Pivot?.moduleApi?.('workspaces.navigation')?.openAdminPanel?.({ restore: false, tab: 'models' });
                 return;
             }
             const shareBtn = event.target.closest('[data-ocr-share]');
@@ -882,12 +854,52 @@
             }
             const exportBtn = event.target.closest('[data-ocr-export]');
             if (exportBtn) {
-                exportOutput(exportBtn.dataset.ocrExport).catch(e => toast(e.message || '导出失败', 'error'));
+                ocrActions.exportOutput(exportBtn.dataset.ocrExport).catch(e => toast(e.message || '导出失败', 'error'));
+                return;
+            }
+            const fields = event.target.closest('[data-ocr-extract-fields]');
+            if (fields) {
+                ocrActions.extractFields(fields.dataset.ocrExtractFields).catch(error => toast(error.message || '字段提取失败', 'error'));
+                return;
+            }
+            const region = event.target.closest('[data-ocr-recognize-region]');
+            if (region) {
+                ocrActions.recognizeSelectedRegion(region.dataset.ocrRecognizeRegion).catch(error => toast(error.message || '区域识别失败', 'error'));
+                return;
+            }
+            const reviewers = event.target.closest('[data-ocr-open-reviewers]');
+            if (reviewers) {
+                ocrActions.openReviewers(reviewers.dataset.ocrOpenReviewers).catch(error => toast(error.message || '加载复核人失败', 'error'));
+                return;
+            }
+            const completeReview = event.target.closest('[data-ocr-complete-review]');
+            if (completeReview) {
+                requestJson(`${API}/jobs/${encodeURIComponent(completeReview.dataset.ocrCompleteReview)}/review-complete`, { method: 'POST' })
+                    .then(data => { toast(data.review?.doubleConfirmed ? '双人复核已完成' : '已完成个人复核，等待第二位复核人确认', 'success'); return loadDetail(state.activeJobId, { silent: true }); })
+                    .catch(error => toast(error.message || '完成复核失败', 'error'));
+                return;
+            }
+            const reviewer = event.target.closest('[data-ocr-reviewer-id]');
+            if (reviewer) {
+                const id = String(reviewer.dataset.ocrReviewerId);
+                if (reviewer.checked) state.selectedReviewerIds.add(id);
+                else state.selectedReviewerIds.delete(id);
+                return;
+            }
+            const saveReviewersButton = event.target.closest('[data-ocr-save-reviewers]');
+            if (saveReviewersButton) {
+                ocrActions.saveReviewers(saveReviewersButton.dataset.ocrSaveReviewers).catch(error => toast(error.message || '分派复核人失败', 'error'));
+                return;
+            }
+            if (event.target.closest('[data-ocr-close-reviewers]')) {
+                state.reviewCandidates = [];
+                state.selectedReviewerIds = new Set();
+                renderDetail();
                 return;
             }
             const output = event.target.closest('[data-ocr-output-download]');
             if (output) {
-                downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
+                ocrActions.downloadOutput(output.dataset.ocrOutputDownload, output.dataset.outputName).catch(e => toast(e.message || '下载失败', 'error'));
                 return;
             }
 
@@ -896,19 +908,24 @@
                 saveReview(save.dataset.ocrPageSave).catch(e => toast(e.message || '保存复核失败', 'error'));
                 return;
             }
+            const feedback = event.target.closest('[data-ocr-submit-feedback]');
+            if (feedback) {
+                ocrActions.submitFeedback(feedback.dataset.ocrSubmitFeedback).catch(error => toast(error.message || '提交纠错反馈失败', 'error'));
+                return;
+            }
             const remove = event.target.closest('[data-ocr-job-delete]');
             if (remove) {
-                deleteJob(remove.dataset.ocrJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
+                ocrActions.deleteJob(remove.dataset.ocrJobDelete).catch(e => toast(e.message || '删除失败', 'error'));
                 return;
             }
             const retry = event.target.closest('[data-ocr-job-retry]');
             if (retry) {
-                retryJob(retry.dataset.ocrJobRetry).catch(e => toast(e.message || '重试失败', 'error'));
+                ocrActions.retryJob(retry.dataset.ocrJobRetry).catch(e => toast(e.message || '重试失败', 'error'));
                 return;
             }
             const cancel = event.target.closest('[data-ocr-job-cancel]');
             if (cancel) {
-                cancelJob(cancel.dataset.ocrJobCancel).catch(e => toast(e.message || '取消失败', 'error'));
+                ocrActions.cancelJob(cancel.dataset.ocrJobCancel).catch(e => toast(e.message || '取消失败', 'error'));
             }
         });
     }
@@ -917,7 +934,7 @@
         if (state.timer) return;
         state.timer = window.setInterval(() => {
             if (window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'ocr') return;
-            const active = state.jobs.some(job => job.status === 'pending' || job.status === 'processing');
+            const active = state.jobs.some(job => job.status === 'queued' || job.status === 'pending' || job.status === 'processing');
             if (active) loadJobs({ keepActive: true }).catch(() => {});
         }, 4000);
     }
@@ -935,8 +952,9 @@
         document.getElementById('apps-back-btn')?.classList.remove('hidden');
         if (typeof setAppsTitle === 'function') setAppsTitle('文字识别', '上传图片或 PDF，复核识别结果并导出文本、Markdown、JSON 或可检索 PDF。');
         render();
+        ocrActions.bindWatchEvents();
         startPolling();
-        const loaders = [loadJobs({ keepActive: true })];
+        const loaders = [loadJobs({ keepActive: true }), loadCapabilities()];
         if (canViewOcrEngineConfig()) loaders.push(loadEngines());
         if (canManageOcrSettings()) loaders.push(loadSettings());
         await Promise.all(loaders);

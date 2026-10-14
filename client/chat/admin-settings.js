@@ -572,6 +572,11 @@ const RETRIEVAL_CONFIG_SECTIONS = {
         modalId: 'rag-retrieval-policy-modal',
         saveLabel: '保存检索策略',
         focusSelector: '#setting-rag-score-threshold'
+    },
+    ocr: {
+        modalId: 'ocr-service-modal',
+        saveLabel: '保存 OCR 服务',
+        focusSelector: '#setting-ocr-service-url'
     }
 };
 
@@ -585,11 +590,20 @@ function openRetrievalModelConfigSection(section) {
     const config = RETRIEVAL_CONFIG_SECTIONS[safeSection];
     const modal = document.getElementById(config.modalId);
     if (!modal) {
-        showToast('检索模型配置面板尚未就绪，请刷新页面后重试', 'error');
+        showToast('模型配置面板尚未就绪，请刷新页面后重试', 'error');
         return false;
     }
     if (safeSection === 'policy') {
         updateRagChunkOverlapLimit();
+    }
+    if (safeSection === 'ocr') {
+        const input = document.getElementById('setting-ocr-service-url');
+        if (input) input.value = window.Pivot?.ocrConfig?.serviceUrl || 'http://ocr-service:9100';
+        const statusEl = document.getElementById('setting-ocr-test-status');
+        if (statusEl) {
+            statusEl.textContent = '';
+            statusEl.className = 'model-modal-desc retrieval-config-status';
+        }
     }
     setRetrievalModelModalVisibility(modal, true, { focusSelector: config.focusSelector });
     return true;
@@ -652,6 +666,29 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
         if (section === 'policy') {
             updateRagChunkOverlapLimit();
             validateRagSettings();
+        }
+
+        if (section === 'ocr') {
+            const serviceUrlInput = document.getElementById('setting-ocr-service-url');
+            const serviceUrl = serviceUrlInput?.value.trim() || '';
+            const res = await apiFetch(`${API_BASE}/settings/ocr`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ serviceUrl })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'OCR 服务保存失败');
+            window.Pivot.ocrConfig = data.settings || { serviceUrl, engine: 'http' };
+            if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
+            const currentSettings = await apiFetch(`${API_BASE}/settings`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({}));
+            (window.Pivot.getModule?.('models.retrieval')?.renderRetrievalModelServices || window.Pivot.legacy.renderRetrievalModelServices)?.({
+                ...currentSettings,
+                ocrConfig: window.Pivot.ocrConfig,
+                ocrEngineStatus: window.Pivot.ocrEngineStatus
+            });
+            showToast('OCR 识别服务配置已保存', 'success');
+            setRetrievalModelModalVisibility(modal, false);
+            return;
         }
 
         const payload = {};
@@ -786,10 +823,49 @@ async function testRerankConnection() {
     }
 };
 
+async function testOcrConnection() {
+    const serviceUrl = document.getElementById('setting-ocr-service-url')?.value.trim() || '';
+    const testBtn = document.getElementById('ocr-service-test-btn');
+    const statusEl = document.getElementById('setting-ocr-test-status');
+    if (!serviceUrl) return showToast('请先填写 OCR 服务地址', 'error');
+    if (testBtn) testBtn.disabled = true;
+    if (statusEl) {
+        statusEl.className = 'model-modal-desc retrieval-config-status is-loading';
+        statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…';
+    }
+    showToast('正在检测 OCR 服务连接…', 'info');
+    try {
+        const res = await apiFetch(`${API_BASE}/settings/ocr-test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serviceUrl })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.engines) {
+            window.Pivot.ocrEngineStatus = data.engines;
+        }
+        if (!res.ok || data.success !== true) throw new Error(data.message || data.error || 'OCR 服务连接失败');
+        if (statusEl) {
+            statusEl.className = 'model-modal-desc retrieval-config-status is-success';
+            statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。';
+        }
+        showToast('OCR 服务连接成功', 'success');
+    } catch (error) {
+        if (statusEl) {
+            statusEl.className = 'model-modal-desc retrieval-config-status is-error';
+            statusEl.textContent = `连接失败：${error.message}`;
+        }
+        showToast(error.message || 'OCR 服务连接失败', 'error');
+    } finally {
+        if (testBtn) testBtn.disabled = false;
+    }
+}
+
 window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     const serviceCards = document.getElementById('retrieval-model-services-body');
     const testBtn = document.getElementById('rag-embedding-test-btn');
     const rerankTestBtn = document.getElementById('rag-rerank-test-btn');
+    const ocrTestBtn = document.getElementById('ocr-service-test-btn');
     const fetchModelsBtn = document.getElementById('rag-embedding-fetch-models-btn');
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -836,6 +912,9 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     }
     if (rerankTestBtn) {
         rerankTestBtn.onclick = () => testRerankConnection();
+    }
+    if (ocrTestBtn) {
+        ocrTestBtn.onclick = () => testOcrConnection();
     }
     if (fetchModelsBtn) {
         fetchModelsBtn.onclick = () => fetchEmbeddingModels();

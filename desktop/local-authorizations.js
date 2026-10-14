@@ -6,8 +6,9 @@ const os = require('os');
 const path = require('path');
 const { chooseLocalBrowserAuthorization, sanitizeLocalBrowserGrant } = require('./local-browser-authorization');
 const { writeJsonAtomic } = require('./atomic-json');
+const { readWatchFile, watchAuthorizedDirectory } = require('./ocr-watch-directory');
 
-const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir', 'local_browser', 'local_workspace', 'local_desktop_control']);
+const LOCAL_AUTH_TYPES = new Set(['local_database', 'local_report_dir', 'local_browser', 'local_workspace', 'local_desktop_control', 'local_ocr_watch_dir']);
 
 function randomSecret() {
     return crypto.randomBytes(48).toString('hex');
@@ -78,6 +79,7 @@ function createLocalAuthorizationManager(options = {}) {
     const dialog = options.dialog;
     const getMainWindow = typeof options.getMainWindow === 'function' ? options.getMainWindow : () => null;
     const getRuntimeConfig = typeof options.getRuntimeConfig === 'function' ? options.getRuntimeConfig : () => null;
+    let ocrWatchStop = null;
 
     function getUserDataPath() {
         return typeof app?.getPath === 'function' ? app.getPath('userData') : process.cwd();
@@ -136,7 +138,8 @@ function createLocalAuthorizationManager(options = {}) {
                 local_report_dir: sanitizeLocalGrant('local_report_dir', store.grants.local_report_dir),
                 local_browser: sanitizeLocalGrant('local_browser', store.grants.local_browser),
                 local_workspace: sanitizeLocalGrant('local_workspace', store.grants.local_workspace),
-                local_desktop_control: sanitizeLocalGrant('local_desktop_control', store.grants.local_desktop_control)
+                local_desktop_control: sanitizeLocalGrant('local_desktop_control', store.grants.local_desktop_control),
+                local_ocr_watch_dir: sanitizeLocalGrant('local_ocr_watch_dir', store.grants.local_ocr_watch_dir)
             },
             message: '桌面客户端已就绪，本机授权信息仅保存在当前设备。'
         };
@@ -180,6 +183,12 @@ function createLocalAuthorizationManager(options = {}) {
             if (!windowTitle || !processName) throw new Error('桌面控制授权需要指定当前应用窗口标题和进程名。');
             return { resourceKind: 'desktop_application', label: String(chooseOptions.label || processName).slice(0, 160), windowTitle, processName, provider: 'desktop', deviceName: os.hostname(), grantedAt: now, updatedAt: now };
         }
+        if (type === 'local_ocr_watch_dir') {
+            const result = await showLocalAuthorizationDialog({ title: '选择文字识别监控目录', properties: ['openDirectory'] });
+            if (result.canceled || !result.filePaths?.[0]) return null;
+            const selectedPath = path.resolve(result.filePaths[0]);
+            return { resourceKind: 'ocr_watch_directory', label: path.basename(selectedPath) || '文字识别监控目录', path: selectedPath, provider: 'desktop', deviceName: os.hostname(), grantedAt: now, updatedAt: now };
+        }
         if (type === 'local_database') {
             const result = await showLocalAuthorizationDialog({
                 title: '选择本机 SQLite 数据库文件',
@@ -221,6 +230,7 @@ function createLocalAuthorizationManager(options = {}) {
         const store = readLocalAuthorizations();
         store.grants[type] = grant;
         writeLocalAuthorizations(store);
+        if (type === 'local_ocr_watch_dir') ensureOcrWatchDirectory();
         return { canceled: false, status: buildLocalAuthorizationStatus() };
     }
 
@@ -229,12 +239,34 @@ function createLocalAuthorizationManager(options = {}) {
         const store = readLocalAuthorizations();
         delete store.grants[type];
         writeLocalAuthorizations(store);
+        if (type === 'local_ocr_watch_dir' && ocrWatchStop) {
+            ocrWatchStop();
+            ocrWatchStop = null;
+        }
         return buildLocalAuthorizationStatus();
+    }
+
+    function ensureOcrWatchDirectory() {
+        if (ocrWatchStop) return;
+        const grant = readLocalAuthorizations().grants.local_ocr_watch_dir;
+        if (!grant?.path) return;
+        try {
+            ocrWatchStop = watchAuthorizedDirectory(grant, fileName => {
+                const mainWindow = getMainWindow();
+                if (!mainWindow || mainWindow.isDestroyed()) return;
+                mainWindow.webContents.send('pivot-ocr-watch:file', { fileName: String(fileName).slice(0, 255), directoryName: path.basename(grant.path) });
+            });
+        } catch (_) { ocrWatchStop = null; }
     }
 
     async function executeLocalMcpTool(payload = {}) {
         configureLocalAuthorizationEnvironment();
         const toolName = String(payload.toolName || payload.name || '').trim();
+        if (toolName === 'ocr.watch.read') {
+            const grant = readLocalAuthorizations().grants.local_ocr_watch_dir;
+            if (!grant?.path) throw new Error('尚未授权文字识别监控目录。');
+            return { action: toolName, file: await readWatchFile(grant, payload.input?.fileName) };
+        }
         if (/^browser\./.test(toolName)) {
             const { runLocalBrowserTask } = require('./local-browser-automation');
             const grant = readLocalAuthorizations().grants.local_browser;
@@ -341,6 +373,7 @@ function createLocalAuthorizationManager(options = {}) {
         localAuthorizationFilePath,
         readLocalAuthorizations,
         revokeLocalAuthorization,
+        ensureOcrWatchDirectory,
         showLocalAuthorizationDialog,
         writeLocalAuthorizations
     };

@@ -347,6 +347,30 @@ async function extractPdfText(filePath, options = {}) {
     throw new Error('不支持的 pdf-parse 导出格式');
 }
 
+async function extractPdfTextByPage(filePath, options = {}) {
+    const buffer = await readBoundedBuffer(filePath);
+    if (!pdfParse || typeof pdfParse.PDFParse !== 'function') {
+        return [{ pageNumber: 1, text: await extractPdfText(filePath, options) }];
+    }
+    const parser = new pdfParse.PDFParse({
+        data: buffer,
+        ...(options.password ? { password: options.password } : {})
+    });
+    try {
+        const result = await parser.getText({
+            partial: Array.isArray(options.pageNumbers) && options.pageNumbers.length ? options.pageNumbers : undefined,
+            lineEnforce: true,
+            pageJoiner: ''
+        });
+        return (result.pages || []).map((page, index) => ({
+            pageNumber: Number(page.num || index + 1),
+            text: normalizeExtractedPlainText(page.text || '')
+        }));
+    } finally {
+        if (typeof parser.destroy === 'function') await parser.destroy();
+    }
+}
+
 async function renderPdfPages(filePath, options = {}) {
     if (!pdfParse || typeof pdfParse.PDFParse !== 'function') return [];
 
@@ -392,6 +416,20 @@ async function extractDocxText(filePath) {
         .map(name => xmlToText(entries.get(name).toString('utf8')))
         .filter(Boolean)
         .join('\n\n');
+}
+
+async function extractOfdText(filePath) {
+    const entries = readZipEntries(await readBoundedBuffer(filePath));
+    const contentNames = Array.from(entries.keys())
+        .filter(name => /(?:^|\/)Content\.xml$/i.test(name))
+        .sort((left, right) => left.localeCompare(right, 'en'));
+    const sources = contentNames.length
+        ? contentNames
+        : Array.from(entries.keys()).filter(name => /(?:^|\/)OFD\.xml$/i.test(name));
+    return normalizeExtractedPlainText(sources
+        .map(name => xmlToText(entries.get(name).toString('utf8')))
+        .filter(Boolean)
+        .join('\n\n'));
 }
 
 async function extractWordText(filePath, options = {}) {
@@ -702,6 +740,7 @@ async function extractDocumentText(filePath, mimeType = '', originalName = '', o
             return extractXlsxText(filePath);
         }
     }
+    if (ext === '.ofd') return extractOfdText(filePath);
     if (TEXT_EXTENSIONS.has(ext) || mime.startsWith('text/')) return readTextPrefix(filePath, options.maxChars);
     return '';
 }
@@ -714,7 +753,9 @@ function truncateExtractedText(text, maxLength = 200000) {
 module.exports = {
     isPasswordError,
     renderPdfPages,
+    extractPdfTextByPage,
     extractDocumentText,
+    extractOfdText,
     truncateExtractedText,
     MAX_DOCUMENT_BUFFER_BYTES,
     readZipEntries,

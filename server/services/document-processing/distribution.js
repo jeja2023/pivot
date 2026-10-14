@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { query, execute } = require('../../db/client');
+const { query, queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { createKnowledgeDocumentFromUpload, scheduleKnowledgeDocumentIndexing } = require('../rag-documents');
 const { createRegulationDocumentFromUpload } = require('../regulations');
@@ -22,6 +22,31 @@ function buildJobShareText(detail) {
         const confidence = page.confidence === null || page.confidence === undefined ? '-' : `${Math.round(Number(page.confidence || 0) * 100)}%`;
         return [`[第 ${pageNumber} 页 | 置信度 ${confidence}]`, text].join('\n');
     }).filter(Boolean).join('\n\n').trim();
+}
+
+function buildOcrSource(detail) {
+    return {
+        jobId: detail?.job?.id || null,
+        contentRevision: Number(detail?.job?.contentRevision || 1),
+        fileId: detail?.file?.id || null,
+        pages: (detail?.pages || []).map(page => ({
+            pageId: page.id,
+            pageNumber: Number(page.pageNumber || 0),
+            alignmentStatus: page.alignmentStatus || 'aligned'
+        }))
+    };
+}
+
+function stableJson(value) {
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value ?? null);
+}
+
+function parseJson(value, fallback = {}) {
+    try { return value ? JSON.parse(value) : fallback; } catch (_error) { return fallback; }
 }
 
 async function cleanupTempUpload(upload) {
@@ -110,7 +135,7 @@ function createDocumentDistributionService({ getJobDetail }) {
                 await cleanupTempUpload(upload);
             }
             const scheduled = await scheduleKnowledgeDocumentIndexing({ docId: created.docId, userId, user });
-            return { target: 'knowledge', documentId: created.docId, collectionId: created.collectionId || null, scheduled: Boolean(scheduled.started), textLength: text.length };
+            return { target: 'knowledge', documentId: created.docId, collectionId: created.collectionId || null, scheduled: Boolean(scheduled.started), textLength: text.length, source: buildOcrSource(detail) };
         }
         if (normalizedTarget === 'regulations' || normalizedTarget === 'regulation') {
             let created;
@@ -129,15 +154,61 @@ function createDocumentDistributionService({ getJobDetail }) {
             } finally {
                 await cleanupTempUpload(upload);
             }
-            return { target: 'regulations', documentId: created.document?.id || null, versionId: created.version?.id || null, articleCount: Array.isArray(created.articles) ? created.articles.length : 0, textLength: text.length };
+            return { target: 'regulations', documentId: created.document?.id || null, versionId: created.version?.id || null, articleCount: Array.isArray(created.articles) ? created.articles.length : 0, textLength: text.length, source: buildOcrSource(detail) };
         }
-        return { target: normalizedTarget || 'text', textLength: text.length };
+        return { target: normalizedTarget || 'text', textLength: text.length, source: buildOcrSource(detail) };
     }
 
-    async function shareJobResult({ user, jobId, target, options = {} }) {
-        const detail = await getJobDetail({ userId: user?.id, jobId });
+    async function shareJobResult({ user, jobId, target, options = {}, sourceModule = '' }) {
+        const detail = await getJobDetail({ userId: user?.id, jobId, sourceModule });
         if (!detail) return null;
-        return sendTextToTarget({ user, detail, target, options });
+        const userId = user?.id;
+        const normalizedTarget = String(target || '').trim().toLowerCase().replace(/_/g, '-').slice(0, 40) || 'text';
+        const contentRevision = Math.max(Number(detail.job?.contentRevision || 1), 1);
+        const optionsHash = crypto.createHash('sha256').update(stableJson(options && typeof options === 'object' ? options : {})).digest('hex');
+        let record = await queryOne(`
+            SELECT * FROM document_distributions
+            WHERE user_id = ? AND job_id = ? AND target = ? AND content_revision = ? AND options_hash = ?
+        `, [userId, detail.job.id, normalizedTarget, contentRevision, optionsHash]);
+        if (record?.status === 'ready') return { ...parseJson(record.result_json, {}), idempotent: true };
+        if (record?.status === 'processing') {
+            const error = new Error('相同版本正在分发，请勿重复提交。');
+            error.code = 'DISTRIBUTION_IN_PROGRESS';
+            error.status = 409;
+            throw error;
+        }
+        const now = getBeijingTimestamp();
+        if (record?.id) {
+            await execute(`UPDATE document_distributions SET status = 'processing', error_message = '', updated_at = ?, completed_at = NULL WHERE id = ?`, [now, record.id]);
+        } else {
+            const id = crypto.randomUUID();
+            await execute(`
+                INSERT INTO document_distributions (id, user_id, job_id, target, content_revision, options_hash, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)
+                ON CONFLICT (user_id, job_id, target, content_revision, options_hash) DO NOTHING
+            `, [id, userId, detail.job.id, normalizedTarget, contentRevision, optionsHash, now, now]);
+        }
+        record = await queryOne(`
+            SELECT * FROM document_distributions
+            WHERE user_id = ? AND job_id = ? AND target = ? AND content_revision = ? AND options_hash = ?
+        `, [userId, detail.job.id, normalizedTarget, contentRevision, optionsHash]);
+        if (!record || record.status !== 'processing') {
+            if (record?.status === 'ready') return { ...parseJson(record.result_json, {}), idempotent: true };
+            const error = new Error('相同版本正在分发，请勿重复提交。');
+            error.code = 'DISTRIBUTION_IN_PROGRESS';
+            error.status = 409;
+            throw error;
+        }
+        try {
+            const result = await sendTextToTarget({ user, detail, target: normalizedTarget, options });
+            const completedAt = getBeijingTimestamp();
+            await execute(`UPDATE document_distributions SET status = 'ready', result_json = ?, error_message = '', updated_at = ?, completed_at = ? WHERE id = ?`, [JSON.stringify(result), completedAt, completedAt, record.id]);
+            return { ...result, distributionId: record.id, idempotent: false };
+        } catch (error) {
+            const completedAt = getBeijingTimestamp();
+            await execute(`UPDATE document_distributions SET status = 'failed', error_message = ?, updated_at = ?, completed_at = ? WHERE id = ?`, [String(error.message || '分发失败').slice(0, 500), completedAt, completedAt, record.id]);
+            throw error;
+        }
     }
 
     async function dispatchPdfJobResult({ user, jobId, target, options = {} }) {

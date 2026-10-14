@@ -10,7 +10,7 @@
 
 - 普通图片/PDF 文字识别：优先使用 PP-OCRv6 或 PP-OCR 系列，速度快、资源占用更可控，适合批量 OCR。
 - 复杂版面文档解析：可以使用 PaddleOCR-VL，例如表格、公式、图表、印章、古籍、复杂扫描件等。
-- Pivot 对接方式保持不变：独立 OCR 项目最终只需要提供 `GET /health` 和 `POST /ocr`。
+- Pivot 对接方式保持不变：独立 OCR 项目至少提供 `GET /health` 和 `POST /ocr`；推荐额外提供 `GET /capabilities`，公开固定模型版本、语言、版面/表格/公式/区域识别能力及输入限额。
 
 ## 二、项目目录建议
 

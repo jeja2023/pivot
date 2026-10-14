@@ -1,4 +1,4 @@
-/* global window, Response -- 浏览器测试执行上下文 */
+/* global window, Response, FormData -- 浏览器测试执行上下文 */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -43,7 +43,10 @@ async function createPdfPage(browser) {
         window.showToast = (message, type) => { window.pdfToasts = [...(window.pdfToasts || []), { message, type }]; };
         window.pdfRequests = [];
         window.apiFetch = async (url, options = {}) => {
-            window.pdfRequests.push([url, options.method || 'GET']);
+            const fields = options.body instanceof FormData
+                ? [...options.body.keys()].filter(key => key !== 'files')
+                : [];
+            window.pdfRequests.push([url, options.method || 'GET', fields]);
             const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
             if (url.endsWith('/capabilities')) return json({
                 operations: [
@@ -76,13 +79,22 @@ test('PDF 工具浏览器工作区呈现排队状态、扩展操作和结果详�
         const page = await createPdfPage(browser);
         await expect(page.locator('#pdf-job-table-body')).toContainText('排队中');
         await expect(page.locator('[data-pdf-job-cancel="101"]')).toBeVisible();
-        await page.locator('#pdf-preset-select').selectOption('internal-watermark');
+        const quickPreset = page.locator('[data-pdf-quick-preset="internal-watermark"]');
+        await expect(quickPreset).toBeVisible();
+        await quickPreset.click();
         await expect(page.locator('#pdf-operation-select')).toHaveValue('watermark');
         await expect(page.locator('#pdf-watermark-text')).toHaveValue('内部资料');
-        await page.locator('#pdf-operation-select').selectOption('watermark');
+        await expect(quickPreset).toHaveAttribute('aria-pressed', 'true');
+        await quickPreset.click();
+        await expect(quickPreset).toHaveAttribute('aria-pressed', 'false');
+        await expect(page.locator('#pdf-operation-select')).toHaveValue('watermark');
+        await expect(page.locator('#pdf-watermark-text')).toHaveValue('内部资料');
+        await quickPreset.click();
+        await expect(quickPreset).toHaveAttribute('aria-pressed', 'true');
         await expect(page.locator('[data-pdf-option="watermark"]')).toBeVisible();
         await expect(page.locator('[data-pdf-option="pages"]')).toBeVisible();
         await page.locator('#pdf-operation-select').selectOption('crop');
+        await expect(quickPreset).toHaveAttribute('aria-pressed', 'false');
         await expect(page.locator('[data-pdf-option="crop"]')).toBeVisible();
         await page.locator('#pdf-operation-select').selectOption('insert_blank');
         await expect(page.locator('[data-pdf-option="blank"]')).toBeVisible();
@@ -104,6 +116,40 @@ test('PDF 工具浏览器工作区呈现排队状态、扩展操作和结果详�
         await page.locator('[data-pdf-page-preview="11"]').click();
         await expect(page.locator('#pdf-page-preview-panel')).toBeVisible();
         assert.equal(await page.locator('#pdf-page-preview-image').getAttribute('src'), '/api/apps/pdf-tools/pages/11/image');
+        await page.close();
+    } finally {
+        await browser.close();
+    }
+});
+
+test('PDF 工具未选择文件时由应用提示，不触发不可聚焦的浏览器原生表单校验', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await createPdfPage(browser);
+        const form = page.locator('#pdf-tools-form');
+        await expect(form).toHaveAttribute('novalidate', '');
+        await expect(page.locator('#pdf-files-input')).not.toHaveAttribute('required', '');
+        await page.locator('#pdf-submit-btn').click();
+        await expect.poll(() => page.evaluate(() => window.pdfToasts?.at(-1)?.message || '')).toBe('请选择需要处理的文件。');
+        await expect(page.locator('#pdf-files-input')).toBeFocused();
+        assert.equal((await page.evaluate(() => window.pdfRequests.filter(([url, method]) => url.endsWith('/jobs') && method === 'POST'))).length, 0);
+        await page.close();
+    } finally {
+        await browser.close();
+    }
+});
+
+test('PDF 工具仅提交当前操作的配置字段，避免触发 multipart 字段数量上限', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await createPdfPage(browser);
+        await page.locator('#pdf-operation-select').selectOption('watermark');
+        await page.locator('#pdf-files-input').setInputFiles({ name: '样例.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\n') });
+        await page.locator('#pdf-submit-btn').click();
+        await expect.poll(() => page.evaluate(() => window.pdfRequests.find(([url, method]) => url.endsWith('/jobs') && method === 'POST')?.[2] || null)).not.toBeNull();
+        assert.deepEqual(await page.evaluate(() => window.pdfRequests.find(([url, method]) => url.endsWith('/jobs') && method === 'POST')?.[2]), [
+            'operation', 'mode', 'watermarkText', 'watermarkPosition', 'watermarkOpacity'
+        ]);
         await page.close();
     } finally {
         await browser.close();

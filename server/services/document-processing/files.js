@@ -17,7 +17,7 @@ const {
 const SAFE_EXTENSIONS = new Set([
     '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
     '.txt', '.md', '.pdf', '.csv', '.json', '.html', '.htm',
-    '.doc', '.docx', '.xls', '.xlsx'
+    '.doc', '.docx', '.xls', '.xlsx', '.ofd'
 ]);
 
 function normalizeJson(value, fallback = {}) {

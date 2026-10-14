@@ -5,6 +5,7 @@ const JSZip = require('jszip');
 const { query, queryOne } = require('../../db/client');
 const { createZip } = require('./exporters');
 const { resolveStoredDocumentPath } = require('./paths');
+const { canAccessDocumentJob } = require('./review-assignments');
 
 const MAX_OUTPUT_ARCHIVE_BYTES = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_PROCESSING_MAX_ARCHIVE_BYTES || String(256 * 1024 * 1024), 10) || 256 * 1024 * 1024, 8 * 1024 * 1024), 1024 * 1024 * 1024);
 
@@ -125,11 +126,11 @@ async function getOutputDownload({ userId, outputId, sourceModule = '' }) {
         SELECT o.*
         FROM document_outputs o
         JOIN document_jobs j ON j.id = o.job_id AND j.user_id = o.user_id
-        WHERE o.id = ? AND o.user_id = ? AND o.status = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
+        WHERE o.id = ? AND o.status = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
     `, sourceModule
-        ? [Number.parseInt(outputId, 10), userId, 'ready', sourceModule]
-        : [Number.parseInt(outputId, 10), userId, 'ready']);
-    if (!output) return null;
+        ? [Number.parseInt(outputId, 10), 'ready', sourceModule]
+        : [Number.parseInt(outputId, 10), 'ready']);
+    if (!output || !await canAccessDocumentJob({ userId, jobId: output.job_id, sourceModule })) return null;
     const filePath = resolveStoredDocumentPath(output.file_path);
     if (!filePath || !await fs.promises.access(filePath, fs.constants.R_OK).then(() => true).catch(() => false)) return null;
     return { filePath, fileName: output.file_name || `document-output-${output.id}`, mimeType: output.mime_type || 'application/octet-stream' };
@@ -140,11 +141,11 @@ async function getPageImage({ userId, pageId, sourceModule = '' }) {
         SELECT p.*
         FROM document_pages p
         JOIN document_jobs j ON j.id = p.job_id AND j.user_id = p.user_id
-        WHERE p.id = ? AND p.user_id = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
+        WHERE p.id = ? ${sourceModule ? 'AND j.source_module = ?' : ''}
     `, sourceModule
-        ? [Number.parseInt(pageId, 10), userId, sourceModule]
-        : [Number.parseInt(pageId, 10), userId]);
-    if (!page?.image_path) return null;
+        ? [Number.parseInt(pageId, 10), sourceModule]
+        : [Number.parseInt(pageId, 10)]);
+    if (!page?.image_path || !await canAccessDocumentJob({ userId, jobId: page.job_id, sourceModule })) return null;
     const filePath = resolveStoredDocumentPath(page.image_path);
     if (!filePath || !await fs.promises.access(filePath, fs.constants.R_OK).then(() => true).catch(() => false)) return null;
     return { filePath, page };

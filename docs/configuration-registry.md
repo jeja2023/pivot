@@ -31,6 +31,17 @@
 | `PG_ANALYZE_TIMEOUT_MS` | integer | `60000` | 1000–120000 | 单张表 ANALYZE 的执行超时。 |
 | `PG_ANALYZE_TOTAL_TIMEOUT_MS` | integer | `600000` | 60000–3600000 | 单轮 ANALYZE 的总时限；到期后从进度游标继续。 |
 
+## 文档处理与 OCR
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `DOCUMENT_PROCESSING_MAX_RENDER_PAGES` | integer | `5` | 1–300 | 单次 OCR/PDF 任务允许渲染的最大页面数；超过时必须选择页范围，系统不会静默截断。 |
+| `DOCUMENT_PROCESSING_MAX_OCR_PAGES` | integer | `5` | 1–300 | 单次 OCR 计划的最大页面数；用于限制识别资源，不改变原始文件真实页数。 |
+| `DOCUMENT_PROCESSING_MAX_CONCURRENT` | integer | `2` | 1–8 | 单进程文档处理 Worker 的最大并发任务数；多实例部署还应使用持久租约避免重复执行。 |
+| `DOCUMENT_PROCESSING_WORKER_ID` | string | `` | 逗号分隔的语言标记 | 可选的文档处理 Worker 实例标识。多实例部署建议配置稳定且唯一的值，用于任务租约和迟到执行保护。 |
+| `DOCUMENT_PROCESSING_OUTPUT_RETENTION_DAYS` | integer | `30` | 1–365 | 未被业务引用的文档处理输出保留天数；引用输出不会被定期清理。 |
+| `OCR_SERVICE_MAX_BLOCKS` | integer | `50000` | 1–100000 | 外部 OCR 服务单页允许返回的最大文字块数，超过时拒绝响应以保护浏览器和数据库。 |
+
 ## 安全
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

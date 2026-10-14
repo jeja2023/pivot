@@ -5,6 +5,10 @@ const pdf = require('./pdf');
 const settings = require('./settings');
 const secrets = require('./secrets');
 const textExtraction = require('./text-extraction');
+const reviewAssignments = require('./review-assignments');
+const regions = require('./regions');
+const feedback = require('./feedback');
+const chatContext = require('./chat-context');
 
 module.exports = {
     ...cleanup,
@@ -13,5 +17,9 @@ module.exports = {
     ...pdf,
     ...settings,
     ...secrets,
-    ...textExtraction
+    ...textExtraction,
+    ...reviewAssignments,
+    ...regions,
+    ...feedback,
+    ...chatContext
 };
