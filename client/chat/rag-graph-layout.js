@@ -9,7 +9,16 @@
             belongs_to: 'is-belong',
             depends_on: 'is-depend',
             contains: 'is-contain',
-            affects: 'is-affect'
+            affects: 'is-affect',
+            applies_to: 'is-belong',
+            references: 'is-depend',
+            supersedes: 'is-affect',
+            prohibits: 'is-affect',
+            requires: 'is-owner',
+            calls: 'is-depend',
+            integrates_with: 'is-contain',
+            implements: 'is-owner',
+            owned_by: 'is-belong'
         })[type] || 'is-related';
     }
 

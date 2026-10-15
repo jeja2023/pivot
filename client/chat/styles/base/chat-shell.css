@@ -542,9 +542,9 @@ body.is-main-workspace-full .chat-container {
 .rag-detail-modal.knowledge-wiki-modal,
 .knowledge-wiki-modal {
     width: min(1320px, calc(100vw - 32px)) !important;
-    height: min(920px, calc(100vh - 28px)) !important;
-    max-height: min(920px, calc(100vh - 28px)) !important;
-    padding: 14px 18px !important;
+    height: auto !important;
+    max-height: min(880px, calc(100vh - 28px)) !important;
+    padding: 14px 18px 16px !important;
     display: flex;
     flex-direction: column;
     gap: 6px !important;
@@ -560,7 +560,7 @@ body.is-main-workspace-full .chat-container {
     flex-shrink: 0;
 }
 .knowledge-wiki-body {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: hidden;
     display: flex;
@@ -569,7 +569,7 @@ body.is-main-workspace-full .chat-container {
     box-sizing: border-box;
 }
 .knowledge-wiki-layout {
-    flex: 1;
+    flex: 1 1 auto;
     height: 100%;
     min-height: 0;
     display: grid;
@@ -581,6 +581,7 @@ body.is-main-workspace-full .chat-container {
 .knowledge-wiki-spaces {
     display: flex;
     min-width: 0;
+    min-height: 0;
     flex-direction: column;
     gap: 8px;
     overflow-y: auto;
@@ -594,6 +595,7 @@ body.is-main-workspace-full .chat-container {
 .knowledge-wiki-pages {
     display: flex;
     min-width: 0;
+    min-height: 0;
     flex-direction: column;
     gap: 12px;
     overflow-y: auto;
@@ -604,7 +606,7 @@ body.is-main-workspace-full .chat-container {
     text-align: left;
 }
 .knowledge-wiki-pages.is-detail-mode {
-    gap: 5px;
+    gap: 6px;
     padding-right: 2px;
     padding-bottom: 2px;
 }
@@ -980,14 +982,14 @@ body.is-main-workspace-full .chat-container {
     color: var(--text-main);
 }
 .knowledge-wiki-markdown-box {
-    min-height: 84px;
-    max-height: 150px;
+    min-height: 72px;
+    max-height: 200px;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 8px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--bg-side, #f8fafc);
+    background: var(--bg-side);
     color: var(--text-main);
     font-size: 0.8rem;
     line-height: 1.5;

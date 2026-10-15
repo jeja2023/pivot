@@ -81,9 +81,11 @@ const closeKnowledgeGraphModal = () => {
     setKnowledgeGraphRestoreState(false);
 };
 
-const graphTypeLabel = (type) => graphTypeLabelText(type);
+const graphTypeLabel = (type) => (window.Pivot?.ragGraphRender?.graphTypeLabel || graphTypeLabelText)(type);
 
-const graphRelationLabel = (type) => graphRelationLabelText(type);
+const graphRelationLabel = (type) => (window.Pivot?.ragGraphRender?.graphRelationLabel || graphRelationLabelText)(type);
+
+const graphStatusLabel = (status) => (window.Pivot?.ragGraphRender?.graphStatusLabel || graphStatusLabelText)(status);
 
 const graphTypeOptionsHtml = (selectedType = 'concept') => buildGraphTypeOptionsHtml(selectedType, {
     escapeAttr: window.Pivot.legacy.escapeRagAttr,
@@ -330,7 +332,7 @@ const renderGraphRelations = (payload = {}) => {
             editLabel: '编辑',
             emptyHtml: '<div class="rag-debug-empty">暂无关系</div>',
             formatConfidence: (row) => `可信度 ${Number(row.confidence || 0).toFixed(2)}`,
-            statusLabel: (value) => ({ active: '已确认', pending: '待确认', deleted: '已删除' })[value] || value
+            statusLabel: (value) => graphStatusLabel(value)
         }
     }));
 };

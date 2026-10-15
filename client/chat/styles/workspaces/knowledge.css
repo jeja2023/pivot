@@ -636,6 +636,26 @@
     outline: none;
 }
 
+.rag-debug-diagnostics {
+    margin: 0 10px 10px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.rag-debug-diagnostics summary {
+    cursor: pointer;
+    padding: 6px 0;
+    color: var(--text-muted);
+}
+
+.rag-debug-diagnostics > div {
+    padding: 7px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--text-muted) 5%, transparent);
+    line-height: 1.5;
+}
+
 .knowledge-panel .workspace-table-wrap {
     flex: 1 1 auto;
     min-height: 220px;

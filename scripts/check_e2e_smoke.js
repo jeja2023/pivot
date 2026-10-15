@@ -34,7 +34,7 @@ function main() {
     assertIncludes('tests/e2e/playwright.config.js', 'reuseExistingServer');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.ui"]');
     assertIncludes('tests/e2e/smoke.spec.js', 'window.Pivot.modules["chat.attachments"]');
-    assertIncludes('tests/e2e/smoke.spec.js', '#rag-debug-history');
+    assertIncludes('tests/e2e/smoke.spec.js', "#rag-debug-history')).toHaveCount(0)");
     assertIncludes('tests/e2e/smoke.spec.js', "tool_call_mode");
     assertIncludes('tests/e2e/smoke.spec.js', "真实 E2E 流式回答");
     assertIncludes('tests/e2e/smoke.spec.js', "e2e-knowledge.md");
@@ -44,7 +44,10 @@ function main() {
     }
     assertIncludes('tests/e2e/smoke.spec.js', "page.waitForResponse(response => response.url().includes('/api/rag/upload')");
     assertIncludes('client/chat/partials/scripts.html', '/chat/pivot-core.js');
-    assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-history"');
+    assertIncludes('client/chat/partials/rag-debug-modal.html', 'id="rag-debug-results"');
+    if (read('client/chat/partials/rag-debug-modal.html').includes('id="rag-debug-history"')) {
+        throw new Error('召回测试弹窗不得展示历史调试记录');
+    }
     if (!manifest.scripts || manifest.scripts['test:e2e'] !== 'node scripts/run_e2e_tests.js') {
         throw new Error('package.json 缺少 test:e2e 测试运行脚本');
     }

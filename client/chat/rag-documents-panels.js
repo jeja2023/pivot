@@ -274,47 +274,27 @@ const renderRagQualityReport = (report) => {
     `);
 };
 
-const renderRagDebugHistory = (items = []) => {
-    const el = document.getElementById('rag-debug-history');
-    if (!el) return;
-    const rows = Array.isArray(items) ? items.slice(0, 8) : [];
-    if (rows.length === 0) {
-        PivotSafeHtml.setHtml(el, '<div class="rag-debug-history-empty">暂无调试历史</div>');
-        return;
-    }
-    PivotSafeHtml.setHtml(el, `
-        <div class="rag-debug-history-head">
-            <strong>最近调试</strong>
-            <span>点击问题可带回输入框</span>
-        </div>
-        <div class="rag-debug-history-list">
-            ${rows.map(item => {
-        const top = (Array.isArray(item.scores) ? item.scores : [])
-            .reduce((acc, score) => Math.max(acc, Number(score.score || 0)), 0);
-        const queue = item.queue || {};
-        const queueLabel = queue.maxConcurrent !== undefined
-            ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)}`
-            : '-';
-        return `
-                    <button type="button" class="rag-debug-history-item" data-rag-debug-sample="${window.Pivot.legacy.escapeRagAttr(item.query || '')}">
-                        <span class="rag-debug-history-query">${window.Pivot.legacy.escapeRagHtml(item.query || '-')}</span>
-                        <span class="rag-debug-history-meta">命中 ${Number(item.matchedCount || 0)} / 候选 ${Number(item.candidateCount || 0)} / 最高 ${top.toFixed(3)} / 队列 ${window.Pivot.legacy.escapeRagHtml(queueLabel)} / ${Number(item.elapsedMs || 0)} ms</span>
-                    </button>
-                `;
-    }).join('')}
-        </div>
-    `);
-};
 const renderRagDebugResults = (data) => {
     const el = document.getElementById('rag-debug-results');
     if (!el) return;
     const matches = Array.isArray(data.matches) ? data.matches : [];
+    // `keywords` 包含供 PostgreSQL FTS 使用的内部符号编码（zsym...z）。
+    // 展示层只使用服务端提供的可读词；兼容旧服务端时也应过滤内部词元。
+    const rawKeywords = Array.isArray(data.keywords) ? data.keywords : [];
+    const displayKeywords = (Array.isArray(data.displayKeywords) && data.displayKeywords.length
+        ? data.displayKeywords
+        : rawKeywords.filter(item => !/zsym[0-9a-f]+z/i.test(String(item || ''))))
+        .map(item => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 8);
+    // 默认只展示达到阈值或实际会被聊天引用的资料，避免大量零分候选
+    // 造成“已召回”的错觉。原始候选数仍在诊断摘要中保留。
+    const visibleMatches = matches.filter(match => match.selected || match.matched);
+    const hiddenCandidateCount = Math.max(0, matches.length - visibleMatches.length);
     el.classList.remove('hidden');
 
     // 关键词高亮：把字符串里出现的 keywords 包成 <mark>，并保持先转义再替换的顺序
-    const keywords = (Array.isArray(data.keywords) ? data.keywords : [])
-        .map(k => String(k || '').trim())
-        .filter(k => k.length > 0)
+    const keywords = displayKeywords
         .sort((a, b) => b.length - a.length)
         .slice(0, 16);
     const highlightChunk = (text) => {
@@ -334,7 +314,7 @@ const renderRagDebugResults = (data) => {
 
     // 按 source 聚合：方便查看哪个文件命中最多、平均分多少
     const grouped = new Map();
-    matches.forEach(m => {
+    visibleMatches.forEach(m => {
         const key = String(m.source || '-');
         const entry = grouped.get(key) || { source: key, count: 0, matched: 0, totalScore: 0, top: 0 };
         entry.count += 1;
@@ -346,11 +326,12 @@ const renderRagDebugResults = (data) => {
     });
     const groupedList = Array.from(grouped.values()).sort((a, b) => b.top - a.top).slice(0, 8);
 
-    const maxScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0) || 1;
+    const maxScore = visibleMatches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0) || 1;
     const elapsed = Number(data.elapsedMs || data.elapsed || 0);
-    const matchedCount = matches.filter(m => m.matched).length;
-    const feedbackAdjustedCount = matches.filter(m => m.feedback && Number(m.feedback.total || 0) > 0).length;
-    const topScore = matches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0);
+    const matchedCount = visibleMatches.length;
+    const selectedCount = visibleMatches.filter(m => m.selected).length;
+    const feedbackAdjustedCount = visibleMatches.filter(m => m.feedback && Number(m.feedback.total || 0) > 0).length;
+    const topScore = visibleMatches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0);
     const queue = data.queue || {};
     const hybrid = data.hybrid || {};
     const ranking = data.ranking || {};
@@ -359,30 +340,30 @@ const renderRagDebugResults = (data) => {
         ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)} pending, max ${Number(queue.maxConcurrent || 0)}`
         : '';
     const hybridLabel = hybrid.rrfK !== undefined
-        ? `dense ${Number(hybrid.wDense || 0).toFixed(2)} / fts ${Number(hybrid.wFts || 0).toFixed(2)} / mmr ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
+        ? `语义 ${Number(hybrid.wDense || 0).toFixed(2)} / 关键词 ${Number(hybrid.wFts || 0).toFixed(2)} / 去重 ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
         : '';
     const debugVerdict = (() => {
-        if (matchedCount > 0 && topScore >= Number(data.threshold || 0)) {
+        if (selectedCount > 0 && topScore >= Number(data.threshold || 0)) {
             return {
                 tone: 'ready',
                 title: '可以带着这个问题去聊天',
-                detail: `已召回 ${matchedCount} 条可引用分块，聊天时启用知识库即可使用。`,
-                action: '用这个问题去聊天'
+                detail: `已准备 ${selectedCount} 条可引用资料，聊天会沿用当前知识库范围。`,
+                action: '带着资料去聊天'
             };
         }
-        if (matches.length > 0) {
+        if (matchedCount > 0) {
             return {
                 tone: 'warning',
                 title: '召回到相近分块，但证据还不够稳',
-                detail: '可以换成更具体的问题，或降低阈值后再测试一次。',
-                action: '带着问题去聊天'
+                detail: '这些分块尚未通过引用门槛；可以换成更具体的问题，或降低阈值后再测试一次。',
+                action: '仍用知识库去聊天'
             };
         }
         return {
             tone: 'empty',
-            title: '这次没有召回到可用分块',
-            detail: '请换个问法、上传相关文档，或确认文档已经就绪并启用。',
-            action: '回到聊天'
+            title: '这次没有找到可引用的资料',
+            detail: hiddenCandidateCount ? '初筛到的候选均未达到当前引用门槛，请换个更具体的问法或调整阈值。' : '请换个问法、上传相关文档，或确认文档已经就绪并启用。',
+            action: '仍用知识库去聊天'
         };
     })();
 
@@ -395,13 +376,10 @@ const renderRagDebugResults = (data) => {
             <button type="button" data-rag-debug-chat="${window.Pivot.legacy.escapeRagAttr(data.query || '')}">${window.Pivot.legacy.escapeRagHtml(debugVerdict.action)}</button>
         </div>
         <div class="rag-debug-meta">
-            <span>关键词：${window.Pivot.legacy.escapeRagHtml((data.keywords || []).join(' / ') || '-')}</span>
-            <span>候选：${Number(data.candidateCount || 0)}</span>
+            <span>检索词：${window.Pivot.legacy.escapeRagHtml(displayKeywords.join(' / ') || data.query || '-')}</span>
+            <span>可引用：${selectedCount}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
             ${feedbackAdjustedCount ? `<span>反馈校正：${feedbackAdjustedCount} 条</span>` : ''}
-            ${rankingMode ? `<span>Mode: ${window.Pivot.legacy.escapeRagHtml(rankingMode)}</span>` : ''}
-            ${hybridLabel ? `<span>Hybrid: ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}</span>` : ''}
-            ${queueLabel ? `<span>Queue: ${window.Pivot.legacy.escapeRagHtml(queueLabel)}</span>` : ''}
             ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
         </div>
         ${groupedList.length > 1 ? `
@@ -415,7 +393,7 @@ const renderRagDebugResults = (data) => {
             </div>
         ` : ''}
         <div class="rag-debug-list">
-            ${matches.map((m, index) => {
+            ${visibleMatches.map((m, index) => {
         const score = Number(m.score || 0);
         const fusedScore = Number(m.fusedScore ?? m.scores?.fused ?? score);
         const rankScore = Number(m.rankScore ?? m.scores?.rank ?? fusedScore);
@@ -425,8 +403,8 @@ const renderRagDebugResults = (data) => {
         const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
         const scoreDetails = [
             `rank #${Number(m.rank || index + 1)}`,
-            `dense ${score.toFixed(3)}`,
-            `fused ${fusedScore.toFixed(3)}`,
+            `相关度 ${score.toFixed(3)}`,
+            `融合分 ${fusedScore.toFixed(3)}`,
             `排序 ${rankScore.toFixed(3)}`,
             `引用可信度 ${Math.round(citationConfidence * 100)}%`,
             denseRank ? `dense-rank #${denseRank}` : '',
@@ -437,7 +415,7 @@ const renderRagDebugResults = (data) => {
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
                     <div class="rag-debug-item-head">
                         <strong>#${index + 1} ${window.Pivot.legacy.escapeRagHtml(m.source || '-')}</strong>
-                        <span class="rag-debug-score" title="Dense / fused / feedback rank / citation confidence">${score.toFixed(3)}${m.matched ? ' HIT' : ''}${m.selected ? ' | MMR' : ''} · ${Math.round(citationConfidence * 100)}%</span>
+                        <span class="rag-debug-score" title="相关度 / 融合分 / 排序分 / 引用可信度">${score.toFixed(3)}${m.selected ? ' · 可引用' : ' · 待核验'} · ${Math.round(citationConfidence * 100)}%</span>
                     </div>
                     <div class="rag-debug-score-bar" aria-hidden="true">
                         <div class="rag-debug-score-bar-fill" style="width:${percent.toFixed(1)}%"></div>
@@ -450,8 +428,12 @@ const renderRagDebugResults = (data) => {
                     </div>
                 </div>
                 `;
-    }).join('') || '<div class="rag-debug-empty">没有召回到可用分块</div>'}
+    }).join('') || '<div class="rag-debug-empty">没有达到当前引用门槛的资料</div>'}
         </div>
+        <details class="rag-debug-diagnostics">
+            <summary>查看检索诊断</summary>
+            <div>${hiddenCandidateCount ? `已隐藏 ${hiddenCandidateCount} 条低置信候选，` : ''}初筛 ${Number(data.candidateCount || 0)} 条${rankingMode ? ` · ${window.Pivot.legacy.escapeRagHtml(rankingMode === 'keyword fallback' ? '关键词降级检索' : rankingMode)}` : ''}${hybridLabel ? ` · ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}` : ''}${queueLabel ? ` · 队列 ${window.Pivot.legacy.escapeRagHtml(queueLabel)}` : ''}</div>
+        </details>
     `);
 };
 

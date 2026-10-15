@@ -16,16 +16,7 @@
     .rag-debug-panel .form-input { margin: 0; height: 32px; flex: 1; font-size: 0.8rem; padding: 5px 9px; }
     .rag-debug-panel .rag-debug-param { flex: 0 0 80px; }
     .rag-debug-panel button { height: 32px; white-space: nowrap; font-size: 0.78rem; padding: 0 11px; }
-    .rag-debug-history { margin: 0 0 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(148, 163, 184, 0.04); overflow: hidden; }
-    .rag-debug-history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 0.74rem; }
-    .rag-debug-history-head strong { color: var(--text-main); }
-    .rag-debug-history-head span { color: var(--text-muted); }
-    .rag-debug-history-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; padding: 7px; }
-    .rag-debug-history-item { display: grid; gap: 3px; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); color: inherit; text-align: left; cursor: pointer; }
-    .rag-debug-history-item:hover, .rag-debug-history-item:focus-visible { border-color: rgba(59, 130, 246, 0.45); box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08); outline: none; }
-    .rag-debug-history-query { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.74rem; font-weight: 600; }
-    .rag-debug-history-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
-    .rag-debug-history-empty { padding: 8px 10px; color: var(--text-muted); font-size: 0.72rem; text-align: center; }    .rag-debug-results { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(148, 163, 184, 0.04); overflow: hidden; }
+    .rag-debug-results { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(148, 163, 184, 0.04); overflow: hidden; }
     .rag-debug-meta { display: flex; flex-wrap: wrap; gap: 7px; padding: 8px 10px; color: var(--text-muted); font-size: 0.72rem; border-bottom: 1px solid var(--border); }
     .rag-debug-list { display: grid; gap: 7px; padding: 8px; max-height: 300px; overflow: auto; }
     .rag-debug-item { border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px; background: var(--bg-secondary); }

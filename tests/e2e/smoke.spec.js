@@ -687,8 +687,41 @@ test.describe('Pivot browser smoke', () => {
     test('knowledge workspace exposes RAG debug controls', async ({ page }) => {
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await expect(page.locator('#rag-debug-modal')).toHaveCount(1);
-        await expect(page.locator('#rag-debug-history')).toHaveCount(1);
+        await expect(page.locator('#rag-debug-history')).toHaveCount(0);
         await expect(page.locator('#rag-debug-results')).toHaveCount(1);
+    });
+
+    test('召回测试每次打开重置界面，带入聊天会明确请求知识库', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.());
+        await expect(page.locator('#knowledge-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        const retrievalMenu = page.locator('.knowledge-action-menu').filter({ hasText: '检索与图谱' });
+        await retrievalMenu.locator('summary').click();
+        const openDebug = page.locator('#rag-debug-modal-open-btn');
+        await expect(openDebug).toBeVisible();
+        await openDebug.click();
+        const debugModal = page.locator('#rag-debug-modal');
+        await expect(debugModal).toBeVisible();
+        await page.locator('#rag-debug-query').fill('上一轮调试问题');
+        await page.locator('#rag-debug-results').evaluate(element => { element.textContent = '上一轮结果'; });
+        await page.locator('#rag-debug-modal-close').click();
+        if (!(await openDebug.isVisible())) await retrievalMenu.locator('summary').click();
+        await openDebug.click();
+        await expect(page.locator('#rag-debug-query')).toHaveValue('');
+        await expect(page.locator('#rag-debug-results')).toContainText('请输入测试问题');
+        await expect(page.locator('#rag-debug-history')).toHaveCount(0);
+
+        await page.locator('#rag-debug-query').fill('请说明当前资料的审批流程');
+        await page.locator('#rag-debug-results').evaluate(element => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.dataset.ragDebugChat = '请说明当前资料的审批流程';
+            button.textContent = '带着资料去聊天';
+            element.replaceChildren(button);
+        });
+        await page.locator('[data-rag-debug-chat]').click();
+        await expect.poll(() => page.evaluate(() => window.Pivot.moduleApi('chat.autoRoute').getOverrides('请说明当前资料的审批流程').forceRag)).toBe(true);
+        await expect(page.locator('#user-input')).toHaveValue('请说明当前资料的审批流程');
     });
 
     test('long chat opens at the newest message and remains scrollable both ways', async ({ page }) => {

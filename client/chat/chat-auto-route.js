@@ -11,6 +11,7 @@
     let mentionScope = '';
     let mentionSearchQuery = '';
     let mentionPage = 0;
+    let pendingRagOverride = null;
 
     const input = () => document.getElementById('user-input');
     // 输入区不再提供开关：在服务端能力开关允许时，普通会话始终采用自适应路由。
@@ -42,7 +43,7 @@
     const getOverrides = prompt => {
         const current = String(prompt || input()?.value || '');
         const active = selections.filter(selection => current.includes(selection.token));
-        return {
+        const overrides = {
             // @Wiki Space 同时显式固定其底层专题库，服务端再以 wikiSpaces
             // 选择综合页；两者都通过现有权限过滤，不能扩大可见范围。
             collections: active.filter(selection => selection.kind === 'collection').map(selection => selection.id)
@@ -50,8 +51,27 @@
             wikiSpaces: active.filter(selection => selection.kind === 'wiki').map(selection => selection.id),
             tools: active.filter(selection => selection.kind === 'tool').map(selection => selection.fullName)
         };
+        if (pendingRagOverride) {
+            overrides.forceRag = true;
+            overrides.collections = [...new Set([...overrides.collections, ...pendingRagOverride.collections])];
+            overrides.tagNames = pendingRagOverride.tagNames.slice();
+        }
+        return overrides;
     };
-    const clearOverrides = () => { selections = []; };
+    const clearOverrides = () => { selections = []; pendingRagOverride = null; };
+    const queueRagRetrievalForNextMessage = (scope = {}) => {
+        const rawCollections = Array.isArray(scope.collectionIds)
+            ? scope.collectionIds
+            : [scope.collectionId];
+        const collections = [...new Set(rawCollections
+            .map(value => Number.parseInt(value, 10))
+            .filter(value => Number.isSafeInteger(value) && value > 0))];
+        const tagNames = (Array.isArray(scope.tagNames) ? scope.tagNames : [scope.tagName])
+            .map(value => String(value || '').trim())
+            .filter(Boolean)
+            .slice(0, 20);
+        pendingRagOverride = { collections, tagNames };
+    };
     const mentionQuery = value => {
         const match = String(value || '').match(/(?:^|\s)@([^\s@]{0,80})$/u);
         return match ? String(match[1] || '').toLowerCase() : null;
@@ -388,6 +408,7 @@
         getOverrides,
         getRagPreference,
         isAvailable: () => available,
+        queueRagRetrievalForNextMessage,
         setAutoRouteEnabled,
         setAvailable,
         setRagPreference,

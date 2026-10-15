@@ -236,7 +236,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(knowledgePartial, /批量重建/);
     assert.match(ragDocs, /重新索引/);
     assert.match(ragPanels, /rag-debug-verdict/);
-    assert.match(ragPanels, /用这个问题去聊天/);
+    assert.match(ragPanels, /带着资料去聊天/);
     assert.match(ragDocs, /正在上传并向量化文档/);
     assert.match(ragDocs, /正在测试召回效果/);
     assert.match(ragDocs, /暂无知识库文档/);
@@ -252,6 +252,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(adminSettings, /updateRagChunkOverlapLimit/);
     assert.match(ragCore, /data-rag-debug-chat/);
     assert.match(ragCore, /pivot_chat_rag_enabled/);
+    assert.match(ragCore, /queueRagRetrievalForNextMessage/);
     assert.doesNotMatch(chatShellPartial, /chat-tool-status/);
     assert.match(chatShellPartial, /id="chat-mode-trigger"/);
     assert.match(chatShellPartial, /data-chat-mode-option="normal"/);
@@ -400,6 +401,65 @@ test('知识图谱卡片使用单一自定义浮层并补全实体悬停信息',
     assert.match(ragCore, /#rag-graph-node-tooltip/);
     assert.match(graphCss, /pointer-events:\s*auto/);
     assert.match(graphCss, /overflow:\s*auto/);
+});
+
+test('知识图谱实体类型、关系类型与状态全面中文化', () => {
+    const sandbox = {
+        window: {
+            Pivot: {}
+        }
+    };
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-graph-layout.js'), 'utf8'),
+        sandbox
+    );
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-graph-render.js'), 'utf8'),
+        sandbox
+    );
+    const graphRender = sandbox.window.Pivot.ragGraphRender;
+    assert.strictEqual(graphRender.graphTypeLabel('legal_doc'), '法规');
+    assert.strictEqual(graphRender.graphTypeLabel('clause'), '条文');
+    assert.strictEqual(graphRender.graphTypeLabel('obligation'), '义务');
+    assert.strictEqual(graphRender.graphTypeLabel('penalty'), '罚则');
+    assert.strictEqual(graphRender.graphTypeLabel('legal_document'), '法规');
+
+    assert.strictEqual(graphRender.graphRelationLabel('applies_to'), '适用');
+    assert.strictEqual(graphRender.graphRelationLabel('references'), '引用');
+    assert.strictEqual(graphRender.graphRelationLabel('supersedes'), '替代');
+    assert.strictEqual(graphRender.graphRelationLabel('prohibits'), '禁止');
+    assert.strictEqual(graphRender.graphRelationLabel('requires'), '要求');
+    assert.strictEqual(graphRender.graphRelationLabel('regulates'), '规范');
+
+    assert.strictEqual(graphRender.graphStatusLabel('active'), '已确认');
+    assert.strictEqual(graphRender.graphStatusLabel('pending'), '待确认');
+    assert.strictEqual(graphRender.graphStatusLabel('deleted'), '已删除');
+    assert.strictEqual(graphRender.graphStatusLabel('stale'), '已失效');
+
+    const summaryHtml = graphRender.buildGraphSummaryHtml({
+        entities: 904,
+        relations: 369,
+        topTypes: [
+            { type: 'concept', count: 475 },
+            { type: 'policy', count: 305 },
+            { type: 'legal_doc', count: 9 }
+        ]
+    }, {
+        graphTypeLabel: graphRender.graphTypeLabel,
+        labels: { entities: '实体', relations: '关系' }
+    });
+    assert.match(summaryHtml, /<small>法规<\/small><b>9<\/b>/);
+    assert.doesNotMatch(summaryHtml, /legal_doc/);
+
+    const tooltip = graphRender.buildGraphRelationTooltip({
+        source_name: '治安管理处罚法',
+        relation_type: 'applies_to',
+        target_name: '直接责任人员',
+        status: 'active'
+    });
+    assert.match(tooltip, /关系：适用/);
+    assert.match(tooltip, /状态：已确认/);
+    assert.doesNotMatch(tooltip, /applies_to/);
 });
 
 test('聊天回答仅在需要时显示紧凑的知识库和工具库凭据', () => {

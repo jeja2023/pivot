@@ -56,6 +56,7 @@ test('自适应路由清理显式覆盖，禁止把非 MCP 名称传入工具覆
         wikiSpaces: [],
         tools: ['mcp.3.db.query'],
         excludedTools: ['mcp.4.viz.chart'],
+        forceRag: false,
         excludeRag: false,
         excludeTools: false
     });
@@ -65,8 +66,40 @@ test('路由覆盖清理 Wiki Space 标识，@Wiki 会同时固定原始专题�
     assert.deepEqual(normalizeRouteOverrides({
         collections: [12], wikiSpaces: ['8', 'bad', 8, -1], tools: []
     }), {
-        collections: [12], wikiSpaces: [8], tools: [], excludedTools: [], excludeRag: false, excludeTools: false
+        collections: [12], wikiSpaces: [8], tools: [], excludedTools: [], forceRag: false, excludeRag: false, excludeTools: false
     });
+});
+
+test('手动开启知识库会固定本轮检索，避免创作类问法被智能路由跳过', async () => {
+    const { router } = routerForTests();
+    const plan = await router.resolveRoutePlan({
+        prompt: '请总结这份材料',
+        user: { id: 7 },
+        state: { ragEnabled: true, ragPreference: 'enabled', mcpEnabled: false, autoRouteEnabled: true }
+    });
+    assert.equal(plan.mode, 'explicit');
+    assert.equal(plan.rag.action, 'retrieve');
+    assert.equal(plan.rag.reasonCode, 'explicit_rag_request');
+    assert.equal(plan.execution.rag.shouldRetrieve, true);
+});
+
+test('从召回测试带入聊天的一次性知识库请求会固定当前轮检索', async () => {
+    const { router } = routerForTests();
+    const plan = await router.resolveRoutePlan({
+        prompt: '请总结这份材料',
+        user: { id: 7 },
+        state: {
+            ragEnabled: true,
+            ragPreference: 'auto',
+            mcpEnabled: false,
+            autoRouteEnabled: true,
+            routeOverrides: { forceRag: true }
+        }
+    });
+    assert.equal(plan.mode, 'explicit');
+    assert.equal(plan.rag.action, 'retrieve');
+    assert.equal(plan.rag.reasonCode, 'explicit_rag_request');
+    assert.equal(plan.execution.rag.shouldRetrieve, true);
 });
 
 test('纯闲聊不触发知识库或工具发现', async () => {

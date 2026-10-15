@@ -11,7 +11,27 @@
         policy: '制度',
         project: '项目',
         role: '角色',
-        concept: '概念'
+        concept: '概念',
+        legal_doc: '法规',
+        clause: '条文',
+        obligation: '义务',
+        right: '权利',
+        penalty: '罚则',
+        subject: '主体',
+        standard: '标准',
+        term: '术语',
+        entity: '实体',
+        organization: '组织',
+        person: '人员',
+        event: '事件',
+        location: '地点',
+        product: '产品',
+        data: '数据',
+        metric: '指标',
+        tool: '工具',
+        module: '模块',
+        service: '服务',
+        component: '组件'
     };
     const GRAPH_RELATION_LABELS = {
         related_to: '相关',
@@ -19,16 +39,108 @@
         belongs_to: '归属',
         depends_on: '依赖',
         contains: '包含',
-        affects: '影响'
+        affects: '影响',
+        applies_to: '适用',
+        references: '引用',
+        supersedes: '替代',
+        prohibits: '禁止',
+        requires: '要求',
+        regulates: '规范',
+        calls: '调用',
+        integrates_with: '集成',
+        implements: '实现',
+        owned_by: '所属',
+        has_milestone: '里程碑',
+        delivered_by: '交付于',
+        manages: '管理',
+        produces: '产出',
+        defines: '定义',
+        uses: '使用',
+        triggers: '触发',
+        supports: '支持',
+        contradicts: '冲突'
     };
-    const GRAPH_RELATION_ORDER = ['related_to', 'responsible_for', 'belongs_to', 'depends_on', 'contains', 'affects'];
+    const GRAPH_RELATION_ORDER = [
+        'related_to', 'responsible_for', 'belongs_to', 'depends_on', 'contains', 'affects',
+        'applies_to', 'references', 'supersedes', 'prohibits', 'requires', 'regulates',
+        'calls', 'integrates_with', 'implements', 'owned_by', 'has_milestone', 'delivered_by',
+        'manages', 'produces', 'defines', 'uses', 'triggers', 'supports', 'contradicts'
+    ];
 
     function graphTypeLabel(type) {
-        return GRAPH_TYPE_LABELS[type] || type || '概念';
+        if (!type) return '概念';
+        const raw = String(type).trim();
+        const key = raw.toLowerCase();
+        if (GRAPH_TYPE_LABELS[key]) return GRAPH_TYPE_LABELS[key];
+        const normalizedKey = key.replace(/[-\s]+/g, '_');
+        if (GRAPH_TYPE_LABELS[normalizedKey]) return GRAPH_TYPE_LABELS[normalizedKey];
+        const aliasMap = {
+            legal: '法规',
+            law: '法规',
+            legal_document: '法规',
+            legaldoc: '法规',
+            regulation: '法规',
+            rule: '制度',
+            article: '条文',
+            section: '章节',
+            dept: '部门',
+            org: '组织',
+            sys: '系统',
+            proj: '项目',
+            proc: '流程'
+        };
+        if (aliasMap[normalizedKey]) return aliasMap[normalizedKey];
+        return raw;
     }
 
     function graphRelationLabel(type) {
-        return GRAPH_RELATION_LABELS[type] || type || '相关';
+        if (!type) return '相关';
+        const raw = String(type).trim();
+        const key = raw.toLowerCase();
+        if (GRAPH_RELATION_LABELS[key]) return GRAPH_RELATION_LABELS[key];
+        const normalizedKey = key.replace(/[-\s]+/g, '_');
+        if (GRAPH_RELATION_LABELS[normalizedKey]) return GRAPH_RELATION_LABELS[normalizedKey];
+        const aliasMap = {
+            relate: '相关',
+            related: '相关',
+            belong: '归属',
+            depend: '依赖',
+            contain: '包含',
+            affect: '影响',
+            apply: '适用',
+            reference: '引用',
+            refer: '引用',
+            supersede: '替代',
+            prohibit: '禁止',
+            require: '要求',
+            call: '调用',
+            integrate: '集成',
+            implement: '实现',
+            own: '所属',
+            milestone: '里程碑',
+            deliver: '交付于',
+            manage: '管理',
+            produce: '产出',
+            define: '定义',
+            use: '使用',
+            trigger: '触发',
+            support: '支持',
+            contradict: '冲突'
+        };
+        if (aliasMap[normalizedKey]) return aliasMap[normalizedKey];
+        return raw;
+    }
+
+    function graphStatusLabel(status) {
+        const map = {
+            active: '已确认',
+            pending: '待确认',
+            deleted: '已删除',
+            disabled: '已禁用',
+            draft: '草稿',
+            stale: '已失效'
+        };
+        return map[String(status || '').toLowerCase()] || status || '已确认';
     }
 
     function getGraphNodeName(node) {
@@ -51,9 +163,9 @@
         const chunkText = String(row.excerpt_text || row.chunk_text || '').trim();
         const lines = [
             `起点：${row.source_name || '-'}`,
-            `关系：${relationText}${row.relation_type && row.relation_type !== relationText ? `（${row.relation_type}）` : ''}`,
+            `关系：${relationText}`,
             `终点：${row.target_name || '-'}`,
-            `状态：${row.status || 'active'}`,
+            `状态：${graphStatusLabel(row.status)}`,
             `来源：${row.doc_name || '知识图谱'}`,
             `可信度：${Number(row.confidence || 0).toFixed(2)}`,
             row.description ? `描述：${row.description}` : '',
@@ -528,6 +640,7 @@
         ,
         getGraphNodeName,
         graphRelationLabel,
-        graphTypeLabel
+        graphTypeLabel,
+        graphStatusLabel
     };
 })();

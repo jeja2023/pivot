@@ -52,6 +52,7 @@ function normalizeRouteOverrides(value = {}) {
         wikiSpaces: normalizeCollectionIds(raw.wikiSpaces ?? raw.wikiSpaceIds ?? raw.wikiSpaceId, MAX_ROUTE_OVERRIDE_WIKI_SPACES),
         tools: normalizeToolNames(raw.tools ?? raw.toolNames),
         excludedTools: normalizeToolNames(raw.excludedTools ?? raw.excludeTools),
+        forceRag: normalizeBoolean(raw.forceRag ?? raw.useKnowledgeBase ?? raw.requireRag, false),
         excludeRag: normalizeBoolean(raw.excludeRag ?? raw.disableRag, false),
         excludeTools: normalizeBoolean(raw.excludeTools ?? raw.disableTools, false)
     };
@@ -275,11 +276,11 @@ function buildRouteSseEvent(plan = {}) {
 function createSemanticRouter(deps = {}) {
     const resolveDecision = deps.resolveBusinessDecision || resolveBusinessDecision;
 
-    async function resolveRouteDecisions({ taskState, user, modelCfg = null, state, rag, tools, routeEnabled, hasExplicitScope, overrides, evaluateRag = false, evaluateTools = false, env, signal }) {
+    async function resolveRouteDecisions({ taskState, user, modelCfg = null, state, rag, tools, routeEnabled, hasExplicitRagRequest, overrides, evaluateRag = false, evaluateTools = false, env, signal }) {
         const ragFallback = rag.action === 'retrieve' ? 'retrieve' : 'skip';
         // 影子模式只禁止改变执行路径，不能缩窄可比较候选；否则学习型提供器
         // 永远只能复述现有路由，无法产生可用于评估的替代建议。
-        const ragFixed = !routeEnabled || hasExplicitScope || overrides.excludeRag || !state.ragEnabled;
+        const ragFixed = !routeEnabled || hasExplicitRagRequest || overrides.excludeRag || !state.ragEnabled;
         const ragCandidates = [
             buildDecisionActionCandidate('chat.rag', 'retrieve', { allowed: ragFixed ? ragFallback === 'retrieve' : true }),
             buildDecisionActionCandidate('chat.rag', 'skip', { allowed: ragFixed ? ragFallback === 'skip' : true })
@@ -337,7 +338,10 @@ function createSemanticRouter(deps = {}) {
             ...(overrides.collections.length ? { collectionIds: overrides.collections } : {})
         });
         const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
-        const mode = !routeEnabled ? 'disabled' : shadow ? 'shadow' : (hasExplicitScope || overrides.tools.length || overrides.excludeRag || overrides.excludeTools) ? 'explicit' : 'auto';
+        // “带着问题去聊天”和手动开启知识库都代表用户的明确检索意图。
+        // 此时智能路由只能优化排序与范围，不能把该轮请求误判为无需检索。
+        const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag;
+        const mode = !routeEnabled ? 'disabled' : shadow ? 'shadow' : (hasExplicitRagRequest || overrides.tools.length || overrides.excludeRag || overrides.excludeTools) ? 'explicit' : 'auto';
         let queryVector = null;
         let embeddingDurationMs = 0;
         let embeddingError = '';
@@ -346,7 +350,7 @@ function createSemanticRouter(deps = {}) {
         const toolRequested = explicitToolIntent || overrides.tools.length > 0;
         // 路由本身是按需增强，不是每一轮对话的前置成本。普通问答不读取
         // 目录、不计算 embedding，也不把“可能有工具”转换为授权弹窗。
-        const needAutoRag = routeEnabled && config.autoRagEnabled && state.ragEnabled && !hasExplicitScope && !overrides.excludeRag && knowledgeRequested;
+        const needAutoRag = routeEnabled && config.autoRagEnabled && state.ragEnabled && !hasExplicitRagRequest && !overrides.excludeRag && knowledgeRequested;
         const needAutoTools = routeEnabled && config.autoToolDiscoveryEnabled && !overrides.excludeTools && toolRequested;
 
         if ((needAutoRag || needAutoTools) && cleanPrompt) {
@@ -382,9 +386,9 @@ function createSemanticRouter(deps = {}) {
         };
         if (!state.ragEnabled || overrides.excludeRag) {
             rag.reasonCode = overrides.excludeRag ? 'explicit_rag_excluded' : 'rag_disabled';
-        } else if (hasExplicitScope) {
+        } else if (hasExplicitRagRequest) {
             rag.action = 'retrieve';
-            rag.reasonCode = 'explicit_rag_scope';
+            rag.reasonCode = hasExplicitScope ? 'explicit_rag_scope' : 'explicit_rag_request';
         } else if (!routeEnabled || !config.autoRagEnabled) {
             rag.action = 'retrieve';
             rag.reasonCode = 'legacy_rag_scope';
@@ -543,7 +547,7 @@ function createSemanticRouter(deps = {}) {
                 tools,
                 routeEnabled,
                 shadow,
-                hasExplicitScope,
+                hasExplicitRagRequest,
                 overrides,
                 evaluateRag: needAutoRag,
                 evaluateTools: needAutoTools && (tools.action === 'propose' || tools.action === 'candidate_only'),

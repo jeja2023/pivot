@@ -73,8 +73,27 @@ function buildRagSearchTerms(query, limit = 32) {
         .slice(0, limit);
 }
 
+// 检索索引会把下划线、路径分隔符等编码成 `zsym...z`，以便 PostgreSQL
+// simple FTS 能够精确匹配。这些内部词元不能直接呈现给用户，因此调试界面
+// 使用独立的、未经编码的展示词列表。
+function buildRagDisplayTerms(query, limit = 8) {
+    const normalized = normalizeSearchText(query);
+    if (!normalized) return [];
+    const lexicalTerms = normalized
+        .split(SPLIT_PATTERN)
+        .map(item => item.trim())
+        .filter(item => item.length >= 2);
+    const cjkPhrases = extractCjkRuns(normalized)
+        .map(item => item.trim())
+        .filter(item => item.length >= 2);
+    return uniq([...lexicalTerms, ...cjkPhrases])
+        .sort((a, b) => b.length - a.length || a.localeCompare(b, 'zh-CN'))
+        .slice(0, limit);
+}
+
 module.exports = {
     buildCjkNgrams,
+    buildRagDisplayTerms,
     buildSymbolicSearchTerms,
     buildRagSearchContent,
     buildRagSearchTerms,

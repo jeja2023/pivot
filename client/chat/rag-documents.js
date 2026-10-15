@@ -1022,24 +1022,23 @@ window.Pivot.legacy.sendRagFeedback = async (button) => {
     }
 };
 
-async function loadRagDebugHistory() {
-    try {
-        const res = await apiFetch(`${API_BASE}/rag/debug-query/history?limit=8`, { headers: authHeaders() });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.error) throw new Error(data.error || '调试历史加载失败');
-        renderRagDebugHistory(data.data || []);
-    } catch (e) {
-        const history = document.getElementById('rag-debug-history');
-        if (history) PivotSafeHtml.setHtml(history, '<div class="rag-debug-history-empty">调试历史暂不可用</div>');
-    }
+function resetRagDebugModal() {
+    const input = document.getElementById('rag-debug-query');
+    const results = document.getElementById('rag-debug-results');
+    if (input) input.value = '';
+    if (results) { results.classList.remove('hidden'); PivotSafeHtml.setHtml(results, '<div class="rag-debug-empty">请输入测试问题并点击“开始测试”</div>'); }
 }
-
+window.Pivot.legacy.openRagDebugModal = function () {
+    const modal = document.getElementById('rag-debug-modal');
+    if (!modal) return;
+    window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-debug-query' });
+    resetRagDebugModal();
+    window.Pivot.legacy.loadKnowledgeDocs?.();
+};
 window.Pivot.exposeModule('rag.debug', {
-    loadRagDebugHistory,
+    resetRagDebugModal,
     openKnowledgeCollectionShareModal: (...args) => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.(...args)
-}, {
-    loadRagDebugHistory: 'loadRagDebugHistory'
-});
+}, { resetRagDebugModal: 'resetRagDebugModal' });
 
 window.Pivot.legacy.debugRagQuery = async () => {
     const input = document.getElementById('rag-debug-query');
@@ -1085,7 +1084,6 @@ window.Pivot.legacy.debugRagQuery = async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.error) throw new Error(data.error || '检索测试失败');
         renderRagDebugResults(data);
-        window.Pivot.legacy.loadRagDebugHistory?.();
     } catch (e) {
         showToast(e.message || '检索测试失败', 'error');
         if (results) {

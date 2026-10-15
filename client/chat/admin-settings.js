@@ -960,11 +960,9 @@ window.Pivot.legacy.bindRagDebugModalEvents = function() {
     const modal = document.getElementById('rag-debug-modal');
     if (!openBtn || !modal) return;
 
+    openBtn.dataset.ragDebugBound = 'true';
     openBtn.onclick = () => {
-        window.Pivot.legacy.setKnowledgeModalVisibility?.(modal, true, { focusSelector: '#rag-debug-query' });
-        // 如果是空的，自动填充默认参数
-        if (window.Pivot.legacy.loadKnowledgeDocs) window.Pivot.legacy.loadKnowledgeDocs();
-        window.Pivot.legacy.loadRagDebugHistory?.();
+        window.Pivot.legacy.openRagDebugModal?.();
     };
     
     if (closeBtn) {

@@ -64,6 +64,38 @@
         return `候选页面 ${Number(validation.receivedCandidates || 0)} 个 · 通过 ${Number(validation.acceptedCandidates || 0)} 个${reasons.length ? ` · ${reasons.join('，')}` : ''}`;
     }
 
+    // 去除 Markdown 格式符号（如 #、**、*、`、~~、> 等），保留纯净文本排版与规范列表符
+    function stripMarkdownFormatting(content) {
+        if (!content) return '';
+        let str = String(content);
+        // 移除代码围栏
+        str = str.replace(/^```[a-zA-Z0-9_-]*\s*$/gm, '');
+        // 移除行首 Markdown 标题标记（# 至 ######）
+        str = str.replace(/^#{1,6}\s*/gm, '');
+        // 移除引用符号 >
+        str = str.replace(/^>\s*/gm, '');
+        // 统一无序列表符号为规范圆点 •
+        str = str.replace(/^\s*[-*+]\s+/gm, '• ');
+        // 移除加粗与斜体标记 ** 或 * 或 __ 或 _
+        str = str.replace(/\*\*([^*\n]+?)\*\*/g, '$1');
+        str = str.replace(/__([^_\n]+?)__/g, '$1');
+        str = str.replace(/\*([^*\n]+?)\*/g, '$1');
+        str = str.replace(/_([^_\n]+?)_/g, '$1');
+        // 清理可能残留的孤立双星号
+        str = str.replace(/\*\*/g, '');
+        // 移除行内代码标记 `code`
+        str = str.replace(/`([^`\n]+?)`/g, '$1');
+        // 移除图片 ![alt](url) -> alt
+        str = str.replace(/!\[([^\]]*?)\]\([^)]+?\)/g, '$1');
+        // 移除 Markdown 链接 [text](url) -> text
+        str = str.replace(/\[([^\]]+?)\]\([^)]+?\)/g, '$1');
+        // 移除删除线 ~~text~~
+        str = str.replace(/~~([^~\n]+?)~~/g, '$1');
+        // 移除连续3个以上的分割线 --- 或 ***
+        str = str.replace(/^[-*_]{3,}\s*$/gm, '');
+        return str.trim();
+    }
+
     function clearScheduledRefresh() {
         if (refreshTimer) window.clearTimeout(refreshTimer);
         refreshTimer = null;
@@ -326,7 +358,7 @@
                 if (page.summary) {
                     const descP = document.createElement('p');
                     descP.className = 'knowledge-wiki-page-card-desc';
-                    descP.textContent = page.summary;
+                    descP.textContent = stripMarkdownFormatting(page.summary);
                     item.appendChild(descP);
                 }
 
@@ -683,7 +715,7 @@
                 const summaryBox = document.createElement('div');
                 summaryBox.className = 'knowledge-wiki-summary-box';
                 appendText(summaryBox, 'span', '页面摘要：', 'knowledge-wiki-summary-label');
-                appendText(summaryBox, 'span', data.page.summary, 'knowledge-wiki-summary-text');
+                appendText(summaryBox, 'span', stripMarkdownFormatting(data.page.summary), 'knowledge-wiki-summary-text');
                 detail.appendChild(summaryBox);
             }
 
@@ -694,7 +726,7 @@
             if (data.page.markdown) {
                 const markdownBox = document.createElement('div');
                 markdownBox.className = 'knowledge-wiki-markdown-box';
-                markdownBox.textContent = data.page.markdown;
+                markdownBox.textContent = stripMarkdownFormatting(data.page.markdown);
                 contentSec.appendChild(markdownBox);
             } else {
                 appendText(contentSec, 'p', '该页面尚未生成正文内容。', 'muted-text');

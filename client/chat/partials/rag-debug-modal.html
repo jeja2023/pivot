@@ -4,7 +4,7 @@
             <div class="rag-debug-modal-head">
                 <div>
                     <h3 id="rag-debug-title">知识库召回测试</h3>
-                    <p class="model-modal-desc">测试知识库检索准确度，查看匹配详情。</p>
+                    <p class="model-modal-desc">测试本次问题的检索效果，只显示本次结果与可引用资料。</p>
                 </div>
                 <button id="rag-debug-modal-close" class="btn-secondary btn-red-outline" type="button" data-knowledge-modal-close aria-label="关闭知识库召回测试">关闭</button>
             </div>
@@ -57,9 +57,7 @@
                     </div>
                 </div>
 
-                <!-- 结果展示区域 -->
-                <div id="rag-debug-history" class="rag-debug-history"></div>
-
+                <!-- 结果展示区域：每次打开由客户端重置，不展示历史调试记录。 -->
                 <div id="rag-debug-results" class="rag-debug-results" style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-primary); padding: 4px;">
                     <div class="rag-debug-empty" style="height: 180px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.85rem;">
                         请输入测试问题并点击“开始测试”

@@ -29,7 +29,8 @@ const {
     buildGraphSummaryHtml,
     getGraphNodeName,
     graphRelationLabel: graphRelationLabelText = (value) => String(value ?? ''),
-    graphTypeLabel: graphTypeLabelText = (value) => String(value ?? '')
+    graphTypeLabel: graphTypeLabelText = (value) => String(value ?? ''),
+    graphStatusLabel: graphStatusLabelText = (value) => String(value ?? '')
 } = window.Pivot?.ragGraphRender || {};
 
 const {
@@ -135,6 +136,23 @@ const ragConfirm = (title, message) => new Promise((resolve) => {
 });
 
 document.addEventListener('click', async (event) => {
+    const debugModal = document.getElementById('rag-debug-modal');
+    if (event.target === debugModal || event.target.closest('#rag-debug-modal-close')) {
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(debugModal, false);
+        return;
+    }
+
+    const debugOpenBtn = event.target.closest('#rag-debug-modal-open-btn');
+    if (debugOpenBtn) {
+        // 管理设置脚本按需加载。脚本尚未就绪时仍必须能打开召回测试，
+        // 不让一次性加载时序把知识库入口变成无响应按钮。
+        if (debugOpenBtn.dataset.ragDebugBound !== 'true') {
+            event.preventDefault();
+            window.Pivot.legacy.openRagDebugModal?.();
+        }
+        return;
+    }
+
     const activeActionMenu = event.target.closest('.knowledge-action-menu');
     if (activeActionMenu) {
         if (event.target.closest('.knowledge-action-menu-panel')) {
@@ -187,8 +205,14 @@ document.addEventListener('click', async (event) => {
     const debugChatBtn = event.target.closest('[data-rag-debug-chat]');
     if (debugChatBtn) {
         const query = debugChatBtn.dataset.ragDebugChat || document.getElementById('rag-debug-query')?.value || '';
-        document.getElementById('rag-debug-modal')?.classList.add('hidden');
+        const debugModal = document.getElementById('rag-debug-modal');
+        window.Pivot.legacy.setKnowledgeModalVisibility?.(debugModal, false);
         window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
+        // 这是用户从召回测试主动进入聊天，不应再交给意图识别决定是否检索。
+        // 智能路由仍可优化排序与范围，但下一条消息必须使用知识库。
+        window.Pivot.moduleApi('chat.autoRoute').queueRagRetrievalForNextMessage?.(
+            window.Pivot.legacy.getRagScopeSelection?.('debug') || {}
+        );
         try {
             localStorage.setItem('pivot_chat_rag_enabled', 'true');
         } catch (e) {

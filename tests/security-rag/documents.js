@@ -535,6 +535,7 @@ test('RAG 调试检索无需外部嵌入也会返回带分数的分块', async (
         );
         assert.equal(result.query, '权限配置审批');
         assert.ok(result.keywords.length > 0);
+        assert.deepEqual(result.displayKeywords, ['权限配置审批']);
         assert.equal(result.matches[0].chunkId, matched.lastInsertRowid);
         assert.equal(result.matches[0].score, 1);
         assert.equal(result.matches[0].matched, true);

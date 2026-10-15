@@ -21,6 +21,7 @@ const {
 } = require('../server/services/rag-index/embedding-client');
 const {
     buildRagSearchContent,
+    buildRagDisplayTerms,
     buildRagSearchTerms
 } = require('../server/services/rag-tokenizer');
 const {
@@ -151,6 +152,13 @@ test('RAG tokenizer preserves code identifiers and their symbols as searchable t
     const content = buildRagSearchContent('调用 foo_bar::run/v2');
     assert.ok(terms.some(term => term.includes('zsym5fz') && term.includes('zsym3az')));
     assert.ok(content.includes('zsym2fz'));
+});
+
+test('RAG 调试展示词不泄露内部符号编码', () => {
+    const displayTerms = buildRagDisplayTerms('请总结《中华人民共和国治安管理处罚法_20250627》');
+    assert.ok(displayTerms.includes('中华人民共和国治安管理处罚法'));
+    assert.ok(displayTerms.includes('20250627'));
+    assert.equal(displayTerms.some(term => /zsym[0-9a-f]+z/i.test(term)), false);
 });
 
 test('RAG PostgreSQL retrieval pushes vector distance and lexical ranking into the database', () => {

@@ -11,6 +11,7 @@ const {
 } = require('../rag-metrics');
 const {
     buildRagSearchContent,
+    buildRagDisplayTerms,
     buildRagSearchTerms
 } = require('../rag-tokenizer');
 const {
@@ -550,6 +551,7 @@ async function debugRetrieveContext(userId, query, {
     const safeCandidateLimit = Math.min(config.candidateLimit, MAX_DEBUG_CANDIDATE_LIMIT);
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
+    const displayKeywords = buildRagDisplayTerms(normalizedQuery);
     const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
         getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user }),
         selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
@@ -559,6 +561,7 @@ async function debugRetrieveContext(userId, query, {
         return {
             query: normalizedQuery,
             keywords,
+            displayKeywords,
             threshold: config.scoreThreshold,
             topK: safeTopK,
             candidateCount: 0,
@@ -645,6 +648,7 @@ async function debugRetrieveContext(userId, query, {
     return {
         query: normalizedQuery,
         keywords,
+        displayKeywords,
         threshold: config.scoreThreshold,
         topK: safeTopK,
         candidateCount: candidates.length,
