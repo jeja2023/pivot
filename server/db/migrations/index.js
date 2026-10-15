@@ -106,7 +106,14 @@ const migrationModules = [
     require('./regulations-vector-column-compatibility'),
     require('./pdf-tool-product-upgrade'),
     require('./ocr-product-upgrade'),
-    require('./ocr-async-exports')
+    require('./ocr-async-exports'),
+    require('./agent-workflow-templates'),
+    require('./agent-streaming-events'),
+    require('./agent-evaluation'),
+    require('./agent-tool-usage-stats'),
+    require('./agent-enhanced-planning'),
+    require('./agent-artifacts'),
+    require('./agent-orchestration-dsl')
 ];
 
 module.exports = migrationModules

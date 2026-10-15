@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模板详情 - Pivot</title>
+    <link rel="stylesheet" href="../chat/tailwind-output.css">
+    <link rel="stylesheet" href="../styles.css">
+    <script src="/common/vendor/marked.min.js"></script>
+    <style>
+        .tab-btn.active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .markdown-content {
+            line-height: 1.8;
+        }
+        .markdown-content h2 {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        .markdown-content h3 {
+            font-size: 1.25em;
+            font-weight: bold;
+            margin-top: 1.25em;
+            margin-bottom: 0.5em;
+        }
+        .markdown-content ul, .markdown-content ol {
+            margin-left: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+        }
+        .markdown-content code {
+            background-color: #f3f4f6;
+            padding: 0.2em 0.4em;
+            border-radius: 0.25em;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .markdown-content pre {
+            background-color: #1f2937;
+            color: #f3f4f6;
+            padding: 1em;
+            border-radius: 0.5em;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- 顶部导航 -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="templates.html" class="text-lg font-medium text-gray-900 hover:text-blue-600">
+                        ← 返回模板商城
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- 加载提示 -->
+        <div id="loadingIndicator" class="text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-blue-600"></div>
+            <p class="mt-4 text-gray-600">加载模板详情中...</p>
+        </div>
+
+        <!-- 模板内容 -->
+        <div id="templateContent" style="display: none;">
+            <!-- 模板头部 -->
+            <div class="bg-white rounded-lg shadow-sm p-8 mb-6">
+                <div class="flex items-start justify-between mb-6">
+                    <div class="flex-1">
+                        <h1 id="templateName" class="text-3xl font-bold text-gray-900 mb-3"></h1>
+                        <p id="templateDescription" class="text-lg text-gray-600 mb-4"></p>
+                        <div class="flex items-center space-x-4 text-sm text-gray-600">
+                            <span id="categoryBadge" class="px-3 py-1 bg-gray-100 rounded-full"></span>
+                            <span id="difficultyBadge" class="px-3 py-1 rounded-full"></span>
+                            <span id="estimatedTime"></span>
+                        </div>
+                    </div>
+                    <div id="builtinBadge" class="ml-4 px-4 py-2 bg-blue-100 text-blue-800 font-medium rounded-lg" style="display: none;">
+                        ✓ 官方模板
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="grid grid-cols-3 gap-4 pt-6 border-t">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-gray-900" id="ratingAvg">-</div>
+                        <div class="text-sm text-gray-600">平均评分</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-gray-900" id="usageCount">-</div>
+                        <div class="text-sm text-gray-600">使用次数</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-gray-900" id="ratingCount">-</div>
+                        <div class="text-sm text-gray-600">评价数量</div>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="flex space-x-4 mt-6">
+                    <button
+                        id="applyTemplateBtn"
+                        class="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        立即使用
+                    </button>
+                    <button
+                        id="rateTemplateBtn"
+                        class="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                        评分
+                    </button>
+                </div>
+            </div>
+
+            <!-- 标签页导航 -->
+            <div class="bg-white rounded-t-lg shadow-sm border-b">
+                <div class="flex space-x-8 px-8">
+                    <button class="tab-btn active py-4 font-medium text-gray-700 hover:text-blue-600 transition-colors" data-tab="documentation">
+                        文档说明
+                    </button>
+                    <button class="tab-btn py-4 font-medium text-gray-700 hover:text-blue-600 transition-colors" data-tab="variables">
+                        变量定义
+                    </button>
+                    <button class="tab-btn py-4 font-medium text-gray-700 hover:text-blue-600 transition-colors" data-tab="ratings">
+                        用户评价
+                    </button>
+                </div>
+            </div>
+
+            <!-- 标签页内容 -->
+            <div class="bg-white rounded-b-lg shadow-sm p-8">
+                <!-- 文档说明 -->
+                <div id="tab-documentation" class="tab-content">
+                    <div id="documentationContent" class="markdown-content prose max-w-none">
+                        <!-- Markdown 内容将在这里渲染 -->
+                    </div>
+
+                    <div class="mt-8 p-6 bg-gray-50 rounded-lg">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-3">示例输出</h3>
+                        <pre id="exampleOutput" class="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"><code></code></pre>
+                    </div>
+                </div>
+
+                <!-- 变量定义 -->
+                <div id="tab-variables" class="tab-content" style="display: none;">
+                    <div id="variablesList" class="space-y-4">
+                        <!-- 变量列表将在这里渲染 -->
+                    </div>
+                </div>
+
+                <!-- 用户评价 -->
+                <div id="tab-ratings" class="tab-content" style="display: none;">
+                    <div id="ratingsList" class="space-y-4">
+                        <p class="text-gray-500 text-center py-8">加载评价中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 应用模板对话框 -->
+    <div id="applyModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none; z-index: 1000;">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4">
+            <div class="p-6 border-b">
+                <h2 class="text-2xl font-bold text-gray-900">配置变量</h2>
+                <p class="text-gray-600 mt-2">请填写以下变量来创建工作流</p>
+            </div>
+            <div class="p-6">
+                <form id="variableForm" class="space-y-6">
+                    <!-- 表单将在这里动态生成 -->
+                </form>
+            </div>
+            <div class="p-6 border-t flex space-x-4">
+                <button
+                    id="submitApplyBtn"
+                    type="button"
+                    class="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    创建工作流
+                </button>
+                <button
+                    id="cancelApplyBtn"
+                    type="button"
+                    class="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                    取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 评分对话框 -->
+    <div id="rateModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none; z-index: 1000;">
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full m-4">
+            <div class="p-6 border-b">
+                <h2 class="text-2xl font-bold text-gray-900">评价模板</h2>
+            </div>
+            <div class="p-6">
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">评分</label>
+                    <div class="flex space-x-2">
+                        <button type="button" class="star-btn text-3xl text-gray-300 hover:text-yellow-400 transition-colors" data-rating="1">★</button>
+                        <button type="button" class="star-btn text-3xl text-gray-300 hover:text-yellow-400 transition-colors" data-rating="2">★</button>
+                        <button type="button" class="star-btn text-3xl text-gray-300 hover:text-yellow-400 transition-colors" data-rating="3">★</button>
+                        <button type="button" class="star-btn text-3xl text-gray-300 hover:text-yellow-400 transition-colors" data-rating="4">★</button>
+                        <button type="button" class="star-btn text-3xl text-gray-300 hover:text-yellow-400 transition-colors" data-rating="5">★</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">评论（可选）</label>
+                    <textarea
+                        id="ratingComment"
+                        rows="4"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="分享您的使用体验..."
+                    ></textarea>
+                </div>
+            </div>
+            <div class="p-6 border-t flex space-x-4">
+                <button
+                    id="submitRatingBtn"
+                    type="button"
+                    class="flex-1 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    提交评价
+                </button>
+                <button
+                    id="cancelRatingBtn"
+                    type="button"
+                    class="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                    取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../src/services/agent/templateService.js"></script>
+    <script>
+        let currentTemplate = null;
+        let selectedRating = 0;
+        let currentVariables = [];
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const templateId = urlParams.get('id');
+
+            if (!templateId) {
+                showError('缺少模板 ID');
+                return;
+            }
+
+            await loadTemplateDetail(templateId);
+            setupEventListeners();
+        });
+
+        // 加载模板详情
+        async function loadTemplateDetail(templateId) {
+            try {
+                const template = await window.TemplateService.getTemplateById(templateId);
+                currentTemplate = template;
+                renderTemplateDetail(template);
+
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('templateContent').style.display = 'block';
+            } catch (error) {
+                console.error('Failed to load template:', error);
+                showError('加载模板详情失败');
+            }
+        }
+
+        // 渲染模板详情
+        function renderTemplateDetail(template) {
+            // 基本信息
+            document.getElementById('templateName').textContent = template.name;
+            document.getElementById('templateDescription').textContent = template.description;
+            document.getElementById('categoryBadge').textContent = template.category_name || '其他';
+            document.getElementById('estimatedTime').textContent = `⏱️ ${template.estimated_time || '未知'}`;
+
+            // 官方标识
+            if (template.is_builtin) {
+                document.getElementById('builtinBadge').style.display = 'block';
+            }
+
+            // 难度
+            const difficultyBadge = document.getElementById('difficultyBadge');
+            const difficultyMap = {
+                'beginner': { text: '入门', color: 'bg-green-100 text-green-800' },
+                'intermediate': { text: '进阶', color: 'bg-yellow-100 text-yellow-800' },
+                'advanced': { text: '高级', color: 'bg-red-100 text-red-800' }
+            };
+            const difficulty = difficultyMap[template.difficulty] || difficultyMap['beginner'];
+            difficultyBadge.textContent = difficulty.text;
+            difficultyBadge.className = `px-3 py-1 rounded-full ${difficulty.color}`;
+
+            // 统计信息
+            document.getElementById('ratingAvg').textContent = template.rating_avg ? template.rating_avg.toFixed(1) : '暂无';
+            document.getElementById('usageCount').textContent = template.usage_count || 0;
+            document.getElementById('ratingCount').textContent = template.rating_count || 0;
+
+            // 文档
+            if (template.documentation) {
+                const html = marked.parse(template.documentation);
+                document.getElementById('documentationContent').innerHTML = html;
+            }
+
+            // 示例输出
+            if (template.example_output) {
+                document.getElementById('exampleOutput').querySelector('code').textContent = template.example_output;
+            }
+
+            // 变量
+            currentVariables = typeof template.variables === 'string'
+                ? JSON.parse(template.variables)
+                : (template.variables || []);
+            renderVariables(currentVariables);
+        }
+
+        // 渲染变量列表
+        function renderVariables(variables) {
+            const container = document.getElementById('variablesList');
+
+            if (variables.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">此模板无需配置变量</p>';
+                return;
+            }
+
+            container.innerHTML = variables.map(v => `
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex items-start justify-between mb-2">
+                        <h4 class="font-semibold text-gray-900">${v.label}</h4>
+                        ${v.required ? '<span class="text-red-500 text-sm">*必填</span>' : '<span class="text-gray-400 text-sm">可选</span>'}
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">${v.description || ''}</p>
+                    <div class="flex items-center space-x-4 text-sm text-gray-500">
+                        <span>类型: <code class="bg-gray-100 px-2 py-1 rounded">${v.type}</code></span>
+                        ${v.default ? `<span>默认值: <code class="bg-gray-100 px-2 py-1 rounded">${v.default}</code></span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 设置事件监听
+        function setupEventListeners() {
+            // 标签页切换
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tabName = btn.dataset.tab;
+                    switchTab(tabName);
+                });
+            });
+
+            // 应用模板
+            document.getElementById('applyTemplateBtn').addEventListener('click', () => {
+                showApplyModal();
+            });
+
+            document.getElementById('cancelApplyBtn').addEventListener('click', () => {
+                document.getElementById('applyModal').style.display = 'none';
+            });
+
+            document.getElementById('submitApplyBtn').addEventListener('click', async () => {
+                await submitApply();
+            });
+
+            // 评分
+            document.getElementById('rateTemplateBtn').addEventListener('click', () => {
+                document.getElementById('rateModal').style.display = 'flex';
+            });
+
+            document.getElementById('cancelRatingBtn').addEventListener('click', () => {
+                document.getElementById('rateModal').style.display = 'none';
+            });
+
+            document.querySelectorAll('.star-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    selectedRating = parseInt(btn.dataset.rating);
+                    updateStars();
+                });
+            });
+
+            document.getElementById('submitRatingBtn').addEventListener('click', async () => {
+                await submitRating();
+            });
+        }
+
+        // 切换标签页
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.tab === tabName) {
+                    btn.classList.add('active');
+                }
+            });
+
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.style.display = 'none';
+            });
+
+            document.getElementById(`tab-${tabName}`).style.display = 'block';
+
+            // 加载评价
+            if (tabName === 'ratings') {
+                loadRatings();
+            }
+        }
+
+        // 显示应用模板对话框
+        function showApplyModal() {
+            const form = document.getElementById('variableForm');
+            form.innerHTML = '';
+
+            if (currentVariables.length === 0) {
+                form.innerHTML = '<p class="text-gray-500 text-center">此模板无需配置变量，点击"创建工作流"即可使用</p>';
+            } else {
+                currentVariables.forEach(v => {
+                    const fieldHtml = createVariableField(v);
+                    form.insertAdjacentHTML('beforeend', fieldHtml);
+                });
+            }
+
+            document.getElementById('applyModal').style.display = 'flex';
+        }
+
+        // 创建变量输入字段
+        function createVariableField(variable) {
+            const isRequired = variable.required ? 'required' : '';
+            const defaultValue = variable.default || '';
+
+            let inputHtml = '';
+            switch (variable.type) {
+                case 'number':
+                    inputHtml = `<input type="number" name="${variable.name}" class="w-full px-3 py-2 border border-gray-300 rounded-lg" value="${defaultValue}" ${isRequired}>`;
+                    break;
+                case 'boolean':
+                    inputHtml = `<input type="checkbox" name="${variable.name}" class="w-4 h-4" ${defaultValue ? 'checked' : ''}>`;
+                    break;
+                case 'select':
+                    const options = variable.options || [];
+                    inputHtml = `<select name="${variable.name}" class="w-full px-3 py-2 border border-gray-300 rounded-lg" ${isRequired}>
+                        ${options.map(opt => `<option value="${opt.value}" ${opt.value === defaultValue ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                    </select>`;
+                    break;
+                default:
+                    inputHtml = `<input type="text" name="${variable.name}" class="w-full px-3 py-2 border border-gray-300 rounded-lg" value="${defaultValue}" ${isRequired}>`;
+            }
+
+            return `
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        ${variable.label}
+                        ${variable.required ? '<span class="text-red-500">*</span>' : ''}
+                    </label>
+                    ${variable.description ? `<p class="text-sm text-gray-500 mb-2">${variable.description}</p>` : ''}
+                    ${inputHtml}
+                </div>
+            `;
+        }
+
+        // 提交应用模板
+        async function submitApply() {
+            const form = document.getElementById('variableForm');
+            const formData = new FormData(form);
+            const variables = {};
+
+            currentVariables.forEach(v => {
+                const value = formData.get(v.name);
+                if (value !== null) {
+                    if (v.type === 'number') {
+                        variables[v.name] = parseFloat(value);
+                    } else if (v.type === 'boolean') {
+                        variables[v.name] = formData.has(v.name);
+                    } else {
+                        variables[v.name] = value;
+                    }
+                } else if (v.default !== undefined) {
+                    variables[v.name] = v.default;
+                }
+            });
+
+            try {
+                const instance = await window.TemplateService.applyTemplate(currentTemplate.id, variables);
+                alert('工作流创建成功！');
+                document.getElementById('applyModal').style.display = 'none';
+                // 跳转到工作流详情页
+                window.location.href = `../chat/chat.html#workflow/${instance.id}`;
+            } catch (error) {
+                console.error('Failed to apply template:', error);
+                alert('创建失败: ' + error.message);
+            }
+        }
+
+        // 更新星星显示
+        function updateStars() {
+            document.querySelectorAll('.star-btn').forEach((btn, index) => {
+                if (index < selectedRating) {
+                    btn.classList.add('text-yellow-400');
+                    btn.classList.remove('text-gray-300');
+                } else {
+                    btn.classList.add('text-gray-300');
+                    btn.classList.remove('text-yellow-400');
+                }
+            });
+        }
+
+        // 提交评分
+        async function submitRating() {
+            if (selectedRating === 0) {
+                alert('请选择评分');
+                return;
+            }
+
+            const comment = document.getElementById('ratingComment').value;
+
+            try {
+                await window.TemplateService.rateTemplate(currentTemplate.id, selectedRating, comment);
+                alert('评价提交成功！');
+                document.getElementById('rateModal').style.display = 'none';
+                // 重新加载模板详情
+                await loadTemplateDetail(currentTemplate.id);
+                // 切换到评价标签页
+                switchTab('ratings');
+            } catch (error) {
+                console.error('Failed to rate template:', error);
+                alert('评价失败: ' + error.message);
+            }
+        }
+
+        // 加载评价列表
+        async function loadRatings() {
+            const container = document.getElementById('ratingsList');
+            container.innerHTML = '<p class="text-gray-500 text-center py-8">加载中...</p>';
+
+            try {
+                const ratings = await window.TemplateService.getTemplateRatings(currentTemplate.id);
+
+                if (ratings.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 text-center py-8">暂无评价</p>';
+                    return;
+                }
+
+                container.innerHTML = ratings.map(r => `
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-medium text-gray-900">${r.user_name || '匿名用户'}</span>
+                                <span class="text-yellow-400">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                            </div>
+                            <span class="text-sm text-gray-500">${new Date(r.created_at).toLocaleDateString()}</span>
+                        </div>
+                        ${r.comment ? `<p class="text-gray-700">${r.comment}</p>` : '<p class="text-gray-400 italic">无评论</p>'}
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load ratings:', error);
+                container.innerHTML = '<p class="text-red-500 text-center py-8">加载评价失败</p>';
+            }
+        }
+
+        // 显示错误
+        function showError(message) {
+            document.getElementById('loadingIndicator').innerHTML = `
+                <p class="text-red-500 text-lg">${message}</p>
+                <a href="templates.html" class="text-blue-600 hover:underline mt-4 inline-block">返回模板商城</a>
+            `;
+        }
+    </script>
+</body>
+</html>

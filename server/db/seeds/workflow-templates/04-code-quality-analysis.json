@@ -1,0 +1,150 @@
+{
+  "name": "代码质量分析",
+  "slug": "code-quality-analysis",
+  "category": "data-analysis",
+  "category_slug": "data-analysis",
+  "description": "使用 LLM 深度分析代码质量：检测潜在问题、优化建议、安全漏洞、性能问题",
+  "difficulty": "advanced",
+  "estimated_time": "15-30分钟",
+  "tags": ["代码审查", "质量分析", "LLM", "最佳实践"],
+  "is_builtin": true,
+  "is_public": true,
+  "documentation": "## 功能说明\n\n代码质量分析模板使用 LLM 对代码进行深度分析，包括：\n\n- **代码质量**：可读性、可维护性、复杂度\n- **潜在问题**：逻辑错误、边界条件、异常处理\n- **安全漏洞**：SQL 注入、XSS、CSRF、认证问题\n- **性能问题**：算法复杂度、资源泄漏、N+1 查询\n- **最佳实践**：设计模式、命名规范、注释质量\n- **改进建议**：重构建议、优化方案、测试建议\n\n## 使用场景\n\n- 代码审查（Code Review）\n- 技术债务评估\n- 遗留代码分析\n- 安全审计\n- 性能优化前诊断\n- 团队编码规范检查\n\n## 分析维度\n\n**质量维度（1-10 分）**：\n- 可读性\n- 可维护性\n- 测试覆盖\n- 文档完整性\n- 安全性\n- 性能\n\n## 输出报告\n\n- **总体评分**：综合质量评分\n- **问题列表**：按严重程度排序\n- **改进建议**：具体的代码优化方案\n- **优先级**：高/中/低\n\n## 注意事项\n\n- 支持多种编程语言（Python, JavaScript, Java, Go 等）\n- 大文件可能需要较长分析时间\n- 建议配合静态分析工具（ESLint, SonarQube）使用\n- LLM 分析作为辅助，不能完全替代人工审查",
+  "example_output": "```markdown\n# 代码质量分析报告\n\n## 文件：src/utils/dataProcessor.js\n\n### 总体评分：6.5/10\n\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 可读性 | 7/10 | 命名清晰，但缺少注释 |\n| 可维护性 | 6/10 | 函数过长，职责不清 |\n| 测试覆盖 | 5/10 | 缺少边界条件测试 |\n| 安全性 | 6/10 | 存在 SQL 注入风险 |\n| 性能 | 7/10 | 算法复杂度合理 |\n\n### 发现的问题（5个）\n\n#### 🔴 高优先级（2个）\n\n**1. SQL 注入风险**\n- **位置**：第 45 行\n- **代码**：`query = f\"SELECT * FROM users WHERE id = {user_id}\"`\n- **问题**：直接拼接 SQL，存在注入风险\n- **建议**：使用参数化查询\n```python\nquery = \"SELECT * FROM users WHERE id = ?\"\nparams = (user_id,)\n```\n\n**2. 未处理的异常**\n- **位置**：第 78-82 行\n- **问题**：文件操作未捕获异常\n- **建议**：添加 try-catch\n\n#### 🟡 中优先级（2个）\n\n**3. 函数过长**\n- **位置**：processData() 函数（150行）\n- **建议**：拆分为多个小函数\n\n**4. 魔法数字**\n- **位置**：多处\n- **建议**：提取为常量\n\n#### 🟢 低优先级（1个）\n\n**5. 缺少类型注解**\n- **建议**：添加 TypeScript 或 JSDoc\n\n### 改进建议\n\n1. **重构 processData 函数**\n   - 拆分数据验证逻辑\n   - 提取数据库操作\n   - 独立错误处理\n\n2. **增强安全性**\n   - 使用 ORM 或参数化查询\n   - 添加输入验证\n   - 实现速率限制\n\n3. **提升可维护性**\n   - 添加单元测试\n   - 补充函数文档\n   - 统一错误处理\n```",
+  "variables": [
+    {
+      "name": "code_file_path",
+      "label": "代码文件路径",
+      "type": "string",
+      "description": "要分析的代码文件路径（支持单文件或目录）",
+      "required": true
+    },
+    {
+      "name": "model_id",
+      "label": "LLM 模型",
+      "type": "model_id",
+      "description": "用于分析的 LLM 模型",
+      "required": true
+    },
+    {
+      "name": "analysis_focus",
+      "label": "分析重点",
+      "type": "select",
+      "description": "选择分析的重点领域",
+      "required": false,
+      "default": "comprehensive",
+      "options": [
+        { "value": "comprehensive", "label": "全面分析" },
+        { "value": "security", "label": "安全性" },
+        { "value": "performance", "label": "性能" },
+        { "value": "maintainability", "label": "可维护性" },
+        { "value": "best-practices", "label": "最佳实践" }
+      ]
+    },
+    {
+      "name": "language",
+      "label": "编程语言",
+      "type": "select",
+      "description": "代码的编程语言（留空则自动检测）",
+      "required": false,
+      "default": "auto",
+      "options": [
+        { "value": "auto", "label": "自动检测" },
+        { "value": "python", "label": "Python" },
+        { "value": "javascript", "label": "JavaScript" },
+        { "value": "typescript", "label": "TypeScript" },
+        { "value": "java", "label": "Java" },
+        { "value": "go", "label": "Go" },
+        { "value": "rust", "label": "Rust" },
+        { "value": "cpp", "label": "C++" }
+      ]
+    },
+    {
+      "name": "severity_threshold",
+      "label": "严重程度阈值",
+      "type": "select",
+      "description": "只报告达到此严重程度的问题",
+      "required": false,
+      "default": "low",
+      "options": [
+        { "value": "critical", "label": "严重" },
+        { "value": "high", "label": "高" },
+        { "value": "medium", "label": "中" },
+        { "value": "low", "label": "低" }
+      ]
+    },
+    {
+      "name": "max_file_size",
+      "label": "最大文件大小",
+      "type": "number",
+      "description": "单个文件的最大大小（KB），超过则跳过",
+      "required": false,
+      "default": 500,
+      "validation": {
+        "min": 1,
+        "max": 5000
+      }
+    },
+    {
+      "name": "output_path",
+      "label": "报告保存路径",
+      "type": "string",
+      "description": "分析报告的保存路径",
+      "required": true,
+      "default": "./code-analysis-report.md"
+    }
+  ],
+  "dag": {
+    "nodes": [
+      {
+        "id": "scan_code_files",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import os\nfrom pathlib import Path\n\ncode_path = Path('{{var.code_file_path}}')\nmax_size = {{var.max_file_size}} * 1024\n\ncode_files = []\n\nif code_path.is_file():\n    if code_path.stat().st_size <= max_size:\n        code_files.append(str(code_path))\n    else:\n        print(f'文件过大，跳过：{code_path}')\nelif code_path.is_dir():\n    for root, dirs, files in os.walk(code_path):\n        # 跳过常见的无需分析的目录\n        dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__', 'venv', 'dist', 'build']]\n        \n        for file in files:\n            file_path = Path(root) / file\n            # 只处理代码文件\n            if file_path.suffix in ['.py', '.js', '.ts', '.java', '.go', '.rs', '.cpp', '.c', '.h']:\n                if file_path.stat().st_size <= max_size:\n                    code_files.append(str(file_path))\n                else:\n                    print(f'文件过大，跳过：{file_path}')\nelse:\n    raise ValueError(f'路径不存在：{code_path}')\n\nprint(f'找到 {len(code_files)} 个代码文件')\ncontext['code_files'] = code_files\ncontext['total_count'] = len(code_files)"
+        }
+      },
+      {
+        "id": "analyze_code",
+        "type": "llm_analysis",
+        "config": {
+          "model_id": "{{var.model_id}}",
+          "prompt_template": "你是一位资深的代码审查专家。请分析以下代码，重点关注：{{var.analysis_focus}}。\n\n编程语言：{{var.language}}\n\n代码内容：\n```\n{{code_content}}\n```\n\n请按照以下格式输出分析结果：\n\n## 总体评分\n\n| 维度 | 评分 (1-10) | 说明 |\n|------|-------------|------|\n| 可读性 | X/10 | ... |\n| 可维护性 | X/10 | ... |\n| 测试覆盖 | X/10 | ... |\n| 安全性 | X/10 | ... |\n| 性能 | X/10 | ... |\n\n综合评分：X/10\n\n## 发现的问题\n\n### 🔴 高优先级\n\n1. **问题标题**\n   - 位置：第 X 行\n   - 问题：详细描述\n   - 建议：具体的改进方案\n\n### 🟡 中优先级\n\n...\n\n### 🟢 低优先级\n\n...\n\n## 改进建议\n\n1. **大标题**\n   - 具体建议 1\n   - 具体建议 2\n\n请给出专业、详细、可操作的分析。",
+          "context_key": "code_content",
+          "output_key": "analysis_result"
+        }
+      },
+      {
+        "id": "aggregate_results",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "from datetime import datetime\n\ncode_files = context.get('code_files', [])\nanalysis_results = context.get('analysis_results', [])\n\nreport = f'''# 代码质量分析报告\n\n**分析时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n**分析文件数**：{len(code_files)}\n**分析重点**：{{var.analysis_focus}}\n\n---\n\n'''\n\nfor file_path, result in zip(code_files, analysis_results):\n    report += f'''## 文件：{file_path}\n\n{result}\n\n---\n\n'''\n\ncontext['report'] = report\nprint('分析报告生成完成')"
+        }
+      },
+      {
+        "id": "save_report",
+        "type": "file_output",
+        "config": {
+          "path": "{{var.output_path}}",
+          "content": "{{context.report}}",
+          "encoding": "utf-8"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "scan_code_files",
+        "target": "analyze_code"
+      },
+      {
+        "source": "analyze_code",
+        "target": "aggregate_results"
+      },
+      {
+        "source": "aggregate_results",
+        "target": "save_report"
+      }
+    ]
+  }
+}

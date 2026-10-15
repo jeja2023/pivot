@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 2261,
+  "total": 2473,
   "entries": [
     {
       "file": "server/auth.js",
@@ -26,6 +26,10 @@
     {
       "file": "server/db/migrations/agent-artifact-delivery.js",
       "count": 6
+    },
+    {
+      "file": "server/db/migrations/agent-artifacts.js",
+      "count": 32
     },
     {
       "file": "server/db/migrations/agent-browser-sessions.js",
@@ -68,8 +72,16 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-enhanced-planning.js",
+      "count": 18
+    },
+    {
       "file": "server/db/migrations/agent-evaluation-case-snapshots.js",
       "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-evaluation.js",
+      "count": 28
     },
     {
       "file": "server/db/migrations/agent-evidence-items.js",
@@ -98,6 +110,10 @@
     {
       "file": "server/db/migrations/agent-model-quality-profiles.js",
       "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-orchestration-dsl.js",
+      "count": 10
     },
     {
       "file": "server/db/migrations/agent-production-control-plane.js",
@@ -132,8 +148,16 @@
       "count": 1
     },
     {
+      "file": "server/db/migrations/agent-streaming-events.js",
+      "count": 17
+    },
+    {
       "file": "server/db/migrations/agent-task-verifications.js",
       "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-tool-usage-stats.js",
+      "count": 10
     },
     {
       "file": "server/db/migrations/agent-voice-sessions.js",
@@ -150,6 +174,10 @@
     {
       "file": "server/db/migrations/agent-workflow-release-review.js",
       "count": 1
+    },
+    {
+      "file": "server/db/migrations/agent-workflow-templates.js",
+      "count": 32
     },
     {
       "file": "server/db/migrations/agent-workflow-trigger-events.js",
@@ -417,7 +445,7 @@
     },
     {
       "file": "server/db/migrations/runner.js",
-      "count": 3
+      "count": 4
     },
     {
       "file": "server/db/migrations/workflow-api-operations.js",
@@ -437,7 +465,7 @@
     },
     {
       "file": "server/db/seed.js",
-      "count": 10
+      "count": 18
     },
     {
       "file": "server/db/test-sync-worker-thread.js",
@@ -740,6 +768,10 @@
       "count": 14
     },
     {
+      "file": "server/services/agent-runtime/artifact-manager.js",
+      "count": 28
+    },
+    {
       "file": "server/services/agent-runtime/dag-run-config.js",
       "count": 1
     },
@@ -854,6 +886,18 @@
     {
       "file": "server/services/agent-world-state-store.js",
       "count": 12
+    },
+    {
+      "file": "server/services/agent/workflowInstanceService.js",
+      "count": 3
+    },
+    {
+      "file": "server/services/agent/workflowTemplateRatingService.js",
+      "count": 7
+    },
+    {
+      "file": "server/services/agent/workflowTemplateService.js",
+      "count": 18
     },
     {
       "file": "server/services/app-settings.js",

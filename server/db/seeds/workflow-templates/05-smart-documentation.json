@@ -1,0 +1,153 @@
+{
+  "name": "智能文档生成",
+  "slug": "smart-documentation-generation",
+  "category": "content-generation",
+  "category_slug": "content-generation",
+  "description": "使用 LLM 自动为代码库生成技术文档：README、API 文档、架构说明",
+  "difficulty": "intermediate",
+  "estimated_time": "20-40分钟",
+  "tags": ["文档生成", "LLM", "自动化", "技术写作"],
+  "is_builtin": true,
+  "is_public": true,
+  "documentation": "## 功能说明\n\n智能文档生成模板使用 LLM 分析代码库，自动生成：\n\n- **README.md**：项目概述、安装、使用说明\n- **API 文档**：接口列表、参数、返回值、示例\n- **架构文档**：系统架构、模块关系、技术栈\n- **开发文档**：环境搭建、调试指南、贡献指南\n- **部署文档**：部署流程、配置说明、运维指南\n\n## 使用场景\n\n- 新项目快速生成文档框架\n- 遗留项目补充文档\n- 开源项目文档生成\n- API 文档自动更新\n- 团队内部知识沉淀\n\n## 生成内容\n\n**README.md**\n- 项目名称和描述\n- 特性列表\n- 快速开始\n- 安装说明\n- 使用示例\n- 配置说明\n- API 文档链接\n- 贡献指南\n- 许可证\n\n**API.md**\n- 接口概览\n- 认证说明\n- 端点列表\n- 请求/响应示例\n- 错误代码\n\n**ARCHITECTURE.md**\n- 系统架构图\n- 模块划分\n- 数据流\n- 技术选型\n- 扩展点\n\n## 注意事项\n\n- 生成的文档需要人工审核和完善\n- 建议提供示例代码和注释以提高质量\n- 敏感信息（密钥、内网地址）需人工删除\n- 大型项目建议分模块生成",
+  "example_output": "````markdown\n# MyApp - 智能任务管理系统\n\n一个基于 React 和 Node.js 的现代化任务管理应用。\n\n## 特性\n\n- 直观的任务看板界面\n- 实时通知系统\n- 团队协作功能\n- 数据可视化报表\n- 企业级权限管理\n- 多语言支持\n\n## 快速开始\n\n### 环境要求\n\n- Node.js >= 16.0.0\n- PostgreSQL >= 13.0\n- Redis >= 6.0\n\n### 安装\n\n```bash\n# 克隆仓库\ngit clone git@git.internal:apps/myapp.git\ncd myapp\n\n# 安装依赖\nnpm install\n\n# 配置环境变量\ncp .env.example .env\n# 编辑 .env 文件，填入数据库配置\n\n# 初始化数据库\nnpm run db:migrate\n\n# 启动开发服务器\nnpm run dev\n```\n\n应用将在 http://localhost:3000 启动。\n\n## 使用说明\n\n### 创建任务\n\n```javascript\nconst task = await api.createTask({\n  title: '完成设计稿',\n  description: '设计新功能的 UI',\n  assignee: 'user123',\n  dueDate: '2026-10-20',\n  priority: 'high'\n});\n```\n\n### API 文档\n\n详见 [API.md](./docs/API.md)\n\n## 架构\n\n```\n┌─────────────┐\n│   React     │  前端\n│   Redux     │\n└──────┬──────┘\n       │ HTTP/WebSocket\n┌──────┴──────┐\n│  Express    │  后端 API\n│  Node.js    │\n└──────┬──────┘\n       │\n┌──────┴──────┐\n│ PostgreSQL  │  数据库\n│   Redis     │  缓存\n└─────────────┘\n```\n\n详见 [ARCHITECTURE.md](./docs/ARCHITECTURE.md)\n\n## 贡献\n\n欢迎提交 Pull Request！\n\n1. Fork 本仓库\n2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)\n3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)\n4. 推送到分支 (`git push origin feature/AmazingFeature`)\n5. 开启 Pull Request\n\n## 许可证\n\nMIT License\n````",
+  "variables": [
+    {
+      "name": "project_path",
+      "label": "项目路径",
+      "type": "string",
+      "description": "代码库的根目录路径",
+      "required": true
+    },
+    {
+      "name": "model_id",
+      "label": "LLM 模型",
+      "type": "model_id",
+      "description": "用于生成文档的 LLM 模型",
+      "required": true
+    },
+    {
+      "name": "doc_types",
+      "label": "文档类型",
+      "type": "select",
+      "description": "选择要生成的文档类型",
+      "required": true,
+      "default": "all",
+      "options": [
+        { "value": "all", "label": "全部生成" },
+        { "value": "readme", "label": "仅 README" },
+        { "value": "api", "label": "仅 API 文档" },
+        { "value": "architecture", "label": "仅架构文档" }
+      ]
+    },
+    {
+      "name": "project_name",
+      "label": "项目名称",
+      "type": "string",
+      "description": "项目名称（留空则自动检测）",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "include_examples",
+      "label": "包含代码示例",
+      "type": "boolean",
+      "description": "是否在文档中包含代码使用示例",
+      "required": false,
+      "default": true
+    },
+    {
+      "name": "language",
+      "label": "文档语言",
+      "type": "select",
+      "description": "生成文档的语言",
+      "required": false,
+      "default": "zh-CN",
+      "options": [
+        { "value": "zh-CN", "label": "简体中文" },
+        { "value": "en-US", "label": "English" }
+      ]
+    },
+    {
+      "name": "output_dir",
+      "label": "输出目录",
+      "type": "string",
+      "description": "文档的保存目录",
+      "required": true,
+      "default": "./docs"
+    }
+  ],
+  "dag": {
+    "nodes": [
+      {
+        "id": "analyze_project",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import os\nimport json\nfrom pathlib import Path\n\nproject_path = Path('{{var.project_path}}')\nif not project_path.exists():\n    raise ValueError(f'项目路径不存在：{project_path}')\n\n# 检测项目信息\nproject_info = {\n    'name': '{{var.project_name|}}' or project_path.name,\n    'path': str(project_path),\n    'files': {},\n    'structure': []\n}\n\n# 读取 package.json (Node.js)\npackage_json = project_path / 'package.json'\nif package_json.exists():\n    with open(package_json, 'r', encoding='utf-8') as f:\n        pkg = json.load(f)\n        project_info['name'] = pkg.get('name', project_info['name'])\n        project_info['description'] = pkg.get('description', '')\n        project_info['dependencies'] = pkg.get('dependencies', {})\n        project_info['scripts'] = pkg.get('scripts', {})\n\n# 读取 README (如果存在)\nreadme_paths = [project_path / 'README.md', project_path / 'README']\nfor readme_path in readme_paths:\n    if readme_path.exists():\n        with open(readme_path, 'r', encoding='utf-8') as f:\n            project_info['existing_readme'] = f.read()[:1000]\n        break\n\n# 扫描项目结构\nfor root, dirs, files in os.walk(project_path):\n    dirs[:] = [d for d in dirs if d not in ['.git', 'node_modules', '__pycache__', 'venv', 'dist', 'build']]\n    rel_root = Path(root).relative_to(project_path)\n    for file in files:\n        if file.endswith(('.js', '.ts', '.py', '.java', '.go')):\n            file_path = Path(root) / file\n            rel_path = file_path.relative_to(project_path)\n            project_info['structure'].append(str(rel_path))\n\nprint(f'项目分析完成：{project_info[\"name\"]}')\ncontext['project_info'] = project_info"
+        }
+      },
+      {
+        "id": "generate_readme",
+        "type": "llm_generation",
+        "config": {
+          "model_id": "{{var.model_id}}",
+          "prompt_template": "你是一位技术写作专家。请为以下项目生成一个专业的 README.md 文档。\n\n## 项目信息\n\n- 名称：{{project_name}}\n- 描述：{{project_description}}\n- 依赖：{{dependencies}}\n- 脚本：{{scripts}}\n\n## 项目结构\n\n{{project_structure}}\n\n## 要求\n\n- 使用 {{var.language}} 编写\n- 包含项目概述、特性、安装、使用说明\n- {% if var.include_examples %}包含代码示例{% endif %}\n- 格式美观，使用 Emoji 增强可读性\n- 包含常见的 README 章节（快速开始、配置、贡献、许可证）\n\n请生成完整的 README.md 内容：",
+          "output_key": "readme_content"
+        }
+      },
+      {
+        "id": "generate_api_doc",
+        "type": "llm_generation",
+        "config": {
+          "model_id": "{{var.model_id}}",
+          "prompt_template": "你是一位 API 文档专家。请为以下项目生成 API 文档。\n\n## 项目信息\n\n{{project_info}}\n\n## 要求\n\n- 使用 {{var.language}} 编写\n- 列出所有 API 端点\n- 包含请求方法、参数、返回值\n- {% if var.include_examples %}提供请求示例{% endif %}\n- 说明认证方式\n- 列出常见错误代码\n\n请生成 API.md 内容：",
+          "output_key": "api_doc_content"
+        }
+      },
+      {
+        "id": "generate_architecture_doc",
+        "type": "llm_generation",
+        "config": {
+          "model_id": "{{var.model_id}}",
+          "prompt_template": "你是一位系统架构师。请为以下项目生成架构文档。\n\n## 项目信息\n\n{{project_info}}\n\n## 要求\n\n- 使用 {{var.language}} 编写\n- 描述系统整体架构\n- 说明各模块职责和关系\n- 使用 Mermaid 或 ASCII 绘制架构图\n- 说明技术选型理由\n- 描述数据流和关键流程\n\n请生成 ARCHITECTURE.md 内容：",
+          "output_key": "arch_doc_content"
+        }
+      },
+      {
+        "id": "save_documents",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "from pathlib import Path\n\noutput_dir = Path('{{var.output_dir}}')\noutput_dir.mkdir(parents=True, exist_ok=True)\n\ndoc_types = '{{var.doc_types}}'\ngenerated_files = []\n\n# 保存 README\nif doc_types in ['all', 'readme']:\n    readme_content = context.get('readme_content', '')\n    if readme_content:\n        readme_path = output_dir.parent / 'README.md'\n        with open(readme_path, 'w', encoding='utf-8') as f:\n            f.write(readme_content)\n        generated_files.append(str(readme_path))\n        print(f'已生成：{readme_path}')\n\n# 保存 API 文档\nif doc_types in ['all', 'api']:\n    api_content = context.get('api_doc_content', '')\n    if api_content:\n        api_path = output_dir / 'API.md'\n        with open(api_path, 'w', encoding='utf-8') as f:\n            f.write(api_content)\n        generated_files.append(str(api_path))\n        print(f'已生成：{api_path}')\n\n# 保存架构文档\nif doc_types in ['all', 'architecture']:\n    arch_content = context.get('arch_doc_content', '')\n    if arch_content:\n        arch_path = output_dir / 'ARCHITECTURE.md'\n        with open(arch_path, 'w', encoding='utf-8') as f:\n            f.write(arch_content)\n        generated_files.append(str(arch_path))\n        print(f'已生成：{arch_path}')\n\ncontext['generated_files'] = generated_files\nprint(f'\\n文档生成完成！共 {len(generated_files)} 个文件')"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "analyze_project",
+        "target": "generate_readme"
+      },
+      {
+        "source": "analyze_project",
+        "target": "generate_api_doc"
+      },
+      {
+        "source": "analyze_project",
+        "target": "generate_architecture_doc"
+      },
+      {
+        "source": "generate_readme",
+        "target": "save_documents"
+      },
+      {
+        "source": "generate_api_doc",
+        "target": "save_documents"
+      },
+      {
+        "source": "generate_architecture_doc",
+        "target": "save_documents"
+      }
+    ]
+  }
+}

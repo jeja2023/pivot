@@ -1,0 +1,134 @@
+{
+  "name": "API 接口自动化测试",
+  "slug": "api-endpoint-testing",
+  "category": "automation-ops",
+  "category_slug": "automation-ops",
+  "description": "自动化测试 REST API 接口：发送请求、验证响应、生成测试报告",
+  "difficulty": "intermediate",
+  "estimated_time": "10-20分钟",
+  "tags": ["API测试", "接口测试", "自动化测试", "质量保障"],
+  "is_builtin": true,
+  "is_public": true,
+  "documentation": "## 功能说明\n\nAPI 接口自动化测试模板支持：\n\n- **多种 HTTP 方法**：GET, POST, PUT, DELETE, PATCH\n- **请求配置**：Headers, Query Params, Body (JSON/Form)\n- **响应验证**：状态码、响应时间、JSON Schema、字段值\n- **批量测试**：从 JSON/CSV 文件批量导入测试用例\n- **测试报告**：Markdown/HTML 格式的详细报告\n\n## 使用场景\n\n- 接口功能测试（正常/异常情况）\n- 接口性能测试（响应时间）\n- 回归测试（版本更新后验证）\n- API 文档验证\n- 契约测试（Provider-Consumer）\n\n## 测试用例格式\n\n```json\n{\n  \"cases\": [\n    {\n      \"name\": \"获取用户列表\",\n      \"method\": \"GET\",\n      \"url\": \"/api/users\",\n      \"headers\": {\"Authorization\": \"Bearer token\"},\n      \"expect\": {\n        \"status\": 200,\n        \"maxTime\": 1000,\n        \"jsonPath\": {\n          \"$.data[0].id\": \"^\\\\d+$\",\n          \"$.data.length\": 10\n        }\n      }\n    }\n  ]\n}\n```\n\n## 注意事项\n\n- 敏感信息（Token, API Key）建议使用环境变量\n- 生产环境测试请谨慎操作\n- 建议先在测试环境验证\n- 大批量测试注意接口限流",
+  "example_output": "```\nAPI 接口测试报告\n==================\n\n测试时间：2026-10-14 15:30:25\n基础 URL：http://api.internal\n总用例数：15\n\n测试结果\n--------\n✓ 通过：13\n✗ 失败：2\n通过率：86.7%\n\n详细结果\n--------\n\n✓ [GET] 获取用户列表\n  状态码：200 ✓\n  响应时间：145ms ✓\n  数据验证：$.data.length = 10 ✓\n\n✗ [POST] 创建用户\n  状态码：201 ✓\n  响应时间：2340ms ✗ (期望 < 1000ms)\n  数据验证：$.data.id 匹配正则 ✓\n\n平均响应时间：234ms\n最慢接口：POST /api/users/bulk (2340ms)\n```",
+  "variables": [
+    {
+      "name": "base_url",
+      "label": "基础 URL",
+      "type": "string",
+      "description": "API 服务器地址，如 http://api.internal 或 http://192.168.1.100:8080",
+      "required": true,
+      "validation": {
+        "pattern": "^https?://",
+        "message": "请输入有效的 URL，需以 http:// 或 https:// 开头"
+      }
+    },
+    {
+      "name": "test_cases_file",
+      "label": "测试用例文件",
+      "type": "string",
+      "description": "包含测试用例的 JSON 文件路径",
+      "required": true
+    },
+    {
+      "name": "auth_token",
+      "label": "认证令牌",
+      "type": "string",
+      "description": "API 认证令牌（Bearer Token），可选",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "timeout",
+      "label": "请求超时时间",
+      "type": "number",
+      "description": "单个请求的超时时间（毫秒）",
+      "required": false,
+      "default": 30000,
+      "validation": {
+        "min": 1000,
+        "max": 120000
+      }
+    },
+    {
+      "name": "parallel",
+      "label": "并发执行",
+      "type": "boolean",
+      "description": "是否并发执行测试用例（提高速度但可能影响结果）",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "output_format",
+      "label": "报告格式",
+      "type": "select",
+      "description": "测试报告的输出格式",
+      "required": false,
+      "default": "markdown",
+      "options": [
+        { "value": "markdown", "label": "Markdown" },
+        { "value": "html", "label": "HTML" },
+        { "value": "json", "label": "JSON" }
+      ]
+    },
+    {
+      "name": "output_path",
+      "label": "报告保存路径",
+      "type": "string",
+      "description": "测试报告的保存路径",
+      "required": true,
+      "default": "./test-report.md"
+    }
+  ],
+  "dag": {
+    "nodes": [
+      {
+        "id": "load_test_cases",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import json\nfrom pathlib import Path\n\ntest_file = Path('{{var.test_cases_file}}')\nif not test_file.exists():\n    raise FileNotFoundError(f'测试用例文件不存在: {test_file}')\n\nwith open(test_file, 'r', encoding='utf-8') as f:\n    data = json.load(f)\n\ntest_cases = data.get('cases', [])\nprint(f'加载了 {len(test_cases)} 个测试用例')\n\ncontext['test_cases'] = test_cases\ncontext['total_count'] = len(test_cases)"
+        }
+      },
+      {
+        "id": "execute_tests",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import requests\nimport time\nimport re\nfrom jsonpath_ng import parse as jsonpath_parse\n\nbase_url = '{{var.base_url}}'.rstrip('/')\nauth_token = '{{var.auth_token|}}'\ntimeout = {{var.timeout}} / 1000\nparallel = {{var.parallel}}\n\ntest_cases = context.get('test_cases', [])\nresults = []\npass_count = 0\nfail_count = 0\ntotal_time = 0\n\nfor case in test_cases:\n    start_time = time.time()\n    result = {\n        'name': case.get('name', 'Unnamed'),\n        'method': case.get('method', 'GET'),\n        'url': case.get('url', '/'),\n        'pass': True,\n        'errors': [],\n        'response_time': 0,\n        'status_code': None\n    }\n    \n    try:\n        # 准备请求\n        url = base_url + case['url']\n        method = case.get('method', 'GET').upper()\n        headers = case.get('headers', {})\n        \n        if auth_token:\n            headers['Authorization'] = f'Bearer {auth_token}'\n        \n        params = case.get('params', {})\n        body = case.get('body', None)\n        \n        # 发送请求\n        response = requests.request(\n            method=method,\n            url=url,\n            headers=headers,\n            params=params,\n            json=body if isinstance(body, dict) else None,\n            data=body if isinstance(body, str) else None,\n            timeout=timeout\n        )\n        \n        end_time = time.time()\n        response_time = int((end_time - start_time) * 1000)\n        result['response_time'] = response_time\n        result['status_code'] = response.status_code\n        total_time += response_time\n        \n        # 验证期望\n        expect = case.get('expect', {})\n        \n        # 验证状态码\n        expected_status = expect.get('status')\n        if expected_status and response.status_code != expected_status:\n            result['pass'] = False\n            result['errors'].append(f'状态码不符：期望 {expected_status}，实际 {response.status_code}')\n        \n        # 验证响应时间\n        max_time = expect.get('maxTime')\n        if max_time and response_time > max_time:\n            result['pass'] = False\n            result['errors'].append(f'响应时间过长：{response_time}ms > {max_time}ms')\n        \n        # 验证 JSON 路径\n        json_path_checks = expect.get('jsonPath', {})\n        if json_path_checks:\n            try:\n                response_json = response.json()\n                for path, expected_value in json_path_checks.items():\n                    jsonpath_expr = jsonpath_parse(path)\n                    matches = jsonpath_expr.find(response_json)\n                    if not matches:\n                        result['pass'] = False\n                        result['errors'].append(f'JSON 路径未找到：{path}')\n                    else:\n                        actual_value = matches[0].value\n                        # 正则匹配\n                        if isinstance(expected_value, str) and expected_value.startswith('^'):\n                            if not re.match(expected_value, str(actual_value)):\n                                result['pass'] = False\n                                result['errors'].append(f'{path} 值不匹配正则：{expected_value}')\n                        # 值比较\n                        elif actual_value != expected_value:\n                            result['pass'] = False\n                            result['errors'].append(f'{path} 值不符：期望 {expected_value}，实际 {actual_value}')\n            except Exception as e:\n                result['pass'] = False\n                result['errors'].append(f'JSON 验证失败：{str(e)}')\n        \n        if result['pass']:\n            pass_count += 1\n        else:\n            fail_count += 1\n        \n    except Exception as e:\n        result['pass'] = False\n        result['errors'].append(f'请求失败：{str(e)}')\n        fail_count += 1\n    \n    results.append(result)\n\ncontext['results'] = results\ncontext['pass_count'] = pass_count\ncontext['fail_count'] = fail_count\ncontext['total_time'] = total_time\ncontext['avg_time'] = total_time // len(results) if results else 0"
+        }
+      },
+      {
+        "id": "generate_report",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "from datetime import datetime\n\nresults = context.get('results', [])\ntotal = context.get('total_count', 0)\npass_count = context.get('pass_count', 0)\nfail_count = context.get('fail_count', 0)\navg_time = context.get('avg_time', 0)\nbase_url = '{{var.base_url}}'\noutput_format = '{{var.output_format}}'\n\npass_rate = (pass_count / total * 100) if total > 0 else 0\n\n# Markdown 格式\nif output_format == 'markdown':\n    report = f'''# API 接口测试报告\n\n## 概览\n\n- **测试时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n- **基础 URL**：{base_url}\n- **总用例数**：{total}\n- **通过**：{pass_count} ✓\n- **失败**：{fail_count} ✗\n- **通过率**：{pass_rate:.1f}%\n- **平均响应时间**：{avg_time}ms\n\n## 详细结果\n\n'''\n    for result in results:\n        status = '✓' if result['pass'] else '✗'\n        report += f\"### {status} [{result['method']}] {result['name']}\\n\\n\"\n        report += f\"- **URL**: {result['url']}\\n\"\n        report += f\"- **状态码**: {result['status_code']}\\n\"\n        report += f\"- **响应时间**: {result['response_time']}ms\\n\"\n        \n        if result['errors']:\n            report += f\"- **错误**:\\n\"\n            for error in result['errors']:\n                report += f\"  - {error}\\n\"\n        \n        report += \"\\n\"\n\n# HTML 格式\nelif output_format == 'html':\n    report = f'''<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"UTF-8\">\n    <title>API 测试报告</title>\n    <style>\n        body {{ font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }}\n        h1 {{ color: #333; }}\n        .summary {{ background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; }}\n        .pass {{ color: #4caf50; }}\n        .fail {{ color: #f44336; }}\n        .test-case {{ border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px; }}\n        .error {{ background: #ffebee; padding: 10px; margin: 10px 0; border-left: 4px solid #f44336; }}\n    </style>\n</head>\n<body>\n    <h1>API 接口测试报告</h1>\n    <div class=\"summary\">\n        <p><strong>测试时间</strong>：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>\n        <p><strong>基础 URL</strong>：{base_url}</p>\n        <p><strong>总用例数</strong>：{total}</p>\n        <p><strong>通过</strong>：<span class=\"pass\">{pass_count} ✓</span></p>\n        <p><strong>失败</strong>：<span class=\"fail\">{fail_count} ✗</span></p>\n        <p><strong>通过率</strong>：{pass_rate:.1f}%</p>\n        <p><strong>平均响应时间</strong>：{avg_time}ms</p>\n    </div>\n    <h2>详细结果</h2>\n'''\n    for result in results:\n        status_class = 'pass' if result['pass'] else 'fail'\n        status_icon = '✓' if result['pass'] else '✗'\n        report += f'''    <div class=\"test-case\">\n        <h3 class=\"{status_class}\">{status_icon} [{result['method']}] {result['name']}</h3>\n        <p><strong>URL</strong>: {result['url']}</p>\n        <p><strong>状态码</strong>: {result['status_code']}</p>\n        <p><strong>响应时间</strong>: {result['response_time']}ms</p>\n'''\n        if result['errors']:\n            report += '        <div class=\"error\">'\n            for error in result['errors']:\n                report += f'            <p>• {error}</p>'\n            report += '        </div>'\n        report += '    </div>\\n'\n    report += '</body>\\n</html>'\n\n# JSON 格式\nelse:\n    import json\n    report = json.dumps({\n        'timestamp': datetime.now().isoformat(),\n        'base_url': base_url,\n        'summary': {\n            'total': total,\n            'pass': pass_count,\n            'fail': fail_count,\n            'pass_rate': pass_rate,\n            'avg_time': avg_time\n        },\n        'results': results\n    }, indent=2, ensure_ascii=False)\n\ncontext['report'] = report"
+        }
+      },
+      {
+        "id": "save_report",
+        "type": "file_output",
+        "config": {
+          "path": "{{var.output_path}}",
+          "content": "{{context.report}}",
+          "encoding": "utf-8"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "load_test_cases",
+        "target": "execute_tests"
+      },
+      {
+        "source": "execute_tests",
+        "target": "generate_report"
+      },
+      {
+        "source": "generate_report",
+        "target": "save_report"
+      }
+    ]
+  }
+}

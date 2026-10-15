@@ -72,13 +72,37 @@ function makeToolbarDropdown(label, buttons, className = '') {
         });
         dropdown.appendChild(summary);
         dropdown.appendChild(menu);
-        dropdown.addEventListener('toggle', () => {
-            const host = dropdown.parentElement;
-            if (!dropdown.open || !host) return;
-            host.querySelectorAll('.pivot-dag-toolbar-dropdown[open]').forEach(item => {
+
+        const closeOtherDropdowns = () => {
+            const toolbar = dropdown.closest('.pivot-dag-toolbar') || document;
+            toolbar.querySelectorAll('.pivot-dag-toolbar-dropdown[open]').forEach(item => {
                 if (item !== dropdown) item.open = false;
             });
+        };
+
+        summary.addEventListener('click', () => {
+            if (!dropdown.open) {
+                closeOtherDropdowns();
+            }
         });
+
+        dropdown.addEventListener('toggle', () => {
+            if (dropdown.open) {
+                closeOtherDropdowns();
+            }
+        });
+
+        if (typeof window !== 'undefined' && !window.__dagToolbarDropdownGlobalCloseBound) {
+            window.__dagToolbarDropdownGlobalCloseBound = true;
+            document.addEventListener('click', (event) => {
+                if (!event.target.closest('.pivot-dag-toolbar-dropdown')) {
+                    document.querySelectorAll('.pivot-dag-toolbar-dropdown[open]').forEach(item => {
+                        item.open = false;
+                    });
+                }
+            });
+        }
+
         return dropdown;
     }
 
@@ -146,10 +170,74 @@ function renderDagToolbar(ctx) {
                     ...presetButtons
                 ])
             ], 'is-node-group'));
-            ctx.toolbar.appendChild(makeToolbarDropdown('模板', [
+            // 动态加载工作流模板
+            const templateButtons = [
                 makeButton('多智能体审阅', '添加并行研究员、审阅员与主管智能体裁决节点', ctx.addAgentTeamTemplate),
                 makeButton('统计图模板', '从数据库表和字段快速生成可编辑的统计图工作流', ctx.openStatsChartWizard)
-            ], 'is-template-group'));
+            ];
+
+            // 异步加载内置工作流模板（仅在已登录时）
+            (async () => {
+                try {
+                    // 检查用户是否已登录
+                    const isLoggedIn = window.Pivot?.legacy?.currentUser || document.cookie.includes('session=');
+                    if (!isLoggedIn) {
+                        console.log('用户未登录，跳过工作流模板加载');
+                        return;
+                    }
+
+                    const response = await fetch('/api/agent/workflow-templates?is_builtin=true&limit=20', {
+                        credentials: 'include'  // 包含 cookies
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            console.log('需要登录才能查看工作流模板');
+                            return;
+                        }
+                        throw new Error(`API 返回错误: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                        result.data.forEach(template => {
+                            const rawName = (template.name || '').trim();
+                            const cleanName = rawName.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{1F100}-\u{1F64F}\u{1F680}-\u{1F6FF}\s]+/u, '');
+                            const displayName = cleanName || rawName;
+                            const btn = makeButton(
+                                displayName,
+                                template.description || `应用 ${displayName} 模板`,
+                                () => {
+                                    if (typeof ctx.applyWorkflowTemplate === 'function') {
+                                        ctx.applyWorkflowTemplate(template);
+                                    } else {
+                                        window.Pivot?.legacy?.showToast?.(`模板应用功能开发中：${displayName}`, 'info');
+                                    }
+                                }
+                            );
+                            templateButtons.push(btn);
+                        });
+
+                        // 重新渲染模板下拉菜单
+                        const templateDropdown = ctx.toolbar.querySelector('.is-template-group');
+                        if (templateDropdown) {
+                            const menu = templateDropdown.querySelector('.pivot-dag-toolbar-menu');
+                            if (menu) {
+                                menu.replaceChildren(...templateButtons.map(btn => {
+                                    btn.setAttribute('role', 'menuitem');
+                                    btn.addEventListener('click', () => { templateDropdown.open = false; });
+                                    return btn;
+                                }));
+                            }
+                        }
+                        console.log(`已加载 ${result.data.length} 个工作流模板`);
+                    }
+                } catch (error) {
+                    console.warn('加载工作流模板失败:', error);
+                }
+            })();
+
+            ctx.toolbar.appendChild(makeToolbarDropdown('模板', templateButtons, 'is-template-group'));
             const showTimelineWaterfall = () => {
                 const api = window.Pivot?.moduleApi?.('agent.dagTimeline');
                 api?.showTimelineWaterfallModal?.({

@@ -71,7 +71,7 @@ async function runSeedsPg() {
         }
 
         async function ensureBuiltInAdminAccount() {
-            const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = ?', ['admin']);
+            const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = $1', ['admin']);
             if (!admin) { await createInitialAdminAccount(); return; }
             const needsRepair = admin.role !== 'admin' || admin.status === 'disabled' || admin.deleted_at;
             if (!needsRepair) return;
@@ -79,7 +79,7 @@ async function runSeedsPg() {
                 UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
                     nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
                     unit = COALESCE(NULLIF(unit, ''), '智枢科技')
-                WHERE id = ?
+                WHERE id = $1
             `, [admin.id]);
             logger.warn({ username: 'admin', userId: admin.id }, '[PG] 已修复内置 admin 账号');
         }
@@ -103,17 +103,207 @@ async function runSeedsPg() {
         const userRow = await trx.queryOne('SELECT COUNT(*) AS count FROM users');
         if (Number(userRow?.count) === 0) await createInitialAdminAccount();
         else await ensureBuiltInAdminAccount();
+
+        // 导入工作流模板种子数据（仅当表已存在时）
+        const tableExists = await trx.queryOne(`
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'agent_workflow_templates'
+            ) as exists
+        `);
+
+        if (tableExists?.exists) {
+            logger.info('开始导入内置工作流模板...');
+            const workflowTemplateSeed = require('./seeds/003-workflow-templates');
+
+            // 创建一个 knex 兼容的包装器
+            const knexWrapper = (tableName) => ({
+                select: (...fields) => ({
+                    then: async (resolve) => {
+                        const fieldList = fields.length > 0 ? fields.join(', ') : '*';
+                        const rows = await trx.query(`SELECT ${fieldList} FROM ${tableName}`);
+                        resolve(rows);
+                    }
+                }),
+                where: (keyOrConditions, value) => ({
+                    first: () => ({
+                        then: async (resolve) => {
+                            let keys, values;
+                            if (typeof keyOrConditions === 'string') {
+                                // where('field', value) 语法
+                                keys = [keyOrConditions];
+                                values = [value];
+                            } else {
+                                // where({ field: value }) 语法
+                                keys = Object.keys(keyOrConditions);
+                                values = keys.map(k => keyOrConditions[k]);
+                            }
+                            const whereClause = keys.map((k, i) => `${k} = $${i + 1}`).join(' AND ');
+                            const row = await trx.queryOne(`SELECT * FROM ${tableName} WHERE ${whereClause}`, values);
+                            resolve(row);
+                        }
+                    }),
+                    update: (updateData) => ({
+                        then: async (resolve) => {
+                            let whereKeys, whereValues;
+                            if (typeof keyOrConditions === 'string') {
+                                whereKeys = [keyOrConditions];
+                                whereValues = [value];
+                            } else {
+                                whereKeys = Object.keys(keyOrConditions);
+                                whereValues = whereKeys.map(k => keyOrConditions[k]);
+                            }
+
+                            const updateKeys = Object.keys(updateData);
+                            const setClause = updateKeys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+                            const whereClause = whereKeys.map((k, i) => `${k} = $${updateKeys.length + i + 1}`).join(' AND ');
+
+                            const values = [
+                                ...updateKeys.map(k => {
+                                    const val = updateData[k];
+                                    if (val === null || val === undefined) return null;
+                                    if (Array.isArray(val)) return val;
+                                    if (typeof val === 'object') return JSON.stringify(val);
+                                    return val;
+                                }),
+                                ...whereValues
+                            ];
+
+                            await trx.query(
+                                `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`,
+                                values
+                            );
+                            resolve();
+                        }
+                    })
+                }),
+                insert: (data) => ({
+                    returning: (fields) => ({
+                        then: async (resolve) => {
+                            const keys = Object.keys(data);
+                            const placeholders = keys.map((k, i) => `$${i + 1}`).join(', ');
+                            const fieldList = Array.isArray(fields) ? fields.join(', ') : fields;
+                            const values = keys.map(k => {
+                                const val = data[k];
+                                if (val === null || val === undefined) return null;
+                                // PostgreSQL 数组：保持为 JavaScript 数组，pg 驱动会自动转换
+                                if (Array.isArray(val)) return val;
+                                if (typeof val === 'object') return JSON.stringify(val);
+                                return val;
+                            });
+                            const row = await trx.queryOne(
+                                `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING ${fieldList}`,
+                                values
+                            );
+                            resolve([row]);
+                        }
+                    })
+                }),
+                update: (data) => ({
+                    returning: (fields) => ({
+                        then: async (resolve) => {
+                            const keys = Object.keys(data);
+                            const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+                            const values = keys.map(k => {
+                                const val = data[k];
+                                if (val === null || val === undefined) return null;
+                                if (Array.isArray(val)) return val;
+                                if (typeof val === 'object') return JSON.stringify(val);
+                                return val;
+                            });
+                            const fieldList = Array.isArray(fields) ? fields.join(', ') : fields;
+                            const row = await trx.queryOne(
+                                `UPDATE ${tableName} SET ${setClause} RETURNING ${fieldList}`,
+                                values
+                            );
+                            resolve([row]);
+                        }
+                    }),
+                    where: (keyOrConditions, value) => ({
+                        update: (additionalData) => ({
+                            then: async (resolve) => {
+                                const mergedData = { ...data, ...additionalData };
+                                const updateKeys = Object.keys(mergedData);
+                                const setClause = updateKeys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+
+                                let whereKeys, whereValues;
+                                if (typeof keyOrConditions === 'string') {
+                                    whereKeys = [keyOrConditions];
+                                    whereValues = [value];
+                                } else {
+                                    whereKeys = Object.keys(keyOrConditions);
+                                    whereValues = whereKeys.map(k => keyOrConditions[k]);
+                                }
+
+                                const whereClause = whereKeys.map((k, i) => `${k} = $${updateKeys.length + i + 1}`).join(' AND ');
+                                const values = [
+                                    ...updateKeys.map(k => {
+                                        const val = mergedData[k];
+                                        if (val === null || val === undefined) return null;
+                                        if (Array.isArray(val)) return val;
+                                        if (typeof val === 'object') return JSON.stringify(val);
+                                        return val;
+                                    }),
+                                    ...whereValues
+                                ];
+
+                                await trx.query(
+                                    `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`,
+                                    values
+                                );
+                                resolve();
+                            }
+                        }),
+                        then: async (resolve) => {
+                            const updateKeys = Object.keys(data);
+                            const setClause = updateKeys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+
+                            let whereKeys, whereValues;
+                            if (typeof keyOrConditions === 'string') {
+                                whereKeys = [keyOrConditions];
+                                whereValues = [value];
+                            } else {
+                                whereKeys = Object.keys(keyOrConditions);
+                                whereValues = whereKeys.map(k => keyOrConditions[k]);
+                            }
+
+                            const whereClause = whereKeys.map((k, i) => `${k} = $${updateKeys.length + i + 1}`).join(' AND ');
+                            const values = [
+                                ...updateKeys.map(k => typeof data[k] === 'object' ? JSON.stringify(data[k]) : data[k]),
+                                ...whereValues
+                            ];
+
+                            await trx.query(
+                                `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`,
+                                values
+                            );
+                            resolve();
+                        }
+                    })
+                })
+            });
+
+            try {
+                await workflowTemplateSeed.seed(knexWrapper);
+                logger.info('✅ 内置工作流模板导入完成');
+            } catch (error) {
+                logger.error({ error: error.message }, '❌ 工作流模板导入失败');
+            }
+        } else {
+            logger.info('⏭️  agent_workflow_templates 表尚未创建，跳过工作流模板种子导入');
+        }
     });
 }
 
 async function ensureBuiltInAdminAccount() {
     const { transaction } = require('./client');
     await transaction(async trx => {
-        const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = ?', ['admin']);
+        const admin = await trx.queryOne('SELECT id, role, status, deleted_at FROM users WHERE username = $1', ['admin']);
         if (!admin) {
             const credential = buildInitialAdminCredential();
             await trx.execute(
-                'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
                 ['admin', credential.passwordHash, '系统管理员', '智枢科技', 'admin', 'active', getBeijingTimestamp()]
             );
             logInitialAdminCredential(credential);
@@ -124,7 +314,7 @@ async function ensureBuiltInAdminAccount() {
             UPDATE users SET role = 'admin', status = 'active', deleted_at = NULL,
                 nickname = COALESCE(NULLIF(nickname, ''), '系统管理员'),
                 unit = COALESCE(NULLIF(unit, ''), '智枢科技')
-            WHERE id = ?
+            WHERE id = $1
         `, [admin.id]);
         logger.warn({ username: 'admin', userId: admin.id }, '[PG] 已修复内置 admin 账号角色或状态');
     });

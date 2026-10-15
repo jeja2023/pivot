@@ -1,0 +1,128 @@
+{
+  "name": "Excel 数据分析报告",
+  "slug": "excel-data-analysis",
+  "category": "data-analysis",
+  "description": "读取 Excel 文件，执行数据清洗和统计分析，使用 LLM 生成洞察报告，并输出为 Markdown 格式",
+  "tags": ["Excel", "数据分析", "报告生成", "统计"],
+  "difficulty": "beginner",
+  "estimatedTime": "5-10 分钟",
+  "icon": "file-spreadsheet",
+  "previewImage": "/templates/preview/excel-data-analysis.png",
+  "exampleOutput": "## 销售数据分析报告\n\n### 数据概览\n- 总销售额：¥1,234,567\n- 订单数量：456\n- 平均客单价：¥2,706\n\n### 关键洞察\n1. Q4 销售额同比增长 35%\n2. 产品 A 贡献了 42% 的收入\n3. 华东地区市场表现最佳\n\n### 建议\n- 加大产品 A 的推广力度\n- 优化库存管理降低成本",
+  "documentation": "# Excel 数据分析模板\n\n## 适用场景\n- 销售数据分析\n- 财务报表解读\n- 运营数据洞察\n\n## 变量说明\n- **excel_file_path**：Excel 文件路径（支持 .xlsx 和 .xls 格式）\n- **sheet_name**：工作表名称（默认为第一个工作表）\n- **analysis_focus**：分析重点（如：销售趋势、产品对比、地区分析）\n- **model_id**：使用的 LLM 模型\n\n## 工作流说明\n1. **读取 Excel**：使用 Python 节点读取指定文件和工作表\n2. **数据清洗**：处理缺失值、格式转换、异常值过滤\n3. **统计分析**：计算基础统计指标（总和、平均、最大/最小、分布等）\n4. **LLM 分析**：将数据和统计结果发送给 LLM，生成洞察报告\n5. **输出报告**：格式化为 Markdown 并保存\n\n## 输出内容\n- **数据概览**：关键指标汇总\n- **趋势分析**：时间序列趋势\n- **洞察发现**：异常值、模式、相关性\n- **行动建议**：基于数据的优化建议\n\n## 注意事项\n- 确保 Excel 文件格式正确，包含列标题\n- 大文件（>10MB）可能需要较长处理时间\n- 敏感数据请在本地运行，不要上传到云端模型",
+  "variables": [
+    {
+      "name": "excel_file_path",
+      "type": "string",
+      "label": "Excel 文件路径",
+      "description": "要分析的 Excel 文件完整路径（例如：/Users/username/data/sales.xlsx）",
+      "required": true,
+      "validation": {
+        "pattern": "\\.(xlsx|xls)$",
+        "message": "文件必须是 Excel 格式（.xlsx 或 .xls）"
+      }
+    },
+    {
+      "name": "sheet_name",
+      "type": "string",
+      "label": "工作表名称",
+      "description": "要读取的工作表名称，留空则读取第一个工作表",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "analysis_focus",
+      "type": "select",
+      "label": "分析重点",
+      "description": "选择您最关心的分析维度",
+      "required": true,
+      "default": "comprehensive",
+      "options": [
+        { "label": "综合分析", "value": "comprehensive" },
+        { "label": "销售趋势", "value": "sales_trend" },
+        { "label": "产品对比", "value": "product_comparison" },
+        { "label": "地区分析", "value": "regional_analysis" },
+        { "label": "客户分析", "value": "customer_analysis" }
+      ]
+    },
+    {
+      "name": "model_id",
+      "type": "model_id",
+      "label": "LLM 模型",
+      "description": "用于生成分析报告的 LLM 模型",
+      "required": true,
+      "default": 1
+    },
+    {
+      "name": "output_path",
+      "type": "string",
+      "label": "报告输出路径",
+      "description": "分析报告保存路径（Markdown 格式）",
+      "required": false,
+      "default": "./analysis_report.md"
+    }
+  ],
+  "dag": {
+    "nodes": [
+      {
+        "id": "read_excel",
+        "type": "code_execution",
+        "name": "读取 Excel 文件",
+        "config": {
+          "language": "python",
+          "code": "import pandas as pd\nimport json\n\n# 读取 Excel 文件\nfile_path = '{{var.excel_file_path}}'\nsheet_name = '{{var.sheet_name}}' or 0\n\ntry:\n    df = pd.read_excel(file_path, sheet_name=sheet_name)\n    \n    # 基础信息\n    info = {\n        'rows': len(df),\n        'columns': len(df.columns),\n        'column_names': df.columns.tolist(),\n        'dtypes': df.dtypes.astype(str).to_dict(),\n        'missing_values': df.isnull().sum().to_dict(),\n        'sample_data': df.head(10).to_dict('records')\n    }\n    \n    # 保存完整数据为 CSV（供后续节点使用）\n    df.to_csv('/tmp/excel_data.csv', index=False)\n    \n    print(json.dumps(info, ensure_ascii=False, indent=2))\n    \nexcept Exception as e:\n    print(f'读取失败：{str(e)}')\n    raise",
+          "timeout": 60
+        }
+      },
+      {
+        "id": "data_cleaning",
+        "type": "code_execution",
+        "name": "数据清洗",
+        "config": {
+          "language": "python",
+          "code": "import pandas as pd\nimport json\n\n# 读取数据\ndf = pd.read_csv('/tmp/excel_data.csv')\n\n# 数据清洗\ndf_clean = df.copy()\n\n# 删除完全为空的行和列\ndf_clean = df_clean.dropna(how='all', axis=0)\ndf_clean = df_clean.dropna(how='all', axis=1)\n\n# 数值列：填充缺失值为0\nnumeric_cols = df_clean.select_dtypes(include=['number']).columns\nfor col in numeric_cols:\n    df_clean[col] = df_clean[col].fillna(0)\n\n# 字符串列：填充缺失值为空字符串\nstr_cols = df_clean.select_dtypes(include=['object']).columns\nfor col in str_cols:\n    df_clean[col] = df_clean[col].fillna('')\n\n# 日期列：尝试转换\nfor col in df_clean.columns:\n    if '日期' in col or 'date' in col.lower() or '时间' in col:\n        try:\n            df_clean[col] = pd.to_datetime(df_clean[col])\n        except:\n            pass\n\n# 保存清洗后的数据\ndf_clean.to_csv('/tmp/excel_data_clean.csv', index=False)\n\nclean_info = {\n    'original_rows': len(df),\n    'cleaned_rows': len(df_clean),\n    'removed_rows': len(df) - len(df_clean),\n    'columns': df_clean.columns.tolist()\n}\n\nprint(json.dumps(clean_info, ensure_ascii=False, indent=2))"
+        }
+      },
+      {
+        "id": "statistical_analysis",
+        "type": "code_execution",
+        "name": "统计分析",
+        "config": {
+          "language": "python",
+          "code": "import pandas as pd\nimport json\n\n# 读取清洗后的数据\ndf = pd.read_csv('/tmp/excel_data_clean.csv')\n\n# 基础统计\nstats = {}\n\n# 数值列统计\nnumeric_cols = df.select_dtypes(include=['number']).columns.tolist()\nfor col in numeric_cols:\n    stats[col] = {\n        'count': int(df[col].count()),\n        'sum': float(df[col].sum()),\n        'mean': float(df[col].mean()),\n        'median': float(df[col].median()),\n        'min': float(df[col].min()),\n        'max': float(df[col].max()),\n        'std': float(df[col].std()) if df[col].std() == df[col].std() else 0  # 检查 NaN\n    }\n\n# 分类列统计\ncategorical_cols = df.select_dtypes(include=['object']).columns.tolist()\nfor col in categorical_cols:\n    value_counts = df[col].value_counts().head(10)\n    stats[col] = {\n        'unique_count': int(df[col].nunique()),\n        'top_values': value_counts.to_dict()\n    }\n\nresult = {\n    'total_rows': len(df),\n    'statistics': stats,\n    'numeric_columns': numeric_cols,\n    'categorical_columns': categorical_cols\n}\n\nprint(json.dumps(result, ensure_ascii=False, indent=2))"
+        }
+      },
+      {
+        "id": "llm_analysis",
+        "type": "llm_call",
+        "name": "LLM 深度分析",
+        "config": {
+          "model_id": "{{var.model_id}}",
+          "prompt": "你是一位专业的数据分析师。请基于以下 Excel 数据的统计分析结果，生成一份详细的分析报告。\n\n## 分析重点\n{{var.analysis_focus}}\n\n## 统计数据\n${statistical_analysis.output}\n\n## 要求\n1. 使用 Markdown 格式输出\n2. 包含以下章节：\n   - **数据概览**：总体情况汇总\n   - **关键指标**：最重要的 3-5 个指标\n   - **趋势分析**：数据的时间趋势或分布特征\n   - **深度洞察**：发现的模式、异常值、相关性\n   - **行动建议**：基于数据的 3-5 条具体建议\n3. 使用图表描述（用文字描述，不需要实际生成图表）\n4. 语言专业、简洁，适合向管理层汇报\n\n请开始分析：",
+          "temperature": 0.7,
+          "max_tokens": 2000
+        }
+      },
+      {
+        "id": "save_report",
+        "type": "code_execution",
+        "name": "保存分析报告",
+        "config": {
+          "language": "python",
+          "code": "import json\nfrom datetime import datetime\n\n# 获取 LLM 分析结果\nllm_result = '''${llm_analysis.output}'''\n\n# 构建完整报告\nreport = f'''# Excel 数据分析报告\n\n> 生成时间：{datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}\n> 数据源：{{var.excel_file_path}}\n> 分析重点：{{var.analysis_focus}}\n\n---\n\n{llm_result}\n\n---\n\n*本报告由 Pivot 智能体系统自动生成*\n'''\n\n# 保存报告\noutput_path = '{{var.output_path}}'\nwith open(output_path, 'w', encoding='utf-8') as f:\n    f.write(report)\n\nprint(f'✅ 分析报告已保存到：{output_path}')\nprint(f'📊 报告字数：{len(report)} 字符')"
+        }
+      }
+    ],
+    "edges": [
+      { "from": "read_excel", "to": "data_cleaning" },
+      { "from": "data_cleaning", "to": "statistical_analysis" },
+      { "from": "statistical_analysis", "to": "llm_analysis" },
+      { "from": "llm_analysis", "to": "save_report" }
+    ],
+    "config": {
+      "max_retries": 2,
+      "timeout": 600,
+      "error_handling": "stop_on_error"
+    }
+  }
+}

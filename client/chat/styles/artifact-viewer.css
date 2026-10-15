@@ -1,0 +1,436 @@
+/* ==========================================================================
+   Pivot Artifact Viewer (交互空间弹窗与抽屉工作区样式)
+   ========================================================================== */
+
+/* 全屏遮罩与抽屉容器 */
+.pivot-artifact-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(8px);
+    z-index: 6300;
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pivot-artifact-modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* 抽屉工作区主体 */
+.pivot-artifact-drawer {
+    width: min(880px, 92vw);
+    height: 100vh;
+    background: #0b1120;
+    border-left: 1px solid rgba(56, 189, 248, 0.2);
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.65);
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.2s ease;
+    overflow: hidden;
+}
+
+.pivot-artifact-modal-overlay.active .pivot-artifact-drawer {
+    transform: translateX(0);
+}
+
+/* 全屏模式切换 */
+.pivot-artifact-drawer.fullscreen {
+    width: 100vw;
+    border-left: none;
+}
+
+/* 头部导航与操作栏 */
+.pivot-artifact-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: #0f172a;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.15);
+    min-height: 56px;
+    box-sizing: border-box;
+    gap: 16px;
+}
+
+.pivot-artifact-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+
+.pivot-artifact-header-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(59, 130, 246, 0.2));
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #38bdf8;
+    flex-shrink: 0;
+}
+
+.pivot-artifact-header-titles {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pivot-artifact-header-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f8fafc;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.pivot-artifact-header-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+    font-size: 11.5px;
+    color: #94a3b8;
+}
+
+.pivot-artifact-version-pill {
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* 头部导航 Tab */
+.pivot-artifact-tabs {
+    display: flex;
+    align-items: center;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+}
+
+.pivot-artifact-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 12.5px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pivot-artifact-tab-btn:hover {
+    color: #e2e8f0;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.pivot-artifact-tab-btn.active {
+    color: #38bdf8;
+    background: #0f172a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* 头部操作动作 */
+.pivot-artifact-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.pivot-artifact-icon-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: rgba(30, 41, 59, 0.5);
+    color: #cbd5e1;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pivot-artifact-icon-btn:hover {
+    background: rgba(51, 65, 85, 0.7);
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.pivot-artifact-close-btn {
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.pivot-artifact-close-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+/* 主工作区视图切换体 */
+.pivot-artifact-body {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+}
+
+.pivot-artifact-tab-pane {
+    display: none;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}
+
+.pivot-artifact-tab-pane.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 源码编辑器视图 */
+.pivot-artifact-source-view {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background: #090d16;
+}
+
+.pivot-artifact-source-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #0f172a;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.pivot-artifact-source-textarea {
+    flex: 1;
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 16px;
+    background: transparent;
+    color: #f1f5f9;
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    box-sizing: border-box;
+}
+
+/* 版本历史视图 */
+.pivot-artifact-versions-view {
+    padding: 24px;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.pivot-artifact-version-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.pivot-artifact-version-card:hover {
+    border-color: rgba(56, 189, 248, 0.35);
+    background: rgba(30, 41, 59, 0.75);
+}
+
+.pivot-artifact-version-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pivot-artifact-version-tag {
+    font-weight: 600;
+    color: #38bdf8;
+    font-size: 14px;
+}
+
+.pivot-artifact-version-time {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+.pivot-artifact-version-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 讨论与评论视图 */
+.pivot-artifact-comments-view {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.pivot-artifact-comments-list {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pivot-artifact-comment-item {
+    padding: 12px 16px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pivot-artifact-comment-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+}
+
+.pivot-artifact-comment-author {
+    font-weight: 600;
+    color: #38bdf8;
+}
+
+.pivot-artifact-comment-time {
+    color: #64748b;
+}
+
+.pivot-artifact-comment-content {
+    font-size: 13.5px;
+    color: #e2e8f0;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.pivot-artifact-comment-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.pivot-artifact-comment-input {
+    flex: 1;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #f1f5f9;
+    font-size: 13px;
+    outline: none;
+}
+
+.pivot-artifact-comment-input:focus {
+    border-color: #38bdf8;
+}
+
+/* 消息内嵌入的 Artifact 引导卡片 */
+.pivot-artifact-chat-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 12px 0;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9));
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.pivot-artifact-chat-card:hover {
+    border-color: #38bdf8;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(56, 189, 248, 0.15);
+}
+
+.pivot-artifact-card-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pivot-artifact-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pivot-artifact-card-title {
+    font-weight: 600;
+    color: #f8fafc;
+    font-size: 14px;
+}
+
+.pivot-artifact-card-type {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-top: 2px;
+}
+
+.pivot-artifact-card-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+}

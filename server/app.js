@@ -78,6 +78,7 @@ const { createToolLibraryRouter } = require('./routes/tool-library');
 const { createEventsRouter } = require('./routes/events');
 const { createAnnouncementsRouter } = require('./routes/announcements');
 const { createMemoriesRouter } = require('./routes/memories');
+const { createWorkflowTemplatesRouter } = require('./routes/agent/workflowTemplates');
 const { createKnowledgeRouter } = require('./routes/knowledge');
 const { createAppServerRouter } = require('./routes/app-server');
 const { createAppServerProtocol } = require('./services/app-server-protocol');
@@ -663,6 +664,36 @@ app.use('/api', createAgentsRouter({
         single(field) { return [skillUpload.single(field), uploadSecurityMiddleware]; }
     }
 }));
+
+// 工作流模板路由
+app.use('/api', createWorkflowTemplatesRouter({
+    authMiddleware,
+    logAction
+}));
+
+// 评测系统路由
+const evaluationRouter = require('./routes/api/evaluation');
+app.use('/api/evaluation', evaluationRouter);
+
+// 流式交互路由
+const streamingRouter = require('./routes/api/streaming');
+app.use('/api/streaming', streamingRouter);
+
+// 工具推荐路由
+const toolRecommendationRouter = require('./routes/api/tool-recommendation');
+app.use('/api/tools', toolRecommendationRouter);
+
+// 自主规划路由
+const planningRouter = require('./routes/api/planning');
+app.use('/api/planning', planningRouter);
+
+// Artifacts 交互空间路由
+const artifactsRouter = require('./routes/api/artifacts');
+app.use('/api/artifacts', artifactsRouter);
+
+// 编排语言路由
+const orchestrationRouter = require('./routes/api/orchestration');
+app.use('/api/orchestration', orchestrationRouter);
 
 // 入站触发挂在 /hooks 下：令牌即凭证，不参与浏览器会话鉴权和 CSRF 校验
 app.use('/hooks', createTriggersRouter({

@@ -1,0 +1,174 @@
+{
+  "name": "批量图片处理",
+  "slug": "batch-image-processing",
+  "category": "automation-ops",
+  "category_slug": "automation-ops",
+  "description": "批量处理图片文件：调整尺寸、压缩、格式转换、添加水印等常见操作",
+  "difficulty": "beginner",
+  "estimated_time": "5-10分钟",
+  "tags": ["图片处理", "批量操作", "自动化", "文件处理"],
+  "is_builtin": true,
+  "is_public": true,
+  "documentation": "## 功能说明\n\n批量图片处理模板支持对指定目录下的所有图片文件执行以下操作：\n\n- **调整尺寸**：按指定宽度/高度缩放\n- **压缩**：降低文件大小，优化存储\n- **格式转换**：支持 JPEG, PNG, WebP 等格式\n- **添加水印**：在图片上添加文本或图片水印\n- **批量重命名**：统一命名规则\n\n## 使用场景\n\n- 网站图片优化（减小加载时间）\n- 产品图片标准化（电商平台）\n- 批量添加版权水印\n- 格式统一（如 PNG → WebP）\n- 社交媒体图片准备（统一尺寸）\n\n## 注意事项\n\n- 处理大量图片时请耐心等待\n- 建议先备份原始图片\n- 确保输出目录有足够的磁盘空间\n- 水印位置可选：左上、右上、左下、右下、居中",
+  "example_output": "```\n处理完成！\n\n总计：150 张图片\n成功：148 张\n失败：2 张\n\n统计信息：\n- 总大小：156.8 MB → 42.3 MB（减少 73%）\n- 平均压缩率：72.9%\n- 处理时间：2 分 18 秒\n\n输出目录：/path/to/output/\n```",
+  "variables": [
+    {
+      "name": "input_directory",
+      "label": "输入目录",
+      "type": "string",
+      "description": "包含待处理图片的目录路径",
+      "required": true,
+      "validation": {
+        "message": "请输入有效的目录路径"
+      }
+    },
+    {
+      "name": "output_directory",
+      "label": "输出目录",
+      "type": "string",
+      "description": "处理后图片的保存路径",
+      "required": true,
+      "validation": {
+        "message": "请输入有效的目录路径"
+      }
+    },
+    {
+      "name": "operation",
+      "label": "处理操作",
+      "type": "select",
+      "description": "选择要执行的图片处理操作",
+      "required": true,
+      "default": "resize",
+      "options": [
+        { "value": "resize", "label": "调整尺寸" },
+        { "value": "compress", "label": "压缩" },
+        { "value": "convert", "label": "格式转换" },
+        { "value": "watermark", "label": "添加水印" },
+        { "value": "all", "label": "全部执行" }
+      ]
+    },
+    {
+      "name": "target_width",
+      "label": "目标宽度",
+      "type": "number",
+      "description": "图片目标宽度（像素），0 表示保持原宽度",
+      "required": false,
+      "default": 1920,
+      "validation": {
+        "min": 0,
+        "max": 10000
+      }
+    },
+    {
+      "name": "target_height",
+      "label": "目标高度",
+      "type": "number",
+      "description": "图片目标高度（像素），0 表示保持原高度",
+      "required": false,
+      "default": 0,
+      "validation": {
+        "min": 0,
+        "max": 10000
+      }
+    },
+    {
+      "name": "quality",
+      "label": "压缩质量",
+      "type": "number",
+      "description": "图片压缩质量（1-100），数值越高质量越好",
+      "required": false,
+      "default": 85,
+      "validation": {
+        "min": 1,
+        "max": 100
+      }
+    },
+    {
+      "name": "output_format",
+      "label": "输出格式",
+      "type": "select",
+      "description": "转换后的图片格式",
+      "required": false,
+      "default": "jpg",
+      "options": [
+        { "value": "jpg", "label": "JPEG" },
+        { "value": "png", "label": "PNG" },
+        { "value": "webp", "label": "WebP" }
+      ]
+    },
+    {
+      "name": "watermark_text",
+      "label": "水印文本",
+      "type": "string",
+      "description": "水印文本内容（不填则不添加水印）",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "watermark_position",
+      "label": "水印位置",
+      "type": "select",
+      "description": "水印在图片上的位置",
+      "required": false,
+      "default": "bottom-right",
+      "options": [
+        { "value": "top-left", "label": "左上角" },
+        { "value": "top-right", "label": "右上角" },
+        { "value": "bottom-left", "label": "左下角" },
+        { "value": "bottom-right", "label": "右下角" },
+        { "value": "center", "label": "居中" }
+      ]
+    }
+  ],
+  "dag": {
+    "nodes": [
+      {
+        "id": "scan_images",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import os\nfrom pathlib import Path\n\ninput_dir = Path('{{var.input_directory}}')\nif not input_dir.exists():\n    raise ValueError(f'输入目录不存在: {input_dir}')\n\nsupported_formats = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']\nimage_files = []\n\nfor ext in supported_formats:\n    image_files.extend(list(input_dir.glob(f'*{ext}')))\n    image_files.extend(list(input_dir.glob(f'*{ext.upper}')))\n\nimage_files = [str(f) for f in sorted(set(image_files))]\nprint(f'找到 {len(image_files)} 张图片')\n\ncontext['image_files'] = image_files\ncontext['total_count'] = len(image_files)"
+        }
+      },
+      {
+        "id": "process_images",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "import os\nfrom PIL import Image, ImageDraw, ImageFont\nfrom pathlib import Path\n\noutput_dir = Path('{{var.output_directory}}')\noutput_dir.mkdir(parents=True, exist_ok=True)\n\noperation = '{{var.operation}}'\ntarget_width = {{var.target_width}}\ntarget_height = {{var.target_height}}\nquality = {{var.quality}}\noutput_format = '{{var.output_format}}'\nwatermark_text = '{{var.watermark_text|}}'\nwatermark_position = '{{var.watermark_position}}'\n\nimage_files = context.get('image_files', [])\nsuccess_count = 0\nfail_count = 0\nerrors = []\noriginal_size = 0\nprocessed_size = 0\n\nfor img_path in image_files:\n    try:\n        # 打开图片\n        img = Image.open(img_path)\n        original_size += os.path.getsize(img_path)\n        \n        # 调整尺寸\n        if operation in ['resize', 'all'] and (target_width > 0 or target_height > 0):\n            if target_width > 0 and target_height > 0:\n                img = img.resize((target_width, target_height), Image.LANCZOS)\n            elif target_width > 0:\n                ratio = target_width / img.width\n                new_height = int(img.height * ratio)\n                img = img.resize((target_width, new_height), Image.LANCZOS)\n            elif target_height > 0:\n                ratio = target_height / img.height\n                new_width = int(img.width * ratio)\n                img = img.resize((new_width, target_height), Image.LANCZOS)\n        \n        # 添加水印\n        if operation in ['watermark', 'all'] and watermark_text:\n            draw = ImageDraw.Draw(img)\n            font_size = max(20, int(min(img.width, img.height) * 0.05))\n            try:\n                font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', font_size)\n            except:\n                font = ImageFont.load_default()\n            \n            bbox = draw.textbbox((0, 0), watermark_text, font=font)\n            text_width = bbox[2] - bbox[0]\n            text_height = bbox[3] - bbox[1]\n            \n            margin = 20\n            if watermark_position == 'top-left':\n                position = (margin, margin)\n            elif watermark_position == 'top-right':\n                position = (img.width - text_width - margin, margin)\n            elif watermark_position == 'bottom-left':\n                position = (margin, img.height - text_height - margin)\n            elif watermark_position == 'bottom-right':\n                position = (img.width - text_width - margin, img.height - text_height - margin)\n            else:  # center\n                position = ((img.width - text_width) // 2, (img.height - text_height) // 2)\n            \n            draw.text(position, watermark_text, fill='white', font=font, stroke_width=2, stroke_fill='black')\n        \n        # 保存\n        filename = Path(img_path).stem\n        output_path = output_dir / f'{filename}.{output_format}'\n        \n        save_kwargs = {'quality': quality} if output_format in ['jpg', 'jpeg'] else {}\n        if img.mode == 'RGBA' and output_format in ['jpg', 'jpeg']:\n            img = img.convert('RGB')\n        \n        img.save(output_path, **save_kwargs)\n        processed_size += os.path.getsize(output_path)\n        success_count += 1\n        \n    except Exception as e:\n        fail_count += 1\n        errors.append(f'{Path(img_path).name}: {str(e)}')\n\ncontext['success_count'] = success_count\ncontext['fail_count'] = fail_count\ncontext['errors'] = errors\ncontext['original_size'] = original_size\ncontext['processed_size'] = processed_size"
+        }
+      },
+      {
+        "id": "generate_report",
+        "type": "code_execution",
+        "config": {
+          "runtime": "python",
+          "code": "total = context.get('total_count', 0)\nsuccess = context.get('success_count', 0)\nfail = context.get('fail_count', 0)\nerrors = context.get('errors', [])\noriginal = context.get('original_size', 0)\nprocessed = context.get('processed_size', 0)\n\noriginal_mb = original / 1024 / 1024\nprocessed_mb = processed / 1024 / 1024\nreduction = ((original - processed) / original * 100) if original > 0 else 0\n\nreport = f'''处理完成！\n\n总计：{total} 张图片\n成功：{success} 张\n失败：{fail} 张\n\n'''\n\nif original > 0:\n    report += f'''统计信息：\n- 总大小：{original_mb:.1f} MB → {processed_mb:.1f} MB（减少 {reduction:.1f}%）\n- 平均压缩率：{reduction:.1f}%\n\n'''\n\nreport += f'''输出目录：{{var.output_directory}}\n'''\n\nif errors:\n    report += f'\n\n错误列表：\n' + '\n'.join(f'- {e}' for e in errors[:10])\n    if len(errors) > 10:\n        report += f'\n... 及其他 {len(errors) - 10} 个错误'\n\ncontext['report'] = report\nprint(report)"
+        }
+      },
+      {
+        "id": "save_report",
+        "type": "file_output",
+        "config": {
+          "path": "{{var.output_directory}}/processing_report.txt",
+          "content": "{{context.report}}",
+          "encoding": "utf-8"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "scan_images",
+        "target": "process_images"
+      },
+      {
+        "source": "process_images",
+        "target": "generate_report"
+      },
+      {
+        "source": "generate_report",
+        "target": "save_report"
+      }
+    ]
+  }
+}
