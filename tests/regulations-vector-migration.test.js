@@ -49,15 +49,18 @@ test('法规旧 text 向量列迁移不会重写列或既有 ANN 索引，并会
         `);
         assert.equal(type.rows[0].type, 'text');
         const state = await client.query(`
-            SELECT v.index_status, v.index_attempts, a.embedding, a.embedding_profile
+            SELECT v.index_status, v.index_attempts, v.embedding_profile AS version_embedding_profile, a.embedding, a.embedding_profile
             FROM regulation_versions v
             JOIN regulation_articles a ON a.version_id = v.id
             WHERE v.id = $1
         `, [versionId]);
         assert.equal(state.rows[0].index_status, 'retry_wait');
         assert.equal(Number(state.rows[0].index_attempts), 0);
-        assert.equal(state.rows[0].embedding, null);
-        assert.equal(state.rows[0].embedding_profile, '');
+        assert.equal(state.rows[0].version_embedding_profile, '');
+        // 启动迁移刻意不阻塞同步更新 regulation_articles，避免全表长事务锁表；
+        // 条文旧向量保留原样，由后台巡检在 retry_wait 状态下异步覆盖重建
+        assert.equal(state.rows[0].embedding, '[0.1,0.2]');
+        assert.equal(state.rows[0].embedding_profile, 'http:old-model');
         const index = await client.query('SELECT indexname FROM pg_indexes WHERE indexname = $1', [indexName]);
         assert.equal(index.rows.length, 1, '旧 ANN 表达式索引应被保留，迁移不得触发重建');
     } finally {
