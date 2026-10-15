@@ -4,7 +4,7 @@
  * 基于 PostgreSQL 原生异步连接池
  */
 
-const { query, queryOne, execute, transaction } = require('../../db/client');
+const { query, queryOne } = require('../../db/client');
 const { workflowTemplateService } = require('./workflowTemplateService');
 
 class WorkflowInstanceService {

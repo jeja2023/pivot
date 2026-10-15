@@ -240,7 +240,7 @@ class ExecutionPlanner {
   /**
    * 确定执行策略
    */
-  determineStrategy(subtasks, context) {
+  determineStrategy(subtasks, _context) {
     const totalTasks = subtasks.length;
     const highComplexityTasks = subtasks.filter(
       t => t.estimatedComplexity === 'high'
@@ -317,7 +317,7 @@ class PlanAdjuster {
   /**
    * 根据执行结果调整计划
    */
-  async adjustPlan(originalPlan, executionResults, context = {}) {
+  async adjustPlan(originalPlan, executionResults, _context = {}) {
     // 分析执行情况
     const analysis = this.analyzeExecution(executionResults);
 

@@ -162,7 +162,7 @@ router.post('/suites', requireAdmin, async (req, res) => {
 router.post('/run', requireAuth, async (req, res) => {
   try {
     const { suiteId, options } = req.body;
-    const userId = req.user.id;
+    const _userId = req.user.id;
 
     if (!suiteId) {
       return res.status(400).json({
@@ -200,7 +200,7 @@ router.post('/run', requireAuth, async (req, res) => {
     benchmarkManager.registerSuite(targetSuite);
 
     // 模拟 Agent 运行器（实际应该使用真实的运行器）
-    const mockAgentRunner = async (input, context) => {
+    const mockAgentRunner = async (input, _context) => {
       // 这里应该调用真实的 Agent 运行时
       // 暂时返回模拟结果
       return {

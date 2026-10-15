@@ -223,7 +223,6 @@ class ToolRecommendationEngine {
     }
 
     const { task, intent, entities = [] } = context;
-    const recommendations = [];
 
     // 1. 基于任务描述的语义相似度匹配
     const semanticMatches = this.findSemanticMatches(task, limit * 2);

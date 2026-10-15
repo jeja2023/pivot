@@ -8,7 +8,7 @@
  * - 使用统计
  */
 
-const { query, queryOne, execute, transaction } = require('../../db/client');
+const { query, queryOne, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 
 class WorkflowTemplateError extends Error {

@@ -140,7 +140,7 @@ test('元数据审核在同一工作台并排展示法规原文和审核表单',
         await expect(evidence).toContainText('法规原文');
         await expect(evidence).toContainText('测试法规原文，用于核验元数据');
         await expect(page.locator('.regulations-review-evidence-head')).toContainText('审核依据');
-        assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('regulations-detail-content')).display), 'grid');
+        assert.equal(await page.evaluate(() => window.getComputedStyle(document.getElementById('regulations-detail-content')).display), 'grid');
 
         await form.locator('[data-regulation-cancel-inline]').click();
         await expect(panel).not.toHaveClass(/regulations-metadata-review-mode/);

@@ -230,7 +230,7 @@ function createPerformanceTestSuite() {
     context: {},
     expectedBehavior: '应该在5秒内完成',
     timeout: 5000,
-    successCriteria: (output, input, context) => {
+    successCriteria: (output, _input, _context) => {
       const correct = output.result && /2|二|两/.test(output.result);
       const fast = output.metadata && output.metadata.duration < 5000;
       return {

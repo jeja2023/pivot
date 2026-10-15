@@ -161,7 +161,7 @@ class EvaluationSuite {
   /**
    * 运行单个用例
    */
-  async runCase(evalCase, agentRunner, options = {}) {
+  async runCase(evalCase, agentRunner, _options = {}) {
     const result = {
       caseId: evalCase.id,
       caseName: evalCase.name,
