@@ -32,7 +32,7 @@ class StreamingRenderer {
    * 初始化UI容器
    */
   initializeUI() {
-    this.container.innerHTML = `
+    PivotSafeHtml.setHtml(this.container, `
       <div class="streaming-container">
         <!-- 状态栏 -->
         <div class="streaming-status" id="streaming-status">
@@ -69,7 +69,7 @@ class StreamingRenderer {
           <span id="avg-latency">平均延迟: -</span>
         </div>
       </div>
-    `;
+    `);
 
     this.statusEl = document.getElementById('streaming-status');
     this.thinkingPanel = document.getElementById('thinking-chain-panel');
@@ -162,7 +162,7 @@ class StreamingRenderer {
     const stepEl = document.createElement('div');
     stepEl.className = 'thinking-step';
     stepEl.id = `thinking-step-${step}`;
-    stepEl.innerHTML = `
+    PivotSafeHtml.setHtml(stepEl, `
       <div class="step-header">
         <span class="step-number">步骤 ${step}</span>
         <span class="step-status">思考中...</span>
@@ -171,7 +171,7 @@ class StreamingRenderer {
       <div class="step-progress">
         <div class="progress-bar" id="progress-bar-${step}" style="width: 0%"></div>
       </div>
-    `;
+    `);
 
     this.thinkingStepsEl.appendChild(stepEl);
 
@@ -228,7 +228,10 @@ class StreamingRenderer {
     if (data.observation) {
       const contentEl = document.getElementById(`step-content-${step}`);
       if (contentEl) {
-        contentEl.innerHTML += `<div class="observation">观察: ${data.observation}</div>`;
+        const obsEl = document.createElement('div');
+        obsEl.className = 'observation';
+        obsEl.textContent = `观察: ${data.observation}`;
+        contentEl.appendChild(obsEl);
       }
     }
   }
@@ -249,7 +252,7 @@ class StreamingRenderer {
     const toolEl = document.createElement('div');
     toolEl.className = 'tool-call';
     toolEl.id = `tool-call-${toolName}`;
-    toolEl.innerHTML = `
+    PivotSafeHtml.setHtml(toolEl, `
       <div class="tool-header">
         <span class="tool-name">${toolName}</span>
         <span class="tool-status">调用中...</span>
@@ -257,7 +260,7 @@ class StreamingRenderer {
       <div class="tool-progress">
         <div class="progress-bar" id="tool-progress-${toolName}" style="width: 0%"></div>
       </div>
-    `;
+    `);
 
     this.toolCallsEl.appendChild(toolEl);
   }
@@ -346,9 +349,9 @@ class StreamingRenderer {
 
     const errorEl = document.createElement('div');
     errorEl.className = 'error-message';
-    errorEl.innerHTML = `
-      <strong>错误:</strong> ${data.message}
-    `;
+    PivotSafeHtml.setHtml(errorEl, `
+      <strong>错误:</strong> ${PivotSafeHtml.escapeHtml(data.message)}
+    `);
     this.outputContent.appendChild(errorEl);
 
     this.updateStatus('error', '发生错误');
@@ -403,14 +406,12 @@ class StreamingRenderer {
    */
   cleanup() {
     this.disconnect();
-    this.container.innerHTML = '';
+    PivotSafeHtml.setHtml(this.container, '');
   }
 }
 
 // 导出
-if (typeof window !== 'undefined') {
-  window.StreamingRenderer = StreamingRenderer;
-  window.Pivot = window.Pivot || {};
+if (typeof window !== 'undefined' && window.Pivot) {
   window.Pivot.StreamingRenderer = StreamingRenderer;
 }
 if (typeof module !== 'undefined' && module.exports) {

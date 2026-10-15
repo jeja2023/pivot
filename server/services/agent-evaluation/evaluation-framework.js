@@ -412,7 +412,6 @@ class BenchmarkManager {
 }
 
 module.exports = {
-  EvaluationCase,
   EvaluationSuite,
   BenchmarkManager
 };

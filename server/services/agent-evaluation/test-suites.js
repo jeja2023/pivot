@@ -386,9 +386,5 @@ function getAllTestSuites() {
 }
 
 module.exports = {
-  createCorrectnessTestSuite,
-  createRobustnessTestSuite,
-  createPerformanceTestSuite,
-  createSafetyTestSuite,
   getAllTestSuites
 };

@@ -90,6 +90,30 @@ let PivotSafeHtml;
         element.prepend(...Array.from(scratch.childNodes));
     };
 
+    const appendHtml = (element, html, options = {}) => {
+        if (!element) return;
+        const raw = String(html ?? '');
+        const scratch = createContextElement(element);
+        scratch.innerHTML = raw;
+        if (window.DOMPurify) {
+            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+        } else {
+            sanitizeDomFallback(scratch);
+        }
+        if (typeof element.append === 'function') {
+            element.append(...Array.from(scratch.childNodes));
+        } else {
+            while (scratch.firstChild) {
+                element.appendChild(scratch.firstChild);
+            }
+        }
+    };
+
+    const setSrcdoc = (iframe, html) => {
+        if (!iframe) return;
+        iframe.setAttribute('srcdoc', String(html ?? ''));
+    };
+
     if (typeof window !== 'undefined' && !window.DOMPurify && typeof document !== 'undefined') {
         const hasScript = Array.from(document.scripts || []).some(s => (s.src || '').includes('purify.min.js'));
         if (!hasScript && (document.head || document.documentElement)) {
@@ -106,10 +130,14 @@ let PivotSafeHtml;
         sanitizeHtml,
         setHtml,
         prependHtml,
+        appendHtml,
+        setSrcdoc,
         markdownSafeOptions: MARKDOWN_SAFE_OPTIONS
     };
 
     PivotSafeHtml = api;
-    window.Pivot.legacy.PivotSafeHtml = api;
-    window.Pivot.html = api;
+    if (typeof window !== 'undefined' && window.Pivot) {
+        if (window.Pivot.legacy) window.Pivot.legacy.PivotSafeHtml = api;
+        window.Pivot.html = api;
+    }
 })();

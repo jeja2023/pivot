@@ -347,3 +347,8 @@
     align-items: center;
     gap: 8px;
 }
+
+.pivot-artifact-action-btn.copied {
+    color: var(--success);
+    border-color: var(--success);
+}

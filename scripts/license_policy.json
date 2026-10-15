@@ -39,6 +39,11 @@
       "selectedLicense": "MIT",
       "reason": "better-sqlite3 预编译工具依赖，上游声明 (BSD-2-Clause OR MIT OR Apache-2.0)；本项目选择 MIT 分支。",
       "expiresOn": "2026-12-31"
+    },
+    "sylvester": {
+      "selectedLicense": "MIT",
+      "reason": "natural 依赖项，上游源码包随附 LICENSE.txt 声明标准 MIT 许可，package.json 未填写 license 字段；本项目按 MIT 条款分发。",
+      "expiresOn": "2026-12-31"
     }
   }
 }

@@ -434,3 +434,14 @@
     font-size: 12.5px;
     font-weight: 500;
 }
+
+.pivot-artifact-placeholder {
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 40px;
+}
+
+.pivot-artifact-error {
+    color: var(--danger);
+    padding: 20px;
+}

@@ -5,8 +5,6 @@
  */
 
 (function () {
-    window.Pivot = window.Pivot || {};
-
     class ArtifactRenderer {
         constructor() {
             this.container = null;
@@ -32,7 +30,7 @@
             const showToolbar = options.showToolbar !== false;
 
             // 清空容器
-            container.innerHTML = '';
+            PivotSafeHtml.setHtml(container, '');
             container.classList.add('pivot-artifact-render-container');
 
             // 1. 构建顶部小工具栏
@@ -41,7 +39,7 @@
                 toolbar.className = 'pivot-artifact-render-toolbar';
 
                 const badgeClass = `pivot-artifact-badge pivot-artifact-badge-${type.toLowerCase()}`;
-                toolbar.innerHTML = `
+                PivotSafeHtml.setHtml(toolbar, `
                     <div class="pivot-artifact-render-info">
                         <span class="${badgeClass}">${this.escapeHtml(type)}</span>
                         <span class="pivot-artifact-meta-text">${this.escapeHtml(title)}</span>
@@ -56,7 +54,7 @@
                             <span>下载</span>
                         </button>
                     </div>
-                `;
+                `);
 
                 // 绑定复制与下载
                 const copyBtn = toolbar.querySelector('#pivot-artifact-btn-copy');
@@ -113,7 +111,7 @@
 
             const loading = document.createElement('div');
             loading.className = 'pivot-artifact-iframe-loading';
-            loading.innerHTML = '<div class="pivot-artifact-spinner"></div><span>正在加载交互沙箱...</span>';
+            PivotSafeHtml.setHtml(loading, '<div class="pivot-artifact-spinner"></div><span>正在加载交互沙箱...</span>');
             iframeContainer.appendChild(loading);
 
             const iframe = document.createElement('iframe');
@@ -146,7 +144,7 @@
 </html>`;
             }
 
-            iframe.srcdoc = fullDoc;
+            PivotSafeHtml.setSrcdoc(iframe, fullDoc);
             iframe.onload = () => {
                 loading.style.opacity = '0';
                 setTimeout(() => loading.remove(), 250);
@@ -194,14 +192,14 @@
                 html = `<pre style="white-space: pre-wrap;">${this.escapeHtml(markdownContent)}</pre>`;
             }
 
-            mdContainer.innerHTML = html;
+            PivotSafeHtml.setHtml(mdContainer, html);
             viewport.appendChild(mdContainer);
         }
 
         /**
          * 渲染代码
          */
-        renderCode(viewport, codeContent, language = 'text') {
+        renderCode(viewport, codeContent, _language = 'text') {
             const codeContainer = document.createElement('div');
             codeContainer.className = 'pivot-artifact-code-view';
 
@@ -210,7 +208,7 @@
                 return `<span class="pivot-artifact-code-line"><span class="pivot-artifact-code-lineno">${idx + 1}</span>${this.escapeHtml(line)}</span>`;
             }).join('');
 
-            codeContainer.innerHTML = `<pre class="pivot-artifact-code-pre"><code>${linesHtml}</code></pre>`;
+            PivotSafeHtml.setHtml(codeContainer, `<pre class="pivot-artifact-code-pre"><code>${linesHtml}</code></pre>`);
             viewport.appendChild(codeContainer);
         }
 
@@ -226,11 +224,7 @@
                 // 直接渲染 SVG
                 const wrapper = document.createElement('div');
                 wrapper.className = 'pivot-artifact-svg-wrapper';
-                if (typeof DOMPurify !== 'undefined') {
-                    wrapper.innerHTML = DOMPurify.sanitize(trimmed, { USE_PROFILES: { svg: true, svgFilters: true } });
-                } else {
-                    wrapper.innerHTML = trimmed;
-                }
+                PivotSafeHtml.setHtml(wrapper, trimmed, { USE_PROFILES: { svg: true, svgFilters: true } });
                 diagramContainer.appendChild(wrapper);
             } else {
                 // 如果是 Mermaid 规范文本或 JSON 数据
@@ -248,9 +242,11 @@
             try {
                 await navigator.clipboard.writeText(text);
                 const originalHtml = btn.innerHTML;
-                btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span style="color:#34d399;">已复制</span>`;
+                btn.classList.add('copied');
+                PivotSafeHtml.setHtml(btn, '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>已复制</span>');
                 setTimeout(() => {
-                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('copied');
+                    PivotSafeHtml.setHtml(btn, originalHtml);
                 }, 1800);
             } catch (err) {
                 console.error('复制失败:', err);
@@ -298,5 +294,7 @@
         }
     }
 
-    window.Pivot.ArtifactRenderer = ArtifactRenderer;
+    if (typeof window !== 'undefined' && window.Pivot) {
+        window.Pivot.ArtifactRenderer = ArtifactRenderer;
+    }
 })();

@@ -6,7 +6,7 @@ const express = require('express');
 const router = express.Router();
 const streamingService = require('../../services/agent-runtime/streaming-service');
 const db = require('../../db/connection');
-const { requireAuth } = require('../../middleware/auth');
+const { authMiddleware: requireAuth } = require('../../auth');
 
 /**
  * GET /api/agent/runs/:runId/stream
@@ -284,8 +284,8 @@ router.get('/streaming/active-sessions', requireAuth, async (req, res) => {
  */
 router.post('/runs/:runId/stream/test', requireAuth, async (req, res) => {
   try {
-    const { runId } = req.params;
-    const userId = req.user.id;
+    const { runId: _runId } = req.params;
+    const _userId = req.user.id;
     const { sessionId } = req.body;
 
     if (!sessionId) {

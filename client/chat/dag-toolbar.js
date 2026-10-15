@@ -1,7 +1,6 @@
 /* Agent DAG 工具栏、工具元数据与输入结构辅助函数（拆自 agents-dag-editor.js） */
 
-
-
+let dagToolbarDropdownGlobalCloseBound = false;
 function renderToolSchemaHint(tool) {
         const schema = getToolSchema(tool);
         const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
@@ -92,8 +91,8 @@ function makeToolbarDropdown(label, buttons, className = '') {
             }
         });
 
-        if (typeof window !== 'undefined' && !window.__dagToolbarDropdownGlobalCloseBound) {
-            window.__dagToolbarDropdownGlobalCloseBound = true;
+        if (!dagToolbarDropdownGlobalCloseBound && typeof document !== 'undefined') {
+            dagToolbarDropdownGlobalCloseBound = true;
             document.addEventListener('click', (event) => {
                 if (!event.target.closest('.pivot-dag-toolbar-dropdown')) {
                     document.querySelectorAll('.pivot-dag-toolbar-dropdown[open]').forEach(item => {

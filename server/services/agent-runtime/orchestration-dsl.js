@@ -474,7 +474,7 @@ class OrchestrationExecutor {
     const visited = new Set();
     const visiting = new Set();
 
-    const visit = (node) => {
+    const visitNode = (node) => {
       if (visited.has(node)) return;
       if (visiting.has(node)) {
         throw new Error('检测到循环依赖');
@@ -484,7 +484,7 @@ class OrchestrationExecutor {
 
       const dependencies = graph.get(node) || [];
       for (const dep of dependencies) {
-        visit(dep);
+        visitNode(dep);
       }
 
       visiting.delete(node);
@@ -493,7 +493,7 @@ class OrchestrationExecutor {
     };
 
     for (const node of graph.keys()) {
-      visit(node);
+      visitNode(node);
     }
 
     return result;

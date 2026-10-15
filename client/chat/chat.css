@@ -8,3 +8,5 @@
 @import url("./styles/workspaces/table-foundation.css");
 @import url("./styles/workspaces/shared.css");
 @import url("./styles/workspaces/responsive.css");
+@import url("./styles/artifact-renderer.css");
+@import url("./styles/artifact-viewer.css");

@@ -4,8 +4,6 @@
  */
 
 (function () {
-    window.Pivot = window.Pivot || {};
-
     class ArtifactViewer {
         constructor() {
             this.modalEl = null;
@@ -33,7 +31,7 @@
             overlay.setAttribute('role', 'dialog');
             overlay.setAttribute('aria-modal', 'true');
 
-            overlay.innerHTML = `
+            PivotSafeHtml.setHtml(overlay, `
                 <div class="pivot-artifact-drawer">
                     <!-- 头部工具栏 -->
                     <div class="pivot-artifact-header">
@@ -125,7 +123,7 @@
                         </div>
                     </div>
                 </div>
-            `;
+            `);
 
             document.body.appendChild(overlay);
             this.modalEl = overlay;
@@ -256,12 +254,12 @@
             } catch (err) {
                 console.error('加载 Artifact 失败:', err);
                 const previewPane = this.modalEl.querySelector('#pivot-artifact-pane-preview');
-                previewPane.innerHTML = `
+                PivotSafeHtml.setHtml(previewPane, `
                     <div class="pivot-artifact-error-box">
                         <div class="pivot-artifact-error-title">加载失败</div>
-                        <div>${err.message || '无法获取产物数据'}</div>
+                        <div>${this.escapeHtml(err.message || '无法获取产物数据')}</div>
                     </div>
-                `;
+                `);
             }
         }
 
@@ -348,7 +346,7 @@
         async loadVersions() {
             if (!this.currentArtifact || !this.currentArtifact.id) return;
             const container = this.modalEl.querySelector('#pivot-artifact-versions-container');
-            container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 40px;">正在获取版本列表...</div>';
+            PivotSafeHtml.setHtml(container, '<div class="pivot-artifact-placeholder">正在获取版本列表...</div>');
 
             try {
                 const res = await (typeof apiFetch === 'function'
@@ -360,11 +358,11 @@
 
                 const versions = data.data || [];
                 if (!versions.length) {
-                    container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 40px;">暂无历史修订版本</div>';
+                    PivotSafeHtml.setHtml(container, '<div class="pivot-artifact-placeholder">暂无历史修订版本</div>');
                     return;
                 }
 
-                container.innerHTML = versions.map(v => `
+                PivotSafeHtml.setHtml(container, versions.map(v => `
                     <div class="pivot-artifact-version-card">
                         <div class="pivot-artifact-version-info">
                             <span class="pivot-artifact-version-tag">版本 v${v.version}</span>
@@ -376,7 +374,7 @@
                             </button>
                         </div>
                     </div>
-                `).join('');
+                `).join(''));
 
                 container.querySelectorAll('[data-restore-version]').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -385,7 +383,7 @@
                     });
                 });
             } catch (err) {
-                container.innerHTML = `<div style="color:#f87171;padding:20px;">${err.message}</div>`;
+                PivotSafeHtml.setHtml(container, `<div class="pivot-artifact-error">${this.escapeHtml(err.message)}</div>`);
             }
         }
 
@@ -426,7 +424,7 @@
         async loadComments() {
             if (!this.currentArtifact || !this.currentArtifact.id) return;
             const list = this.modalEl.querySelector('#pivot-artifact-comments-list');
-            list.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 40px;">正在获取讨论记录...</div>';
+            PivotSafeHtml.setHtml(list, '<div class="pivot-artifact-placeholder">正在获取讨论记录...</div>');
 
             try {
                 const res = await (typeof apiFetch === 'function'
@@ -438,11 +436,11 @@
 
                 const comments = data.data || [];
                 if (!comments.length) {
-                    list.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 40px;">暂无评论讨论，来发表第一条观点吧</div>';
+                    PivotSafeHtml.setHtml(list, '<div class="pivot-artifact-placeholder">暂无评论讨论，来发表第一条观点吧</div>');
                     return;
                 }
 
-                list.innerHTML = comments.map(c => `
+                PivotSafeHtml.setHtml(list, comments.map(c => `
                     <div class="pivot-artifact-comment-item">
                         <div class="pivot-artifact-comment-header">
                             <span class="pivot-artifact-comment-author">${this.escapeHtml(c.nickname || c.username || '用户')}</span>
@@ -450,9 +448,9 @@
                         </div>
                         <div class="pivot-artifact-comment-content">${this.escapeHtml(c.content)}</div>
                     </div>
-                `).join('');
+                `).join(''));
             } catch (err) {
-                list.innerHTML = `<div style="color:#f87171;padding:20px;">${err.message}</div>`;
+                PivotSafeHtml.setHtml(list, `<div class="pivot-artifact-error">${this.escapeHtml(err.message)}</div>`);
             }
         }
 
@@ -537,17 +535,18 @@
 
     // 单例与全局快捷 API
     const viewerInstance = new ArtifactViewer();
-    window.Pivot.ArtifactViewer = viewerInstance;
-    window.Pivot.openArtifact = (id) => viewerInstance.open(id);
-    window.Pivot.openArtifactPreview = (data) => viewerInstance.openPreview(data);
+    if (typeof window !== 'undefined' && window.Pivot) {
+        window.Pivot.ArtifactViewer = viewerInstance;
+        window.Pivot.openArtifact = (id) => viewerInstance.open(id);
+        window.Pivot.openArtifactPreview = (data) => viewerInstance.openPreview(data);
 
-    /**
-     * 辅助函数：在对话中渲染产物卡片
-     */
-    window.Pivot.createArtifactCard = function (artifact) {
+        /**
+         * 辅助函数：在对话中渲染产物卡片
+         */
+        window.Pivot.createArtifactCard = function (artifact) {
         const card = document.createElement('div');
         card.className = 'pivot-artifact-chat-card';
-        card.innerHTML = `
+        PivotSafeHtml.setHtml(card, `
             <div class="pivot-artifact-card-left">
                 <div class="pivot-artifact-card-icon">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
@@ -561,7 +560,7 @@
                 <span>进入交互空间</span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </button>
-        `;
+        `);
 
         card.addEventListener('click', () => {
             if (artifact.id) {
@@ -573,4 +572,5 @@
 
         return card;
     };
+    }
 })();

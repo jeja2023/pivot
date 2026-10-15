@@ -564,6 +564,21 @@ module.exports = [
         }
     },
     {
+        files: ['**/*.test.js', 'tests/**/*.js'],
+        languageOptions: {
+            globals: {
+                describe: 'readonly',
+                it: 'readonly',
+                test: 'readonly',
+                expect: 'readonly',
+                beforeAll: 'readonly',
+                afterAll: 'readonly',
+                beforeEach: 'readonly',
+                afterEach: 'readonly'
+            }
+        }
+    },
+    {
         files: ['client/**/*.js'],
         languageOptions: {
             ecmaVersion: 2022,

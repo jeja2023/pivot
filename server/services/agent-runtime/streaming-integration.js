@@ -269,7 +269,7 @@ async function broadcastToRunSessions(runId, eventType, data, content = null, db
   await Promise.allSettled(promises);
 }
 
-module.exports = {
+const streamingIntegration = {
   createStreamingWrapper,
   wrapToolExecutor,
   wrapPlanner,
@@ -278,3 +278,5 @@ module.exports = {
   getRunStreamingSessions,
   broadcastToRunSessions
 };
+
+module.exports = streamingIntegration;

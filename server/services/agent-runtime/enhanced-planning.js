@@ -535,9 +535,5 @@ class EnhancedPlanningEngine {
 }
 
 module.exports = {
-  EnhancedPlanningEngine,
-  TaskDecomposer,
-  DependencyAnalyzer,
-  ExecutionPlanner,
-  PlanAdjuster
+  EnhancedPlanningEngine
 };

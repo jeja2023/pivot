@@ -104,7 +104,7 @@ async function forwardStreamingWithFirstResponseDeadline(request, options = {}) 
     else sourceSignal?.addEventListener?.('abort', abortFromSource, { once: true });
 
     let timer = null;
-    const cleanup = () => {
+    const cleanupRequest = () => {
         if (timer) clearTimeout(timer);
         sourceSignal?.removeEventListener?.('abort', abortFromSource);
     };
@@ -123,9 +123,9 @@ async function forwardStreamingWithFirstResponseDeadline(request, options = {}) 
         if (timer) clearTimeout(timer);
         // 必须持续保留 sourceSignal -> controller 的桥接直到 SSE 结束；
         // 否则首响应之后的用户取消无法中止已经建立的流。
-        return { response, cleanup };
+        return { response, cleanup: cleanupRequest };
     } catch (error) {
-        cleanup();
+        cleanupRequest();
         throw error;
     }
 }
