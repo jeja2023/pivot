@@ -168,9 +168,6 @@ function validateRegulationAiGrounding({ answer, sources = [], question = '' } =
 }
 
 module.exports = {
-    buildInsufficientEvidenceAnswer,
-    extractLegalReferences,
-    extractSourceCitations,
     normalizeArticleKey,
     validateRegulationAiGrounding
 };
