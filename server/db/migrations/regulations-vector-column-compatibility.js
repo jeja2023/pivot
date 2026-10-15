@@ -39,19 +39,10 @@ module.exports = [{
                     legacy_embedding := TRUE;
                 END IF;
 
-                -- 仅在发现旧 TEXT 列时执行一次全量当前版本回填。即使部分旧值可以
-                -- 转换，也需要以正在使用的系统模型重建，防止旧模型、旧维度或 profile
-                -- 混入检索空间。这里刻意不 ALTER COLUMN，避免触发现有 ANN 索引重建。
+                -- 仅在发现旧 TEXT 列时重排当前版本。这里刻意不 ALTER COLUMN，避免触发现有 ANN 索引重建。
+                -- 由后台索引恢复巡检器异步分批重建向量，避免在启动事务中同步全表
+                -- UPDATE regulation_articles SET embedding = NULL 导致长事务锁表、GIN 索引开销过大以及 statement timeout。
                 IF legacy_embedding THEN
-                    UPDATE regulation_articles article
-                    SET embedding = NULL, embedding_profile = ''
-                    FROM regulation_documents document
-                    WHERE article.document_id = document.id
-                      AND article.version_id = document.current_version_id
-                      AND document.deleted_at IS NULL
-                      AND document.status <> 'archived'
-                      AND (article.embedding IS NOT NULL OR COALESCE(article.embedding_profile, '') <> '');
-
                     UPDATE regulation_versions version
                     SET index_status = 'retry_wait',
                         index_error = '检测到法规历史 TEXT 向量，系统将使用当前向量模型自动补齐索引。',

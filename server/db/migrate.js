@@ -14,11 +14,13 @@ async function runMigrationsPg() {
             // schema 快照已经覆盖历史建表/补列；只执行 PostgreSQL 专属的
             // 数据回填和约束收敛迁移。不存在 SQLite baseline 或执行路径。
             if (typeof migration.upPg !== 'function') continue;
+            logger.info({ id: migration.id }, '[PG] 开始执行数据库迁移');
             await client.query('BEGIN; SET LOCAL statement_timeout = 0');
             try {
                 await migration.upPg(client, { logger });
                 await recordPgMigration(client, migration.id, migration.description || '');
                 await client.query('COMMIT');
+                logger.info({ id: migration.id }, '[PG] 数据库迁移执行成功');
             } catch (error) {
                 await client.query('ROLLBACK');
                 throw new Error(`[PG] 迁移 ${migration.id} 执行失败: ${error.message}`);

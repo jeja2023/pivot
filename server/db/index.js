@@ -25,11 +25,15 @@ async function initializePostgresStructure({
     runMigrationsPg = require('./migrate').runMigrationsPg,
     applyPgSchemaComments = require('./schema/pg').applyPgSchemaComments
 } = {}) {
+    const { logger } = require('../logger');
+    logger.info('[PG] 检查主库表结构与扩展...');
     await initSchemaPg();
+    logger.info('[PG] 检查待执行的版本化迁移...');
     await runMigrationsPg();
     // CREATE TABLE IF NOT EXISTS 不会为历史表补列。注释必须在版本迁移后执行，
     // 否则升级旧库时会对尚未创建的新字段发出误导性告警。
     await applyPgSchemaComments();
+    logger.info('[PG] 主库结构与版本迁移完成');
 }
 
 /**
