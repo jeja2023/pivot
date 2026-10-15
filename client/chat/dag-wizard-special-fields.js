@@ -669,6 +669,199 @@ function createDagWizardSpecialFieldControls() {
         syncCredentialPicker(control, credentialValueFromControl(control));
     };
 
+    // 绑定数据分组字段交互事件
+    const bindGroupFields = ({ control, showToast }) => {
+        const addInput = control.querySelector('[data-pivot-dag-group-field-input]');
+        const syncCandidateState = () => {
+            const selected = new Set(groupFieldsFromControl(control));
+            control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
+                const value = String(option.dataset.pivotDagGroupFieldOption || '').trim();
+                const isSelected = selected.has(value);
+                option.classList.toggle('is-selected', isSelected);
+                option.disabled = isSelected;
+                option.setAttribute('aria-pressed', String(isSelected));
+            });
+        };
+        const addField = (value = addInput?.value) => {
+            const next = String(value || '').trim();
+            if (!next) return;
+            const fields = groupFieldsFromControl(control);
+            if (fields.includes(next)) {
+                showToast?.('该分组字段已存在。', 'warning');
+                return;
+            }
+            if (fields.length >= 12) {
+                showToast?.('分组字段最多 12 个。', 'warning');
+                return;
+            }
+            renderGroupFields(control, [...fields, next]);
+            if (addInput) addInput.value = '';
+            syncCandidateState();
+            addInput?.focus?.({ preventScroll: true });
+        };
+        control.querySelector('[data-pivot-dag-group-field-add]')?.addEventListener('click', addField);
+        control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
+            option.addEventListener('click', () => addField(option.dataset.pivotDagGroupFieldOption));
+        });
+        addInput?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            addField();
+        });
+        control.addEventListener('click', event => {
+            const remove = event.target.closest('[data-pivot-dag-group-field-remove]');
+            if (!remove) return;
+            const field = String(remove.dataset.pivotDagGroupFieldRemove || '').trim();
+            renderGroupFields(control, groupFieldsFromControl(control).filter(item => item !== field));
+            syncCandidateState();
+        });
+        syncCandidateState();
+    };
+
+    // 绑定多字段选择控件交互事件
+    const bindColumnFields = ({ control, showToast }) => {
+        const addInput = control.querySelector('[data-pivot-dag-column-field-input]');
+        const addField = () => {
+            const next = String(addInput?.value || '').trim();
+            if (!next) return;
+            const fields = columnFieldsFromControl(control);
+            if (fields.includes(next)) {
+                showToast?.('该字段已存在。', 'warning');
+                return;
+            }
+            if (fields.length >= 50) {
+                showToast?.('最多选择 50 个字段。', 'warning');
+                return;
+            }
+            renderColumnFields(control, [...fields, next]);
+            if (addInput) addInput.value = '';
+            addInput?.focus?.({ preventScroll: true });
+        };
+        control.querySelector('[data-pivot-dag-column-field-add]')?.addEventListener('click', addField);
+        addInput?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            addField();
+        });
+        control.addEventListener('click', event => {
+            const remove = event.target.closest('[data-pivot-dag-column-field-remove]');
+            if (!remove) return;
+            const field = String(remove.dataset.pivotDagColumnFieldRemove || '').trim();
+            renderColumnFields(control, columnFieldsFromControl(control).filter(item => item !== field));
+        });
+    };
+
+    // 绑定审批对象标签选择事件
+    const bindApprovalTags = ({ control, showToast }) => {
+        const addInput = control.querySelector('[data-pivot-dag-approval-tag-input]');
+        const numericOnly = control.dataset.pivotDagTagNumeric === '1';
+        const addTag = () => {
+            const next = String(addInput?.value || '').trim();
+            if (!next) return;
+            if (numericOnly && !Number.isSafeInteger(Number.parseInt(next, 10))) {
+                showToast?.('审批用户 ID 必须是正整数。', 'warning');
+                return;
+            }
+            const tags = approvalTagsFromControl(control);
+            if (tags.includes(next)) {
+                showToast?.('该审批对象已存在。', 'warning');
+                return;
+            }
+            if (tags.length >= 50) {
+                showToast?.('审批对象最多 50 个。', 'warning');
+                return;
+            }
+            renderApprovalTags(control, [...tags, next]);
+            if (addInput) addInput.value = '';
+            addInput?.focus?.({ preventScroll: true });
+        };
+        control.querySelector('[data-pivot-dag-approval-tag-add]')?.addEventListener('click', addTag);
+        addInput?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            addTag();
+        });
+        control.addEventListener('click', event => {
+            const remove = event.target.closest('[data-pivot-dag-approval-tag-remove]');
+            if (!remove) return;
+            const tag = String(remove.dataset.pivotDagApprovalTagRemove || '').trim();
+            renderApprovalTags(control, approvalTagsFromControl(control).filter(item => item !== tag));
+        });
+    };
+
+    // 绑定多级审批配置交互事件
+    const bindApprovalLevels = ({ control, setActiveField, showToast }) => {
+        const source = control.querySelector('[data-pivot-dag-approval-level-source]');
+        const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
+        source?.addEventListener('change', () => {
+            syncApprovalLevelSource(control);
+            if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
+        });
+        custom?.addEventListener('input', () => setActiveField?.(control));
+        control.querySelector('[data-pivot-dag-approval-level-add]')?.addEventListener('click', () => {
+            const current = approvalLevelsFromControl(control);
+            if (current === null) return;
+            if (typeof current === 'string') {
+                source.value = '';
+                custom.value = '';
+                syncApprovalLevelSource(control);
+            }
+            const levels = Array.isArray(current) ? current : [];
+            if (levels.length >= 10) {
+                showToast?.('审批级别最多 10 级。', 'warning');
+                return;
+            }
+            renderApprovalLevels(control, [...levels, {}]);
+        });
+        control.addEventListener('click', event => {
+            const remove = event.target.closest('[data-pivot-dag-approval-level-remove]');
+            if (!remove) return;
+            const level = remove.closest('[data-pivot-dag-approval-level]');
+            level?.remove();
+            const remaining = [...control.querySelectorAll('[data-pivot-dag-approval-level]')];
+            if (!remaining.length) {
+                renderApprovalLevels(control, [{}]);
+                return;
+            }
+            remaining.forEach((item, index) => {
+                const position = index + 1;
+                const heading = item.querySelector('.pivot-dag-approval-level-head strong');
+                const button = item.querySelector('[data-pivot-dag-approval-level-remove]');
+                if (heading) heading.textContent = `第 ${position} 级审批`;
+                if (button) button.setAttribute('aria-label', `删除第 ${position} 级审批`);
+            });
+        });
+        control.addEventListener('focusin', () => setActiveField?.(control));
+        syncApprovalLevelSource(control);
+    };
+
+    // 绑定浏览器目标页面交互事件
+    const bindBrowserTarget = ({ control, setActiveField }) => {
+        const source = control.querySelector('[data-pivot-dag-browser-target-source]');
+        const custom = control.querySelector('[data-pivot-dag-browser-target-custom]');
+        const mode = control.querySelector('[data-pivot-dag-browser-target-mode]');
+        source?.addEventListener('change', () => {
+            syncBrowserTargetMode(control);
+            if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
+        });
+        mode?.addEventListener('change', () => syncBrowserTargetMode(control));
+        control.addEventListener('focusin', () => setActiveField?.(control));
+        syncBrowserTargetMode(control);
+    };
+
+    // 绑定数据字段选择器交互事件
+    const bindDataFieldPicker = ({ control }) => {
+        const select = control.querySelector('[data-pivot-dag-data-field-select]');
+        const manual = control.querySelector('[data-pivot-dag-data-field-manual]');
+        const sync = () => {
+            const manualMode = select?.value === '__manual__';
+            manual?.classList.toggle('is-visible', manualMode);
+            if (manualMode) manual?.focus?.({ preventScroll: true });
+        };
+        select?.addEventListener('change', sync);
+        sync();
+    };
+
     return {
         approvalLevelsFromControl,
         approvalTagsFromControl,
@@ -681,6 +874,12 @@ function createDagWizardSpecialFieldControls() {
         bindKeyValueMap,
         bindTagList,
         bindWorkflowInputDefault,
+        bindGroupFields,
+        bindColumnFields,
+        bindApprovalTags,
+        bindApprovalLevels,
+        bindBrowserTarget,
+        bindDataFieldPicker,
         browserTargetFromControl,
         aggregationMetricsFromControl,
         columnFieldsFromControl,

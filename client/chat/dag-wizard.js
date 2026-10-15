@@ -127,7 +127,7 @@ function createDagWizardController(ctx) {
             const referencePickerFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-picker="${fieldName}"]`);
             const referenceCustomFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-reference-custom="${fieldName}"]`);
             const manualControlFor = fieldName => modal.querySelector(`[data-pivot-dag-wizard-manual-control="${fieldName}"]`);
-            const { aggregationMetricsFromControl, approvalLevelsFromControl, approvalTagsFromControl, bindAggregationMetrics, bindBrowserTargetVisibility, bindChannelBindingPicker, bindConditionCompareField, bindCredentialPicker, bindKeyValueMap, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderAggregationMetrics, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
+            const { aggregationMetricsFromControl, approvalLevelsFromControl, approvalTagsFromControl, bindAggregationMetrics, bindApprovalLevels, bindApprovalTags, bindBrowserTarget, bindBrowserTargetVisibility, bindChannelBindingPicker, bindColumnFields, bindConditionCompareField, bindCredentialPicker, bindDataFieldPicker, bindGroupFields, bindKeyValueMap, bindOutputPresentationFields, bindTagList, bindWorkflowInputDefault, browserTargetFromControl, columnFieldsFromControl, credentialValueFromControl, groupFieldsFromControl, hydrateWorkflowInputDefault, keyValueMapFromControl, renderAggregationMetrics, renderApprovalLevels, renderApprovalTags, renderColumnFields, renderDataFieldPicker, renderGroupFields, renderKeyValueRows, renderResourceOptions, renderTagList, syncApprovalLevelSource, syncBrowserTargetMode, syncCredentialPicker, syncResourcePicker, tagListValuesFromControl, workflowInputDefaultFromControl } = createDagWizardSpecialFieldControls();
             const { bindReportSheetPicker, hydrateSheet, setManualSheet, sheetValue } = createDagWizardReportAssist();
             let syncBrowserTargetVisibility = () => {}, syncConditionCompareField = () => {}, syncOutputPresentationFields = () => {};
             const syncReferencePicker = (fieldName, nextValue) => {
@@ -579,8 +579,7 @@ function createDagWizardController(ctx) {
                     }
                     nextInput.sql = built.sql;
                     nextInput.limit = built.queryBuilder.limit;
-                    // Query-builder configuration is presentation state, not
-                    // a db.run_readonly_query tool argument.
+                    // queryBuilder 为前端可视化构建器状态，非 db.run_readonly_query 工具直接参数。
                     delete nextInput.queryBuilder;
                     nextUi.queryBuilder = built.queryBuilder;
                 }
@@ -676,189 +675,14 @@ function createDagWizardController(ctx) {
                 custom?.addEventListener('input', () => setActiveField(fieldsByName.get(fieldName)));
             });
             modal.querySelectorAll('[data-pivot-dag-aggregation-metrics]').forEach(control => bindAggregationMetrics({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
-            modal.querySelectorAll('[data-pivot-dag-group-fields]').forEach(control => {
-                const addInput = control.querySelector('[data-pivot-dag-group-field-input]');
-                const syncCandidateState = () => {
-                    const selected = new Set(groupFieldsFromControl(control));
-                    control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
-                        const value = String(option.dataset.pivotDagGroupFieldOption || '').trim();
-                        const isSelected = selected.has(value);
-                        option.classList.toggle('is-selected', isSelected);
-                        option.disabled = isSelected;
-                        option.setAttribute('aria-pressed', String(isSelected));
-                    });
-                };
-                const addField = (value = addInput?.value) => {
-                    const next = String(value || '').trim();
-                    if (!next) return;
-                    const fields = groupFieldsFromControl(control);
-                    if (fields.includes(next)) {
-                        window.Pivot.legacy.showToast?.('该分组字段已存在。', 'warning');
-                        return;
-                    }
-                    if (fields.length >= 12) {
-                        window.Pivot.legacy.showToast?.('分组字段最多 12 个。', 'warning');
-                        return;
-                    }
-                    renderGroupFields(control, [...fields, next]);
-                    addInput.value = '';
-                    syncCandidateState();
-                    addInput.focus?.({ preventScroll: true });
-                };
-                control.querySelector('[data-pivot-dag-group-field-add]')?.addEventListener('click', addField);
-                control.querySelectorAll('[data-pivot-dag-group-field-option]').forEach(option => {
-                    option.addEventListener('click', () => addField(option.dataset.pivotDagGroupFieldOption));
-                });
-                addInput?.addEventListener('keydown', event => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    addField();
-                });
-                control.addEventListener('click', event => {
-                    const remove = event.target.closest('[data-pivot-dag-group-field-remove]');
-                    if (!remove) return;
-                    const field = String(remove.dataset.pivotDagGroupFieldRemove || '').trim();
-                    renderGroupFields(control, groupFieldsFromControl(control).filter(item => item !== field));
-                    syncCandidateState();
-                });
-                syncCandidateState();
-            });
-            modal.querySelectorAll('[data-pivot-dag-column-fields]').forEach(control => {
-                const addInput = control.querySelector('[data-pivot-dag-column-field-input]');
-                const addField = () => {
-                    const next = String(addInput?.value || '').trim();
-                    if (!next) return;
-                    const fields = columnFieldsFromControl(control);
-                    if (fields.includes(next)) {
-                        window.Pivot.legacy.showToast?.('该字段已存在。', 'warning');
-                        return;
-                    }
-                    if (fields.length >= 50) {
-                        window.Pivot.legacy.showToast?.('最多选择 50 个字段。', 'warning');
-                        return;
-                    }
-                    renderColumnFields(control, [...fields, next]);
-                    addInput.value = '';
-                    addInput.focus?.({ preventScroll: true });
-                };
-                control.querySelector('[data-pivot-dag-column-field-add]')?.addEventListener('click', addField);
-                addInput?.addEventListener('keydown', event => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    addField();
-                });
-                control.addEventListener('click', event => {
-                    const remove = event.target.closest('[data-pivot-dag-column-field-remove]');
-                    if (!remove) return;
-                    const field = String(remove.dataset.pivotDagColumnFieldRemove || '').trim();
-                    renderColumnFields(control, columnFieldsFromControl(control).filter(item => item !== field));
-                });
-            });
-            modal.querySelectorAll('[data-pivot-dag-approval-tags]').forEach(control => {
-                const addInput = control.querySelector('[data-pivot-dag-approval-tag-input]');
-                const numericOnly = control.dataset.pivotDagTagNumeric === '1';
-                const addTag = () => {
-                    const next = String(addInput?.value || '').trim();
-                    if (!next) return;
-                    if (numericOnly && !Number.isSafeInteger(Number.parseInt(next, 10))) {
-                        window.Pivot.legacy.showToast?.('审批用户 ID 必须是正整数。', 'warning');
-                        return;
-                    }
-                    const tags = approvalTagsFromControl(control);
-                    if (tags.includes(next)) {
-                        window.Pivot.legacy.showToast?.('该审批对象已存在。', 'warning');
-                        return;
-                    }
-                    if (tags.length >= 50) {
-                        window.Pivot.legacy.showToast?.('审批对象最多 50 个。', 'warning');
-                        return;
-                    }
-                    renderApprovalTags(control, [...tags, next]);
-                    addInput.value = '';
-                    addInput.focus?.({ preventScroll: true });
-                };
-                control.querySelector('[data-pivot-dag-approval-tag-add]')?.addEventListener('click', addTag);
-                addInput?.addEventListener('keydown', event => {
-                    if (event.key !== 'Enter') return;
-                    event.preventDefault();
-                    addTag();
-                });
-                control.addEventListener('click', event => {
-                    const remove = event.target.closest('[data-pivot-dag-approval-tag-remove]');
-                    if (!remove) return;
-                    const tag = String(remove.dataset.pivotDagApprovalTagRemove || '').trim();
-                    renderApprovalTags(control, approvalTagsFromControl(control).filter(item => item !== tag));
-                });
-            });
+            modal.querySelectorAll('[data-pivot-dag-group-fields]').forEach(control => bindGroupFields({ control, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
+            modal.querySelectorAll('[data-pivot-dag-column-fields]').forEach(control => bindColumnFields({ control, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
+            modal.querySelectorAll('[data-pivot-dag-approval-tags]').forEach(control => bindApprovalTags({ control, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-tag-list]').forEach(control => bindTagList({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
             modal.querySelectorAll('[data-pivot-dag-workflow-input-default]').forEach(control => bindWorkflowInputDefault({ control, typeControl: fieldsByName.get('type'), setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
-            modal.querySelectorAll('[data-pivot-dag-approval-levels]').forEach(control => {
-                const source = control.querySelector('[data-pivot-dag-approval-level-source]');
-                const custom = control.querySelector('[data-pivot-dag-approval-level-custom]');
-                source?.addEventListener('change', () => {
-                    syncApprovalLevelSource(control);
-                    if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
-                });
-                custom?.addEventListener('input', () => setActiveField(control));
-                control.querySelector('[data-pivot-dag-approval-level-add]')?.addEventListener('click', () => {
-                    const current = approvalLevelsFromControl(control);
-                    if (current === null) return;
-                    if (typeof current === 'string') {
-                        source.value = '';
-                        custom.value = '';
-                        syncApprovalLevelSource(control);
-                    }
-                    const levels = Array.isArray(current) ? current : [];
-                    if (levels.length >= 10) {
-                        window.Pivot.legacy.showToast?.('审批级别最多 10 级。', 'warning');
-                        return;
-                    }
-                    renderApprovalLevels(control, [...levels, {}]);
-                });
-                control.addEventListener('click', event => {
-                    const remove = event.target.closest('[data-pivot-dag-approval-level-remove]');
-                    if (!remove) return;
-                    const level = remove.closest('[data-pivot-dag-approval-level]');
-                    level?.remove();
-                    const remaining = [...control.querySelectorAll('[data-pivot-dag-approval-level]')];
-                    if (!remaining.length) {
-                        renderApprovalLevels(control, [{}]);
-                        return;
-                    }
-                    remaining.forEach((item, index) => {
-                        const position = index + 1;
-                        const heading = item.querySelector('.pivot-dag-approval-level-head strong');
-                        const button = item.querySelector('[data-pivot-dag-approval-level-remove]');
-                        if (heading) heading.textContent = `第 ${position} 级审批`;
-                        if (button) button.setAttribute('aria-label', `删除第 ${position} 级审批`);
-                    });
-                });
-                control.addEventListener('focusin', () => setActiveField(control));
-                syncApprovalLevelSource(control);
-            });
-            modal.querySelectorAll('[data-pivot-dag-browser-target]').forEach(control => {
-                const source = control.querySelector('[data-pivot-dag-browser-target-source]');
-                const custom = control.querySelector('[data-pivot-dag-browser-target-custom]');
-                const mode = control.querySelector('[data-pivot-dag-browser-target-mode]');
-                source?.addEventListener('change', () => {
-                    syncBrowserTargetMode(control);
-                    if (source.value === '__custom__') custom?.focus?.({ preventScroll: true });
-                });
-                mode?.addEventListener('change', () => syncBrowserTargetMode(control));
-                control.addEventListener('focusin', () => setActiveField(control));
-                syncBrowserTargetMode(control);
-            });
-            modal.querySelectorAll('[data-pivot-dag-data-field-picker]').forEach(control => {
-                const select = control.querySelector('[data-pivot-dag-data-field-select]');
-                const manual = control.querySelector('[data-pivot-dag-data-field-manual]');
-                const sync = () => {
-                    const manualMode = select?.value === '__manual__';
-                    manual?.classList.toggle('is-visible', manualMode);
-                    if (manualMode) manual?.focus?.({ preventScroll: true });
-                };
-                select?.addEventListener('change', sync);
-                sync();
-            });
+            modal.querySelectorAll('[data-pivot-dag-approval-levels]').forEach(control => bindApprovalLevels({ control, setActiveField, showToast: (...args) => window.Pivot.legacy.showToast?.(...args) }));
+            modal.querySelectorAll('[data-pivot-dag-browser-target]').forEach(control => bindBrowserTarget({ control, setActiveField }));
+            modal.querySelectorAll('[data-pivot-dag-data-field-picker]').forEach(control => bindDataFieldPicker({ control }));
             modal.querySelectorAll('[data-pivot-dag-keyvalue-map]').forEach(control => bindKeyValueMap({
                 control,
                 setActiveField,
