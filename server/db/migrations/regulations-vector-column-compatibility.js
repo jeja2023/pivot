@@ -10,6 +10,7 @@ module.exports = [{
     id: '202610140001_regulations_vector_column_compatibility',
     description: 'Safely requeue legacy regulation text embeddings without rewriting production vector indexes.',
     async upPg(client) {
+        await client.query('SET LOCAL statement_timeout = 0');
         await client.query('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public');
         await client.query(`
             DO $migration$
@@ -33,7 +34,9 @@ module.exports = [{
                     RAISE EXCEPTION 'regulation_articles.embedding 不存在，无法修复法规向量索引';
                 END IF;
 
-                IF embedding_type <> 'vector' THEN
+                -- 仅当实际不是 vector 类型（例如为历史 text 或 varchar）时才标记为旧数据。
+                -- 避免将 vector(1024)、vector(1536) 或带 schema 限定词的合法向量列误判为 legacy。
+                IF lower(embedding_type) NOT LIKE '%vector%' THEN
                     legacy_embedding := TRUE;
                 END IF;
 
@@ -47,7 +50,8 @@ module.exports = [{
                     WHERE article.document_id = document.id
                       AND article.version_id = document.current_version_id
                       AND document.deleted_at IS NULL
-                      AND document.status <> 'archived';
+                      AND document.status <> 'archived'
+                      AND (article.embedding IS NOT NULL OR COALESCE(article.embedding_profile, '') <> '');
 
                     UPDATE regulation_versions version
                     SET index_status = 'retry_wait',

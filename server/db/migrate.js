@@ -7,6 +7,7 @@ async function runMigrationsPg() {
     const { ensurePgMigrationTable, hasPgMigration, recordPgMigration } = require('./migrations/runner');
     const client = await getPgPool().connect();
     try {
+        await client.query('SET statement_timeout = 0');
         await ensurePgMigrationTable(client);
         const applied = [];
         for (const migration of migrations.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
@@ -28,6 +29,9 @@ async function runMigrationsPg() {
         if (applied.length) logger.info({ applied }, '[PG] 已应用版本化迁移');
         return applied;
     } finally {
+        try {
+            await client.query('SET statement_timeout TO DEFAULT');
+        } catch (_) {}
         client.release();
     }
 }
