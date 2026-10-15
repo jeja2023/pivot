@@ -60,6 +60,15 @@ function normalizeModelReference(value) {
 function normalizeToolInput(toolName, input = {}, run = {}) {
     const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     const normalized = { ...source };
+    // `queryBuilder` is editor-only state emitted by the visual SQL workflow
+    // form.  It must remain in the persisted DAG for subsequent editing, but
+    // must never cross the tool boundary: db.run_readonly_query only accepts
+    // the generated SQL and its result limit.  Keeping the cleanup here makes
+    // every execution entrypoint (DAG, agent, streaming and policy engine)
+    // compatible with legacy visual-query workflows without relaxing their
+    // strict tool schema.
+    const normalizedToolName = String(toolName || '').trim().replace(/^mcp\.\d+\./, '');
+    if (normalizedToolName === 'db.run_readonly_query') delete normalized.queryBuilder;
     ['model', 'modelId', 'model_id'].forEach(key => {
         if (Object.prototype.hasOwnProperty.call(normalized, key)) {
             normalized[key] = normalizeModelReference(normalized[key]);

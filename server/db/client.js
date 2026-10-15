@@ -169,6 +169,84 @@ async function query(sql, params = []) {
     return result.rows;
 }
 
+async function acquirePgClientWithin(pool, timeoutMs) {
+    const safeTimeout = Math.max(1, Math.min(Number(timeoutMs) || 1, 60_000));
+    let timer = null;
+    let timedOut = false;
+    const connection = pool.connect();
+    // The connection promise can settle after the local deadline. Attach a
+    // handler now so it is never an unhandled rejection, and release a late
+    // client immediately rather than silently consuming a pool slot.
+    connection.catch(() => {});
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            timedOut = true;
+            const error = new Error(`等待数据库连接超过 ${safeTimeout}ms。`);
+            error.code = 'PG_POOL_ACQUIRE_TIMEOUT';
+            reject(error);
+        }, safeTimeout);
+        timer.unref?.();
+    });
+    try {
+        return await Promise.race([connection, deadline]);
+    } catch (error) {
+        if (timedOut) void connection.then(client => client.release()).catch(() => {});
+        throw error;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+/**
+ * Execute one read query with a transaction-local PostgreSQL statement limit.
+ *
+ * Pool-wide `statement_timeout` protects the database, but optional UI
+ * enhancements (such as semantic recall) need a much shorter deadline so
+ * their ordinary fallback can still complete before the HTTP watchdog fires.
+ * SET LOCAL is scoped to this transaction and cannot leak to another pooled
+ * request after the client is released.
+ */
+async function queryWithStatementTimeout(sql, params = [], timeoutMs = 0) {
+    const parsedTimeout = Number.parseInt(timeoutMs, 10);
+    const safeTimeout = Number.isSafeInteger(parsedTimeout) && parsedTimeout > 0
+        ? Math.min(parsedTimeout, 600_000)
+        : 0;
+    if (!safeTimeout) return await query(sql, params);
+
+    const startedAt = Date.now();
+    // Optional UI enrichment must not queue behind a saturated pool for the
+    // same duration as its query budget. Leave the request enough time to run
+    // its safe fallback and return a normal response.
+    const client = await acquirePgClientWithin(getPgPool(), Math.min(safeTimeout, 1_000));
+    let transactionOpen = false;
+    let releaseError = null;
+    try {
+        await client.query('BEGIN');
+        transactionOpen = true;
+        // safeTimeout is normalized as an integer above, so this command does
+        // not interpolate user-controlled SQL.
+        await client.query(`SET LOCAL statement_timeout = ${safeTimeout}`);
+        const result = await client.query(getPostgresSql(sql), params);
+        await client.query('COMMIT');
+        transactionOpen = false;
+        return result.rows;
+    } catch (error) {
+        if (transactionOpen) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                releaseError = rollbackError;
+            }
+        }
+        throw error;
+    } finally {
+        const duration = Date.now() - startedAt;
+        if (duration >= SLOW_SQL_THRESHOLD_MS) notifySlowSql(sql, duration, params);
+        // Do not allow a client with a failed rollback to contaminate the pool.
+        client.release(releaseError || undefined);
+    }
+}
+
 /**
  * 查询单行（无结果返回 null）
  * @param {string} sql
@@ -258,6 +336,7 @@ async function transaction(fn) {
 
 module.exports = {
     query,
+    queryWithStatementTimeout,
     queryOne,
     execute,
     transaction,

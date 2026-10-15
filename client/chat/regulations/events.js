@@ -134,6 +134,7 @@
                     if (event.key === 'Escape') {
                         const detailPanel = document.getElementById('regulations-detail-panel');
                         if (detailPanel && !detailPanel.classList.contains('hidden')) {
+                            closeInlineForms();
                             detailPanel.classList.add('hidden');
                             detailPanel.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
                             if (state.openedFromAi) {
@@ -472,6 +473,7 @@
                     }
                     if (event.target.closest('[data-regulations-close-detail]')) {
                         const detailPanel = document.getElementById('regulations-detail-panel');
+                        closeInlineForms();
                         detailPanel?.classList.add('hidden');
                         detailPanel?.classList.remove('regulations-detail-from-ai', 'regulations-detail-from-search');
                         if (state.openedFromAi) {
@@ -510,6 +512,7 @@
                         const documentId = addVersion.dataset.regulationAddVersion;
                         Promise.resolve().then(async () => {
                             if (documentId && String(documentId) !== String(state.activeId)) await loadDetail(documentId);
+                            closeInlineForms();
                             const form = document.getElementById('regulations-version-form');
                             form?.classList.remove('hidden');
                             document.getElementById('regulations-edit-form')?.classList.add('hidden');

@@ -284,9 +284,11 @@ const isWizardFieldRelevant = (name, _input = {}, tool = null) => {
                 const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input)
                     ? node.input
                     : {};
-                const queryBuilder = input.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
-                    ? input.queryBuilder
-                    : {};
+                const queryBuilder = node?.ui?.queryBuilder && typeof node.ui.queryBuilder === 'object' && !Array.isArray(node.ui.queryBuilder)
+                    ? node.ui.queryBuilder
+                    : (input.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
+                        ? input.queryBuilder
+                        : {});
                 const columns = [
                     ...(Array.isArray(queryBuilder.columns) ? queryBuilder.columns : []),
                     ...(Array.isArray(input.columns) ? input.columns : [])

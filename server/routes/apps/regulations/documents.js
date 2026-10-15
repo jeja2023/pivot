@@ -120,7 +120,7 @@ function registerDocumentRoutes(router, deps) {
         }));
 
         router.post('/category-folders', authMiddleware, asyncHandler(async (req, res) => {
-            if (!requireRegulationsAdmin(req, res)) return;
+            if (!requireRegulationsSuperAdmin(req, res, '仅 admin 权限层级可新建法规分类目录')) return;
             let body = req.body;
             if (typeof body === 'string') {
                 try { body = JSON.parse(body); } catch (_) {}
@@ -133,7 +133,7 @@ function registerDocumentRoutes(router, deps) {
         }));
 
         router.delete('/category-folders/:category', authMiddleware, asyncHandler(async (req, res) => {
-            if (!requireRegulationsAdmin(req, res)) return;
+            if (!requireRegulationsSuperAdmin(req, res, '仅 admin 权限层级可删除法规分类目录')) return;
             const name = decodeURIComponent(req.params.category || '').trim();
             const result = await deleteRegulationCategory({ name });
             logAction(req, '法规查询删除分类目录', `分类：${name}`);

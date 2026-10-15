@@ -4,6 +4,54 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { asyncHandler } = require('../server/http');
 const { registerArticleRoutes } = require('../server/routes/apps/regulations/articles');
+const {
+    regulationHybridSearchBudget,
+    searchRegulationArticles,
+    searchRegulationArticlesByVector
+} = require('../server/services/regulations/search');
+
+test('法规混合检索预算独立限制词法与语义数据库调用', async () => {
+    assert.deepEqual(regulationHybridSearchBudget({
+        REGULATION_LEXICAL_QUERY_TIMEOUT_MS: 'bad',
+        REGULATION_SEMANTIC_QUERY_TIMEOUT_MS: '999999',
+        REGULATION_SEMANTIC_CANDIDATE_LIMIT: '1'
+    }), {
+        lexicalTimeoutMs: 3000,
+        semanticTimeoutMs: 10000,
+        semanticCandidateLimit: 20
+    });
+
+    const lexicalCalls = [];
+    await searchRegulationArticles({
+        query: '三年以下有期徒刑',
+        limit: 50,
+        candidateMode: true,
+        statementTimeoutMs: 750,
+        queryFn: async (...args) => {
+            lexicalCalls.push(args);
+            return [];
+        }
+    });
+    assert.equal(lexicalCalls.length, 1);
+    assert.equal(lexicalCalls[0][2], 750);
+
+    const semanticCalls = [];
+    const timeout = Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' });
+    const semantic = await searchRegulationArticlesByVector([0.1, 0.2], {
+        query: '三年以下有期徒刑',
+        embeddingProfile: 'http:test-model',
+        limit: 300,
+        statementTimeoutMs: 1200,
+        queryFn: async (...args) => {
+            semanticCalls.push(args);
+            throw timeout;
+        }
+    });
+    assert.deepEqual(semantic, []);
+    assert.equal(semanticCalls.length, 1);
+    assert.equal(semanticCalls[0][2], 1200);
+    assert.match(semanticCalls[0][0], /ORDER BY a\.embedding::vector <=>/);
+});
 
 test('asyncHandler 在 res.headersSent 为 true 或捕获 ERR_HTTP_HEADERS_SENT 时静默结束流且不调用 next(err)', async () => {
     let nextCalled = false;

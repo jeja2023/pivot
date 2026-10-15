@@ -155,27 +155,40 @@ function inspectDagContracts(dag = {}, toolList = []) {
     const results = nodes.map(node => {
         const tool = tools.get(String(node.tool || ''));
         const explicitInputSchema = normalizeJsonSchema(node.inputSchema || node.input_schema || {});
+        const toolInputSchema = normalizeJsonSchema(tool?.input_schema || tool?.inputSchema || tool?.parameters || {});
         const inputSchema = schemaHasRules(explicitInputSchema)
             ? explicitInputSchema
-            : normalizeJsonSchema(tool?.input_schema || tool?.inputSchema || tool?.parameters || {});
+            : toolInputSchema;
         const outputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
         const blockers = [];
+        const inputBlockers = [];
+        const outputBlockers = [];
         const warnings = [];
         if (!tool) blockers.push(`${node.title || node.id} 使用的工具不可用：${node.tool || '-'}。`);
-        validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, blockers);
-        validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, blockers);
+        validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, inputBlockers);
+        validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, outputBlockers);
         if (schemaHasRules(inputSchema)) {
-            validateValueAgainstSchema(node.input || {}, inputSchema, { allowTemplates: true }, `${node.title || node.id} 输入`, blockers);
+            validateValueAgainstSchema(node.input || {}, inputSchema, { allowTemplates: true }, `${node.title || node.id} 输入`, inputBlockers);
         } else {
             warnings.push(`${node.title || node.id} 没有可识别的输入契约。`);
         }
+        // A node-level inputSchema can add editor/runtime constraints, but it
+        // can never widen the provider tool's actual contract. Validate both
+        // when they differ so API saves cannot hide fields that PEP will deny.
+        if (schemaHasRules(explicitInputSchema) && schemaHasRules(toolInputSchema)) {
+            validateJsonSchemaDefinition(toolInputSchema, `${node.title || node.id} 工具输入契约`, inputBlockers);
+            validateValueAgainstSchema(node.input || {}, toolInputSchema, { allowTemplates: true }, `${node.title || node.id} 工具输入`, inputBlockers);
+        }
         if (!schemaHasRules(outputSchema)) warnings.push(`${node.title || node.id} 尚未配置输出契约，下游变量只能在运行时发现。`);
+        blockers.push(...inputBlockers, ...outputBlockers);
         return {
             id: node.id,
             title: node.title || node.id,
             tool: node.tool,
             input: summarizeSchema(inputSchema),
             output: summarizeSchema(outputSchema),
+            inputBlockers,
+            outputBlockers,
             blockers,
             warnings,
             status: blockers.length ? 'blocked' : (warnings.length ? 'warning' : 'ready')

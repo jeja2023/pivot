@@ -3,7 +3,7 @@
     if (!ns) throw new Error('法规库核心模块未加载');
     if (ns.actionsCoreReady) return;
 
-    const { API, state, REGULATIONS_PAGE_SIZE, esc, cleanArticleTitle, canManage, toast, fetchJson, regulationConfirm } = ns;
+    const { API, state, REGULATIONS_PAGE_SIZE, esc, cleanArticleTitle, canManage, canImportDocuments, toast, fetchJson, regulationConfirm } = ns;
     const renderSavedSearches = (...args) => ns.renderSavedSearches?.(...args);
     const renderSearchResults = (...args) => ns.renderSearchResults?.(...args);
     const renderDocuments = (...args) => ns.renderDocuments?.(...args);
@@ -25,6 +25,7 @@
                     function openSearchDialog() {
                         const panel = document.getElementById('regulations-search-panel');
                         panel?.classList.remove('hidden');
+                        setSearchBusy(false);
                         state.matches = [];
                         state.hasSearched = false;
                         syncSearchControls();
@@ -34,7 +35,17 @@
                     }
 
                     function closeSearchDialog() {
+                        // Closing a search means its results are no longer wanted. Abort
+                        // the browser request when supported and invalidate the response
+                        // token so a late completion cannot repaint a re-opened dialog.
+                        state.searchRequestId += 1;
+                        state.searchAbortController?.abort();
+                        state.searchAbortController = null;
+                        setSearchBusy(false);
                         document.getElementById('regulations-search-panel')?.classList.add('hidden');
+                        state.query = '';
+                        const query = document.getElementById('regulations-query');
+                        if (query) query.value = '';
                         state.matches = [];
                         state.hasSearched = false;
                         renderSearchResults();
@@ -98,6 +109,9 @@
                     function closeInlineForms() {
                         document.getElementById('regulations-edit-form')?.classList.add('hidden');
                         document.getElementById('regulations-version-form')?.classList.add('hidden');
+                        state.metadataReviewMode = false;
+                        state.metadataReviewEvidenceScrollTop = 0;
+                        document.getElementById('regulations-detail-panel')?.classList.remove('regulations-metadata-review-mode');
                     }
 
                     function closeDialogs() {
@@ -191,6 +205,10 @@
                     }
 
                     function openCreateFolderDialog() {
+                        if (!canImportDocuments()) {
+                            toast('仅 admin 账号可新建法规分类目录', 'warning');
+                            return;
+                        }
                         const panel = document.getElementById('regulations-create-folder-panel');
                         const input = document.getElementById('regulations-new-folder-name');
                         const desc = document.getElementById('regulations-new-folder-desc');
@@ -206,6 +224,10 @@
                     }
 
                     async function createCategoryFolder({ name, description } = {}) {
+                        if (!canImportDocuments()) {
+                            toast('仅 admin 账号可新建法规分类目录', 'warning');
+                            return;
+                        }
                         const trimmed = String(name || '').trim();
                         if (!trimmed) {
                             toast('请输入分类目录名称', 'warning');
@@ -230,6 +252,10 @@
                     }
 
                     async function deleteCategoryFolder(category) {
+                        if (!canImportDocuments()) {
+                            toast('仅 admin 账号可删除法规分类目录', 'warning');
+                            return;
+                        }
                         const targetCategory = String(category || '').trim();
                         if (!targetCategory) return;
                         const ok = await regulationConfirm('删除分类目录', `确定要删除分类目录「${targetCategory}」吗？\n该操作仅能删除没有关联法规文档的自定义分类。`);
@@ -367,7 +393,16 @@
                         if (includeArchived) includeArchived.checked = !!state.filters.includeArchived;
                     }
 
-                    async function fetchArticleMatches() {
+                    function setSearchBusy(busy) {
+                        state.searchBusy = Boolean(busy);
+                        const button = document.getElementById('regulations-search-btn');
+                        if (!button) return;
+                        button.disabled = state.searchBusy;
+                        button.setAttribute('aria-busy', String(state.searchBusy));
+                        button.textContent = state.searchBusy ? '检索中…' : '检索';
+                    }
+
+                    async function fetchArticleMatches({ signal = null } = {}) {
                         const hasFilters = !!(state.filters.category || state.filters.issuingBody || state.filters.jurisdiction || state.filters.status);
                         if (!state.query && !hasFilters) return [];
                         const params = new URLSearchParams({ query: state.query, limit: '50' });
@@ -377,21 +412,36 @@
                         if (state.filters.status) params.set('status', state.filters.status);
                         if (canManage() && state.filters.includeArchived) params.set('includeArchived', 'true');
                         const endpoint = state.searchMode === 'keyword' ? 'documents/search' : 'search/hybrid';
-                        const data = await fetchJson(`${API}/${endpoint}?${params.toString()}`);
+                        const data = await fetchJson(`${API}/${endpoint}?${params.toString()}`, signal ? { signal } : {});
                         return (Array.isArray(data.matches) ? data.matches : []).slice(0, 20);
                     }
 
                     async function runSearch() {
+                        if (state.searchBusy) return;
                         readSearchControls();
+                        const requestId = state.searchRequestId + 1;
+                        state.searchRequestId = requestId;
+                        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                        state.searchAbortController = controller;
+                        setSearchBusy(true);
                         state.hasSearched = true;
+                        state.matches = [];
+                        renderSearchResults();
                         try {
-                            state.matches = await fetchArticleMatches();
+                            const matches = await fetchArticleMatches({ signal: controller?.signal || null });
+                            if (requestId !== state.searchRequestId) return;
+                            state.matches = matches;
                         } catch (err) {
+                            if (requestId !== state.searchRequestId || err?.name === 'AbortError') return;
                             console.warn('[regulations] 检索执行异常:', err);
                             toast(err.message || '检索失败，请稍后重试', 'warning');
                             state.matches = [];
+                        } finally {
+                            if (requestId !== state.searchRequestId) return;
+                            state.searchAbortController = null;
+                            setSearchBusy(false);
+                            renderSearchResults();
                         }
-                        renderSearchResults();
                     }
                     async function loadSavedSearches() {
                         try {
@@ -542,6 +592,7 @@
                         createCategoryFolder,
                         deleteCategoryFolder,
             syncSearchControls,
+            setSearchBusy,
             fetchArticleMatches,
             runSearch,
             loadSavedSearches,

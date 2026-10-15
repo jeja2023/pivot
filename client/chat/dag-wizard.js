@@ -466,7 +466,7 @@ function createDagWizardController(ctx) {
             const queryBuilder = isVisualSqlQuery
                 ? mountVisualSqlBuilder({
                     modal,
-                    initialInput,
+                    initialInput: { ...initialInput, ui: node.ui || {} },
                     tool,
                     wizardTools,
                     getConnectionId: currentDatabaseConnectionId,
@@ -534,6 +534,9 @@ function createDagWizardController(ctx) {
             };
             const collectWizardInput = () => {
                 const nextInput = cloneDagInput(wizardBaseInput);
+                const nextUi = node.ui && typeof node.ui === 'object' && !Array.isArray(node.ui)
+                    ? { ...node.ui }
+                    : {};
                 const missing = [];
                 let invalidField = '';
                 fields.forEach(([name, fieldSchema]) => {
@@ -575,8 +578,11 @@ function createDagWizardController(ctx) {
                         return null;
                     }
                     nextInput.sql = built.sql;
-                    nextInput.queryBuilder = built.queryBuilder;
                     nextInput.limit = built.queryBuilder.limit;
+                    // Query-builder configuration is presentation state, not
+                    // a db.run_readonly_query tool argument.
+                    delete nextInput.queryBuilder;
+                    nextUi.queryBuilder = built.queryBuilder;
                 }
                 if (missing.length) {
                     const first = fieldsByName.get(missing[0]);
@@ -593,11 +599,12 @@ function createDagWizardController(ctx) {
                     ) {
                         return;
                     }
+                    if (queryBuilder && key === 'queryBuilder') return;
                     if (!Object.prototype.hasOwnProperty.call(properties, key) && nextInput[key] === undefined) {
                         nextInput[key] = wizardBaseInput[key];
                     }
                 });
-                return nextInput;
+                return { input: nextInput, ui: nextUi };
             };
             const syncFormWithDraft = (draftInput = {}) => {
                 populateFields(draftInput);
@@ -611,13 +618,15 @@ function createDagWizardController(ctx) {
                 modal.classList.add('hidden');
             };
             const applyWizard = () => {
-                const nextInput = collectWizardInput();
-                if (!nextInput) return;
+                const next = collectWizardInput();
+                if (!next) return;
                 ctx.recordHistory?.();
                 if (tool && toolValue(tool)) node.tool = toolValue(tool);
-                node.input = nextInput;
+                node.input = next.input;
+                if (Object.keys(next.ui).length) node.ui = next.ui;
+                else delete node.ui;
                 if (typeof syncLlmOutputContract === 'function') {
-                    syncLlmOutputContract(node, nextInput);
+                    syncLlmOutputContract(node, next.input);
                 }
                 closeWizard();
                 let renderError = null;
@@ -643,7 +652,7 @@ function createDagWizardController(ctx) {
             const resetWizard = (draftInput = {}) => {
                 wizardBaseInput = cloneDagInput(draftInput);
                 syncFormWithDraft(draftInput);
-                queryBuilder?.hydrate(draftInput);
+                queryBuilder?.hydrate({ ...draftInput, ui: node.ui || {} });
             };
             modal.querySelectorAll('[data-pivot-dag-wizard-field]').forEach(control => {
                 control.addEventListener('focus', () => setActiveField(control));

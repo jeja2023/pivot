@@ -116,6 +116,17 @@ async function normalizeWorkflowPayload(body = {}, fallback = {}, user = {}) {
         throw err;
     }
     assertWorkflowLlmNodesConfigured(dagSpec);
+    // Client-side readiness gives immediate feedback, but API callers can
+    // bypass it. Reject known-tool inputs that do not satisfy the exact
+    // normalized contract before persisting a workflow version.
+    const contractReport = inspectDagContracts(dagSpec, await formatToolList(user, { toolPolicy: 'all' }));
+    const inputBlockers = contractReport.nodes.flatMap(item => item.inputBlockers || []);
+    if (inputBlockers.length) {
+        const err = new Error(`工作流输入契约无效：${inputBlockers[0]}`);
+        err.status = 400;
+        err.details = { contracts: contractReport };
+        throw err;
+    }
     const share = normalizeShareSettings(body, user, fallback);
     const hasExplicitUserTargets = Object.prototype.hasOwnProperty.call(body, 'allowedUserIds')
         || Object.prototype.hasOwnProperty.call(body, 'allowed_user_ids');
@@ -143,10 +154,10 @@ function normalizeDagInputsPayload(value) {
 
 function formatAgentWorkflow(row, user = null) {
     if (!row) return null;
-    const dagSpec = parseJsonObject(row.current_dag_spec || row.dag_spec || '') || { nodes: [] };
+    const dagSpec = normalizeDagSpec(parseJsonObject(row.current_dag_spec || row.dag_spec || '') || { nodes: [] });
     const scope = normalizeShareScope(row.scope);
     const isOwner = user ? Number(row.user_id) === Number(user.id) : true;
-    const publishedDagSpec = parseJsonObject(row.published_dag_spec || '') || { nodes: [] };
+    const publishedDagSpec = normalizeDagSpec(parseJsonObject(row.published_dag_spec || '') || { nodes: [] });
     const visibleDagSpec = isOwner ? dagSpec : sanitizeSharedDagSpec(publishedDagSpec);
     const visibleVersion = isOwner
         ? Number(row.current_version || row.version || 0)

@@ -16,9 +16,12 @@
             const effectStatus = String(doc?.current_effect_status || 'unverified');
             const effectText = effectLabels[effectStatus] || '效力待核验';
 
-            const reviewLabels = { pending: '待审核', approved: '已审核', rejected: '已驳回' };
-            const reviewStatus = String(doc?.current_review_status || 'pending');
-            const reviewText = reviewLabels[reviewStatus] || '待审核';
+            const metadataReviewLabels = { unreviewed: '待审核', approved: '已审核', rejected: '已驳回' };
+            const metadataReviewStatus = String(doc?.metadata_review_status || 'unreviewed');
+            const metadataReviewText = metadataReviewLabels[metadataReviewStatus] || '待审核';
+            // 元数据审核和当前版本审核是两条独立治理线。列表“管理/效力”列
+            // 应展示文档元数据状态，不能误用 current_review_status。
+            const metadataReviewClass = metadataReviewStatus === 'unreviewed' ? 'pending' : metadataReviewStatus;
 
             // 效力状态徽章（核心法学属性，配轻量圆点指示器）
             const effectChip = `<span class="regulations-status-pill ${esc(effectStatus)}" title="效力状态：${esc(effectText)}"><span class="regulations-status-dot" aria-hidden="true"></span>${esc(effectText)}</span>`;
@@ -26,7 +29,7 @@
             // 治理与管理状态徽章：归档显式标记；启用状态展示元数据审核结论
             const secondaryChip = isArchived
                 ? '<span class="regulations-status-pill archived" title="管理状态：已归档">已归档</span>'
-                : `<span class="regulations-status-pill review-${esc(reviewStatus)}" title="元数据审核：${esc(reviewText)}">${esc(reviewText)}</span>`;
+                : `<span class="regulations-status-pill review-${esc(metadataReviewClass)}" title="元数据审核：${esc(metadataReviewText)}">${esc(metadataReviewText)}</span>`;
 
             const indexStatus = String(doc?.current_index_status || 'lexical_ready');
             const indexLabels = { vector_ready: '向量已就绪', indexing: '索引中', retry_wait: '索引待重试', lexical_ready: '关键词检索' };
@@ -35,7 +38,7 @@
                 ? ''
                 : `<span class="regulations-status-pill review-pending" title="${esc(doc?.current_index_error || indexText)}">${esc(indexText)}</span>`;
 
-            const fullTitle = `管理状态：${isArchived ? '已归档' : '已启用'} | 效力状态：${effectText} | 审核状态：${reviewText}`;
+            const fullTitle = `管理状态：${isArchived ? '已归档' : '已启用'} | 效力状态：${effectText} | 元数据审核：${metadataReviewText}`;
             return `<span class="regulations-status-cell" title="${esc(`${fullTitle} | 索引状态：${indexText}`)}">${effectChip}${secondaryChip}${indexChip}</span>`;
         }
 

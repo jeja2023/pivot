@@ -1,6 +1,7 @@
 const {
     query,
     queryOne,
+    queryWithStatementTimeout,
     execute,
     cosineSimilarity,
     generateEmbeddings,
@@ -12,10 +13,20 @@ const {
 } = require('./shared');
 const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('../rag-config');
 const { rerankCandidates } = require('../rerank-client');
+const { readTypedEnv } = require('../../config/env-registry');
+const { logger } = require('../../logger');
 
 const MAX_REGULATION_SEARCH_RESULTS = 50;
 const MAX_REGULATION_RETRIEVAL_CANDIDATES = 300;
 const RECIPROCAL_RANK_K = 60;
+
+function regulationHybridSearchBudget(env = process.env) {
+    return {
+        lexicalTimeoutMs: readTypedEnv('REGULATION_LEXICAL_QUERY_TIMEOUT_MS', env),
+        semanticTimeoutMs: readTypedEnv('REGULATION_SEMANTIC_QUERY_TIMEOUT_MS', env),
+        semanticCandidateLimit: readTypedEnv('REGULATION_SEMANTIC_CANDIDATE_LIMIT', env)
+    };
+}
 
 function normalizeSearchLimit(value, fallback = 8, maximum = MAX_REGULATION_SEARCH_RESULTS) {
     return Math.min(Math.max(Number.parseInt(value, 10) || fallback, 1), maximum);
@@ -115,14 +126,16 @@ async function searchRegulationArticles({
     status = '',
     limit = 8,
     includeArchived = false,
-    candidateMode = false
+    candidateMode = false,
+    queryFn = query,
+    statementTimeoutMs = 0
 } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit, 8, candidateMode ? MAX_REGULATION_RETRIEVAL_CANDIDATES : MAX_REGULATION_SEARCH_RESULTS);
     const { filters, params } = buildArticleFilters({ documentId, category, issuingBody, jurisdiction, status, includeArchived });
     const whereBase = `WHERE ${filters.join(' AND ')}`;
     if (!normalizedQuery) {
-        const rows = await query(`
+        const rows = await queryFn(`
             SELECT ${buildArticleSelect()}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
@@ -130,7 +143,7 @@ async function searchRegulationArticles({
             ${whereBase}
             ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
-        `, [...params, safeLimit]);
+        `, [...params, safeLimit], statementTimeoutMs);
         return formatSearchRows(rows, normalizedQuery, 'metadata');
     }
 
@@ -171,7 +184,7 @@ async function searchRegulationArticles({
         )` : 'd.title ILIKE ? OR a.article_label ILIKE ?';
     const titleOrAliasFirstParams = normalizedAlias ? [like, like, normalizedAlias, aliasLike] : [like, like];
     try {
-        const rows = await query(`
+        const rows = await queryFn(`
             SELECT ${buildArticleSelect(`${relevanceSql} AS score`)}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
@@ -184,11 +197,11 @@ async function searchRegulationArticles({
                 a.sort_order ASC,
                 a.id ASC
             LIMIT ?
-        `, [...relevanceParams, ...params, ...matchParams, ...titleOrAliasFirstParams, safeLimit]);
+        `, [...relevanceParams, ...params, ...matchParams, ...titleOrAliasFirstParams, safeLimit], statementTimeoutMs);
         return formatSearchRows(rows, normalizedQuery);
     } catch (error) {
         console.warn('[regulations] 词法相关度排序不可用，回退基础检索:', error.message);
-        const rows = await query(`
+        const rows = await queryFn(`
             SELECT ${buildArticleSelect('0 AS score')}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
@@ -196,7 +209,7 @@ async function searchRegulationArticles({
             ${whereBase} AND ${matchSql}
             ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
-        `, [...params, ...matchParams, safeLimit]);
+        `, [...params, ...matchParams, safeLimit], statementTimeoutMs);
         return formatSearchRows(rows, normalizedQuery);
     }
 }
@@ -207,8 +220,10 @@ async function searchRegulationArticlesByVector(queryVector, options = {}) {
     const { filters, params } = buildArticleFilters(options);
     const embeddingProfile = String(options.embeddingProfile || '').trim();
     if (!embeddingProfile) return [];
+    const queryFn = typeof options.queryFn === 'function' ? options.queryFn : queryWithStatementTimeout;
+    const statementTimeoutMs = Number(options.statementTimeoutMs) || regulationHybridSearchBudget().semanticTimeoutMs;
     try {
-        const rows = await query(`
+        const rows = await queryFn(`
             SELECT ${buildArticleSelect('1 - (a.embedding::vector <=> ?::vector) AS vector_score')}
             FROM regulation_documents d
             JOIN regulation_versions v ON v.id = d.current_version_id
@@ -219,10 +234,20 @@ async function searchRegulationArticlesByVector(queryVector, options = {}) {
               AND vector_dims(a.embedding::vector) = ?
             ORDER BY a.embedding::vector <=> ?::vector ASC, a.id ASC
             LIMIT ?
-        `, [JSON.stringify(queryVector), ...params, embeddingProfile, queryVector.length, JSON.stringify(queryVector), safeLimit]);
+        `, [JSON.stringify(queryVector), ...params, embeddingProfile, queryVector.length, JSON.stringify(queryVector), safeLimit], statementTimeoutMs);
         return formatSearchRows(rows, options.query, 'semantic');
     } catch (error) {
-        console.warn('[regulations] 语义召回不可用，保留词法检索结果:', error.message);
+        const timedOut = error?.code === '57014' || /statement timeout|query timeout/i.test(String(error?.message || ''));
+        logger.warn({
+            err: error?.message || String(error),
+            code: error?.code || '',
+            timedOut,
+            timeoutMs: statementTimeoutMs,
+            candidateLimit: safeLimit,
+            embeddingProfile
+        }, timedOut
+            ? '[regulations] 语义召回达到独立时限，已保留词法检索结果'
+            : '[regulations] 语义召回不可用，已保留词法检索结果');
         return [];
     }
 }
@@ -277,20 +302,34 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit);
     const sharedOptions = { query: normalizedQuery, documentId, category, issuingBody, jurisdiction, status, includeArchived };
+    const budget = regulationHybridSearchBudget();
 
     if (!normalizedQuery) {
-        const lexical = await searchRegulationArticles({ ...sharedOptions, limit: safeLimit, candidateMode: false });
+        const lexical = await searchRegulationArticles({
+            ...sharedOptions,
+            limit: safeLimit,
+            candidateMode: false,
+            queryFn: queryWithStatementTimeout,
+            statementTimeoutMs: budget.lexicalTimeoutMs
+        });
         return lexical.slice(0, safeLimit);
     }
 
-    // 并行发起词法检索与查询向量生成；将向量超时严格限制在 4 秒内，
-    // 避免远端向量服务异常或排队将整个请求拖延至看门狗超时。
+    // 并行发起词法检索与查询向量生成；Embedding 仍受 4 秒边界，
+    // 后续 pgvector 排序另有更短的独立数据库时限，二者都不能占满
+    // HTTP 看门狗，从而始终有时间返回词法结果。
     // 法规库是共享资料：不使用搜索者的个人 Embedding 配置，确保查询向量与
     // 后台写入条文的系统向量 profile 永远一致。
     const embeddingConfig = getSystemEmbeddingConfig();
     const queryEmbeddingInput = formatEmbeddingQuery(normalizedQuery, embeddingConfig);
     const [lexicalResult, vectorResult] = await Promise.allSettled([
-        searchRegulationArticles({ ...sharedOptions, limit: MAX_REGULATION_RETRIEVAL_CANDIDATES, candidateMode: true }),
+        searchRegulationArticles({
+            ...sharedOptions,
+            limit: MAX_REGULATION_RETRIEVAL_CANDIDATES,
+            candidateMode: true,
+            queryFn: queryWithStatementTimeout,
+            statementTimeoutMs: budget.lexicalTimeoutMs
+        }),
         generateEmbeddings([queryEmbeddingInput], embeddingConfig.mode, embeddingConfig.http, null, { source: 'regulations_search', timeoutMs: 4000 })
     ]);
 
@@ -314,7 +353,8 @@ async function searchRegulationArticlesHybrid({ query: searchQuery, documentId =
         semantic = await searchRegulationArticlesByVector(queryVector, {
             ...sharedOptions,
             embeddingProfile: getEmbeddingProfile(embeddingConfig),
-            limit: MAX_REGULATION_RETRIEVAL_CANDIDATES
+            limit: budget.semanticCandidateLimit,
+            statementTimeoutMs: budget.semanticTimeoutMs
         });
     } catch (semanticError) {
         console.warn('[regulations] 混合检索向量召回失败，回退词法检索:', semanticError.message);
@@ -445,5 +485,7 @@ module.exports = {
     listSavedSearches,
     mergeRegulationCandidates,
     searchRegulationArticles,
+    searchRegulationArticlesByVector,
+    regulationHybridSearchBudget,
     searchRegulationArticlesHybrid
 };

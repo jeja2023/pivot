@@ -55,6 +55,12 @@ test('regulation upload routes authorize administrators before multipart files r
     }
 });
 
+test('regulation category folders require the admin permission tier', () => {
+    const route = fs.readFileSync(path.join(__dirname, '../../server/routes/apps/regulations/documents.js'), 'utf8');
+    assert.match(route, /router\.post\('\/category-folders', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!requireRegulationsSuperAdmin\(req, res,/);
+    assert.match(route, /router\.delete\('\/category-folders\/:category', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!requireRegulationsSuperAdmin\(req, res,/);
+});
+
 test('regulation article parsing counts legal articles instead of long-content chunks', () => {
     const longClause = '\u5185\u5bb9'.repeat(500);
     const text = [

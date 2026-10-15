@@ -76,6 +76,42 @@ test('content review policy normalizes model references before contract validati
     assert.deepEqual(result.input.records, [{ id: 1, content: '待校对内容' }]);
 });
 
+test('visual SQL editor metadata is removed before strict database-query validation', () => {
+    const tool = {
+        name: 'mcp.7.db.run_readonly_query',
+        source: 'mcp',
+        input_schema: {
+            type: 'object',
+            required: ['sql'],
+            properties: {
+                sql: { type: 'string' },
+                limit: { type: 'integer', minimum: 1, maximum: 1000 }
+            }
+        }
+    };
+    const visualQuery = evaluateToolPolicy({
+        run: {},
+        tool,
+        input: {
+            sql: 'SELECT id FROM accounts',
+            limit: 100,
+            queryBuilder: { mode: 'visual', table: 'accounts', columns: ['id'] }
+        },
+        allowApproval: true
+    });
+    assert.equal(visualQuery.decision, 'allow');
+    assert.deepEqual(visualQuery.input, { sql: 'SELECT id FROM accounts', limit: 100 });
+
+    const unknownBusinessInput = evaluateToolPolicy({
+        run: {},
+        tool,
+        input: { sql: 'SELECT id FROM accounts', limit: 100, unexpected: true },
+        allowApproval: true
+    });
+    assert.equal(unknownBusinessInput.decision, 'denied');
+    assert.ok(unknownBusinessInput.reasonCodes.includes('tool_input_invalid'));
+});
+
 test('long-term memory model extraction classifies timeout as a fallback', () => {
     assert.equal(isModelExtractionTimeoutError(Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' })), true);
     assert.equal(isModelExtractionTimeoutError(new Error('invalid response')), false);

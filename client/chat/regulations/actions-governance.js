@@ -106,8 +106,8 @@
 
     const GOVERNANCE_SCOPE_CONFIG = {
         metadata: {
-            title: '元数据待审核法规',
-            description: '补齐法规层级、权威来源等字段，并确认元数据审核状态。',
+            title: '元数据治理待办法规',
+            description: '待办包括缺少法规层级、权威来源地址，或元数据审核尚未通过的法规。',
             notice: '处理元数据',
             focus: '[name="legalLevel"]'
         },
@@ -180,6 +180,10 @@
         if (!documentId || !canManage?.()) return;
         const config = governanceScopeConfig(scope);
         try {
+            // 元数据审核必须能同时核对正文。先切换工作台模式，再加载详情，
+            // 以便正文与表单在同一窗口中呈现，而非由表单覆盖原文。
+            state.metadataReviewMode = normalizeGovernanceScope(scope) === 'metadata';
+            state.metadataReviewEvidenceScrollTop = 0;
             // 编辑表单始终会回传维护人字段；所有治理入口先加载候选项，避免
             // 从“版本待治理”进入时因下拉框为空而把既有维护人误保存为空。
             await loadGovernanceAssignees();
@@ -191,6 +195,9 @@
             versionForm?.classList.add('hidden');
             window.setTimeout(() => editForm.querySelector(config.focus || '[name="title"]')?.focus(), 0);
         } catch (error) {
+            state.metadataReviewMode = false;
+            state.metadataReviewEvidenceScrollTop = 0;
+            document.getElementById('regulations-detail-panel')?.classList.remove('regulations-metadata-review-mode');
             toast(error.message || `打开${config.title}表单失败`, 'error');
         }
     }
@@ -488,10 +495,11 @@
             const links = summary.links || {};
             const locations = summary.locations || {};
             const obligations = summary.obligations || {};
+            const metadataBreakdown = `层级缺失 ${Number(documents.missingLegalLevel || 0)} · 来源缺失 ${Number(documents.missingOfficialSourceUrl || 0)} · 审核未通过 ${Number(documents.metadataReviewNotApproved || 0)}`;
             PivotSafeHtml.setHtml(body, `
                 <div class="regulations-quality-grid">
                     ${renderQualityMetric('法规文档', documents.total)}
-                    ${renderQualityMetric('元数据待审核', documents.metadataNeedsReview, '含缺少层级、来源或审核信息', Number(documents.metadataNeedsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="metadata">处理元数据</button>' : '')}
+                    ${renderQualityMetric('元数据治理待办', documents.metadataNeedsReview, metadataBreakdown, Number(documents.metadataNeedsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="metadata">处理元数据</button>' : '')}
                     ${renderQualityMetric('缺少维护人', documents.missingMaintainer, '指派责任人后可持续维护', Number(documents.missingMaintainer || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="maintainer">指派维护人</button>' : '')}
                     ${renderQualityMetric('版本待治理', versions.governanceNeedsReview, '效力或审核状态未确认', Number(versions.governanceNeedsReview || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="version">处理版本</button>' : '')}
                     ${renderQualityMetric('索引未完成', versions.indexingIncomplete, '可重新加入向量索引队列', Number(versions.indexingIncomplete || 0) ? '<button type="button" class="btn-secondary" data-regulation-governance-worklist="index">重建索引</button>' : '')}

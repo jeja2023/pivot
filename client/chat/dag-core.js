@@ -119,15 +119,42 @@ function placeNewNode(nodes, node, anchorId = '') {
         return node;
     }
 
+function dagToolShortName(value = '') {
+        return String(value || '').trim().replace(/^mcp\.\d+\./, '');
+    }
+
+function normalizeDagNodeInputAndUi(node = {}) {
+        const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input)
+            ? { ...node.input }
+            : {};
+        const savedUi = node?.ui && typeof node.ui === 'object' && !Array.isArray(node.ui) ? { ...node.ui } : {};
+        if (dagToolShortName(node?.tool) !== 'db.run_readonly_query') {
+            return { input, ui: Object.keys(savedUi).length ? savedUi : null };
+        }
+        const savedQueryBuilder = savedUi.queryBuilder && typeof savedUi.queryBuilder === 'object' && !Array.isArray(savedUi.queryBuilder)
+            ? savedUi.queryBuilder
+            : null;
+        const legacyQueryBuilder = input.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
+            ? input.queryBuilder
+            : null;
+        delete input.queryBuilder;
+        const queryBuilder = savedQueryBuilder || legacyQueryBuilder;
+        if (queryBuilder) savedUi.queryBuilder = queryBuilder;
+        return { input, ui: Object.keys(savedUi).length ? savedUi : null };
+    }
+
 function ensureDefaults(spec) {
         const savedLayout = spec?.layout && typeof spec.layout === 'object' && !Array.isArray(spec.layout)
             ? spec.layout
             : {};
-        const nodes = Array.isArray(spec?.nodes) ? spec.nodes.map(n => ({
+        const nodes = Array.isArray(spec?.nodes) ? spec.nodes.map(n => {
+            const inputAndUi = normalizeDagNodeInputAndUi(n);
+            return {
             id: String(n.id || '').trim() || 'node',
             title: String(n.title || n.id || '').trim() || '未命名',
             tool: String(n.tool || '').trim(),
-            input: n.input && typeof n.input === 'object' ? n.input : {},
+            input: inputAndUi.input,
+            ...(inputAndUi.ui ? { ui: inputAndUi.ui } : {}),
             inputSchema: n.inputSchema && typeof n.inputSchema === 'object'
                 ? n.inputSchema
                 : (n.input_schema && typeof n.input_schema === 'object' ? n.input_schema : {}),
@@ -150,7 +177,8 @@ function ensureDefaults(spec) {
             // 优先读取独立布局元数据，同时兼容旧版节点内坐标。
             _x: Number.isFinite(Number(savedLayout[n.id]?.x ?? n._x)) ? clampDagCoordinate(savedLayout[n.id]?.x ?? n._x) : undefined,
             _y: Number.isFinite(Number(savedLayout[n.id]?.y ?? n._y)) ? clampDagCoordinate(savedLayout[n.id]?.y ?? n._y) : undefined
-        })) : [];
+            };
+        }) : [];
         nodes.forEach(ensureLlmNodeInput);
         const missingPositionNodes = nodes.filter(n => n._x === undefined || n._y === undefined);
         if (missingPositionNodes.length === nodes.length) {
@@ -183,12 +211,14 @@ function ensureDefaults(spec) {
     }
 
 function serialize(spec) {
-        const nodes = spec.nodes.map(({ id, title, tool, input, inputSchema, outputSchema, dependsOn, condition, when, retryLimit, timeoutMs, onError, fallbackOutput, cache, joinMode }) => {
+        const nodes = spec.nodes.map(({ id, title, tool, input, ui, inputSchema, outputSchema, dependsOn, condition, when, retryLimit, timeoutMs, onError, fallbackOutput, cache, joinMode }) => {
+            const inputAndUi = normalizeDagNodeInputAndUi({ tool, input, ui });
             const node = {
                 id,
                 title,
                 tool,
-                input,
+                input: inputAndUi.input,
+                ...(inputAndUi.ui ? { ui: inputAndUi.ui } : {}),
                 inputSchema: inputSchema && typeof inputSchema === 'object' ? inputSchema : {},
                 outputSchema: outputSchema && typeof outputSchema === 'object' ? outputSchema : {},
                 dependsOn: [...(dependsOn || [])],

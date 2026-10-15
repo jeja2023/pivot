@@ -117,9 +117,9 @@ function requireRegulationsAdmin(req, res) {
     return false;
 }
 
-function requireRegulationsSuperAdmin(req, res) {
+function requireRegulationsSuperAdmin(req, res, message = '仅 admin 权限层级可删除法规文档') {
     if (isSuperAdmin(req.user)) return true;
-    res.status(403).json({ error: { message: '仅 admin 权限层级可删除法规文档', type: 'forbidden' } });
+    res.status(403).json({ error: { message, type: 'forbidden' } });
     return false;
 }
 

@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const dialect = require('../server/db/dialect');
 const pgSchema = require('../server/db/schema/pg');
-const { toPostgresParams } = require('../server/db/client');
+const { query, queryWithStatementTimeout, toPostgresParams } = require('../server/db/client');
 const { normalizePgTimestamp } = require('../server/db/pg-connection');
 const { parseJsonArray } = require('../server/services/long-term-memory/memory-utils');
 const { serializeMemoryJob } = require('../server/services/long-term-memory/memory-serialization');
@@ -24,6 +24,15 @@ test('PostgreSQL placeholder conversion skips quoted text and comments', () => {
             `WHERE value = $2 /* outer ? /* nested ? */ still ignored ? */ AND note = E'escaped \\'? text'`
         ].join('\n')
     );
+});
+
+test('transaction-local statement timeout cancels only the bounded read query', async () => {
+    await assert.rejects(
+        () => queryWithStatementTimeout('SELECT pg_sleep(?)', [1], 500),
+        error => error?.code === '57014'
+    );
+    const rows = await query('SELECT 1 AS value');
+    assert.equal(Number(rows[0]?.value), 1);
 });
 
 test('dialect helpers produce valid PostgreSQL SQL expressions', () => {

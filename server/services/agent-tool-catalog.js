@@ -116,6 +116,10 @@ async function formatToolList(user, options = {}) {
         const contract = normalizeToolContract(tool);
         return {
             ...tool,
+            // The editor must see the same normalized, strict input contract
+            // that PEP enforces at execution time. Otherwise an invalid draft
+            // can appear saveable and fail only after it is run.
+            input_schema: contract.input_schema,
             version: contract.version,
             capabilities: contract.capabilities,
             risk_level: contract.risk_level,

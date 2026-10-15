@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { query, queryOne, execute, transaction } = require('../../db/client');
+const { query, queryOne, queryWithStatementTimeout, execute, transaction } = require('../../db/client');
 const { orderNocase, nowExpr } = require('../../db/dialect');
 const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('../document-processing/text-extraction');
 const { getKnowledgeLimits } = require('../resource-limits');
@@ -278,6 +278,7 @@ module.exports = {
     path,
     query,
     queryOne,
+    queryWithStatementTimeout,
     execute,
     transaction,
     orderNocase,

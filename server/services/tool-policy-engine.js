@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const { formatToolList } = require('./agent-tool-catalog');
 const { buildToolExecutionPlan } = require('./agent-tool-execution-plan');
-const { PolicyError } = require('./agent-policy');
+const { PolicyError, normalizeToolInput } = require('./agent-policy');
 const { normalizeToolContract, validateToolInput } = require('./agent-contracts');
 const { schemaHasRules, validateValueAgainstSchema } = require('./agent-dag-contracts');
 const { getCapabilityToolGovernance } = require('./capability-market');
@@ -232,7 +232,7 @@ function createToolPolicyEngine(deps = {}) {
         // provider tool. Strip it before JSON Schema validation and before the
         // payload crosses an MCP boundary so account IDs never become a hidden
         // API parameter or model-visible credential substitute.
-        const sanitizedInput = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
+        let sanitizedInput = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
         const embeddedConnectionAccountId = sanitizedInput.connectionAccountId ?? sanitizedInput.connection_account_id;
         delete sanitizedInput.connectionAccountId;
         delete sanitizedInput.connection_account_id;
@@ -248,6 +248,9 @@ function createToolPolicyEngine(deps = {}) {
             throw error;
         }
         const effectiveRun = virtualRun(user, { ...effectiveOptions, run });
+        // Apply the same execution-boundary normalization as agent/DAG runs
+        // before the direct PEP performs its first schema validation.
+        sanitizedInput = normalizeToolInput(safeName || tool.name, sanitizedInput, effectiveRun);
         const catalog = await resolveCatalogReference(safeName || tool.name, tool, { ...effectiveOptions, input: sanitizedInput }, deps);
         validateScopedReportPaths(safeName, sanitizedInput);
         const issues = validateToolInput(tool, sanitizedInput);

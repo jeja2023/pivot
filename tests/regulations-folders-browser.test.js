@@ -68,3 +68,30 @@ test('法规分类目录先显示虚拟文件夹，支持新建/删除分类目�
         await browser.close();
     }
 });
+
+test('管理员权限层级用户不可见且不可打开法规分类目录的新建入口', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await createPage(browser, {
+            includeAdvanced: true,
+            user: { username: 'manager', role: 'admin', permissionTier: 'manager' }
+        });
+        await page.evaluate(async () => {
+            const ns = window.Pivot.legacy.PivotRegulationsInternal;
+            await ns.loadCategoryFolders();
+            ns.openCreateFolderDialog();
+        });
+
+        await expect(page.locator('#regulations-folder-directory')).toBeVisible();
+        await expect(page.locator('#regulations-create-folder-btn')).toHaveCount(0);
+        await expect(page.locator('#regulations-create-folder-panel')).toBeHidden();
+        await expect(page.locator('[data-regulation-import-folder]')).toHaveCount(0);
+        assert.deepEqual(await page.evaluate(() => window.testToasts.at(-1)), {
+            message: '仅 admin 账号可新建法规分类目录',
+            type: 'warning'
+        });
+        await page.close();
+    } finally {
+        await browser.close();
+    }
+});

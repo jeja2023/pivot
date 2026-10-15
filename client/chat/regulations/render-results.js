@@ -82,7 +82,11 @@
                         const modeText = hasQuery ? ` · ${getSearchModeLabel()}` : (hasFilters ? ' · 条件筛选' : '');
 
                         let resultsHtml = '';
-                        if (!state.hasSearched) {
+                        if (state.searchBusy) {
+                            resultsHtml = `
+                                <div class="regulations-loading" role="status" aria-live="polite">正在检索法规条文，请稍候…</div>
+                            `;
+                        } else if (!state.hasSearched) {
                             resultsHtml = `
                                 <div class="regulations-search-results-head">
                                     <div class="regulations-search-results-title-group">

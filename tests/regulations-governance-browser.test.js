@@ -21,7 +21,8 @@ test('法规治理界面可查看质量、切换订阅并人工审核义务', { 
         });
 
         await page.locator('#regulations-quality-btn').click();
-        await expect(page.locator('#regulations-quality-body')).toContainText('元数据待审核');
+        await expect(page.locator('#regulations-quality-body')).toContainText('元数据治理待办');
+        await expect(page.locator('#regulations-quality-body')).toContainText('层级缺失 1 · 来源缺失 1 · 审核未通过 1');
         await expect(page.locator('#regulations-quality-body')).toContainText('义务待审核');
         await page.locator('[data-regulations-close-quality]').click();
         await page.evaluate(() => document.getElementById('regulations-detail-panel').classList.remove('hidden'));
@@ -68,6 +69,33 @@ test('法规治理界面可查看质量、切换订阅并人工审核义务', { 
     }
 });
 
+test('管理/效力列使用元数据审核状态，普通用户不显示质量概览', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const adminPage = await createPage(browser, { includeAdvanced: true });
+        const status = await adminPage.evaluate(() => window.Pivot.legacy.PivotRegulationsInternal.renderRegulationStatusCell({
+            status: 'active',
+            current_effect_status: 'effective',
+            current_review_status: 'pending',
+            metadata_review_status: 'approved',
+            current_index_status: 'vector_ready'
+        }));
+        assert.match(status, /元数据审核：已审核/);
+        assert.match(status, />已审核</);
+        assert.doesNotMatch(status, />待审核</);
+        await adminPage.close();
+
+        const userPage = await createPage(browser, {
+            includeAdvanced: true,
+            user: { username: 'ordinary-user', role: 'user', permissionTier: 'user', isAdmin: false }
+        });
+        await expect(userPage.locator('#regulations-quality-btn')).toHaveCount(0);
+        await userPage.close();
+    } finally {
+        await browser.close();
+    }
+});
+
 test('法规管理员可从质量概览进入待治理队列并完成版本审核', { timeout: 60000 }, async () => {
     const browser = await chromium.launch({ headless: true });
     try {
@@ -89,6 +117,34 @@ test('法规管理员可从质量概览进入待治理队列并完成版本审�
         await page.locator('#regulations-edit-form button[type="submit"]').click();
         await expect.poll(() => page.evaluate(() => window.testDocuments.find(item => item.id === 1)?.current_review_status)).toBe('approved');
         await expect.poll(() => page.evaluate(() => window.testDocuments.find(item => item.id === 1)?.current_effect_status)).toBe('effective');
+        await page.close();
+    } finally {
+        await browser.close();
+    }
+});
+
+test('元数据审核在同一工作台并排展示法规原文和审核表单', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await createPage(browser, { includeAdvanced: true, user: { username: 'manager', role: 'admin', permissionTier: 'manager' } });
+        await page.locator('#regulations-quality-btn').click();
+        await page.locator('[data-regulation-governance-worklist="metadata"]').click();
+        await page.locator('[data-regulation-document-governance="1"]').click();
+
+        const panel = page.locator('#regulations-detail-panel');
+        const form = page.locator('#regulations-edit-form');
+        const evidence = page.locator('#regulations-detail-body');
+        await expect(panel).toHaveClass(/regulations-metadata-review-mode/);
+        await expect(form).toBeVisible();
+        await expect(form).toContainText('审核法规元数据');
+        await expect(evidence).toContainText('法规原文');
+        await expect(evidence).toContainText('测试法规原文，用于核验元数据');
+        await expect(page.locator('.regulations-review-evidence-head')).toContainText('审核依据');
+        assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('regulations-detail-content')).display), 'grid');
+
+        await form.locator('[data-regulation-cancel-inline]').click();
+        await expect(panel).not.toHaveClass(/regulations-metadata-review-mode/);
+        await expect(form).toBeHidden();
         await page.close();
     } finally {
         await browser.close();

@@ -104,9 +104,14 @@ function queryBuilderTemporalSqlValue(value, fieldType = '') {
 }
 
 function normalizeVisualSqlQueryBuilder(input = {}) {
-    const source = input?.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
+    const uiQueryBuilder = input?.ui?.queryBuilder && typeof input.ui.queryBuilder === 'object' && !Array.isArray(input.ui.queryBuilder)
+        ? input.ui.queryBuilder
+        : null;
+    // input.queryBuilder is accepted only as a legacy read fallback. New
+    // workflow versions persist this editor state under node.ui instead.
+    const source = uiQueryBuilder || (input?.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
         ? input.queryBuilder
-        : {};
+        : {});
     const hasSavedBuilder = Object.keys(source).length > 0;
     const rawMode = queryBuilderString(source.mode);
     const mode = rawMode === 'advanced' || (!hasSavedBuilder && queryBuilderString(input.sql)) ? 'advanced' : 'visual';

@@ -84,6 +84,9 @@ async function listRegulationQualitySummary() {
         queryOne(`
             SELECT COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE COALESCE(legal_level, '') = '' OR COALESCE(official_source_url, '') = '' OR COALESCE(metadata_review_status, 'unreviewed') <> 'approved') AS metadata_needs_review,
+                   COUNT(*) FILTER (WHERE COALESCE(legal_level, '') = '') AS missing_legal_level,
+                   COUNT(*) FILTER (WHERE COALESCE(official_source_url, '') = '') AS missing_official_source_url,
+                   COUNT(*) FILTER (WHERE COALESCE(metadata_review_status, 'unreviewed') <> 'approved') AS metadata_review_not_approved,
                    COUNT(*) FILTER (WHERE maintainer_user_id IS NULL) AS missing_maintainer
             FROM regulation_documents WHERE deleted_at IS NULL AND status <> 'archived'
         `),
@@ -128,6 +131,9 @@ async function listRegulationQualitySummary() {
         documents: {
             total: Number(documents?.total || 0),
             metadataNeedsReview: Number(documents?.metadata_needs_review || 0),
+            missingLegalLevel: Number(documents?.missing_legal_level || 0),
+            missingOfficialSourceUrl: Number(documents?.missing_official_source_url || 0),
+            metadataReviewNotApproved: Number(documents?.metadata_review_not_approved || 0),
             missingMaintainer: Number(documents?.missing_maintainer || 0)
         },
         versions: {

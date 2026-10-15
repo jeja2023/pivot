@@ -134,6 +134,49 @@ test('旧 MCP 工具未声明输出契约时保留数组和文本结果', async 
     assert.equal(textResult, 'legacy plain-text result');
 });
 
+test('统一 PEP 在严格查询契约前剥离可视化 SQL 编辑器元数据', async () => {
+    let executedInput = null;
+    const engine = createToolPolicyEngine({
+        formatToolList: async () => [],
+        listCachedMcpTools: async () => [{
+            name: 'db.run_readonly_query',
+            fullName: 'mcp.7.db.run_readonly_query',
+            serverType: 'database',
+            input_schema: {
+                type: 'object',
+                required: ['sql'],
+                properties: {
+                    sql: { type: 'string' },
+                    limit: { type: 'integer', minimum: 1, maximum: 1000 }
+                }
+            }
+        }],
+        activeRelease: async () => null,
+        getCapabilityToolGovernance: async () => ({ enabled: true }),
+        buildToolExecutionPlan: async ({ tool, input }) => ({
+            tool: tool.name,
+            input,
+            policy: { decision: 'allow', reasons: [], reasonCodes: [] },
+            approval: { required: false }, network: { preflight: 'not_applicable' }, retry: { retryable: true }
+        }),
+        recordToolInvocationEvent: async () => 'event-1'
+    });
+    const output = await engine.invoke({
+        actor: { id: 7 },
+        toolName: 'mcp.7.db.run_readonly_query',
+        input: {
+            sql: 'SELECT id FROM accounts',
+            limit: 100,
+            queryBuilder: { mode: 'visual', table: 'accounts', columns: ['id'] }
+        }
+    }, async evaluation => {
+        executedInput = evaluation.input;
+        return { rows: [{ id: 1 }] };
+    });
+    assert.deepEqual(executedInput, { sql: 'SELECT id FROM accounts', limit: 100 });
+    assert.deepEqual(output, { rows: [{ id: 1 }] });
+});
+
 test('连接账户公开投影永不返回秘密，工具任务 ID 不可预测且带前缀', () => {
     const account = publicConnectionAccount({ id: 1, encrypted_secret_ref: 'mcp_servers:1:api_key', scopes: '["orders.read"]', metadata: '{"provider":"erp"}' });
     assert.equal(account.encrypted_secret_ref, 'configured');

@@ -273,6 +273,42 @@ function normalizeDagWhen(value) {
     return { source, operator, value: expected };
 }
 
+function dagToolShortName(value = '') {
+    return String(value || '').trim().replace(/^mcp\.\d+\./, '');
+}
+
+/**
+ * Keep editor-only state out of the executable tool input.
+ *
+ * `queryBuilder` used to be stored in input by the visual SQL editor. That
+ * makes a presentation concern cross a strict MCP contract boundary. The
+ * migration is performed while normalizing every DAG, so old versions remain
+ * editable while newly saved versions use node.ui.
+ */
+function normalizeDagNodeInputAndUi(node = {}, toolName = '') {
+    const input = node?.input && typeof node.input === 'object' && !Array.isArray(node.input)
+        ? { ...node.input }
+        : {};
+    const savedUi = node?.ui && typeof node.ui === 'object' && !Array.isArray(node.ui)
+        ? { ...node.ui }
+        : {};
+    if (dagToolShortName(toolName) !== 'db.run_readonly_query') {
+        return { input, ui: Object.keys(savedUi).length ? savedUi : null };
+    }
+    const uiQueryBuilder = savedUi.queryBuilder && typeof savedUi.queryBuilder === 'object' && !Array.isArray(savedUi.queryBuilder)
+        ? savedUi.queryBuilder
+        : null;
+    const legacyQueryBuilder = input.queryBuilder && typeof input.queryBuilder === 'object' && !Array.isArray(input.queryBuilder)
+        ? input.queryBuilder
+        : null;
+    // queryBuilder is never a db.run_readonly_query argument, even if an old
+    // workflow stored a malformed scalar under that key.
+    delete input.queryBuilder;
+    const queryBuilder = uiQueryBuilder || legacyQueryBuilder;
+    if (queryBuilder) savedUi.queryBuilder = queryBuilder;
+    return { input, ui: Object.keys(savedUi).length ? savedUi : null };
+}
+
 function normalizeDagSpec(value) {
     let parsed = value;
     if (typeof value === 'string') {
@@ -297,6 +333,8 @@ function normalizeDagSpec(value) {
     const hasEdgeModel = rawEdges.length > 0 || requestedSchemaVersion === 'pivot.dag.v2';
     const nodes = rawNodes.map((node, index) => {
         const key = String(node.id || node.key || `node_${index + 1}`).trim().replace(/[^\w.-]/g, '_').slice(0, 60) || `node_${index + 1}`;
+        const tool = String(node.tool || node.toolName || node.tool_name || '').trim();
+        const inputAndUi = normalizeDagNodeInputAndUi(node, tool);
         const dependsOn = Array.isArray(node.dependsOn || node.depends_on)
             ? (node.dependsOn || node.depends_on).map(item => String(item || '').trim()).filter(Boolean)
             : String(node.dependsOn || node.depends_on || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -313,8 +351,9 @@ function normalizeDagSpec(value) {
         return {
             id: key,
             title: String(node.title || key).trim().slice(0, 120),
-            tool: String(node.tool || node.toolName || node.tool_name || '').trim(),
-            input: node.input && typeof node.input === 'object' ? node.input : {},
+            tool,
+            input: inputAndUi.input,
+            ...(inputAndUi.ui ? { ui: inputAndUi.ui } : {}),
             inputSchema: normalizeJsonSchema(node.inputSchema || node.input_schema || {}),
             outputSchema: normalizeJsonSchema(node.outputSchema || node.output_schema || {}),
             dependsOn,
@@ -531,6 +570,7 @@ module.exports = {
     normalizeScheduleFrequency,
     normalizeContextConfig,
     serializeContextConfig,
+    normalizeDagNodeInputAndUi,
     normalizeDagSpec,
     inspectDagTopology,
     normalizeDagWhen,

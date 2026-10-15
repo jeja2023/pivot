@@ -19,7 +19,7 @@
 
         const state = {
             documents: [], total: 0, activeId: '', detail: null, matches: [], query: '',
-            hasSearched: false,
+            hasSearched: false, searchBusy: false, searchAbortController: null, searchRequestId: 0,
             effectiveAt: '',
             searchMode: 'hybrid', savedSearches: [],
             filters: { category: '', issuingBody: '', jurisdiction: '', status: '', includeArchived: false },
@@ -32,6 +32,7 @@
             facets: { categories: [], legalLevels: [], issuingBodies: [], jurisdictions: [] },
             libraryView: 'folders', activeFolder: null, categoryFolders: [],
             governancePending: false, governanceScope: '', governanceAssignees: [],
+            metadataReviewMode: false, metadataReviewEvidenceScrollTop: 0,
             page: 1, pageSize: REGULATIONS_PAGE_SIZE,
             selectedDocumentIds: new Set(), selectedDocumentTitles: new Map(), batchMode: false, batchDeletePending: false,
             diffView: null,
@@ -153,16 +154,19 @@
         function canManage() {
             const user = getActiveUser();
             if (typeof isAdminUser === 'function' && isAdminUser(user)) return true;
-            const tier = String(user?.permissionTier || user?.permission_tier || '').toLowerCase();
             return user?.isAdmin === true
                 || user?.is_admin === true
-                || tier === 'admin'
-                || tier === 'manager';
+                || String(user?.role || '').toLowerCase() === 'admin';
         }
 
         function canImportDocuments() {
             const user = getActiveUser();
-            return String(user?.username || '').toLowerCase() === 'admin';
+            if (typeof isSuperAdminUser === 'function' && isSuperAdminUser(user)) return true;
+            const username = String(user?.username || '').trim().toLowerCase();
+            return username === 'admin'
+                && (String(user?.role || '').toLowerCase() === 'admin'
+                    || user?.isAdmin === true
+                    || user?.is_admin === true);
         }
 
         function getRegulationsSelectedModelId() {

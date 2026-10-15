@@ -121,11 +121,17 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
             }
             if (url.includes('/search/hybrid') || url.includes('/documents/search')) {
                 window.testSearchRequest = url;
+                if (window.testSearchDeferred) {
+                    await new Promise(resolve => { window.testReleaseSearch = resolve; });
+                }
                 return { matches: [{ document_id: 1, version_id: 1, article_id: 11, document_title: '测试法规 1', article_label: '第一条', excerpt: '测试内容', retrieval: 'keyword' }] };
             }
             if (url.includes('/quality-summary')) {
                 return { summary: {
-                    documents: { total: 3, metadataNeedsReview: 1, missingMaintainer: 2 },
+                    documents: {
+                        total: 3, metadataNeedsReview: 1, missingLegalLevel: 1,
+                        missingOfficialSourceUrl: 1, metadataReviewNotApproved: 1, missingMaintainer: 2
+                    },
                     versions: { total: 3, governanceNeedsReview: 2, indexingIncomplete: 1, parsingIncomplete: 0 },
                     links: { unresolved: 1, needsReview: 1 },
                     locations: { total: 3, articlesWithoutLocation: 1 },
@@ -200,7 +206,17 @@ async function createPage(browser, { width = 1280, batchMode = false, includeAdv
                     review_status: document.current_review_status,
                     source_url: '', published_at: '', effective_from: '', effective_to: ''
                 } : null;
-                return { detail: document ? { document, currentVersion, versions: [currentVersion], articles: [] } : null };
+                return { detail: document ? {
+                    document,
+                    currentVersion,
+                    versions: [currentVersion],
+                    articles: [{
+                        id: Number(document.id) * 100 + 1,
+                        article_label: '第一条',
+                        article_title: '总则',
+                        content: `第一条 ${document.title} 的测试法规原文，用于核验元数据。`
+                    }]
+                } : null };
             }
             if (url.includes('/ai-logs')) {
                 return { data: [{

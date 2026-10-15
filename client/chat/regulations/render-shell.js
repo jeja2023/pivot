@@ -151,8 +151,10 @@
                                     <div id="regulations-detail-toolbar" class="regulations-detail-toolbar">
                                         <div id="regulations-detail-admin-actions" class="regulations-detail-actions-wrap"></div>
                                     </div>
-                                    <div id="regulations-detail-forms"></div>
-                                    <div id="regulations-detail-body" class="workspace-modal-body regulations-dialog-body"></div>
+                                    <div id="regulations-detail-content" class="regulations-detail-content">
+                                        <div id="regulations-detail-forms"></div>
+                                        <div id="regulations-detail-body" class="workspace-modal-body regulations-dialog-body"></div>
+                                    </div>
                                 </div>
                             </section>
                             <section id="regulations-ai-panel" class="regulations-admin-panel hidden" role="dialog" aria-modal="true" aria-labelledby="regulations-ai-title">

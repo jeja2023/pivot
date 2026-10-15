@@ -5,6 +5,8 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { normalizeDagSpec } = require('../server/services/agent-validators');
+const { normalizeToolContract, validateToolInput } = require('../server/services/agent-contracts');
+const { inspectDagContracts } = require('../server/services/agent-dag-contracts');
 const { applySqlLimit } = require('../server/services/database-mcp/sql-governance');
 
 function loadDagCore() {
@@ -84,10 +86,10 @@ test('visual SQL builder supports OR filters and temporal field controls', () =>
         queryBuilderTemporalInputValue,
         queryBuilderTemporalSqlValue
     } = loadQueryBuilder();
-    const normalized = normalizeVisualSqlQueryBuilder({ queryBuilder: {
+    const normalized = normalizeVisualSqlQueryBuilder({ ui: { queryBuilder: {
         filter_relation: 'OR',
         filters: [{ field: 'created_at', field_type: 'timestamp without time zone', operator: 'gte', value: '2026-08-04 13:44:28' }]
-    } });
+    } } });
     assert.equal(normalized.filterRelation, 'or');
     assert.equal(normalized.filters[0].fieldType, 'timestamp without time zone');
     assert.equal(queryBuilderTemporalKind('timestamp without time zone'), 'datetime');
@@ -108,6 +110,57 @@ test('visual SQL builder supports OR filters and temporal field controls', () =>
     assert.equal(result.issues.length, 0);
     assert.match(result.sql, /WHERE `created_at` >= '2026-08-01 00:00:00'\n  OR `created_at` < '2026-09-01 00:00:00'/);
     assert.equal(result.config.filterRelation, 'or');
+});
+
+test('visual SQL editor state is migrated to node.ui before a workflow is saved or validated', () => {
+    const legacySpec = {
+        nodes: [{
+            id: 'query',
+            title: '订单查询',
+            tool: 'db.run_readonly_query',
+            input: {
+                connectionId: '7',
+                sql: 'SELECT id FROM orders',
+                limit: 100,
+                queryBuilder: { mode: 'visual', table: 'orders', columns: ['id'] }
+            }
+        }]
+    };
+    const serverNode = normalizeDagSpec(legacySpec).nodes[0];
+    assert.deepEqual(serverNode.input, { connectionId: '7', sql: 'SELECT id FROM orders', limit: 100 });
+    assert.deepEqual(serverNode.ui, { queryBuilder: { mode: 'visual', table: 'orders', columns: ['id'] } });
+
+    const queryContract = normalizeToolContract({
+        name: 'db.run_readonly_query',
+        source: 'mcp',
+        input_schema: {
+            type: 'object',
+            required: ['connectionId', 'sql'],
+            properties: {
+                connectionId: { type: 'string' },
+                sql: { type: 'string' },
+                limit: { type: 'integer', minimum: 1, maximum: 1000 }
+            }
+        }
+    });
+    assert.deepEqual(validateToolInput(queryContract, serverNode.input), []);
+
+    const core = loadDagCore();
+    const clientNode = JSON.parse(JSON.stringify(core.serialize(core.ensureDefaults(legacySpec)))).nodes[0];
+    assert.deepEqual(clientNode.input, serverNode.input);
+    assert.deepEqual(clientNode.ui, serverNode.ui);
+
+    const report = inspectDagContracts({ nodes: [{
+        id: 'unsafe', tool: 'db.run_readonly_query',
+        // A node-local schema must not be able to widen the real tool
+        // contract during API save validation.
+        inputSchema: { type: 'object', properties: { sql: { type: 'string' }, editorOnly: { type: 'string' } } },
+        input: { sql: 'SELECT 1', editorOnly: 'must be rejected' }
+    }] }, [{
+        name: 'db.run_readonly_query',
+        input_schema: { type: 'object', required: ['sql'], properties: { sql: { type: 'string' } }, additionalProperties: false }
+    }]);
+    assert.ok(report.nodes[0].inputBlockers.some(issue => issue.includes('editorOnly')));
 });
 
 test('visual SQL builder supports relative filters against the current day', () => {

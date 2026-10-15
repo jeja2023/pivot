@@ -359,6 +359,23 @@ test('法规订阅只对审核通过的现行版本发通知，义务清单与�
     const summary = await listRegulationQualitySummary();
     assert.equal(Number.isInteger(summary.versions.governanceNeedsReview), true);
     assert.equal(Number.isInteger(summary.obligations.needsReview), true);
+    assert.equal(Number.isInteger(summary.documents.missingLegalLevel), true);
+    assert.equal(Number.isInteger(summary.documents.missingOfficialSourceUrl), true);
+    assert.equal(Number.isInteger(summary.documents.metadataReviewNotApproved), true);
+    await updateRegulationDocument({
+        documentId,
+        userId: 1,
+        patch: {
+            legalLevel: '法律',
+            officialSourceUrl: 'https://authority.example/regulations/subscription',
+            metadataReviewStatus: 'approved'
+        }
+    });
+    const metadataResolved = await listRegulationQualitySummary();
+    assert.equal(metadataResolved.documents.metadataNeedsReview, summary.documents.metadataNeedsReview - 1);
+    assert.equal(metadataResolved.documents.missingLegalLevel, summary.documents.missingLegalLevel - 1);
+    assert.equal(metadataResolved.documents.missingOfficialSourceUrl, summary.documents.missingOfficialSourceUrl - 1);
+    assert.equal(metadataResolved.documents.metadataReviewNotApproved, summary.documents.metadataReviewNotApproved - 1);
     assert.equal(await unsubscribeFromRegulation({ userId: 1, documentId }), true);
     assert.equal((await listRegulationSubscriptions({ userId: 1, documentId })).length, 0);
     assert.equal((await listRegulationSubscriptions({ userId: 1, documentId, includeCancelled: true }))[0].status, 'cancelled');

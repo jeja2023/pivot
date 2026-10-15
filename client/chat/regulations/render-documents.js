@@ -12,6 +12,7 @@
         cleanDisplayTitle,
         fmtDate,
         canManage,
+        canImportDocuments,
         renderRichText
     } = ns;
 
@@ -19,6 +20,72 @@
     const renderRegulationActions = (...args) => ns.renderRegulationActions?.(...args);
     const renderRegulationsSummary = (...args) => ns.renderRegulationsSummary?.(...args);
     const renderDocumentsPagination = (...args) => ns.renderDocumentsPagination?.(...args);
+
+    function getCategoryFolderTheme(title, isUncategorized) {
+                if (isUncategorized || title === '未分类') {
+                    return {
+                        themeClass: 'folder-theme-slate',
+                        icon: 'folder',
+                        tag: '未分类'
+                    };
+                }
+                const t = String(title || '').trim();
+                if (/测试|试验|demo|test/i.test(t)) {
+                    return { themeClass: 'folder-theme-fuchsia', icon: 'folder', tag: '测试试验' };
+                }
+                if (/刑法|刑事|治安|惩戒|监察|纪检/i.test(t)) {
+                    return { themeClass: 'folder-theme-rose', icon: 'shield', tag: '刑事安全' };
+                }
+                if (/宪法|民法|法律|基本法|法典/i.test(t)) {
+                    return { themeClass: 'folder-theme-blue', icon: 'scales', tag: '国家法律' };
+                }
+                if (/行政|规章|国务院|政务|部门/i.test(t)) {
+                    return { themeClass: 'folder-theme-cyan', icon: 'building', tag: '行政规章' };
+                }
+                if (/地方|省|市|区|特区|自治/i.test(t)) {
+                    return { themeClass: 'folder-theme-emerald', icon: 'pin', tag: '地方规范' };
+                }
+                if (/行业|规范|行业标准|国标|行标/i.test(t)) {
+                    return { themeClass: 'folder-theme-amber', icon: 'book', tag: '行业规范' };
+                }
+                if (/司法|解释|判例|最高法|最高检/i.test(t)) {
+                    return { themeClass: 'folder-theme-purple', icon: 'file-text', tag: '司法解释' };
+                }
+                if (/团体|企业|制度|内控|章程/i.test(t)) {
+                    return { themeClass: 'folder-theme-indigo', icon: 'folder', tag: '企团标准' };
+                }
+                const palettes = [
+                    { themeClass: 'folder-theme-blue', icon: 'scales', tag: '法规分类' },
+                    { themeClass: 'folder-theme-emerald', icon: 'pin', tag: '法规分类' },
+                    { themeClass: 'folder-theme-amber', icon: 'book', tag: '法规分类' },
+                    { themeClass: 'folder-theme-purple', icon: 'file-text', tag: '法规分类' },
+                    { themeClass: 'folder-theme-rose', icon: 'shield', tag: '法规分类' },
+                    { themeClass: 'folder-theme-cyan', icon: 'building', tag: '法规分类' }
+                ];
+                let hash = 0;
+                for (let i = 0; i < t.length; i++) hash = (hash << 5) - hash + t.charCodeAt(i);
+                return palettes[Math.abs(hash) % palettes.length];
+            }
+
+            function getCategoryFolderIconSvg(iconType) {
+                switch (iconType) {
+                    case 'scales':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v17M5 7h14M5 7l-3 6h6L5 7ZM19 7l-3 6h6l-3-6Z"/></svg>';
+                    case 'shield':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>';
+                    case 'building':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V9l7-6 7 6v12M9 21v-6h6v6"/></svg>';
+                    case 'pin':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0ZM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>';
+                    case 'book':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5ZM6 6h10M6 10h10"/></svg>';
+                    case 'file-text':
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>';
+                    default:
+                        return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>';
+                }
+            }
+
             function renderCategoryDirectory() {
                 const target = document.getElementById('regulations-folder-directory');
                 const folderIndex = document.getElementById('regulations-folder-index');
@@ -41,17 +108,59 @@
                 const emptyText = '暂无可访问的法规分类。';
                 const folderListHtml = folders.length
                     ? folders.map(folder => {
-                        const folderTitle = esc(folder.title || fallbackTitle);
+                        const rawTitle = folder.title || fallbackTitle;
+                        const folderTitle = esc(rawTitle);
+                        const docCount = Number(folder.documentCount || 0);
+                        const articleCount = Number(folder.articleCount || 0);
+                        const effectiveCount = Number(folder.effectiveCount || 0);
+                        const reviewCount = Number(folder.needsReviewCount || 0);
+                        const theme = getCategoryFolderTheme(rawTitle, folder.isUncategorized);
+                        const iconSvg = getCategoryFolderIconSvg(theme.icon);
+                        const customTag = folder.isCustom ? '自定义' : (rawTitle === theme.tag ? (rawTitle === '行业规范' ? '标准规范' : '法规目录') : theme.tag);
+                        const effectiveRate = docCount > 0 ? Math.round((effectiveCount / docCount) * 100) : 0;
+
                         return `
-                            <button type="button" class="btn-secondary regulations-folder-card" data-regulation-folder-category="${esc(folder.category || '')}" data-regulation-folder-uncategorized="${folder.isUncategorized ? 'true' : 'false'}" data-regulation-folder-custom="${folder.isCustom ? 'true' : 'false'}" data-regulation-folder-title="${folderTitle}" data-regulation-folder-documents="${Number(folder.documentCount || 0)}" data-regulation-folder-articles="${Number(folder.articleCount || 0)}" data-regulation-folder-effective="${Number(folder.effectiveCount || 0)}" data-regulation-folder-review="${Number(folder.needsReviewCount || 0)}" data-regulation-folder-updated="${esc(folder.latestUpdatedAt || '')}">
-                                <strong>${folderTitle}</strong>
-                                <span>${Number(folder.documentCount || 0)} 份法规 · ${Number(folder.articleCount || 0)} 条文</span>
-                                <small>已核验现行 ${Number(folder.effectiveCount || 0)} · 待治理 ${Number(folder.needsReviewCount || 0)}</small>
+                            <button type="button" class="btn-secondary regulations-folder-card ${theme.themeClass}" data-regulation-folder-category="${esc(folder.category || '')}" data-regulation-folder-uncategorized="${folder.isUncategorized ? 'true' : 'false'}" data-regulation-folder-custom="${folder.isCustom ? 'true' : 'false'}" data-regulation-folder-title="${folderTitle}" data-regulation-folder-documents="${docCount}" data-regulation-folder-articles="${articleCount}" data-regulation-folder-effective="${effectiveCount}" data-regulation-folder-review="${reviewCount}" data-regulation-folder-updated="${esc(folder.latestUpdatedAt || '')}">
+                                <div class="regulations-folder-card-top">
+                                    <div class="regulations-folder-icon-wrap">
+                                        ${iconSvg}
+                                    </div>
+                                    <div class="regulations-folder-title-block">
+                                        <strong class="regulations-folder-title" title="${folderTitle}">${folderTitle}</strong>
+                                        <span class="regulations-folder-type-tag">${customTag}</span>
+                                    </div>
+                                </div>
+
+                                <div class="regulations-folder-stats-row">
+                                    <span class="regulations-folder-stat-item">
+                                        <strong class="regulations-folder-stat-val ${docCount === 0 ? 'is-zero' : ''}">${docCount}</strong>
+                                        <span class="regulations-folder-stat-lbl">份法规</span>
+                                    </span>
+                                    <span class="regulations-folder-stat-sep">·</span>
+                                    <span class="regulations-folder-stat-item">
+                                        <strong class="regulations-folder-stat-val ${articleCount === 0 ? 'is-zero' : ''}">${articleCount}</strong>
+                                        <span class="regulations-folder-stat-lbl">条文</span>
+                                    </span>
+                                </div>
+
+                                <div class="regulations-folder-footer-row">
+                                    <span class="regulations-health-pill is-effective ${effectiveCount > 0 ? 'has-count' : ''}">
+                                        <span class="regulations-health-dot"></span>已核验现行 ${effectiveCount}
+                                    </span>
+                                    <span class="regulations-health-pill ${reviewCount > 0 ? 'is-warning' : 'is-muted'}">
+                                        <span class="regulations-health-dot"></span>待治理 ${reviewCount}
+                                    </span>
+                                </div>
+
+                                <div class="regulations-folder-progress-track" title="现行核验率: ${effectiveRate}%">
+                                    <div class="regulations-folder-progress-bar" data-progress-rate="${docCount > 0 ? (effectiveCount === 0 && reviewCount === 0 ? 0 : effectiveRate) : 0}"></div>
+                                </div>
                             </button>
                         `;
                     }).join('')
                     : `<div class="regulations-empty compact">${emptyText}</div>`;
-                const canAdd = canManage();
+                // 分类目录会影响全库导入时的归档口径，仅 super admin 可维护。
+                const canAdd = canImportDocuments();
                 PivotSafeHtml.setHtml(target, `
                     <div class="regulations-folder-heading">
                         <div>
@@ -67,6 +176,10 @@
                         ${folderListHtml}
                     </div>
                 `);
+                target.querySelectorAll('.regulations-folder-progress-bar').forEach(bar => {
+                    const rate = Math.max(0, Math.min(100, Number(bar.getAttribute('data-progress-rate')) || 0));
+                    bar.style.setProperty('width', `${rate}%`);
+                });
             }
 
             function renderActiveFolderIndex() {
@@ -80,7 +193,7 @@
                 target.classList.remove('hidden');
                 const folder = state.activeFolder;
                 const canBatch = canManage();
-                const canDeleteFolder = canManage() && folder && folder.isCustom && Number(folder.documentCount || 0) === 0;
+                const canDeleteFolder = canImportDocuments() && folder && folder.isCustom && Number(folder.documentCount || 0) === 0;
                 const governanceConfig = getGovernanceWorklistConfig(state.governanceScope);
                 const isGovernanceWorklist = Boolean(governanceConfig);
                 const folderTitle = governanceConfig?.title || (folder ? folder.title : '全部法规');
@@ -148,7 +261,7 @@
                 const canSelect = canManage() && state.batchMode;
                 if (!state.documents.length) {
                     const folderCat = state.activeFolder?.category;
-                    const canImportThisCategory = canManage() && folderCat;
+                    const canImportThisCategory = canImportDocuments() && folderCat;
                     const emptyAction = canImportThisCategory ? `
                         <div class="regulations-empty-actions">
                             <button type="button" class="btn-primary" data-regulation-import-folder="${esc(folderCat)}">导入此分类法规</button>
@@ -188,10 +301,12 @@
                         const target = document.getElementById('regulations-detail-body');
                         if (!target) return;
                         const detail = state.detail;
+                        const detailPanel = document.getElementById('regulations-detail-panel');
                         const adminActions = document.getElementById('regulations-detail-admin-actions');
                         const formsHost = document.getElementById('regulations-detail-forms');
                         const docBadge = document.getElementById('regulations-detail-doc-badge');
                         if (!detail?.document) {
+                            detailPanel?.classList.remove('regulations-metadata-review-mode');
                             PivotSafeHtml.setHtml(target, '<div class="regulations-placeholder">请选择法规文档查看正文。</div>');
                             if (docBadge) PivotSafeHtml.setHtml(docBadge, '');
                             if (adminActions) PivotSafeHtml.setHtml(adminActions, '');
@@ -199,6 +314,8 @@
                             return;
                         }
                         const doc = detail.document;
+                        const metadataReviewMode = Boolean(state.metadataReviewMode && canManage());
+                        detailPanel?.classList.toggle('regulations-metadata-review-mode', metadataReviewMode);
                         const articles = Array.isArray(detail.articles) ? detail.articles : [];
                         const title = cleanDisplayTitle(doc.title || '未命名法规');
                         const verLabel = detail.currentVersion?.version_label || doc.current_version_label || '';
@@ -272,7 +389,7 @@
                             `);
                         }
                         if (formsHost) {
-                            PivotSafeHtml.setHtml(formsHost, canManage() ? renderInlineEditor(doc, detail.currentVersion) + renderVersionUploader(doc) : '');
+                            PivotSafeHtml.setHtml(formsHost, canManage() ? renderInlineEditor(doc, detail.currentVersion, { metadataReviewMode }) + renderVersionUploader(doc) : '');
                         }
                         // #5 废止/修订提醒横幅：汇总被其它法律 supersede 的条文
                         const superseded = articles.filter(a => Array.isArray(a.supersededBy) && a.supersededBy.length);
@@ -333,9 +450,21 @@
                                 `;
                             }).filter(Boolean).join('');
                         }
+                        const reviewEvidenceHeader = metadataReviewMode ? `
+                            <div class="regulations-review-evidence-head">
+                                <div><strong>法规原文</strong><span>审核依据</span></div>
+                                <small>核对原文后再确认标题、层级、发布机构、效力日期与权威来源。</small>
+                            </div>
+                        ` : '';
                         PivotSafeHtml.setHtml(target, bodyHtml
-                            ? `${indexNotice}${supersedeBanner}${bodyHtml}`
-                            : `${indexNotice}${supersedeBanner}<div class="regulations-empty compact">${esc(title)} 暂无可查看的法规原文</div>`);
+                            ? `${reviewEvidenceHeader}${indexNotice}${supersedeBanner}${bodyHtml}`
+                            : `${reviewEvidenceHeader}${indexNotice}${supersedeBanner}<div class="regulations-empty compact">${esc(title)} 暂无可查看的法规原文</div>`);
+                        if (metadataReviewMode) {
+                            target.scrollTop = Math.max(0, Number(state.metadataReviewEvidenceScrollTop) || 0);
+                            target.onscroll = () => { state.metadataReviewEvidenceScrollTop = target.scrollTop; };
+                        } else {
+                            target.onscroll = null;
+                        }
                     }
 
                     // #8 条文状态徽章：amended（已修正）/ repealed（已废止），active 不显示
@@ -350,7 +479,7 @@
                         return '';
                     }
 
-                    function renderInlineEditor(doc, version = {}) {
+                    function renderInlineEditor(doc, version = {}, { metadataReviewMode = false } = {}) {
                         const assignees = Array.isArray(state.governanceAssignees) ? state.governanceAssignees : [];
                         const hasCurrentAssignee = assignees.some(item => Number(item.id) === Number(doc.maintainer_user_id));
                         const unavailableAssigneeOption = doc.maintainer_user_id && !hasCurrentAssignee
@@ -361,13 +490,14 @@
                             return `<option value="${esc(item.id)}" ${Number(item.id) === Number(doc.maintainer_user_id) ? 'selected' : ''}>${esc(label)}</option>`;
                         }).join('');
                         return `
-                            <form id="regulations-edit-form" class="regulations-inline-form hidden" data-doc-id="${esc(doc.id)}" data-version-id="${esc(version?.id || '')}">
+                            <form id="regulations-edit-form" class="regulations-inline-form${metadataReviewMode ? ' regulations-metadata-review-form' : ''} hidden" data-doc-id="${esc(doc.id)}" data-version-id="${esc(version?.id || '')}">
                                 <div class="regulations-dialog-head">
                                     <div>
-                                        <h3>编辑法规信息</h3>
-                                        <p>这些信息用于筛选、检索和问答引用。</p>
+                                        <h3>${metadataReviewMode ? '审核法规元数据' : '编辑法规信息'}</h3>
+                                        <p>${metadataReviewMode ? '请以左侧法规原文为依据；确认必填信息完整、准确后再标记为已审核。' : '这些信息用于筛选、检索和问答引用。'}</p>
                                     </div>
                                 </div>
+                                ${metadataReviewMode ? '<div class="regulations-review-form-notice"><strong>审核提示</strong><span>“已审核”表示已根据当前版本原文完成核验；无法确认时请保留待审核或标记驳回。</span></div>' : ''}
                                 <div class="regulations-admin-group">
                                     <div class="regulations-admin-grid">
                                         <label>标题<input name="title" class="form-input" maxlength="120" value="${esc(doc.title || '')}" required></label>

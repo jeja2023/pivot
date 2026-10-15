@@ -90,6 +90,9 @@
 | `RAG_EMBEDDING_BATCH_MAX_INPUTS` | integer | `16` | 1–128 | 一次 Embedding HTTP 请求最多包含的文本数；服务端模型批次上限仍以其自身配置为准。 |
 | `RAG_EMBEDDING_BATCH_MAX_TOKENS` | integer | `12000` | 256–1000000 | 一次 Embedding HTTP 请求的估算 Token 总预算。 |
 | `RAG_EMBEDDING_QUERY_INSTRUCTION` | string | `` | 逗号分隔的语言标记 | 可选查询 Embedding 指令。留空时 gte-Qwen2-Instruct 自动使用中文法规检索指令；文档入库正文不会添加该前缀。 |
+| `REGULATION_LEXICAL_QUERY_TIMEOUT_MS` | integer | `3000` | 500–15000 | 法规交互检索中词法召回的数据库超时；超过后结束该召回，避免慢 SQL 占满接口看门狗。 |
+| `REGULATION_SEMANTIC_QUERY_TIMEOUT_MS` | integer | `2000` | 200–10000 | 法规交互检索中 pgvector 语义召回的数据库超时；超时立即保留词法结果，不返回接口错误。 |
+| `REGULATION_SEMANTIC_CANDIDATE_LIMIT` | integer | `100` | 20–300 | 法规语义召回最多返回的候选数；用于控制向量排序成本，最终展示仍受请求 limit 限制。 |
 | `REGULATION_INDEX_RECOVERY_INTERVAL_MS` | integer | `5000` | 1000–300000 | 法规向量队列巡检间隔。队列状态已持久化，重启服务后会继续处理。 |
 | `REGULATION_INDEX_RECOVERY_BATCH_SIZE` | integer | `3` | 1–50 | 每轮法规向量队列连续处理的当前版本数。纯 CPU 部署建议设为 1。 |
 | `RERANK_ENABLED` | boolean | `false` | true / false | 是否启用外部 Cross-Encoder 重排序。仅重排已完成权限过滤的有限候选，服务异常时自动回退。 |

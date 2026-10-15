@@ -706,6 +706,27 @@ test('编辑期可运行性检查能定位节点缺失必填参数和重复运�
     assert.ok(!exclusive.issues.some(issue => issue.type === 'duplicate_workflow_output'));
 });
 
+test('编辑期可运行性检查会提示严格工具契约之外的持久化字段', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-readiness.js'), 'utf8');
+    const sandbox = {
+        window: { Pivot: { exposeModule: (_name, value) => { sandbox.api = value; } } }
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+    const report = sandbox.api.inspectDagReadiness([{
+        id: 'query', title: '查询', tool: 'db.run_readonly_query',
+        input: { connectionId: '7', sql: 'SELECT 1', queryBuilder: { mode: 'visual' } }
+    }], [{
+        name: 'db.run_readonly_query',
+        input_schema: {
+            type: 'object', additionalProperties: false,
+            properties: { connectionId: { type: 'string' }, sql: { type: 'string' } },
+            required: ['connectionId', 'sql']
+        }
+    }]);
+    assert.ok(report.issues.some(issue => issue.type === 'unknown_input_field' && issue.field === 'queryBuilder'));
+});
+
 test('编辑期可运行性检查覆盖常见节点的语义配置和 schema 边界', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'dag-readiness.js'), 'utf8');
     const sandbox = {

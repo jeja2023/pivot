@@ -170,6 +170,20 @@ function inspectDagReadiness(nodes = [], tools = [], edges = []) {
         Object.entries(properties).forEach(([field, fieldSchema]) => {
             dagReadinessValidateSchemaValue(issues, node, field, fieldSchema, dagReadinessInputValue(input, field));
         });
+        // The catalog exposes the same strict schema enforced by PEP. Surface
+        // undeclared persisted fields while editing, rather than letting them
+        // survive a save and fail only at execution time.
+        if (schema.additionalProperties === false && Object.keys(properties).length) {
+            Object.keys(input)
+                .filter(field => !Object.prototype.hasOwnProperty.call(properties, field))
+                .forEach(field => dagReadinessIssue(
+                    issues,
+                    node,
+                    field,
+                    `包含工具契约未声明的字段“${field}”。`,
+                    'unknown_input_field'
+                ));
+        }
         dagReadinessValidateSemantics(issues, node, nodeName, input);
         if (nodeName === 'workflow.input') {
             const name = String(input.name || '').trim();
