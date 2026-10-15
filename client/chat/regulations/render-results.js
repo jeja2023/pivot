@@ -200,7 +200,13 @@
                                                     <p class="regulations-match-excerpt">${excerpt}</p>
                                                 </div>
                                                 <div class="regulations-match-footer">
-                                                    <span class="regulations-match-hint">匹配条文定位</span>
+                                                    <span class="regulations-match-hint">
+                                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                            <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                                                            <circle cx="12" cy="10" r="3"></circle>
+                                                        </svg>
+                                                        匹配条文定位
+                                                    </span>
                                                     <span class="regulations-match-arrow" aria-hidden="true">
                                                         查看正文
                                                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -285,8 +291,18 @@
                         const turnsHtml = state.aiTurns.map((turn, turnIndex) => {
                             const isStreaming = !!turn.streaming;
                             const sources = Array.isArray(turn.sources) ? turn.sources : [];
+                            const grounding = turn.grounding && typeof turn.grounding === 'object' ? turn.grounding : null;
                             const direct = sources.filter(s => !s.viaLink);
                             const related = sources.filter(s => s.viaLink);
+                            const verificationLabel = isStreaming
+                                ? '生成并核验中…'
+                                : grounding?.status === 'verified'
+                                    ? '依据已核验'
+                                    : grounding?.status === 'no_candidates'
+                                        ? '未检到候选'
+                                        : grounding?.status === 'insufficient_evidence'
+                                            ? '候选不足，需补充'
+                                            : '基于条文检索';
                             const renderSourceBtn = source => {
                                 const excerptText = source.excerpt
                                     ? (typeof stripMarkdownFormatting === 'function' ? stripMarkdownFormatting(source.excerpt) : source.excerpt)
@@ -294,7 +310,7 @@
                                 return `
                                     <button class="regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}" title="点击查看此法条原文">
                                         <span class="regulations-ai-source-label">
-                                            <span class="regulations-ai-source-name">${esc(source.label || '相关条文')}</span>
+                                            <span class="regulations-ai-source-name"><b class="regulations-ai-source-index">[${esc(source.index || '?')}]</b>${esc(source.label || '相关条文')}</span>
                                             ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
                                         </span>
                                         ${excerptText ? `<span class="regulations-ai-source-excerpt">${esc(excerptText)}</span>` : ''}
@@ -305,14 +321,22 @@
                                 <div class="regulations-ai-sources">
                                     ${direct.length ? `
                                         <div class="regulations-ai-sources-head">
-                                            <span class="regulations-ai-sources-title">直接命中条文</span>
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                                                <circle cx="12" cy="10" r="3"></circle>
+                                            </svg>
+                                            <span class="regulations-ai-sources-title" title="由检索直接召回，尚不代表已被回答采纳">直接检索候选</span>
                                             <span class="regulations-ai-sources-count">${direct.length}</span>
                                         </div>
                                         <div class="regulations-ai-sources-list">${direct.map(renderSourceBtn).join('')}</div>
                                     ` : ''}
                                     ${related.length ? `
                                         <div class="regulations-ai-sources-head">
-                                            <span class="regulations-ai-sources-title">关联条文</span>
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                                            </svg>
+                                            <span class="regulations-ai-sources-title" title="由候选条文的引用关系扩展得出，尚不代表已被回答采纳">引用关联候选</span>
                                             <span class="regulations-ai-sources-count">${related.length}</span>
                                         </div>
                                         <div class="regulations-ai-sources-list">${related.map(renderSourceBtn).join('')}</div>
@@ -335,7 +359,7 @@
                                                 <span class="regulations-ai-pulse-dot"></span>
                                                 <span class="regulations-ai-pulse-dot"></span>
                                             </div>
-                                            <span class="regulations-ai-loading-text">正在检索法规条文并分析生成回答…</span>
+                                            <span class="regulations-ai-loading-text">正在检索法规条文、生成并核验引用依据…</span>
                                         </div>
                                     `;
                                 }
@@ -354,7 +378,7 @@
                                         <div class="regulations-ai-card-header">
                                             <span class="regulations-ai-card-avatar" aria-hidden="true">AI</span>
                                             <strong class="regulations-ai-card-title">法规问答答复</strong>
-                                            <span class="regulations-ai-card-tag">${isStreaming ? '分析生成中…' : '基于条文检索'}</span>
+                                            <span class="regulations-ai-card-tag">${verificationLabel}</span>
                                         </div>
                                         <div id="regulations-ai-answer-${turnIndex}" class="regulations-article-body regulations-ai-card-body">${bodyHtml}</div>
                                         ${groupsHtml}
@@ -396,7 +420,7 @@
                                             <span class="regulations-ai-pulse-dot"></span>
                                             <span class="regulations-ai-pulse-dot"></span>
                                         </div>
-                                        <span class="regulations-ai-loading-text">正在检索法规条文并分析生成回答…</span>
+                                        <span class="regulations-ai-loading-text">正在检索法规条文、生成并核验引用依据…</span>
                                     </div>
                                 </div>
                             </div>

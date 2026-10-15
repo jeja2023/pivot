@@ -149,27 +149,58 @@ test('法规批量修改会报告已删除和不存在的文档，并继续处�
     assert.equal(db.prepare('SELECT category FROM regulation_documents WHERE id = ?').get(deleted).category, '');
 });
 
-test('法规批量修改单项异常不阻断其余文档，失败信息不暴露内部错误', async () => {
-    const attempted = [];
+test('法规批量修改以集合事务写入，2,000 项不会退化为逐文档元数据调用', async () => {
+    const statements = [];
+    const ids = Array.from({ length: 2000 }, (_, index) => index + 1);
+    const rows = ids.map(id => ({
+        id,
+        title: `法规 ${id}`,
+        category: '',
+        legal_level: '',
+        issuing_body: '',
+        jurisdiction: '',
+        official_source_url: '',
+        metadata_review_status: 'unreviewed',
+        maintainer_user_id: null,
+        status: 'active',
+        current_version_id: null,
+        batch_version_id: null,
+        batch_version_label: '',
+        batch_effect_status: '',
+        batch_review_status: ''
+    }));
     const sandbox = {
         module: { exports: {} },
         require: request => {
-            if (request.includes('mutations')) return { updateRegulationDocument: async ({ documentId, patch }) => {
-                attempted.push(documentId);
-                if (documentId === 2) throw new Error('数据库内部信息');
-                return { id: documentId, category: patch.category || '', issuing_body: patch.issuingBody || '', jurisdiction: patch.jurisdiction || '', status: patch.status || 'active' };
-            } };
-            if (request.includes('catalog')) return { getRegulationDocumentById: async id => ({ id, category: '', issuing_body: '', jurisdiction: '', status: 'active', deleted_at: null }) };
-            if (request.includes('db/client')) return { execute: async () => 1, query: async () => [] };
+            if (request.includes('mutations')) return {};
+            if (request.includes('catalog')) return {};
+            if (request.includes('governance')) return { notifyRegulationSubscribersBulk: async () => ({ notified: 0 }) };
+            if (request.includes('shared')) return { normalizeRegulationIssuingBodies: value => String(value || '') };
+            if (request.includes('logger')) return { logger: { warn: () => {} } };
+            if (request.includes('db/client')) {
+                const runQuery = async sql => {
+                    statements.push(sql);
+                    if (sql.includes('FROM regulation_documents d')) return rows;
+                    if (sql.includes('UPDATE regulation_documents')) return rows.map(row => ({ ...row, category: '法律' }));
+                    return [];
+                };
+                const runExecute = async sql => { statements.push(sql); return 3; };
+                return {
+                    execute: runExecute,
+                    query: runQuery,
+                    transaction: async callback => await callback({ query: runQuery, queryOne: async () => null, execute: runExecute })
+                };
+            }
             if (request.includes('time')) return { getBeijingTimestamp: () => '2026-10-12 20:00:00' };
             return {};
         }
     };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../server/services/regulations/document-batch.js'), 'utf8'), sandbox);
-    const result = await sandbox.module.exports.updateRegulationDocuments({ documentIds: [1, 2, 3], userId: 1, patch: { category: '法律' } });
-    assert.deepEqual(attempted, [1, 2, 3]);
-    assert.equal(result.updated.length, 2);
-    assert.equal(result.failed[0].message, '修改失败，请稍后重试');
+    const result = await sandbox.module.exports.updateRegulationDocuments({ documentIds: ids, userId: 1, patch: { category: '法律' } });
+    assert.equal(result.updated.length, 2000);
+    assert.equal(result.failed.length, 0);
+    assert.equal(statements.filter(sql => sql.includes('UPDATE regulation_documents')).length, 1);
+    assert.equal(statements.filter(sql => sql.includes('INSERT INTO regulation_document_change_logs')).length, 1);
 });
 
 test('法规批量修改 HTTP 接口沿用管理员权限，校验参数并记录审计', async () => {

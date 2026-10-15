@@ -82,7 +82,8 @@ const {
     updateRegulationDocument,
     updateRegulationDocuments,
     updateRegulationVersionGovernance,
-    unsubscribeFromRegulation
+    unsubscribeFromRegulation,
+    validateRegulationAiGrounding
 } = require('../../../services/regulations');
 
 const SUPPORTED_UPLOAD_LABEL = 'TXT、Markdown、PDF、Word（DOC/DOCX）、Excel（XLS/XLSX）、CSV、JSON、HTML/HTM';
@@ -335,5 +336,6 @@ module.exports = {
     updateRegulationDocument,
     updateRegulationDocuments,
     updateRegulationVersionGovernance,
-    unsubscribeFromRegulation
+    unsubscribeFromRegulation,
+    validateRegulationAiGrounding
 };

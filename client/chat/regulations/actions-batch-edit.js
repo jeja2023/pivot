@@ -4,6 +4,9 @@
     if (ns.actionsBatchEditReady) return;
 
     const { API, state, canManage, toast, fetchJson } = ns;
+    // 批量元数据事务会等待行锁、审计写入和订阅通知；不要被通用 30 秒 API
+    // 超时提前中止。服务端仍以集合 SQL 执行，而不是把长计算留在请求内。
+    const BATCH_METADATA_TIMEOUT_MS = 120000;
     let editDocuments = [];
 
     function syncBatchEditFields() {
@@ -107,7 +110,8 @@
                 result = await fetchJson(`${API}/documents/batch-update`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: selected.map(doc => doc.id), patch })
+                    body: JSON.stringify({ ids: selected.map(doc => doc.id), patch }),
+                    timeoutMs: BATCH_METADATA_TIMEOUT_MS
                 });
             } catch (error) {
                 toast(error.message || '批量修改失败，请稍后重试', 'error');
@@ -121,7 +125,9 @@
             }
             applyUpdatedDocuments(updated);
             document.getElementById('regulations-batch-edit-panel')?.classList.add('hidden');
-            toast(`已修改 ${updated.length} 个文档${failed.length ? `，${failed.length} 个失败` : ''}`, failed.length ? 'warning' : 'success');
+            const elapsed = Number(result.durationMs || 0);
+            const durationText = elapsed >= 1000 ? `，耗时 ${(elapsed / 1000).toFixed(elapsed >= 10000 ? 0 : 1)} 秒` : '';
+            toast(`已修改 ${updated.length} 个文档${failed.length ? `，${failed.length} 个失败` : ''}${durationText}`, failed.length ? 'warning' : 'success');
             if (result.batchId) ns.showBatchUpdateResult?.(result, titles);
             else if (failed.length) ns.showBatchFailures(failed, titles, '修改');
             try {

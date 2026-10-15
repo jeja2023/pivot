@@ -4,7 +4,8 @@ const {
     getRegulationDocumentById,
     recordRegulationAiAnswer,
     normalizeRegulationId,
-    recordRegulationAccess
+    recordRegulationAccess,
+    validateRegulationAiGrounding
 } = require('./helpers');
 
 function registerAiRoutes(router, deps) {
@@ -24,7 +25,7 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
         const built = await buildRegulationAiContext({ query, documentId, limit, userId: req.user.id, expandLinks: true });
         await recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
-        // 把命中条文的来源精简后随回答一并返回，便于前端展示「依据条文」并可点击跳转
+        // 候选条文独立返回给前端。它们是检索召回结果，不等同于已经被模型采纳的结论依据。
         const sources = (built.sources || []).map(source => ({
             index: source.index,
             documentId: source.documentId,
@@ -54,6 +55,18 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             temperature: 0.25,
             stream: !!body.stream,
             extraPayload: { sources },
+            transformCompletion: async answer => {
+                const verified = validateRegulationAiGrounding({
+                    answer,
+                    sources: built.sources || [],
+                    question: query
+                });
+                return {
+                    content: verified.answer,
+                    metadata: { grounding: verified.grounding },
+                    extraPayload: { grounding: verified.grounding }
+                };
+            },
             onComplete: async (answer, metadata) => await recordRegulationAiAnswer({
                 userId: req.user.id,
                 documentId,
@@ -62,21 +75,25 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
                 modelName: metadata?.model || '',
                 contextSnapshot: context,
                 sources,
-                usage: metadata?.usage || {}
+                usage: {
+                    ...(metadata?.usage || {}),
+                    grounding: metadata?.grounding || {}
+                }
             }),
             messages: [
                 {
                     role: 'system',
                     content: [
                         '你是法规查询助手，回答必须基于给定的法规条文依据。',
-                        '依据分为「直接命中条文」和「经引用关联的条文」两组：前者是与问题直接相关的条文，后者是被前者引用或引用前者的关联法条。',
+                        '依据分为「直接检索候选」和「经引用关联的候选」两组。候选仅代表检索召回，不天然等于可直接适用的法律依据。',
                         '请按以下结构组织回答：',
-                        '1. 【核心法条】：列出与问题直接相关的关键条文及其要点；',
-                        '2. 【关联法条】：列出经引用关联的条文，并说明其与核心法条的引用关系（如“第三条依照第一条”）；若无关联条文则说明“无”；',
+                        '1. 【核心法条】：仅列出足以支持本轮结论的条文及其要点；',
+                        '2. 【关联法条】：仅列出经给定引用关系支持的关联条文，并说明其与核心法条的引用关系；若无已核验关联条文则说明“无”；',
                         '3. 【适用建议】：基于上述条文给出简洁、可执行的建议。',
-                        '关联法条必须基于提供的引用关系，不得臆造未给出的条文或引用关系。',
-                        '如果依据不足，请明确说明当前检索没有找到足够依据，不要编造条文。',
-                        '可以结合上文对话进行追问式回答，但仍以本轮提供的条文依据为准。',
+                        '每一段包含事实判断、法律结论、条文名称或条号时，都必须在该段末尾添加给定来源编号，例如“……。[1]”。只能使用本轮依据中实际存在的编号。',
+                        '不得引用本轮依据中不存在的法律、条号、罪名或量刑标准；关联法条必须基于提供的引用关系，不得臆造。',
+                        '如果候选条文不足以回答，请明确说明“已检索到候选条文，但不足以支持具体法律结论”，并提出需要补充的事实；不得写成“未命中条文”。',
+                        '可以使用上文对话理解用户意图，但上文对话不是法规依据，不能据此新增或引用法条。',
                         '不要输出与问题无关的免责声明。'
                     ].join('\n')
                 },

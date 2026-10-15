@@ -1,5 +1,8 @@
-const { execute, query } = require('../../db/client');
+const { execute, query, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
+const { logger } = require('../../logger');
+const { normalizeRegulationIssuingBodies } = require('./shared');
+const { notifyRegulationSubscribersBulk } = require('./governance');
 const { getRegulationDocumentById, getRegulationVersionById } = require('./catalog');
 const {
     deleteRegulationDocument,
@@ -10,6 +13,19 @@ const {
 } = require('./mutations');
 
 const MAX_BATCH_DOCUMENTS = 2000;
+
+// 批量写入的 SQL 统一经事务执行器调用，避免绕过同一连接上的锁与回滚边界。
+async function runBatchQuery(trx, statement, params = []) {
+    return await trx.query(statement, params);
+}
+
+async function runBatchQueryOne(trx, statement, params = []) {
+    return await trx.queryOne(statement, params);
+}
+
+async function runBatchExecute(trx, statement, params = []) {
+    return await trx.execute(statement, params);
+}
 
 function validateDocumentIds(documentIds) {
     if (!Array.isArray(documentIds) || !documentIds.length || documentIds.length > MAX_BATCH_DOCUMENTS) {
@@ -96,7 +112,9 @@ function validateMetadataPatch(patch) {
         if (definition.maxLength && trimmed.length > definition.maxLength) {
             throw Object.assign(new Error(`${BATCH_METADATA_FIELDS[key]}必须为不超过 ${definition.maxLength} 字的文本，请修改后重试`), { status: 400 });
         }
-        normalized[key] = trimmed.replace(/\s+/g, ' ');
+        normalized[key] = key === 'issuingBody'
+            ? normalizeRegulationIssuingBodies(trimmed)
+            : trimmed.replace(/\s+/g, ' ');
     }
     return normalized;
 }
@@ -117,62 +135,175 @@ function getBatchFieldValue(document, version, key) {
     return '';
 }
 
+function buildBatchDocumentAssignments(documentPatch, userId, now) {
+    const assignments = [];
+    const params = [];
+    for (const [key, definition] of Object.entries(BATCH_DOCUMENT_FIELDS)) {
+        if (!Object.hasOwn(documentPatch, key) || key === 'metadataReviewStatus' || key === 'maintainerUserId') continue;
+        assignments.push(`${definition.column} = ?`);
+        params.push(documentPatch[key]);
+    }
+    if (Object.hasOwn(documentPatch, 'maintainerUserId')) {
+        assignments.push('maintainer_user_id = ?');
+        params.push(documentPatch.maintainerUserId ? Number(documentPatch.maintainerUserId) : null);
+    }
+    if (Object.hasOwn(documentPatch, 'metadataReviewStatus')) {
+        assignments.push('metadata_review_status = ?');
+        params.push(documentPatch.metadataReviewStatus);
+        assignments.push("metadata_reviewed_by_user = CASE WHEN ? = 'approved' THEN ? ELSE metadata_reviewed_by_user END");
+        params.push(documentPatch.metadataReviewStatus, userId || 0);
+        assignments.push("metadata_reviewed_at = CASE WHEN ? = 'approved' THEN ? ELSE metadata_reviewed_at END");
+        params.push(documentPatch.metadataReviewStatus, now);
+    }
+    assignments.push('updated_by_user = ?', 'updated_at = ?');
+    params.push(userId || 0, now);
+    return { assignments, params };
+}
+
+function buildBatchVersionAssignments(versionPatch, userId, now) {
+    const assignments = [];
+    const params = [];
+    for (const [key, definition] of Object.entries(BATCH_VERSION_FIELDS)) {
+        if (!Object.hasOwn(versionPatch, key) || key === 'reviewStatus') continue;
+        assignments.push(`${definition.column} = ?`);
+        params.push(versionPatch[key]);
+    }
+    if (Object.hasOwn(versionPatch, 'reviewStatus')) {
+        assignments.push('review_status = ?');
+        params.push(versionPatch.reviewStatus);
+        assignments.push("reviewed_by_user = CASE WHEN ? = 'approved' THEN ? ELSE reviewed_by_user END");
+        params.push(versionPatch.reviewStatus, userId || 0);
+        assignments.push("reviewed_at = CASE WHEN ? = 'approved' THEN ? ELSE reviewed_at END");
+        params.push(versionPatch.reviewStatus, now);
+    }
+    assignments.push('updated_at = ?');
+    params.push(now);
+    return { assignments, params };
+}
+
+function batchVersionFromRow(row) {
+    if (!row?.batch_version_id) return null;
+    return {
+        id: row.batch_version_id,
+        document_id: row.id,
+        version_label: row.batch_version_label,
+        effect_status: row.batch_effect_status,
+        review_status: row.batch_review_status
+    };
+}
+
+function buildBatchAuditRows(rows, documentsById, versionsByDocumentId, metadata, versionPatch) {
+    return rows.map(row => {
+        const beforeVersion = batchVersionFromRow(row);
+        const documentId = Number(row.id);
+        const afterDocument = documentsById.get(documentId) || row;
+        const afterVersion = versionsByDocumentId.get(documentId) || beforeVersion;
+        const before = Object.fromEntries(Object.keys(metadata).map(key => [key, getBatchFieldValue(row, beforeVersion, key)]));
+        const after = Object.fromEntries(Object.keys(metadata).map(key => [key, getBatchFieldValue(afterDocument, afterVersion, key)]));
+        if (Object.keys(versionPatch).length) {
+            before.__currentVersionId = row.current_version_id;
+            after.__currentVersionId = row.current_version_id;
+        }
+        return { document_id: documentId, before_json: before, after_json: after };
+    });
+}
+
 async function updateRegulationDocuments({ documentIds, userId, patch }) {
+    const startedAt = Date.now();
     const uniqueIds = validateDocumentIds(documentIds);
     const metadata = validateMetadataPatch(patch);
     const { documentPatch, versionPatch } = splitMetadataPatch(metadata);
     const batchId = createBatchId();
-    const updated = [];
-    const failed = [];
-    for (const documentId of uniqueIds) {
+    const now = getBeijingTimestamp();
+    const result = await transaction(async trx => {
+        const idPlaceholders = uniqueIds.map(() => '?').join(', ');
+        const rows = await runBatchQuery(trx, `
+            SELECT d.*,
+                   v.id AS batch_version_id,
+                   v.version_label AS batch_version_label,
+                   v.effect_status AS batch_effect_status,
+                   v.review_status AS batch_review_status
+            FROM regulation_documents d
+            LEFT JOIN regulation_versions v ON v.id = d.current_version_id
+            WHERE d.id IN (${idPlaceholders}) AND d.deleted_at IS NULL
+            ORDER BY d.id ASC
+            FOR UPDATE OF d
+        `, uniqueIds);
+        const documentsById = new Map(rows.map(row => [Number(row.id), row]));
+        const failed = uniqueIds
+            .filter(documentId => !documentsById.has(documentId))
+            .map(documentId => ({ documentId, message: '法规文档不存在或已删除，请刷新列表' }));
+        const eligibleRows = rows.filter(row => {
+            if (!Object.keys(versionPatch).length || row.batch_version_id) return true;
+            failed.push({ documentId: Number(row.id), message: '法规缺少当前版本，无法批量更新版本治理信息' });
+            return false;
+        });
+        if (!eligibleRows.length) return { updated: [], failed, notificationCandidates: [] };
+
+        if (Object.hasOwn(documentPatch, 'maintainerUserId') && documentPatch.maintainerUserId) {
+            const assignee = await runBatchQueryOne(trx, 'SELECT id FROM users WHERE id = ? AND deleted_at IS NULL AND status = \'active\'', [Number(documentPatch.maintainerUserId)]);
+            if (!assignee) throw Object.assign(new Error('维护人不存在或已停用，请重新选择'), { status: 400 });
+        }
+
+        const eligibleIds = eligibleRows.map(row => Number(row.id));
+        let updatedDocuments = eligibleRows;
+        if (Object.keys(documentPatch).length) {
+            const update = buildBatchDocumentAssignments(documentPatch, userId, now);
+            updatedDocuments = await runBatchQuery(trx, `
+                UPDATE regulation_documents
+                SET ${update.assignments.join(', ')}
+                WHERE id IN (${eligibleIds.map(() => '?').join(', ')}) AND deleted_at IS NULL
+                RETURNING *
+            `, [...update.params, ...eligibleIds]);
+        }
+        const updatedDocumentsById = new Map(updatedDocuments.map(document => [Number(document.id), document]));
+
+        let updatedVersions = [];
+        if (Object.keys(versionPatch).length) {
+            const versionIds = eligibleRows.map(row => Number(row.batch_version_id));
+            const update = buildBatchVersionAssignments(versionPatch, userId, now);
+            updatedVersions = await runBatchQuery(trx, `
+                UPDATE regulation_versions
+                SET ${update.assignments.join(', ')}
+                WHERE id IN (${versionIds.map(() => '?').join(', ')})
+                RETURNING id, document_id, version_label, effect_status, review_status
+            `, [...update.params, ...versionIds]);
+        }
+        const updatedVersionsByDocumentId = new Map(updatedVersions.map(version => [Number(version.document_id), version]));
+        const auditRows = buildBatchAuditRows(eligibleRows, updatedDocumentsById, updatedVersionsByDocumentId, metadata, versionPatch);
+        await runBatchExecute(trx, `
+            INSERT INTO regulation_document_change_logs (
+                batch_id, document_id, actor_user_id, action, before_json, after_json, created_at
+            )
+            SELECT ?, item.document_id, ?, 'batch_update', item.before_json, item.after_json, ?
+            FROM jsonb_to_recordset(?::jsonb) AS item(document_id BIGINT, before_json JSONB, after_json JSONB)
+        `, [batchId, userId, now, JSON.stringify(auditRows)]);
+        const notificationCandidates = updatedVersions.map(version => ({
+            document: updatedDocumentsById.get(Number(version.document_id)) || documentsById.get(Number(version.document_id)),
+            version
+        }));
+        return {
+            updated: eligibleIds.map(documentId => updatedDocumentsById.get(documentId)).filter(Boolean),
+            failed,
+            notificationCandidates
+        };
+    });
+
+    if (result.notificationCandidates.length) {
         try {
-            const beforeDocument = await getRegulationDocumentById(documentId, { includeArchived: true });
-            if (!beforeDocument || beforeDocument.deleted_at) {
-                failed.push({ documentId, message: '法规文档不存在或已删除，请刷新列表' });
-                continue;
-            }
-            const beforeVersion = Object.keys(versionPatch).length && beforeDocument.current_version_id
-                ? await getRegulationVersionById(beforeDocument.current_version_id)
-                : null;
-            if (Object.keys(versionPatch).length && !beforeVersion) {
-                failed.push({ documentId, message: '法规缺少当前版本，无法批量更新版本治理信息' });
-                continue;
-            }
-            const document = Object.keys(documentPatch).length
-                ? await updateRegulationDocument({ documentId, userId, patch: documentPatch })
-                : beforeDocument;
-            const version = Object.keys(versionPatch).length
-                ? await updateRegulationVersionGovernance({
-                    documentId,
-                    versionId: beforeDocument.current_version_id,
-                    userId,
-                    patch: versionPatch
-                })
-                : beforeVersion;
-            if (document && !document.deleted_at && (!Object.keys(versionPatch).length || version)) {
-                const before = Object.fromEntries(Object.keys(metadata).map(key => [key, getBatchFieldValue(beforeDocument, beforeVersion, key)]));
-                const after = Object.fromEntries(Object.keys(metadata).map(key => [key, getBatchFieldValue(document, version, key)]));
-                if (Object.keys(versionPatch).length) {
-                    before.__currentVersionId = beforeDocument.current_version_id;
-                    after.__currentVersionId = beforeDocument.current_version_id;
-                }
-                await execute(`
-                    INSERT INTO regulation_document_change_logs (
-                        batch_id, document_id, actor_user_id, action, before_json, after_json, created_at
-                    ) VALUES (?, ?, ?, 'batch_update', ?::jsonb, ?::jsonb, ?)
-                `, [batchId, documentId, userId, JSON.stringify(before), JSON.stringify(after), getBeijingTimestamp()]);
-                updated.push(document);
-            } else failed.push({ documentId, message: Object.keys(versionPatch).length ? '法规当前版本不存在，无法更新版本治理信息' : '法规文档不存在或已删除，请刷新列表' });
-        } catch (_error) {
-            failed.push({ documentId, message: '修改失败，请稍后重试' });
+            await notifyRegulationSubscribersBulk({ candidates: result.notificationCandidates });
+        } catch (error) {
+            // 元数据已在事务中提交；通知失败不能把前台批量操作伪装成失败，保留结构化日志供运维补偿。
+            logger.warn({ err: error.message, batchId, count: result.notificationCandidates.length }, '法规批量更新后的订阅通知发送失败');
         }
     }
     return {
         total: uniqueIds.length,
-        updated,
-        failed,
+        updated: result.updated,
+        failed: result.failed,
         fields: Object.keys(metadata).map(key => BATCH_METADATA_FIELDS[key]),
-        batchId: updated.length ? batchId : null
+        batchId: result.updated.length ? batchId : null,
+        durationMs: Date.now() - startedAt
     };
 }
 

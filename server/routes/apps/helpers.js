@@ -75,7 +75,25 @@ const { normalizeTokenUsage } = require('../../services/token-accounting');
 const { ContextLengthExceededError, fitMessagesToContextBudget } = require('../../services/context-budget');
 const { logger } = require('../../logger');
 
-async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null, onComplete = null }) {
+async function applyCompletionTransform(transformCompletion, content, metadata) {
+    if (typeof transformCompletion !== 'function') {
+        return { content, metadata, extraPayload: null };
+    }
+    const transformed = await transformCompletion(content, metadata);
+    if (typeof transformed === 'string') {
+        return { content: transformed, metadata, extraPayload: null };
+    }
+    if (!transformed || typeof transformed !== 'object') {
+        throw new Error('AI 完成结果核验器未返回有效结果。');
+    }
+    return {
+        content: typeof transformed.content === 'string' ? transformed.content : content,
+        metadata: { ...metadata, ...(transformed.metadata && typeof transformed.metadata === 'object' ? transformed.metadata : {}) },
+        extraPayload: transformed.extraPayload && typeof transformed.extraPayload === 'object' ? transformed.extraPayload : null
+    };
+}
+
+async function runAppsAiCompletion({ req, res, logAction, source, auditAction, messages, maxTokens = 1200, temperature = 0.35, stream = false, extraPayload = null, onComplete = null, transformCompletion = null }) {
     const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
         return res.status(404).json({
@@ -190,12 +208,15 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                     releaseSlots();
                 }
             });
+            const mustVerifyBeforeDelivery = typeof transformCompletion === 'function';
             response.data.on('data', chunk => {
                 streamIdleWatchdog.touch();
-                sse.writeRaw(chunk);
                 parser.write(chunk);
+                // 受法规依据核验保护的回答必须在完成后统一交付。否则上游模型可能先
+                // 输出一个无法被后续校验撤回的虚构法条，造成短暂但真实的错误展示。
+                if (!mustVerifyBeforeDelivery) sse.writeRaw(chunk);
             });
-            response.data.on('end', () => {
+            response.data.on('end', async () => {
                 streamIdleWatchdog.stop();
                 parser.end();
                 accumulator.finish();
@@ -208,8 +229,26 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                 });
                 recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+                let completion;
+                try {
+                    completion = await applyCompletionTransform(transformCompletion, totalContent, { model: modelCfg.model_name, usage });
+                } catch (transformError) {
+                    logger.error({ err: transformError.message, model: modelCfg.name, source }, '应用中心 AI 完成结果核验失败');
+                    if (!res.writableEnded) {
+                        sse.writeData({ error: { message: '回答依据核验失败，未展示未经核验的内容。', type: 'grounding_verification_error', code: 'AI_GROUNDING_VERIFICATION_FAILED' } });
+                        sse.writeData('[DONE]');
+                        res.end();
+                    }
+                    releaseSlots();
+                    return;
+                }
+                if (mustVerifyBeforeDelivery && !res.writableEnded) {
+                    if (completion.extraPayload) sse.writeData({ type: 'apps.completion', ...completion.extraPayload });
+                    if (completion.content) sse.writeData({ choices: [{ delta: { content: completion.content } }] });
+                    sse.writeData('[DONE]');
+                }
                 if (typeof onComplete === 'function') {
-                    Promise.resolve(onComplete(totalContent, { model: modelCfg.model_name, usage })).catch(err => logger.warn({ err: err.message, source }, '保存应用中心 AI 结果失败'));
+                    Promise.resolve(onComplete(completion.content, completion.metadata)).catch(err => logger.warn({ err: err.message, source }, '保存应用中心 AI 结果失败'));
                 }
                 if (!res.writableEnded) res.end();
                 releaseSlots();
@@ -242,14 +281,20 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
         });
         recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
         recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
+        const completion = await applyCompletionTransform(transformCompletion, content, { model: modelCfg.model_name, usage });
         releaseSlots();
         if (typeof onComplete === 'function') {
-            try { await onComplete(content, { model: modelCfg.model_name, usage }); } catch (err) {
+            try { await onComplete(completion.content, completion.metadata); } catch (err) {
                 logger.warn({ err: err.message, source }, '保存应用中心 AI 结果失败');
             }
         }
         // extraPayload 用于让具体应用附带额外字段（如法规问答的引用来源），不影响其它调用方
-        return res.json({ content, model: modelCfg.model_name, ...(extraPayload && typeof extraPayload === 'object' ? extraPayload : {}) });
+        return res.json({
+            content: completion.content,
+            model: modelCfg.model_name,
+            ...(extraPayload && typeof extraPayload === 'object' ? extraPayload : {}),
+            ...(completion.extraPayload || {})
+        });
     } catch (e) {
         releaseSlots();
         if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {

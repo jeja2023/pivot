@@ -310,12 +310,13 @@ async function buildRegulationAiContext({
         relation: match.relation || ''
     }));
 
-    // 上下文分两组：直接命中 / 经引用关联，便于模型分辨主次
+    // 上下文分两组：检索候选 / 经引用关联候选。候选不是已采纳的结论依据，
+    // 最终回答仍须由法规问答的引用核验器确认。
     const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n${s.contextExcerpt}`);
     const relatedLines = sources.filter(s => s.viaLink).map(s => `[${s.index}] ${s.label}（${s.relation}）\n${s.contextExcerpt}`);
     const parts = [];
-    if (directLines.length) parts.push(`【直接命中条文】\n${directLines.join('\n\n')}`);
-    if (relatedLines.length) parts.push(`【经引用关联的条文】\n${relatedLines.join('\n\n')}`);
+    if (directLines.length) parts.push(`【直接检索候选】\n${directLines.join('\n\n')}`);
+    if (relatedLines.length) parts.push(`【经引用关联的候选】\n${relatedLines.join('\n\n')}`);
     const context = parts.join('\n\n');
     return { matches: all, sources, context };
 }

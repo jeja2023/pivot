@@ -1,6 +1,14 @@
-const { query, queryOne, execute } = require('../../db/client');
+const { query, queryOne, execute, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { normalizeRegulationField, normalizeRegulationId, normalizeRegulationReviewStatus } = require('./shared');
+
+async function runSubscriberBatchQuery(trx, statement, params = []) {
+    return await trx.query(statement, params);
+}
+
+async function runSubscriberBatchExecute(trx, statement, params = []) {
+    return await trx.execute(statement, params);
+}
 
 function normalizeObligationStatus(value) {
     const status = String(value || '').trim().toLowerCase();
@@ -77,6 +85,63 @@ async function notifyRegulationSubscribers({ document, version }) {
         await execute('UPDATE regulation_subscriptions SET last_notified_version_id = ?, updated_at = ? WHERE user_id = ? AND document_id = ?', [versionId, now, subscription.user_id, documentId]);
     }
     return { notified: subscriptions.length };
+}
+
+// 批量更新版本治理信息时，不能逐文档、逐订阅者发送 SQL；2,000 份法规会把一个
+// 元数据请求放大为数千次往返。此处以集合 SQL 写入通知并更新订阅水位。
+async function notifyRegulationSubscribersBulk({ candidates = [] } = {}) {
+    const normalized = (Array.isArray(candidates) ? candidates : []).map(candidate => {
+        const documentId = normalizeRegulationId(candidate?.document?.id || candidate?.document?.document_id);
+        const versionId = normalizeRegulationId(candidate?.version?.id || candidate?.version?.version_id);
+        const effective = candidate?.version?.effect_status === 'effective';
+        const approved = candidate?.version?.review_status === 'approved';
+        if (!documentId || !versionId || !effective || !approved) return null;
+        return {
+            documentId,
+            versionId,
+            title: String(candidate?.document?.title || '法规').slice(0, 160),
+            versionLabel: String(candidate?.version?.version_label || `版本 ${versionId}`).slice(0, 100)
+        };
+    }).filter(Boolean);
+    if (!normalized.length) return { notified: 0 };
+
+    const now = getBeijingTimestamp();
+    return await transaction(async trx => {
+        const subscriptions = await runSubscriberBatchQuery(trx, `
+            WITH candidates AS (
+                SELECT *
+                FROM jsonb_to_recordset(?::jsonb) AS item(document_id BIGINT, version_id BIGINT, title TEXT, version_label TEXT)
+            )
+            SELECT s.user_id, s.document_id, c.version_id, c.title, c.version_label
+            FROM regulation_subscriptions s
+            JOIN candidates c ON c.document_id = s.document_id
+            WHERE s.status = 'active'
+              AND (s.last_notified_version_id IS NULL OR s.last_notified_version_id <> c.version_id)
+        `, [JSON.stringify(normalized.map(item => ({
+            document_id: item.documentId,
+            version_id: item.versionId,
+            title: item.title,
+            version_label: item.versionLabel
+        })))]);
+        if (!subscriptions.length) return { notified: 0 };
+        await runSubscriberBatchExecute(trx, `
+            INSERT INTO agent_notifications (user_id, run_id, type, title, body, status, created_at)
+            SELECT item.user_id, NULL, 'regulation_update', '关注法规已更新',
+                   item.title || ' 已发布审核通过的' || item.version_label || '。', 'unread', ?
+            FROM jsonb_to_recordset(?::jsonb) AS item(user_id BIGINT, document_id BIGINT, version_id BIGINT, title TEXT, version_label TEXT)
+        `, [now, JSON.stringify(subscriptions)]);
+        await runSubscriberBatchExecute(trx, `
+            UPDATE regulation_subscriptions s
+            SET last_notified_version_id = item.version_id, updated_at = ?
+            FROM jsonb_to_recordset(?::jsonb) AS item(user_id BIGINT, document_id BIGINT, version_id BIGINT)
+            WHERE s.user_id = item.user_id AND s.document_id = item.document_id
+        `, [now, JSON.stringify(subscriptions.map(item => ({
+            user_id: item.user_id,
+            document_id: item.document_id,
+            version_id: item.version_id
+        })))]);
+        return { notified: subscriptions.length };
+    });
 }
 
 async function listRegulationQualitySummary() {
@@ -258,6 +323,7 @@ module.exports = {
     listRegulationQualitySummary,
     listRegulationSubscriptions,
     notifyRegulationSubscribers,
+    notifyRegulationSubscribersBulk,
     reviewRegulationObligation,
     subscribeToRegulation,
     unsubscribeFromRegulation

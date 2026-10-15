@@ -42,7 +42,8 @@ test('法规问答以流式方式显示增量并保留可回溯依据', { timeou
                 const source = new ReadableStream({
                     start(controller) {
                         controller.enqueue(encoder.encode('data: {"type":"apps.extra","sources":[{"index":1,"documentId":1,"versionId":1,"articleId":11,"label":"测试法规 / v1 / 第一条","excerpt":"依据正文"}]}\n\n'));
-                        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"第一段回答。"}}]}\n\n'));
+                        controller.enqueue(encoder.encode('data: {"type":"apps.completion","grounding":{"status":"verified","accepted":true,"citedSourceIndexes":[1]}}\n\n'));
+                        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"第一段回答。[1]"}}]}\n\n'));
                         controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"第二段回答。"}}]}\n\n'));
                         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
                         controller.close();
@@ -60,8 +61,10 @@ test('法规问答以流式方式显示增量并保留可回溯依据', { timeou
         await page.locator('#regulations-ai-scope').selectOption('document');
         await page.locator('#regulations-ai-question').fill('这条法规如何执行？');
         await page.locator('#regulations-ai-btn').click();
-        await expect(page.locator('#regulations-ai-answer')).toContainText('第一段回答。第二段回答。');
+        await expect(page.locator('#regulations-ai-answer')).toContainText('第一段回答。[1]第二段回答。');
         await expect(page.locator('#regulations-ai-answer')).toContainText('测试法规 / v1 / 第一条');
+        await expect(page.locator('#regulations-ai-answer')).toContainText('依据已核验');
+        await expect(page.locator('#regulations-ai-answer')).toContainText('直接检索候选');
         await expect(page.locator('[data-regulation-export-format="docx"]')).toHaveCount(1);
         await expect(page.locator('[data-regulation-export-format="pdf"]')).toHaveCount(1);
         await expect(page.locator('#regulations-ai-stop-btn')).toBeHidden();

@@ -2473,19 +2473,23 @@
 }
 
 .regulations-article-focused::before {
-    content: "📍 命中条文定位";
+    content: "命中条文定位";
     display: inline-flex;
     align-items: center;
-    gap: 4px;
     margin-bottom: 8px;
-    padding: 2px 10px;
+    padding: 3px 10px 3px 25px;
     font-size: 0.72rem;
     font-weight: 700;
-    color: #1d4ed8;
-    background: #e0e7ff;
-    border: 1px solid #bfdbfe;
+    line-height: 1.2;
+    color: var(--primary);
+    background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d4ed8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 8px center;
+    background-size: 12px 12px;
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
     border-radius: 9999px;
-    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--primary) 15%, transparent);
 }
 
 .regulations-article-focused .regulations-article-block-head strong {
@@ -2503,9 +2507,10 @@ body.dark-mode .regulations-article-focused,
 
 body.dark-mode .regulations-article-focused::before,
 .dark-mode .regulations-article-focused::before {
-    color: #dbeafe;
-    background: rgba(30, 58, 138, 0.7);
-    border-color: rgba(96, 165, 250, 0.5);
+    color: color-mix(in srgb, var(--primary) 70%, white);
+    background-color: color-mix(in srgb, var(--primary) 25%, transparent);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393c5fd' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/svg%3E");
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 body.dark-mode .regulations-article-focused .regulations-article-block-head strong,
@@ -2625,6 +2630,14 @@ body.dark-mode .regulations-article-focused .regulations-article-block-head stro
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.regulations-ai-source-index {
+    display: inline-block;
+    margin-right: 5px;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
 }
 
 .regulations-ai-source-rel {
@@ -5982,9 +5995,17 @@ body.dark-mode .regulations-article-focused .regulations-article-block-head stro
 }
 
 .regulations-match-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 0.73rem;
     color: var(--text-muted);
     opacity: 0.85;
+}
+
+.regulations-match-hint svg {
+    flex-shrink: 0;
+    opacity: 0.8;
 }
 
 .regulations-match-arrow {

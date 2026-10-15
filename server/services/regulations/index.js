@@ -6,6 +6,7 @@ const collaboration = require('./collaboration');
 const documentBatch = require('./document-batch');
 const importJobs = require('./import-jobs');
 const governance = require('./governance');
+const grounding = require('./grounding');
 const links = require('./links');
 const locations = require('./locations');
 const mutations = require('./mutations');
@@ -71,6 +72,7 @@ module.exports = {
     getRegulationSupersedeNotices: analysis.getRegulationSupersedeNotices,
     getRegulationVersionById: catalog.getRegulationVersionById,
     getRegulationVersionStorageById: catalog.getRegulationVersionStorageById,
+    validateRegulationAiGrounding: grounding.validateRegulationAiGrounding,
     listRegulationAccessLogs: collaboration.listRegulationAccessLogs,
     createRegulationCategory: catalog.createRegulationCategory,
     deleteRegulationCategory: catalog.deleteRegulationCategory,

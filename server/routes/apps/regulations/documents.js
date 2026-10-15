@@ -772,7 +772,7 @@ function registerDocumentRoutes(router, deps) {
                 userId: req.user.id,
                 patch: req.body?.patch
             });
-            logAction(req, '法规查询批量修改信息', `字段：${result.fields.join('、')}，成功 ${result.updated.length} / 共 ${result.total}，失败 ${result.failed.length}`);
+            logAction(req, '法规查询批量修改信息', `字段：${result.fields.join('、')}，成功 ${result.updated.length} / 共 ${result.total}，失败 ${result.failed.length}，耗时 ${result.durationMs}ms`);
             res.json(result);
         }));
 

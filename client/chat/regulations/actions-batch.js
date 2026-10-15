@@ -4,6 +4,7 @@
     if (ns.actionsBatchReady) return;
 
     const { API, state, esc, canManage, canDeleteDocuments, toast, fetchJson, regulationConfirm } = ns;
+    const BATCH_OPERATION_TIMEOUT_MS = 120000;
 
     function getSelectedDocuments() {
         return [...state.selectedDocumentIds].map(id => {
@@ -210,12 +211,12 @@
         if (!(await regulationConfirm(actionLabel, confirmation))) return;
         ns.setBusy(true, isIndex ? '正在批量加入向量索引队列…' : '正在批量重建条文来源定位…');
         try {
-            // 定位重建会为每条条文写入页码与字符范围。按 100 份法规分批提交，
-            // 避免 1,000+ 份法规的单个 HTTP 请求被代理超时；索引重建则保持单条
+            // 定位重建会为每条条文写入页码与字符范围。按 25 份法规分批提交，
+            // 让每个请求在慢磁盘、长法规场景下仍能落在反向代理的可控窗口内；索引重建则保持单条
             // 集合 SQL，以最快速度进入可恢复队列。
             const chunks = isIndex
                 ? [selected]
-                : Array.from({ length: Math.ceil(selected.length / 100) }, (_, index) => selected.slice(index * 100, (index + 1) * 100));
+                : Array.from({ length: Math.ceil(selected.length / 25) }, (_, index) => selected.slice(index * 25, (index + 1) * 25));
             const result = { total: selected.length, queuedVersions: 0, clearedArticles: 0, queuedDocumentIds: [], rebuilt: [], rebuiltArticles: 0, failed: [] };
             for (let index = 0; index < chunks.length; index += 1) {
                 const chunk = chunks[index];
@@ -223,7 +224,8 @@
                 const response = await fetchJson(`${API}/documents/${isIndex ? 'batch-reindex' : 'batch-rebuild-locations'}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: chunk.map(document => document.id) })
+                    body: JSON.stringify({ ids: chunk.map(document => document.id) }),
+                    timeoutMs: BATCH_OPERATION_TIMEOUT_MS
                 });
                 const partial = response?.result || {};
                 result.queuedVersions += Number(partial.queuedVersions || 0);
@@ -292,7 +294,8 @@
             const result = await fetchJson(`${API}/documents/batch-revert`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ batchId })
+                body: JSON.stringify({ batchId }),
+                timeoutMs: BATCH_OPERATION_TIMEOUT_MS
             });
             const reverted = Array.isArray(result.reverted) ? result.reverted : [];
             const failed = Array.isArray(result.failed) ? result.failed : [];
