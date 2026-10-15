@@ -10,7 +10,6 @@ module.exports = [{
     id: '202610140001_regulations_vector_column_compatibility',
     description: 'Safely requeue legacy regulation text embeddings without rewriting production vector indexes.',
     async upPg(client) {
-        await client.query('SET LOCAL statement_timeout = 0');
         await client.query('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public');
         await client.query(`
             DO $migration$

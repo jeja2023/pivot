@@ -7,7 +7,6 @@ async function runMigrationsPg() {
     const { ensurePgMigrationTable, hasPgMigration, recordPgMigration } = require('./migrations/runner');
     const client = await getPgPool().connect();
     try {
-        await client.query('SET statement_timeout = 0');
         await ensurePgMigrationTable(client);
         const applied = [];
         for (const migration of migrations.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
@@ -15,7 +14,7 @@ async function runMigrationsPg() {
             // schema 快照已经覆盖历史建表/补列；只执行 PostgreSQL 专属的
             // 数据回填和约束收敛迁移。不存在 SQLite baseline 或执行路径。
             if (typeof migration.upPg !== 'function') continue;
-            await client.query('BEGIN');
+            await client.query('BEGIN; SET LOCAL statement_timeout = 0');
             try {
                 await migration.upPg(client, { logger });
                 await recordPgMigration(client, migration.id, migration.description || '');
@@ -29,9 +28,6 @@ async function runMigrationsPg() {
         if (applied.length) logger.info({ applied }, '[PG] 已应用版本化迁移');
         return applied;
     } finally {
-        try {
-            await client.query('SET statement_timeout TO DEFAULT');
-        } catch (_) {}
         client.release();
     }
 }
