@@ -65,7 +65,7 @@ class ArtifactManager {
       )
       VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, 1, 'active', NOW(), NOW())
       RETURNING *
-    `, [uId, title, description, type, content, metadataStr, runId, parentId]);
+    `, [uId, title, description, type, content, metadataStr, runId || null, parentId || null]);
 
     const artifact = rows[0];
     return this.formatArtifact(artifact);
