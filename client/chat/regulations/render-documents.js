@@ -116,7 +116,6 @@
                         const reviewCount = Number(folder.needsReviewCount || 0);
                         const theme = getCategoryFolderTheme(rawTitle, folder.isUncategorized);
                         const iconSvg = getCategoryFolderIconSvg(theme.icon);
-                        const customTag = folder.isCustom ? '自定义' : (rawTitle === theme.tag ? (rawTitle === '行业规范' ? '标准规范' : '法规目录') : theme.tag);
                         const effectiveRate = docCount > 0 ? Math.round((effectiveCount / docCount) * 100) : 0;
 
                         return `
@@ -127,7 +126,6 @@
                                     </div>
                                     <div class="regulations-folder-title-block">
                                         <strong class="regulations-folder-title" title="${folderTitle}">${folderTitle}</strong>
-                                        <span class="regulations-folder-type-tag">${customTag}</span>
                                     </div>
                                 </div>
 
