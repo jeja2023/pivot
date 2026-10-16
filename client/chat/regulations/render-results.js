@@ -294,27 +294,35 @@
                             const grounding = turn.grounding && typeof turn.grounding === 'object' ? turn.grounding : null;
                             const direct = sources.filter(s => !s.viaLink);
                             const related = sources.filter(s => s.viaLink);
-                            const verificationLabel = isStreaming
-                                ? '生成并核验中…'
-                                : grounding?.status === 'verified'
-                                    ? '依据已核验'
-                                    : grounding?.status === 'no_candidates'
-                                        ? '未检到候选'
-                                        : grounding?.status === 'insufficient_evidence'
-                                            ? '候选不足，需补充'
-                                            : '基于条文检索';
+                            const verificationLabel = (() => {
+                                if (isStreaming) return '生成并核验中…';
+                                const labels = {
+                                    verified: '依据已核验',
+                                    clarification_needed: '需要补充事实',
+                                    candidate_conflict: '候选与结论不一致',
+                                    citation_repair_required: '引用格式待修复',
+                                    no_candidates: '未检到候选',
+                                    insufficient_evidence: '候选不足，需补充'
+                                };
+                                return labels[grounding?.status] || '基于条文检索';
+                            })();
                             const renderSourceBtn = source => {
                                 const excerptText = source.excerpt
                                     ? (typeof stripMarkdownFormatting === 'function' ? stripMarkdownFormatting(source.excerpt) : source.excerpt)
                                     : '';
+                                const selected = state.aiSelectedArticleIds?.has(Number(source.articleId));
                                 return `
-                                    <button class="regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}" title="点击查看此法条原文">
-                                        <span class="regulations-ai-source-label">
-                                            <span class="regulations-ai-source-name"><b class="regulations-ai-source-index">[${esc(source.index || '?')}]</b>${esc(source.label || '相关条文')}</span>
-                                            ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
-                                        </span>
-                                        ${excerptText ? `<span class="regulations-ai-source-excerpt">${esc(excerptText)}</span>` : ''}
-                                    </button>
+                                    <div class="regulations-ai-source-row${source.viaLink ? ' viaLink' : ''}">
+                                        <button class="btn-secondary regulations-ai-source${source.viaLink ? ' viaLink' : ''}" type="button" data-regulation-match-doc="${esc(source.documentId)}" data-regulation-match-version="${esc(source.versionId || '')}" data-regulation-match-article="${esc(source.articleId)}" title="点击查看此法条原文">
+                                            <span class="regulations-ai-source-label">
+                                                <span class="regulations-ai-source-name"><b class="regulations-ai-source-index">[${esc(source.index || '?')}]</b>${esc(source.label || '相关条文')}</span>
+                                                ${source.relation ? `<em class="regulations-ai-source-rel">${esc(source.relation)}</em>` : ''}
+                                            </span>
+                                            ${excerptText ? `<span class="regulations-ai-source-excerpt">${esc(excerptText)}</span>` : ''}
+                                            ${(source.pageStart || source.headingPath) ? `<span class="regulations-ai-source-meta">${esc(source.headingPath || '')}${source.pageStart ? ` · 第${esc(source.pageStart)}页${source.pageEnd && source.pageEnd !== source.pageStart ? `-${esc(source.pageEnd)}` : ''}` : ''}</span>` : ''}
+                                        </button>
+                                        <button class="btn-secondary regulations-ai-source-select" type="button" data-regulation-ai-source-select="${esc(source.articleId)}" aria-pressed="${selected ? 'true' : 'false'}">${selected ? '已保留' : '保留'}</button>
+                                    </div>
                                 `;
                             };
                             const groupsHtml = sources.length ? `
@@ -345,6 +353,15 @@
                             ` : '';
 
                             const rawAnswer = turn.answer || '';
+                            const diagnostics = turn.diagnostics && typeof turn.diagnostics === 'object' ? turn.diagnostics : null;
+                            const diagnosticsHtml = !isStreaming && diagnostics && (diagnostics.retrievedCandidateCount || diagnostics.effectiveVersionId || diagnostics.followUpResolved) ? `
+                                <div class="regulations-ai-diagnostics">
+                                    <span>候选池 ${esc(diagnostics.retrievedCandidateCount || 0)}</span>
+                                    <span>直接依据 ${esc(diagnostics.directCandidateCount || direct.length)}</span>
+                                    ${diagnostics.effectiveVersionId ? `<span>版本 ${esc(diagnostics.effectiveVersionId)}</span>` : ''}
+                                    ${diagnostics.followUpResolved ? '<span>已结合上一轮问题</span>' : ''}
+                                </div>
+                            ` : '';
                             let bodyHtml = '';
                             if (isStreaming) {
                                 if (rawAnswer) {
@@ -381,6 +398,7 @@
                                             <span class="regulations-ai-card-tag">${verificationLabel}</span>
                                         </div>
                                         <div id="regulations-ai-answer-${turnIndex}" class="regulations-article-body regulations-ai-card-body">${bodyHtml}</div>
+                                        ${diagnosticsHtml}
                                         ${groupsHtml}
                                         ${isStreaming ? '' : `<div class="regulations-ai-turn-actions">
                                             <button class="btn-secondary regulations-ai-copy-btn" type="button" data-regulations-ai-copy="${turnIndex}" title="复制此条回答">

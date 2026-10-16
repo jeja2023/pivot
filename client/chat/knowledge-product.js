@@ -2,7 +2,7 @@
 (() => {
     const tabs = ['search', 'content', 'sources', 'jobs', 'evaluation'];
     let activeTab = 'search';
-    const productState = { documents: [], sources: [], jobs: [], evaluationCases: [], evaluationRuns: [] };
+    const productState = { documents: [], sources: [], jobs: [], evaluationCases: [], evaluationRuns: [], answerMetrics: null };
 
     const escapeHtml = value => window.Pivot?.legacy?.escapeRagHtml?.(value) || String(value ?? '');
     const escapeAttr = value => window.Pivot?.legacy?.escapeRagAttr?.(value) || String(value ?? '');
@@ -48,11 +48,12 @@
     function renderSearchResults(items = []) {
         const target = document.getElementById('knowledge-product-results');
         if (!target) return;
-        if (!items.length) {
-            PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">没有检索到相关证据。</div>');
+        const verifiedItems = (Array.isArray(items) ? items : []).filter(item => item?.selected === true);
+        if (!verifiedItems.length) {
+            PivotSafeHtml.setHtml(target, '<div class="knowledge-product-empty">本轮未找到达到证据要求的相关资料，已隐藏未通过相关性与可信度校验的候选。</div>');
             return;
         }
-        PivotSafeHtml.setHtml(target, `<div class="knowledge-search-result-list">${items.slice(0, 12).map(item => `
+        PivotSafeHtml.setHtml(target, `<div class="knowledge-search-result-list">${verifiedItems.slice(0, 12).map(item => `
             <article class="knowledge-search-result ${item.selected ? 'is-selected' : ''}">
                 <header><strong>${escapeHtml(item.documentName || item.source || '知识片段')}</strong><span>${Number(item.citationConfidence || 0) > 0 ? `可信度 ${Math.round(Number(item.citationConfidence) * 100)}%` : `相关度 ${Number(item.score || 0).toFixed(3)}`}</span></header>
                 <small>${escapeHtml(item.headingPath || `片段 ${Number(item.chunkIndex || 0) + 1}`)}</small>
@@ -64,14 +65,33 @@
         const target = document.getElementById('knowledge-product-answer');
         if (!target) return;
         const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        const grounding = data.grounding && typeof data.grounding === 'object' ? data.grounding : null;
+        const groundingLabel = grounding?.accepted
+            ? '依据已核验'
+            : grounding?.status === 'insufficient_evidence'
+                ? '证据不足'
+                : grounding ? '依据待补充' : '待核验';
         PivotSafeHtml.setHtml(target, `
             <article class="knowledge-answer-card">
-                <header><strong>知识库回答</strong><span>${escapeHtml(data.retrievalMode || '-')}</span></header>
+                <header><strong>知识库回答</strong><span>${escapeHtml(knowledgeRetrievalModeLabel(data.retrievalMode))} · ${escapeHtml(groundingLabel)}</span></header>
                 <div class="knowledge-answer-copy">${escapeHtml(data.answer || '')}</div>
                 ${warnings.length ? `<div class="knowledge-answer-warnings">${warnings.map(escapeHtml).join('；')}</div>` : ''}
                 <div class="knowledge-answer-sources"><strong>可验证来源</strong>${renderCitations(data.citations || [])}</div>
                 ${renderWikiPages(data.wikiPages || [], data.wikiCitations || [])}
             </article>`);
+    }
+
+    function knowledgeRetrievalModeLabel(value = '') {
+        const labels = {
+            hybrid_dual_rrf_mmr: '混合检索',
+            keyword_fallback: '关键词降级检索',
+            confidence_rejected: '候选未通过相关性与可信度校验',
+            no_candidates: '未找到候选资料',
+            empty_query: '未输入有效问题'
+        };
+        const modes = String(value || '').split(/\s*\+\s*/).map(mode => String(mode || '').trim()).filter(Boolean);
+        if (!modes.length) return '检索状态待确认';
+        return [...new Set(modes.map(mode => labels[mode] || '自适应检索'))].join('、');
     }
 
     async function runKnowledgeSearch({ ask = false } = {}) {
@@ -95,13 +115,9 @@
             });
             if (ask) {
                 renderAnswer(data);
-                const evidence = await fetchKnowledge('/knowledge/search', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, scope, filters })
-                });
-                renderSearchResults(evidence.results || []);
+                renderSearchResults(data.results || []);
             } else {
-                if (answer) PivotSafeHtml.setHtml(answer, `<div class="knowledge-search-summary">已检索 ${Number(data.candidateCount || 0)} 个候选，当前模式：${escapeHtml(data.retrievalMode || '-')}</div>${renderCitations(data.citations || [])}${renderWikiPages(data.wikiPages || [], data.wikiCitations || [])}`);
+                if (answer) PivotSafeHtml.setHtml(answer, `<div class="knowledge-search-summary">已检索 ${Number(data.candidateCount || 0)} 个候选，当前模式：${escapeHtml(knowledgeRetrievalModeLabel(data.retrievalMode))}</div>${renderCitations(data.citations || [])}${renderWikiPages(data.wikiPages || [], data.wikiCitations || [])}`);
                 renderSearchResults(data.results || []);
             }
         } catch (error) {
@@ -278,6 +294,58 @@
         return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : '—';
     }
 
+    const EVALUATION_STATUS_LABELS = Object.freeze({
+        queued: '等待执行',
+        running: '评测中',
+        retry_wait: '等待重试',
+        completed: '已完成',
+        failed: '执行失败',
+        cancelled: '已取消'
+    });
+
+    const EVALUATION_METRIC_LABELS = Object.freeze({
+        recallAt1: { label: '前 1 条召回率', format: 'percentage' },
+        recallAt3: { label: '前 3 条召回率', format: 'percentage' },
+        recallAt5: { label: '前 5 条召回率', format: 'percentage' },
+        precisionAt1: { label: '前 1 条准确率', format: 'percentage' },
+        precisionAt3: { label: '前 3 条准确率', format: 'percentage' },
+        precisionAt5: { label: '前 5 条准确率', format: 'percentage' },
+        mrr: { label: '平均倒数排名', format: 'score' },
+        ndcgAt5: { label: '前 5 条排序质量', format: 'score' },
+        citationPrecision: { label: '引用准确率', format: 'percentage' },
+        citationRecall: { label: '引用召回率', format: 'percentage' },
+        citationF1: { label: '引用综合得分', format: 'score' },
+        answerPointCoverage: { label: '答案要点覆盖率', format: 'percentage' },
+        abstentionAccuracy: { label: '拒答准确率', format: 'percentage' },
+        groundingAcceptanceRate: { label: '依据核验通过率', format: 'percentage' }
+    });
+
+    function evaluationStatusLabel(status) {
+        return EVALUATION_STATUS_LABELS[String(status || '').toLowerCase()] || '状态未知';
+    }
+
+    function evaluationMetricValue(metricKey, value) {
+        const meta = EVALUATION_METRIC_LABELS[metricKey] || { format: 'score' };
+        if (!Number.isFinite(Number(value))) return '—';
+        return meta.format === 'percentage' ? percentage(value) : Number(value).toFixed(3);
+    }
+
+    function evaluationMetricText(metricKey, value) {
+        const meta = EVALUATION_METRIC_LABELS[metricKey] || { label: '评测指标' };
+        return `${meta.label} ${evaluationMetricValue(metricKey, value)}`;
+    }
+
+    function evaluationMetricDeltaText(metricKey, value) {
+        const meta = EVALUATION_METRIC_LABELS[metricKey] || { label: '评测指标', format: 'score' };
+        if (!Number.isFinite(Number(value))) return '';
+        const number = Number(value);
+        const sign = number > 0 ? '+' : '';
+        const delta = meta.format === 'percentage'
+            ? `${sign}${(number * 100).toFixed(1)} 个百分点`
+            : `${sign}${number.toFixed(3)}`;
+        return `${meta.label}：${delta}`;
+    }
+
     function renderEvaluation() {
         const summary = document.getElementById('knowledge-product-evaluation-summary');
         const casesTarget = document.getElementById('knowledge-product-evaluation-cases');
@@ -285,11 +353,16 @@
         const latest = productState.evaluationRuns[0];
         if (summary) {
             const metrics = latest?.summary || {};
-            PivotSafeHtml.setHtml(summary, latest ? `
-                <div class="knowledge-search-summary"><strong>${escapeHtml(latest.name || '最近评测')}</strong> · ${escapeHtml(latest.status || '-')}
-                · Recall@3 ${percentage(metrics.recallAt3)} · MRR ${Number.isFinite(Number(metrics.mrr)) ? Number(metrics.mrr).toFixed(3) : '—'}
-                · nDCG@5 ${Number.isFinite(Number(metrics.ndcgAt5)) ? Number(metrics.ndcgAt5).toFixed(3) : '—'}
-                · 拒答 ${percentage(metrics.abstentionAccuracy)}</div>` : '<div class="knowledge-product-empty">尚未运行评测。先建立一组有标准答案的业务问题。</div>');
+            const evaluationSummary = latest ? `
+                <div class="knowledge-search-summary"><strong>${escapeHtml(latest.name || '最近评测')}</strong> · ${escapeHtml(evaluationStatusLabel(latest.status))}
+                · ${escapeHtml(evaluationMetricText('recallAt3', metrics.recallAt3))} · ${escapeHtml(evaluationMetricText('mrr', metrics.mrr))}
+                · ${escapeHtml(evaluationMetricText('ndcgAt5', metrics.ndcgAt5))}
+                · ${escapeHtml(evaluationMetricText('abstentionAccuracy', metrics.abstentionAccuracy))} · ${escapeHtml(evaluationMetricText('groundingAcceptanceRate', metrics.groundingAcceptanceRate))}</div>` : '<div class="knowledge-product-empty">尚未运行评测。先建立一组有标准答案的业务问题。</div>';
+            const live = productState.answerMetrics;
+            const liveSummary = live
+                ? `<div class="knowledge-product-summary-metrics">近 ${Number(live.days || 30)} 天线上问答：${Number(live.total || 0)} 次 · 依据核验 ${percentage(live.acceptanceRate)} · 平均候选 ${Number(live.averageCandidates || 0).toFixed(1)} · 平均依据 ${Number(live.averageSources || 0).toFixed(1)}</div>`
+                : '';
+            PivotSafeHtml.setHtml(summary, `${evaluationSummary}${liveSummary}`);
         }
         if (casesTarget) {
             PivotSafeHtml.setHtml(casesTarget, productState.evaluationCases.length ? productState.evaluationCases.map(item => `
@@ -297,17 +370,19 @@
         }
         if (runsTarget) {
             PivotSafeHtml.setHtml(runsTarget, productState.evaluationRuns.length ? productState.evaluationRuns.map(item => `
-                <article class="knowledge-product-row"><div><strong>${escapeHtml(item.name || '知识库评测')}</strong><span>${escapeHtml(item.status || '-')} · Recall@3 ${percentage(item.summary?.recallAt3)} · MRR ${Number.isFinite(Number(item.summary?.mrr)) ? Number(item.summary.mrr).toFixed(3) : '—'} · 引用 F1 ${Number.isFinite(Number(item.summary?.citationF1)) ? Number(item.summary.citationF1).toFixed(3) : '—'} · ${escapeHtml(item.completedAt || item.createdAt || '')}${item.errorMessage ? ` · ${escapeHtml(item.errorMessage)}` : ''}</span></div><div class="knowledge-product-row-actions"><button type="button" class="btn-secondary" data-knowledge-eval-run="${item.id}">详情</button>${productState.evaluationRuns.length > 1 ? `<button type="button" class="btn-secondary" data-knowledge-eval-compare="${item.id}">与上一轮比较</button>` : ''}</div></article>`).join('') : '');
+                <article class="knowledge-product-row"><div><strong>${escapeHtml(item.name || '知识库评测')}</strong><span>${escapeHtml(evaluationStatusLabel(item.status))} · ${escapeHtml(evaluationMetricText('recallAt3', item.summary?.recallAt3))} · ${escapeHtml(evaluationMetricText('mrr', item.summary?.mrr))} · ${escapeHtml(evaluationMetricText('citationF1', item.summary?.citationF1))} · ${escapeHtml(item.completedAt || item.createdAt || '')}${item.errorMessage ? ` · ${escapeHtml(item.errorMessage)}` : ''}</span></div><div class="knowledge-product-row-actions"><button type="button" class="btn-secondary" data-knowledge-eval-run="${item.id}">详情</button>${productState.evaluationRuns.length > 1 ? `<button type="button" class="btn-secondary" data-knowledge-eval-compare="${item.id}">与上一轮比较</button>` : ''}</div></article>`).join('') : '');
         }
     }
 
     async function loadEvaluation() {
-        const [cases, runs] = await Promise.all([
+        const [cases, runs, answerMetrics] = await Promise.all([
             fetchKnowledge('/knowledge/evaluations/cases?limit=200'),
-            fetchKnowledge('/knowledge/evaluations/runs?limit=50')
+            fetchKnowledge('/knowledge/evaluations/runs?limit=50'),
+            fetchKnowledge('/knowledge/answers/metrics?days=30').catch(() => ({ metrics: null }))
         ]);
         productState.evaluationCases = cases.data || [];
         productState.evaluationRuns = runs.data || [];
+        productState.answerMetrics = answerMetrics.metrics || null;
         renderEvaluation();
     }
 
@@ -649,7 +724,7 @@
         if (!name) return;
         const query = await window.Pivot.legacy.showInputPrompt?.({ title: '新建黄金问题', label: '业务问题', placeholder: '例如：采购审批需要哪些材料？' });
         if (!query) return;
-        const chunks = await window.Pivot.legacy.showInputPrompt?.({ title: '新建黄金问题', label: '预期 Chunk ID（可选，逗号分隔）', placeholder: '例如：101,102' });
+        const chunks = await window.Pivot.legacy.showInputPrompt?.({ title: '新建黄金问题', label: '预期片段编号（可选，逗号分隔）', placeholder: '例如：101,102' });
         const expectedChunkIds = String(chunks || '').split(/[,，\s]+/).map(Number).filter(Number.isSafeInteger);
         await fetchKnowledge('/knowledge/evaluations/cases', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, query, expectedChunkIds })
@@ -659,7 +734,7 @@
     }
 
     async function runEvaluation() {
-        const modelId = await window.Pivot.legacy.showInputPrompt?.({ title: '运行知识库评测', label: '回答评测模型 ID（可选）', placeholder: '留空只评测检索与引用', required: false });
+        const modelId = await window.Pivot.legacy.showInputPrompt?.({ title: '运行知识库评测', label: '回答评测模型编号（可选）', placeholder: '留空时只评测检索与引用', required: false });
         const data = await fetchKnowledge('/knowledge/evaluations/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '知识库检索评测', ...(modelId ? { modelId } : {}) }) });
         showToast(`评测已入队：#${data.run?.id || '-'}`);
         await loadEvaluation();
@@ -668,7 +743,7 @@
     async function showEvaluationRun(id) {
         const data = await fetchKnowledge(`/knowledge/evaluations/runs/${encodeURIComponent(id)}`);
         const run = data.run || {};
-        const copy = (run.results || []).map(item => `${item.name} · ${item.status} · Recall@3 ${percentage(item.metrics?.recallAt3)} · MRR ${Number(item.metrics?.mrr || 0).toFixed(3)}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n') || '暂无明细';
+        const copy = (run.results || []).map(item => `${item.name} · ${evaluationStatusLabel(item.status)} · ${evaluationMetricText('recallAt3', item.metrics?.recallAt3)} · ${evaluationMetricText('mrr', item.metrics?.mrr)}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n') || '暂无明细';
         await window.Pivot.legacy.showAlert?.(run.name || '评测详情', copy);
     }
 
@@ -679,8 +754,8 @@
         if (!base) return;
         const data = await fetchKnowledge(`/knowledge/evaluations/compare?baseRunId=${encodeURIComponent(base.id)}&candidateRunId=${encodeURIComponent(candidateRunId)}`);
         const compare = data.comparison || {};
-        const delta = Object.entries(compare.delta || {}).filter(([, value]) => value !== null).map(([key, value]) => `${key}: ${value > 0 ? '+' : ''}${value}`).join('\n') || '没有可比较指标';
-        const regressions = (compare.regressions || []).map(item => `${item.name}: Recall@3 ${item.before} → ${item.after}`).join('\n');
+        const delta = Object.entries(compare.delta || {}).filter(([, value]) => value !== null).map(([key, value]) => evaluationMetricDeltaText(key, value)).filter(Boolean).join('\n') || '没有可比较指标';
+        const regressions = (compare.regressions || []).map(item => `${item.name}：前 3 条召回率 ${percentage(item.before)} → ${percentage(item.after)}`).join('\n');
         await window.Pivot.legacy.showAlert?.('评测比较', `${delta}${regressions ? `\n\n回归用例：\n${regressions}` : ''}`);
     }
 

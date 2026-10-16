@@ -39,6 +39,15 @@
         return map[key] || fallback || key || '-';
     }
 
+    function escapeHtml(str) {
+        return String(str ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function parseMetadata(value) {
         if (value && typeof value === 'object') return value;
         try { return JSON.parse(String(value || '{}')); } catch (_) { return {}; }
@@ -48,6 +57,7 @@
         const cell = document.createElement('td');
         if (className) cell.className = className;
         cell.textContent = text || '-';
+        if (text && text !== '-') cell.title = text;
         row.appendChild(cell);
         return cell;
     }
@@ -64,7 +74,7 @@
         if (!rows.length) {
             const row = document.createElement('tr');
             const cell = document.createElement('td');
-            cell.colSpan = 7;
+            cell.colSpan = 10;
             cell.className = 'text-center route-feedback-empty';
             cell.textContent = reviewStatus === 'pending' ? '暂无待核验的路由建议。' : '暂无符合筛选条件的路由建议。';
             row.appendChild(cell);
@@ -72,24 +82,89 @@
         } else {
             rows.forEach((item, index) => {
                 const row = document.createElement('tr');
+                row.dataset.feedbackId = String(item.feedback_id || '');
                 const metadata = parseMetadata(item.metadata);
                 const displayIndex = (page - 1) * (feedbackState.pageSize || 10) + index + 1;
                 appendTextCell(row, String(displayIndex), 'text-center col-index');
                 appendTextCell(row, formatTime(item.occurred_at), 'route-feedback-time');
+
+                const userCell = document.createElement('td');
+                userCell.className = 'route-feedback-user';
+                const userWrap = document.createElement('div');
+                userWrap.className = 'route-feedback-user-main';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'route-feedback-user-name';
+                const displayName = item.nickname || item.username || '未知用户';
+                nameSpan.textContent = displayName;
+                userWrap.appendChild(nameSpan);
+                if (item.username && item.nickname && item.username !== item.nickname) {
+                    const subSpan = document.createElement('span');
+                    subSpan.className = 'route-feedback-user-sub';
+                    subSpan.textContent = `(@${item.username})`;
+                    userWrap.appendChild(subSpan);
+                }
+                if (item.unit) {
+                    const unitBadge = document.createElement('span');
+                    unitBadge.className = 'route-feedback-unit-badge';
+                    unitBadge.textContent = item.unit;
+                    userWrap.appendChild(unitBadge);
+                }
+                userCell.appendChild(userWrap);
+                userCell.title = [
+                    item.nickname ? `昵称: ${item.nickname}` : '',
+                    item.username ? `账号: @${item.username}` : '',
+                    item.unit ? `单位: ${item.unit}` : ''
+                ].filter(Boolean).join('\n') || displayName;
+                row.appendChild(userCell);
+
+                const sessionCell = document.createElement('td');
+                sessionCell.className = 'route-feedback-session';
+                const sessionWrap = document.createElement('div');
+                sessionWrap.className = 'route-feedback-session-main';
+                const sessionTitleSpan = document.createElement('span');
+                sessionTitleSpan.className = 'route-feedback-session-title';
+                const titleText = item.session_title || (item.session_id ? '未命名会话' : '未关联会话');
+                sessionTitleSpan.textContent = titleText;
+                sessionWrap.appendChild(sessionTitleSpan);
+                if (item.session_id) {
+                    const idSpan = document.createElement('span');
+                    idSpan.className = 'route-feedback-session-id';
+                    idSpan.textContent = `(ID: ${item.session_id.slice(0, 8)}…)`;
+                    idSpan.dataset.sessionId = item.session_id;
+                    idSpan.title = `点击复制完整会话ID: ${item.session_id}`;
+                    sessionWrap.appendChild(idSpan);
+                }
+                sessionCell.appendChild(sessionWrap);
+                sessionCell.title = item.session_id
+                    ? `${titleText}\n会话ID: ${item.session_id}`
+                    : titleText;
+                row.appendChild(sessionCell);
+
+                const queryCell = document.createElement('td');
+                queryCell.className = 'route-feedback-query';
+                const queryText = String(item.query_preview || '').trim();
+                queryCell.textContent = queryText || '—';
+                queryCell.title = queryText ? `当轮提问（已脱敏，点击查看详情）:\n${queryText}` : '未记录当轮提问（点击查看详情）';
+                queryCell.dataset.routeFeedbackDetail = String(item.feedback_id || '');
+                row.appendChild(queryCell);
+
                 appendTextCell(row, label(SCENARIO_LABELS, item.scenario, '本轮路由'), 'route-feedback-scenario');
                 appendTextCell(row, `${label(ACTION_LABELS, item.selected_action_id, '未命名动作')} → ${label(ACTION_LABELS, item.corrected_action_id, '未命名动作')}`, 'route-feedback-action');
 
                 const reasonCell = document.createElement('td');
                 reasonCell.className = 'route-feedback-reason';
-                const reason = document.createElement('strong');
-                reason.textContent = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
-                reasonCell.appendChild(reason);
+                const reasonText = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
                 const note = String(metadata.note || '').trim();
+                const reasonStrong = document.createElement('strong');
+                reasonStrong.textContent = reasonText;
+                reasonCell.appendChild(reasonStrong);
                 if (note) {
-                    const noteText = document.createElement('span');
-                    noteText.textContent = note;
-                    reasonCell.appendChild(noteText);
+                    const noteSpan = document.createElement('span');
+                    noteSpan.className = 'route-feedback-reason-note';
+                    noteSpan.textContent = ` · ${note}`;
+                    reasonCell.appendChild(noteSpan);
                 }
+                reasonCell.title = note ? `${reasonText} · ${note}` : reasonText;
                 row.appendChild(reasonCell);
 
                 const statusCell = document.createElement('td');
@@ -103,6 +178,14 @@
 
                 const actionCell = document.createElement('td');
                 actionCell.className = 'text-center route-feedback-actions-cell';
+                const detailBtn = document.createElement('button');
+                detailBtn.type = 'button';
+                detailBtn.className = 'btn-secondary route-feedback-detail-btn';
+                detailBtn.dataset.routeFeedbackDetail = String(item.feedback_id || '');
+                detailBtn.textContent = '详情';
+                detailBtn.title = '查看脱敏提问与核验详情';
+                actionCell.appendChild(detailBtn);
+
                 if (normalizedStatus === 'pending') {
                     ['accepted', 'rejected'].forEach(reviewStatusValue => {
                         const button = document.createElement('button');
@@ -121,7 +204,10 @@
                         reviewedSpan.textContent = `已于 ${formatTime(item.reviewed_at)} 核验`;
                         actionCell.appendChild(reviewedSpan);
                     } else {
-                        actionCell.textContent = '-';
+                        const reviewedSpan = document.createElement('span');
+                        reviewedSpan.className = 'route-feedback-reviewed-time';
+                        reviewedSpan.textContent = '已核验';
+                        actionCell.appendChild(reviewedSpan);
                     }
                 }
                 row.appendChild(actionCell);
@@ -182,7 +268,150 @@
         }
     }
 
-    async function reviewFeedback(button) {
+    function closeDetailModal() {
+        const modal = document.getElementById('route-feedback-detail-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    function openDetailModal(item) {
+        const modal = document.getElementById('route-feedback-detail-modal');
+        const content = document.getElementById('route-feedback-detail-content');
+        const footer = document.getElementById('route-feedback-detail-footer');
+        if (!modal || !content || !footer || !item) return;
+
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+
+        const metadata = parseMetadata(item.metadata);
+        const queryText = String(item.query_preview || '').trim();
+        const scenarioText = label(SCENARIO_LABELS, item.scenario, '本轮路由');
+        const originActionText = label(ACTION_LABELS, item.selected_action_id, '未命名动作');
+        const correctedActionText = label(ACTION_LABELS, item.corrected_action_id, '未命名动作');
+        const reasonText = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
+        const noteText = String(metadata.note || '').trim();
+        const statusText = label(REVIEW_STATUS_LABELS, item.review_status, '待核验');
+        const userDisplay = [
+            item.nickname || '',
+            item.username ? `(@${item.username})` : '',
+            item.unit ? `[${item.unit}]` : ''
+        ].filter(Boolean).join(' ') || '未知用户';
+        const sessionTitle = item.session_title || (item.session_id ? '未命名会话' : '未关联会话');
+
+        content.innerHTML = `
+            <div class="route-feedback-detail-section">
+                <div class="route-feedback-detail-label">
+                    <span>当轮提问（用户提问）</span>
+                    <span class="route-feedback-privacy-badge">已规则脱敏·不含隐私</span>
+                </div>
+                <div class="route-feedback-query-card ${queryText ? '' : 'text-muted'}">${escapeHtml(queryText || '（未记录提问原文或由早期历史生成）')}</div>
+            </div>
+
+            <div class="route-feedback-detail-grid">
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">路由场景</span>
+                    <span class="route-feedback-item-value">${escapeHtml(scenarioText)}</span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">当前核验状态</span>
+                    <span class="route-feedback-item-value">
+                        <span class="route-feedback-status is-${escapeHtml(String(item.review_status || 'pending').toLowerCase())}">
+                            ${escapeHtml(statusText)}
+                        </span>
+                    </span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">原始系统决策</span>
+                    <span class="route-feedback-item-value is-origin">${escapeHtml(originActionText)}</span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">用户建议修正</span>
+                    <span class="route-feedback-item-value is-corrected">${escapeHtml(correctedActionText)}</span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">提交用户</span>
+                    <span class="route-feedback-item-value">${escapeHtml(userDisplay)}</span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">关联会话</span>
+                    <span class="route-feedback-item-value">
+                        ${escapeHtml(sessionTitle)}
+                        ${item.session_id ? `<span class="route-feedback-session-id" data-session-id="${escapeHtml(item.session_id)}" title="点击复制完整会话ID">(ID: ${escapeHtml(item.session_id.slice(0, 8))}…)</span>` : ''}
+                    </span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">反馈原因分类</span>
+                    <span class="route-feedback-item-value">${escapeHtml(reasonText)}</span>
+                </div>
+                <div class="route-feedback-detail-item">
+                    <span class="route-feedback-item-label">提交时间</span>
+                    <span class="route-feedback-item-value">${escapeHtml(formatTime(item.occurred_at || item.created_at))}</span>
+                </div>
+            </div>
+
+            <div class="route-feedback-detail-section">
+                <div class="route-feedback-detail-label">用户补充说明</div>
+                <div class="route-feedback-note-card ${noteText ? '' : 'text-muted'}">${escapeHtml(noteText || '（用户未填写补充说明）')}</div>
+            </div>
+
+            ${item.review_status === 'pending' ? `
+                <div class="route-feedback-detail-section">
+                    <div class="route-feedback-detail-label">核验备注（可选）</div>
+                    <input type="text" id="route-feedback-modal-note" class="form-input route-feedback-review-note-input" placeholder="输入核验意见或采纳说明（可选，最多500字）" maxlength="500">
+                </div>
+            ` : `
+                <div class="route-feedback-detail-section">
+                    <div class="route-feedback-detail-label">核验记录</div>
+                    <div class="route-feedback-note-card">
+                        ${item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成核验` : '已核验'}
+                        ${item.review_note ? ` · 备注：${escapeHtml(item.review_note)}` : ''}
+                    </div>
+                </div>
+            `}
+        `;
+
+        footer.innerHTML = '';
+        if (item.review_status === 'pending') {
+            const acceptBtn = document.createElement('button');
+            acceptBtn.type = 'button';
+            acceptBtn.className = 'btn-primary';
+            acceptBtn.textContent = '采纳此建议';
+            acceptBtn.addEventListener('click', () => {
+                const noteInput = document.getElementById('route-feedback-modal-note');
+                reviewFeedback({ dataset: { routeFeedbackId: item.feedback_id, routeFeedbackReview: 'accepted' } }, noteInput?.value?.trim() || '');
+            });
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.type = 'button';
+            rejectBtn.className = 'btn-secondary';
+            rejectBtn.textContent = '不采纳 / 驳回';
+            rejectBtn.addEventListener('click', () => {
+                const noteInput = document.getElementById('route-feedback-modal-note');
+                reviewFeedback({ dataset: { routeFeedbackId: item.feedback_id, routeFeedbackReview: 'rejected' } }, noteInput?.value?.trim() || '');
+            });
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'btn-secondary';
+            cancelBtn.textContent = '关闭';
+            cancelBtn.addEventListener('click', closeDetailModal);
+
+            footer.appendChild(acceptBtn);
+            footer.appendChild(rejectBtn);
+            footer.appendChild(cancelBtn);
+        } else {
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'btn-secondary';
+            closeBtn.textContent = '关闭';
+            closeBtn.addEventListener('click', closeDetailModal);
+            footer.appendChild(closeBtn);
+        }
+
+        modal.classList.remove('hidden');
+    }
+
+    async function reviewFeedback(button, customNote = '') {
         const feedbackId = String(button?.dataset?.routeFeedbackId || '').trim();
         const reviewStatus = String(button?.dataset?.routeFeedbackReview || '').trim().toLowerCase();
         if (!feedbackId || !['accepted', 'rejected'].includes(reviewStatus)) return;
@@ -197,15 +426,18 @@
         const siblingButtons = button.parentElement?.querySelectorAll('button') || [];
         siblingButtons.forEach(control => { control.disabled = true; });
         try {
+            const bodyPayload = { reviewStatus };
+            if (customNote) bodyPayload.reviewNote = customNote;
             const response = await apiFetch(`${API_BASE}/stats/observability/decision-feedback/${encodeURIComponent(feedbackId)}/review`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reviewStatus })
+                body: JSON.stringify(bodyPayload)
             });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || payload.error) throw new Error(payload.error || '核验路由反馈失败');
             const toastMessage = reviewStatus === 'accepted' ? '已采纳，并加入待训练的已核验样本。' : '已标记为未采纳。';
             if (typeof showToast === 'function') showToast(toastMessage, 'success');
+            closeDetailModal();
             await loadRouteFeedbackReviewQueue();
         } catch (error) {
             siblingButtons.forEach(control => { control.disabled = false; });
@@ -224,7 +456,47 @@
             feedbackState.page = 1;
             loadRouteFeedbackReviewQueue(1);
         });
+        const modal = document.getElementById('route-feedback-detail-modal');
+        if (modal && modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+        document.getElementById('route-feedback-detail-close')?.addEventListener('click', closeDetailModal);
+        modal?.addEventListener('click', event => {
+            if (event.target.id === 'route-feedback-detail-modal') {
+                closeDetailModal();
+                return;
+            }
+            const copyIdEl = event.target.closest?.('.route-feedback-session-id');
+            if (copyIdEl) {
+                const text = copyIdEl.dataset?.sessionId || copyIdEl.textContent.replace(/^ID:\s*/, '').trim();
+                if (text && navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        if (typeof showToast === 'function') showToast('已复制会话ID', 'success');
+                    }).catch(() => {});
+                }
+            }
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') closeDetailModal();
+        });
         section.addEventListener('click', event => {
+            const copyIdEl = event.target.closest?.('.route-feedback-session-id');
+            if (copyIdEl) {
+                const text = copyIdEl.dataset?.sessionId || copyIdEl.textContent.replace(/^ID:\s*/, '').trim();
+                if (text && navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        if (typeof showToast === 'function') showToast('已复制会话ID', 'success');
+                    }).catch(() => {});
+                }
+                return;
+            }
+            const detailTrigger = event.target.closest?.('[data-route-feedback-detail]') || event.target.closest?.('.route-feedback-query');
+            if (detailTrigger) {
+                const feedbackId = detailTrigger.dataset.routeFeedbackDetail || detailTrigger.closest('tr')?.dataset?.feedbackId;
+                const item = feedbackState.items.find(it => String(it.feedback_id || '') === String(feedbackId || ''));
+                if (item) openDetailModal(item);
+                return;
+            }
             const button = event.target.closest?.('[data-route-feedback-review]');
             if (button) reviewFeedback(button);
         });

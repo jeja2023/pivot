@@ -2585,6 +2585,32 @@ body.dark-mode .regulations-article-focused .regulations-article-block-head stro
     width: 100%;
 }
 
+.regulations-ai-source-row {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+}
+
+.regulations-ai-source-row .regulations-ai-source {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.regulations-ai-source-select {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    min-width: 52px;
+    padding: 6px 8px;
+    font-size: 0.72rem;
+}
+
+.regulations-ai-source-select[aria-pressed="true"] {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
 .regulations-ai-source {
     display: flex !important;
     flex-direction: column !important;
@@ -2683,6 +2709,27 @@ body.dark-mode .regulations-article-focused .regulations-article-block-head stro
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
+}
+
+.regulations-ai-source-meta {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+.regulations-ai-diagnostics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 20px 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.regulations-ai-diagnostics span {
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
 }
 
 .regulations-admin-panel:not(.hidden) {

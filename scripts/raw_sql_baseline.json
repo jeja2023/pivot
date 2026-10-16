@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Production baseline for direct query/queryOne/execute SQL literals. New request-path SQL must be reviewed, preferably placed behind a repository boundary.",
-  "total": 2468,
+  "total": 2479,
   "entries": [
     {
       "file": "server/auth.js",
@@ -233,6 +233,10 @@
     },
     {
       "file": "server/db/migrations/drop-redundant-log-indexes.js",
+      "count": 1
+    },
+    {
+      "file": "server/db/migrations/knowledge-ai-answer-audit.js",
       "count": 1
     },
     {
@@ -513,7 +517,7 @@
     },
     {
       "file": "server/routes/announcements.js",
-      "count": 13
+      "count": 14
     },
     {
       "file": "server/routes/apps/presentations.js",
@@ -1024,6 +1028,10 @@
       "count": 4
     },
     {
+      "file": "server/services/knowledge-ai-audit.js",
+      "count": 5
+    },
+    {
       "file": "server/services/knowledge-content.js",
       "count": 100
     },
@@ -1213,11 +1221,11 @@
     },
     {
       "file": "server/services/regulations/ai-audit.js",
-      "count": 3
+      "count": 6
     },
     {
       "file": "server/services/regulations/analysis.js",
-      "count": 9
+      "count": 11
     },
     {
       "file": "server/services/regulations/bookmarks.js",
@@ -1233,7 +1241,7 @@
     },
     {
       "file": "server/services/regulations/document-batch.js",
-      "count": 4
+      "count": 3
     },
     {
       "file": "server/services/regulations/governance.js",

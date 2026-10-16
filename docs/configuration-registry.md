@@ -80,6 +80,13 @@
 | `PIVOT_CHAT_PROMPT_CACHE_ENABLED` | boolean | `true` | true / false | 是否在 Responses API 的兼容模型上请求会话隔离的 Prompt Cache；不支持的端点会自动重试并降级。 |
 | `PIVOT_CHAT_PROMPT_CACHE_TTL` | enum | `30m` | 30m | Responses API Prompt Cache 的最短复用时间。 |
 
+## 知识库问答
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_KNOWLEDGE_SEMANTIC_VERIFIER_ENABLED` | boolean | `true` | true / false | 是否在知识库回答的引用编号与原文支持性校验后，额外执行模型语义蕴含复核；不可用时安全拒绝未完成复核的结论。 |
+| `PIVOT_KNOWLEDGE_SEMANTIC_VERIFIER_MAX_TOKENS` | integer | `700` | 256–1200 | 知识库结论语义复核的最大输出 Token 数。 |
+
 ## 法规索引与 Embedding
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
@@ -93,6 +100,10 @@
 | `REGULATION_LEXICAL_QUERY_TIMEOUT_MS` | integer | `3000` | 500–15000 | 法规交互检索中词法召回的数据库超时；超过后结束该召回，避免慢 SQL 占满接口看门狗。 |
 | `REGULATION_SEMANTIC_QUERY_TIMEOUT_MS` | integer | `2000` | 200–10000 | 法规交互检索中 pgvector 语义召回的数据库超时；超时立即保留词法结果，不返回接口错误。 |
 | `REGULATION_SEMANTIC_CANDIDATE_LIMIT` | integer | `100` | 20–300 | 法规语义召回最多返回的候选数；用于控制向量排序成本，最终展示仍受请求 limit 限制。 |
+| `REGULATION_AI_CANDIDATE_LIMIT` | integer | `120` | 20–150 | 法规 AI 问答每个检索变体的候选池上限；候选池会先融合再生成回答。 |
+| `REGULATION_AI_EVIDENCE_LIMIT` | integer | `14` | 4–20 | 法规 AI 问答送入模型的直接证据条文数量上限。 |
+| `REGULATION_AI_RELATED_LIMIT` | integer | `5` | 0–8 | 法规 AI 问答送入模型的已审核引用关联条文数量上限。 |
+| `REGULATION_AI_MAX_OUTPUT_TOKENS` | integer | `2600` | 1200–4000 | 法规 AI 问答默认最大输出 Token 数；提高后可容纳更完整的法条分析，但仍受模型上下文窗口限制。 |
 | `REGULATION_INDEX_RECOVERY_INTERVAL_MS` | integer | `5000` | 1000–300000 | 法规向量队列巡检间隔。队列状态已持久化，重启服务后会继续处理。 |
 | `REGULATION_INDEX_RECOVERY_BATCH_SIZE` | integer | `3` | 1–50 | 每轮法规向量队列连续处理的当前版本数。纯 CPU 部署建议设为 1。 |
 | `RERANK_ENABLED` | boolean | `false` | true / false | 是否启用外部 Cross-Encoder 重排序。仅重排已完成权限过滤的有限候选，服务异常时自动回退。 |

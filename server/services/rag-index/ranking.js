@@ -144,16 +144,34 @@ function rerankHybridCandidates(items, query, { scoreThreshold = 0 } = {}) {
     ));
 }
 
-function rejectLowConfidenceResults(items, { scoreThreshold = 0, minRerankScore = 0.3, minCitationConfidence = 0.42, minMargin = 0.02 } = {}) {
+function normalizeRequiredTerms(terms = []) {
+    return [...new Set((Array.isArray(terms) ? terms : [])
+        .map(term => String(term || '').trim().toLowerCase())
+        .filter(term => term.length >= 2))];
+}
+
+function matchRequiredTerms(item, terms = []) {
+    const requiredTerms = normalizeRequiredTerms(terms);
+    if (!requiredTerms.length) return { matched: true, terms: [] };
+    const text = `${item?.headingPath || ''}\n${item?.text || item?.content || ''}`.toLowerCase();
+    const matchedTerms = requiredTerms.filter(term => text.includes(term));
+    return { matched: matchedTerms.length > 0, terms: matchedTerms };
+}
+
+function rejectLowConfidenceResults(items, { scoreThreshold = 0, minRerankScore = 0.3, minCitationConfidence = 0.42, minMargin = 0.02, requiredTerms = [] } = {}) {
     const ranked = attachCitationConfidence(items, scoreThreshold);
     if (!ranked.length) return { accepted: [], rejected: true, reason: 'empty' };
-    const top = ranked[0];
-    const second = ranked[1];
+    const required = normalizeRequiredTerms(requiredTerms);
+    const relevant = ranked.map(item => ({ ...item, requiredTermMatch: matchRequiredTerms(item, required) }));
+    const eligible = required.length ? relevant.filter(item => item.requiredTermMatch.matched) : relevant;
+    if (!eligible.length) return { accepted: [], rejected: true, reason: 'required_term_missing', top: relevant[0], margin: 0 };
+    const top = eligible[0];
+    const second = eligible[1];
     const margin = second ? Number(top.rerankScore || 0) - Number(second.rerankScore || 0) : 1;
     if (Number(top.rerankScore || 0) < minRerankScore) return { accepted: [], rejected: true, reason: 'rerank_below_threshold', top, margin };
     if (Number(top.citationConfidence || 0) < minCitationConfidence) return { accepted: [], rejected: true, reason: 'citation_confidence_below_threshold', top, margin };
     if (Number(top.rerankScore || 0) < 0.55 && margin < minMargin) return { accepted: [], rejected: true, reason: 'ambiguous_top_result', top, margin };
-    const accepted = ranked.filter(item => Number(item.rerankScore || 0) >= minRerankScore && Number(item.citationConfidence || 0) >= minCitationConfidence);
+    const accepted = eligible.filter(item => Number(item.rerankScore || 0) >= minRerankScore && Number(item.citationConfidence || 0) >= minCitationConfidence);
     return { accepted, rejected: accepted.length === 0, reason: accepted.length ? 'accepted' : 'all_candidates_below_threshold', top, margin };
 }
 
@@ -162,6 +180,7 @@ module.exports = {
     attachCitationConfidence,
     calculateCitationConfidence,
     feedbackAdjustment,
+    matchRequiredTerms,
     rejectLowConfidenceResults,
     rerankHybridCandidates
 };

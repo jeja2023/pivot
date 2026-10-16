@@ -12,6 +12,7 @@ const {
 const {
     buildRagSearchContent,
     buildRagDisplayTerms,
+    buildRagRequiredTerms,
     buildRagSearchTerms
 } = require('../rag-tokenizer');
 const {
@@ -28,6 +29,7 @@ const {
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getRagConfig,
+    getRagLimits,
     getHybridRetrievalConfig,
     getChunkSizeForDocType
 } = require('../rag-config');
@@ -552,6 +554,7 @@ async function debugRetrieveContext(userId, query, {
     const normalizedScope = normalizeRetrievalScope(scope);
     const keywords = buildKeywordCandidates(normalizedQuery);
     const displayKeywords = buildRagDisplayTerms(normalizedQuery);
+    const requiredTerms = buildRagRequiredTerms(normalizedQuery);
     const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
         getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user }),
         selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
@@ -596,7 +599,8 @@ async function debugRetrieveContext(userId, query, {
         const confidenceGate = rejectLowConfidenceResults(gated, {
             scoreThreshold: config.scoreThreshold,
             minRerankScore: config.rerankThreshold,
-            minCitationConfidence: config.citationConfidenceThreshold
+            minCitationConfidence: config.citationConfidenceThreshold,
+            requiredTerms
         });
         gated = confidenceGate.accepted;
         confidenceRejected = confidenceGate.rejected;
@@ -628,7 +632,8 @@ async function debugRetrieveContext(userId, query, {
         const confidenceGate = rejectLowConfidenceResults(gated, {
             scoreThreshold: config.scoreThreshold,
             minRerankScore: config.rerankThreshold,
-            minCitationConfidence: config.citationConfidenceThreshold
+            minCitationConfidence: config.citationConfidenceThreshold,
+            requiredTerms
         });
         gated = confidenceGate.accepted;
         confidenceRejected = confidenceGate.rejected;
@@ -649,6 +654,7 @@ async function debugRetrieveContext(userId, query, {
         query: normalizedQuery,
         keywords,
         displayKeywords,
+        requiredTerms,
         threshold: config.scoreThreshold,
         topK: safeTopK,
         candidateCount: candidates.length,
@@ -661,6 +667,7 @@ async function debugRetrieveContext(userId, query, {
             selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
             gatedCount: gated.length,
             confidenceRejectionReason,
+            requiredTerms,
             rerankThreshold: config.rerankThreshold,
             citationConfidenceThreshold: config.citationConfidenceThreshold
         },
@@ -672,7 +679,13 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     const startedAt = Date.now();
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
-    const config = getRagConfig({ topK }, userId);
+    const baseConfig = getRagConfig({ topK }, userId);
+    const config = {
+        ...baseConfig,
+        topK: topK == null
+            ? resolveKnowledgeTopK(normalizedQuery, baseConfig.topK, getRagLimits().topKMax || 10)
+            : baseConfig.topK
+    };
     const retrievalScope = normalizeRetrievalScope(options.scope || {});
     const cacheScope = await buildRagCacheScope(userId, config, retrievalScope, options.user || null);
     const recordRetrieval = (payload) => {
@@ -797,6 +810,20 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
         recordRetrieval({ status: 'error', durationMs: Date.now() - startedAt });
         return '';
     }
+}
+
+function resolveKnowledgeTopK(queryText, configuredTopK = 3, maximum = 10) {
+    const text = String(queryText || '').trim();
+    const base = Math.max(1, Number.parseInt(configuredTopK, 10) || 3);
+    if (!text) return base;
+    const complexitySignals = [
+        /(?:同时|分别|以及|并且|另外|比较|对比|区别|差异)/u.test(text),
+        /[；;。]/u.test(text),
+        text.length >= 36,
+        (text.match(/[?？]/g) || []).length > 1
+    ].filter(Boolean).length;
+    const boost = complexitySignals >= 3 ? 4 : complexitySignals >= 1 ? 2 : 0;
+    return Math.min(Math.max(base, base + boost), Math.max(base, Number(maximum) || 10));
 }
 
 // 富文本 = 面包屑(出处/章节) + 原文。用于向量化与 FTS，使切片自带上下文。
@@ -941,6 +968,7 @@ module.exports = {
     buildRagSearchContent,
     buildRagSearchTerms,
     debugRetrieveContext,
+    resolveKnowledgeTopK,
     retrieveContext,
     indexDocumentChunks
 };

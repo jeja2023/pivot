@@ -10,6 +10,8 @@ const { buildPgCommentStatements } = require('./comments');
 const { logger } = require('../../logger');
 
 const PG_NOW = `(NOW() AT TIME ZONE 'Asia/Shanghai')`;
+// 快照中的新表均有独立、可重复执行的版本化迁移；不要仅因快照增量就强制
+// 已部署历史库重跑全部外键补建。后者可能触发与本次发布无关的旧列类型问题。
 const PG_SCHEMA_VERSION = '20261013.1';
 const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
 // 这类索引依赖“已部署旧库尚未拥有”的迁移字段。初始化快照会先于版本迁移运行，
@@ -50,6 +52,11 @@ function quotePgIdentifier(value) {
 
 function getPgIndexName(sql) {
     return String(sql || '').match(/\bINDEX(?:\s+IF\s+NOT\s+EXISTS)?\s+([A-Za-z0-9_]+)/i)?.[1] || '';
+}
+
+function isDeferredForeignKeyError(error = {}) {
+    return ['42804', '42830', '0A000'].includes(error.code)
+        || /cannot implement foreign key constraint|incompatible types|无法实现外键约束|不兼容的类型/i.test(String(error.message || ''));
 }
 
 function qualifiedPgTable(tableName) {
@@ -219,6 +226,12 @@ async function initSchemaPg() {
             catch (error) {
                 if (error.code === '42501' || error.code === '42710') logger.warn({ sql: sql.trim().slice(0, 200), err: error.message }, '[PG] 当前用户非表属主或外键已存在，跳过外键补建');
                 else if (error.code === '42703') logger.warn({ sql: sql.trim().slice(0, 200), err: error.message }, '[PG] 外键依赖字段尚不存在，跳过当前初始化阶段外键补建（由版本迁移补齐）');
+                else if (isDeferredForeignKeyError(error)) {
+                    // 历史库的列类型可能早于当前快照；NOT VALID 只能跳过存量数据
+                    // 校验，无法绕过类型不兼容。保留已有数据并让后续专用迁移处理，
+                    // 不能让一条非本次功能的旧外键阻断整个服务启动。
+                    logger.warn({ sql: sql.trim().slice(0, 200), err: error.message, code: error.code }, '[PG] 历史列类型不兼容，延后外键补建');
+                }
                 else throw new Error(`[PG Schema] 外键补建失败: ${error.message}\nSQL: ${sql.trim().slice(0, 300)}`);
             }
         }
@@ -254,6 +267,7 @@ module.exports = {
     getPgIndexName,
     getPgSchemaTableNames,
     initSchemaPg,
+    isDeferredForeignKeyError,
     isPgSchemaCurrent,
     normalizeLegacyResidualColumnTypes
 };

@@ -278,6 +278,13 @@ test('AI 页面提案兼容代码围栏、尾随逗号和字符串中的原始�
     assert.equal(proposal.presentation.slides[0].speakerNotes, '第一行\n第二行');
 });
 
+test('AI 页面紧凑重试使用更小的受控输出契约', () => {
+    const messages = buildSlidesMessages({ topic: '紧凑页面', templateId: 'business-blue', outline: { title: '紧凑页面', slides: [] }, compact: true });
+    const prompt = messages.at(-1).content;
+    assert.match(prompt, /紧凑输出模式/);
+    assert.match(prompt, /每页使用 2 至 3 个元素/);
+});
+
 test('AI 页面提案会安全跳过缺少列的表格和不完整图表，不阻断整份演示生成', () => {
     const proposal = {
         title: 'AI 生成容错验证',

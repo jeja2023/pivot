@@ -402,5 +402,6 @@ module.exports = {
     normalizeActionId,
     normalizeCandidates,
     normalizeLinearModel,
+    redactRoutingText,
     sanitizeDecisionContext
 };

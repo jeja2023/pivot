@@ -682,6 +682,17 @@
     height: 32px;
 }
 
+.knowledge-uploader-column {
+    width: 130px;
+}
+
+.knowledge-uploader-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .knowledge-collection-pill,
 .knowledge-tag-pill,
 .knowledge-empty-meta {

@@ -31,6 +31,13 @@ test('路由反馈核验队列使用统计路由前缀，避免请求不存在�
     assert.doesNotMatch(reviewQueueSource, /\$\{API_BASE\}\/observability\/decision-feedback/);
 });
 
+test('反馈核验详情中的提问和补充说明不会把模板缩进渲染为前导空白', () => {
+    assert.match(reviewQueueSource, /route-feedback-query-card \$\{queryText \? '' : 'text-muted'\}\">\$\{escapeHtml\(queryText/);
+    assert.match(reviewQueueSource, /route-feedback-note-card \$\{noteText \? '' : 'text-muted'\}\">\$\{escapeHtml\(noteText/);
+    assert.doesNotMatch(reviewQueueSource, /route-feedback-query-card \$\{queryText \? '' : 'text-muted'\}\">\s+\$\{escapeHtml\(queryText/);
+    assert.doesNotMatch(reviewQueueSource, /route-feedback-note-card \$\{noteText \? '' : 'text-muted'\}\">\s+\$\{escapeHtml\(noteText/);
+});
+
 const reviewHtml = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/route-feedback.html'), 'utf8');
 const adminLayoutCss = fs.readFileSync(path.join(__dirname, '../client/chat/styles/admin/admin-layout.css'), 'utf8');
 

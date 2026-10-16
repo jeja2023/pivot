@@ -418,10 +418,13 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             } catch (error) {
                 if (!options.retryMalformedJson || !isPresentationAiJsonError(error) || abort.signal.aborted) throw error;
                 try {
-                    result = await callPresentationAi({ req, logAction: writeLog, messages: buildAiJsonRepairMessages(result.content), source: (options.source || 'presentation_ai') + '_json_repair', auditAction: (options.auditAction || 'PPT AI操作') + ' JSON 修复', maxTokens: options.maxTokens || 4000, signal: abort.signal });
+                    const recoveryMessages = typeof options.buildMalformedJsonRecoveryMessages === 'function'
+                        ? options.buildMalformedJsonRecoveryMessages()
+                        : buildAiJsonRepairMessages(result.content);
+                    result = await callPresentationAi({ req, logAction: writeLog, messages: recoveryMessages, source: (options.source || 'presentation_ai') + (options.malformedJsonRecoverySourceSuffix || '_json_repair'), auditAction: (options.auditAction || 'PPT AI操作') + (options.malformedJsonRecoveryAuditSuffix || ' JSON 修复'), maxTokens: options.maxTokens || 4000, signal: abort.signal });
                     payload = await options.parse(result);
                 } catch (_) {
-                    const failure = new Error('AI 返回的页面数据格式不完整，系统已自动重试一次仍无法修复，请重新生成。');
+                    const failure = new Error(options.malformedJsonFailureMessage || 'AI 返回的页面数据格式不完整，系统已自动重试一次仍无法修复，请重新生成。');
                     failure.status = 422;
                     failure.code = 'PRESENTATION_AI_JSON_REPAIR_FAILED';
                     throw failure;
@@ -451,15 +454,27 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/ai/slides', authMiddleware, asyncHandler(async (req, res) => {
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!body.outline || typeof body.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
-        return runAiRequest(req, res, body, buildSlidesMessages(body), { source: 'presentation_slides', auditAction: 'PPT AI生成页面', maxTokens: 6000, retryMalformedJson: true, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
-            if (proposal.presentation) {
-                const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
-                proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
-                proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: body.materials.map(materialToPresentationSource) });
+        return runAiRequest(req, res, body, buildSlidesMessages(body), {
+            source: 'presentation_slides',
+            auditAction: 'PPT AI生成页面',
+            maxTokens: 7200,
+            retryMalformedJson: true,
+            // 当原回答在 JSON 尚未闭合时被模型输出上限截断，修复残片无法补回
+            // 缺失的页面。此时从已确认的大纲重新按紧凑契约生成，成功率高于语法修复。
+            buildMalformedJsonRecoveryMessages: () => buildSlidesMessages({ ...body, compact: true }),
+            malformedJsonRecoverySourceSuffix: '_compact_retry',
+            malformedJsonRecoveryAuditSuffix: ' 紧凑格式重试',
+            malformedJsonFailureMessage: 'AI 返回的页面数据格式不完整，系统已按紧凑格式自动重试一次仍无法完成。请减少页数或补充材料后重新生成。',
+            parse: async result => {
+                const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+                if (proposal.presentation) {
+                    const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
+                    proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
+                    proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: body.materials.map(materialToPresentationSource) });
+                }
+                return { proposal, validation: runPresentationValidation(proposal.presentation) };
             }
-            return { proposal, validation: runPresentationValidation(proposal.presentation) };
-        }});
+        });
     }));
 
     router.post('/apps/presentations/ai/continue', authMiddleware, asyncHandler(async (req, res) => {

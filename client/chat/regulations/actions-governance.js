@@ -55,9 +55,20 @@
         try {
             const data = await fetchJson(`${API}/ai-logs?documentId=${encodeURIComponent(documentId)}&limit=30`);
             const rows = Array.isArray(data.data) ? data.data : [];
+            let metrics = null;
+            if (canManage?.()) {
+                try {
+                    metrics = (await fetchJson(`${API}/ai-metrics?documentId=${encodeURIComponent(documentId)}&days=30`)).metrics || null;
+                } catch (_error) {
+                    metrics = null;
+                }
+            }
             const groundingLabel = item => {
                 const grounding = item?.usage_json?.grounding;
                 if (grounding?.status === 'verified') return '依据已核验';
+                if (grounding?.status === 'clarification_needed') return '需要补充事实';
+                if (grounding?.status === 'candidate_conflict') return '候选与结论不一致';
+                if (grounding?.status === 'citation_repair_required') return '引用格式待修复';
                 if (grounding?.status === 'no_candidates') return '未检到候选';
                 if (grounding?.status === 'insufficient_evidence') return '候选不足，已要求补充';
                 return '历史记录未核验';
@@ -66,14 +77,21 @@
                 const sources = Array.isArray(item.sources_json) ? item.sources_json : [];
                 return sources.map(source => source.label || '').filter(Boolean).join('；') || '未命中可用依据';
             };
-            PivotSafeHtml.setHtml(body, rows.length ? `
+            const metricHtml = metrics ? `
+                <div class="regulations-ai-metrics">
+                    <span>近 ${esc(metrics.days)} 天问答 ${esc(metrics.total)} 次</span>
+                    <span>依据核验通过率 ${esc(Math.round(Number(metrics.acceptanceRate || 0) * 100))}%</span>
+                    <span>平均候选 ${esc(Math.round(Number(metrics.averageCandidates || 0)))}</span>
+                </div>
+            ` : '';
+            PivotSafeHtml.setHtml(body, metricHtml + (rows.length ? `
                 <div class="regulations-ai-audit-list">
                     ${rows.map(row => `<article class="regulations-ai-audit-item">
                         <div class="regulations-annotation-meta"><strong>${esc(row.question || '未命名问题')}</strong><span>${esc(fmtDate(row.created_at))}</span></div>
                         <div class="regulations-ai-audit-model">模型：${esc(row.model_name || '-')} · 证据核验：${esc(groundingLabel(row))} · 候选：${esc(sourceLabels(row))}</div>
                         <details><summary>查看回答与依据快照</summary><div class="regulations-ai-audit-answer">${esc(row.answer || '模型未返回正文')}</div><div class="regulations-ai-audit-context">${esc(row.context_snapshot || '未保存上下文快照')}</div></details>
                     </article>`).join('')}
-                </div>` : '<div class="regulations-empty compact">该法规暂无你的问答记录。</div>');
+                </div>` : '<div class="regulations-empty compact">该法规暂无你的问答记录。</div>'));
         } catch (error) {
             PivotSafeHtml.setHtml(body, `<div class="regulations-empty compact">${esc(error.message || '加载问答记录失败')}</div>`);
         }

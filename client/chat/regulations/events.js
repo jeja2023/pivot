@@ -552,6 +552,18 @@
                         }).catch(e => toast(e.message || '打开命中条文失败', 'error'));
                         return;
                     }
+                    const aiSourceSelect = event.target.closest('[data-regulation-ai-source-select]');
+                    if (aiSourceSelect) {
+                        const articleId = Number(aiSourceSelect.dataset.regulationAiSourceSelect);
+                        if (Number.isSafeInteger(articleId) && articleId > 0) {
+                            if (state.aiSelectedArticleIds.has(articleId)) state.aiSelectedArticleIds.delete(articleId);
+                            else state.aiSelectedArticleIds.add(articleId);
+                            state.aiRestrictToSelected = true;
+                            aiSourceSelect.setAttribute('aria-pressed', state.aiSelectedArticleIds.has(articleId) ? 'true' : 'false');
+                            aiSourceSelect.textContent = state.aiSelectedArticleIds.has(articleId) ? '已保留' : '保留';
+                        }
+                        return;
+                    }
                     const effectiveDateClear = event.target.closest('[data-regulation-effective-date-clear]');
                     if (effectiveDateClear) {
                         const docId = effectiveDateClear.dataset.regulationEffectiveDateClear;
@@ -581,6 +593,8 @@
                     if (articleAsk) {
                         const article = state.detail?.articles?.find(a => String(a.id) === String(articleAsk.dataset.articleAsk));
                         state.aiScope = 'document';
+                        state.aiSelectedArticleIds = new Set(article ? [Number(article.id)] : []);
+                        state.aiRestrictToSelected = Boolean(article);
                         openAiDialog('document');
                         const question = document.getElementById('regulations-ai-question');
                         if (article && question) {
@@ -844,6 +858,8 @@
                     }
                     if (event.target.closest('#regulations-ai-clear-btn')) {
                         clearAiTurns();
+                        state.aiSelectedArticleIds.clear();
+                        state.aiRestrictToSelected = false;
                         const question = document.getElementById('regulations-ai-question');
                         if (question) question.value = '';
                         return;

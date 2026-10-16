@@ -190,6 +190,18 @@ function getAssistantTraceEventCopy(event = {}) {
         };
     }
 
+    if (type === 'rag_grounding') {
+        return {
+            tool: 'rag-grounding',
+            placement: 'footer',
+            label: event.accepted ? '依据已核验' : '依据待补充',
+            tone: event.accepted ? 'ready' : 'warning',
+            text: event.accepted
+                ? `已核验 ${Number(event.sourceCount || 0)} 条来源`
+                : '回答未通过知识库来源核验'
+        };
+    }
+
     if (type === 'memory') {
         // 长期记忆是后台上下文增强，不占用每轮回答的可视区域。
         return null;

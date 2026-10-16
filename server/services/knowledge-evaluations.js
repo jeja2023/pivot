@@ -6,6 +6,8 @@
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { debugRetrieveContext } = require('./rag-index');
+const { retrieveKnowledgeEvidence } = require('./knowledge-answer-service');
+const { verifyKnowledgeAnswerSemantics } = require('./knowledge-grounding');
 const { getAccessibleModelAsync } = require('./models');
 const { callModelTextWithBudget } = require('./model-text-call');
 const { retrieveWikiContext } = require('./knowledge-wiki');
@@ -128,7 +130,7 @@ function computeAnswerPointCoverage(answer = '', expectedAnswerPoints = []) {
 
 function buildEvaluationAnswerMessages(query, context) {
     return [
-        { role: 'system', content: '你是知识库评测助手。只能依据提供的检索证据回答；证据不足时明确回答“知识库中未找到足够依据”。不要编造来源或事实。若上下文含 Wiki 综合页，它只作导航与总结，原始资料优先。' },
+        { role: 'system', content: '你是知识库评测助手。只能依据提供的检索证据回答；证据不足时明确回答“知识库中未找到足够依据”。每个事实结论必须标注本轮真实来源，例如“[引用 1 | citation:xxx]”。不要编造来源或事实。若上下文含 Wiki 综合页，它只作导航与总结，原始资料优先。' },
         { role: 'user', content: `【问题】\n${query}\n\n【检索证据】\n${context}` }
     ];
 }
@@ -144,6 +146,7 @@ function aggregateMetrics(results = []) {
         return values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4)) : null;
     };
     const abstention = completed.map(result => result.metrics.abstentionCorrect).filter(value => typeof value === 'boolean');
+    const grounding = completed.map(result => result.metrics.groundingAccepted).filter(value => typeof value === 'boolean');
     return {
         cases: results.length,
         completed: completed.length,
@@ -160,7 +163,8 @@ function aggregateMetrics(results = []) {
         citationRecall: average('citationRecall'),
         citationF1: average('citationF1'),
         answerPointCoverage: average('answerPointCoverage'),
-        abstentionAccuracy: abstention.length ? Number((abstention.filter(Boolean).length / abstention.length).toFixed(4)) : null
+        abstentionAccuracy: abstention.length ? Number((abstention.filter(Boolean).length / abstention.length).toFixed(4)) : null,
+        groundingAcceptanceRate: grounding.length ? Number((grounding.filter(Boolean).length / grounding.length).toFixed(4)) : null
     };
 }
 
@@ -267,6 +271,7 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
     const executeDebug = deps.debugRetrieveContext || debugRetrieveContext;
     const getModel = deps.getAccessibleModelAsync || getAccessibleModelAsync;
     const callModel = deps.callModelTextWithBudget || callModelTextWithBudget;
+    const verifyGrounding = deps.verifyKnowledgeAnswerSemantics || verifyKnowledgeAnswerSemantics;
     const claim = await transaction(async trx => {
         const run = await trx.queryOne(`
             SELECT * FROM knowledge_eval_runs WHERE id = ? FOR UPDATE
@@ -293,24 +298,26 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
     for (const row of cases) {
         const evaluationCase = parseRowCase(row);
         try {
-            const retrieval = await executeDebug(user.id, evaluationCase.query, {
+            const evidence = await retrieveKnowledgeEvidence({
+                user,
+                query: evaluationCase.query,
                 topK: config.topK,
                 candidateLimit: config.candidateLimit,
                 scoreThreshold: config.scoreThreshold,
                 scope: evaluationCase.collectionId ? { collectionId: evaluationCase.collectionId } : {},
-                user
+                retrieve: executeDebug
             });
-            const ranked = (retrieval.matches || []).filter(match => match.matched).slice(0, 5);
+            const ranked = (evidence.matches || []).filter(match => match.selected).slice(0, 12);
             const retrievedChunkIds = ranked.map(match => normalizeId(match.chunkId)).filter(Boolean);
             const retrievedDocumentIds = await resolveSelectedDocumentIds(retrievedChunkIds);
             const expectedLegacyDocumentIds = await resolveExpectedLegacyDocumentIds(evaluationCase.expectedDocumentIds);
-            const citationKeys = (retrieval.matches || []).filter(match => match.selected && match.citationKey).map(match => match.citationKey);
+            const retrievedCitationKeys = ranked.map(match => match.citationKey).filter(Boolean);
             const wiki = config.includeWiki === true && normalizeId(config.wikiSpaceId)
-                ? await retrieveWikiContext({ user, queryText: evaluationCase.query, spaceId: config.wikiSpaceId, limit: config.wikiLimit || 3 })
+                ? await retrieveWikiContext({ user, queryText: evidence.plan.rewrittenQuery || evaluationCase.query, spaceId: config.wikiSpaceId, limit: config.wikiLimit || 3 })
                 : { context: '', pages: [], citations: [] };
-            const answerContext = `${retrieval.injectedContext || ''}${wiki.context ? `\n\n【Wiki 综合页】\n${wiki.context}` : ''}`;
+            const answerContext = `${evidence.injectedContext || ''}${wiki.context ? `\n\n【Wiki 综合页】\n${wiki.context}` : ''}`;
             let answer = '';
-            if (answerModel && retrieval.injectedContext) {
+            if (answerModel && evidence.injectedContext) {
                 const completion = await callModel({
                     modelCfg: answerModel,
                     user,
@@ -321,6 +328,20 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
                 });
                 answer = String(completion?.content || '').trim();
             }
+            const grounding = answer
+                ? await verifyGrounding({
+                    answer,
+                    ragContext: evidence.injectedContext,
+                    modelCfg: answerModel,
+                    user,
+                    callModel
+                })
+                : { grounding: { accepted: false, status: 'answer_not_generated', citedSourceIndexes: [] }, sources: [] };
+            if (answer && !grounding.grounding.accepted) answer = grounding.answer;
+            const citationByIndex = new Map((grounding.sources || []).map(source => [Number(source.index), source.citationKey]));
+            const citationKeys = grounding.grounding.accepted
+                ? (grounding.grounding.citedSourceIndexes || []).map(index => citationByIndex.get(Number(index))).filter(Boolean)
+                : (answerModel ? [] : retrievedCitationKeys);
             const metrics = {
                 ...computeRetrievalMetrics({
                 expectedDocumentIds: expectedLegacyDocumentIds,
@@ -330,8 +351,10 @@ async function executeKnowledgeEvaluationRun(runId, deps = {}) {
                 }),
                 ...computeCitationMetrics({ expectedCitationKeys: evaluationCase.expectedCitationKeys, citationKeys }),
                 ...computeAnswerPointCoverage(answer, evaluationCase.expectedAnswerPoints),
-                graphClaimCount: Number(retrieval.graph?.relations?.length || 0),
-                graphEvidenceChunkCount: new Set((retrieval.graph?.relations || []).map(item => item.source_chunk_id).filter(Boolean)).size,
+                groundingAccepted: grounding.grounding.accepted === true,
+                groundingStatus: grounding.grounding.status || '',
+                graphClaimCount: Number(evidence.retrievals?.[0]?.graph?.relations?.length || 0),
+                graphEvidenceChunkCount: new Set((evidence.retrievals?.[0]?.graph?.relations || []).map(item => item.source_chunk_id).filter(Boolean)).size,
                 wikiPageCount: Number(wiki.pages?.length || 0),
                 wikiSourceCount: Number(wiki.citations?.length || 0)
             };
@@ -440,7 +463,7 @@ async function compareKnowledgeEvaluationRuns(userId, baseRunId, candidateRunId)
         getKnowledgeEvaluationRun(userId, candidateRunId)
     ]);
     if (!base || !candidate) return null;
-    const metricKeys = ['recallAt1', 'recallAt3', 'recallAt5', 'precisionAt1', 'precisionAt3', 'precisionAt5', 'mrr', 'ndcgAt5', 'citationPrecision', 'citationRecall', 'citationF1', 'answerPointCoverage', 'abstentionAccuracy'];
+    const metricKeys = ['recallAt1', 'recallAt3', 'recallAt5', 'precisionAt1', 'precisionAt3', 'precisionAt5', 'mrr', 'ndcgAt5', 'citationPrecision', 'citationRecall', 'citationF1', 'answerPointCoverage', 'abstentionAccuracy', 'groundingAcceptanceRate'];
     const delta = Object.fromEntries(metricKeys.map(key => {
         const before = Number(base.summary?.[key]);
         const after = Number(candidate.summary?.[key]);
@@ -478,7 +501,7 @@ async function getKnowledgeGapReport(userId, { limit = 30 } = {}) {
     `, [latest.id]) : [];
     const missedCases = evaluationGaps.map(row => {
         const metrics = (() => { try { return JSON.parse(row.metrics_json || '{}'); } catch (_) { return {}; } })();
-        return Number(metrics.recallAt3) === 0 || Number(metrics.citationRecall) === 0
+        return Number(metrics.recallAt3) === 0 || Number(metrics.citationRecall) === 0 || metrics.groundingAccepted === false
             ? { caseId: Number(row.case_id), name: row.name, query: row.query, metrics }
             : null;
     }).filter(Boolean).slice(0, safeLimit);

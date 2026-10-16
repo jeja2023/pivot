@@ -1165,8 +1165,11 @@
                                     </div>
                                     <section id="presentation-outline-markdown" class="presentation-outline-markdown" aria-label="演示大纲预览"></section>
                                 </div>
-                                <div id="presentation-outline-warnings" class="presentation-outline-warnings"></div>
-                                <div class="presentation-create-actions presentation-outline-actions"><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回调整要求</button><button id="presentation-outline-stop-btn" class="btn-secondary" type="button">停止生成</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
+                                <div class="presentation-outline-confirmation" aria-live="polite">
+                                    <div id="presentation-outline-warnings" class="presentation-outline-warnings"></div>
+                                    <p id="presentation-outline-confirmation-status" class="presentation-outline-confirmation-status hidden"></p>
+                                </div>
+                                <div class="presentation-create-actions presentation-outline-actions"><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回调整要求</button><button id="presentation-outline-confirm-all-btn" class="btn-secondary hidden" type="button">确认全部待确认项</button><button id="presentation-outline-stop-btn" class="btn-secondary" type="button">停止生成</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
                             </div>
                         </div>
 <div id="presentation-presenter-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-presenter-title"><div class="modal presentation-presenter-dialog"><div class="presentation-create-dialog-head"><h3 id="presentation-presenter-title">演示者模式</h3><p><span id="presentation-presenter-timer">00:00</span> · <span id="presentation-presenter-counter"></span></p></div><div id="presentation-presenter-preview" class="presentation-presenter-preview"></div><section class="presentation-presenter-notes"><strong>提词与备注</strong><div id="presentation-presenter-notes-text" tabindex="0"></div></section><div class="presentation-create-actions"><button id="presentation-presenter-prev-btn" class="btn-secondary" type="button">上一页</button><button id="presentation-presenter-next-btn" class="btn-primary" type="button">下一页</button><button id="presentation-presenter-close-btn" class="btn-secondary" type="button">结束演示</button></div></div></div>

@@ -94,6 +94,7 @@ function buildSlidesMessages(body = {}) {
     const template = templateForAi(body);
     const layouts = templateLayoutSummary(template);
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
+    const compact = body.compact === true;
     const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${clamp(materialText(item), 5000)}`).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
@@ -113,7 +114,8 @@ function buildSlidesMessages(body = {}) {
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
                 `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":80,"y":180,"width":1120,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
-                '仅可使用 text、shape、table、chart 元素；不要输出 image 或任意外部 URL。坐标基于 1280x720，元素不能越界。图表仅在材料给出数值数据时使用。表格必须提供至少一个非空 columns 字段，所有 rows 的列数必须与 columns 一致；无法提供可核实表格数据时，改用 text 元素。图表必须提供至少两个 data.columns 字段及其对应数值行。'
+                '仅可使用 text、shape、table、chart 元素；不要输出 image 或任意外部 URL。每页最多 4 个元素（含标题），每个 text 的文字不超过 240 个字符，speakerNotes 不超过 160 个字符；坐标基于 1280x720，元素不能越界。图表仅在材料给出数值数据时使用。表格必须提供至少一个非空 columns 字段，所有 rows 的列数必须与 columns 一致；无法提供可核实表格数据时，改用 text 元素。图表必须提供至少两个 data.columns 字段及其对应数值行。',
+                compact ? '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
             ].join('\n')
         }
     ];

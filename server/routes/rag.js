@@ -97,6 +97,7 @@ ragRouter.get('/docs', authMiddleware, asyncHandler(async (req, res) => {
     const offset = (page - 1) * limit;
     const collectionId = Number.parseInt(req.query.collectionId, 10);
     const tag = String(req.query.tag || '').trim().replace(/^#+/, '').slice(0, 40);
+    const canViewUploadOwner = isSuperAdmin(req.user);
     const access = buildDocumentAccessFilter(req.user, 'd', 'c');
     const filters = [access.sql, 'd.deleted_at IS NULL'];
     const params = [...access.params];
@@ -117,6 +118,15 @@ ragRouter.get('/docs', authMiddleware, asyncHandler(async (req, res) => {
     `, params);
     const total = Number(countRow?.total || 0);
     const tagAgg = groupConcat('t.tag', ',');
+    const uploaderSelect = canViewUploadOwner
+        ? `,
+            uploader.id AS uploader_id,
+            uploader.username AS uploader_username,
+            uploader.nickname AS uploader_nickname`
+        : '';
+    const uploaderJoin = canViewUploadOwner
+        ? 'LEFT JOIN users uploader ON uploader.id = d.user_id'
+        : '';
     const docs = (await query(`
         SELECT
             d.*,
@@ -128,23 +138,39 @@ ragRouter.get('/docs', authMiddleware, asyncHandler(async (req, res) => {
                 SELECT ${tagAgg}
                 FROM knowledge_doc_tags t
                 WHERE t.doc_id = d.id AND t.user_id = d.user_id
-            ), '') AS tags
+            ), '') AS tags${uploaderSelect}
         FROM knowledge_docs d
         LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+        ${uploaderJoin}
         WHERE ${whereSql}
         ORDER BY d.created_at DESC
         LIMIT ? OFFSET ?
-    `, [...params, limit, offset])).map(doc => ({
-        ...doc,
-        can_edit: Number(doc.user_id) === Number(req.user.id),
-        read_only: Number(doc.user_id) !== Number(req.user.id),
-        shared_readable: canReadKnowledgeResource({
-            user_id: doc.user_id,
-            scope: doc.collection_scope,
-            allowed_units: doc.collection_allowed_units,
-            allowed_user_ids: doc.collection_allowed_user_ids
-        }, req.user)
-    }));
+    `, [...params, limit, offset])).map(doc => {
+        const normalized = {
+            ...doc,
+            can_edit: Number(doc.user_id) === Number(req.user.id),
+            read_only: Number(doc.user_id) !== Number(req.user.id),
+            shared_readable: canReadKnowledgeResource({
+                user_id: doc.user_id,
+                scope: doc.collection_scope,
+                allowed_units: doc.collection_allowed_units,
+                allowed_user_ids: doc.collection_allowed_user_ids
+            }, req.user)
+        };
+        if (!canViewUploadOwner) return normalized;
+        const uploaderId = Number(doc.uploader_id || doc.user_id) || null;
+        const username = String(doc.uploader_username || '').trim();
+        const nickname = String(doc.uploader_nickname || '').trim();
+        return {
+            ...normalized,
+            uploader: {
+                id: uploaderId,
+                username,
+                nickname,
+                displayName: nickname || username || (uploaderId ? `用户 #${uploaderId}` : '未知用户')
+            }
+        };
+    });
     res.json({ data: docs, total, page, limit });
 }));
 
@@ -157,12 +183,18 @@ ragRouter.get('/tags', authMiddleware, asyncHandler(async (req, res) => {
 }));
 
 ragRouter.get('/collections/share-options', authMiddleware, asyncHandler(async (req, res) => {
+    if (!isSuperAdmin(req.user)) {
+        return res.status(403).json({ error: '仅 admin 权限层级可管理共享专题库。' });
+    }
     const options = await getKnowledgeCollectionShareOptions({ collectionId: req.query.collectionId, user: req.user });
     if (!options) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });
     return res.json({ data: options });
 }));
 
 ragRouter.patch('/collections/:id/sharing', authMiddleware, asyncHandler(async (req, res) => {
+    if (!isSuperAdmin(req.user)) {
+        return res.status(403).json({ error: '仅 admin 权限层级可管理共享专题库。' });
+    }
     try {
         const collection = await updateKnowledgeCollectionSharing({ collectionId: req.params.id, user: req.user, body: req.body || {} });
         if (!collection) return res.status(404).json({ error: '集合不存在或无权管理共享设置' });

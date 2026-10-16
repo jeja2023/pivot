@@ -13,12 +13,17 @@ const mutations = require('./mutations');
 const parser = require('./parser');
 const search = require('./search');
 const shared = require('./shared');
+const aiPlanning = require('./ai-planning');
+const evidence = require('./evidence');
 
 module.exports = {
     analyzeRegulationChangeImpact: analysis.analyzeRegulationChangeImpact,
     approveHighConfidenceRegulationCitationLinks: links.approveHighConfidenceRegulationCitationLinks,
     listRegulationAiAnswerLogs: aiAudit.listRegulationAiAnswerLogs,
+    getRegulationAiQualityMetrics: aiAudit.getRegulationAiQualityMetrics,
     buildRegulationAiContext: analysis.buildRegulationAiContext,
+    buildRegulationAiQueryPlan: aiPlanning.buildRegulationAiQueryPlan,
+    buildRegulationEvidenceExcerpt: evidence.buildRegulationEvidenceExcerpt,
     buildRegulationSearchExcerpt: search.buildRegulationSearchExcerpt,
     buildRegulationQaReport: collaboration.buildRegulationQaReport,
     buildRegulationQaReportIr: collaboration.buildRegulationQaReportIr,

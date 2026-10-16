@@ -816,9 +816,11 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 if (data.type === 'chart') {
                     return;
                 }
-                if (data.type === 'rag') {
+                if (data.type === 'rag' || data.type === 'rag_grounding') {
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    updateAssistantStatus(data.message || '正在检索知识库');
+                    updateAssistantStatus(data.type === 'rag_grounding'
+                        ? (data.accepted ? '知识库依据已核验' : '知识库回答需要补充依据')
+                        : (data.message || '正在检索知识库'));
                     return;
                 }
                 if (data.type === 'memory') {

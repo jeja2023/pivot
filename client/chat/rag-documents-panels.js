@@ -274,6 +274,23 @@ const renderRagQualityReport = (report) => {
     `);
 };
 
+function getRagRankingModeLabel(mode = '') {
+    const normalized = String(mode || '').trim().toLowerCase();
+    const labels = {
+        hybrid_dual_rrf_mmr: '混合检索（语义与关键词融合，已进行多样性重排）',
+        keyword_fallback: '关键词降级检索',
+        confidence_rejected: '候选未通过引用可信度门槛',
+        no_candidates: '未检索到候选资料',
+        empty_query: '未输入有效检索问题'
+    };
+    return labels[normalized] || (normalized ? '自适应检索排序' : '');
+}
+
+function getRagQueueLabel(queue = {}) {
+    if (queue.maxConcurrent === undefined) return '';
+    return `执行中 ${Number(queue.running || 0)} 条，排队中 ${Number(queue.pending || 0)} 条，并发上限 ${Number(queue.maxConcurrent || 0)}`;
+}
+
 const renderRagDebugResults = (data) => {
     const el = document.getElementById('rag-debug-results');
     if (!el) return;
@@ -335,12 +352,10 @@ const renderRagDebugResults = (data) => {
     const queue = data.queue || {};
     const hybrid = data.hybrid || {};
     const ranking = data.ranking || {};
-    const rankingMode = ranking.mode ? String(ranking.mode).replace(/_/g, ' ') : '';
-    const queueLabel = queue.maxConcurrent !== undefined
-        ? `${Number(queue.running || 0)}/${Number(queue.pending || 0)} pending, max ${Number(queue.maxConcurrent || 0)}`
-        : '';
+    const rankingModeLabel = getRagRankingModeLabel(ranking.mode);
+    const queueLabel = getRagQueueLabel(queue);
     const hybridLabel = hybrid.rrfK !== undefined
-        ? `语义 ${Number(hybrid.wDense || 0).toFixed(2)} / 关键词 ${Number(hybrid.wFts || 0).toFixed(2)} / 去重 ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
+        ? `语义权重 ${Number(hybrid.wDense || 0).toFixed(2)} / 关键词权重 ${Number(hybrid.wFts || 0).toFixed(2)} / 多样性系数 ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
         : '';
     const debugVerdict = (() => {
         if (selectedCount > 0 && topScore >= Number(data.threshold || 0)) {
@@ -380,7 +395,7 @@ const renderRagDebugResults = (data) => {
             <span>可引用：${selectedCount}</span>
             <span>阈值：${Number(data.threshold || 0).toFixed(2)}</span>
             ${feedbackAdjustedCount ? `<span>反馈校正：${feedbackAdjustedCount} 条</span>` : ''}
-            ${elapsed > 0 ? `<span>检索耗时：${elapsed} ms</span>` : ''}
+            ${elapsed > 0 ? `<span>检索耗时：${elapsed} 毫秒</span>` : ''}
         </div>
         ${groupedList.length > 1 ? `
             <div class="rag-debug-grouped" role="list">
@@ -402,14 +417,14 @@ const renderRagDebugResults = (data) => {
         const ftsRank = m.scores?.ftsRank || null;
         const percent = Math.max(0, Math.min(1, score / maxScore)) * 100;
         const scoreDetails = [
-            `rank #${Number(m.rank || index + 1)}`,
+            `当前排名 第 ${Number(m.rank || index + 1)} 名`,
             `相关度 ${score.toFixed(3)}`,
             `融合分 ${fusedScore.toFixed(3)}`,
             `排序 ${rankScore.toFixed(3)}`,
             `引用可信度 ${Math.round(citationConfidence * 100)}%`,
-            denseRank ? `dense-rank #${denseRank}` : '',
-            ftsRank ? `fts #${ftsRank}` : '',
-            m.selected ? 'MMR selected' : ''
+            denseRank ? `语义召回排名 第 ${denseRank} 名` : '',
+            ftsRank ? `关键词召回排名 第 ${ftsRank} 名` : '',
+            m.selected ? '已通过多样性重排入选' : ''
         ].filter(Boolean).join(' | ');
         return `
                 <div class="rag-debug-item ${m.matched ? 'matched' : ''}">
@@ -432,21 +447,25 @@ const renderRagDebugResults = (data) => {
         </div>
         <details class="rag-debug-diagnostics">
             <summary>查看检索诊断</summary>
-            <div>${hiddenCandidateCount ? `已隐藏 ${hiddenCandidateCount} 条低置信候选，` : ''}初筛 ${Number(data.candidateCount || 0)} 条${rankingMode ? ` · ${window.Pivot.legacy.escapeRagHtml(rankingMode === 'keyword fallback' ? '关键词降级检索' : rankingMode)}` : ''}${hybridLabel ? ` · ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}` : ''}${queueLabel ? ` · 队列 ${window.Pivot.legacy.escapeRagHtml(queueLabel)}` : ''}</div>
+            <div>${hiddenCandidateCount ? `已隐藏 ${hiddenCandidateCount} 条低置信候选，` : ''}初筛 ${Number(data.candidateCount || 0)} 条${rankingModeLabel ? ` · ${window.Pivot.legacy.escapeRagHtml(rankingModeLabel)}` : ''}${hybridLabel ? ` · ${window.Pivot.legacy.escapeRagHtml(hybridLabel)}` : ''}${queueLabel ? ` · 队列状态：${window.Pivot.legacy.escapeRagHtml(queueLabel)}` : ''}</div>
         </details>
     `);
 };
 
 async function openKnowledgeCollectionShareModal() {
+    if (!isSuperAdminUser()) {
+        showToast('仅 admin 权限层级可管理共享专题库', 'error');
+        return;
+    }
     const normalizeId = window.Pivot.modules?.['rag.documents']?.normalizeRagCollectionId || window.Pivot.legacy.normalizeRagCollectionId || (value => {
         const id = Number.parseInt(value, 10);
         return Number.isSafeInteger(id) && id > 0 ? String(id) : '';
     });
     const collectionId = normalizeId(document.getElementById('rag-collection-filter')?.value);
-    if (!collectionId) return showToast('请先在专题库筛选中选择一个自己的专题库', 'error');
+    if (!collectionId) return showToast('请先在专题库筛选中选择要管理的专题库', 'error');
     const collections = window.Pivot.modules?.['rag.documents']?.getRagCollections?.() || window.Pivot.legacy.getRagCollections?.() || (typeof ragCollections !== 'undefined' ? ragCollections : []);
     const collection = collections.find(item => String(item.id) === collectionId);
-    if (!collection?.can_edit) return showToast('共享专题库需要所有者权限', 'error');
+    if (!collection) return showToast('当前专题库不存在或不可管理', 'error');
 
     const res = await apiFetch(`${API_BASE}/rag/collections/share-options?collectionId=${encodeURIComponent(collectionId)}`, { headers: authHeaders() });
     const data = await res.json().catch(() => ({}));
@@ -482,8 +501,8 @@ async function openKnowledgeCollectionShareModal() {
         <div class="modal agent-workflow-share-modal knowledge-share-modal" role="dialog" aria-modal="true" aria-labelledby="knowledge-share-title">
             <div class="agent-workflow-share-head">
                 <div>
-                    <h3 id="knowledge-share-title">分享专题库</h3>
-                    <p id="knowledge-share-subtitle">设置哪些单位或个人可以只读检索与问答该专题库。</p>
+                    <h3 id="knowledge-share-title">管理共享专题库</h3>
+                    <p id="knowledge-share-subtitle">仅 admin 权限层级可设置哪些单位或个人可以只读检索与问答该专题库。</p>
                 </div>
                 <button type="button" class="btn-danger-outline" data-knowledge-share-close data-knowledge-modal-close>关闭</button>
             </div>

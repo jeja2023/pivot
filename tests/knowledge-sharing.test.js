@@ -10,6 +10,7 @@ const {
     canAccessSharedResource,
     normalizeShareSettings
 } = require('../server/services/unit-visibility');
+const { isSuperAdmin } = require('../server/permissions');
 const { getGraphSummary } = require('../server/services/knowledge-graph');
 
 const owner = { id: 10, role: 'user', unit: '研发部' };
@@ -91,4 +92,40 @@ test('知识图谱跨用户访问仅向超级管理员开放', () => {
     assert.match(source, /isSuperAdmin\(userOrId\)/);
     assert.doesNotMatch(source, /user\.isAdmin\) return \{ sql: '1 = 1'/);
     assert.equal(typeof getGraphSummary, 'function');
+});
+
+test('知识库全局治理能力只授予系统 admin，不授予普通管理员', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const root = path.resolve(__dirname, '..');
+    const ragRoute = fs.readFileSync(path.join(root, 'server/routes/rag.js'), 'utf8');
+    const ragDocuments = fs.readFileSync(path.join(root, 'server/services/rag-documents.js'), 'utf8');
+    const ragClient = fs.readFileSync(path.join(root, 'client/chat/rag-documents.js'), 'utf8');
+    const ragPanels = fs.readFileSync(path.join(root, 'client/chat/rag-documents-panels.js'), 'utf8');
+
+    assert.equal(isSuperAdmin(admin), true);
+    assert.equal(isSuperAdmin(regularAdmin), false);
+    assert.match(ragRoute, /collections\/share-options', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!isSuperAdmin\(req\.user\)\)/);
+    assert.match(ragRoute, /collections\/:id\/sharing', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!isSuperAdmin\(req\.user\)\)/);
+    assert.match(ragRoute, /admin\/docs\/reindex-all', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!isSuperAdmin\(req\.user\)\)/);
+    assert.match(ragRoute, /admin\/docs\/audit', authMiddleware, asyncHandler\(async \(req, res\) => \{\s*if \(!isSuperAdmin\(req\.user\)\)/);
+    assert.match(ragDocuments, /if \(!isSuperAdmin\(user\)\) return null;/);
+    assert.match(ragClient, /toolbar && isSuperAdminUser\(\) && !toolbar\.querySelector\('#rag-share-collection-btn'\)/);
+    assert.match(ragPanels, /if \(!isSuperAdminUser\(\)\) \{/);
+});
+
+test('系统 admin 查看全库知识文档时可看到上传用户，其他用户不接收上传者资料', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const root = path.resolve(__dirname, '..');
+    const ragRoute = fs.readFileSync(path.join(root, 'server/routes/rag.js'), 'utf8');
+    const ragClient = fs.readFileSync(path.join(root, 'client/chat/rag-documents.js'), 'utf8');
+    const knowledgeWorkspace = fs.readFileSync(path.join(root, 'client/chat/partials/workspaces/knowledge.html'), 'utf8');
+
+    assert.match(ragRoute, /const canViewUploadOwner = isSuperAdmin\(req\.user\)/);
+    assert.match(ragRoute, /uploader\.username AS uploader_username/);
+    assert.match(ragRoute, /if \(!canViewUploadOwner\) return normalized/);
+    assert.match(ragClient, /function renderRagUploaderCell/);
+    assert.match(ragClient, /const canViewUploadOwner = isSuperAdminUser\(\)/);
+    assert.match(knowledgeWorkspace, /上传用户/);
 });

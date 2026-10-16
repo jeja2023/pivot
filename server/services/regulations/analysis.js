@@ -1,5 +1,6 @@
 const {
     query,
+    queryOne,
     normalizeRegulationId,
     normalizeRegulationSummary
 } = require('./shared');
@@ -7,7 +8,9 @@ const {
     getRegulationDocumentById,
     listRegulationVersions
 } = require('./catalog');
-const { buildRegulationSearchExcerpt, searchRegulationArticlesHybrid } = require('./search');
+const { searchRegulationArticlesHybrid } = require('./search');
+const { buildRegulationEvidenceExcerpt } = require('./evidence');
+const { buildRegulationAiQueryPlan, normalizeArticleIds, regulationAiLimits } = require('./ai-planning');
 
 function computeLineDiff(textA, textB) {
     const linesA = String(textA || '').split('\n');
@@ -117,7 +120,7 @@ const REGULATION_RELATION_LABELS = {
 };
 
 // 沿引用边扩展命中条文：把直接命中条文所引用、以及引用它们的关联条文补进候选
-async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchived = false } = {}) {
+async function expandRegulationMatchesByLinks(matches, { limit = 4, includeArchived = false } = {}) {
     const baseIds = matches.map(m => Number(m.article_id)).filter(Boolean);
     if (!baseIds.length) return [];
     const seen = new Set(baseIds);
@@ -125,12 +128,16 @@ async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchi
     // 双向：作为 source 引用出去的目标，以及作为 target 被其它条文引用的来源
     const linkRows = await query(`
         SELECT l.source_article_id, l.target_article_id, l.relation_type,
+               l.target_version_id, l.binding_mode, l.review_status, l.confidence,
                sa.id AS sa_id, ta.id AS ta_id
         FROM regulation_article_links l
         LEFT JOIN regulation_articles sa ON sa.id = l.source_article_id
         LEFT JOIN regulation_articles ta ON ta.id = l.target_article_id
         WHERE (l.source_article_id IN (${placeholders}) OR l.target_article_id IN (${placeholders}))
           AND l.target_article_id IS NOT NULL
+          AND l.version_id = sa.version_id
+          AND COALESCE(l.review_status, 'auto') = 'approved'
+          AND COALESCE(l.confidence, 0) >= 0.8
     `, [...baseIds, ...baseIds]);
 
     // 收集关联条文 id 及其与命中条文的关系说明
@@ -138,10 +145,10 @@ async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchi
     linkRows.forEach(row => {
         const rel = REGULATION_RELATION_LABELS[row.relation_type] || '关联';
         if (baseIds.includes(row.source_article_id) && row.target_article_id && !seen.has(row.target_article_id)) {
-            relatedInfo.set(row.target_article_id, { relation: `本条${rel}` });
+            relatedInfo.set(row.target_article_id, { relation: `本条${rel}`, confidence: Number(row.confidence) || 0 });
         }
         if (baseIds.includes(row.target_article_id) && row.source_article_id && !seen.has(row.source_article_id)) {
-            relatedInfo.set(row.source_article_id, { relation: `被引用（${rel}）` });
+            relatedInfo.set(row.source_article_id, { relation: `被引用（${rel}）`, confidence: Number(row.confidence) || 0 });
         }
     });
 
@@ -152,9 +159,9 @@ async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchi
         SELECT
             d.id AS document_id, d.title AS document_title, d.category, d.issuing_body,
             d.jurisdiction, d.summary AS document_summary,
-            v.id AS version_id, v.version_label,
-            a.id AS article_id, a.sort_order, a.article_label, a.article_title, a.content,
-            substr(replace(a.content, '\n', ' '), 1, 240) AS excerpt
+            v.id AS version_id, v.version_label, v.effective_from, v.effective_to, v.effect_status, v.review_status,
+            a.id AS article_id, a.sort_order, a.article_label, a.article_title, a.heading_path, a.page_start, a.page_end, a.content,
+            substr(replace(a.content, '\n', ' '), 1, 600) AS excerpt
         FROM regulation_articles a
         JOIN regulation_documents d ON d.id = a.document_id
         JOIN regulation_versions v ON v.id = a.version_id
@@ -162,7 +169,82 @@ async function expandRegulationMatchesByLinks(matches, { limit = 8, includeArchi
           AND d.deleted_at IS NULL${includeArchived ? '' : " AND d.status <> 'archived'"}
     `, relatedIds);
 
-    return rows.map(row => ({ ...row, viaLink: true, relation: relatedInfo.get(row.article_id)?.relation || '关联' }));
+    return rows.map(row => ({
+        ...row,
+        viaLink: true,
+        relation: relatedInfo.get(row.article_id)?.relation || '已核验关联',
+        relationConfidence: relatedInfo.get(row.article_id)?.confidence || 0
+    }));
+}
+
+function mergeAiRetrievalCandidates(resultSets, selectedArticleIds = []) {
+    const selected = new Set(selectedArticleIds.map(String));
+    const combined = new Map();
+    resultSets.forEach((rows, queryIndex) => {
+        (Array.isArray(rows) ? rows : []).forEach((row, rank) => {
+            const key = String(row?.article_id || '');
+            if (!key) return;
+            const existing = combined.get(key) || { ...row, aiRetrievalScore: 0, retrievalQueryIndexes: [] };
+            existing.aiRetrievalScore += 1 / (20 + rank + 1) + (queryIndex === 0 ? 0.01 : 0);
+            if (!existing.retrievalQueryIndexes.includes(queryIndex)) existing.retrievalQueryIndexes.push(queryIndex);
+            if (selected.has(key)) existing.aiRetrievalScore += 1;
+            combined.set(key, existing);
+        });
+    });
+    return [...combined.values()]
+        .sort((left, right) => right.aiRetrievalScore - left.aiRetrievalScore
+            || Number(right.rankScore || right.rerankScore || right.hybridScore || 0) - Number(left.rankScore || left.rerankScore || left.hybridScore || 0)
+            || Number(left.article_id) - Number(right.article_id));
+}
+
+function selectDiverseEvidenceCandidates(candidates, { limit = 10, selectedArticleIds = [] } = {}) {
+    const selected = new Set(selectedArticleIds.map(String));
+    const perDocument = new Map();
+    const result = [];
+    for (const candidate of candidates) {
+        const id = String(candidate?.article_id || '');
+        const documentId = String(candidate?.document_id || '');
+        const count = perDocument.get(documentId) || 0;
+        if (!selected.has(id) && count >= 3) continue;
+        result.push(candidate);
+        perDocument.set(documentId, count + 1);
+        if (result.length >= limit) break;
+    }
+    return result;
+}
+
+async function getSelectedRegulationArticles(articleIds, { documentId = null, versionId = null, includeArchived = false } = {}) {
+    const ids = normalizeArticleIds(articleIds);
+    if (!ids.length) return [];
+    const clauses = [`a.id IN (${ids.map(() => '?').join(',')})`, 'd.deleted_at IS NULL'];
+    const params = [...ids];
+    const docId = normalizeRegulationId(documentId);
+    const version = normalizeRegulationId(versionId);
+    if (!includeArchived) clauses.push("d.status <> 'archived'");
+    if (docId) {
+        clauses.push('d.id = ?');
+        params.push(docId);
+    }
+    if (version) {
+        clauses.push('a.version_id = ?');
+        params.push(version);
+    } else {
+        clauses.push('a.version_id = d.current_version_id');
+    }
+    const rows = await query(`
+        SELECT d.id AS document_id, d.title AS document_title, d.category, d.issuing_body, d.jurisdiction,
+               d.summary AS document_summary, d.status AS document_status,
+               v.id AS version_id, v.version_label, v.effective_from, v.effective_to, v.effect_status, v.review_status,
+               a.id AS article_id, a.sort_order, a.article_label, a.article_title, a.heading_path, a.page_start, a.page_end, a.content,
+               1 AS ai_selected
+        FROM regulation_articles a
+        JOIN regulation_documents d ON d.id = a.document_id
+        JOIN regulation_versions v ON v.id = a.version_id
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY a.sort_order ASC, a.id ASC
+    `, params);
+    const order = new Map(ids.map((id, index) => [String(id), index]));
+    return rows.sort((left, right) => (order.get(String(left.article_id)) ?? 9999) - (order.get(String(right.article_id)) ?? 9999));
 }
 
 // #6 变更影响分析：找出两版本间变更的条文，再反查引用了这些条文的其它条文（被影响方）
@@ -273,28 +355,61 @@ async function getRegulationSupersedeNotices(documentId, { versionId = null, inc
 async function buildRegulationAiContext({
     query: searchQuery,
     documentId = null,
+    versionId = null,
+    articleIds = [],
+    restrictToSelected = false,
     category = '',
     issuingBody = '',
     jurisdiction = '',
     status = '',
     userId = 0,
-    limit = 12,
+    limit = 14,
+    candidateLimit = 120,
+    history = [],
+    effectiveAt = '',
     expandLinks = true,
-    relatedLimit = 8,
+    relatedLimit = 5,
     includeArchived = false
 } = {}) {
-    const matches = await searchRegulationArticlesHybrid({
-        query: searchQuery,
-        documentId,
-        category,
-        issuingBody,
-        jurisdiction,
-        status,
-        userId,
-        limit,
-        includeArchived
-    });
-    const related = expandLinks ? await expandRegulationMatchesByLinks(matches, { limit: relatedLimit, includeArchived }) : [];
+    const plan = buildRegulationAiQueryPlan({ question: searchQuery, history, effectiveAt });
+    const aiLimits = regulationAiLimits();
+    const selectedArticleIds = normalizeArticleIds(articleIds);
+    let effectiveVersionId = normalizeRegulationId(versionId);
+    if (!effectiveVersionId && documentId && plan.effectiveAt) {
+        const effectiveVersion = await queryOne(`
+            SELECT id
+            FROM regulation_versions
+            WHERE document_id = ?
+              AND effective_from IS NOT NULL
+              AND effective_from <= ?
+              AND (effective_to IS NULL OR effective_to >= ?)
+              AND COALESCE(effect_status, 'unverified') IN ('effective', 'unverified')
+            ORDER BY effective_from DESC, id DESC
+            LIMIT 1
+        `, [normalizeRegulationId(documentId), plan.effectiveAt, plan.effectiveAt]);
+        effectiveVersionId = normalizeRegulationId(effectiveVersion?.id);
+    }
+    const selectedRows = await getSelectedRegulationArticles(selectedArticleIds, { documentId, versionId: effectiveVersionId, includeArchived });
+    const retrievalResults = restrictToSelected && selectedRows.length
+        ? []
+        : await Promise.allSettled(plan.retrievalQueries.map(queryText => searchRegulationArticlesHybrid({
+            query: queryText,
+            documentId,
+            versionId: effectiveVersionId,
+            category,
+            issuingBody,
+            jurisdiction,
+            status,
+            userId,
+            limit: Math.min(Math.max(Number(candidateLimit) || 120, 20), 150),
+            includeArchived
+        })));
+    const retrieved = retrievalResults
+        .filter(result => result.status === 'fulfilled')
+        .map(result => result.value);
+    const candidates = mergeAiRetrievalCandidates([selectedRows, ...retrieved], selectedArticleIds);
+    const matches = selectDiverseEvidenceCandidates(candidates, { limit: Math.min(Math.max(Number(limit) || aiLimits.evidenceLimit, 1), 20), selectedArticleIds });
+    const related = expandLinks ? await expandRegulationMatchesByLinks(matches, { limit: Math.min(Math.max(Number(relatedLimit) || aiLimits.relatedLimit, 0), 8), includeArchived }) : [];
     const all = [...matches, ...related];
 
     const sources = all.map((match, index) => ({
@@ -303,22 +418,48 @@ async function buildRegulationAiContext({
         versionId: match.version_id,
         articleId: match.article_id,
         label: `${match.document_title}${match.version_label ? ` / ${match.version_label}` : ''} / ${match.article_label}${match.article_title ? ` ${match.article_title}` : ''}`,
-        excerpt: normalizeRegulationSummary(buildRegulationSearchExcerpt(match.content || match.excerpt, searchQuery, 600)),
-        contextExcerpt: normalizeRegulationSummary(buildRegulationSearchExcerpt(match.content || match.excerpt, searchQuery, 1800)),
+        headingPath: match.heading_path || '',
+        pageStart: Number(match.page_start) || null,
+        pageEnd: Number(match.page_end) || null,
+        effectiveFrom: match.effective_from || '',
+        effectiveTo: match.effective_to || '',
+        effectStatus: match.effect_status || 'unverified',
+        reviewStatus: match.review_status || 'pending',
+        excerpt: normalizeRegulationSummary(buildRegulationEvidenceExcerpt(match.content || match.excerpt, plan.retrievalQueries, { maxLength: 800, before: 220 }).excerpt),
+        contextExcerpt: normalizeRegulationSummary(buildRegulationEvidenceExcerpt(match.content || match.excerpt, plan.retrievalQueries, { maxLength: 2200, before: 620 }).excerpt),
+        evidenceRange: buildRegulationEvidenceExcerpt(match.content || match.excerpt, plan.retrievalQueries, { maxLength: 2200, before: 620 }),
         source: match.document_title,
         viaLink: !!match.viaLink,
-        relation: match.relation || ''
+        relation: match.relation || '',
+        retrieval: match.retrieval || (match.ai_selected ? 'selected' : 'hybrid'),
+        selected: selectedArticleIds.includes(Number(match.article_id))
     }));
 
     // 上下文分两组：检索候选 / 经引用关联候选。候选不是已采纳的结论依据，
     // 最终回答仍须由法规问答的引用核验器确认。
-    const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n${s.contextExcerpt}`);
-    const relatedLines = sources.filter(s => s.viaLink).map(s => `[${s.index}] ${s.label}（${s.relation}）\n${s.contextExcerpt}`);
+    const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n定位：${s.headingPath || s.label}${s.pageStart ? `；来源页 ${s.pageStart}${s.pageEnd && s.pageEnd !== s.pageStart ? `-${s.pageEnd}` : ''}` : ''}\n效力：${s.effectStatus}；审核：${s.reviewStatus}\n证据：${s.contextExcerpt}`);
+    const relatedLines = sources.filter(s => s.viaLink).map(s => `[${s.index}] ${s.label}（${s.relation}，已审核关联）\n定位：${s.headingPath || s.label}\n证据：${s.contextExcerpt}`);
     const parts = [];
     if (directLines.length) parts.push(`【直接检索候选】\n${directLines.join('\n\n')}`);
     if (relatedLines.length) parts.push(`【经引用关联的候选】\n${relatedLines.join('\n\n')}`);
-    const context = parts.join('\n\n');
-    return { matches: all, sources, context };
+    const context = `PIVOT_RAG_CONTEXT_BEGIN\n${parts.join('\n\n')}\nPIVOT_RAG_CONTEXT_END`;
+    return {
+        matches: all,
+        sources,
+        context,
+        plan,
+        diagnostics: {
+            retrievalQueries: plan.retrievalQueries,
+            retrievalQueryCount: plan.retrievalQueries.length,
+            retrievedCandidateCount: candidates.length,
+            selectedCandidateCount: selectedRows.length,
+            directCandidateCount: sources.filter(source => !source.viaLink).length,
+            relatedCandidateCount: sources.filter(source => source.viaLink).length,
+            followUpResolved: plan.followUpResolved,
+            effectiveAt: plan.effectiveAt || '',
+            effectiveVersionId: effectiveVersionId || null
+        }
+    };
 }
 
 module.exports = {

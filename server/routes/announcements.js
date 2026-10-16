@@ -155,6 +155,22 @@ const fetchActiveAnnouncementRows = async (userId) => {
     `, [userId, now, now]);
 };
 
+const fetchAnnouncementHistoryRows = async (userId) => {
+    const now = getBeijingTimestamp();
+    return query(`
+        SELECT a.*, ar.read_at, ar.acknowledged_at, ar.dismissed_at
+        FROM announcements a
+        LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ?
+        WHERE a.deleted_at IS NULL
+          AND a.status IN ('published', 'archived')
+          AND (a.starts_at IS NULL OR a.starts_at <= ?)
+        ORDER BY
+          a.created_at DESC,
+          a.id DESC
+        LIMIT 100
+    `, [userId, now]);
+};
+
 const fetchPublicAnnouncementRows = async () => {
     const now = getBeijingTimestamp();
     // show_on_login 以 BIGINT 0/1 存储，统一使用整数比较。
@@ -191,14 +207,28 @@ function createAnnouncementsRouter({
     }));
 
     router.get('/announcements/active', authMiddleware, asyncHandler(async (req, res) => {
-        const rows = (await fetchActiveAnnouncementRows(req.user.id))
+        const includeDismissed = req.query.includeDismissed === 'true' || req.query.all === '1' || req.query.all === 'true';
+        const allRows = (await fetchActiveAnnouncementRows(req.user.id))
+            .filter(row => isTargetedToUser(row, req.user));
+        const filtered = includeDismissed ? allRows : allRows.filter(isVisibleAfterUserDismiss);
+        const rows = filtered.map(mapAnnouncementRow);
+        res.json({
+            data: rows,
+            totalAvailable: allRows.length,
+            unreadCount: allRows.filter(item => !item.read_at).length,
+            criticalCount: allRows.filter(item => item.priority === 'critical').length,
+            requireAckCount: allRows.filter(item => item.require_ack && !item.acknowledged_at).length
+        });
+    }));
+
+    router.get('/announcements/history', authMiddleware, asyncHandler(async (req, res) => {
+        const rows = (await fetchAnnouncementHistoryRows(req.user.id))
             .filter(row => isTargetedToUser(row, req.user))
-            .filter(isVisibleAfterUserDismiss)
             .map(mapAnnouncementRow);
         res.json({
             data: rows,
-            unreadCount: rows.filter(item => !item.readAt).length,
-            requireAckCount: rows.filter(item => item.requireAck && !item.acknowledgedAt).length
+            total: rows.length,
+            unreadCount: rows.filter(item => !item.readAt).length
         });
     }));
 

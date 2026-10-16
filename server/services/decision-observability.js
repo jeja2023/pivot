@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const { execute, query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { sanitizeDecisionContext, normalizeActionId } = require('./decision-provider');
+const { sanitizeDecisionContext, normalizeActionId, redactRoutingText } = require('./decision-provider');
 const { logger } = require('../logger');
 
 const MAX_PENDING = 5000;
@@ -179,10 +179,19 @@ const LIST_USER_FEEDBACK_SQL = [
     'SELECT o.id AS feedback_id, o.decision_id, d.scenario, d.tenant_id, d.session_id,',
     'o.selected_action_id, o.verified_action_id AS corrected_action_id, o.status, o.reason_code, o.metadata,',
     'o.review_status, o.reviewed_by, o.reviewed_at, o.review_note, o.occurred_at,',
-    'u.username, u.nickname',
+    'u.username, u.nickname, u.unit, u.role,',
+    "CASE WHEN d.session_id IS NULL OR d.session_id = '' THEN '未关联会话' ELSE COALESCE(NULLIF(s.title, ''), '未命名会话') END AS session_title,",
+    'd.candidate_actions, d.policy_outcome, d.provider_outputs,',
+    '(',
+    '    SELECT m.content FROM messages m',
+    '    WHERE m.session_id = d.session_id AND m.role = \'user\' AND m.deleted_at IS NULL',
+    '      AND m.created_at <= d.created_at + INTERVAL \'5 seconds\'',
+    '    ORDER BY m.created_at DESC LIMIT 1',
+    ') AS query_preview',
     'FROM decision_outcomes o',
     'JOIN decision_records d ON d.decision_id = o.decision_id',
     'LEFT JOIN users u ON u.id = d.user_id',
+    'LEFT JOIN sessions s ON s.id = d.session_id',
     "WHERE o.event_type = 'feedback' AND o.source = 'user' AND o.review_status = ?",
     'ORDER BY o.occurred_at DESC, o.id DESC LIMIT ?'
 ].join(' ');
@@ -266,7 +275,11 @@ async function listUserDecisionFeedback({ reviewStatus = 'pending', limit = 50 }
         ? String(reviewStatus).trim().toLowerCase()
         : 'pending';
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200));
-    return await (deps.query || query)(LIST_USER_FEEDBACK_SQL, [status, safeLimit]);
+    const rows = await (deps.query || query)(LIST_USER_FEEDBACK_SQL, [status, safeLimit]);
+    return (rows || []).map(row => ({
+        ...row,
+        query_preview: redactRoutingText(row.query_preview || '')
+    }));
 }
 
 async function listUserDecisionFeedbackStatuses({ userId, sessionId } = {}, deps = {}) {

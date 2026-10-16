@@ -22,6 +22,9 @@
             <colgroup>
                 <col class="col-index">
                 <col class="col-feedback-time">
+                <col class="col-feedback-user">
+                <col class="col-feedback-session">
+                <col class="col-feedback-query">
                 <col class="col-feedback-scenario">
                 <col class="col-feedback-actions">
                 <col class="col-feedback-reason">
@@ -32,6 +35,9 @@
                 <tr>
                     <th class="text-center col-index">序号</th>
                     <th>提交时间</th>
+                    <th>提交用户</th>
+                    <th>关联会话</th>
+                    <th>当轮提问</th>
                     <th>路由场景</th>
                     <th>当前 → 建议</th>
                     <th>原因与补充说明</th>
@@ -43,4 +49,14 @@
         </table>
     </div>
     <div id="pagination-route-feedback" class="pagination"></div>
+
+    <div id="route-feedback-detail-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="route-feedback-detail-title">
+        <div class="route-feedback-detail-dialog">
+            <div class="modal-header">
+                <h3 id="route-feedback-detail-title">反馈核验详情</h3>
+            </div>
+            <div class="modal-body route-feedback-detail-body" id="route-feedback-detail-content"></div>
+            <div class="modal-footer" id="route-feedback-detail-footer"></div>
+        </div>
+    </div>
 </section>

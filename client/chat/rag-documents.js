@@ -200,6 +200,15 @@ function renderRagTagsCell(doc = {}) {
     return `<div class="knowledge-tag-list">${tags.map(tag => `<span class="knowledge-tag-pill" title="${window.Pivot.legacy.escapeRagAttr(tag)}">${window.Pivot.legacy.escapeRagHtml(tag)}</span>`).join('')}</div>`;
 }
 
+function renderRagUploaderCell(doc = {}) {
+    const uploader = doc.uploader && typeof doc.uploader === 'object' ? doc.uploader : {};
+    const displayName = String(uploader.displayName || uploader.nickname || uploader.username || '').trim()
+        || `用户 #${Number(doc.user_id) || '-'}`;
+    const username = String(uploader.username || '').trim();
+    const title = username && username !== displayName ? `账号：${username}` : displayName;
+    return `<span class="knowledge-uploader-name" title="${window.Pivot.legacy.escapeRagAttr(title)}">${window.Pivot.legacy.escapeRagHtml(displayName)}</span>`;
+}
+
 function getCachedKnowledgeDoc(id) {
     const docId = Number.parseInt(id, 10);
     if (!Number.isSafeInteger(docId) || docId <= 0) return null;
@@ -544,11 +553,13 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
         updateRagDebugSamples(docs);
 
         const body = document.getElementById('rag-docs-body');
+        const canViewUploadOwner = isSuperAdminUser();
         PivotSafeHtml.setHtml(body, docs.map((d, index) => `
             <tr>
                 <td class="text-center"><input type="checkbox" class="rag-doc-check" value="${d.id}"></td>
                 <td class="text-center">${(pageNo - 1) * pageSize + index + 1}</td>
                 <td title="${window.Pivot.legacy.escapeRagHtml(d.name)}">${window.Pivot.legacy.escapeRagHtml(d.name)}</td>
+                ${canViewUploadOwner ? `<td>${renderRagUploaderCell(d)}</td>` : ''}
                 <td>${renderRagCollectionCell(d)}</td>
                 <td>${renderRagTagsCell(d)}</td>
                 <td class="text-center">
@@ -565,7 +576,7 @@ window.Pivot.legacy.loadKnowledgeDocs = async (page = ragDocsPage) => {
                     <div class="rag-actions">${renderRagActions(d)}</div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="12" class="text-center">暂无知识库文档</td></tr>');
+        `).join('') || `<tr><td colspan="${canViewUploadOwner ? 13 : 12}" class="text-center">暂无知识库文档</td></tr>`);
         body?.querySelectorAll('.rag-enable-toggle').forEach(toggle => {
             const doc = getCachedKnowledgeDoc(toggle.dataset.ragId);
             if (doc?.read_only === true || doc?.can_edit === false) toggle.disabled = true;
@@ -613,18 +624,19 @@ async function openKnowledgeWorkbench() {
     panel.setAttribute('aria-hidden', 'false');
     document.dispatchEvent(new CustomEvent('pivot:knowledge-opened'));
     const toolbar = panel.querySelector('.knowledge-toolbar');
-    if (toolbar && !toolbar.querySelector('#rag-share-collection-btn')) {
+    if (toolbar && isSuperAdminUser() && !toolbar.querySelector('#rag-share-collection-btn')) {
         const button = document.createElement('button');
         button.id = 'rag-share-collection-btn';
         button.className = 'btn-secondary';
         button.type = 'button';
         button.setAttribute('role', 'menuitem');
-        button.textContent = '分享专题库';
+        button.textContent = '管理共享专题库';
         button.addEventListener('click', () => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.());
         const contentMenu = toolbar.querySelector('.knowledge-action-menu:first-of-type .knowledge-action-menu-panel');
         if (contentMenu) contentMenu.appendChild(button);
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
+    if (toolbar && !isSuperAdminUser()) toolbar.querySelector('#rag-share-collection-btn')?.remove();
     const settingsPromise = Promise.resolve()
         .then(() => window.Pivot.legacy.ensureAdminSettingsScript?.())
         .then(() => {

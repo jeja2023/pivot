@@ -214,6 +214,14 @@ function buildRouteMetadata(plan = {}) {
             action: String(plan.rag?.action || 'skip'),
             confidence: Number(plan.rag?.confidence || 0),
             reasonCode: String(plan.rag?.reasonCode || ''),
+            grounding: plan.rag?.grounding ? {
+                status: String(plan.rag.grounding.status || ''),
+                accepted: plan.rag.grounding.accepted === true,
+                sourceCount: Number(plan.rag.grounding.sourceCount || 0),
+                citedSourceIndexes: Array.isArray(plan.rag.grounding.citedSourceIndexes)
+                    ? plan.rag.grounding.citedSourceIndexes.slice(0, 20).map(Number)
+                    : []
+            } : null,
             collections: (plan.rag?.collections || []).map(item => ({
                 id: Number(item.id),
                 name: String(item.name || ''),

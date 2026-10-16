@@ -145,10 +145,10 @@ async function createKnowledgeCollection({ userId, name, description = '' }) {
     return collection;
 }
 async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
+    // 共享范围会改变其他用户可见的知识资产，只允许系统 admin 管理。
+    if (!isSuperAdmin(user)) return null;
     const collection = await getKnowledgeCollectionForUser(collectionId, user);
     if (!collection) return null;
-    const normalizedUser = normalizeKnowledgeUser(user);
-    if (Number(collection.user_id) !== normalizedUser.id && !isSuperAdmin(user)) return null;
     return {
         collection: {
             id: collection.id,
@@ -162,20 +162,20 @@ async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
 }
 async function updateKnowledgeCollectionSharing({ collectionId, user, body = {} }) {
     const normalizedId = normalizeKnowledgeCollectionId(collectionId);
-    if (!normalizedId) return null;
+    if (!normalizedId || !isSuperAdmin(user)) return null;
     const current = await queryOne(`
         SELECT * FROM knowledge_collections
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [normalizedId, normalizeKnowledgeUser(user).id]);
+        WHERE id = ? AND deleted_at IS NULL
+    `, [normalizedId]);
     if (!current) return null;
     const settings = normalizeShareSettings(body, user, current);
     settings.allowedUserIds = await filterExistingShareUserIds(settings.allowedUserIds, { excludeUserId: current.user_id });
     await execute(`
         UPDATE knowledge_collections
         SET scope = ?, allowed_units = ?, allowed_user_ids = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId, normalizeKnowledgeUser(user).id]);
-    clearRagCacheForUser(normalizeKnowledgeUser(user).id);
+        WHERE id = ? AND deleted_at IS NULL
+    `, [settings.scope, settings.allowedUnits, settings.allowedUserIds, getBeijingTimestamp(), normalizedId]);
+    clearRagCacheForUser(current.user_id);
     invalidateKnowledgeCatalog(normalizedId);
     return await getKnowledgeCollectionForUser(normalizedId, user);
 }

@@ -256,7 +256,26 @@
                         const scope = document.getElementById('regulations-ai-scope')?.value || state.aiScope;
                         state.aiScope = scope === 'document' && state.detail?.document?.id ? 'document' : 'library';
                         const documentId = state.aiScope === 'document' ? state.detail?.document?.id : undefined;
-                        const turn = { question, answer: '', sources: [], grounding: null, documentId: documentId || null, streaming: true };
+                        const versionId = state.aiScope === 'document' ? (state.detail?.currentVersion?.id || state.detail?.currentVersion?.version_id) : undefined;
+                        const articleIds = [...(state.aiSelectedArticleIds || new Set())].map(Number).filter(Number.isSafeInteger);
+                        const filters = state.aiScope === 'library' ? (state.filters || {}) : {};
+                        const requestPayload = {
+                            query: question,
+                            limit: 14,
+                            candidateLimit: 120,
+                            history,
+                            model,
+                            documentId,
+                            versionId,
+                            articleIds,
+                            restrictToSelected: Boolean(state.aiRestrictToSelected && articleIds.length),
+                            category: filters.category || '',
+                            issuingBody: filters.issuingBody || '',
+                            jurisdiction: filters.jurisdiction || '',
+                            status: filters.status || '',
+                            effectiveAt: state.effectiveAt || ''
+                        };
+                        const turn = { question, answer: '', sources: [], grounding: null, diagnostics: null, documentId: documentId || null, streaming: true };
                         const turnIndex = state.aiTurns.push(turn) - 1;
                         const controller = new AbortController();
                         state.aiAbortController = controller;
@@ -277,16 +296,17 @@
                                 const data = await fetchJson(`${API}/ai`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ query: question, limit: 8, history, model, documentId })
+                                    body: JSON.stringify(requestPayload)
                                 });
                                 full = data.content || data.answer || '';
                                 sources = Array.isArray(data.sources) ? data.sources : [];
                                 turn.grounding = data.grounding || null;
+                                turn.diagnostics = data.diagnostics || null;
                             } else {
                                 const res = await apiFetch(`${API}/ai`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-                                    body: JSON.stringify({ query: question, limit: 8, history, model, documentId, stream: true }),
+                                    body: JSON.stringify({ ...requestPayload, stream: true }),
                                     signal: controller.signal
                                 });
                                 if (!res.ok || !res.body) {
@@ -302,6 +322,7 @@
                                         try { data = JSON.parse(payload); } catch (_error) { return; }
                                         if (data?.type === 'apps.extra') {
                                             sources = Array.isArray(data.sources) ? data.sources : sources;
+                                            turn.diagnostics = data.diagnostics || turn.diagnostics;
                                             return;
                                         }
                                         if (data?.type === 'apps.completion') {

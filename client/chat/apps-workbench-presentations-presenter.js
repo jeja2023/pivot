@@ -777,11 +777,18 @@
             warnings: outlineTextList(source.warnings, 50, 500)
         };
     }
-    function renderOutlineWarnings(outline) {
+    function renderOutlineWarnings(outline, confirmations = new Set()) {
         const target = byId('presentation-outline-warnings'); if (!target) return;
-        const messages = [...outline.assumptions.map(item => ({ label: '待确认', text: item })), ...outline.warnings.map(item => ({ label: '提示', text: item }))];
+        const messages = [...outline.assumptions.map((item, index) => ({ label: '待确认', text: item, index })), ...outline.warnings.map(item => ({ label: '提示', text: item }))];
         target.replaceChildren(); target.classList.toggle('hidden', messages.length === 0);
         messages.forEach(message => {
+            if (message.label === '待确认') {
+                const row = document.createElement('label'); row.className = 'presentation-outline-confirmation-item';
+                const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.presentationOutlineAssumption = String(message.index); checkbox.checked = confirmations.has(message.index);
+                const copy = document.createElement('span'); const label = document.createElement('strong'); label.textContent = message.label;
+                copy.append(label, document.createTextNode(message.text)); row.append(checkbox, copy); target.appendChild(row);
+                return;
+            }
             const row = document.createElement('p'); const label = document.createElement('strong');
             label.textContent = message.label; row.append(label, document.createTextNode(message.text)); target.appendChild(row);
         });
@@ -821,9 +828,10 @@
         const template = templateById?.(state.pendingCreate?.templateId);
         const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels, template);
         state.pendingOutline = outline;
+        state.pendingOutlineConfirmations = new Set();
         const preview = byId('presentation-outline-markdown'); if (preview) renderOutlineDocument(preview, outline);
         const count = byId('presentation-outline-page-count'); if (count) count.textContent = '共 ' + outline.outline.length + ' 个章节 · ' + outline.outline.reduce((total, section) => total + section.slides.length, 0) + ' 个主题';
-        renderOutlineWarnings(outline);
+        renderOutlineWarnings(outline, state.pendingOutlineConfirmations);
     }
     function collectOutlineFromReview(state, { labels = {}, templateById } = {}) {
         return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId));

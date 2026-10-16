@@ -462,6 +462,30 @@ test('知识图谱实体类型、关系类型与状态全面中文化', () => {
     assert.doesNotMatch(tooltip, /applies_to/);
 });
 
+test('系统公告弹窗居中显示且内容完整展示', () => {
+    const announcementsJs = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'announcements.js'), 'utf8');
+    const announcementsCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'announcements-shell.css'), 'utf8');
+    const personalHtml = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'workspaces', 'personal.html'), 'utf8');
+    const chatHtml = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'partials', 'workspaces', 'chat-shell.html'), 'utf8');
+
+    assert.match(announcementsJs, /announcement-banner-dialog/);
+    assert.match(announcementsJs, /announcement-banner-title/);
+    assert.match(announcementsJs, /announcement-banner-content/);
+    assert.match(announcementsJs, /我知道了/);
+    assert.match(announcementsJs, /不再提示/);
+    assert.match(announcementsJs, /openAnnouncementDetail/);
+    assert.match(announcementsJs, /announcement-center-tabs/);
+    assert.match(announcementsJs, /announcements\/history/);
+
+    assert.match(announcementsCss, /\.announcement-banner\s*\{[^}]*inset:\s*0/);
+    assert.match(announcementsCss, /\.announcement-banner\s*\{[^}]*justify-content:\s*center/);
+    assert.match(announcementsCss, /\.announcement-banner-content\s*\{[^}]*white-space:\s*pre-wrap/);
+    assert.match(announcementsCss, /\.announcement-center-tabs/);
+
+    assert.match(personalHtml, /personal-announcement-btn/);
+    assert.match(chatHtml, /chat-sidebar-announcement-btn/);
+});
+
 test('聊天回答仅在需要时显示紧凑的知识库和工具库凭据', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine.js'), 'utf8');
     const streaming = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8');

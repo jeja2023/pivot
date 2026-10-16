@@ -1896,23 +1896,29 @@ body.dark-mode .settings-workspace-view .memories-table td,
     max-height: min(620px, calc(100vh - 250px));
 }
 .route-feedback-table {
-    min-width: 900px;
+    min-width: 1560px;
     table-layout: fixed;
 }
 .route-feedback-table .col-index,
-.route-feedback-table th:nth-child(1) { width: 56px; text-align: center; }
+.route-feedback-table th:nth-child(1) { width: 46px; text-align: center; }
 .route-feedback-table .col-feedback-time,
-.route-feedback-table th:nth-child(2) { width: 140px; }
-.route-feedback-table .col-feedback-scenario,
-.route-feedback-table th:nth-child(3) { width: 110px; }
-.route-feedback-table .col-feedback-actions,
+.route-feedback-table th:nth-child(2) { width: 160px; }
+.route-feedback-table .col-feedback-user,
+.route-feedback-table th:nth-child(3) { width: 160px; }
+.route-feedback-table .col-feedback-session,
 .route-feedback-table th:nth-child(4) { width: 190px; }
+.route-feedback-table .col-feedback-query,
+.route-feedback-table th:nth-child(5) { width: 220px; }
+.route-feedback-table .col-feedback-scenario,
+.route-feedback-table th:nth-child(6) { width: 100px; }
+.route-feedback-table .col-feedback-actions,
+.route-feedback-table th:nth-child(7) { width: 230px; }
 .route-feedback-table .col-feedback-reason,
-.route-feedback-table th:nth-child(5) { width: auto; }
+.route-feedback-table th:nth-child(8) { width: auto; min-width: 180px; }
 .route-feedback-table .col-feedback-status,
-.route-feedback-table th:nth-child(6) { width: 96px; text-align: center; }
+.route-feedback-table th:nth-child(9) { width: 80px; text-align: center; }
 .route-feedback-table .col-feedback-review,
-.route-feedback-table th:nth-child(7) { width: 140px; text-align: center; }
+.route-feedback-table th:nth-child(10) { width: 200px; text-align: center; }
 .route-feedback-table .col-index {
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
@@ -1922,9 +1928,13 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .route-feedback-table td {
     height: 38px;
     min-height: 38px;
+    max-height: 38px;
     padding: 6px 8px;
     box-sizing: border-box;
     vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .route-feedback-table tbody tr:hover td {
     background: var(--bg-hover, color-mix(in srgb, var(--text-main) 4%, transparent));
@@ -1934,6 +1944,88 @@ body.dark-mode .settings-workspace-view .memories-table td,
     font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+}
+.route-feedback-user,
+.route-feedback-session,
+.route-feedback-query,
+.route-feedback-scenario,
+.route-feedback-action,
+.route-feedback-reason {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.route-feedback-query {
+    color: var(--text-main);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.route-feedback-query:hover {
+    color: var(--primary, #2563eb);
+    text-decoration: underline;
+}
+.route-feedback-user-main,
+.route-feedback-session-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.route-feedback-user-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+    max-width: 110px;
+}
+.route-feedback-user-sub {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 1;
+}
+.route-feedback-unit-badge {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--primary, #2563eb) 8%, var(--surface));
+    color: var(--primary, #2563eb);
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.route-feedback-session-title {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.route-feedback-session-id {
+    font-size: 0.72rem;
+    font-family: var(--font-mono, Consolas, monospace);
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+.route-feedback-session-id:hover {
+    color: var(--primary, #2563eb);
+    text-decoration: underline;
 }
 .route-feedback-scenario {
     color: var(--text-main);
@@ -1950,20 +2042,18 @@ body.dark-mode .settings-workspace-view .memories-table td,
     line-height: 1.35;
 }
 .route-feedback-reason strong {
-    display: block;
+    display: inline;
     color: var(--text-main);
     font-size: 0.78rem;
     font-weight: 600;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 }
-.route-feedback-reason span {
-    display: block;
-    margin-top: 2px;
+.route-feedback-reason span,
+.route-feedback-reason-note {
+    display: inline;
     color: var(--text-muted);
     font-size: 0.75rem;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 }
 .route-feedback-status {
     display: inline-flex;
@@ -2000,6 +2090,7 @@ body.dark-mode .settings-workspace-view .memories-table td,
 .route-feedback-actions-cell {
     white-space: nowrap;
     text-align: center;
+    overflow: visible;
 }
 .route-feedback-actions-cell .btn-primary,
 .route-feedback-actions-cell .btn-secondary {
@@ -2011,6 +2102,8 @@ body.dark-mode .settings-workspace-view .memories-table td,
     line-height: 24px;
     border-radius: 6px;
     vertical-align: middle;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 .route-feedback-actions-cell .btn-primary:first-child,
 .route-feedback-actions-cell .btn-secondary:first-child {
@@ -2056,6 +2149,180 @@ body.dark-mode .route-feedback-reason strong,
 body.dark-mode .route-feedback-table tbody tr:hover td,
 .dark-mode .route-feedback-table tbody tr:hover td {
     background: color-mix(in srgb, var(--text-main) 6%, transparent);
+}
+/* 反馈核验详情弹窗 */
+#route-feedback-detail-modal.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-modal-backdrop, color-mix(in srgb, var(--text-main) 50%, transparent));
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+#route-feedback-detail-modal.hidden {
+    display: none !important;
+}
+#route-feedback-detail-modal .route-feedback-detail-dialog,
+.route-feedback-detail-dialog {
+    width: min(640px, calc(100vw - 32px)) !important;
+    max-width: min(640px, calc(100vw - 32px)) !important;
+    height: auto !important;
+    max-height: min(760px, calc(100vh - 48px)) !important;
+    padding: 0 !important;
+    margin: auto !important;
+    text-align: left !important;
+    border-radius: 12px !important;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--surface, #ffffff) !important;
+    box-shadow: var(--shadow-modal, 0 25px 50px -12px color-mix(in srgb, var(--text-main) 25%, transparent));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.route-feedback-detail-dialog .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.route-feedback-detail-dialog .modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.route-feedback-detail-body {
+    padding: 18px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: left !important;
+}
+.route-feedback-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left !important;
+}
+.route-feedback-detail-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.route-feedback-privacy-badge {
+    font-size: 0.68rem;
+    font-weight: normal;
+    color: var(--primary, #2563eb);
+    background: color-mix(in srgb, var(--primary, #2563eb) 8%, var(--surface));
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.route-feedback-query-card {
+    background: color-mix(in srgb, var(--primary, #2563eb) 5%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--primary, #2563eb) 18%, transparent);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: var(--text-main);
+    word-break: break-word;
+    white-space: pre-wrap;
+    text-align: left !important;
+}
+.route-feedback-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+}
+.route-feedback-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.route-feedback-item-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.route-feedback-item-value {
+    font-size: 0.82rem;
+    color: var(--text-main);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.route-feedback-item-value.is-origin {
+    color: var(--text-muted);
+}
+.route-feedback-item-value.is-corrected {
+    color: var(--primary, #2563eb);
+    font-weight: 600;
+}
+.route-feedback-note-card {
+    background: var(--bg-hover, color-mix(in srgb, var(--text-main) 3%, transparent));
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-main);
+    word-break: break-word;
+    white-space: pre-wrap;
+    min-height: 38px;
+    text-align: left !important;
+}
+#route-feedback-detail-modal .route-feedback-query-card,
+#route-feedback-detail-modal .route-feedback-note-card {
+    text-align: left !important;
+}
+.route-feedback-review-note-input {
+    width: 100%;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    background: var(--surface);
+    color: var(--text-main);
+    box-sizing: border-box;
+}
+.route-feedback-review-note-input:focus {
+    border-color: var(--primary, #2563eb);
+    outline: none;
+}
+.route-feedback-detail-dialog .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+body.dark-mode #route-feedback-detail-modal .route-feedback-detail-dialog,
+.dark-mode #route-feedback-detail-modal .route-feedback-detail-dialog {
+    background: var(--surface) !important;
+    border-color: var(--border);
+}
+body.dark-mode #route-feedback-detail-modal .modal-header,
+.dark-mode #route-feedback-detail-modal .modal-header,
+body.dark-mode #route-feedback-detail-modal .modal-footer,
+.dark-mode #route-feedback-detail-modal .modal-footer {
+    border-color: var(--border);
+    background: var(--surface);
+}
+body.dark-mode .route-feedback-query-card,
+.dark-mode .route-feedback-query-card {
+    background: color-mix(in srgb, var(--primary, #2563eb) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary, #2563eb) 28%, transparent);
 }
 @media (max-width: 760px) {
     .settings-workspace-view #tab-content-route-feedback .settings-page-head { align-items: stretch; flex-direction: column; }

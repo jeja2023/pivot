@@ -24,6 +24,7 @@
             searchMode: 'hybrid', savedSearches: [],
             filters: { category: '', issuingBody: '', jurisdiction: '', status: '', includeArchived: false },
             aiAnswer: '', aiSources: [], aiTurns: [], aiBusy: false, aiAbortController: null, aiStopSilently: false,
+            aiSelectedArticleIds: new Set(), aiRestrictToSelected: false,
             aiScope: 'library',
             openedFromAi: false,
             openedFromSearch: false,

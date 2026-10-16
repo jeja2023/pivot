@@ -38,6 +38,7 @@
     "knowledge_eval_cases": "知识库黄金问题与期望证据集表",
     "knowledge_eval_runs": "知识库检索评测批次与汇总指标表",
     "knowledge_eval_results": "知识库评测逐题结果与指标明细表",
+    "knowledge_ai_answer_logs": "用户隔离的知识库 AI 回答、证据链与核验结果审计表",
     "knowledge_doc_tags": "知识库文档与标签关联映射表",
     "knowledge_tags": "知识库业务标签定义字典表",
     "rag_feedback": "RAG 问答效果用户点赞点踩反馈表",
@@ -284,6 +285,20 @@
       "search_content": "全文检索分词优化文本",
       "heading_path": "章节标题层级路径",
       "embedding": "向量表示数据（pgvector 向量）"
+    },
+    "knowledge_ai_answer_logs": {
+      "id": "主键自增 ID / 唯一主键",
+      "user_id": "提问用户 ID（关联 users.id）",
+      "session_id": "关联聊天会话 ID；工作台问答为空",
+      "surface": "回答入口（chat/workbench/evaluation）",
+      "question": "用户原始问题快照",
+      "rewritten_query": "规划器生成的检索问题快照",
+      "answer": "最终向用户交付的回答快照",
+      "model_name": "生成与核验使用的模型名称",
+      "retrieval_json": "受权限筛选后的检索计划、候选和证据摘要 JSON",
+      "grounding_json": "来源与语义核验结果 JSON",
+      "usage_json": "模型令牌与调用用量 JSON",
+      "created_at": "记录创建时间（东八区）"
     },
     "knowledge_doc_tags": {
       "id": "主键自增 ID / 唯一主键",

@@ -26,7 +26,7 @@
 
 ## Shared resource boundaries
 
-- Knowledge collections, database MCP connections and published agent workflows may be shared with an explicit unit or individual-user allowlist; all other assets remain personal by default.
+- Knowledge collections, database MCP connections and published agent workflows may be shared with an explicit unit or individual-user allowlist; all other assets remain personal by default. Knowledge collections are created and maintained by their owners; only the system `admin` account may manage a collection's shared scope, rebuild the whole knowledge index, or read the global deletion audit. Other administrator accounts retain only their own knowledge assets and do not receive these cross-user capabilities.
 - Recipients have read-only access to shared knowledge, governed database read tools and published workflow definitions. Ownership, mutation, refresh, diagnosis, version management and secret management stay with the owner or administrator.
 - Shared workflow execution resolves models, tools and credentials against the recipient account. Bindings are pinned to a published version, become stale after republishing, and must be reconfirmed before execution; credential secrets never enter the recipient payload.
 - Every shared workflow response must redact direct HTTP credentials, and publishing or sharing a workflow containing sensitive HTTP literals is rejected.

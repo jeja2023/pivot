@@ -62,6 +62,7 @@ const migrationModules = [
     require('./knowledge-derived-governance'),
     require('./knowledge-derived-quality'),
     require('./knowledge-derived-quality-repair'),
+    require('./knowledge-ai-answer-audit'),
     require('./analysis-bi-product'),
     require('./analysis-semantic-models'),
     require('./analysis-scalability'),

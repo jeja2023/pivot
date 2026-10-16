@@ -12,6 +12,7 @@ const { getRequestOrigin, resolveRagQueryContent } = require('./chat-route-helpe
 const {
     buildRagInsufficientContextMessage,
     injectRagContextBeforeLatestUser,
+    mergeRagContexts,
     summarizeRagContextSources
 } = require('./chat-rag-context');
 const { saveUserMessage } = require('./chat-messages');
@@ -21,6 +22,7 @@ const { filterMcpToolsByCapability } = require('./capability-market');
 const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
 const { retrieveWikiContext } = require('./knowledge-wiki');
+const { buildKnowledgeRetrievalPlan } = require('./knowledge-query-planner');
 const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
@@ -135,7 +137,9 @@ async function assembleChatContext({
         scope: state.ragScope || {},
         routeOverrides: state.routeOverrides || {}
     });
-    const retrievalQuery = taskState.retrievalQuery || effectiveUserPrompt || modelContent;
+    const baseRetrievalQuery = taskState.retrievalQuery || effectiveUserPrompt || modelContent;
+    const retrievalPlan = buildKnowledgeRetrievalPlan({ question: baseRetrievalQuery, history });
+    const retrievalQuery = retrievalPlan.rewrittenQuery || baseRetrievalQuery;
     const memoryQuery = retrievalQuery;
 
 
@@ -236,13 +240,16 @@ async function assembleChatContext({
         && typeof isRagEnabled === 'function'
         && isRagEnabled()
         && Boolean(retrievalQuery);
-    const [memoryResult, ragResult] = await Promise.allSettled([
-        !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
-        shouldRetrieveRag ? retrieveContext(userId, retrievalQuery, null, {
+    const ragPromise = shouldRetrieveRag
+        ? Promise.all(retrievalPlan.retrievalQueries.slice(0, 3).map(query => retrieveContext(userId, query, null, {
             user: req.user,
             scope: effectiveRagScope,
             ...(routeQueryVector?.length ? { queryVector: routeQueryVector } : {})
-        }) : Promise.resolve(null)
+        }))).then(contexts => mergeRagContexts(contexts, { maxCitations: Math.max(8, (getModelContextBudget(modelCfg).inputBudget > 0 ? 12 : 8)) }))
+        : Promise.resolve(null);
+    const [memoryResult, ragResult] = await Promise.allSettled([
+        !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
+        ragPromise
     ]);
 
     try {
@@ -555,9 +562,23 @@ async function assembleChatContext({
         throw e;
     }
 
+    const finalRagContext = shouldRetrieveRag && ragResult?.status === 'fulfilled' ? ragResult.value || '' : '';
     return {
         visionHistory,
         effectiveUserPrompt,
+        retrievalQuery,
+        retrievalPlan,
+        ragContext: finalRagContext,
+        ragSourceSummary: finalRagContext ? summarizeRagContextSources(finalRagContext, 20) : null,
+        ragGrounding: {
+            required: Boolean(
+                shouldRetrieveRag
+                && ragResult?.status === 'fulfilled'
+                && ragResult.value
+            ),
+            query: retrievalQuery,
+            followUpResolved: retrievalPlan.followUpResolved
+        },
         disableChatThinking,
         chatStepContext,
         routePlan

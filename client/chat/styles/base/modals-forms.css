@@ -1092,6 +1092,13 @@ body.auth-active {
     border: 1px solid var(--border);
     overflow: auto;
 }
+#route-feedback-detail-modal .route-feedback-detail-dialog,
+.route-feedback-detail-dialog,
+#route-feedback-detail-modal .route-feedback-query-card,
+#route-feedback-detail-modal .route-feedback-note-card,
+#route-feedback-detail-modal .route-feedback-review-note-input {
+    text-align: left !important;
+}
 .subtitle { margin-bottom: 25px; color: var(--text-muted); font-size: 1rem; }
 
 /* 表单输入框样式 - 适配深色模式 */

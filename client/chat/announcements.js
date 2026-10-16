@@ -26,6 +26,9 @@
 
     const state = {
         items: [],
+        historyItems: [],
+        activeTab: 'all',
+        selectedModalItem: null,
         polling: null,
         initialized: false,
         loginItems: [],
@@ -63,6 +66,48 @@
         return data;
     };
 
+    function getAllAnnouncements() {
+        const map = new Map();
+        (state.items || []).forEach(it => {
+            if (it && it.id) map.set(String(it.id), { ...it });
+        });
+        (state.historyItems || []).forEach(it => {
+            if (!it || !it.id) return;
+            const key = String(it.id);
+            if (!map.has(key)) {
+                map.set(key, { ...it });
+            } else {
+                const existing = map.get(key);
+                map.set(key, { ...it, ...existing });
+            }
+        });
+        return Array.from(map.values()).sort((a, b) => {
+            const priorityScore = { critical: 0, high: 1, normal: 2, low: 3 };
+            const pa = priorityScore[a.priority] ?? 2;
+            const pb = priorityScore[b.priority] ?? 2;
+            if (pa !== pb) return pa - pb;
+            const ta = new Date(a.startsAt || a.createdAt || 0).getTime();
+            const tb = new Date(b.startsAt || b.createdAt || 0).getTime();
+            return tb - ta;
+        });
+    }
+
+    function openAnnouncementDetail(id) {
+        const all = getAllAnnouncements();
+        const item = all.find(it => String(it.id) === String(id));
+        if (!item) return;
+        state.selectedModalItem = item;
+        renderAnnouncements();
+        if (!item.readAt) {
+            markAnnouncementRead(item.id);
+        }
+    }
+
+    function closeAnnouncementDetail() {
+        state.selectedModalItem = null;
+        renderAnnouncements();
+    }
+
     function mountAnnouncementBell() {
         const bell = document.getElementById('announcement-bell');
         if (!bell) return;
@@ -80,7 +125,36 @@
         }
     }
 
+    function bindAnnouncementTriggers() {
+        const toggleCenter = (forceOpen) => {
+            const center = document.getElementById('announcement-center');
+            if (!center) return;
+            const isHidden = center.classList.contains('hidden');
+            const shouldOpen = forceOpen !== undefined ? forceOpen : isHidden;
+            center.classList.toggle('hidden', !shouldOpen);
+            if (shouldOpen) {
+                loadActiveAnnouncements();
+            }
+        };
+
+        const triggers = [
+            document.getElementById('announcement-bell'),
+            document.getElementById('personal-announcement-btn'),
+            document.getElementById('chat-sidebar-announcement-btn')
+        ];
+        triggers.forEach(trigger => {
+            if (trigger && !trigger.dataset.announcementBound) {
+                trigger.dataset.announcementBound = 'true';
+                trigger.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleCenter();
+                });
+            }
+        });
+    }
+
     function ensureShell() {
+        bindAnnouncementTriggers();
         if (document.getElementById('announcement-root')) {
             mountAnnouncementBell();
             return;
@@ -89,18 +163,37 @@
         root.id = 'announcement-root';
         PivotSafeHtml.setHtml(root, `
             <div id="announcement-banner" class="announcement-banner hidden"></div>
-            <button id="announcement-bell" class="announcement-bell hidden" type="button" title="公告中心" aria-label="公告中心">
+            <button id="announcement-bell" class="btn-secondary announcement-bell hidden" type="button" title="公告中心" aria-label="公告中心">
                 <span class="announcement-bell-dot hidden" id="announcement-bell-dot"></span>
                 <span>公告</span>
             </button>
             <aside id="announcement-center" class="announcement-center hidden" aria-label="公告中心">
                 <div class="announcement-center-head">
-                    <div>
-                        <h3>公告中心</h3>
+                    <div class="announcement-center-head-title">
+                        <div class="announcement-center-title-row">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                            <h3>公告中心</h3>
+                        </div>
                         <p id="announcement-center-summary">暂无公告</p>
                     </div>
-                    <button id="announcement-center-close" class="btn-secondary" type="button">关闭</button>
+                    <div class="announcement-center-head-actions">
+                        <button id="announcement-mark-all-read" class="btn-secondary announcement-head-btn" type="button" title="全部标为已读">全部已读</button>
+                        <button id="announcement-center-close" class="btn-secondary announcement-head-close" type="button" aria-label="关闭公告中心">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                    </div>
                 </div>
+                <nav class="announcement-center-tabs" aria-label="公告分类">
+                    <button type="button" class="btn-secondary announcement-tab-btn active" data-announcement-tab="all">
+                        全部 <span class="tab-badge" id="announcement-tab-all-count">0</span>
+                    </button>
+                    <button type="button" class="btn-secondary announcement-tab-btn" data-announcement-tab="unread">
+                        未读 <span class="tab-badge" id="announcement-tab-unread-count">0</span>
+                    </button>
+                    <button type="button" class="btn-secondary announcement-tab-btn" data-announcement-tab="history">
+                        历史已读 <span class="tab-badge" id="announcement-tab-history-count">0</span>
+                    </button>
+                </nav>
                 <div id="announcement-center-list" class="announcement-center-list"></div>
             </aside>
             <div id="announcement-ack-modal" class="announcement-ack-modal hidden">
@@ -114,74 +207,197 @@
         `);
         document.body.appendChild(root);
         mountAnnouncementBell();
-        document.getElementById('announcement-bell')?.addEventListener('click', () => {
-            document.getElementById('announcement-center')?.classList.toggle('hidden');
-            markVisibleAnnouncementsRead();
-        });
+        bindAnnouncementTriggers();
+
         document.getElementById('announcement-center-close')?.addEventListener('click', () => {
             document.getElementById('announcement-center')?.classList.add('hidden');
         });
+
+        document.getElementById('announcement-mark-all-read')?.addEventListener('click', async () => {
+            await markVisibleAnnouncementsRead();
+        });
+
         document.getElementById('announcement-ack-btn')?.addEventListener('click', async () => {
             const id = document.getElementById('announcement-ack-btn')?.dataset.id;
             if (!id) return;
             await ackAnnouncement(id);
         });
+
+        document.getElementById('announcement-banner')?.addEventListener('click', async (event) => {
+            if (event.target.id === 'announcement-banner') {
+                if (state.selectedModalItem) {
+                    closeAnnouncementDetail();
+                    return;
+                }
+                const visible = (state.items || []).filter(shouldShowAnnouncement);
+                const top = visible.find(item => item.requireAck && !item.acknowledgedAt) || visible[0];
+                if (top && canDismissAnnouncement(top)) {
+                    await dismissAnnouncement(top.id);
+                }
+            }
+        });
+
         document.addEventListener('click', async (event) => {
+            const tabBtn = event.target.closest('[data-announcement-tab]');
+            if (tabBtn) {
+                event.stopPropagation();
+                state.activeTab = tabBtn.dataset.announcementTab || 'all';
+                renderAnnouncements();
+                return;
+            }
+
+            const personalAction = event.target.closest('[data-personal-action="open-announcements"]');
+            if (personalAction) {
+                event.stopPropagation();
+                const center = document.getElementById('announcement-center');
+                if (center) {
+                    center.classList.toggle('hidden');
+                    if (!center.classList.contains('hidden')) {
+                        loadActiveAnnouncements();
+                    }
+                }
+                return;
+            }
+
             const action = event.target.closest('[data-announcement-action]');
-            if (!action) return;
-            const id = action.dataset.announcementId;
-            if (action.dataset.announcementAction === 'dismiss') await dismissAnnouncement(id);
-            if (action.dataset.announcementAction === 'ack') await ackAnnouncement(id);
-            if (action.dataset.announcementAction === 'read') await markAnnouncementRead(id);
+            if (action) {
+                const id = action.dataset.announcementId;
+                const act = action.dataset.announcementAction;
+                if (act === 'dismiss') await dismissAnnouncement(id);
+                else if (act === 'ack') await ackAnnouncement(id);
+                else if (act === 'read') await markAnnouncementRead(id);
+                else if (act === 'view') {
+                    openAnnouncementDetail(id);
+                } else if (act === 'close-modal') {
+                    closeAnnouncementDetail();
+                }
+                return;
+            }
+
+            const cardEl = event.target.closest('.announcement-card');
+            if (cardEl && cardEl.dataset.announcementId) {
+                openAnnouncementDetail(cardEl.dataset.announcementId);
+                return;
+            }
+
+            const center = document.getElementById('announcement-center');
+            if (center && !center.classList.contains('hidden')) {
+                if (!event.target.closest('#announcement-center') &&
+                    !event.target.closest('#announcement-bell') &&
+                    !event.target.closest('#personal-announcement-btn') &&
+                    !event.target.closest('#chat-sidebar-announcement-btn')) {
+                    center.classList.add('hidden');
+                }
+            }
         });
     }
 
     function renderAnnouncements() {
         ensureShell();
-        const active = state.items || [];
-        const visible = active.filter(shouldShowAnnouncement);
-        const unread = visible.filter(item => !item.readAt).length;
-        const requiresAck = visible.filter(item => item.requireAck && !item.acknowledgedAt);
-        const banner = document.getElementById('announcement-banner');
-        const bell = document.getElementById('announcement-bell');
-        const dot = document.getElementById('announcement-bell-dot');
-        const summary = document.getElementById('announcement-center-summary');
-        const list = document.getElementById('announcement-center-list');
-        bell?.classList.toggle('hidden', visible.length === 0);
-        dot?.classList.toggle('hidden', unread === 0);
-        if (summary) summary.textContent = visible.length ? `${visible.length} 条有效公告，${unread} 条未读` : '暂无公告';
+        const all = getAllAnnouncements();
+        const unreadCount = all.filter(item => !item.readAt).length;
+        const unreadItems = all.filter(item => !item.readAt);
+        const historyItems = all.filter(item => item.readAt || item.dismissedAt);
 
-        const top = visible[0];
+        const bell = document.getElementById('announcement-bell');
+        const personalBtn = document.getElementById('personal-announcement-btn');
+        const chatBtn = document.getElementById('chat-sidebar-announcement-btn');
+        const dot = document.getElementById('announcement-bell-dot');
+        const personalDot = document.getElementById('personal-announcement-dot');
+        const chatDot = document.getElementById('chat-sidebar-announcement-dot');
+
+        if (bell) bell.classList.toggle('hidden', all.length === 0);
+        if (personalBtn) personalBtn.classList.remove('hidden');
+        if (chatBtn) chatBtn.classList.remove('hidden');
+        dot?.classList.toggle('hidden', unreadCount === 0);
+        personalDot?.classList.toggle('hidden', unreadCount === 0);
+        chatDot?.classList.toggle('hidden', unreadCount === 0);
+
+        const summary = document.getElementById('announcement-center-summary');
+        if (summary) summary.textContent = all.length ? `共 ${all.length} 条公告 · ${unreadCount} 条未读` : '暂无系统公告';
+
+        const tabAllCount = document.getElementById('announcement-tab-all-count');
+        const tabUnreadCount = document.getElementById('announcement-tab-unread-count');
+        const tabHistoryCount = document.getElementById('announcement-tab-history-count');
+        if (tabAllCount) tabAllCount.textContent = String(all.length);
+        if (tabUnreadCount) tabUnreadCount.textContent = String(unreadCount);
+        if (tabHistoryCount) tabHistoryCount.textContent = String(historyItems.length);
+
+        document.querySelectorAll('.announcement-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.announcementTab === state.activeTab);
+        });
+
+        const banner = document.getElementById('announcement-banner');
+        const visible = (state.items || []).filter(shouldShowAnnouncement);
+        const autoPopupTop = visible.find(item => item.requireAck && !item.acknowledgedAt) || visible[0];
+        const displayItem = state.selectedModalItem || autoPopupTop;
+
         if (banner) {
-            banner.className = `announcement-banner ${top ? `is-${top.priority || 'normal'}` : 'hidden'}`;
-            PivotSafeHtml.setHtml(banner, top ? `
-                <div>
-                    <strong>${esc(top.title)}</strong>
-                    <span>${esc(top.content)}</span>
-                </div>
-                <div class="announcement-banner-actions">
-                    ${top.requireAck && !top.acknowledgedAt ? `<button class="btn-primary" type="button" data-announcement-action="ack" data-announcement-id="${top.id}">确认</button>` : ''}
-                    ${canDismissAnnouncement(top) ? `<button class="btn-secondary" type="button" data-announcement-action="dismiss" data-announcement-id="${top.id}">不再提示</button>` : ''}
+            banner.className = `announcement-banner ${displayItem ? '' : 'hidden'}`;
+            const isManualView = Boolean(state.selectedModalItem);
+            PivotSafeHtml.setHtml(banner, displayItem ? `
+                <div class="announcement-banner-dialog is-${esc(displayItem.priority || 'normal')}" role="dialog" aria-modal="true" aria-labelledby="announcement-banner-title">
+                    <div class="announcement-banner-head">
+                        <div class="announcement-banner-meta">
+                            <span class="announcement-chip">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                <span>${esc(TYPE_LABELS[displayItem.type] || '系统')} · ${esc(PRIORITY_LABELS[displayItem.priority] || '普通')}</span>
+                            </span>
+                            ${displayItem.startsAt || displayItem.createdAt ? `<time class="announcement-banner-time">${esc(formatDate(displayItem.startsAt || displayItem.createdAt))}</time>` : ''}
+                        </div>
+                    </div>
+                    <h3 id="announcement-banner-title" class="announcement-banner-title">${esc(displayItem.title)}</h3>
+                    <div class="announcement-banner-body">
+                        <div class="announcement-banner-content">${esc(displayItem.content)}</div>
+                    </div>
+                    <div class="announcement-banner-footer">
+                        <div class="announcement-banner-actions">
+                            ${isManualView ? `
+                                ${displayItem.requireAck && !displayItem.acknowledgedAt
+                                    ? `<button class="btn-primary" type="button" data-announcement-action="ack" data-announcement-id="${displayItem.id}">我已知晓并确认</button>`
+                                    : ''
+                                }
+                                <button class="btn-secondary" type="button" data-announcement-action="close-modal" data-announcement-id="${displayItem.id}">关闭</button>
+                            ` : `
+                                ${canDismissAnnouncement(displayItem) ? `<button class="btn-secondary" type="button" data-announcement-action="dismiss" data-announcement-id="${displayItem.id}">不再提示</button>` : ''}
+                                ${displayItem.requireAck && !displayItem.acknowledgedAt
+                                    ? `<button class="btn-primary" type="button" data-announcement-action="ack" data-announcement-id="${displayItem.id}">我已知晓并确认</button>`
+                                    : `<button class="btn-primary" type="button" data-announcement-action="dismiss" data-announcement-id="${displayItem.id}">我知道了</button>`
+                                }
+                            `}
+                        </div>
+                    </div>
                 </div>
             ` : '');
         }
 
+        const list = document.getElementById('announcement-center-list');
         if (list) {
-            if (!visible.length) {
-                PivotSafeHtml.setHtml(list, '<div class="announcement-empty">暂无有效公告</div>');
+            let activeList = all;
+            if (state.activeTab === 'unread') activeList = unreadItems;
+            if (state.activeTab === 'history') activeList = historyItems;
+
+            if (!activeList.length) {
+                const emptyMsg = state.activeTab === 'unread' ? '没有未读公告' : (state.activeTab === 'history' ? '暂无历史公告' : '暂无系统公告');
+                PivotSafeHtml.setHtml(list, `<div class="announcement-empty">${esc(emptyMsg)}</div>`);
             } else {
-                PivotSafeHtml.setHtml(list, visible.map(item => `
-                    <article class="announcement-card ${item.readAt ? '' : 'is-unread'} is-${esc(item.priority)}">
+                PivotSafeHtml.setHtml(list, activeList.map(item => `
+                    <article class="announcement-card ${item.readAt ? 'is-read' : 'is-unread'} is-${esc(item.priority || 'normal')}" data-announcement-id="${item.id}">
                         <div class="announcement-card-head">
-                            <span class="announcement-chip">${TYPE_LABELS[item.type] || '公告'} · ${PRIORITY_LABELS[item.priority] || '普通'}</span>
-                            <time>${formatDate(item.startsAt || item.createdAt)}</time>
+                            <div class="announcement-card-tags">
+                                <span class="announcement-chip">${esc(TYPE_LABELS[item.type] || '公告')} · ${esc(PRIORITY_LABELS[item.priority] || '普通')}</span>
+                                <span class="announcement-status-tag ${item.readAt ? 'is-read' : 'is-unread'}">
+                                    ${item.requireAck && item.acknowledgedAt ? '已确认' : (item.readAt ? '已读' : '未读')}
+                                </span>
+                            </div>
+                            <time class="announcement-card-time">${esc(formatDate(item.startsAt || item.createdAt))}</time>
                         </div>
-                        <h4>${esc(item.title)}</h4>
-                        <p>${esc(item.content)}</p>
-                        <div class="announcement-card-actions">
-                            ${item.requireAck && !item.acknowledgedAt ? `<button class="btn-primary" type="button" data-announcement-action="ack" data-announcement-id="${item.id}">确认</button>` : ''}
-                            ${!item.readAt ? `<button class="btn-secondary" type="button" data-announcement-action="read" data-announcement-id="${item.id}">标为已读</button>` : ''}
-                            ${canDismissAnnouncement(item) ? `<button class="btn-secondary" type="button" data-announcement-action="dismiss" data-announcement-id="${item.id}">不再提示</button>` : ''}
+                        <h4 class="announcement-card-title">${esc(item.title)}</h4>
+                        <p class="announcement-card-snippet">${esc(item.content)}</p>
+                        <div class="announcement-card-actions" onclick="event.stopPropagation()">
+                            <button class="btn-primary announcement-card-btn" type="button" data-announcement-action="view" data-announcement-id="${item.id}">查看详情</button>
+                            ${!item.readAt ? `<button class="btn-secondary announcement-card-btn" type="button" data-announcement-action="read" data-announcement-id="${item.id}">标为已读</button>` : ''}
+                            ${item.requireAck && !item.acknowledgedAt ? `<button class="btn-primary announcement-card-btn" type="button" data-announcement-action="ack" data-announcement-id="${item.id}">确认</button>` : ''}
                         </div>
                     </article>
                 `).join(''));
@@ -189,15 +405,8 @@
         }
 
         const ackModal = document.getElementById('announcement-ack-modal');
-        const ackItem = requiresAck[0];
-        if (ackModal && ackItem) {
-            document.getElementById('announcement-ack-type').textContent = `${TYPE_LABELS[ackItem.type] || '公告'} · ${PRIORITY_LABELS[ackItem.priority] || '普通'}`;
-            document.getElementById('announcement-ack-title').textContent = ackItem.title || '';
-            document.getElementById('announcement-ack-content').textContent = ackItem.content || '';
-            document.getElementById('announcement-ack-btn').dataset.id = String(ackItem.id);
-            ackModal.classList.remove('hidden');
-        } else {
-            ackModal?.classList.add('hidden');
+        if (ackModal) {
+            ackModal.classList.add('hidden');
         }
     }
 
@@ -373,8 +582,12 @@
     async function loadActiveAnnouncements() {
         if (!getCurrentUser() || typeof apiFetch !== 'function') return;
         try {
-            const data = await apiJson(`${API_BASE}/announcements/active`);
-            state.items = data.data || [];
+            const [activeRes, historyRes] = await Promise.all([
+                apiJson(`${API_BASE}/announcements/active?includeDismissed=true`).catch(() => ({ data: [] })),
+                apiJson(`${API_BASE}/announcements/history`).catch(() => ({ data: [] }))
+            ]);
+            state.items = activeRes.data || [];
+            state.historyItems = historyRes.data || [];
             renderAnnouncements();
         } catch (e) {
             console.warn('加载活跃公告失败:', e);
@@ -395,12 +608,15 @@
 
     async function dismissAnnouncement(id) {
         if (!id) return;
+        state.selectedModalItem = null;
         await apiJson(`${API_BASE}/announcements/${encodeURIComponent(id)}/dismiss`, { method: 'POST' });
         await loadActiveAnnouncements();
     }
 
     async function markVisibleAnnouncementsRead() {
-        const unread = (state.items || []).filter(item => shouldShowAnnouncement(item) && !item.readAt).slice(0, 20);
+        const all = getAllAnnouncements();
+        const unread = all.filter(item => !item.readAt).slice(0, 20);
+        if (!unread.length) return;
         await Promise.all(unread.map(item => apiJson(`${API_BASE}/announcements/${encodeURIComponent(item.id)}/read`, { method: 'POST' }).catch(() => null)));
         await loadActiveAnnouncements();
     }

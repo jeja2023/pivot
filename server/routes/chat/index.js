@@ -36,6 +36,7 @@ const {
     injectRagContextBeforeLatestUser,
     summarizeRagContextSources
 } = require('../../services/chat-rag-context');
+const { createChatRagResponseFlow } = require('../../services/chat-rag-grounding');
 const {
     saveUserMessage,
     touchSession,
@@ -680,11 +681,8 @@ function createChatRouter({
                 signal: abortController.signal
             }), { modelId: modelCfg.id, messageCount: visionHistory.length });
 
-            const writeContentSse = (content) => {
-                splitStreamTextForDisplay(content).forEach(chunk => {
-                    writeSse(JSON.stringify({ content: chunk }));
-                });
-            };
+            const ragResponse = createChatRagResponseFlow({ contextResult, routePlan, modelCfg, user: req.user, userId, sessionId, question: modelContent, releaseSemaphore, writeSse, splitStreamTextForDisplay, log: req.log });
+            const writeContentSse = ragResponse.writeContent;
             const visibleReasoningFilter = disableChatThinking ? createVisibleReasoningStreamFilter() : null;
             const internalScaffoldFilter = createInternalAgentScaffoldStreamFilter();
             const providerState = createProviderEventStateMachine({ maxRecentEvents: 128 });
@@ -812,6 +810,9 @@ function createChatRouter({
                         if (visibleTail) writeContentSse(visibleTail);
                     }
                     assistantContent = sanitizeUserVisibleText(assistantContent);
+                    const groundedRagAnswer = await ragResponse.ground(assistantContent);
+                    assistantContent = groundedRagAnswer.assistantContent;
+                    const ragGrounding = groundedRagAnswer.ragGrounding;
                     const endedAt = Date.now();
                     const stats = buildAssistantSpeedStats({
                         assistantContent,
@@ -829,6 +830,8 @@ function createChatRouter({
                         visibleContent, assistantContent, assistantTokens, costTime, tokensPerSec, routePlan,
                         providerUsage: apiUsage || providerSnapshot.usage?.raw || null
                     });
+
+                    await ragResponse.audit(assistantContent, ragGrounding, apiUsage || providerSnapshot.usage?.raw || {});
 
                     req.log.info({ length: assistantContent.length }, '生成结束');
                     recordModelSuccess(modelCfg, endedAt - requestStartedAt);
@@ -856,7 +859,8 @@ function createChatRouter({
                         costTime,
                         tps: tokensPerSec,
                         content: assistantContent,
-                        routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
+                        routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null,
+                        ragGrounding: ragGrounding?.grounding || null
                     }));
                     writeSse('[DONE]');
                     res.end();

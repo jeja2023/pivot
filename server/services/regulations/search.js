@@ -16,7 +16,7 @@ const { rerankCandidates } = require('../rerank-client');
 const { readTypedEnv } = require('../../config/env-registry');
 const { logger } = require('../../logger');
 
-const MAX_REGULATION_SEARCH_RESULTS = 50;
+const MAX_REGULATION_SEARCH_RESULTS = 100;
 const MAX_REGULATION_RETRIEVAL_CANDIDATES = 300;
 const RECIPROCAL_RANK_K = 60;
 
@@ -37,9 +37,11 @@ function normalizeSearchStatus(value) {
     return ['active', 'archived'].includes(status) ? status : '';
 }
 
-function buildArticleFilters({ documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', includeArchived = false } = {}) {
-    const filters = ['a.version_id = d.current_version_id', 'd.deleted_at IS NULL'];
+function buildArticleFilters({ documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', includeArchived = false } = {}) {
+    const normalizedVersionId = normalizeRegulationId(versionId);
+    const filters = [normalizedVersionId ? 'a.version_id = ?' : 'a.version_id = d.current_version_id', 'd.deleted_at IS NULL'];
     const params = [];
+    if (normalizedVersionId) params.push(normalizedVersionId);
     const normalizedDocId = normalizeRegulationId(documentId);
     const normalizedCategory = normalizeRegulationField(category, 120);
     const normalizedIssuingBody = normalizeRegulationField(issuingBody, 120);
@@ -80,10 +82,17 @@ function buildArticleSelect(scoreSql = '0 AS score') {
         d.status AS document_status,
         v.id AS version_id,
         v.version_label,
+        v.effective_from,
+        v.effective_to,
+        v.effect_status,
+        v.review_status,
         a.id AS article_id,
         a.sort_order,
         a.article_label,
         a.article_title,
+        a.heading_path,
+        a.page_start,
+        a.page_end,
         a.content,
         ${scoreSql}
     `;
@@ -120,6 +129,7 @@ function formatSearchRows(rows, searchQuery, retrieval = 'keyword') {
 async function searchRegulationArticles({
     query: searchQuery,
     documentId = null,
+    versionId = null,
     category = '',
     issuingBody = '',
     jurisdiction = '',
@@ -132,14 +142,14 @@ async function searchRegulationArticles({
 } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit, 8, candidateMode ? MAX_REGULATION_RETRIEVAL_CANDIDATES : MAX_REGULATION_SEARCH_RESULTS);
-    const { filters, params } = buildArticleFilters({ documentId, category, issuingBody, jurisdiction, status, includeArchived });
+    const { filters, params } = buildArticleFilters({ documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived });
     const whereBase = `WHERE ${filters.join(' AND ')}`;
     if (!normalizedQuery) {
         const rows = await queryFn(`
             SELECT ${buildArticleSelect()}
             FROM regulation_documents d
-            JOIN regulation_versions v ON v.id = d.current_version_id
-            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id
+            JOIN regulation_versions v ON v.id = a.version_id
             ${whereBase}
             ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
@@ -187,8 +197,8 @@ async function searchRegulationArticles({
         const rows = await queryFn(`
             SELECT ${buildArticleSelect(`${relevanceSql} AS score`)}
             FROM regulation_documents d
-            JOIN regulation_versions v ON v.id = d.current_version_id
-            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id
+            JOIN regulation_versions v ON v.id = a.version_id
             ${whereBase} AND ${matchSql}
             ORDER BY
                 CASE WHEN ${titleOrAliasFirstSql} THEN 1 ELSE 0 END DESC,
@@ -204,8 +214,8 @@ async function searchRegulationArticles({
         const rows = await queryFn(`
             SELECT ${buildArticleSelect('0 AS score')}
             FROM regulation_documents d
-            JOIN regulation_versions v ON v.id = d.current_version_id
-            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id
+            JOIN regulation_versions v ON v.id = a.version_id
             ${whereBase} AND ${matchSql}
             ORDER BY d.updated_at DESC, a.sort_order ASC, a.id ASC
             LIMIT ?
@@ -226,8 +236,8 @@ async function searchRegulationArticlesByVector(queryVector, options = {}) {
         const rows = await queryFn(`
             SELECT ${buildArticleSelect('1 - (a.embedding::vector <=> ?::vector) AS vector_score')}
             FROM regulation_documents d
-            JOIN regulation_versions v ON v.id = d.current_version_id
-            JOIN regulation_articles a ON a.document_id = d.id AND a.version_id = d.current_version_id
+            JOIN regulation_articles a ON a.document_id = d.id
+            JOIN regulation_versions v ON v.id = a.version_id
             WHERE ${filters.join(' AND ')}
               AND a.embedding IS NOT NULL
               AND a.embedding_profile = ?
@@ -298,10 +308,10 @@ async function rerankRegulationCandidates(query, candidates) {
 
 // 混合检索采用“词法、向量独立召回 + 倒数排名融合”。词法命中没有向量时仍会保留，
 // 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
-async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
+async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit);
-    const sharedOptions = { query: normalizedQuery, documentId, category, issuingBody, jurisdiction, status, includeArchived };
+    const sharedOptions = { query: normalizedQuery, documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived };
     const budget = regulationHybridSearchBudget();
 
     if (!normalizedQuery) {
