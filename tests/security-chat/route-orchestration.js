@@ -557,7 +557,7 @@ test('聊天路由在模型不可用时返回模型缺失错误', async () => {
 });
 
 test('聊天路由在知识库命中时下发引用来源摘要', async () => {
-    const upstream = await startFakeUpstream({ replyChunks: ['已依据知识库回答。[引用 1]'] });
+    const upstream = await startFakeUpstream({ replyChunks: ['已依据知识库回答：出差住宿标准按城市分级执行。[引用 1]'] });
     const fixture = createChatFixture({ prefix: 'chat_rag_hit', upstreamUrl: upstream.url });
     const ragContext = [
         '[引用 1 | 来源: 差旅报销制度.pdf] 出差住宿标准按城市分级执行。',

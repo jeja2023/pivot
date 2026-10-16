@@ -42,6 +42,20 @@ async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usag
                 if (parsed && parsed.stream === false) {
                     res.statusCode = 200;
                     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    let content = replyChunks.join('');
+                    const isSemanticVerifier = parsed.messages?.some(m => String(m.content || '').includes('知识库证据蕴含核验器'));
+                    if (isSemanticVerifier) {
+                        try {
+                            const userMsg = parsed.messages.find(m => m.role === 'user');
+                            const userPayload = JSON.parse(userMsg?.content || '{}');
+                            const claims = Array.isArray(userPayload.claims) ? userPayload.claims : [{ index: 1, citedSourceIds: [1] }];
+                            content = JSON.stringify({
+                                claims: claims.map(c => ({ index: c.index, supported: true, sourceIds: c.citedSourceIds || [1] }))
+                            });
+                        } catch (_) {
+                            content = JSON.stringify({ claims: [{ index: 1, supported: true, sourceIds: [1] }] });
+                        }
+                    }
                     res.end(JSON.stringify({
                         id: 'fake-cmpl-1',
                         object: 'chat.completion',
@@ -51,7 +65,7 @@ async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usag
                             index: 0,
                             message: {
                                 role: 'assistant',
-                                content: replyChunks.join('')
+                                content
                             },
                             finish_reason: 'stop'
                         }],

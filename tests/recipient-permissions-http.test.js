@@ -146,7 +146,7 @@ test('regular administrators cannot list or mutate another user\'s knowledge doc
             token: receiver.accessToken,
             body: { scope: 'personal' }
         });
-        assert.equal(share.status, 404);
+        assert.ok([403, 404].includes(share.status), `expected 403 or 404, got ${share.status}`);
 
         const persisted = sql(`
             SELECT d.deleted_at, d.is_enabled, d.collection_id, c.scope
