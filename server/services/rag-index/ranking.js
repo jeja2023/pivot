@@ -180,7 +180,6 @@ module.exports = {
     attachCitationConfidence,
     calculateCitationConfidence,
     feedbackAdjustment,
-    matchRequiredTerms,
     rejectLowConfidenceResults,
     rerankHybridCandidates
 };
