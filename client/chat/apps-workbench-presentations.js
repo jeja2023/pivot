@@ -174,18 +174,9 @@
         return { id, type: 'text', x, y, width, height, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text }, style: { fontFamily: 'Microsoft YaHei', fontSize: 20, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, italic: false, underline: false, bullet: false, padding: 0, ...style } };
     }
     const PRESENTATION_LAYOUT_LABELS = Object.freeze({
-        cover: '封面页',
-        section: '章节过渡页',
-        'title-content': '标题与正文',
-        'two-column': '双栏图文',
-        'three-card': '三栏卡片',
-        'image-focus': '大图重点页',
-        chart: '数据图表页',
-        'data-chart': '数据图表页',
-        table: '数据表格页',
-        'data-table': '数据表格页',
-        quote: '引用重点页',
-        summary: '总结行动页'
+        cover: '封面页', section: '章节过渡页', 'title-content': '标题与正文', 'two-column': '双栏图文',
+        'three-card': '三栏卡片', 'image-focus': '大图重点页', chart: '数据图表页', 'data-chart': '数据图表页',
+        table: '数据表格页', 'data-table': '数据表格页', quote: '引用重点页', summary: '总结行动页'
     });
     function presentationLayoutLabel(layoutId) {
         const id = String(layoutId || '').trim();
@@ -953,15 +944,9 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-presenter-btn') || event.target.closest('#presentation-notes-presenter-btn')) { openPresenterMode().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-delivery-guide-btn')) { presenter()?.loadDeliveryGuide?.(state, { toast }); return; }
             if (event.target.closest('#presentation-remote-start-btn')) { startRemotePresentation().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-remote-stop-btn')) { stopRemotePresentation().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-presenter-prev-btn')) { movePresenterSlide(-1); return; }
-            if (event.target.closest('#presentation-presenter-next-btn')) { movePresenterSlide(1); return; }
-            if (event.target.closest('#presentation-presenter-close-btn')) { closePresenterMode(); return; }
-            if (event.target.closest('#presentation-export-options-btn')) { syncExportOptionsForm(); byId('presentation-export-options-modal')?.classList.remove('hidden'); return; }
-            if (event.target.closest('#presentation-export-options-cancel-btn')) { byId('presentation-export-options-modal')?.classList.add('hidden'); return; }
-            if (event.target.closest('#presentation-export-options-save-btn')) { saveExportOptions(); return; }
-            if (event.target.closest('#presentation-export-pptx-btn')) { exportPresentation('pptx').catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-export-pdf-btn')) { exportPresentation('pdf').catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-export-png-btn')) { exportPresentation('png').catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-presenter-prev-btn')) { movePresenterSlide(-1); return; } if (event.target.closest('#presentation-presenter-next-btn')) { movePresenterSlide(1); return; } if (event.target.closest('#presentation-presenter-close-btn')) { closePresenterMode(); return; }
+            if (event.target.closest('#presentation-export-options-btn')) { syncExportOptionsForm(); byId('presentation-export-options-modal')?.classList.remove('hidden'); return; } if (event.target.closest('#presentation-export-options-cancel-btn')) { byId('presentation-export-options-modal')?.classList.add('hidden'); return; } if (event.target.closest('#presentation-export-options-save-btn')) { saveExportOptions(); return; }
+            if (event.target.closest('#presentation-export-pptx-btn')) { exportPresentation('pptx').catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-export-pdf-btn')) { exportPresentation('pdf').catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-export-png-btn')) { exportPresentation('png').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-ai-rewrite-btn')) { rewriteCurrentSlide().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-ai-layout-variants-btn')) { presenter()?.generateLayoutVariants?.(state, { renderEditor, toast }); return; }
         if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
@@ -990,9 +975,7 @@ function setSelectedImageAsCover() {
         view.addEventListener('keydown', event => {
             const modal = byId('presentation-presenter-modal');
             if (!modal || modal.classList.contains('hidden')) return;
-            if (event.key === 'Escape') { event.preventDefault(); closePresenterMode(); }
-            if (event.key === 'ArrowLeft') { event.preventDefault(); movePresenterSlide(-1); }
-            if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); movePresenterSlide(1); }
+            if (event.key === 'Escape') { event.preventDefault(); closePresenterMode(); } else if (event.key === 'ArrowLeft') { event.preventDefault(); movePresenterSlide(-1); } else if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); movePresenterSlide(1); }
         });
         window.addEventListener('beforeunload', () => { stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat?.(); closePresenterMode(); });
     }

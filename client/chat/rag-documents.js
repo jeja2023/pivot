@@ -202,8 +202,7 @@ function renderRagTagsCell(doc = {}) {
 
 function renderRagUploaderCell(doc = {}) {
     const uploader = doc.uploader && typeof doc.uploader === 'object' ? doc.uploader : {};
-    const displayName = String(uploader.displayName || uploader.nickname || uploader.username || '').trim()
-        || `用户 #${Number(doc.user_id) || '-'}`;
+    const displayName = String(uploader.displayName || uploader.nickname || uploader.username || '').trim() || `用户 #${Number(doc.user_id) || '-'}`;
     const username = String(uploader.username || '').trim();
     const title = username && username !== displayName ? `账号：${username}` : displayName;
     return `<span class="knowledge-uploader-name" title="${window.Pivot.legacy.escapeRagAttr(title)}">${window.Pivot.legacy.escapeRagHtml(displayName)}</span>`;
@@ -215,18 +214,9 @@ function getCachedKnowledgeDoc(id) {
     return ragDocsCache.find(doc => Number(doc.id) === docId) || null;
 }
 
-function getRagCollectionOptionsHtml(selectedId = '', {
-    includeAll = false,
-    allLabel = '全部知识库',
-    unassignedLabel = '未归类'
-} = {}) {
+function getRagCollectionOptionsHtml(selectedId = '', { includeAll = false, allLabel = '全部知识库', unassignedLabel = '未归类' } = {}) {
     const selected = normalizeRagCollectionId(selectedId);
-    const options = [];
-    if (includeAll) {
-        options.push(`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(allLabel)}</option>`);
-    } else {
-        options.push(`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(unassignedLabel)}</option>`);
-    }
+    const options = [`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(includeAll ? allLabel : unassignedLabel)}</option>`];
     ragCollections.forEach(collection => {
         const id = normalizeRagCollectionId(collection.id);
         if (!id) return;
@@ -244,11 +234,7 @@ function setSelectOptions(select, html, fallback = '') {
     select.value = Array.from(select.options).some(option => option.value === previous) ? previous : fallback;
 }
 
-function getRagTagOptionsHtml(selectedTag = '', {
-    includeAll = true,
-    allLabel = '全部标签',
-    collectionId = ''
-} = {}) {
+function getRagTagOptionsHtml(selectedTag = '', { includeAll = true, allLabel = '全部标签', collectionId = '' } = {}) {
     const selected = normalizeRagTag(selectedTag);
     const options = includeAll ? [`<option value="" ${selected ? '' : 'selected'}>${window.Pivot.legacy.escapeRagHtml(allLabel)}</option>`] : [];
     getRagTagsForCollection(collectionId).forEach(item => {
@@ -626,10 +612,7 @@ async function openKnowledgeWorkbench() {
     const toolbar = panel.querySelector('.knowledge-toolbar');
     if (toolbar && isSuperAdminUser() && !toolbar.querySelector('#rag-share-collection-btn')) {
         const button = document.createElement('button');
-        button.id = 'rag-share-collection-btn';
-        button.className = 'btn-secondary';
-        button.type = 'button';
-        button.setAttribute('role', 'menuitem');
+        button.id = 'rag-share-collection-btn'; button.className = 'btn-secondary'; button.type = 'button'; button.setAttribute('role', 'menuitem');
         button.textContent = '管理共享专题库';
         button.addEventListener('click', () => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.());
         const contentMenu = toolbar.querySelector('.knowledge-action-menu:first-of-type .knowledge-action-menu-panel');
