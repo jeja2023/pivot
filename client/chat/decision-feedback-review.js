@@ -298,7 +298,7 @@
         ].filter(Boolean).join(' ') || '未知用户';
         const sessionTitle = item.session_title || (item.session_id ? '未命名会话' : '未关联会话');
 
-        content.innerHTML = `
+        PivotSafeHtml.setHtml(content, `
             <div class="route-feedback-detail-section">
                 <div class="route-feedback-detail-label">
                     <span>当轮提问（用户提问）</span>
@@ -368,9 +368,9 @@
                     </div>
                 </div>
             `}
-        `;
+        `);
 
-        footer.innerHTML = '';
+        footer.replaceChildren();
         if (item.review_status === 'pending') {
             const acceptBtn = document.createElement('button');
             acceptBtn.type = 'button';
