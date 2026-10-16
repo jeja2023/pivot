@@ -250,27 +250,24 @@ test('Agent控制台统一收件箱与持续目标卡片自适应撑满高度，
     assert.match(harnessCss, /\.agent-goal-list[\s\S]*?overflow-y:\s*auto;/);
 });
 
-test('工作流发布支持跳过评测门禁及在门禁拦截时提示确认发布', () => {
+test('工作流发布默认不要求固定评测，且不显示紧急跳过门禁入口', () => {
     const routeJs = read('server/routes/agents.js');
     const libraryJs = read('client/chat/agent-workflow-library.js');
     const toolbarJs = read('client/chat/dag-toolbar.js');
-    const appJs = read('server/app.js');
 
-    // 1. 服务端发布路由支持 skipEvaluationGate 参数
-    assert.match(routeJs, /skipEvaluationGate\s*=\s*req\.body\?\.skipEvaluationGate === true \|\| req\.body\?\.fixedEvaluationRequired === false/);
+    // 1. 固定评测只有在调用方明确要求时才是发布门禁。
+    assert.match(routeJs, /fixedEvaluationRequired:\s*req\.body\?\.fixedEvaluationRequired === true/);
+    assert.doesNotMatch(routeJs, /skipEvaluationGate/);
 
-    // 2. 全局错误中间件在 4xx 时透传 err.code
-    assert.match(appJs, /isClientError && err\.code \? \{ code: err\.code \} : \{\}/);
-
-    // 3. 前端工作流发布方法支持 skipEvaluationGate 并在 409 拦截时弹出提示确认
+    // 2. 正常发布不再请求紧急跳过，也不再弹出评测门禁确认。
     assert.match(libraryJs, /async function publishSelectedAgentWorkflow\(version = 'current', options = \{\}\)/);
-    assert.match(libraryJs, /WORKFLOW_EVALUATION_GATE_FAILED/);
-    assert.match(libraryJs, /isSuperAdminUser\(\)/);
-    assert.match(libraryJs, /showConfirm\('发布门禁提示'/);
+    assert.doesNotMatch(libraryJs, /skipEvaluationGate/);
+    assert.doesNotMatch(libraryJs, /紧急跳过评测门禁/);
 
-    // 4. 画布工具栏发布菜单包含「发布当前版本」与「跳过门禁发布」
+    // 3. 画布工具栏只保留普通发布入口，并说明评测是可选检查。
     assert.match(toolbarJs, /makeButton\('发布当前版本'/);
-    assert.match(toolbarJs, /紧急跳过门禁发布/);
+    assert.match(toolbarJs, /评测为可选质量检查/);
+    assert.doesNotMatch(toolbarJs, /紧急跳过门禁发布/);
 });
 
 test('工作流版本页提供发布影响清单和管理员审阅闭环', () => {

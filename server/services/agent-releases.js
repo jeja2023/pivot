@@ -15,7 +15,6 @@ const {
     isTenantAdmin,
     resolveAccessSubjects
 } = require('./agent-skill-access');
-const { isSuperAdmin } = require('../permissions');
 const {
     chooseRolloutRelease,
     normalizeBreakerThresholds
@@ -521,29 +520,32 @@ async function resolvePublishedSkill(name, user) {
 }
 
 async function publishWorkflowRelease(workflowId, user, input = {}) {
-    if (input.fixedEvaluationRequired === false) {
-        if (!isSuperAdmin(user)) throw invalid('只有系统管理员可以紧急跳过工作流评测门禁。', 403, 'WORKFLOW_BREAK_GLASS_FORBIDDEN');
-        if (String(input.breakGlassReason || '').trim().length < 10) throw invalid('紧急跳过评测门禁必须填写至少 10 个字符的原因。', 400, 'WORKFLOW_BREAK_GLASS_REASON_REQUIRED');
-    }
     const tenantForAdmin = input.allowTenantAdmin === true && isTenantAdmin(user)
         ? (input.tenantId || await getPrimaryTenantId(user.id))
         : null;
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current', { allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     if (!resolved) return null;
     const impact = await getWorkflowReleaseImpact(workflowId, user, { version: input.version || 'current', resolved });
-    let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
-    if (evaluation && Number(evaluation.run?.target_snapshot?.workflowVersionId || 0) !== Number(resolved.version_id)) evaluation = null;
-    if (!evaluation) {
-        const candidates = await query("SELECT er.id FROM agent_eval_runs er JOIN agent_eval_suites s ON s.id = er.suite_id WHERE er.user_id = ? AND s.workflow_id = ? AND er.status = 'completed' ORDER BY er.created_at DESC LIMIT 50", [user.id, resolved.workflow.id]);
-        for (const candidate of candidates) {
-            const item = await getAgentEvalRun(candidate.id, user);
-            if (Number(item?.run?.target_snapshot?.workflowVersionId || 0) === Number(resolved.version_id)) {
-                evaluation = item;
-                break;
+    // 评测是发布前的可选质量检查。只有调用方明确声明时才作为门禁，
+    // 避免新工作流在首次发布前因没有已发布版本可供评测而无法发布。
+    const requireFixedEvaluation = input.fixedEvaluationRequired === true;
+    if (requireFixedEvaluation) {
+        let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
+        if (evaluation && Number(evaluation.run?.target_snapshot?.workflowVersionId || 0) !== Number(resolved.version_id)) evaluation = null;
+        if (!evaluation) {
+            const candidates = await query("SELECT er.id FROM agent_eval_runs er JOIN agent_eval_suites s ON s.id = er.suite_id WHERE er.user_id = ? AND s.workflow_id = ? AND er.status = 'completed' ORDER BY er.created_at DESC LIMIT 50", [user.id, resolved.workflow.id]);
+            for (const candidate of candidates) {
+                const item = await getAgentEvalRun(candidate.id, user);
+                if (Number(item?.run?.target_snapshot?.workflowVersionId || 0) === Number(resolved.version_id)) {
+                    evaluation = item;
+                    break;
+                }
             }
         }
+        if (!evaluation?.run || Number(evaluation.run.summary?.passRate || 0) < Number(input.minPassRate || 80)) {
+            throw invalid('工作流固定评测集未通过发布门禁。', 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
+        }
     }
-    if (input.fixedEvaluationRequired !== false && (!evaluation?.run || Number(evaluation.run.summary?.passRate || 0) < Number(input.minPassRate || 80))) throw invalid('工作流固定评测集未通过发布门禁。', 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
     const rollout = normalizeRollout(input);
     const releaseNote = normalizeWorkflowReleaseNote(input.releaseNote ?? input.release_note);
     if (rollout.rolloutScope !== 'personal' && !isTenantAdmin(user)) throw invalid('团队或组织工作流发布需要管理员权限。', 403, 'WORKFLOW_ROLLOUT_SCOPE_FORBIDDEN');
@@ -557,8 +559,8 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
     await publishAgentWorkflowVersion(workflowId, user, input.version || 'current', {
         skipRelease: true,
         dryRun: true,
-        skipEvaluationGate: input.fixedEvaluationRequired === false,
-        breakGlassReason: input.breakGlassReason,
+        requireFixedEvaluation,
+        evaluationRunId: input.evaluationRunId,
         allowTenantAdmin: Boolean(tenantForAdmin),
         tenantId: tenantForAdmin
     });
@@ -576,7 +578,7 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         }
         const requestedVersion = String(input.version || 'current').trim().toLowerCase();
         if (requestedVersion === 'current' && Number(locked.current_version_id) !== Number(resolved.version_id)) {
-            throw invalid('工作流已在评测或发布期间更新，请重新运行评测后发布。', 409, 'WORKFLOW_VERSION_CONFLICT');
+            throw invalid('工作流已在发布期间更新，请确认目标版本后重试。', 409, 'WORKFLOW_VERSION_CONFLICT');
         }
         const previous = await trx.queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1 FOR UPDATE", [resolved.workflow.id]);
         const next = await trx.queryOne(`

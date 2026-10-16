@@ -224,27 +224,22 @@ test('PostgreSQL profile field versions reject stale concurrent updates', { skip
     await updateAgentProfile(userId, { profile: before }, { expectedVersion: next.version, source: 'integration-restore' });
 });
 
-test('workflow release gate requires a completed fixed evaluation batch', { skip: !process.env.DATABASE_URL }, async () => {
+test('workflow publishing does not require an evaluation batch unless explicitly requested', { skip: !process.env.DATABASE_URL }, async () => {
     const { getPgPool } = require('../server/db/pg-connection');
     const pool = getPgPool();
     const user = await ensureTestUser(pool, 'admin');
     const suffix = Date.now();
     const workflow = await createAgentWorkflow(user, { name: `integration-gate-${suffix}`, description: 'gate', dagSpec: { nodes: [{ id: 'output', tool: 'workflow.output', input: { name: 'answer', value: 'ok' } }] } });
     try {
-        await assert.rejects(() => publishWorkflowRelease(workflow.id, user, { version: 'current' }), error => error.code === 'WORKFLOW_EVALUATION_GATE_FAILED');
+        const releaseWithoutEvaluation = await publishWorkflowRelease(workflow.id, user, { version: 'current' });
+        assert.equal(releaseWithoutEvaluation.status, 'published');
+        await assert.rejects(() => publishWorkflowRelease(workflow.id, user, { version: 'current', fixedEvaluationRequired: true }), error => error.code === 'WORKFLOW_EVALUATION_GATE_FAILED');
         const suite = await pool.query(`INSERT INTO agent_eval_suites (user_id, name, target_type, workflow_id, workflow_version, run_config, status, created_at, updated_at) VALUES ($1, $2, 'workflow', $3, 'current', '{}', 'active', NOW(), NOW()) RETURNING id`, [user.id, `gate-suite-${suffix}`, workflow.id]);
         const evalCase = await pool.query(`INSERT INTO agent_eval_cases (suite_id, name, input, input_variables, expected_output, assertions, sort_order, created_at, updated_at) VALUES ($1, 'gate', 'gate', '{}', '', '{}', 0, NOW(), NOW()) RETURNING id`, [suite.rows[0].id]);
         await pool.query(`INSERT INTO agent_eval_runs (id, suite_id, user_id, status, target_snapshot, summary, started_at, completed_at, created_at) VALUES ($1, $2, $3, 'completed', $4, $5, NOW(), NOW(), NOW())`, [`gate-run-${suffix}`, suite.rows[0].id, user.id, JSON.stringify({ workflowVersion: workflow.current_version, workflowVersionId: workflow.current_version_id }), JSON.stringify({ passRate: 100, averageScore: 100 })]);
         await pool.query(`INSERT INTO agent_eval_results (eval_run_id, case_id, status, score, passed, grader_results, created_at, completed_at) VALUES ($1, $2, 'passed', 100, 1, '{}', NOW(), NOW())`, [`gate-run-${suffix}`, evalCase.rows[0].id]);
-        const release = await publishWorkflowRelease(workflow.id, user, { version: 'current', evaluationRunId: `gate-run-${suffix}` });
+        const release = await publishWorkflowRelease(workflow.id, user, { version: 'current', fixedEvaluationRequired: true, evaluationRunId: `gate-run-${suffix}` });
         assert.equal(release.status, 'published');
-
-        const breakGlassRelease = await publishWorkflowRelease(workflow.id, user, {
-            version: 'current',
-            fixedEvaluationRequired: false,
-            breakGlassReason: 'E2E测试紧急跳过发布验证必须超过十个字符'
-        });
-        assert.equal(breakGlassRelease.status, 'published');
     } finally {
         await pool.query('DELETE FROM agent_workflow_releases WHERE workflow_id = $1', [workflow.id]);
         await pool.query('DELETE FROM agent_eval_runs WHERE id LIKE $1', [`gate-run-${suffix}%`]);

@@ -893,45 +893,16 @@ async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
         if (!workflow) return;
     }
     if (!workflow) return showToast('请选择要发布的工作流', 'warning');
-    const skipEvaluationGate = options?.skipEvaluationGate === true || options?.fixedEvaluationRequired === false;
     const reqBody = { version };
     if (options.releaseNote !== undefined) reqBody.releaseNote = String(options.releaseNote || '').trim().slice(0, 2000);
-    if (skipEvaluationGate) {
-        const reason = await window.Pivot.legacy.showInputPrompt?.({
-            title: '紧急跳过评测门禁',
-            message: '仅系统管理员可用。请填写跳过固定评测门禁的原因，至少 10 个字符。',
-            placeholder: '例如：生产故障修复，固定评测将在发布后补跑。',
-            requiredMessage: '请填写紧急原因。'
-        });
-        if (reason === null || reason === undefined || String(reason).trim().length < 10) {
-            showToast('已取消紧急发布：原因至少需要 10 个字符。', 'warning');
-            return null;
-        }
-        reqBody.skipEvaluationGate = true;
-        reqBody.fixedEvaluationRequired = false;
-        reqBody.breakGlassReason = String(reason).trim().slice(0, 500);
-    }
+    if (options.fixedEvaluationRequired === true) reqBody.fixedEvaluationRequired = true;
     const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reqBody)
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-        if (res.status === 409 && (data.code === 'WORKFLOW_EVALUATION_GATE_FAILED' || String(data.error || '').includes('评测集') || String(data.error || '').includes('门禁'))) {
-            if (typeof isSuperAdminUser !== 'function' || !isSuperAdminUser()) {
-                showToast('当前工作流尚未通过固定评测集，请先完成评测后再发布。', 'error');
-                return null;
-            }
-            if (typeof window.Pivot.legacy.showConfirm === 'function') {
-                window.Pivot.legacy.showConfirm('发布门禁提示', '当前工作流尚未通过固定评测集（要求评测通过率 ≥ 80%）。是否跳过评测门禁直接发布当前版本？', async () => {
-                    await publishSelectedAgentWorkflow(version, { skipEvaluationGate: true });
-                });
-                return null;
-            }
-        }
-        return showToast(data.error || '发布工作流失败', 'error');
-    }
+    if (!res.ok) return showToast(data.error || '发布工作流失败', 'error');
     activeAgentWorkflowId = String(data.workflow.id);
     agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
     agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;

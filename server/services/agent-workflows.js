@@ -19,7 +19,6 @@ const { filterExistingShareUserIds, listShareTargets } = require('./share-target
 const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { isTenantAdmin } = require('./agent-skill-access');
-const { isSuperAdmin } = require('../permissions');
 const { persistWorkflowToolReleaseBindings } = require('./workflow-tool-releases');
 
 /**
@@ -468,20 +467,6 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
     const tenantOverride = options.allowTenantAdmin === true && isTenantAdmin(user)
         && options.tenantId && Number(options.tenantId) === Number(await getPrimaryTenantId(sourceWorkflow?.user_id));
     if (!ownerAllowed && !tenantOverride) return null;
-    if (options.skipEvaluationGate === true) {
-        if (!isSuperAdmin(user)) {
-            const error = new Error('只有系统管理员可以紧急跳过工作流评测门禁。');
-            error.status = 403;
-            error.code = 'WORKFLOW_BREAK_GLASS_FORBIDDEN';
-            throw error;
-        }
-        if (String(options.breakGlassReason || '').trim().length < 10) {
-            const error = new Error('紧急跳过评测门禁必须填写至少 10 个字符的原因。');
-            error.status = 400;
-            error.code = 'WORKFLOW_BREAK_GLASS_REASON_REQUIRED';
-            throw error;
-        }
-    }
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, version || 'current', { allowTenantAdmin: tenantOverride, tenantId: options.tenantId });
     if (!resolved) return null;
     const topology = inspectDagTopology(resolved.dagSpec);
@@ -507,20 +492,22 @@ async function publishAgentWorkflowVersion(workflowId, user, version = 'current'
             throw err;
         }
     }
-    const evaluationRows = await query(`
-        SELECT er.summary, er.target_snapshot
-        FROM agent_eval_runs er
-        JOIN agent_eval_suites es ON es.id = er.suite_id
-        WHERE es.workflow_id = ? AND er.user_id = ? AND er.status = 'completed'
-        ORDER BY er.created_at DESC LIMIT 50
-    `, [resolved.workflow.id, user.id]);
-    const evaluation = evaluationRows.find(row => Number(parseJsonObject(row.target_snapshot)?.workflowVersionId || 0) === Number(resolved.version_id));
-    const passRate = Number(parseJsonObject(evaluation?.summary)?.passRate || 0);
-    if (options.skipEvaluationGate !== true && (!evaluation || passRate < 80)) {
-        const err = new Error('工作流必须通过固定评测集（通过率至少 80%）后才能发布。');
-        err.status = 409;
-        err.code = 'WORKFLOW_EVALUATION_GATE_FAILED';
-        throw err;
+    if (options.requireFixedEvaluation === true) {
+        const evaluationRows = await query(`
+            SELECT er.summary, er.target_snapshot
+            FROM agent_eval_runs er
+            JOIN agent_eval_suites es ON es.id = er.suite_id
+            WHERE es.workflow_id = ? AND er.user_id = ? AND er.status = 'completed'
+            ORDER BY er.created_at DESC LIMIT 50
+        `, [resolved.workflow.id, user.id]);
+        const evaluation = evaluationRows.find(row => Number(parseJsonObject(row.target_snapshot)?.workflowVersionId || 0) === Number(resolved.version_id));
+        const passRate = Number(parseJsonObject(evaluation?.summary)?.passRate || 0);
+        if (!evaluation || passRate < 80) {
+            const err = new Error('工作流必须通过固定评测集（通过率至少 80%）后才能发布。');
+            err.status = 409;
+            err.code = 'WORKFLOW_EVALUATION_GATE_FAILED';
+            throw err;
+        }
     }
     if (options.dryRun === true) return resolved;
     const now = getBeijingTimestamp();

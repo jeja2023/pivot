@@ -2097,7 +2097,7 @@ test('due automation schedule dispatch records audit log for workflow and agent 
         description: '测试工作流',
         dagSpec: { nodes: [{ id: 'm1', tool: 'models.list', input: {} }] }
     });
-    await publishAgentWorkflowVersion(workflow.id, user, 1, { skipEvaluationGate: true, breakGlassReason: '集成测试需要创建可调度的已发布工作流。' });
+    await publishAgentWorkflowVersion(workflow.id, user, 1);
 
     const { createAgentSchedule } = require('../server/services/agent-schedules');
     const schedule = await createAgentSchedule(user, {
