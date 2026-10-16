@@ -32,6 +32,7 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-ai-stop-btn"/);
     assert.match(workspace, /id="presentation-create-stop-btn"/);
     assert.match(workspace, /id="presentation-outline-stop-btn"/);
+    assert.match(workspace, /id="presentation-outline-cancel-btn"/);
     assert.match(workspace, /id="presentation-speaker-notes"/);
     assert.match(workspace, /id="presentation-delivery-guide-btn"/);
     assert.match(workspace, /id="presentation-chart-insert-narrative"/);
@@ -66,8 +67,11 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(editor, /materials: content\.sources \|\| \[\]/);
     assert.match(editor, /planApproval: \{ outline \}/);
     assert.match(editor, /function collectOutlineFromReview/);
+    assert.match(editor, /function cancelOutlineReview/);
     assert.match(editor, /pendingOutlineConfirmations/);
     assert.match(editor, /data-presentation-outline-assumption/);
+    assert.match(presenter, /function outlineSourceRefs/);
+    assert.match(presenter, /function outlineSourceIds/);
     assert.doesNotMatch(editor, /JSON\.parse\(byId\('presentation-outline-editor'\)/);
     assert.match(editor, /exposeModule\?\.\('apps\.presentations'/);
     assert.doesNotMatch(editor, /window\.Pivot\.legacy\.showPresentationsApp\s*=/);
@@ -147,6 +151,7 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(presentationRoutes, /PRESENTATION_AI_JSON_REPAIR_FAILED/);
     assert.match(presentationRoutes, /buildMalformedJsonRecoveryMessages/);
     assert.match(presentationRoutes, /_compact_retry/);
+    assert.match(presentationRoutes, /filterOutlineSourceRefs/);
     const service = source('server/services/presentations/presentation-service.js');
     const templateService = source('server/services/presentations/presentation-template-service.js');
     const assetService = source('server/services/presentations/presentation-asset-service.js');

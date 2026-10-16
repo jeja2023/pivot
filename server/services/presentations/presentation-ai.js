@@ -62,7 +62,10 @@ function buildOutlineMessages(body = {}) {
     const template = templateForAi(body);
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
     const summaryLayoutId = preferredTemplateLayoutId(template, 'summary', coverLayoutId);
-    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `- ${clamp(item?.title || '材料', 120)}：${clamp(materialText(item), 6000)}`).filter(Boolean).join('\n') : '';
+    const materialItems = Array.isArray(body.materials) ? body.materials.slice(0, 20) : [];
+    const sourceIds = materialItems.map((item, index) => String(item?.id || `source_${index + 1}`).trim()).filter(Boolean);
+    const sourceRefExample = JSON.stringify(sourceIds.length ? [sourceIds[0]] : []);
+    const materials = materialItems.map((item, index) => `- 来源 ${sourceIds[index] || `source_${index + 1}`} / ${clamp(item?.title || '材料', 120)}：${clamp(materialText(item), 6000)}`).filter(Boolean).join('\n');
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         {
@@ -76,13 +79,13 @@ function buildOutlineMessages(body = {}) {
                 `风格：${clamp(body.style || '专业、简洁、可演示', 200)}`,
                 `允许布局：${templateLayoutSummary(template).map(item => item.id).join('、') || 'cover、section、title-content、two-column、three-card、image-focus、chart、table、quote、summary'}`,
                 `数据图表：${body.needsCharts === true ? '需要；仅在材料存在可核实数值时安排图表页' : '按内容需要决定，不得编造数据'}`,
-                `来源引用：${body.retainSourceRefs === false ? '仅保留内部来源关系，不在页面文字中展示来源' : '对重要事实、数字和结论保留来源引用'}`,
+                `来源引用：${body.retainSourceRefs === false ? '仅保留内部来源关系，不在页面文字中展示来源' : '对重要事实、数字和结论保留来源引用'}；sourceRefs 只能使用本次材料的来源标识：${sourceIds.length ? sourceIds.join('、') : '无（必须为空数组）'}`,
                 body.mustInclude ? `必须包含：${clamp(body.mustInclude, 1000)}` : '',
                 body.prohibitedContent ? `禁止出现：${clamp(body.prohibitedContent, 1000)}；如材料涉及该内容，只能提示用户处理，不得在页面正文输出。` : '',
                 materials ? `材料：\n${materials}` : '材料：未提供，请输出必要的待核实假设。',
                 '',
                 '返回格式：',
-                `{"title":"...","outline":[{"section":"...","slides":[{"title":"...","purpose":"...","layoutHint":"${preferredTemplateLayoutId(template, 'title-content', coverLayoutId)}","keyPoints":["..."],"sourceRefs":["source_1"]}]}],"assumptions":["..."],"warnings":["..."]}`,
+                `{"title":"...","outline":[{"section":"...","slides":[{"title":"...","purpose":"...","layoutHint":"${preferredTemplateLayoutId(template, 'title-content', coverLayoutId)}","keyPoints":["..."],"sourceRefs":${sourceRefExample}}]}],"assumptions":["..."],"warnings":["..."]}`,
                 `outline 总页数必须等于目标页数；第一页 layoutHint=${coverLayoutId}，最后一页 layoutHint=${summaryLayoutId}。`
             ].join('\n')
         }
@@ -249,6 +252,34 @@ const AI_CHART_TYPES = new Set(['bar', 'line', 'area', 'pie']);
 
 function isAiObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function filterOutlineSourceRefs(outline, sources = []) {
+    if (!isAiObject(outline)) return outline;
+    const sourceIdList = (Array.isArray(sources) ? sources : [])
+        .map(source => normalizeAiText(source?.id, '', 96))
+        .filter(Boolean);
+    const sourceIds = new Set(sourceIdList);
+    // 旧版大纲提示词固定展示 source_1。若本轮实际只提供一份材料，
+    // 可以无歧义地把该遗留示例标识恢复为该材料，保留引用可追溯性。
+    const legacySingleSourceId = sourceIdList.length === 1 ? sourceIdList[0] : '';
+    const filterRefs = value => [...new Set((Array.isArray(value) ? value : [])
+        .map(ref => normalizeAiText(ref, '', 160))
+        .map(ref => sourceIds.has(ref) ? ref : (ref === 'source_1' ? legacySingleSourceId : ''))
+        .filter(Boolean))];
+    const filterSlides = slides => (Array.isArray(slides) ? slides : []).map(slide => (
+        isAiObject(slide) ? { ...slide, sourceRefs: filterRefs(slide.sourceRefs) } : slide
+    ));
+    if (Array.isArray(outline.outline)) {
+        return {
+            ...outline,
+            outline: outline.outline.map(section => (
+                isAiObject(section) ? { ...section, slides: filterSlides(section.slides) } : section
+            ))
+        };
+    }
+    if (Array.isArray(outline.slides)) return { ...outline, slides: filterSlides(outline.slides) };
+    return outline;
 }
 
 function normalizeAiText(value, fallback = '', maxLength = 500) {
@@ -418,4 +449,4 @@ function parsePresentationProposal(content, { templateId = 'business-blue', temp
     return { ...proposal, presentation: contentObject };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, parsePresentationProposal, parseValidationProposal, repairAiPresentationProposal };
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, repairAiPresentationProposal };

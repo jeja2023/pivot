@@ -68,7 +68,7 @@ const {
     leavePresence
 } = require('../../services/presentations/presentation-presence');
 const { runPresentationValidation } = require('../../services/presentations/presentation-validation');
-const { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, parsePresentationProposal, parseValidationProposal } = require('../../services/presentations/presentation-ai');
+const { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal } = require('../../services/presentations/presentation-ai');
 const { resolveAppsModel, buildModelSecretErrorPayload } = require('./helpers');
 const { buildChart } = require('../../services/data-analysis');
 const { normalizePresentation } = require('../../services/presentations/presentation-schema');
@@ -446,31 +446,32 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!String(body.topic || '').trim()) return res.status(400).json({ error: '请输入演示主题。', code: 'PRESENTATION_TOPIC_REQUIRED' });
         return runAiRequest(req, res, body, buildOutlineMessages(body), { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600, retryMalformedJson: true, parse: async result => {
-            let outline; try { outline = parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language }); } catch (error) { error.status = error.status || 422; throw error; }
+            let outline; try { outline = filterOutlineSourceRefs(parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language }), body.materials); } catch (error) { error.status = error.status || 422; throw error; }
             return { outline };
         }});
     }));
 
     router.post('/apps/presentations/ai/slides', authMiddleware, asyncHandler(async (req, res) => {
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
-        if (!body.outline || typeof body.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
-        return runAiRequest(req, res, body, buildSlidesMessages(body), {
+        const requestBody = { ...body, outline: filterOutlineSourceRefs(body.outline, body.materials) };
+        if (!requestBody.outline || typeof requestBody.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
+        return runAiRequest(req, res, requestBody, buildSlidesMessages(requestBody), {
             source: 'presentation_slides',
             auditAction: 'PPT AI生成页面',
             maxTokens: 7200,
             retryMalformedJson: true,
             // 当原回答在 JSON 尚未闭合时被模型输出上限截断，修复残片无法补回
             // 缺失的页面。此时从已确认的大纲重新按紧凑契约生成，成功率高于语法修复。
-            buildMalformedJsonRecoveryMessages: () => buildSlidesMessages({ ...body, compact: true }),
+            buildMalformedJsonRecoveryMessages: () => buildSlidesMessages({ ...requestBody, compact: true }),
             malformedJsonRecoverySourceSuffix: '_compact_retry',
             malformedJsonRecoveryAuditSuffix: ' 紧凑格式重试',
             malformedJsonFailureMessage: 'AI 返回的页面数据格式不完整，系统已按紧凑格式自动重试一次仍无法完成。请减少页数或补充材料后重新生成。',
             parse: async result => {
-                const proposal = parsePresentationProposal(result.content, { title: body.title || body.outline.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+                const proposal = parsePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials });
                 if (proposal.presentation) {
-                    const sourceIds = new Set(body.materials.map((item, index) => item.id || 'source_' + (index + 1)));
+                    const sourceIds = new Set(requestBody.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                     proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
-                    proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: body.materials.map(materialToPresentationSource) });
+                    proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: requestBody.materials.map(materialToPresentationSource) });
                 }
                 return { proposal, validation: runPresentationValidation(proposal.presentation) };
             }

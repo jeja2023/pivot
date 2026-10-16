@@ -624,9 +624,7 @@ function setSelectedImageAsCover() {
     async function createFromArtifact() { return presenter()?.createFromArtifact?.(state, { loadDocuments, openPresentation, templateById, toast }); }
     function getPresentationAiModelId() {
         return window.Pivot?.legacy?.PivotAppModels?.getSelectedModel?.('presentations', 'presentation-create-model')
-            || byId('presentation-create-model')?.value
-            || byId('presentation-ai-model')?.value
-            || '';
+            || byId('presentation-create-model')?.value || byId('presentation-ai-model')?.value || '';
     }
     function requirePresentationAiModel() {
         const modelId = getPresentationAiModelId();
@@ -635,10 +633,7 @@ function setSelectedImageAsCover() {
     }
     async function refreshPresentationAiModelSelectors() {
         const appModels = window.Pivot?.legacy?.PivotAppModels;
-        await Promise.all([
-            appModels?.refresh?.('presentations', 'presentation-create-model'),
-            appModels?.refresh?.('presentations', 'presentation-ai-model')
-        ]);
+        await Promise.all([appModels?.refresh?.('presentations', 'presentation-create-model'), appModels?.refresh?.('presentations', 'presentation-ai-model')]);
     }
     function openCreateModal() {
         populateTemplateSelect(byId('presentation-create-template'));
@@ -647,6 +642,11 @@ function setSelectedImageAsCover() {
         window.setTimeout(() => byId('presentation-create-topic')?.focus(), 0);
     }
     function closeCreateModal() { abortAiRequest(); byId('presentation-create-modal')?.classList.add('hidden'); }
+    function cancelOutlineReview() {
+        abortAiRequest();
+        state.pendingOutline = null; state.pendingOutlineConfirmations = new Set(); state.pendingCreate = null;
+        byId('presentation-outline-modal')?.classList.add('hidden');
+    }
     function populateTemplateSelect(select) {
         if (!select) return; select.replaceChildren(); state.templates.forEach(template => { const option = document.createElement('option'); option.value = template.id; option.textContent = template.name; select.appendChild(option); });
     }
@@ -956,6 +956,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-data-chart-cancel-btn')) { byId('presentation-data-chart-modal')?.classList.add('hidden'); return; }
             if (event.target.closest('#presentation-refresh-versions-btn')) { loadVersions().catch(error => toast(error.message, 'error')); return; }
             const restore = event.target.closest('[data-presentation-restore-version]'); if (restore) { restoreVersion(Number(restore.dataset.presentationRestoreVersion)).catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-outline-cancel-btn')) { cancelOutlineReview(); return; }
             if (event.target.closest('#presentation-outline-back-btn')) { byId('presentation-outline-modal')?.classList.add('hidden'); openCreateModal(); return; }
             if (event.target.closest('#presentation-outline-confirm-all-btn')) { requiredOutlineAssumptions().forEach((_, index) => state.pendingOutlineConfirmations.add(index)); byId('presentation-outline-warnings')?.querySelectorAll('[data-presentation-outline-assumption]').forEach(item => { item.checked = true; }); updateOutlineConfirmationUi(); return; }
             if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); return; }

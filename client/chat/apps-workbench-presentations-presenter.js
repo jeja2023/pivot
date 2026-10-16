@@ -740,6 +740,13 @@
         if (!Array.isArray(value)) return [];
         return value.map(item => outlineText(item, '', maxLength)).filter(Boolean).slice(0, maxItems);
     }
+    function outlineSourceRefs(value, sourceIds = null) {
+        const refs = outlineTextList(value, 50, 160);
+        return sourceIds instanceof Set ? refs.filter(ref => sourceIds.has(ref)) : refs;
+    }
+    function outlineSourceIds(state) {
+        return new Set((state.pendingCreate?.materials || []).map((item, index) => String(item?.id || `source_${index + 1}`).trim()).filter(Boolean));
+    }
     function outlineLayout(value, pageIndex, pageCount, labels = {}, template = null) {
         const layout = String(value || '').trim();
         const layouts = Array.isArray(template?.definition?.layouts) ? template.definition.layouts : [];
@@ -749,7 +756,7 @@
         if (pageIndex === pageCount - 1) return preferred('summary')?.id || 'summary';
         return preferred('title-content')?.id || 'title-content';
     }
-    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}, template = null) {
+    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}, template = null, sourceIds = null) {
         const source = input && typeof input === 'object' ? input : {};
         const rawSections = Array.isArray(source.outline) ? source.outline : (Array.isArray(source.slides) ? [{ section: '演示内容', slides: source.slides }] : []);
         const totalSlides = rawSections.reduce((total, section) => total + (Array.isArray(section?.slides) ? section.slides.length : 0), 0);
@@ -763,7 +770,7 @@
                     purpose: outlineText(slide?.purpose, '', 500),
                     layoutHint: outlineLayout(slide?.layoutHint, currentIndex, totalSlides, labels, template),
                     keyPoints: outlineTextList(slide?.keyPoints, 12, 500),
-                    sourceRefs: outlineTextList(slide?.sourceRefs, 50, 160),
+                    sourceRefs: outlineSourceRefs(slide?.sourceRefs, sourceIds),
                     order: slideIndex
                 };
             });
@@ -826,7 +833,7 @@
     }
     function renderOutlineReview(input, state, { labels = {}, templateById } = {}) {
         const template = templateById?.(state.pendingCreate?.templateId);
-        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels, template);
+        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels, template, outlineSourceIds(state));
         state.pendingOutline = outline;
         state.pendingOutlineConfirmations = new Set();
         const preview = byId('presentation-outline-markdown'); if (preview) renderOutlineDocument(preview, outline);
@@ -834,7 +841,7 @@
         renderOutlineWarnings(outline, state.pendingOutlineConfirmations);
     }
     function collectOutlineFromReview(state, { labels = {}, templateById } = {}) {
-        return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId));
+        return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId), outlineSourceIds(state));
     }
 
     function renderEvidence(state) {

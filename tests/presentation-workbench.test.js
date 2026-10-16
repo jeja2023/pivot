@@ -19,12 +19,11 @@ const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('
 const { assertSensitiveExportAllowed, exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
-const { parsePresentationProposal, parseValidationProposal, buildRewriteMessages, buildContinueMessages, buildValidationMessages, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
+const { parsePresentationProposal, parseValidationProposal, buildOutlineMessages, buildSlidesMessages, buildRewriteMessages, buildContinueMessages, buildValidationMessages, filterOutlineSourceRefs, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
 const { normalizeTemplatePackage, applyTemplateBrandControls, inferPresentationAssetType, presentationFromArtifactText } = require('../server/services/presentations/presentation-service');
 const { scanVbaSource } = require('../server/services/presentations/presentation-vba');
 const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
 const { importPptxTemplatePackage } = require('../server/services/presentations/presentation-pptx-template-import');
-const { buildOutlineMessages, buildSlidesMessages } = require('../server/services/presentations/presentation-ai');
 const { normalizeMaterials, sha256 } = require('../server/services/presentations/presentation-evidence');
 const { buildSlideChangeImpact, mergeLockedElements } = require('../server/services/presentations/presentation-change-impact');
 const { buildPresentationDataNarrative } = require('../server/services/presentations/presentation-data-narrative');
@@ -285,6 +284,23 @@ test('AI 页面紧凑重试使用更小的受控输出契约', () => {
     assert.match(prompt, /每页使用 2 至 3 个元素/);
 });
 
+test('AI 演示大纲只保留本轮实际提供材料的来源引用', () => {
+    const outline = {
+        title: '无材料演示',
+        outline: [{
+            section: '方案',
+            slides: [{ title: '现状', purpose: '', layoutHint: 'title-content', keyPoints: ['关键结论'], sourceRefs: ['source_1', 'unknown_source'] }]
+        }]
+    };
+    const withoutMaterials = filterOutlineSourceRefs(outline, []);
+    assert.deepEqual(withoutMaterials.outline[0].slides[0].sourceRefs, []);
+    const withUploadedSource = filterOutlineSourceRefs(outline, [{ id: 'source_1720000000000' }]);
+    assert.deepEqual(withUploadedSource.outline[0].slides[0].sourceRefs, ['source_1720000000000']);
+    const withMultipleSources = filterOutlineSourceRefs(outline, [{ id: 'source_1720000000000' }, { id: 'source_1720000000001' }]);
+    assert.deepEqual(withMultipleSources.outline[0].slides[0].sourceRefs, []);
+    assert.deepEqual(outline.outline[0].slides[0].sourceRefs, ['source_1', 'unknown_source']);
+});
+
 test('AI 页面提案会安全跳过缺少列的表格和不完整图表，不阻断整份演示生成', () => {
     const proposal = {
         title: 'AI 生成容错验证',
@@ -498,6 +514,15 @@ test('AI 创建协议传递语言、时长、图表、引用及内容边界', ()
     const slides = buildSlidesMessages({ ...body, outline: { title: body.topic, slides: [] } }).at(-1).content;
     ['输出语言：zh-CN,en-US', '演示时长：20 分钟', '必须包含：收入、风险、行动', '禁止出现：未经核实数据', '数据图表：需要'].forEach(expected => assert.ok(outline.includes(expected), expected));
     assert.ok(slides.includes('来源引用：重要数字、结论和材料摘录必须保留 sourceRefs'));
+});
+
+test('AI 大纲提示词向模型提供上传材料的真实来源标识', () => {
+    const uploadedSourceId = 'source_1720000000000';
+    const prompt = buildOutlineMessages({ topic: '项目复盘', materials: [{ id: uploadedSourceId, title: '上传报告', text: '项目进度与风险。' }] }).at(-1).content;
+    assert.ok(prompt.includes(`来源 ${uploadedSourceId} / 上传报告`));
+    assert.ok(prompt.includes(`sourceRefs 只能使用本次材料的来源标识：${uploadedSourceId}`));
+    assert.ok(prompt.includes(`"sourceRefs":["${uploadedSourceId}"]`));
+    assert.equal(prompt.includes('"sourceRefs":["source_1"]'), false);
 });
 
 test('导出器遵守备注选项并继续生成三种受控格式', async () => {
