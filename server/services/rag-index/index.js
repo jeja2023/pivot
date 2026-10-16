@@ -29,10 +29,10 @@ const {
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getRagConfig,
-    getRagLimits,
     getHybridRetrievalConfig,
     getChunkSizeForDocType
 } = require('../rag-config');
+const { getRagLimits } = require('../resource-limits');
 const { ensureKnowledgeVectorIndex } = require('../knowledge-vector-index');
 const { chunkText, chunkDocument, detectDocType } = require('../rag-chunker');
 const { recordSlowRagRetrieval } = require('../observability');
