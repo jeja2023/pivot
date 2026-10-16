@@ -298,6 +298,22 @@
         });
     }
 
+    function handleTemplateClick(event, state, context = {}) {
+        const { renderTemplatePanel, toast } = context;
+        const notify = promise => promise?.catch(error => toast?.(error?.message || '模板操作失败', 'error'));
+        if (event.target.closest('#presentation-save-template-btn')) { notify(saveAsTemplate('organization', state, context)); return true; }
+        if (event.target.closest('#presentation-save-department-template-btn')) { notify(saveAsTemplate('department', state, context)); return true; }
+        if (event.target.closest('#presentation-submit-template-review-btn')) { notify(submitCurrentTemplateReview(state, context)); return true; }
+        if (event.target.closest('#presentation-review-template-btn')) { notify(reviewCurrentTemplate(state, context)); return true; }
+        if (event.target.closest('#presentation-export-template-btn')) { notify(exportCurrentTemplate(state, context)); return true; }
+        if (event.target.closest('#presentation-download-template-source-btn')) { notify(downloadCurrentTemplateSource(state, context)); return true; }
+        if (event.target.closest('#presentation-reparse-template-source-btn')) { notify(reparseCurrentTemplateSource(state, context)); return true; }
+        if (event.target.closest('#presentation-template-report-btn')) { state.templateImportReportExpanded = !state.templateImportReportExpanded; renderTemplatePanel?.(); return true; }
+        if (event.target.closest('#presentation-import-template-btn')) { byId('presentation-template-package-input')?.click(); return true; }
+        if (event.target.closest('#presentation-cancel-template-import-btn')) { notify(cancelTemplateImport(state, context)); return true; }
+        return false;
+    }
+
     window.Pivot?.exposeModule?.('apps.presentations.templates', {
         ready: true,
         renderTemplatePanel,
@@ -309,6 +325,7 @@
         reparseCurrentTemplateSource,
         importTemplatePackage,
         cancelTemplateImport,
-        renderTemplates
+        renderTemplates,
+        handleTemplateClick
     });
 })();

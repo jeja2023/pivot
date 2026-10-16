@@ -524,15 +524,7 @@
     function assetByRef(ref) { return state.assets?.find(asset => asset.ref === ref) || null; }
     async function loadPresentationMetrics() { return presenter()?.loadPresentationMetrics?.(); }
     function renderTemplatePanel() { return templatePresenter()?.renderTemplatePanel?.(state, { templateById, renderTemplates }); }
-    async function saveAsOrganizationTemplate() { return templatePresenter()?.saveAsTemplate?.('organization', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
-    async function saveAsDepartmentTemplate() { return templatePresenter()?.saveAsTemplate?.('department', state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast }); }
-    async function submitCurrentTemplateReview() { return templatePresenter()?.submitCurrentTemplateReview?.(state, { templateById, renderTemplatePanel, toast }); }
-    async function reviewCurrentTemplate() { return templatePresenter()?.reviewCurrentTemplate?.(state, { templateById, renderTemplatePanel, toast }); }
-    async function exportCurrentTemplate() { return templatePresenter()?.exportCurrentTemplate?.(state, { templateById, toast }); }
-    async function downloadCurrentTemplateSource() { return templatePresenter()?.downloadCurrentTemplateSource?.(state, { templateById, toast }); }
-    async function reparseCurrentTemplateSource() { return templatePresenter()?.reparseCurrentTemplateSource?.(state, { templateById, renderTemplatePanel, renderLibrary, toast }); }
-    async function importTemplatePackage(file) { return templatePresenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
-    async function cancelTemplateImport() { return templatePresenter()?.cancelTemplateImport?.(state, { renderTemplatePanel, toast }); }
+    function importTemplatePackage(file) { return templatePresenter()?.importTemplatePackage?.(file, state, { renderTemplatePanel, renderLibrary, toast }); }
     function renderSpeakerNotes() { return presenter()?.renderSpeakerNotes?.(state); }
     function renderPresenterMode() { return presenter()?.renderPresenterMode?.(state); }
     async function openPresenterMode() { return presenter()?.openPresenterMode?.(state, { saveActive, syncRemoteSlide }); }
@@ -883,23 +875,12 @@ function setSelectedImageAsCover() {
     function bindEvents(view) {
         if (!view.__dropdownGlobalBound && typeof document !== 'undefined') {
             view.__dropdownGlobalBound = true;
-            document.addEventListener('pointerdown', e => {
-                if (!e.target.closest('.presentation-dropdown')) {
-                    document.querySelectorAll('.presentation-dropdown[open]').forEach(details => {
-                        details.open = false;
-                    });
-                }
-            });
+            document.addEventListener('pointerdown', e => { if (!e.target.closest('.presentation-dropdown')) document.querySelectorAll('.presentation-dropdown[open]').forEach(d => { d.open = false; }); });
         }
         view.addEventListener('click', event => {
             const dropdownItem = event.target.closest('.presentation-dropdown-item');
-            if (dropdownItem) {
-                const parentDropdown = dropdownItem.closest('details.presentation-dropdown');
-                if (parentDropdown) parentDropdown.open = false;
-            }
-            view.querySelectorAll('.presentation-dropdown[open]').forEach(details => {
-                if (!details.contains(event.target)) details.open = false;
-            });
+            if (dropdownItem) dropdownItem.closest('details.presentation-dropdown')?.removeAttribute('open');
+            view.querySelectorAll('.presentation-dropdown[open]').forEach(d => { if (!d.contains(event.target)) d.open = false; });
             const template = event.target.closest('[data-presentation-template-id]'); if (template) { if (state.active) applyTemplate(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); else createBlank(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); return; }
             const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; const action = docAction.dataset.presentationAction; if (action === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (action === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (action === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); if (action === 'favorite') toggleFavoriteDocument(id, docAction.dataset.presentationFavorite === 'true').catch(error => toast(error.message, 'error')); if (action === 'tags') { let tags = []; try { tags = JSON.parse(docAction.dataset.presentationTags || '[]'); } catch (_) {} updateDocumentTags(id, tags).catch(error => toast(error.message, 'error')); } return; }
             const slideButton = event.target.closest('[data-presentation-slide-id]'); if (slideButton) { state.selectedSlideId = slideButton.dataset.presentationSlideId; state.selectedElementId = ''; state.selectedElementIds = []; renderEditor(); collab()?.sendPresenceHeartbeat?.(); syncRemoteSlide().catch(() => {}); return; }
@@ -925,16 +906,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-add-table-btn')) { addTable(); return; }
             if (event.target.closest('#presentation-add-chart-btn')) { addChart(); return; }
             if (event.target.closest('#presentation-import-data-chart-btn')) { openDataChartModal().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-save-template-btn')) { saveAsOrganizationTemplate().catch(error => toast(error.message, 'error')); return; }
-        if (event.target.closest('#presentation-save-department-template-btn')) { saveAsDepartmentTemplate().catch(error => toast(error.message, 'error')); return; }
-        if (event.target.closest('#presentation-submit-template-review-btn')) { submitCurrentTemplateReview().catch(error => toast(error.message, 'error')); return; }
-        if (event.target.closest('#presentation-review-template-btn')) { reviewCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-export-template-btn')) { exportCurrentTemplate().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-download-template-source-btn')) { downloadCurrentTemplateSource().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-reparse-template-source-btn')) { reparseCurrentTemplateSource().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-template-report-btn')) { state.templateImportReportExpanded = !state.templateImportReportExpanded; renderTemplatePanel(); return; }
-            if (event.target.closest('#presentation-import-template-btn')) { byId('presentation-template-package-input')?.click(); return; }
-            if (event.target.closest('#presentation-cancel-template-import-btn')) { cancelTemplateImport().catch(error => toast(error.message, 'error')); return; }
+            if (templatePresenter()?.handleTemplateClick?.(event, state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast })) return;
             if (event.target.closest('#presentation-upload-image-btn')) { byId('presentation-image-input')?.click(); return; }
             if (event.target.closest('#presentation-add-diagram-btn')) { addDiagram(); return; }
             if (event.target.closest('#presentation-insert-media-btn')) { state.pendingAssetType = 'media'; byId('presentation-rich-asset-input')?.click(); return; }
