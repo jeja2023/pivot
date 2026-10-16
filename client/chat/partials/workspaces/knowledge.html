@@ -122,8 +122,14 @@
                         <input id="knowledge-filter-updated-after" class="form-input" type="date" aria-label="更新时间下限">
                     </div>
                     <div class="knowledge-ask-actions">
+                        <label class="knowledge-answer-model-field" for="knowledge-product-model">
+                            <span>回答模型</span>
+                            <select id="knowledge-product-model" class="form-input" data-pivot-app-model="knowledge" aria-label="选择知识库回答模型" disabled>
+                                <option value="">加载模型中…</option>
+                            </select>
+                        </label>
                         <button type="button" id="knowledge-product-search" class="btn-secondary">检索证据</button>
-                        <button type="button" id="knowledge-product-ask" class="btn-primary">生成有据回答</button>
+                        <button type="button" id="knowledge-product-ask" class="btn-primary" disabled>生成有据回答</button>
                     </div>
                 </div>
                 <div id="knowledge-product-answer" class="knowledge-product-answer" aria-live="polite"></div>

@@ -86,6 +86,14 @@ test('TEI 路由与原始分数归一化兼容', () => {
     });
 });
 
+test('外部重排序低分不会清零明确词面命中的法规片段', () => {
+    const ranked = applyRerankResults([
+        { chunkId: 1, text: '盗窃公私财物', phraseMatch: 1, ftsRank: 15, rerankScore: 0.8 }
+    ], [{ index: 0, score: 0.01 }]);
+    assert.equal(ranked[0].externalRerankScore, 0.01);
+    assert.ok(ranked[0].rerankScore >= 0.55);
+});
+
 test('重排序连接测试将可配置服务转换为受限测试候选', async () => {
     const result = await testRerankConnection({ apiUrl: '' });
     assert.deepEqual(result, { success: false, error: '请填写重排序服务地址。' });

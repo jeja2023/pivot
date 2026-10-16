@@ -6,6 +6,7 @@ const {
 } = require('./shared');
 const {
     getRegulationDocumentById,
+    listRegulationCategoryFolders,
     listRegulationVersions
 } = require('./catalog');
 const { searchRegulationArticlesHybrid } = require('./search');
@@ -435,6 +436,19 @@ async function buildRegulationAiContext({
         selected: selectedArticleIds.includes(Number(match.article_id))
     }));
 
+    let indexStatus = 'ready';
+    if (!sources.length) {
+        try {
+            const folders = await listRegulationCategoryFolders({ includeArchived });
+            const documentCount = folders.reduce((total, folder) => total + Number(folder.documentCount || 0), 0);
+            const articleCount = folders.reduce((total, folder) => total + Number(folder.articleCount || 0), 0);
+            indexStatus = !documentCount ? 'no_documents'
+                : !articleCount ? 'no_recorded_articles' : 'no_matching_articles';
+        } catch (_error) {
+            indexStatus = 'index_check_unavailable';
+        }
+    }
+
     // 上下文分两组：检索候选 / 经引用关联候选。候选不是已采纳的结论依据，
     // 最终回答仍须由法规问答的引用核验器确认。
     const directLines = sources.filter(s => !s.viaLink).map(s => `[${s.index}] ${s.label}\n定位：${s.headingPath || s.label}${s.pageStart ? `；来源页 ${s.pageStart}${s.pageEnd && s.pageEnd !== s.pageStart ? `-${s.pageEnd}` : ''}` : ''}\n效力：${s.effectStatus}；审核：${s.reviewStatus}\n证据：${s.contextExcerpt}`);
@@ -455,6 +469,8 @@ async function buildRegulationAiContext({
             selectedCandidateCount: selectedRows.length,
             directCandidateCount: sources.filter(source => !source.viaLink).length,
             relatedCandidateCount: sources.filter(source => source.viaLink).length,
+            indexStatus,
+            retrievalErrorCount: retrievalResults.filter(result => result.status === 'rejected').length,
             followUpResolved: plan.followUpResolved,
             effectiveAt: plan.effectiveAt || '',
             effectiveVersionId: effectiveVersionId || null

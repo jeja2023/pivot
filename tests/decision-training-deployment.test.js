@@ -399,7 +399,7 @@ test('active 下一步策略选择澄清时停止 RAG 与工具执行，并保�
         recordChatRouteMetric() {},
         resolveBusinessDecision: async input => ({
             decisionId: 'next-step-' + input.scenario,
-            context: { scenario: input.scenario },
+            context: { scenario: input.scenario, candidates: input.candidates },
             selectedActionId: input.scenario === 'chat.next_step' ? 'clarify' : input.fallbackActionId,
             policy: { mode: 'active', suggestedActionId: input.scenario === 'chat.next_step' ? 'clarify' : input.fallbackActionId, confidence: 0.95, threshold: 0.58, reasonCode: 'policy_auto_approved', applied: true }
         })

@@ -682,7 +682,7 @@ const RESTORABLE_WORKSPACES = new Set(['personal', 'chat', 'apps', 'agent', 'age
 
 const WORKSPACE_SCRIPT_GROUPS = {
     apps: [
-        '/chat/apps-model-selector.js', '/chat/apps-workbench-core.js', '/chat/apps-workbench-editor.js',
+        '/chat/apps-workbench-core.js', '/chat/apps-workbench-editor.js',
         '/chat/apps-workbench-proofread.js', '/chat/apps-workbench-ai.js', '/chat/apps-workbench-rewrite.js',
         '/chat/apps-workbench-export.js', '/chat/apps-workbench-rag.js', '/chat/apps-workbench-regulations.js',
         '/chat/apps-workbench-ocr-review-views.js', '/chat/apps-workbench-ocr-actions.js', '/chat/apps-workbench-ocr.js', '/chat/apps-workbench-pdf-tools.js', '/chat/apps-workbench-presentations-collab.js', '/chat/apps-workbench-presentations-templates.js', '/chat/apps-workbench-presentations-presenter.js', '/chat/apps-workbench-presentations.js'

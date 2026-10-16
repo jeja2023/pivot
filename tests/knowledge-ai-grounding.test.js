@@ -3,10 +3,27 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { buildKnowledgeRetrievalPlan } = require('../server/services/knowledge-query-planner');
-const { validateKnowledgeAnswer, verifyKnowledgeAnswerSemantics } = require('../server/services/knowledge-grounding');
+const { validateKnowledgeAnswer, verifyKnowledgeAnswerSemantics, verifyKnowledgeAnswerWithRepair } = require('../server/services/knowledge-grounding');
 const { retrieveKnowledgeEvidence } = require('../server/services/knowledge-answer-service');
 const { createChatRagResponseFlow } = require('../server/services/chat-rag-grounding');
 const { resolveKnowledgeTopK } = require('../server/services/rag-index');
+const { resolveAccessibleAnswerModelAsync } = require('../server/services/models');
+
+test('知识问答未指定模型时选个人默认，并在默认缺失时使用可授权模型', async () => {
+    const user = { id: 7, default_model_id: 2 };
+    const calls = [];
+    const getModel = async id => {
+        calls.push(id);
+        return id === 2 ? { id: 2 } : id === 9 ? { id: 9 } : null;
+    };
+    assert.equal((await resolveAccessibleAnswerModelAsync(null, user, { getModel, listModels: async () => [{ id: 9 }] })).id, 2);
+    assert.deepEqual(calls, [2]);
+    calls.length = 0;
+    const fallback = await resolveAccessibleAnswerModelAsync(null, { id: 7, default_model_id: 3 }, { getModel, listModels: async () => [{ id: 9 }] });
+    assert.equal(fallback.id, 9);
+    assert.deepEqual(calls, [3, null, 9]);
+    assert.equal(await resolveAccessibleAnswerModelAsync(99, user, { getModel, listModels: async () => [{ id: 9 }] }), null);
+});
 
 test('知识库短追问会结合上一轮问题生成完整检索式', () => {
     const plan = buildKnowledgeRetrievalPlan({
@@ -114,6 +131,44 @@ test('知识库语义复核接受模型判定被同一来源蕴含的结论', as
     });
     assert.equal(result.grounding.accepted, true);
     assert.equal(result.grounding.status, 'semantically_verified');
+});
+
+test('知识库回答缺少引用时只接受修复后通过来源核验的正文', async () => {
+    const context = '[引用 1 | citation:kb:1:v1:b1 | 来源:制度.md · 片段 1 | 检索可信度: 82%]: 报销申请应在返岗后十个工作日内提交。';
+    const result = await verifyKnowledgeAnswerWithRepair({
+        answer: '报销申请应在返岗后十个工作日内提交。',
+        ragContext: context,
+        question: '报销申请什么时候提交？',
+        modelCfg: { id: 1 },
+        user: { id: 1 },
+        enabled: false,
+        callModel: async () => ({ content: '报销申请应在返岗后十个工作日内提交。[引用 1 | citation:kb:1:v1:b1]' })
+    });
+    assert.equal(result.grounding.accepted, true);
+    assert.equal(result.grounding.citationRepaired, true);
+    assert.deepEqual(result.grounding.citedSourceIndexes, [1]);
+
+    const rejected = await verifyKnowledgeAnswerWithRepair({
+        answer: '采购合同必须经过法务会签。',
+        ragContext: context,
+        modelCfg: { id: 1 },
+        user: { id: 1 },
+        enabled: false,
+        callModel: async () => ({ content: '采购合同必须经过法务会签。[引用 1]' })
+    });
+    assert.equal(rejected.grounding.accepted, false);
+    assert.match(rejected.answer, /未能通过知识库来源核验/);
+
+    const corrected = await verifyKnowledgeAnswerWithRepair({
+        answer: '采购合同必须经过法务会签。[引用 1]',
+        ragContext: context,
+        modelCfg: { id: 1 },
+        user: { id: 1 },
+        enabled: false,
+        callModel: async () => ({ content: '报销申请应在返岗后十个工作日内提交。[引用 1 | citation:kb:1:v1:b1]' })
+    });
+    assert.equal(corrected.grounding.accepted, true);
+    assert.equal(corrected.grounding.citationRepaired, true);
 });
 
 test('知识库复杂问题自动扩大检索 Top-K，简单问题保持默认规模', () => {

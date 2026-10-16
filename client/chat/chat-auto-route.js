@@ -20,11 +20,11 @@
     const getRagPreference = () => {
         try {
             const value = localStorage.getItem(RAG_PREFERENCE_KEY);
-            return value === 'enabled' ? 'enabled' : 'auto';
+            return ['enabled', 'disabled'].includes(value) ? value : 'auto';
         } catch (_) { return 'auto'; }
     };
     const setRagPreference = preference => {
-        const value = preference === 'enabled' ? 'enabled' : 'auto';
+        const value = ['enabled', 'disabled'].includes(preference) ? preference : 'auto';
         try {
             if (value === 'auto') localStorage.removeItem(RAG_PREFERENCE_KEY);
             else localStorage.setItem(RAG_PREFERENCE_KEY, value);
@@ -139,9 +139,8 @@
                 ? { kind: 'wiki', id: selection.id, collectionId: selection.collectionId, token }
                 : { kind: 'tool', fullName: selection.fullName, token };
         selections = [...selections.filter(item => item.token !== token && (item.kind !== next.kind || (item.id || item.fullName) !== (next.id || next.fullName))), next].slice(-20);
-        if (selection.kind === 'collection' || selection.kind === 'wiki') {
-            setRagPreference('enabled');
-        }
+        // @资料库 / @Wiki 是本条消息的显式覆盖，不应把“强制检索”写成
+        // 长期偏好而让后续普通对话继续带着该范围检索。
         field.focus();
         window.Pivot.legacy.resizeUserInput?.();
         closeMentionMenu();

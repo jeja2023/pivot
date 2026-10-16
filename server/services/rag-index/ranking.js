@@ -76,7 +76,10 @@ function calculateCitationConfidence(item, scoreThreshold = 0, maxRankScore = nu
     const maxScore = Number(maxRankScore);
     const rankQuality = Number.isFinite(rankScore) && maxScore > 0 ? clamp(rankScore / maxScore) : 0;
     const ftsRank = Number.isInteger(item?.ftsRank) ? item.ftsRank : null;
-    const lexicalQuality = ftsRank == null ? 0 : clamp(1 - ftsRank / 10);
+    const lexicalQuality = Math.max(
+        ftsRank == null ? 0 : clamp(1 - ftsRank / 10),
+        item?.phraseMatch ? 1 : clamp(Number(item?.termCoverage || 0) * 0.8)
+    );
     const sourceQuality = String(item?.headingPath || '').trim() ? 1 : 0.55;
     const feedback = normalizeFeedbackSignal(item?.feedback);
     const feedbackQuality = feedback ? (feedback.helpful + 1) / (feedback.total + 2) : 0.5;

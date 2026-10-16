@@ -68,6 +68,7 @@
         state.remoteSession = data.session;
         byId('presentation-remote-start-btn')?.classList.add('hidden');
         byId('presentation-remote-stop-btn')?.classList.remove('hidden');
+        byId('presentation-remote-badge')?.classList.remove('hidden');
         const url = new URL(data.displayUrl, window.location.origin).toString();
         try { await navigator.clipboard?.writeText(url); } catch (_) {}
         const opened = window.open(url, 'pivot-presentation-display', 'noopener,noreferrer');
@@ -91,6 +92,7 @@
         state.remoteSession = null;
         byId('presentation-remote-start-btn')?.classList.remove('hidden');
         byId('presentation-remote-stop-btn')?.classList.add('hidden');
+        byId('presentation-remote-badge')?.classList.add('hidden');
         toast?.('远程投屏已结束。');
     }
 

@@ -22,6 +22,7 @@ module.exports = {
     listRegulationAiAnswerLogs: aiAudit.listRegulationAiAnswerLogs,
     getRegulationAiQualityMetrics: aiAudit.getRegulationAiQualityMetrics,
     buildRegulationAiContext: analysis.buildRegulationAiContext,
+    buildRegulationUnverifiedModelAnswer: grounding.buildRegulationUnverifiedModelAnswer,
     buildRegulationAiQueryPlan: aiPlanning.buildRegulationAiQueryPlan,
     buildRegulationEvidenceExcerpt: evidence.buildRegulationEvidenceExcerpt,
     buildRegulationSearchExcerpt: search.buildRegulationSearchExcerpt,

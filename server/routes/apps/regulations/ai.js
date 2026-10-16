@@ -6,6 +6,7 @@ const {
     recordRegulationAiAnswer,
     normalizeRegulationId,
     recordRegulationAccess,
+    buildRegulationUnverifiedModelAnswer,
     validateRegulationAiGrounding
 } = require('./helpers');
 const { isAdmin } = require('../../../permissions');
@@ -60,6 +61,7 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
         });
         await recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
+        const hasArticleEvidence = Boolean(built.sources?.length);
         // 候选条文独立返回给前端。它们是检索召回结果，不等同于已经被模型采纳的结论依据。
         const sources = (built.sources || []).map(source => ({
             index: source.index,
@@ -100,11 +102,29 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             stream: !!body.stream,
             extraPayload: { sources, diagnostics: built.diagnostics || {}, queryPlan: built.plan || {} },
             transformCompletion: async answer => {
+                if (!hasArticleEvidence) {
+                    return {
+                        content: buildRegulationUnverifiedModelAnswer(answer, { indexStatus: built.diagnostics?.indexStatus }),
+                        metadata: { grounding: { status: 'model_general_unverified', accepted: false, candidateCount: 0, reasonCodes: ['no_candidates'] } },
+                        extraPayload: { grounding: { status: 'model_general_unverified', accepted: false, candidateCount: 0, reasonCodes: ['no_candidates'] } }
+                    };
+                }
                 const verified = validateRegulationAiGrounding({
                     answer,
                     sources: built.sources || [],
                     question: query
                 });
+                const formatOnly = !verified.grounding.accepted
+                    && verified.grounding.reasonCodes?.length
+                    && verified.grounding.reasonCodes.every(code => ['missing_source_citation', 'invalid_structured_output'].includes(code));
+                if (formatOnly) {
+                    const grounding = { ...verified.grounding, status: 'model_general_unverified' };
+                    return {
+                        content: buildRegulationUnverifiedModelAnswer(answer, { hasCandidates: true }),
+                        metadata: { grounding },
+                        extraPayload: { grounding }
+                    };
+                }
                 return {
                     content: verified.answer,
                     metadata: { grounding: verified.grounding },
@@ -126,7 +146,7 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
                     queryPlan: built.plan || {}
                 }
             }),
-            messages: [
+            messages: hasArticleEvidence ? [
                 {
                     role: 'system',
                     content: [
@@ -147,6 +167,10 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
                     role: 'user',
                     content: `法规条文依据：\n${context}\n\n本轮检索规划：${JSON.stringify(built.plan || {})}\n\n问题：${query}`
                 }
+            ] : [
+                { role: 'system', content: '你是法规查询助手。本轮法规库未返回可引用条文。请根据一般法律知识简洁回答，并明确说明具体法律适用、条号及刑罚需核对现行官方法条。不要伪造来源或声称已检索到法规依据。' },
+                ...historyMessages,
+                { role: 'user', content: query }
             ]
         });
     }));

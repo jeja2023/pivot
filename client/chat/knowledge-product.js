@@ -73,7 +73,7 @@
                 : grounding ? '依据待补充' : '待核验';
         PivotSafeHtml.setHtml(target, `
             <article class="knowledge-answer-card">
-                <header><strong>知识库回答</strong><span>${escapeHtml(knowledgeRetrievalModeLabel(data.retrievalMode))} · ${escapeHtml(groundingLabel)}</span></header>
+                <header><strong>知识库回答</strong><span>${data.modelName ? `${escapeHtml(data.modelName)} · ` : ''}${escapeHtml(knowledgeRetrievalModeLabel(data.retrievalMode))} · ${escapeHtml(groundingLabel)}</span></header>
                 <div class="knowledge-answer-copy">${escapeHtml(data.answer || '')}</div>
                 ${warnings.length ? `<div class="knowledge-answer-warnings">${warnings.map(escapeHtml).join('；')}</div>` : ''}
                 <div class="knowledge-answer-sources"><strong>可验证来源</strong>${renderCitations(data.citations || [])}</div>
@@ -97,6 +97,9 @@
     async function runKnowledgeSearch({ ask = false } = {}) {
         const query = document.getElementById('knowledge-product-query')?.value?.trim();
         if (!query) return showToast('请输入知识库问题', 'error');
+        const modelSelect = document.getElementById('knowledge-product-model');
+        const modelId = ask ? String(modelSelect?.value || '').trim() : '';
+        if (ask && (!modelId || modelSelect?.disabled)) return showToast('请先选择可用的回答模型', 'error');
         const answer = document.getElementById('knowledge-product-answer');
         const results = document.getElementById('knowledge-product-results');
         if (answer) PivotSafeHtml.setHtml(answer, '<div class="knowledge-product-loading">正在检索可验证知识…</div>');
@@ -111,7 +114,7 @@
             const data = await fetchKnowledge(ask ? '/knowledge/ask' : '/knowledge/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, scope, filters })
+                body: JSON.stringify({ query, scope, filters, ...(ask ? { model: modelId } : {}) })
             });
             if (ask) {
                 renderAnswer(data);
@@ -387,6 +390,12 @@
     }
 
     async function refreshActiveTab() {
+        if (activeTab === 'search') {
+            const modelId = await window.Pivot.legacy.PivotAppModels?.refresh?.('knowledge', 'knowledge-product-model');
+            const askButton = document.getElementById('knowledge-product-ask');
+            if (askButton) askButton.disabled = !modelId;
+            return;
+        }
         if (activeTab === 'content') return loadDocuments();
         if (activeTab === 'sources') return loadSources();
         if (activeTab === 'jobs') return loadJobs();

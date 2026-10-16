@@ -1639,11 +1639,15 @@
     gap: 10px 14px;
 }
 
-/* 模式二：直接搜索用户 单行对齐网格 */
+/* 模式二：直接搜索用户 2 列对齐网格（首行全宽输入，次行 50%/50% 角色与操作按钮） */
 .presentation-collab-grid-search {
     display: grid;
-    grid-template-columns: 1fr 170px auto;
-    gap: 10px;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+}
+
+.presentation-collab-grid-search .presentation-collab-search-field {
+    grid-column: 1 / -1;
 }
 
 .presentation-collab-field {
@@ -1695,6 +1699,12 @@
     box-sizing: border-box !important;
 }
 
+/* 清除通用表单控件的底部外边距，避免其撑高网格行而使操作按钮下移。 */
+.presentation-collab-select,
+.presentation-collab-input {
+    margin: 0 !important;
+}
+
 .presentation-collab-select:focus,
 .presentation-collab-input:focus {
     border-color: #10a37f !important;
@@ -1704,8 +1714,7 @@
 
 .presentation-collab-btn-cell {
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    align-self: end;
 }
 
 .presentation-collab-btn-wrap {
@@ -1732,13 +1741,10 @@
     gap: 6px !important;
 }
 
-.presentation-collab-grid-unit-user .presentation-collab-submit-btn {
+.presentation-collab-grid-unit-user .presentation-collab-submit-btn,
+.presentation-collab-grid-search .presentation-collab-submit-btn,
+.presentation-collab-unit-actions-row .presentation-collab-submit-btn {
     width: 100% !important;
-}
-
-.presentation-collab-grid-search .presentation-collab-submit-btn {
-    width: auto !important;
-    min-width: 96px !important;
 }
 
 .presentation-collab-submit-btn:hover {
@@ -1857,16 +1863,15 @@
 }
 
 .presentation-collab-unit-actions-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
     padding-top: 10px;
     border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .presentation-collab-unit-actions-row .presentation-collab-role-field {
-    width: 200px;
-    flex-shrink: 0;
+    width: 100%;
 }
 
 /* 协作者列表展示区 */
@@ -2428,5 +2433,378 @@
     .presentation-outline-actions .btn-secondary,
     .presentation-outline-actions .btn-primary {
         flex: 1 1 auto;
+    }
+}
+
+/* ==========================================================================
+   PPT 顶部操作栏精细化重构：历史按钮组、协作/演示/导出下拉菜单与响应式
+   ========================================================================== */
+
+.presentation-editor-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+}
+
+/* 顶部各类按钮与下拉控件统一垂直居中与基线对齐 */
+.presentation-editor-actions > .presentation-btn-group,
+.presentation-editor-actions > .presentation-dropdown,
+.presentation-editor-actions > button {
+    display: inline-flex !important;
+    align-items: center !important;
+    vertical-align: middle !important;
+    margin: 0 !important;
+}
+
+/* 历史操作按钮组 (撤销/重做) */
+.presentation-btn-group {
+    display: inline-flex !important;
+    align-items: center !important;
+    box-shadow: 0 1px 2px var(--shadow-color-sm, rgba(15, 23, 42, 0.04));
+}
+
+.presentation-btn-group .presentation-group-btn {
+    height: 34px !important;
+    padding: 0 10px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    font-size: 0.76rem !important;
+    font-weight: 750 !important;
+    position: relative;
+    border-radius: 0 !important;
+}
+
+.presentation-btn-group .presentation-group-btn:first-child {
+    border-top-left-radius: 8px !important;
+    border-bottom-left-radius: 8px !important;
+}
+
+.presentation-btn-group .presentation-group-btn:last-child {
+    border-top-right-radius: 8px !important;
+    border-bottom-right-radius: 8px !important;
+    border-left: 0 !important;
+}
+
+.presentation-btn-group .presentation-group-btn:hover {
+    z-index: 1;
+}
+
+.presentation-btn-group .presentation-group-btn:disabled,
+.presentation-btn-group .presentation-group-btn[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 按钮图标与图文排版 */
+.presentation-btn-icon {
+    flex-shrink: 0;
+    color: currentColor;
+    opacity: 0.85;
+}
+
+.presentation-btn-with-icon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 34px !important;
+    padding: 0 12px !important;
+    border-radius: 8px !important;
+    font-size: 0.78rem !important;
+    font-weight: 800 !important;
+    box-sizing: border-box !important;
+}
+
+/* 下拉菜单容器与 Summary 按钮 */
+.presentation-dropdown {
+    position: relative;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.presentation-dropdown[open] {
+    z-index: 60;
+}
+
+.presentation-dropdown-summary {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 34px !important;
+    padding: 0 12px !important;
+    border-radius: 8px !important;
+    font-size: 0.78rem !important;
+    font-weight: 800 !important;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    box-sizing: border-box !important;
+    transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.presentation-dropdown-summary::-webkit-details-marker,
+.presentation-dropdown-summary::marker {
+    display: none;
+    content: "";
+}
+
+.presentation-dropdown-caret {
+    flex-shrink: 0;
+    margin-left: 1px;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0.75;
+}
+
+.presentation-dropdown[open] .presentation-dropdown-caret {
+    transform: rotate(180deg);
+}
+
+.presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary {
+    border-color: var(--primary-focus, rgba(16, 163, 127, 0.45));
+    background: var(--primary-subtle, #f0fdfa);
+    color: var(--primary-dark, #047857);
+}
+
+/* 远程投屏状态呼吸标签 */
+.presentation-remote-live-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--success, #10b981);
+    color: var(--text-inverse, #ffffff);
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.2px;
+    animation: presentationBadgePulse 2s infinite ease-in-out;
+}
+
+@keyframes presentationBadgePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(0.96); }
+}
+
+/* 下拉菜单面板浮层 */
+.presentation-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 236px;
+    max-width: 290px;
+    padding: 6px;
+    border: 1px solid var(--border, rgba(148, 163, 184, 0.22));
+    border-radius: 10px;
+    background: var(--bg-main, #ffffff);
+    box-shadow: 0 14px 32px var(--shadow-color, rgba(15, 23, 42, 0.12)), 0 2px 6px var(--shadow-color-sm, rgba(15, 23, 42, 0.04));
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    animation: presentationDropdownSlide 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.presentation-dropdown-menu-right {
+    left: auto;
+    right: 0;
+}
+
+@keyframes presentationDropdownSlide {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* 下拉菜单项高优先级重置与左对齐规整（强力覆盖全局 .btn-secondary 的居中属性） */
+.presentation-editor-actions .presentation-dropdown-menu .presentation-dropdown-item,
+.presentation-dropdown-menu .presentation-dropdown-item,
+.presentation-dropdown-item.btn-secondary,
+.presentation-dropdown-item {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 44px !important;
+    padding: 8px 10px !important;
+    border: 0 !important;
+    outline: none !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--text-main, #0f172a) !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+    gap: 12px !important;
+    font-family: inherit !important;
+    font-size: 0.78rem !important;
+    font-weight: normal !important;
+    transition: background 0.14s ease, color 0.14s ease !important;
+}
+
+.presentation-editor-actions .presentation-dropdown-menu .presentation-dropdown-item:hover,
+.presentation-dropdown-menu .presentation-dropdown-item:hover,
+.presentation-dropdown-item:hover {
+    background: var(--bg-hover, #f1f5f9) !important;
+}
+
+/* 图标固定尺寸容器与居中对齐，彻底消除不同图标宽度的不对齐现象 */
+.presentation-dropdown-item > svg,
+.presentation-dropdown-icon {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    max-width: 20px !important;
+    flex: 0 0 20px !important;
+    flex-shrink: 0 !important;
+    color: var(--text-muted, #64748b) !important;
+    transition: color 0.14s ease, transform 0.14s ease !important;
+    margin: 0 !important;
+}
+
+.presentation-dropdown-item:hover > svg {
+    color: var(--primary, #10a37f) !important;
+    transform: scale(1.08);
+}
+
+/* 文本列绝对左对齐 */
+.presentation-dropdown-text {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    text-align: left !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    gap: 2px !important;
+    margin: 0 !important;
+}
+
+.presentation-dropdown-text strong {
+    font-size: 0.78rem !important;
+    font-weight: 750 !important;
+    color: var(--text-main, #0f172a) !important;
+    line-height: 1.3 !important;
+    text-align: left !important;
+    display: block !important;
+}
+
+.presentation-dropdown-text small {
+    font-size: 0.67rem !important;
+    color: var(--text-muted, #64748b) !important;
+    line-height: 1.3 !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+}
+
+/* 推荐徽章行左对齐 */
+.presentation-item-headline {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 6px !important;
+    text-align: left !important;
+    width: 100% !important;
+}
+
+.presentation-tag-badge {
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: var(--primary-badge-bg, #ecfdf5);
+    color: var(--primary-badge-color, #047857);
+    border: 1px solid var(--primary-badge-border, rgba(16, 163, 127, 0.25));
+}
+
+/* 危险与特殊动作项 */
+.presentation-dropdown-item-danger:hover {
+    background: var(--danger-subtle, #fef2f2) !important;
+}
+
+.presentation-dropdown-item-danger:hover strong,
+.presentation-dropdown-item-danger:hover > svg {
+    color: var(--danger, #dc2626) !important;
+}
+
+.presentation-dropdown-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--divider, rgba(148, 163, 184, 0.16));
+}
+
+.presentation-dropdown-item:disabled,
+.presentation-dropdown-item[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 暗色模式适配 */
+body.dark-mode .presentation-dropdown-menu,
+.dark-mode .presentation-dropdown-menu {
+    background: var(--bg-dark-card, #1e293b);
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.18));
+    box-shadow: 0 16px 36px var(--shadow-dark, rgba(0, 0, 0, 0.45));
+}
+
+body.dark-mode .presentation-dropdown-item,
+.dark-mode .presentation-dropdown-item {
+    color: var(--text-dark, #f1f5f9);
+}
+
+body.dark-mode .presentation-dropdown-item:hover,
+.dark-mode .presentation-dropdown-item:hover {
+    background: var(--bg-dark-hover, #334155);
+}
+
+body.dark-mode .presentation-dropdown-item strong,
+.dark-mode .presentation-dropdown-item strong {
+    color: var(--text-dark-head, #f8fafc);
+}
+
+body.dark-mode .presentation-dropdown-divider,
+.dark-mode .presentation-dropdown-divider {
+    background: var(--divider-dark, rgba(148, 163, 184, 0.14));
+}
+
+body.dark-mode .presentation-tag-badge,
+.dark-mode .presentation-tag-badge {
+    background: var(--primary-badge-dark-bg, rgba(16, 163, 127, 0.16));
+    color: var(--primary-badge-dark-color, #34d399);
+    border-color: var(--primary-badge-dark-border, rgba(16, 163, 127, 0.35));
+}
+
+body.dark-mode .presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary,
+.dark-mode .presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary {
+    background: var(--primary-dark-active-bg, #064e3b);
+    color: var(--primary-dark-active-color, #6ee7b7);
+    border-color: var(--primary-dark-active-border, #059669);
+}
+
+/* 覆盖旧版本在 <= 1120px 粗暴隐藏撤销重做的规则 */
+@media (max-width: 1120px) {
+    .presentation-editor-actions .btn-secondary:nth-of-type(1),
+    .presentation-editor-actions .btn-secondary:nth-of-type(2) {
+        display: inline-flex !important;
     }
 }

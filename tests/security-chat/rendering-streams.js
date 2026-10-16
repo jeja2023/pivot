@@ -251,7 +251,7 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.match(adminSettings, /validateRagSettings/);
     assert.match(adminSettings, /updateRagChunkOverlapLimit/);
     assert.match(ragCore, /data-rag-debug-chat/);
-    assert.match(ragCore, /pivot_chat_rag_enabled/);
+    assert.doesNotMatch(ragCore, /localStorage\.setItem\('pivot_chat_rag_enabled'/);
     assert.match(ragCore, /queueRagRetrievalForNextMessage/);
     assert.doesNotMatch(chatShellPartial, /chat-tool-status/);
     assert.match(chatShellPartial, /id="chat-mode-trigger"/);
@@ -483,7 +483,7 @@ test('系统公告弹窗居中显示且内容完整展示', () => {
     assert.match(announcementsCss, /\.announcement-center-tabs/);
 
     assert.match(personalHtml, /personal-announcement-btn/);
-    assert.match(chatHtml, /chat-sidebar-announcement-btn/);
+    assert.doesNotMatch(chatHtml, /chat-sidebar-announcement-btn/);
 });
 
 test('聊天回答仅在需要时显示紧凑的知识库和工具库凭据', () => {

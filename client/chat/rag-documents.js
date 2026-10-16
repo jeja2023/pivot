@@ -328,20 +328,6 @@ window.Pivot.legacy.getRagScopeSelection = function (source = 'chat') {
     };
 };
 
-window.Pivot.legacy.applyRagDebugScopeToChat = async function () {
-    const debugValue = normalizeRagCollectionId(document.getElementById('rag-debug-collection')?.value);
-    const debugTag = normalizeRagTag(document.getElementById('rag-debug-tag')?.value);
-    const chatSelect = document.getElementById('chat-rag-collection-scope');
-    const chatTagSelect = document.getElementById('chat-rag-tag-scope');
-    if (chatSelect) chatSelect.value = debugValue;
-    await window.Pivot.legacy.loadKnowledgeTags?.(debugValue, { updateControls: false });
-    updateRagTagControls();
-    if (chatTagSelect) {
-        chatTagSelect.value = Array.from(chatTagSelect.options).some(option => option.value === debugTag) ? debugTag : '';
-    }
-    window.Pivot.legacy.updateChatToolReadiness?.({ silent: true });
-};
-
 window.Pivot.legacy.loadKnowledgeCollections = async function () {
     if (!hasRagAuthContext()) return ragCollections;
     try {

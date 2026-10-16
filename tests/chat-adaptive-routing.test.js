@@ -49,11 +49,13 @@ function routerForTests({ collections = [], vectors = null, config = {} } = {}) 
 test('自适应路由清理显式覆盖，禁止把非 MCP 名称传入工具覆盖', () => {
     assert.deepEqual(normalizeRouteOverrides({
         collections: ['12', 'x', -1, 12],
+        tagNames: ['财务', '报销', '财务'],
         tools: ['mcp.3.db.query', 'db.query', 'mcp.bad.query'],
         excludedTools: ['mcp.4.viz.chart', 'mcp.4.viz.chart']
     }), {
         collections: [12],
         wikiSpaces: [],
+        tagNames: ['财务', '报销'],
         tools: ['mcp.3.db.query'],
         excludedTools: ['mcp.4.viz.chart'],
         forceRag: false,
@@ -66,7 +68,7 @@ test('路由覆盖清理 Wiki Space 标识，@Wiki 会同时固定原始专题�
     assert.deepEqual(normalizeRouteOverrides({
         collections: [12], wikiSpaces: ['8', 'bad', 8, -1], tools: []
     }), {
-        collections: [12], wikiSpaces: [8], tools: [], excludedTools: [], forceRag: false, excludeRag: false, excludeTools: false
+        collections: [12], wikiSpaces: [8], tagNames: [], tools: [], excludedTools: [], forceRag: false, excludeRag: false, excludeTools: false
     });
 });
 
@@ -100,6 +102,40 @@ test('从召回测试带入聊天的一次性知识库请求会固定当前轮�
     assert.equal(plan.rag.action, 'retrieve');
     assert.equal(plan.rag.reasonCode, 'explicit_rag_request');
     assert.equal(plan.execution.rag.shouldRetrieve, true);
+});
+
+test('一次性召回覆盖会完整保留 Collection 与标签范围', async () => {
+    const { router } = routerForTests();
+    const plan = await router.resolveRoutePlan({
+        prompt: '请总结当前资料',
+        user: { id: 7 },
+        state: {
+            ragEnabled: true,
+            ragPreference: 'auto',
+            mcpEnabled: false,
+            autoRouteEnabled: true,
+            routeOverrides: { forceRag: true, collections: [12], tagNames: ['财务', '报销'] }
+        }
+    });
+    assert.equal(plan.rag.action, 'retrieve');
+    assert.deepEqual(plan.execution.rag.scope.collectionIds, [12]);
+    assert.deepEqual(plan.execution.rag.scope.tagNames, ['财务', '报销']);
+});
+
+test('关闭或影子运行自动路由时，auto 许可不会使普通聊天全量检索', async () => {
+    for (const config of [
+        { enabled: false, shadowMode: false },
+        { enabled: true, shadowMode: true }
+    ]) {
+        const { router } = routerForTests({ config });
+        const plan = await router.resolveRoutePlan({
+            prompt: '你好',
+            user: { id: 7 },
+            state: { ragEnabled: true, ragPreference: 'auto', mcpEnabled: false, autoRouteEnabled: true }
+        });
+        assert.equal(plan.execution.rag.shouldRetrieve, false);
+        assert.equal(plan.rag.action, 'skip');
+    }
 });
 
 test('纯闲聊不触发知识库或工具发现', async () => {
@@ -153,6 +189,30 @@ test('显式知识库范围优先于自动路由且即使向量不可用仍可�
     assert.equal(plan.rag.reasonCode, 'explicit_rag_scope');
 });
 
+test('显式知识库选择不会被异常决策器改为先澄清', async () => {
+    const router = createSemanticRouter({
+        getChatAutoRouteConfig: () => ({ enabled: true, autoRagEnabled: true, autoToolDiscoveryEnabled: true, shadowMode: false, maxToolCandidates: 2, maxCollections: 2, ragThreshold: 0.34, ragGrayThreshold: 0.16, toolThreshold: 0.2, embeddingTimeoutMs: 100 }),
+        getEmbeddingConfig: () => ({ http: { url: '' } }),
+        knowledgeCatalogIndex: { getVisibleEntries: async () => [], scheduleRefresh() {} },
+        mcpToolCatalogIndex: { getEntries: () => [], scheduleRefresh() {} },
+        recordChatRouteMetric() {},
+        resolveBusinessDecision: async input => ({
+            decisionId: input.scenario,
+            context: { scenario: input.scenario, candidates: input.candidates },
+            selectedActionId: input.scenario === 'chat.next_step' ? 'clarify' : input.fallbackActionId,
+            policy: { applied: input.scenario === 'chat.next_step', confidence: 0.99, reasonCode: 'stale_model' }
+        })
+    });
+    const plan = await router.resolveRoutePlan({
+        prompt: '请总结当前资料',
+        user: { id: 7 },
+        state: { ragEnabled: true, ragPreference: 'auto', mcpEnabled: false, autoRouteEnabled: true, routeOverrides: { forceRag: true, collections: [12] } }
+    });
+    assert.equal(plan.rag.action, 'retrieve');
+    assert.equal(plan.nextStep.action, 'direct_answer');
+    assert.equal(plan.execution.rag.shouldRetrieve, true);
+});
+
 test('@ 工具选择固定受治理候选，主动决策不能改判为跳过', async () => {
     const tool = {
         fullName: 'mcp.3.db.run_readonly_query', name: 'db.run_readonly_query',
@@ -171,6 +231,9 @@ test('@ 工具选择固定受治理候选，主动决策不能改判为跳过', 
                 // 模拟不可信或过时的策略输出；用户的 @ 显式选择必须仍优先。
                 return { decisionId: 'tools-decision', context: { scenario: 'chat.tools', candidates: input.candidates }, selectedActionId: 'skip', policy: { applied: true, confidence: 0.99, reasonCode: 'stale_model' } };
             }
+            if (input.scenario === 'chat.next_step') {
+                return { decisionId: 'next-step-decision', context: { scenario: input.scenario, candidates: input.candidates }, selectedActionId: 'clarify', policy: { applied: true, confidence: 0.99, reasonCode: 'stale_model' } };
+            }
             return { decisionId: input.scenario, context: { scenario: input.scenario, candidates: input.candidates }, selectedActionId: input.fallbackActionId, policy: { applied: false } };
         }
     });
@@ -184,6 +247,8 @@ test('@ 工具选择固定受治理候选，主动决策不能改判为跳过', 
     assert.deepEqual(decisionCandidates, [[['propose', true], ['candidate_only', false], ['skip', false]]]);
     assert.equal(plan.tools.action, 'propose');
     assert.deepEqual(plan.execution.tools.candidates, [tool]);
+    assert.equal(plan.nextStep.action, 'direct_answer');
+    assert.equal(plan.execution.tools.shouldPlan, true);
 });
 
 test('知识库目录加载失败会回退原有全范围检索，不会把已启用 RAG 误路由为跳过', async () => {

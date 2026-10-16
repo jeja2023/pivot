@@ -117,11 +117,6 @@
             if (bell.parentElement !== brand) {
                 brand.insertBefore(bell, brandText?.nextSibling || null);
             }
-            return;
-        }
-        const targetContainer = document.querySelector('.sidebar-tools') || document.querySelector('.sidebar-header');
-        if (targetContainer && bell.parentElement !== targetContainer) {
-            targetContainer.appendChild(bell);
         }
     }
 
@@ -139,8 +134,7 @@
 
         const triggers = [
             document.getElementById('announcement-bell'),
-            document.getElementById('personal-announcement-btn'),
-            document.getElementById('chat-sidebar-announcement-btn')
+            document.getElementById('personal-announcement-btn')
         ];
         triggers.forEach(trigger => {
             if (trigger && !trigger.dataset.announcementBound) {
@@ -306,9 +300,12 @@
         const personalDot = document.getElementById('personal-announcement-dot');
         const chatDot = document.getElementById('chat-sidebar-announcement-dot');
 
-        if (bell) bell.classList.toggle('hidden', all.length === 0);
+        if (bell) {
+            const isMounted = bell.parentElement && bell.parentElement.id !== 'announcement-root';
+            bell.classList.toggle('hidden', !isMounted || all.length === 0);
+        }
         if (personalBtn) personalBtn.classList.remove('hidden');
-        if (chatBtn) chatBtn.classList.remove('hidden');
+        if (chatBtn) chatBtn.classList.add('hidden');
         dot?.classList.toggle('hidden', unreadCount === 0);
         personalDot?.classList.toggle('hidden', unreadCount === 0);
         chatDot?.classList.toggle('hidden', unreadCount === 0);

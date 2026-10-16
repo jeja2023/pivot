@@ -461,7 +461,8 @@ function gateHybridPool(scored, hybrid, scoreThreshold) {
     return scored.filter(item =>
         (item.denseScore != null && item.denseScore > scoreThreshold) ||
         (item.ftsRank != null && item.ftsRank < hybrid.ftsRankFloor) ||
-        (item.graphRank != null && item.graphRank < hybrid.ftsRankFloor)
+        (item.graphRank != null && item.graphRank < hybrid.ftsRankFloor) ||
+        (item.ftsRank != null && (item.phraseMatch || item.termCoverage >= 0.8))
     );
 }
 

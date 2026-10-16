@@ -50,6 +50,9 @@ function normalizeRouteOverrides(value = {}) {
     return {
         collections: normalizeCollectionIds(raw.collections ?? raw.collectionIds),
         wikiSpaces: normalizeCollectionIds(raw.wikiSpaces ?? raw.wikiSpaceIds ?? raw.wikiSpaceId, MAX_ROUTE_OVERRIDE_WIKI_SPACES),
+        // 一次性“带着资料去聊天”会同时携带专题库和标签。标签是检索范围
+        // 的一部分，不能在覆盖参数的清理阶段被静默丢弃而扩大到整个专题库。
+        tagNames: normalizeRetrievalScope({ tagNames: raw.tagNames ?? raw.tagName ?? raw.tags }).tagNames,
         tools: normalizeToolNames(raw.tools ?? raw.toolNames),
         excludedTools: normalizeToolNames(raw.excludedTools ?? raw.excludeTools),
         forceRag: normalizeBoolean(raw.forceRag ?? raw.useKnowledgeBase ?? raw.requireRag, false),
@@ -155,6 +158,12 @@ function safeScore(value) {
     return Number.isFinite(Number(value)) ? Math.max(0, Math.min(1, Number(value))) : 0;
 }
 
+function isResolvedDecisionActionAllowed(decision, actionId) {
+    const action = String(actionId || '');
+    return Array.isArray(decision?.context?.candidates)
+        && decision.context.candidates.some(candidate => String(candidate?.id || '') === action && candidate?.allowed !== false);
+}
+
 function scoreCollection(entry, prompt, queryVector = []) {
     const lexical = lexicalSimilarity(prompt, `${entry.name || ''}\n${entry.description || ''}\n${(entry.domainTags || []).join(' ')}`);
     const semantic = Array.isArray(queryVector) && queryVector.length && Array.isArray(entry.vector) && entry.vector.length === queryVector.length
@@ -182,11 +191,14 @@ function scoreTool(entry, prompt, queryVector = [], overrides = {}) {
     };
 }
 
-function buildLegacyExecution(state, tools = []) {
+function buildLegacyExecution(state, tools = [], { ragRequested = false, ragScope = null } = {}) {
     return {
         rag: {
-            shouldRetrieve: Boolean(state.ragEnabled),
-            scope: normalizeRetrievalScope(state.ragScope || {}),
+            // `ragEnabled` 在自适应模式中只是允许路由器检索的能力许可，并不
+            // 表示旧流程中的“每一轮都检索”。关闭路由或启用影子模式时，只有
+            // 明确选择资料范围/手动开启知识库的请求才走旧检索链路。
+            shouldRetrieve: Boolean(ragRequested),
+            scope: normalizeRetrievalScope(ragScope || state.ragScope || {}),
             queryVector: null
         },
         tools: {
@@ -302,7 +314,9 @@ function createSemanticRouter(deps = {}) {
             buildDecisionActionCandidate('chat.tools', 'candidate_only', { allowed: toolFixed ? toolFallback === 'candidate_only' : Boolean(!state.mcpEnabled && tools.candidates.length) }),
             buildDecisionActionCandidate('chat.tools', 'skip', { allowed: toolFixed ? toolFallback === 'skip' : true })
         ];
-        const nextStepFixed = !routeEnabled;
+        // 用户显式选择知识库或 @工具 时，系统必须尊重该执行意图。决策器仍可
+        // 参与工具/资料的候选排序，但不得以“先澄清”把明确请求变成不执行。
+        const nextStepFixed = !routeEnabled || hasExplicitRagRequest || overrides.tools.length > 0;
         const nextStepCandidates = [
             buildDecisionActionCandidate('chat.next_step', 'direct_answer', { allowed: true }),
             buildDecisionActionCandidate('chat.next_step', 'clarify', { allowed: !nextStepFixed })
@@ -337,18 +351,28 @@ function createSemanticRouter(deps = {}) {
         const cleanPrompt = normalizeRoutePrompt(structuredTaskState?.retrievalQuery || structuredTaskState?.currentQuestion || prompt);
         const overrides = normalizeRouteOverrides(state.routeOverrides);
         const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
-        const legacyExecution = buildLegacyExecution(state, legacyTools);
         const autoRequested = state.autoRouteEnabled !== false;
         const routeEnabled = config.enabled && autoRequested;
         const shadow = routeEnabled && config.shadowMode;
         const explicitScope = normalizeRetrievalScope({
             ...(state.ragScope || {}),
-            ...(overrides.collections.length ? { collectionIds: overrides.collections } : {})
+            ...(overrides.collections.length ? { collectionIds: overrides.collections } : {}),
+            ...(overrides.tagNames.length ? { tagNames: overrides.tagNames } : {})
         });
         const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
         // “带着问题去聊天”和手动开启知识库都代表用户的明确检索意图。
         // 此时智能路由只能优化排序与范围，不能把该轮请求误判为无需检索。
         const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag;
+        const legacyRagRequested = Boolean(state.ragEnabled) && (
+            hasExplicitRagRequest
+            // 没有 ragPreference 是旧客户端的请求；保留它的显式 ragEnabled
+            // 语义，避免升级服务端后意外关闭原有手动检索。
+            || !['auto', 'enabled', 'disabled'].includes(String(state.ragPreference || '').toLowerCase())
+        );
+        const legacyExecution = buildLegacyExecution(state, legacyTools, {
+            ragRequested: legacyRagRequested,
+            ragScope: hasExplicitScope ? explicitScope : state.ragScope
+        });
         const mode = !routeEnabled ? 'disabled' : shadow ? 'shadow' : (hasExplicitRagRequest || overrides.tools.length || overrides.excludeRag || overrides.excludeTools) ? 'explicit' : 'auto';
         let queryVector = null;
         let embeddingDurationMs = 0;
@@ -398,9 +422,13 @@ function createSemanticRouter(deps = {}) {
             rag.action = 'retrieve';
             rag.reasonCode = hasExplicitScope ? 'explicit_rag_scope' : 'explicit_rag_request';
         } else if (!routeEnabled || !config.autoRagEnabled) {
-            rag.action = 'retrieve';
-            rag.reasonCode = 'legacy_rag_scope';
-            rag.scope = normalizeRetrievalScope(state.ragScope || {});
+            if (legacyRagRequested) {
+                rag.action = 'retrieve';
+                rag.reasonCode = 'legacy_rag_scope';
+                rag.scope = hasExplicitScope ? explicitScope : normalizeRetrievalScope(state.ragScope || {});
+            } else {
+                rag.reasonCode = 'rag_not_requested';
+            }
         } else if (!needAutoRag) {
             rag.reasonCode = isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'rag_not_requested';
         } else {
@@ -565,20 +593,26 @@ function createSemanticRouter(deps = {}) {
             const selectedRagAction = routeDecisions?.rag?.selectedActionId;
             const selectedToolAction = routeDecisions?.tools?.selectedActionId;
             const selectedNextStepAction = routeDecisions?.nextStep?.selectedActionId;
-            if (!shadow && routeDecisions?.rag?.policy?.applied && ['retrieve', 'skip'].includes(selectedRagAction) && selectedRagAction !== rag.action) {
+            if (!shadow && routeDecisions?.rag?.policy?.applied
+                && isResolvedDecisionActionAllowed(routeDecisions.rag, selectedRagAction)
+                && ['retrieve', 'skip'].includes(selectedRagAction) && selectedRagAction !== rag.action) {
                 rag.action = selectedRagAction;
                 rag.confidence = routeDecisions.rag.policy.confidence;
                 rag.reasonCode = 'decision_policy_' + routeDecisions.rag.policy.reasonCode;
             }
             // 即便上游决策提供器异常返回了未允许的动作，也不能推翻用户用
             // `@工具` 指定的受治理候选。显式排除同样由既有 fallback 固定。
-            if (!shadow && !overrides.tools.length && routeDecisions?.tools?.policy?.applied && ['propose', 'candidate_only', 'skip'].includes(selectedToolAction) && selectedToolAction !== tools.action) {
+            if (!shadow && !overrides.tools.length && routeDecisions?.tools?.policy?.applied
+                && isResolvedDecisionActionAllowed(routeDecisions.tools, selectedToolAction)
+                && ['propose', 'candidate_only', 'skip'].includes(selectedToolAction) && selectedToolAction !== tools.action) {
                 tools.action = selectedToolAction;
                 tools.confidence = routeDecisions.tools.policy.confidence;
                 tools.reasonCode = 'decision_policy_' + routeDecisions.tools.policy.reasonCode;
                 if (selectedToolAction === 'skip') tools.candidateTools = [];
             }
-            if (!shadow && routeDecisions?.nextStep?.policy?.applied && ['direct_answer', 'clarify'].includes(selectedNextStepAction) && selectedNextStepAction !== nextStep.action) {
+            if (!shadow && routeDecisions?.nextStep?.policy?.applied
+                && isResolvedDecisionActionAllowed(routeDecisions.nextStep, selectedNextStepAction)
+                && ['direct_answer', 'clarify'].includes(selectedNextStepAction) && selectedNextStepAction !== nextStep.action) {
                 nextStep.action = selectedNextStepAction;
                 nextStep.confidence = routeDecisions.nextStep.policy.confidence;
                 nextStep.reasonCode = 'decision_policy_' + routeDecisions.nextStep.policy.reasonCode;

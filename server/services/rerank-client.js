@@ -99,9 +99,14 @@ function applyRerankResults(candidates, ranks) {
             return;
         }
         const externalRerankScore = byIndex.get(index);
-        ranked.push({ ...candidate, externalRerankScore, rerankScore: externalRerankScore, rankScore: externalRerankScore });
+        // 精确词面命中的原文保留部分本地相关性，避免跨模型分数标定差异把它直接清零。
+        const lexicalFloor = candidate.phraseMatch && Number.isInteger(candidate.ftsRank)
+            ? Number(candidate.rerankScore || 0) * 0.7 : 0;
+        const effectiveScore = Math.max(externalRerankScore, lexicalFloor);
+        ranked.push({ ...candidate, externalRerankScore, rerankScore: effectiveScore, rankScore: effectiveScore });
     });
-    ranked.sort((left, right) => Number(right.externalRerankScore) - Number(left.externalRerankScore));
+    ranked.sort((left, right) => Number(right.rankScore) - Number(left.rankScore)
+        || Number(right.externalRerankScore) - Number(left.externalRerankScore));
     return [...ranked, ...remaining];
 }
 

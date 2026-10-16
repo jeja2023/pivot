@@ -7,12 +7,12 @@ const { asyncHandler, normalizeLimit } = require('../http');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
-const { getAccessibleModelAsync } = require('../services/models');
+const { resolveAccessibleAnswerModelAsync } = require('../services/models');
 const sessionsRepository = require('../repositories/sessions');
 const { getRunDetailForUser } = require('../services/agent-runs');
 const { callModelTextWithBudget } = require('../services/model-text-call');
 const { retrieveKnowledgeEvidence } = require('../services/knowledge-answer-service');
-const { verifyKnowledgeAnswerSemantics } = require('../services/knowledge-grounding');
+const { verifyKnowledgeAnswerWithRepair } = require('../services/knowledge-grounding');
 const {
     getKnowledgeAiQualityMetrics,
     listKnowledgeAiAnswerLogs,
@@ -263,8 +263,9 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
                 warnings: [noEvidenceWarning]
             });
         }
-        const model = await getAccessibleModelAsync(req.body?.model || null, req.user);
-        if (!model) return res.status(400).json({ error: '未找到可用于知识问答的模型，请选择已授权模型。', code: 'KNOWLEDGE_MODEL_NOT_FOUND' });
+        const model = await resolveAccessibleAnswerModelAsync(req.body?.model || req.body?.modelId || null, req.user);
+        if (!model) return res.status(400).json({ error: '当前账号没有可用的问答模型，请联系管理员授权或在模型管理中配置。', code: 'KNOWLEDGE_MODEL_NOT_FOUND' });
+        if (model.secret_error) return res.status(400).json({ error: '知识问答模型凭据不可用，请在模型管理中重新保存密钥后重试。', code: 'KNOWLEDGE_MODEL_CREDENTIAL_UNAVAILABLE' });
         const completion = await callModelTextWithBudget({
             modelCfg: model,
             user: req.user,
@@ -273,9 +274,10 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
             maxTokens: Math.min(Math.max(Number.parseInt(req.body?.maxTokens, 10) || 1200, 256), 4000),
             temperature: 0.1
         });
-        const grounded = await verifyKnowledgeAnswerSemantics({
+        const grounded = await verifyKnowledgeAnswerWithRepair({
             answer: completion.content,
             ragContext: evidence.injectedContext,
+            question: queryText,
             modelCfg: model,
             user: req.user,
             callModel: callModelTextWithBudget
@@ -314,6 +316,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         return res.json({
             success: true,
             answer: grounded.answer,
+            modelName: model.name || model.model_name || '',
             retrievalMode: evidence.retrievalModes.join(' + ') || 'hybrid_dual_rrf_mmr',
             citations,
             results: evidence.matches,

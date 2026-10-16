@@ -302,6 +302,7 @@
                                     candidate_conflict: '候选与结论不一致',
                                     citation_repair_required: '引用格式待修复',
                                     no_candidates: '未检到候选',
+                                    model_general_unverified: '模型参考回答，未核验',
                                     insufficient_evidence: '候选不足，需补充'
                                 };
                                 return labels[grounding?.status] || '基于条文检索';
@@ -354,10 +355,12 @@
 
                             const rawAnswer = turn.answer || '';
                             const diagnostics = turn.diagnostics && typeof turn.diagnostics === 'object' ? turn.diagnostics : null;
-                            const diagnosticsHtml = !isStreaming && diagnostics && (diagnostics.retrievedCandidateCount || diagnostics.effectiveVersionId || diagnostics.followUpResolved) ? `
+                            const diagnosticsHtml = !isStreaming && diagnostics ? `
                                 <div class="regulations-ai-diagnostics">
                                     <span>候选池 ${esc(diagnostics.retrievedCandidateCount || 0)}</span>
                                     <span>直接依据 ${esc(diagnostics.directCandidateCount || direct.length)}</span>
+                                    ${diagnostics.indexStatus === 'no_recorded_articles' ? '<span>法规文档条文数为零</span>' : ''}
+                                    ${diagnostics.retrievalErrorCount ? `<span>检索异常 ${esc(diagnostics.retrievalErrorCount)} 路</span>` : ''}
                                     ${diagnostics.effectiveVersionId ? `<span>版本 ${esc(diagnostics.effectiveVersionId)}</span>` : ''}
                                     ${diagnostics.followUpResolved ? '<span>已结合上一轮问题</span>' : ''}
                                 </div>

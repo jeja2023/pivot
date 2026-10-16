@@ -132,13 +132,26 @@ function buildEvidenceUnavailableAnswer({ question, sources, reasonCodes = [] })
 
 function parseStructuredAnswer(answer) {
     const raw = String(answer || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    if (!raw.startsWith('{')) return null;
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
     try {
-        const parsed = JSON.parse(raw);
+        const parsed = JSON.parse(raw.slice(start, end + 1));
         return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
     } catch (_error) {
         return null;
     }
+}
+
+function buildRegulationUnverifiedModelAnswer(rawAnswer, { hasCandidates = false, indexStatus = '' } = {}) {
+    const structured = parseStructuredAnswer(rawAnswer);
+    const content = String(structured ? (structured.answer || structured.summary || '') : (rawAnswer || '')).trim().slice(0, 6000);
+    const note = indexStatus === 'no_recorded_articles'
+        ? '法规文档记录的条文数为零，请检查导入和索引状态。'
+        : hasCandidates
+            ? '已检索到候选条文，但模型未提供可核验引用；请对照下方条文核查后再用于法律判断。'
+            : '本次法规库未检索到可引用条文，请在作出法律判断前核对现行法条与来源文件。';
+    return `【未核验的模型参考回答】\n${content || '模型未返回有效内容。'}\n\n${note}`;
 }
 
 function normalizeClaimSourceIds(value) {
@@ -234,6 +247,7 @@ function validateRegulationAiGrounding({ answer, sources = [], question = '' } =
 }
 
 module.exports = {
+    buildRegulationUnverifiedModelAnswer,
     normalizeArticleKey,
     validateRegulationAiGrounding
 };

@@ -186,6 +186,17 @@ async function getUserRunnableModelsAsync(user) {
 
 const getUserRunnableModels = getUserRunnableModelsAsync;
 
+// 应用内未显式选模型时，沿用用户默认模型，再找系统默认和其余已授权模型。
+async function resolveAccessibleAnswerModelAsync(modelId, user, { getModel = getAccessibleModelAsync, listModels = getUserRunnableModelsAsync } = {}) {
+    if (modelId) return await getModel(modelId, user);
+    for (const preferredId of [user?.default_model_id, null]) {
+        const model = await getModel(preferredId, user);
+        if (model) return model;
+    }
+    const available = await listModels(user);
+    return available.length ? await getModel(available[0].id, user) : null;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // getRunnableModelForUser — PostgreSQL 异步
 // ──────────────────────────────────────────────────────────────────────────
@@ -328,6 +339,7 @@ module.exports = {
     getOrCreateEmbeddingUsageModel,
     getUserAccessibleModels,
     getAccessibleModelAsync,
+    resolveAccessibleAnswerModelAsync,
     getRunnableModelForUserAsync,
     getUserRunnableModelsAsync,
     getModelDailyUsageAsync,

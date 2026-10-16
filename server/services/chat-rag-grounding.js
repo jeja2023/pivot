@@ -1,7 +1,7 @@
 'use strict';
 
 const { callModelTextWithBudget } = require('./model-text-call');
-const { verifyKnowledgeAnswerSemantics } = require('./knowledge-grounding');
+const { verifyKnowledgeAnswerWithRepair } = require('./knowledge-grounding');
 const { recordKnowledgeAiAnswer } = require('./knowledge-ai-audit');
 
 // RAG 回答必须在原始流完全结束后再公开；先释放生成连接，再进行独立复核，
@@ -14,13 +14,15 @@ async function groundChatRagAnswer({
     releaseSemaphore,
     emitContentSse,
     writeSse,
-    routePlan
+    routePlan,
+    question
 } = {}) {
     if (!contextResult?.ragGrounding?.required) return { assistantContent, ragGrounding: null };
     releaseSemaphore?.();
-    const ragGrounding = await verifyKnowledgeAnswerSemantics({
+    const ragGrounding = await verifyKnowledgeAnswerWithRepair({
         answer: assistantContent,
         ragContext: contextResult.ragContext,
+        question,
         modelCfg,
         user,
         callModel: callModelTextWithBudget

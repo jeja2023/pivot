@@ -70,6 +70,7 @@
                 if (grounding?.status === 'candidate_conflict') return '候选与结论不一致';
                 if (grounding?.status === 'citation_repair_required') return '引用格式待修复';
                 if (grounding?.status === 'no_candidates') return '未检到候选';
+                if (grounding?.status === 'model_general_unverified') return '模型参考回答，未核验';
                 if (grounding?.status === 'insufficient_evidence') return '候选不足，已要求补充';
                 return '历史记录未核验';
             };

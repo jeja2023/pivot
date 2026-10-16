@@ -70,6 +70,19 @@ test('工具授权续跑指定原始消息，并继续使用经过清理的路�
     assert.deepEqual(state.routeOverrides.tools, ['mcp.7.db.run_readonly_query']);
 });
 
+test('auto RAG 许可遵从客户端状态，不会在自动路由关闭后变成强制检索', () => {
+    const disabled = buildChatRequestState({
+        body: { content: '你好', autoRouteEnabled: false, ragPreference: 'auto', ragEnabled: false },
+        user: { id: 7 }
+    });
+    const enabled = buildChatRequestState({
+        body: { content: '请说明报销流程', autoRouteEnabled: true, ragPreference: 'auto', ragEnabled: true },
+        user: { id: 7 }
+    });
+    assert.equal(disabled.ragEnabled, false);
+    assert.equal(enabled.ragEnabled, true);
+});
+
 test('聊天输入框默认使用智能自适应，并将资料和工具控制收敛到 @ 与授权流程', () => {
     const shell = fs.readFileSync(path.resolve(__dirname, '../client/chat/partials/workspaces/chat-shell.html'), 'utf8');
     const workspace = fs.readFileSync(path.resolve(__dirname, '../client/chat/app-workspaces.js'), 'utf8');
@@ -88,6 +101,8 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.doesNotMatch(shell, /id="chat-mcp-subpanel"/);
     assert.match(autoRoute, /const getAutoRouteEnabled = \(\) => true/);
     assert.match(autoRoute, /const enableMcpFromRouteTrace = async/);
+    assert.match(autoRoute, /\['enabled', 'disabled'\]\.includes\(value\)/);
+    assert.doesNotMatch(autoRoute, /applyRagDebugScopeToChat/);
     assert.doesNotMatch(autoRoute, /请重新发送这条消息/);
     assert.match(autoRoute, /chat-route-mention-scope/);
     assert.match(autoRoute, /appendScopeOption\(menu, 'collection', '知识库'/);

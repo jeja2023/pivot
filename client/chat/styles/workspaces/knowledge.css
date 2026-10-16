@@ -1276,7 +1276,43 @@
     font-size: 0.76rem;
 }
 
-.knowledge-ask-actions { justify-content: flex-end; }
+.knowledge-ask-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.knowledge-ask-actions .btn-secondary,
+.knowledge-ask-actions .btn-primary {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 13px;
+    font-size: 0.76rem;
+    font-weight: 500;
+}
+
+.knowledge-answer-model-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-right: auto;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.knowledge-answer-model-field .form-input {
+    width: min(165px, 34vw);
+    min-width: 115px;
+    height: 32px;
+    min-height: 32px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 0.74rem;
+    border-radius: var(--radius-sm, 6px);
+}
 
 .knowledge-product-answer,
 .knowledge-product-results { margin-top: 2px; }
@@ -1706,6 +1742,9 @@
 
     .knowledge-product-row-actions,
     .knowledge-ask-actions { justify-content: flex-start; }
+
+    .knowledge-answer-model-field { width: 100%; margin-right: 0; }
+    .knowledge-answer-model-field .form-input { flex: 1; width: auto; }
 
     .knowledge-product-heading p { font-size: 0.73rem; }
     .knowledge-product-tabs { margin-top: 10px; }

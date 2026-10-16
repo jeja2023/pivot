@@ -213,12 +213,8 @@ document.addEventListener('click', async (event) => {
         window.Pivot.moduleApi('chat.autoRoute').queueRagRetrievalForNextMessage?.(
             window.Pivot.legacy.getRagScopeSelection?.('debug') || {}
         );
-        try {
-            localStorage.setItem('pivot_chat_rag_enabled', 'true');
-        } catch (e) {
-            // 本地存储不可用时，仍然尝试同步当前页面按钮状态。
-        }
-        await window.Pivot.legacy.applyRagDebugScopeToChat?.();
+        // 调试页的专题库/标签通过一次性 routeOverrides 随下一条消息发送。
+        // 不写入聊天区持久范围或开关，避免“带着资料去聊天”意外影响后续对话。
         window.Pivot.legacy.syncChatToolToggles?.();
         const input = document.getElementById('user-input');
         if (input && query) {

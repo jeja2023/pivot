@@ -8,7 +8,8 @@ const {
 } = require('../server/services/structured-task-state');
 const {
     rejectLowConfidenceResults,
-    rerankHybridCandidates
+    rerankHybridCandidates,
+    calculateCitationConfidence
 } = require('../server/services/rag-index/ranking');
 const {
     normalizeRelativeEntryPath
@@ -46,6 +47,14 @@ test('RAG 低置信度或模糊并列结果直接拒答', () => {
         { chunkId: 2, text: '相关片段二', denseScore: 0.47, fused: 0.399 }
     ], { scoreThreshold: 0.4, minRerankScore: 0.2, minCitationConfidence: 0.2, minMargin: 0.02 });
     assert.equal(ambiguous.rejected, true);
+});
+
+test('精确词面命中可提高无向量片段的引用可信度', () => {
+    const ranked = rerankHybridCandidates([
+        { chunkId: 1, text: '第二百六十四条 盗窃公私财物，数额较大的，处三年以下有期徒刑。', headingPath: '刑法', denseScore: null, ftsRank: 15, fused: 0.02 }
+    ], '盗窃', { scoreThreshold: 0.4 });
+    assert.equal(ranked[0].phraseMatch, 1);
+    assert.ok(calculateCitationConfidence(ranked[0], 0.4, ranked[0].rankScore) >= 0.42);
 });
 
 test('本机目录路径只接受白名单根目录下的相对候选路径', () => {

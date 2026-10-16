@@ -310,7 +310,7 @@ async function rerankRegulationCandidates(query, candidates) {
 // 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
 async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
-    const safeLimit = normalizeSearchLimit(limit);
+    const safeLimit = normalizeSearchLimit(limit, 8, MAX_REGULATION_RETRIEVAL_CANDIDATES);
     const sharedOptions = { query: normalizedQuery, documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived };
     const budget = regulationHybridSearchBudget();
 

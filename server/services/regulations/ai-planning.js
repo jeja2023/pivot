@@ -63,6 +63,7 @@ function extractSearchAnchor(question) {
         .replace(/第\s*[零〇一二两三四五六七八九十百千万\d]+\s*条(?:\s*之\s*[零〇一二两三四五六七八九十百千万\d]+)?/g, ' ')
         .replace(/[？?。！!；;：:,，、（）()【】\[\]“”"'`]/g, ' ')
         .replace(/(?:请问|请|是否|能否|如何|哪些|什么|关于|对于|这个|那条|本条|该条|其中|规定|要求|问题)/g, ' ')
+        .replace(/(?:最高|最低|可以|可能|应当|判处|多少|几年|多长|有期徒刑)/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 180);
@@ -90,12 +91,16 @@ function buildRegulationAiQueryPlan({ question = '', history = [], effectiveAt =
     const namedRegulation = extractNamedRegulation(normalizedQuestion);
     const historicalQuestion = isLikelyFollowUp(normalizedQuestion) ? previousQuestion(history) : '';
     const anchor = extractSearchAnchor(normalizedQuestion);
+    const crimeTerm = normalizedQuestion.match(/([\u3400-\u9fff]{2,6}罪)/u)?.[1]
+        ?.replace(/^(?:触犯|涉嫌|构成|犯了|关于|对于|在|犯)/u, '') || '';
     const historicalAnchor = extractSearchAnchor(historicalQuestion);
     const queries = uniqueText([
         normalizedQuestion,
         [namedRegulation, articleReference].filter(Boolean).join(' '),
-        [historicalAnchor, anchor].filter(Boolean).join(' '),
-        anchor
+        crimeTerm ? crimeTerm.slice(0, -1) : '',
+        crimeTerm,
+        anchor,
+        [historicalAnchor, anchor].filter(Boolean).join(' ')
     ]);
     return {
         question: normalizedQuestion,

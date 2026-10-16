@@ -166,6 +166,11 @@ const {
                     endpointStatusGetter: getModelEndpointRuntimeStatus,
                     taskType: inferTaskType(run)
                 });
+                if (!routed?.model) {
+                    const error = new Error(routed?.reason || '没有满足当前任务能力与上下文要求的可用模型。');
+                    error.code = 'MODEL_ROUTER_NO_COMPATIBLE_MODEL';
+                    throw error;
+                }
                 if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
                     modelCfg = routed.model;
                     modelCfgForSummary = modelCfg;
@@ -187,6 +192,9 @@ const {
                     details: { strategy: routerStrategy }
                 });
             } catch (routerErr) {
+                // “没有兼容模型”不是路由器暂时故障；继续使用原模型会把包含
+                // 图片或超长上下文的任务发送给明确不兼容的端点。
+                if (routerErr?.code === 'MODEL_ROUTER_NO_COMPATIBLE_MODEL') throw routerErr;
                 await recordAgentTraceSpan(runId, {
                     type: 'routing',
                     name: '模型路由',

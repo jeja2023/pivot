@@ -49,9 +49,14 @@ function buildChatRequestState(req) {
         ragPreference,
         mcpEnabled: Boolean(body.mcpEnabled) && Boolean(body.mcpConfirmed),
         mcpToolAllowlist,
-        // `auto` 是新版客户端的默认值：它允许路由器决定是否检索，而不是把
-        // 旧按钮的初始视觉状态误解成用户明确关闭知识库。
-        ragEnabled: ragPreference === 'disabled' ? false : (ragPreference === 'auto' ? true : body.ragEnabled !== false),
+        // `auto` 默认允许自适应路由决定是否检索，以兼容未发送该字段的旧
+        // 客户端；只有明确传入 false 才关闭许可。关闭自动路由/影子模式时
+        // 是否实际检索由语义路由器按显式请求另行判断，不能等同于全量检索。
+        ragEnabled: ragPreference === 'disabled'
+            ? false
+            : ragPreference === 'enabled'
+                ? true
+                : body.ragEnabled !== false,
         ragScope: body.ragScope && typeof body.ragScope === 'object' ? body.ragScope : {},
         sessionId: String(body.sessionId || '').trim(),
         modelId: body.modelId ? parseInt(body.modelId, 10) : null,

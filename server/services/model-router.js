@@ -69,8 +69,8 @@ function modelTotalPrice(model) {
     return input + output;
 }
 
-function findVisionCandidate(candidates) {
-    return candidates.find(modelSupportsVision) || null;
+function findVisionCandidate(candidates, estimatedInputTokens = 0) {
+    return pickAutoContext(candidates.filter(modelSupportsVision), estimatedInputTokens);
 }
 
 function pickAutoContext(candidates, estimatedInputTokens) {
@@ -140,7 +140,7 @@ function pickAutoQuality(candidates, profiles = [], estimatedInputTokens) {
  * @param {function} [params.endpointStatusGetter] - 注入式：返回 getModelEndpointRuntimeStatus()，便于测试
  * @returns {{ model: object, strategy: string, reason: string, candidatesCount: number }|null}
  */
-async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter, qualityProfiles = null, taskType = 'general' }) {
+async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter, qualityProfiles = null, taskType = 'general', candidateModels = null }) {
     if (!user) return null;
     const normalized = normalizeStrategy(strategy);
 
@@ -151,7 +151,8 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
         // 没有指定模型时也按 auto-context 兜底
     }
 
-    const candidates = (await getUserRunnableModelsAsync(user)).filter(model => model.status !== 'usage_only');
+    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
+        .filter(model => model.status !== 'usage_only');
     if (candidates.length === 0) {
         const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
         return fallback ? { model: fallback, strategy: 'fixed', reason: '无可用模型候选，回退到原模型', candidatesCount: 0 } : null;
@@ -159,26 +160,32 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
 
     const estimatedTokens = estimateMessageTokens(messages);
     const hasVision = messagesContainVisionInput(messages);
+    // 自动策略不能把含图片的请求路由到不支持视觉的模型。固定模型保留调用
+    // 方原语义，由既有预检给出明确错误；自动选择则必须从能力兼容池中选。
+    const eligibleCandidates = hasVision ? candidates.filter(modelSupportsVision) : candidates;
+    if (!eligibleCandidates.length) {
+        return { model: null, strategy: normalized, reason: '没有支持视觉输入的可用模型', candidatesCount: candidates.length };
+    }
     let chosen = null;
     let reason = '';
 
     if (normalized === 'auto-vision') {
         if (hasVision) {
-            chosen = findVisionCandidate(candidates);
+            chosen = findVisionCandidate(eligibleCandidates, estimatedTokens);
             reason = chosen ? '输入含图片，选用支持视觉的模型' : '';
         }
         if (!chosen) {
-            chosen = pickAutoContext(candidates, estimatedTokens);
+            chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
             reason = reason || '无视觉模型可用，按上下文匹配';
         }
     } else if (normalized === 'auto-context') {
-        chosen = pickAutoContext(candidates, estimatedTokens);
+        chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
         reason = chosen ? `按上下文匹配（估算 ${estimatedTokens} tokens）` : '';
     } else if (normalized === 'auto-cost') {
-        chosen = pickAutoCost(candidates, estimatedTokens);
+        chosen = pickAutoCost(eligibleCandidates, estimatedTokens);
         reason = chosen ? '按成本最低（输入+输出单价之和）' : '';
     } else if (normalized === 'auto-load') {
-        chosen = pickAutoLoad(candidates, estimatedTokens, endpointStatusGetter);
+        chosen = pickAutoLoad(eligibleCandidates, estimatedTokens, endpointStatusGetter);
         reason = chosen ? '按端点负载最低' : '';
     } else if (normalized === 'auto-quality') {
         let profiles = Array.isArray(qualityProfiles) ? qualityProfiles : [];
@@ -190,24 +197,27 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
                 profiles = [];
             }
         }
-        chosen = pickAutoQuality(candidates, profiles, estimatedTokens);
+        chosen = pickAutoQuality(eligibleCandidates, profiles, estimatedTokens);
         reason = chosen ? '按同类已验收任务质量优先' : '';
         if (!chosen) {
-            chosen = pickAutoContext(candidates, estimatedTokens);
+            chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
             reason = '质量样本不足，按上下文匹配回退';
         }
     } else if (normalized === 'auto-escalate') {
         // 第一轮：与 auto-cost 等同，挑最便宜的能用模型；调用方负责后续判断置信度并调用 pickEscalationModel
-        chosen = pickAutoCost(candidates, estimatedTokens);
+        chosen = pickAutoCost(eligibleCandidates, estimatedTokens);
         reason = chosen ? '先用成本最低模型尝试（auto-escalate 第一轮）' : '';
     }
 
     if (!chosen) {
         // 任何策略选不出时降级到 hint 指定模型
         const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
-        if (fallback) return { model: fallback, strategy: 'fixed', reason: '路由未命中，回退到原模型', candidatesCount: candidates.length };
-        // hint 都拿不到再回到候选第一个
-        return { model: candidates[0], strategy: normalized, reason: '路由未命中，使用第一个可用候选', candidatesCount: candidates.length };
+        if (fallback && (!hasVision || modelSupportsVision(fallback))) {
+            return { model: fallback, strategy: 'fixed', reason: '路由未命中，回退到原模型', candidatesCount: candidates.length };
+        }
+        // 没有模型能同时满足自动策略、输入窗口与视觉能力时，宁可由调用方
+        // 清晰失败，也不能静默换成不兼容的第一个候选。
+        return { model: null, strategy: normalized, reason: hasVision ? '没有同时支持视觉输入和当前上下文的可用模型' : '没有能容纳当前上下文的可用模型', candidatesCount: candidates.length };
     }
     return { model: chosen, strategy: normalized, reason, candidatesCount: candidates.length };
 }
@@ -236,29 +246,33 @@ function assessConfidence({ output = '', finishReason = '', minOutputChars = 20 
  * auto-escalate 第二轮：从可用候选中挑一个比当前模型更强的（按"成本更高 OR 上下文更大"）
  * 输入：用户、当前模型、估算 token；输出：升级目标模型或 null（没有更强候选）
  */
-async function pickEscalationModel({ user, currentModel, messages = [] }) {
+async function pickEscalationModel({ user, currentModel, messages = [], candidateModels = null }) {
     if (!user || !currentModel) return null;
-    const candidates = (await getUserRunnableModelsAsync(user)).filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
+    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
+        .filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
     if (candidates.length === 0) return null;
     const estimatedTokens = estimateMessageTokens(messages);
     const currentPrice = modelTotalPrice(currentModel);
     const currentMaxInput = Number(currentModel.max_input_tokens) || 0;
     // 优先选"价格高于当前 + 能容纳输入"的候选；次选"上下文窗口更大"的
-    const stronger = candidates.filter(m => hasUsableInputWindow(m, estimatedTokens));
+    const stronger = candidates.filter(m => hasUsableInputWindow(m, estimatedTokens)).filter(model => {
+        const modelPrice = modelTotalPrice(model);
+        const modelMaxInput = Number(model.max_input_tokens) || 0;
+        return modelPrice > currentPrice || modelMaxInput > currentMaxInput;
+    });
     if (stronger.length === 0) return null;
     stronger.sort((a, b) => {
-        const priceDiff = modelTotalPrice(b) - modelTotalPrice(a);
-        if (priceDiff !== 0) return priceDiff;
+        // 成本升级优先选择最小的价格增幅；同等价格下优先更大的上下文。
+        // 上下文更大且不涨价的候选同样是有效升级，不应被更贵但更弱的
+        // 候选遮蔽。
+        const aPriceDelta = Math.max(0, modelTotalPrice(a) - currentPrice);
+        const bPriceDelta = Math.max(0, modelTotalPrice(b) - currentPrice);
+        if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
         const aLimit = Number(a.max_input_tokens) || Number.MAX_SAFE_INTEGER;
         const bLimit = Number(b.max_input_tokens) || Number.MAX_SAFE_INTEGER;
         return bLimit - aLimit;
     });
-    const candidate = stronger[0];
-    // 必须严格更强：价格更高或窗口更大
-    if (modelTotalPrice(candidate) <= currentPrice && (Number(candidate.max_input_tokens) || 0) <= currentMaxInput) {
-        return null;
-    }
-    return candidate;
+    return stronger[0];
 }
 
 module.exports = {

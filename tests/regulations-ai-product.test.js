@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { buildRegulationAiQueryPlan } = require('../server/services/regulations/ai-planning');
 const { buildRegulationEvidenceExcerpt } = require('../server/services/regulations/evidence');
-const { validateRegulationAiGrounding } = require('../server/services/regulations/grounding');
+const { buildRegulationUnverifiedModelAnswer, validateRegulationAiGrounding } = require('../server/services/regulations/grounding');
 
 test('法规问答查询规划会把短追问补全为上一轮主题，并保留条号/法名锚点', () => {
     const plan = buildRegulationAiQueryPlan({
@@ -17,6 +17,10 @@ test('法规问答查询规划会把短追问补全为上一轮主题，并保�
     const articlePlan = buildRegulationAiQueryPlan({ question: '《测试办法》第十二条的生效日期是什么？' });
     assert.equal(articlePlan.articleReference, '第十二条');
     assert.equal(articlePlan.namedRegulation, '《测试办法》');
+
+    const crimePlan = buildRegulationAiQueryPlan({ question: '抢劫罪最高可以判处多少年有期徒刑' });
+    assert.ok(crimePlan.retrievalQueries.includes('抢劫'));
+    assert.ok(crimePlan.retrievalQueries.includes('抢劫罪'));
 });
 
 test('法规证据窗口优先保留长条文中真正命中的句子', () => {
@@ -57,5 +61,28 @@ test('法规结构化问答必须逐条提供候选编号和原文短引', () =>
     });
     assert.equal(rejected.grounding.accepted, false);
     assert.equal(rejected.grounding.status, 'candidate_conflict');
+});
+
+test('法规模型在 JSON 前输出说明时仍可核验真实条文引用', () => {
+    const result = validateRegulationAiGrounding({
+        question: '审批期限是多少？',
+        sources: [{ index: 1, label: '测试办法 / 第一条', contextExcerpt: '审批事项应当在三十日内完成。' }],
+        answer: '以下是依据：\n' + JSON.stringify({
+            answerability: 'adequate',
+            claims: [{ text: '审批事项应当在三十日内完成', sourceIds: [1], quote: '审批事项应当在三十日内完成。' }],
+            answer: '请核对具体起算日。'
+        })
+    });
+    assert.equal(result.grounding.accepted, true);
+});
+
+test('法规缺少条文或模型引用格式时保留显式未核验的参考回答', () => {
+    const answer = buildRegulationUnverifiedModelAnswer(JSON.stringify({ answer: '具体刑罚应结合情节判断。' }), { hasCandidates: true });
+    assert.match(answer, /未核验的模型参考回答/);
+    assert.match(answer, /具体刑罚应结合情节判断/);
+    assert.match(answer, /模型未提供可核验引用/);
+    assert.doesNotMatch(answer, /"answer"/);
+    const missingIndex = buildRegulationUnverifiedModelAnswer('请核对法规', { indexStatus: 'no_recorded_articles' });
+    assert.match(missingIndex, /检查导入和索引状态/);
 });
 

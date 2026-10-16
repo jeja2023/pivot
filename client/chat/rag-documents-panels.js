@@ -304,9 +304,8 @@ const renderRagDebugResults = (data) => {
         .map(item => String(item || '').trim())
         .filter(Boolean)
         .slice(0, 8);
-    // 默认只展示达到阈值或实际会被聊天引用的资料，避免大量零分候选
-    // 造成“已召回”的错觉。原始候选数仍在诊断摘要中保留。
-    const visibleMatches = matches.filter(match => match.selected || match.matched);
+    // 诊断页展示前列候选，包括未通过引用门槛的结果，便于区分召回与引用。
+    const visibleMatches = matches.filter((match, index) => match.selected || match.matched || index < 30);
     const hiddenCandidateCount = Math.max(0, matches.length - visibleMatches.length);
     el.classList.remove('hidden');
 
@@ -345,10 +344,9 @@ const renderRagDebugResults = (data) => {
 
     const maxScore = visibleMatches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0) || 1;
     const elapsed = Number(data.elapsedMs || data.elapsed || 0);
-    const matchedCount = visibleMatches.length;
+    const matchedCount = visibleMatches.filter(match => match.matched || match.selected).length;
     const selectedCount = visibleMatches.filter(m => m.selected).length;
     const feedbackAdjustedCount = visibleMatches.filter(m => m.feedback && Number(m.feedback.total || 0) > 0).length;
-    const topScore = visibleMatches.reduce((acc, m) => Math.max(acc, Number(m.score || 0)), 0);
     const queue = data.queue || {};
     const hybrid = data.hybrid || {};
     const ranking = data.ranking || {};
@@ -358,7 +356,7 @@ const renderRagDebugResults = (data) => {
         ? `语义权重 ${Number(hybrid.wDense || 0).toFixed(2)} / 关键词权重 ${Number(hybrid.wFts || 0).toFixed(2)} / 多样性系数 ${Number(hybrid.mmrLambda || 0).toFixed(2)}`
         : '';
     const debugVerdict = (() => {
-        if (selectedCount > 0 && topScore >= Number(data.threshold || 0)) {
+        if (selectedCount > 0) {
             return {
                 tone: 'ready',
                 title: '可以带着这个问题去聊天',

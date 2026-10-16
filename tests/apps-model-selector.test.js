@@ -77,9 +77,14 @@ test('三个应用的 AI 请求均使用应用内模型选择器，而不读取�
     const dataView = read('client/chat/data-analysis/view.js');
     const regulationsShell = read('client/chat/regulations/render-shell.js');
     const appsPartial = read('client/chat/partials/workspaces/apps.html');
-    const workspace = read('client/chat/app-workspaces.js');
+    const scripts = read('client/chat/partials/scripts.html');
+    const knowledge = read('client/chat/partials/workspaces/knowledge.html');
+    const knowledgeProduct = read('client/chat/knowledge-product.js');
 
-    assert.match(workspace, /\/chat\/apps-model-selector\.js/);
+    assert.match(scripts, /\/chat\/apps-model-selector\.js/);
+    assert.match(knowledge, /id="knowledge-product-model"[^>]*data-pivot-app-model="knowledge"/);
+    assert.match(knowledgeProduct, /refresh\?\.\('knowledge', 'knowledge-product-model'\)/);
+    assert.match(knowledgeProduct, /\{ model: modelId \}/);
     assert.match(officialWriting, /function getOfficialWritingTaskModelId\(task = 'selection'\)/);
     assert.match(dataAnalysis, /getSelectedModel\?\.\('data-analysis', 'data-analysis-ai-model'\)/);
     assert.match(regulations, /getSelectedModel\?\.\('regulations', 'regulations-ai-model'\)/);

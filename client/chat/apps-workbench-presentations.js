@@ -403,6 +403,7 @@
         byId('presentation-remote-start-btn')?.toggleAttribute('disabled', !canExport);
         byId('presentation-remote-start-btn')?.classList.toggle('hidden', Boolean(state.remoteSession?.id));
         byId('presentation-remote-stop-btn')?.classList.toggle('hidden', !state.remoteSession?.id);
+        byId('presentation-remote-badge')?.classList.toggle('hidden', !state.remoteSession?.id);
         document.querySelectorAll('#presentation-properties-form input, #presentation-properties-form textarea, #presentation-properties-form select').forEach(input => input.toggleAttribute('disabled', !editable || slideApproved));
         collab()?.renderPresenceBar();
         collab()?.renderComments();
@@ -880,7 +881,25 @@ function setSelectedImageAsCover() {
     }
     function endDrag() { if (!state.drag) return; state.drag = null; recordHistory(); }
     function bindEvents(view) {
+        if (!view.__dropdownGlobalBound && typeof document !== 'undefined') {
+            view.__dropdownGlobalBound = true;
+            document.addEventListener('pointerdown', e => {
+                if (!e.target.closest('.presentation-dropdown')) {
+                    document.querySelectorAll('.presentation-dropdown[open]').forEach(details => {
+                        details.open = false;
+                    });
+                }
+            });
+        }
         view.addEventListener('click', event => {
+            const dropdownItem = event.target.closest('.presentation-dropdown-item');
+            if (dropdownItem) {
+                const parentDropdown = dropdownItem.closest('details.presentation-dropdown');
+                if (parentDropdown) parentDropdown.open = false;
+            }
+            view.querySelectorAll('.presentation-dropdown[open]').forEach(details => {
+                if (!details.contains(event.target)) details.open = false;
+            });
             const template = event.target.closest('[data-presentation-template-id]'); if (template) { if (state.active) applyTemplate(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); else createBlank(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); return; }
             const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; const action = docAction.dataset.presentationAction; if (action === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (action === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (action === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); if (action === 'favorite') toggleFavoriteDocument(id, docAction.dataset.presentationFavorite === 'true').catch(error => toast(error.message, 'error')); if (action === 'tags') { let tags = []; try { tags = JSON.parse(docAction.dataset.presentationTags || '[]'); } catch (_) {} updateDocumentTags(id, tags).catch(error => toast(error.message, 'error')); } return; }
             const slideButton = event.target.closest('[data-presentation-slide-id]'); if (slideButton) { state.selectedSlideId = slideButton.dataset.presentationSlideId; state.selectedElementId = ''; state.selectedElementIds = []; renderEditor(); collab()?.sendPresenceHeartbeat?.(); syncRemoteSlide().catch(() => {}); return; }
