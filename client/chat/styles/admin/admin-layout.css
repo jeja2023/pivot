@@ -1916,7 +1916,7 @@ body.dark-mode .settings-workspace-view .memories-table td,
     gap: 16px;
     padding-bottom: 14px;
     margin-bottom: 18px !important;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    border-bottom: 1px solid var(--border);
 }
 .decision-review-head-actions {
     display: inline-flex;

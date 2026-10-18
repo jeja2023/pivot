@@ -320,7 +320,11 @@ function extractHumanComment(line) {
     if (trimmed.startsWith('//')) return trimmed.slice(2).trim();
     if (trimmed.startsWith('/*')) return trimmed.replace(/^\/\*+/, '').replace(/\*+\/$/, '').trim();
     if (trimmed.startsWith('*')) return trimmed.replace(/^\*+/, '').replace(/\*+\/$/, '').trim();
-    if (trimmed.startsWith('<!--')) return trimmed.replace(/^<!--/, '').replace(/-->$/, '').trim();
+    if (trimmed.startsWith('<!--')) {
+        const comment = trimmed.replace(/^<!--/, '').replace(/-->$/, '').trim();
+        if (comment.startsWith('@include')) return '';
+        return comment;
+    }
     return '';
 }
 
@@ -372,7 +376,7 @@ function checkFrontendAddedLine(file, item) {
     if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(')) {
         addFailure(`${location} 新增硬编码颜色。请使用全局 CSS 变量或既有样式类。`);
     }
-    if (/<button\b/i.test(text) && !/(btn-primary|btn-secondary|btn-danger|btn-danger-outline|workspace-modal-close|data-analysis-tab|admin-tab)/.test(text)) {
+    if (/<button\b/i.test(text) && !/(btn-primary|btn-secondary|btn-danger|btn-danger-outline|workspace-modal-close|data-analysis-tab|admin-tab|settings-subtab)/.test(text)) {
         addFailure(`${location} 新增 button 未使用全局按钮类。`);
     }
     if (/<(?:select|textarea)\b/i.test(text) && !hasClass(text, 'form-input')) {
