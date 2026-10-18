@@ -1,39 +1,30 @@
-<div class="settings-page-head decision-gold-page-head">
-        <div class="decision-gold-head-info">
-            <div class="decision-gold-title-wrap">
-                <h3 id="decision-gold-review-title">冻结金标审核</h3>
-                <span class="decision-gold-version-pill" id="decision-gold-active-version-badge" title="当前加载的冻结评测集版本">v2</span>
-            </div>
-            <p class="decision-gold-head-desc">每个案例必须由两名不同管理员独立选择同一允许动作，才能解除发布阻断并成为可用于训练与发布的金标。系统严格执行双盲机制，不代填结论、不展示前序审核人动作，防止锚定偏差。</p>
+    <div class="filter-bar decision-gold-filter-bar decision-gold-toolbar" role="toolbar" aria-label="审核过滤与操作">
+        <div class="decision-gold-filter-unit">
+            <span class="decision-gold-filter-label">版本</span>
+            <input id="decision-gold-review-version" class="form-input decision-gold-version-input" value="v2" maxlength="128" aria-label="冻结集版本" placeholder="版本">
         </div>
-        <div class="settings-page-actions decision-gold-toolbar" role="toolbar" aria-label="审核过滤与操作">
-            <div class="decision-gold-filter-unit">
-                <span class="decision-gold-filter-label">版本</span>
-                <input id="decision-gold-review-version" class="form-input decision-gold-version-input" value="v2" maxlength="128" aria-label="冻结集版本" placeholder="版本">
-            </div>
-            <div class="decision-gold-filter-unit">
-                <span class="decision-gold-filter-label">状态</span>
-                <select id="decision-gold-review-status-filter" class="form-input decision-gold-status-select" aria-label="按审核状态筛选">
-                    <option value="all">全部状态</option>
-                    <option value="pending_human_review">待第二审核</option>
-                    <option value="human_review_conflict">审核冲突</option>
-                    <option value="verified">已核验</option>
-                </select>
-            </div>
-            <div class="decision-gold-search-unit">
-                <svg class="decision-gold-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input id="decision-gold-review-search" class="form-input decision-gold-search-input" placeholder="输入案例ID / 场景 / 路由文本过滤..." maxlength="128" aria-label="检索案例">
-            </div>
-            <div class="decision-gold-btn-group">
-                <button id="decision-gold-review-import" type="button" class="btn-secondary decision-gold-action-btn" title="从服务器预置基准文件导入评测集">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                    <span>导入冻结集</span>
-                </button>
-                <button id="decision-gold-review-refresh" type="button" class="btn-secondary decision-gold-action-btn" title="刷新审核队列列表">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                    <span>刷新</span>
-                </button>
-            </div>
+        <div class="decision-gold-filter-unit">
+            <span class="decision-gold-filter-label">状态</span>
+            <select id="decision-gold-review-status-filter" class="form-input decision-gold-status-select" aria-label="按审核状态筛选">
+                <option value="all">全部状态</option>
+                <option value="pending_human_review">待第二审核</option>
+                <option value="human_review_conflict">审核冲突</option>
+                <option value="verified">已核验</option>
+            </select>
+        </div>
+        <div class="decision-gold-search-unit">
+            <svg class="decision-gold-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input id="decision-gold-review-search" class="form-input decision-gold-search-input" placeholder="输入案例ID / 场景 / 路由文本过滤..." maxlength="128" aria-label="检索案例">
+        </div>
+        <div class="decision-gold-btn-group">
+            <button id="decision-gold-review-import" type="button" class="btn-secondary decision-gold-action-btn" title="从服务器预置基准文件导入评测集">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>导入冻结集</span>
+            </button>
+            <button id="decision-gold-review-refresh" type="button" class="btn-secondary decision-gold-action-btn" title="刷新审核队列列表">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                <span>刷新</span>
+            </button>
         </div>
     </div>
 

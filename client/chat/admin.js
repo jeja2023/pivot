@@ -217,6 +217,17 @@ async function loadDecisionReviewSubtab(subtab, page = 1) {
     return window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
 }
 
+const DECISION_REVIEW_SUBTAB_METAS = {
+    feedback: {
+        title: '反馈核验',
+        desc: '审核用户对检索、工具和回复方式的建议；只有采纳后的建议才会成为训练样本。'
+    },
+    gold: {
+        title: '冻结金标审核',
+        desc: '每个案例必须由两名不同管理员独立选择同一允许动作，才能解除发布阻断并成为可用于训练与发布的金标。系统严格执行双盲机制，不代填结论、不展示前序审核人动作，防止锚定偏差。'
+    }
+};
+
 function switchDecisionReviewSubtab(subtab, options = {}) {
     const target = normalizeDecisionReviewSubtab(subtab);
     document.querySelectorAll('[data-decision-review-subtab]').forEach(button => {
@@ -230,6 +241,13 @@ function switchDecisionReviewSubtab(subtab, options = {}) {
         panel.classList.toggle('hidden', !active);
         panel.setAttribute('aria-hidden', active ? 'false' : 'true');
     });
+    const meta = DECISION_REVIEW_SUBTAB_METAS[target];
+    const titleEl = document.getElementById('decision-review-title');
+    const descEl = document.getElementById('decision-review-desc');
+    const badgeEl = document.getElementById('decision-gold-active-version-badge');
+    if (titleEl && meta) titleEl.textContent = meta.title;
+    if (descEl && meta) descEl.textContent = meta.desc;
+    if (badgeEl) badgeEl.classList.toggle('hidden', target !== 'gold');
     if (!options.skipPersist) persistDecisionReviewSubtab(target);
     if (!options.skipLoad) {
         loadDecisionReviewSubtab(target, options.page || 1).catch(error => {

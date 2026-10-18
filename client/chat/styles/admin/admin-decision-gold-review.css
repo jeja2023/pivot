@@ -6,40 +6,22 @@
     flex-direction: column;
 }
 
-/* 顶部信息与操作工具栏 */
-.settings-workspace-view #decision-review-gold-panel > .decision-gold-page-head,
-.decision-gold-page-head {
+/* 过滤工具栏：采用与用量中心一致的标准卡片式筛选栏 */
+.decision-gold-filter-bar {
+    flex: 0 0 auto;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 4px !important;
+    gap: 10px 12px !important;
+    margin-bottom: 14px !important;
+    padding: 10px 12px !important;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-side);
 }
 
-.decision-gold-head-info {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.decision-gold-title-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.decision-gold-title-wrap h3 {
-    margin: 0;
-    font-size: 1.02rem;
-    font-weight: 700;
-    color: var(--text-main);
-    line-height: 1.2;
-}
-
-.decision-gold-head-desc {
-    margin: 1px 0 0 0;
-    font-size: 0.70rem;
-    line-height: 1.32;
-    color: var(--text-muted, #64748b);
+.decision-gold-filter-bar .decision-gold-btn-group {
+    margin-left: auto;
 }
 
 .decision-gold-version-pill {
@@ -60,9 +42,19 @@
 .decision-gold-toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px 12px;
     flex-shrink: 0;
     flex-wrap: wrap;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+    .decision-gold-filter-bar .decision-gold-btn-group {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+    }
 }
 
 /* 一体化紧凑分段输入单元（版本与状态） */
