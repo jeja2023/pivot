@@ -1,4 +1,5 @@
 const cp = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const os = require('os');
@@ -89,7 +90,9 @@ async function main() {
         PIVOT_LOGIN_RATE_LIMIT_MAX: '100',
         DEFAULT_ADMIN_PASSWORD: 'E2eAdmin123',
         JWT_SECRET: 'pivot-e2e-tests-jwt-secret-012345678901234567890123',
-        DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123'
+        DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123',
+        PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex'),
+        PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex')
         ,E2E_MODEL_URL: fakeModel.url
     };
 

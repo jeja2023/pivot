@@ -11,6 +11,7 @@ const { recoverManualKnowledgeArticleEmbeddings } = require('./services/knowledg
 const { createKnowledgeWikiCompileWorker } = require('./services/knowledge-wiki');
 const { createKnowledgeGraphMaintenanceRunner } = require('./services/knowledge-graph');
 const { createKnowledgeSourceLifecycleWorker } = require('./services/knowledge-source-lifecycle');
+const { createWorkspaceMemorySourceLifecycleWorker } = require('./services/workspace-memory-source-lifecycle');
 const { startGpuMonitor } = require('./services/gpu-monitor');
 const { startModelEndpointMonitor } = require('./services/model-runtime');
 const {
@@ -19,8 +20,10 @@ const {
 } = require('./services/agent-runtime');
 const { createAgentEventOutboxDispatcher } = require('./services/agent-event-outbox');
 const { createSkillReleaseBreakerRunner } = require('./services/agent-skill-breaker');
+const { createWorkflowReleaseBreakerRunner } = require('./services/agent-workflow-breaker');
 const { startRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 const { startLongTermMemoryMaintenanceRunner } = require('./services/long-term-memory');
+const { createMemoryOutcomeMetricsRunner } = require('./services/long-term-memory/memory-outcome-metrics');
 const { startDecisionLearningMaintenanceRunner } = require('./services/decision-maintenance');
 const { createDecisionArtifactBreakerRunner } = require('./services/decision-artifact-breaker');
 const { startAnalysisRefreshRunner, startAsyncQueryRunner } = require('./services/data-analysis');
@@ -99,6 +102,7 @@ function startBackgroundServices({
             return worker?.start?.() || null;
         },
         startKnowledgeSourceLifecycleWorker: () => createKnowledgeSourceLifecycleWorker({ logger }).start(),
+        startWorkspaceMemorySourceLifecycleWorker: () => createWorkspaceMemorySourceLifecycleWorker({ logger }).start(),
         startKnowledgeGraphMaintenanceRunner: () => createKnowledgeGraphMaintenanceRunner({ logger }).start(),
         startKnowledgeEmbeddingRecoveryRunner: () => createKnowledgeEmbeddingRecoveryRunner({
             recover: async () => {
@@ -116,7 +120,9 @@ function startBackgroundServices({
         startAgentScheduleRunner,
         startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
         startSkillReleaseBreakerRunner: () => createSkillReleaseBreakerRunner().start(),
+        startWorkflowReleaseBreakerRunner: () => createWorkflowReleaseBreakerRunner().start(),
         startLongTermMemoryMaintenanceRunner,
+        startMemoryOutcomeMetricsRunner: () => createMemoryOutcomeMetricsRunner({ logger }).start(),
         startDecisionLearningMaintenanceRunner,
         startDecisionArtifactBreakerRunner: () => createDecisionArtifactBreakerRunner().start(),
         startAnalysisRefreshRunner,
@@ -147,6 +153,9 @@ function startBackgroundServices({
         if (typeof dependencies.startKnowledgeSourceLifecycleWorker === 'function') {
             runBackgroundTask(dependencies.startKnowledgeSourceLifecycleWorker, logger, '知识来源生命周期 Worker 启动失败');
         }
+        if (typeof dependencies.startWorkspaceMemorySourceLifecycleWorker === 'function') {
+            runBackgroundTask(dependencies.startWorkspaceMemorySourceLifecycleWorker, logger, '代码工作区记忆来源 Worker 启动失败');
+        }
         if (typeof dependencies.startKnowledgeGraphMaintenanceRunner === 'function') {
             runBackgroundTask(dependencies.startKnowledgeGraphMaintenanceRunner, logger, '知识图谱自动维护任务启动失败');
         }
@@ -164,7 +173,13 @@ function startBackgroundServices({
         if (typeof dependencies.startSkillReleaseBreakerRunner === 'function') {
             runBackgroundTask(dependencies.startSkillReleaseBreakerRunner, logger, '技能发布熔断巡检器启动失败');
         }
+        if (typeof dependencies.startWorkflowReleaseBreakerRunner === 'function') {
+            runBackgroundTask(dependencies.startWorkflowReleaseBreakerRunner, logger, '工作流发布熔断巡检器启动失败');
+        }
         runBackgroundTask(dependencies.startLongTermMemoryMaintenanceRunner, logger, '长期记忆生命周期巡检器启动失败');
+        if (typeof dependencies.startMemoryOutcomeMetricsRunner === 'function') {
+            runBackgroundTask(dependencies.startMemoryOutcomeMetricsRunner, logger, '长期记忆效用周期指标刷新失败');
+        }
         runBackgroundTask(dependencies.startDecisionLearningMaintenanceRunner, logger, '智能决策学习维护巡检器启动失败');
         runBackgroundTask(dependencies.startDecisionArtifactBreakerRunner, logger, '智能决策模型制品熔断巡检器启动失败');
         runBackgroundTask(dependencies.startAnalysisRefreshRunner, logger, '数据分析刷新与告警调度器启动失败');

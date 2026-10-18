@@ -7,7 +7,12 @@ const { getAgentTraceForUser } = require('./agent-traces');
 const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
 const { resolvePersistedDagOutput } = require('./agent-dag-output');
 const { getTaskVerificationForUser } = require('./agent-verification');
+const { listTaskTransactionsForRun } = require('./agent-task-transactions');
 const { listAgentEvidenceForUser } = require('./agent-evidence-items');
+const { listWorkingMemoryRevisionsForUser } = require('./agent-working-memory-revisions');
+const { listPromptInvocationsForUser } = require('./agent-prompt-registry');
+const { listBrowserActionEvidenceForRun } = require('./agent-browser-action-evidence');
+const { listAgentBrowserSessionsForRun } = require('./agent-browser-sessions');
 const runRepository = require('../repositories/agent-runs');
 
 async function getRunForUser(runId, user, options = {}) {
@@ -380,7 +385,7 @@ function getRunProgress(run, steps = []) {
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
-    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence] = await Promise.all([
+    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence, transactions, workingMemoryRevisions, promptInvocations, browserActionEvidence, browserSessions] = await Promise.all([
         listSteps(run.id),
         listDagNodes(run.id),
         listWorkflowInvocationsForUser(run.id, user),
@@ -388,7 +393,12 @@ async function getRunDetailForUser(runId, user) {
         getAgentTraceForUser(run.id, user),
         summarizeAgentCheckpoints(run.id),
         getTaskVerificationForUser(run.id, user),
-        listAgentEvidenceForUser(run.id, user)
+        listAgentEvidenceForUser(run.id, user),
+        listTaskTransactionsForRun(run.id, user, { limit: 20 }),
+        listWorkingMemoryRevisionsForUser(run.id, user, { limit: 12 }),
+        listPromptInvocationsForUser(run.id, user, { limit: 20 }),
+        listBrowserActionEvidenceForRun(run.id, user, { limit: 50 }),
+        listAgentBrowserSessionsForRun(run.id, user, { limit: 20 })
     ]);
     let effectiveDagNodes = dagNodes || [];
     if (String(run.run_mode || '').toLowerCase() === 'dag' && effectiveDagNodes.length === 0) {
@@ -427,7 +437,12 @@ async function getRunDetailForUser(runId, user) {
         checkpoints,
         taskContract: metadata?.taskContract || null,
         verification: verification || metadata?.taskVerification || null,
-        evidence: evidence || []
+        evidence: evidence || [],
+        transactions: transactions || [],
+        workingMemoryRevisions: workingMemoryRevisions || [],
+        promptInvocations: promptInvocations || [],
+        browserActionEvidence: browserActionEvidence || [],
+        browserSessions: browserSessions || []
     };
 }
 

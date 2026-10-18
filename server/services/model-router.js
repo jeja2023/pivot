@@ -130,6 +130,63 @@ function pickAutoQuality(candidates, profiles = [], estimatedInputTokens) {
     })[0];
 }
 
+function summarizeQualityProfile(profile = null) {
+    if (!profile) return null;
+    return {
+        taskType: String(profile.taskType || 'general'), samples: Number(profile.samples || 0),
+        verifiedRate: Number(profile.verifiedRate || 0), verifiedRateLowerBound: Number(profile.verifiedRateLowerBound || 0),
+        incompleteRate: Number(profile.incompleteRate || 0), ageDays: Number(profile.ageDays || 0),
+        status: String(profile.status || ''), thresholds: profile.thresholds && typeof profile.thresholds === 'object' ? profile.thresholds : {}
+    };
+}
+
+function modelProviderErrorText(error = {}) {
+    const payload = error?.response?.data;
+    let serialized = '';
+    try { serialized = typeof payload === 'string' ? payload : JSON.stringify(payload || {}); } catch (_) {}
+    return `${String(error?.code || '')} ${String(error?.message || '')} ${serialized}`.toLowerCase();
+}
+
+function isStructuredOutputIncompatibility(error = {}) {
+    const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+    // 只把供应方明确拒绝 response_format / schema 的 4xx 视作可切换的能力
+    // 不兼容；普通输入 4xx 仍须原样失败，不能借自动路由掩盖调用方错误。
+    if (![400, 404, 422].includes(status)) return false;
+    const message = modelProviderErrorText(error);
+    const structuredFeature = /response[_ -]?format|json[_ -]?schema|json[_ -]?object|structured[_ -]?output|strict[_ -]?schema/.test(message);
+    const unsupported = /unsupported|not\s+support(?:ed)?|does\s+not\s+support|unrecognized|unknown\s+(?:parameter|field|type)|not\s+available/.test(message);
+    return structuredFeature && unsupported;
+}
+
+function modelProviderFailureReason(error = {}) {
+    if (isStructuredOutputIncompatibility(error)) return 'structured_output_incompatible';
+    const code = String(error?.code || '').trim();
+    if (code) return code;
+    const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+    return status ? `http_${status}` : 'provider_failure';
+}
+
+function isRecoverableModelProviderFailure(error = {}) {
+    const code = String(error?.code || '').toUpperCase();
+    if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_USER_REVOKED'].includes(code)) return false;
+    if (isStructuredOutputIncompatibility(error)) return true;
+    if (['AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE', 'ECONNABORTED', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) return true;
+    const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+    return status === 429 || status >= 500;
+}
+
+async function pickFailoverModel({ user, currentModel, messages = [], candidateModels = null, endpointStatusGetter } = {}) {
+    if (!user || !currentModel) return null;
+    const estimatedTokens = estimateMessageTokens(messages);
+    const visionRequired = messagesContainVisionInput(messages);
+    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
+        .filter(model => model.status !== 'usage_only' && Number(model.id) !== Number(currentModel.id))
+        .filter(model => !visionRequired || modelSupportsVision(model))
+        .filter(model => hasUsableInputWindow(model, estimatedTokens));
+    if (!candidates.length) return null;
+    return pickAutoLoad(candidates, estimatedTokens, endpointStatusGetter) || pickAutoContext(candidates, estimatedTokens);
+}
+
 /**
  * 选择模型主入口。
  * @param {object} params
@@ -168,6 +225,7 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
     }
     let chosen = null;
     let reason = '';
+    let qualityProfile = null;
 
     if (normalized === 'auto-vision') {
         if (hasVision) {
@@ -198,6 +256,7 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
             }
         }
         chosen = pickAutoQuality(eligibleCandidates, profiles, estimatedTokens);
+        qualityProfile = chosen ? (profiles || []).find(profile => Number(profile?.modelId) === Number(chosen.id) && profile?.eligible) || null : null;
         reason = chosen ? '按同类已验收任务质量优先' : '';
         if (!chosen) {
             chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
@@ -219,7 +278,7 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
         // 清晰失败，也不能静默换成不兼容的第一个候选。
         return { model: null, strategy: normalized, reason: hasVision ? '没有同时支持视觉输入和当前上下文的可用模型' : '没有能容纳当前上下文的可用模型', candidatesCount: candidates.length };
     }
-    return { model: chosen, strategy: normalized, reason, candidatesCount: candidates.length };
+    return { model: chosen, strategy: normalized, reason, candidatesCount: candidates.length, qualityProfile: summarizeQualityProfile(qualityProfile) };
 }
 
 // 低置信判定（auto-escalate 用）：根据输出内容、长度、finishReason 评估是否需要升级
@@ -284,7 +343,11 @@ module.exports = {
     hasUsableInputWindow,
     modelTotalPrice,
     pickAutoQuality,
+    pickFailoverModel,
+
     chooseModel,
     assessConfidence,
+    isRecoverableModelProviderFailure,
+    modelProviderFailureReason,
     pickEscalationModel
 };

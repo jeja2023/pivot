@@ -29,7 +29,7 @@ function registerDecisionObservabilityRoutes(router, dependencies = {}) {
             reviewNote: req.body?.reviewNote, reviewerId: req.user.id
         });
         if (!review) return res.status(404).json({ error: '冻结评测案例不存在。' });
-        logAction(req, '核验冻结决策评测案例', '版本: ' + review.version + '，案例: ' + review.caseId + '，动作: ' + review.expectedActionId);
+        logAction(req, '审核冻结决策评测案例', '版本: ' + review.version + '，案例: ' + review.caseId + '，状态: ' + review.reviewStatus + '，审核人数: ' + review.distinctReviewerCount);
         res.json({ success: true, review });
     }));
 

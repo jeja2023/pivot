@@ -37,8 +37,9 @@ let approvalTimeoutRunner = null;
 let proactiveGoalRunner = null;
 let channelDeliveryRunner = null;
 let learningJobRunner = null;
+let sloMonitorRunner = null;
 
-function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts, runProactiveGoals, runChannelDeliveries, runLearningJobs } = {}) {
+function configureAgentSchedules({ createAgentRun, createAgentNotification, runPollingTriggers, runApprovalTimeouts, runProactiveGoals, runChannelDeliveries, runLearningJobs, runSloMonitor } = {}) {
     if (typeof createAgentRun === 'function') createAgentRunCallback = createAgentRun;
     if (typeof createAgentNotification === 'function') createAgentNotificationCallback = createAgentNotification;
     if (typeof runPollingTriggers === 'function') pollingTriggerRunner = runPollingTriggers;
@@ -46,6 +47,7 @@ function configureAgentSchedules({ createAgentRun, createAgentNotification, runP
     if (typeof runProactiveGoals === 'function') proactiveGoalRunner = runProactiveGoals;
     if (typeof runChannelDeliveries === 'function') channelDeliveryRunner = runChannelDeliveries;
     if (typeof runLearningJobs === 'function') learningJobRunner = runLearningJobs;
+    if (typeof runSloMonitor === 'function') sloMonitorRunner = runSloMonitor;
 }
 
 function parseBeijingDate(value) {
@@ -445,6 +447,7 @@ function startAgentScheduleRunner() {
                 ['持续目标调度执行失败', () => proactiveGoalRunner?.()],
                 ['渠道投递执行失败', () => channelDeliveryRunner?.()]
                 ,['个人学习任务执行失败', () => learningJobRunner?.()]
+                ,['运行 SLO 监视执行失败', () => sloMonitorRunner?.()]
             ];
             const results = await Promise.allSettled(jobs.map(([, job]) => Promise.resolve().then(job)));
             results.forEach((result, index) => {

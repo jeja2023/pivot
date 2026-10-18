@@ -104,7 +104,7 @@ async function listAgentInbox(user, options = {}) {
     const [notifications, approvals, runs, proposals, events] = await Promise.all([
         query(`SELECT * FROM agent_notifications WHERE user_id = ? AND (snoozed_until IS NULL OR snoozed_until <= ?) AND (muted_until IS NULL OR muted_until <= ?) ORDER BY created_at DESC, id DESC LIMIT ?`, [user.id, getBeijingTimestamp(), getBeijingTimestamp(), limit]),
         query(`SELECT * FROM agent_approval_requests WHERE user_id = ? AND status IN ('pending', 'waiting') ORDER BY created_at ASC LIMIT ?`, [user.id, limit]),
-        query(`SELECT id, title, goal, status, error_message, metadata, created_at, updated_at FROM agent_runs WHERE user_id = ? AND deleted_at IS NULL AND status IN ('running', 'queued', 'waiting_approval', 'approval_required', 'failed', 'error', 'completed_with_errors') ORDER BY updated_at DESC LIMIT ?`, [user.id, limit]),
+        query(`SELECT id, title, goal, status, error_message, metadata, created_at, updated_at FROM agent_runs WHERE user_id = ? AND deleted_at IS NULL AND status IN ('running', 'queued', 'waiting_approval', 'approval_required', 'awaiting_commit', 'failed', 'error', 'completed_with_errors') ORDER BY updated_at DESC LIMIT ?`, [user.id, limit]),
         query(`SELECT * FROM agent_evolution_proposals WHERE user_id = ? AND status IN ('draft', 'pending', 'pending_review', 'sandbox_validate', 'validation_failed', 'versioned_draft') ORDER BY updated_at DESC LIMIT ?`, [user.id, limit])
         // v0.1.163 之前，agent_notifications 会额外镜像为同内容的 inbox event。
         // 通知本身已是收件箱权威记录；保留旧镜像以便审计，但列表中必须排除，
@@ -142,6 +142,7 @@ async function listAgentInbox(user, options = {}) {
         const isFailure = ['failed', 'error'].includes(String(row.status));
         const isRead = Boolean(metadata.inboxRead || metadata.inboxReadAt);
         const requiresApproval = ['waiting_approval', 'approval_required', 'awaiting_approval'].includes(String(row.status));
+        const requiresCommit = String(row.status) === 'awaiting_commit';
         const statusLabel = formatAgentStatus(row.status);
         items.push(item('run', row.id, {
             title: row.title || row.goal || 'Agent 任务',
@@ -150,8 +151,8 @@ async function listAgentInbox(user, options = {}) {
             statusText: statusLabel,
             runId: row.id,
             goalId: metadata.goalId || null,
-            risk: isFailure ? 'medium' : requiresApproval ? 'high' : 'low',
-            unread: requiresApproval ? true : isFailure ? !isRead : false,
+            risk: isFailure ? 'medium' : (requiresApproval || requiresCommit) ? 'high' : 'low',
+            unread: (requiresApproval || requiresCommit) ? true : isFailure ? !isRead : false,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             actions: ['open_run', ...(isFailure ? ['retry'] : [])]

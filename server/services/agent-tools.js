@@ -50,6 +50,7 @@ const { ARTIFACT_TOOL_NAMES, executeArtifactTool, getArtifactToolDefinitions } =
 const { createAgentDelegateExecutor } = require('./agent-tools-delegation');
 const { executeToolDiscoveryMeta, getToolDiscoveryDefinitions } = require('./agent-tools-discovery');
 const { executeTerminalRuntime, isTerminalRuntimeAvailable, terminalToolDefinition } = require('./agent-tools-terminal');
+const { executeAgentCode } = require('./agent-code-runtime');
 const { executeAgentBrowserSessionAction } = require('./agent-browser-sessions');
 const {
     executeAgentCancel,
@@ -70,6 +71,7 @@ const IN_PROCESS_DYNAMIC_CODE_TOOLS = new Set(['agent.code', 'workflow.foreach',
 function assertDynamicCodeExecutionIsSandboxed(toolName, context = {}) {
     const name = String(toolName || '').trim();
     if (!IN_PROCESS_DYNAMIC_CODE_TOOLS.has(name)) return;
+    if (name === 'agent.code' && context.approvalGranted === true && context.executionGrant) return;
     if (name === 'workflow.foreach' && context.sandboxExecution === true && context.approvalGranted === true) return;
     if (name === 'terminal.runtime' && context.approvalGranted === true) return;
     const error = new Error('动态代码只能在独立 Worker 沙箱中执行，当前服务端执行入口已拒绝。');
@@ -198,7 +200,9 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.http',
             title: 'HTTP 请求',
-            description: '调用外部 REST API 并返回状态码与响应数据。内网地址会被安全策略拦截。',
+            description: '调用外部 REST API 并返回状态码与响应数据。所有请求均需审批；POST/PUT/PATCH/DELETE 在任务验收后才会实际发出。内网地址会被安全策略拦截。',
+            side_effect: true,
+            alwaysRequiresApproval: true,
             input_schema: asJsonSchema({
                 url: { type: 'string', description: '请求地址，支持模板变量。' },
                 method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], default: 'GET' },
@@ -272,14 +276,15 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.browser',
             title: '浏览器自动化',
-            description: '在独立浏览器 Profile 中访问白名单页面并执行受控 DOM/视觉定位操作，禁止读取凭证。',
+            description: '在独立浏览器 Profile 中访问白名单页面并执行受控 DOM/视觉定位操作；上传只接受已登记 rendition，禁止读取凭证。',
             alwaysRequiresApproval: true,
             network: true,
             input_schema: asJsonSchema({
                 url: { type: 'string', description: '新建或导航浏览器会话时必须位于任务网络白名单中的 HTTP/HTTPS 地址。' },
                 sessionId: { type: 'string', maxLength: 128, description: '可选的已授权浏览器会话标识，用于连续浏览任务。' },
-                action: { type: 'string', enum: ['open', 'new_tab', 'switch_tab', 'navigate', 'inspect', 'snapshot', 'click', 'fill', 'select', 'scroll', 'wait', 'screenshot', 'close_tab', 'close'], default: 'inspect' },
+                action: { type: 'string', enum: ['open', 'new_tab', 'switch_tab', 'navigate', 'inspect', 'snapshot', 'click', 'fill', 'select', 'download', 'upload', 'scroll', 'wait', 'screenshot', 'close_tab', 'close'], default: 'inspect' },
                 target: { type: 'object', description: 'DOM/视觉目标，支持 selector、role/name 或 text。' },
+                renditionId: { type: 'string', maxLength: 128, description: 'upload 时必填：当前用户可访问且状态为 ready 的已登记渲染产物 ID；不接受路径、文件名或 Base64 正文。' },
                 tabId: { type: 'string', maxLength: 80, description: '可选的浏览器标签标识；省略时使用当前标签。' },
                 newTab: { type: 'boolean', default: false, description: '导航时是否新建标签页；不适用于写入操作。' },
                 value: { description: 'fill 的文本值，或 select 的值、标签或序号对象。' },
@@ -901,6 +906,9 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);
     if (name === 'agent.llm') {
         return executeAgentLlmNode(input, user, context);
+    }
+    if (name === 'agent.code') {
+        return await executeAgentCode(input, user, context);
     }
     if (name === 'agent.content_review') {
         return executeContentReview(input, user, context);

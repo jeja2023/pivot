@@ -4,13 +4,14 @@ const { db } = require('../server/db');
 const { createAgentQueue } = require('../server/services/agent-queue');
 const {
     monitoring: { getAgentQueue },
-    runs: { recoverAgentRuns }
+    runs: { recoverAgentRuns, revokeApprovedAgentTool }
 } = require('../server/services/agent-runtime');
 const {
     canTransitionAgentRunStatus,
     transitionAgentRunStatus,
     TERMINAL_STATUSES
 } = require('../server/services/agent-runtime/state-machine');
+const { createRunState } = require('../server/services/agent-runtime/run-state');
 
 function waitFor(promise, message, timeoutMs = 1000) {
     let timer;
@@ -31,6 +32,56 @@ test('awaiting approval is a legal non-terminal run status transition', () => {
     assert.equal(canTransitionAgentRunStatus('awaiting_approval', 'running'), true);
 });
 
+test('a pre run.started Hook denies the queued-to-planning transition before it is persisted', async () => {
+    const writes = [];
+    const state = createRunState({
+        crypto: require('node:crypto'),
+        queryOne: async sql => sql.includes('JOIN users')
+            ? { id: 17, username: 'hook-owner' }
+            : { status: 'queued', run_mode: 'standard' },
+        execute: async (...args) => { writes.push(args); return 1; },
+        logger: { warn() {}, error() {} },
+        getBeijingTimestamp: () => '2026-10-18 09:00:00',
+        getAgentRunTitle: () => '', getRunMetadata: () => ({}),
+        assertAgentRunStatusTransition: () => {}, canTransitionAgentRunStatus: () => true,
+        TERMINAL_STATUSES: new Set(), releaseChildRunReservation: async () => {}, persistAgentRunChatResult: async () => {},
+        deliverChannelGatewayRunResult: async () => {}, deliverGoalRunResult: async () => {}, recordCollaboratorCompletion: async () => {},
+        recordAgentRunOutcome: async () => {}, recordFirstTaskTerminal: async () => {}, recordAgentEvent: async () => {}, publishUserEvent: async () => {},
+        parseJsonObject: value => value || {}, updateAgentRunMetadataWithRetry: async () => ({}),
+        dispatchPreLifecycleHook: async request => {
+            assert.equal(request.eventType, 'run.started');
+            assert.equal(request.payload.run.run_mode, 'standard');
+            return { denied: true, blocking: { hookId: 'h-start', hookName: 'hold-start' } };
+        }
+    });
+    await assert.rejects(
+        () => state.updateRun('run-pre-denied', { status: 'planning' }),
+        error => error.code === 'AGENT_HOOK_DENIED'
+    );
+    assert.equal(writes.length, 0, '被拒绝的启动不得先改变运行状态');
+});
+
+test('queued approval grant can be revoked before an executor claims the run', async () => {
+    const user = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get();
+    assert.ok(user?.id);
+    const runId = `approval-revoke-${process.pid}-${Date.now()}`;
+    const metadata = {
+        approvalGrants: [{ tool: 'mcp.write', key: 'node:write', inputHash: 'a'.repeat(64), grantedAt: '2026-10-18 10:00:00', expiresAt: '2099-01-01 00:00:00' }]
+    };
+    db.prepare("INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES (?, ?, 'revoke', 'revoke grant', 'queued', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))")
+        .run(runId, user.id, JSON.stringify(metadata));
+    try {
+        const revoked = await revokeApprovedAgentTool(runId, { id: user.id }, 'node:write');
+        assert.equal(revoked.status, 'needs_input');
+        const stored = db.prepare('SELECT status, metadata FROM agent_runs WHERE id = ?').get(runId);
+        const next = typeof stored.metadata === 'object' ? stored.metadata : JSON.parse(stored.metadata);
+        assert.equal(stored.status, 'needs_input');
+        assert.equal(next.approvalGrants.length, 0);
+        assert.equal(next.revokedApproval.key, 'node:write');
+        await assert.rejects(() => revokeApprovedAgentTool(runId, { id: user.id }, 'node:write'), error => error.code === 'AGENT_APPROVAL_REVOCATION_TOO_LATE');
+    } finally { db.prepare('DELETE FROM agent_runs WHERE id = ?').run(runId); }
+});
+
 test('verification states distinguish completed, partial, and needs-input outcomes', () => {
     assert.equal(canTransitionAgentRunStatus('planning', 'verifying'), true);
     assert.equal(canTransitionAgentRunStatus('verifying', 'completed'), true);
@@ -39,6 +90,15 @@ test('verification states distinguish completed, partial, and needs-input outcom
     assert.equal(canTransitionAgentRunStatus('needs_input', 'queued'), true);
     assert.equal(TERMINAL_STATUSES.has('partial'), true);
     assert.equal(TERMINAL_STATUSES.has('needs_input'), false);
+});
+
+test('awaiting commit is a non-terminal state that can only finish or require user intervention', () => {
+    const pending = transitionAgentRunStatus('verifying', 'awaiting_commit');
+    assert.equal(pending.allowed, true);
+    assert.equal(pending.terminal, false);
+    assert.equal(canTransitionAgentRunStatus('awaiting_commit', 'completed'), true);
+    assert.equal(canTransitionAgentRunStatus('awaiting_commit', 'needs_input'), true);
+    assert.equal(canTransitionAgentRunStatus('awaiting_commit', 'executing'), false);
 });
 
 test('runtime recovery leaves stale awaiting approval runs suspended', async () => {
@@ -113,6 +173,9 @@ test('runtime recovery requeues stale idempotent checkpoints and suspends side e
         .run(safeId, userId, 'safe', 'safe', staleAt, staleAt, staleAt);
     db.prepare("INSERT INTO agent_runs (id,user_id,title,goal,status,metadata,last_heartbeat_at,created_at,updated_at) VALUES (?,?,?,?, 'running','{}',?,?,?)")
         .run(unsafeId, userId, 'unsafe', 'unsafe', staleAt, staleAt, staleAt);
+    // 恢复器会异步提示全局队列。给幂等夹具设置未来 retry_after，使断言只覆盖
+    // 持久化恢复语义，不与同进程队列的领取时序耦合。
+    db.prepare("UPDATE agent_runs SET retry_after = '2099-01-01 00:00:00' WHERE id = ?").run(safeId);
     try {
         db.prepare("INSERT INTO agent_run_checkpoints (checkpoint_id,run_id,step_index,checkpoint_type,status,state,operation_key,tool_name,input_hash,idempotent,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
             .run(`cp-safe-${suffix}`, safeId, 1, 'tool', 'pending', '{}', `op-safe-${suffix}`, 'filesystem.read', 'h', 1, staleAt);

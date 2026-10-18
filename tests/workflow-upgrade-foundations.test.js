@@ -96,8 +96,8 @@ test('工作流升级基础：缓存声明、定义归一化与版本差异保�
         inputVariables: { department: '研发部' },
         expectedOutput: '固定结果',
         assertions: {
-            requiredPhrases: ['固定'], forbiddenPhrases: [], minLength: 0, maxDurationMs: 0,
-            maxTokens: 123, requireJson: false, outputSchema: {}
+            requiredPhrases: ['固定'], forbiddenPhrases: [], requiredEvidencePhrases: [], evaluationTier: 'legacy',
+            minLength: 0, maxDurationMs: 0, maxTokens: 123, requireJson: false, outputSchema: {}
         },
         sortOrder: 2
     });

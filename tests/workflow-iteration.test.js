@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { executeWorkflowIteration } = require('../server/services/agent-dag-runtime');
+const { createSubworkflowRuntime } = require('../server/services/agent-dag-subworkflow-runtime');
 
 function makeDeps() {
     const invocations = new Map();
@@ -57,6 +58,9 @@ function makeDeps() {
 
 test('逐项调用子工作流保留顺序、调用身份和固定版本', async () => {
     const deps = makeDeps();
+    const executeTool = deps.executeToolByName;
+    const contexts = [];
+    deps.executeToolByName = async (name, input, user, tools, context) => { contexts.push(context); return await executeTool(name, input, user, tools, context); };
     const result = await executeWorkflowIteration({
         input: {
             items: [{ name: '甲' }, { name: '乙' }],
@@ -72,7 +76,7 @@ test('逐项调用子工作流保留顺序、调用身份和固定版本', async
         toolList: [{ name: 'workflow.output', input_schema: { type: 'object' } }],
         deadline: Date.now() + 30000,
         deps,
-        parentContext: { dagInputs: {}, states: new Map(), nodeMap: new Map(), callerNodeId: 'iterate' }
+        parentContext: { dagInputs: {}, states: new Map(), nodeMap: new Map(), callerNodeId: 'iterate', taskTransactionId: 'tx-iteration' }
     });
     assert.equal(result.inputCount, 2);
     assert.equal(result.count, 2);
@@ -84,6 +88,98 @@ test('逐项调用子工作流保留顺序、调用身份和固定版本', async
     assert.equal([...deps.nodes.values()].some(item => String(item.node_key).includes('item:0')), true);
     assert.equal([...deps.nodes.values()].some(item => String(item.node_key).includes('item:1')), true);
     assert.equal([...deps.iterationItems.values()].every(item => item.inputDigest && item.itemId), true);
+    assert.equal(contexts.every(context => context.taskTransactionId === 'tx-iteration'), true);
+});
+
+test('嵌套子工作流继承同一任务事务与取消信号', async () => {
+    const deps = makeDeps();
+    deps.resolveAgentWorkflowVersion = async workflowId => ({
+        workflow: { id: workflowId, name: `子流程${workflowId}` }, version: 1, version_id: workflowId * 10,
+        dagSpec: { nodes: [{ id: 'node', tool: workflowId === 10 ? 'workflow.subworkflow' : 'workflow.output', input: {}, dependsOn: [] }] }
+    });
+    const seen = [];
+    const runtime = createSubworkflowRuntime({
+        executeDagNodeWithPolicy: async ({ node, executionContext }) => {
+            seen.push(executionContext);
+            if (node.tool === 'workflow.subworkflow') await executionContext.executeSubworkflow({ workflowId: 11 });
+            return { ok: true, output: { name: 'result', value: '完成' }, attempt: 1, durationMs: 1 };
+        },
+        buildDagErrorInfo: () => ({}), prepareDagFallbackOutput: () => null,
+        buildDagFallbackFinalAnswer: () => '', extractReadableDagOutput: () => '', upsertDagNode: deps.upsertDagNode
+    });
+    const signal = new AbortController().signal;
+    await runtime.executeSubworkflowDag({
+        input: { workflowId: 10 }, run: { id: 'nested-transaction', goal: '测试' }, user: { id: 1 }, modelCfg: null,
+        toolList: [{ name: 'workflow.subworkflow' }, { name: 'workflow.output' }], deadline: Date.now() + 30000,
+        deps, taskTransactionId: 'tx-parent', signal
+    });
+    assert.equal(seen.length, 2);
+    assert.equal(seen.every(context => context.taskTransactionId === 'tx-parent' && context.signal === signal), true);
+});
+
+test('子工作流在执行前拒绝无效输入并拒绝不符合契约的输出', async () => {
+    for (const mode of ['input', 'output']) {
+        const deps = makeDeps();
+        let calls = 0;
+        deps.resolveAgentWorkflowVersion = async workflowId => ({
+            workflow: { id: workflowId, name: '契约测试' }, version: 1, version_id: 10,
+            dagSpec: { nodes: [{ id: 'node', tool: 'workflow.output', input: { value: '文本' }, dependsOn: [],
+                inputSchema: mode === 'input' ? { type: 'object', properties: { value: { type: 'number' } } } : {},
+                outputSchema: mode === 'output' ? { type: 'object', required: ['result'] } : {} }] }
+        });
+        const runtime = createSubworkflowRuntime({
+            executeDagNodeWithPolicy: async () => { calls += 1; return { ok: true, output: { wrong: true }, attempt: 1, durationMs: 1 }; },
+            buildDagErrorInfo: error => ({ code: error.code }), prepareDagFallbackOutput: () => null,
+            buildDagFallbackFinalAnswer: () => '', extractReadableDagOutput: () => '', upsertDagNode: deps.upsertDagNode
+        });
+        await assert.rejects(() => runtime.executeSubworkflowDag({
+            input: { workflowId: 10 }, run: { id: `contract-${mode}`, goal: '测试' }, user: { id: 1 }, modelCfg: null,
+            toolList: [{ name: 'workflow.output' }], deadline: Date.now() + 30000, deps
+        }), error => error.code === 'AGENT_SUBWORKFLOW_NODE_FAILED');
+        assert.equal(calls, mode === 'input' ? 0 : 1);
+        const node = [...deps.nodes.values()].find(item => item.status === 'error');
+        assert.equal(node.contractStatus, 'invalid');
+        assert.ok(node.contractIssues.length > 0);
+    }
+});
+
+test('预览模式阻断子工作流中的副作用及审批节点，即使节点配置为失败后继续', async () => {
+    for (const marker of ['side_effect', 'sideEffect', 'approval_required', 'approvalRequired', 'requiresApproval', 'alwaysRequiresApproval']) {
+        const deps = makeDeps();
+        let calls = 0;
+        deps.resolveAgentWorkflowVersion = async workflowId => ({
+            workflow: { id: workflowId, name: '预览子工作流' }, version: 1, version_id: 10,
+            dagSpec: { nodes: [{ id: 'write', tool: 'custom.action', input: {}, dependsOn: [], onError: 'continue' }] }
+        });
+        const runtime = createSubworkflowRuntime({
+            executeDagNodeWithPolicy: async () => { calls += 1; return { ok: true, output: {} }; },
+            buildDagErrorInfo: () => ({}), prepareDagFallbackOutput: () => null,
+            buildDagFallbackFinalAnswer: () => '', extractReadableDagOutput: () => '', upsertDagNode: deps.upsertDagNode
+        });
+        await assert.rejects(() => runtime.executeSubworkflowDag({
+            input: { workflowId: 10 }, run: { id: `preview-${marker}`, metadata: JSON.stringify({ workflow_run_source: 'preview' }) },
+            user: { id: 1 }, modelCfg: null, toolList: [{ name: 'custom.action', [marker]: true }],
+            deadline: Date.now() + 30000, deps
+        }), error => error.code === 'AGENT_PREVIEW_SIDE_EFFECT_BLOCKED');
+        assert.equal(calls, 0);
+    }
+});
+
+test('逐项子工作流检查不同字段命名的副作用及审批声明', async () => {
+    for (const marker of ['side_effect', 'sideEffect', 'approval_required', 'approvalRequired', 'requiresApproval', 'alwaysRequiresApproval']) {
+        const deps = makeDeps();
+        let calls = 0;
+        deps.executeToolByName = async () => { calls += 1; return {}; };
+        const result = await executeWorkflowIteration({
+            input: { items: [{ name: '甲' }], workflowId: 10 },
+            run: { id: `iteration-${marker}`, goal: '测试' }, user: { id: 1 }, modelCfg: null,
+            toolList: [{ name: 'workflow.output', [marker]: true }], deadline: Date.now() + 30000, deps,
+            parentContext: { dagInputs: {}, states: new Map(), nodeMap: new Map(), callerNodeId: 'iterate' }
+        });
+        assert.equal(result.errors.length, 1);
+        assert.match(result.errors[0].error, /不支持副作用、审批/);
+        assert.equal(calls, 0);
+    }
 });
 
 test('逐项调用子工作流按 continue 和 drop 处理失败项', async () => {

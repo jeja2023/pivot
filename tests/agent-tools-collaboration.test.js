@@ -31,6 +31,8 @@ test('agent spawn inherits parent controls and cannot widen an allowlist', async
     assert.deepEqual(created[0].toolAllowlist, ['rag.search']);
     assert.equal(created[0].parentRunId, parent.id);
     assert.equal(created[0].approvalPolicy, parent.approval_policy);
+    assert.equal(created[0].metadata.source, 'delegation');
+    assert.equal(created[0].metadata.collaboration.supervisorRunId, parent.id);
 });
 
 test('agent wait, message, join, and cancel are restricted to direct children', async () => {

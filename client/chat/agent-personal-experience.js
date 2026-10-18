@@ -12,6 +12,8 @@
         });
         state.capabilities = Array.isArray(state.capabilities) ? state.capabilities : [];
         state.capabilityQuery = String(state.capabilityQuery || '');
+        state.discoveredSkills = [];
+        let skillDiscoveryRequest = 0;
         state.channelGatewayDetails = state.channelGatewayDetails instanceof Map ? state.channelGatewayDetails : new Map();
 
         function clearGoalDraft() {
@@ -191,6 +193,48 @@
             return state.capabilities;
         }
 
+        async function searchSkillDiscovery(event) {
+            event?.preventDefault();
+            const request = ++skillDiscoveryRequest;
+            const results = document.getElementById('agent-skill-discovery-results');
+            const detail = document.getElementById('agent-skill-discovery-detail');
+            const params = new URLSearchParams();
+            for (const [name, id] of [['query', 'agent-skill-discovery-query'], ['domain', 'agent-skill-discovery-domain'], ['capability', 'agent-skill-discovery-capability']]) {
+                const value = String(document.getElementById(id)?.value || '').trim();
+                if (value) params.set(name, value);
+            }
+            if (detail) detail.replaceChildren();
+            if (results) results.textContent = '正在查找已授权技能…';
+            try {
+                const response = await apiJson(`${API_BASE}/agents/skills/discovery?${params}`, { cache: 'no-store' });
+                if (request !== skillDiscoveryRequest) return;
+                state.discoveredSkills = Array.isArray(response.data?.candidates) ? response.data.candidates : [];
+                if (!results) return;
+                if (!state.discoveredSkills.length) { results.textContent = '没有匹配的已授权技能。'; return; }
+                setMarkup(results, `<p>找到 ${escape(response.data.total)} 个匹配技能（最多展示 20 个）。</p><div class="agent-capability-catalog-list">${state.discoveredSkills.map((skill, index) => `<article class="agent-capability-catalog-item"><div class="agent-capability-catalog-item-head"><strong>${escape(skill.title)}</strong><span>${escape(capabilityScopeLabel(skill.scope))}</span></div><p>${escape(skill.description || '未填写用途说明。')}</p><footer><span>${escape((skill.domains || []).join('、') || '未标注领域')}</span><button class="btn-secondary btn-xs" type="button" data-agent-skill-discovery-index="${index}">查看契约</button></footer></article>`).join('')}</div>`);
+            } catch (error) {
+                if (request !== skillDiscoveryRequest) return;
+                state.discoveredSkills = [];
+                if (results) results.textContent = error.message || '技能搜索失败。';
+            }
+        }
+
+        async function describeDiscoveredSkill(index) {
+            const skill = state.discoveredSkills[index];
+            const detail = document.getElementById('agent-skill-discovery-detail');
+            if (!skill || !detail) return;
+            const request = ++skillDiscoveryRequest;
+            detail.textContent = '正在重新核验技能授权和版本…';
+            try {
+                const response = await apiJson(`${API_BASE}/agents/skills/discovery/describe`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reference: skill.reference }) });
+                if (request !== skillDiscoveryRequest) return;
+                const value = response.data || {};
+                setMarkup(detail, `<section class="agent-skill-discovery-detail"><strong>${escape(value.title || '技能契约')}</strong><p>版本：${escape(value.reference?.version || '')} · 能力：${escape((value.capabilities || []).join('、') || '无')}</p><p>工具：${escape((value.tools || []).join('、') || '无')}</p><details><summary>输入契约</summary><pre>${escape(JSON.stringify(value.inputs || {}, null, 2))}</pre></details><details><summary>输出契约</summary><pre>${escape(JSON.stringify(value.outputs || {}, null, 2))}</pre></details></section>`);
+            } catch (error) {
+                if (request === skillDiscoveryRequest) detail.textContent = error.message || '技能契约读取失败，请重新搜索。';
+            }
+        }
+
         function setCapabilityCatalogModalVisibility(visible = true) {
             const modal = document.getElementById('agent-capability-catalog-modal');
             if (!modal) return;
@@ -257,6 +301,11 @@
         }
 
         function bindControls() {
+            document.getElementById('agent-skill-discovery-form')?.addEventListener('submit', searchSkillDiscovery);
+            document.getElementById('agent-skill-discovery-results')?.addEventListener('click', event => {
+                const button = event.target.closest('[data-agent-skill-discovery-index]');
+                if (button) describeDiscoveredSkill(Number(button.dataset.agentSkillDiscoveryIndex));
+            });
             document.getElementById('agent-capability-catalog-refresh')?.addEventListener('click', () => loadCapabilityCatalog().catch(error => setNotice(error.message, 'error')));
             document.getElementById('agent-capability-catalog-search')?.addEventListener('input', event => { state.capabilityQuery = event.target.value || ''; renderCapabilityCatalog(); });
             document.getElementById('agent-open-capability-catalog-btn')?.addEventListener('click', () => setCapabilityCatalogModalVisibility(true));

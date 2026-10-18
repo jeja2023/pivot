@@ -114,7 +114,7 @@ async function runSeedsPg() {
         `);
 
         if (tableExists?.exists) {
-            logger.info('开始导入内置工作流模板...');
+            logger.debug('开始导入内置工作流模板...');
             const workflowTemplateSeed = require('./seeds/003-workflow-templates');
 
             // 创建一个 knex 兼容的包装器
@@ -286,12 +286,12 @@ async function runSeedsPg() {
 
             try {
                 await workflowTemplateSeed.seed(knexWrapper);
-                logger.info('✅ 内置工作流模板导入完成');
+                logger.debug('内置工作流模板导入完成');
             } catch (error) {
-                logger.error({ error: error.message }, '❌ 工作流模板导入失败');
+                logger.error({ error: error.message }, '工作流模板导入失败');
             }
         } else {
-            logger.info('⏭️  agent_workflow_templates 表尚未创建，跳过工作流模板种子导入');
+            logger.debug('agent_workflow_templates 表尚未创建，跳过工作流模板种子导入');
         }
     });
 }

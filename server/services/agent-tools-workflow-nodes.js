@@ -3,6 +3,14 @@ const os = require('os');
 const path = require('path');
 const { normalizeWorkflowEmbedUrl } = require('./workflow-embed-policy');
 const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
+const {
+    isWorkerEnabled,
+    normalizeDefinition: normalizeWorkerDefinition,
+    runCapabilityWorker,
+    verifyWorkerSignature
+} = require('./agent-capability-worker');
+const { verifyExecutionGrant } = require('./agent-execution-grant');
+const { consumeExecutionGrant } = require('./agent-execution-grant-ledger');
 
 /**
  * server/services/agent-tools-workflow-nodes.js
@@ -255,8 +263,65 @@ function executeWorkflowCondition(input = {}) {
     return { matched, value, compareTo, operator, route: matched ? 'matched' : 'unmatched', text: matched ? 'matched' : 'unmatched' };
 }
 
+function workflowNodeError(message, code = 'AGENT_FOREACH_WORKER_INVALID', status = 400) {
+    const error = new Error(message);
+    error.code = code;
+    error.status = status;
+    error.statusCode = status;
+    return error;
+}
+
+function foreachWorkerDefinition(env = process.env) {
+    const image = String(env.PIVOT_AGENT_FOREACH_WORKER_IMAGE || '').trim();
+    if (!image) return null;
+    return {
+        image,
+        command: String(env.PIVOT_AGENT_FOREACH_WORKER_COMMAND || 'node,/runner/agent-foreach-worker.js')
+            .split(',').map(item => item.trim()).filter(Boolean).slice(0, 8),
+        limits: {
+            cpu: Number(env.PIVOT_AGENT_FOREACH_WORKER_CPU || 1),
+            memoryMb: Number(env.PIVOT_AGENT_FOREACH_WORKER_MEMORY_MB || 512),
+            timeoutMs: Math.min(Math.max(Number(env.PIVOT_AGENT_FOREACH_WORKER_TIMEOUT_MS || 120000), 1000), 10 * 60 * 1000),
+            maxOutputBytes: Number(env.PIVOT_AGENT_FOREACH_WORKER_MAX_OUTPUT_BYTES || 2 * 1024 * 1024)
+        }
+    };
+}
+
+function allowUnsafeLocalForeach(context = {}) {
+    const env = context.env || process.env;
+    return context.allowUnsafeLocal === true
+        && env.NODE_ENV === 'test'
+        && String(env.PIVOT_AGENT_UNSAFE_LOCAL_TEST || '').toLowerCase() === 'true';
+}
+
+function foreachWorkspaceScopeId(context = {}) {
+    const runId = String(context.run?.id || context.runId || context.node?.id || '').trim();
+    return String(context.executionWorkspaceScopeId || (runId ? `run:${runId}` : '')).slice(0, 160);
+}
+
+function assertForeachExecutionGrant(input, context = {}) {
+    const env = context.env || process.env;
+    const runId = String(context.run?.id || context.runId || context.node?.id || '').trim();
+    const workspaceScopeId = foreachWorkspaceScopeId(context);
+    if (!runId || !workspaceScopeId) {
+        throw workflowNodeError('循环 Worker 执行必须关联运行与工作区授权范围。', 'AGENT_EXECUTION_GRANT_CONTEXT_INVALID', 403);
+    }
+    try {
+        return verifyExecutionGrant(context.executionGrant, {
+            runId,
+            userId: context.user?.id || context.run?.user_id || context.userId,
+            tool: 'workflow.foreach',
+            input,
+            workspaceScopeId
+        }, { env });
+    } catch (error) {
+        throw workflowNodeError(error.message || '循环 Worker 执行授权无效。', error.code || 'AGENT_EXECUTION_GRANT_INVALID', error.status || 403);
+    }
+}
+
 async function executeWorkflowForeach(input = {}, context = {}) {
-    if (String(process.env.AGENT_FOREACH_WORKER_ENABLED || 'true').toLowerCase() === 'false') {
+    const env = context.env || process.env;
+    if (String(env.AGENT_FOREACH_WORKER_ENABLED || 'true').toLowerCase() === 'false') {
         const error = new Error('工作流循环 Worker 已由部署策略停用。');
         error.code = 'AGENT_FOREACH_WORKER_DISABLED';
         error.category = 'policy';
@@ -273,15 +338,79 @@ async function executeWorkflowForeach(input = {}, context = {}) {
     const items = Array.isArray(input.items) ? input.items : [];
     if (items.length > 1000) throw new Error('循环节点最多处理 1000 项。');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-foreach-'));
-    const allowUnsafeLocalTest = context.allowUnsafeLocal === true
-        && process.env.NODE_ENV === 'test'
-        && process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST === 'true';
+    const allowUnsafeLocalTest = allowUnsafeLocalForeach(context);
     const taskId = String(context.run?.id || context.runId || context.node?.id || 'foreach').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'foreach';
     const jail = createWorkspaceJail(root, taskId);
     const workerScript = jail.resolve('foreach-worker.js');
     try {
-        fs.copyFileSync(path.join(__dirname, 'agent-foreach-worker.js'), workerScript);
         const timeoutMs = Math.max(1000, Math.min(Number(context.timeoutMs || input.timeoutMs || 120000), 10 * 60 * 1000));
+        const workerDefinition = foreachWorkerDefinition(env);
+        if (workerDefinition && isWorkerEnabled(env) && !allowUnsafeLocalTest) {
+            try { normalizeWorkerDefinition(workerDefinition); } catch (error) {
+                throw workflowNodeError(error.message || '循环 Worker 配置无效。', error.code || 'AGENT_FOREACH_WORKER_INVALID', error.status || 503);
+            }
+            // 在消费一次性授权前验证受管镜像的签名信任。否则部署侧的清单或
+            // 公钥错误会把一个尚未启动的任务错误地记成“授权已使用”，既妨碍
+            // 人工修复后的重试，也掩盖供应链配置故障。
+            try { verifyWorkerSignature(workerDefinition, { env }); } catch (error) {
+                throw workflowNodeError(error.message || '循环 Worker 生产信任清单校验失败。', error.code || 'AGENT_FOREACH_WORKER_UNTRUSTED', error.status || 503);
+            }
+            const executionGrant = assertForeachExecutionGrant(input, context);
+            try {
+                await consumeExecutionGrant({
+                    token: context.executionGrant,
+                    payload: executionGrant.payload,
+                    consumer: `workflow.foreach:${process.pid}`
+                });
+            } catch (error) {
+                throw workflowNodeError(error.message || '循环 Worker 执行授权账本校验失败。', error.code || 'AGENT_EXECUTION_GRANT_UNAVAILABLE', error.status || 403);
+            }
+            const output = await runCapabilityWorker(workerDefinition, {
+                version: 1,
+                action: 'foreach',
+                items,
+                code: String(input.code || 'return item;'),
+                vars: input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? input.vars : {},
+                concurrency: input.concurrency,
+                stopOnError: input.stopOnError,
+                retryLimit: input.retryLimit,
+                itemTimeoutMs: input.itemTimeoutMs,
+                approvedByControlPlane: true
+            }, {
+                env,
+                signal: context.signal || null,
+                workspaceMount: { source: jail.workspace, target: '/workspace', readOnly: false },
+                requireExecutionGrant: true,
+                executionGrant: context.executionGrant,
+                executionGrantExpected: {
+                    runId: String(context.run?.id || context.runId || context.node?.id || ''),
+                    userId: context.user?.id || context.run?.user_id || context.userId,
+                    tool: 'workflow.foreach',
+                    input,
+                    workspaceScopeId: foreachWorkspaceScopeId(context)
+                }
+            });
+            if (!output?.ok || !output?.result || typeof output.result !== 'object') {
+                throw workflowNodeError(output?.error?.message || '循环 Capability Worker 返回格式无效。', output?.error?.code || 'AGENT_FOREACH_WORKER_OUTPUT_INVALID', 502);
+            }
+            return {
+                ...output.result,
+                worker: {
+                    provider: 'capability-worker',
+                    code: Number.isInteger(output.exitCode) ? output.exitCode : 0,
+                    timedOut: false,
+                    truncated: false,
+                    isolation: {
+                        enforcement: 'enforced', filesystem: 'container-mount', process: 'container', network: 'none'
+                    },
+                    executionGrant: executionGrant.summary
+                }
+            };
+        }
+        if (!allowUnsafeLocalTest) {
+            throw workflowNodeError('循环动态代码需要已启用、镜像摘要固定的 Capability Worker；宿主进程后备已被禁止。', 'AGENT_FOREACH_WORKER_REQUIRED', 503);
+        }
+        fs.copyFileSync(path.join(__dirname, 'agent-foreach-worker.js'), workerScript);
         const result = await runSandboxedProcess(process.execPath, [workerScript], {
             jail,
             timeoutMs,
@@ -404,7 +533,9 @@ module.exports = {
     executeWorkflowEmbedVideo,
     executeWorkflowCondition,
     executeWorkflowDelay,
+
     executeWorkflowForeach,
+
     executeWorkflowIteration,
     executeWorkflowInput,
     executeWorkflowNotify,

@@ -7,8 +7,9 @@ const { normalizeDagNodePolicy, resolveDagInputValue, resolveDagNodeInput, evalu
 const { listDagNodes } = require('./agent-runs');
 const { clampText, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeToolInput } = require('./agent-policy');
+const { assertPreviewToolAllowed, toolHasSideEffectsOrApproval } = require('./agent-dag-execution-guard');
 const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
-const { normalizeJsonSchema, schemaHasRules } = require('./agent-dag-contracts');
+const { normalizeJsonSchema, outputValueForContract, schemaHasRules, validateJsonSchemaDefinition, validateValueAgainstSchema } = require('./agent-dag-contracts');
 const { recordWorkflowInvocationResult, recordWorkflowIterationItemResult } = require('./agent-governance-metrics');
 
 function buildInvocationId(runId, invocationPath) {
@@ -148,6 +149,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
             try {
                 const child = await executeSubworkflowDag({
                     input: { workflowId: config.workflowId, version: config.version, goal: childGoal, inputs: childInputs }, run, user, modelCfg, toolList, deadline, deps,
+                    taskTransactionId: parentContext.taskTransactionId, signal: parentContext.signal,
                     stack: parentContext.stack || [], invocation: { parentInvocationId, callerNodeId: `${callerNodeId}:item:${index}`, executionPath: baseExecutionPath, iterationMode: true, itemId: identity.itemId }
                 });
                 results[index] = { itemId: identity.itemId, inputIndex: index, status: 'completed', value: child.output, outputs: child.outputs, invocationId: child.invocationId, workflowId: child.workflowId, version: child.version, versionId: child.versionId };
@@ -179,7 +181,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
         return { items: collected, count: collected.length, inputCount: config.items.length, processedCount: results.filter(Boolean).length, errors, stoppedOnError, workflowId: config.workflowId, version: errors.length ? null : (collected.find(item => item?.version)?.version || null) };
     }
 
-    async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, deadline, deps, stack = [], invocation = {} }) {
+    async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, deadline, deps, stack = [], invocation = {}, taskTransactionId = '', signal = null }) {
         const workflowId = Number.parseInt(input.workflowId ?? input.workflow_id, 10);
         if (!workflowId) throw new Error('子工作流节点需要选择有效的工作流。');
         if (stack.includes(workflowId)) throw new Error(`检测到子工作流循环调用：${[...stack, workflowId].join(' -> ')}`);
@@ -199,7 +201,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
         if (invocation.iterationMode === true) {
             const blocked = dagSpec.nodes.find(node => {
                 const tool = findAgentToolByName(node.tool, toolList);
-                return !tool || tool.side_effect === true || tool.approval_required === true || ['workflow.approval', 'workflow.delay', 'workflow.foreach', 'workflow.iteration'].includes(String(node.tool || ''));
+                return !tool || toolHasSideEffectsOrApproval(tool) || ['workflow.approval', 'workflow.delay', 'workflow.foreach', 'workflow.iteration'].includes(String(node.tool || ''));
             });
             if (blocked) {
                 const error = new Error(`逐项调用子工作流暂不支持副作用、审批、延时或循环节点：${blocked.title || blocked.id}`);
@@ -249,26 +251,47 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                     }
                     const selectedTool = findAgentToolByName(node.tool, toolList);
                     if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
+                    assertPreviewToolAllowed(run, selectedTool);
                     const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap }), { ...childRun, model_id: childRun.model_id ?? modelCfg?.id, chosen_model_id: childRun.chosen_model_id ?? modelCfg?.id });
                     const approvalKey = invocationNodeKey(node);
-                    const workflowApprovalResult = node.tool === 'workflow.approval' ? await deps.waitForWorkflowApproval({ run, user, node, input: resolvedInput, key: approvalKey }) : null;
-                    const workflowDelayResult = node.tool === 'workflow.delay' ? await deps.waitForWorkflowDelay({ run, node, input: resolvedInput, key: approvalKey }) : null;
-                    if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
-                        const error = new Error('子工作流节点需要工具审批。'); error.code = 'AGENT_APPROVAL_REQUIRED'; throw error;
-                    }
                     const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs, selectedTool);
+                    const explicitInputSchema = normalizeJsonSchema(node.inputSchema || node.input_schema || {});
+                    const inputSchema = schemaHasRules(explicitInputSchema) ? explicitInputSchema : normalizeJsonSchema(selectedTool?.input_schema || selectedTool?.inputSchema || selectedTool?.parameters || {});
                     const explicitOutputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
                     const outputSchema = schemaHasRules(explicitOutputSchema) ? explicitOutputSchema : normalizeJsonSchema(selectedTool?.output_schema || selectedTool?.outputSchema || {});
-                    const executionContext = {
-                        dagInputs, workflowApprovalResult, workflowDelayResult, budget: deps.taskBudget, approvalKey,
-                        approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: true, invocationId, executionPath, itemId: invocation.itemId || null,
-                        executeSubworkflow: childInput => executeSubworkflowDag({ input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack, invocation: { parentInvocationId: invocationId, callerNodeId: node.id, executionPath, iterationMode: invocation.iterationMode === true, itemId: invocation.itemId || null } }),
-                        executeIteration: iterationInput => executeWorkflowIteration({ input: iterationInput, run, user, modelCfg, toolList, deadline, deps, parentContext: { dagInputs, states, nodeMap, stack: childStack, executionPath, invocationId, callerNodeId: node.id } })
-                    };
-                    const result = await executeDagNodeWithPolicy({ run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: 0, executionContext }, deps);
+                    const issues = validateJsonSchemaDefinition(inputSchema, `${node.title || node.id} 输入契约`, []);
+                    validateValueAgainstSchema(resolvedInput, inputSchema, {}, `${node.title || node.id} 输入`, issues);
+                    validateJsonSchemaDefinition(outputSchema, `${node.title || node.id} 输出契约`, issues);
+                    let result;
+                    if (issues.length) {
+                        const error = new Error(`子工作流节点契约校验失败：${issues[0]}`);
+                        error.code = 'AGENT_DAG_CONTRACT_INVALID'; error.contractIssues = issues;
+                        result = { ok: false, error, attempt: 0, durationMs: 0 };
+                    } else {
+                        const workflowApprovalResult = node.tool === 'workflow.approval' ? await deps.waitForWorkflowApproval({ run, user, node, input: resolvedInput, key: approvalKey }) : null;
+                        const workflowDelayResult = node.tool === 'workflow.delay' ? await deps.waitForWorkflowDelay({ run, node, input: resolvedInput, key: approvalKey }) : null;
+                        if (node.tool !== 'workflow.approval' && await deps.maybePauseForApproval(run, selectedTool, resolvedInput, approvalKey)) {
+                            const error = new Error('子工作流节点需要工具审批。'); error.code = 'AGENT_APPROVAL_REQUIRED'; throw error;
+                        }
+                        const executionContext = {
+                            dagInputs, workflowApprovalResult, workflowDelayResult, budget: deps.taskBudget, approvalKey, taskTransactionId, signal,
+                            approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: true, invocationId, executionPath, itemId: invocation.itemId || null,
+                            executeSubworkflow: childInput => executeSubworkflowDag({ input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack, taskTransactionId, signal, invocation: { parentInvocationId: invocationId, callerNodeId: node.id, executionPath, iterationMode: invocation.iterationMode === true, itemId: invocation.itemId || null } }),
+                            executeIteration: iterationInput => executeWorkflowIteration({ input: iterationInput, run, user, modelCfg, toolList, deadline, deps, parentContext: { dagInputs, states, nodeMap, stack: childStack, executionPath, invocationId, callerNodeId: node.id, taskTransactionId, signal } })
+                        };
+                        result = await executeDagNodeWithPolicy({ run: childRun, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: 0, executionContext }, deps);
+                        if (result.ok) {
+                            const outputIssues = validateValueAgainstSchema(outputValueForContract(result.output, node), outputSchema, {}, `${node.title || node.id} 输出`, []);
+                            if (outputIssues.length) {
+                                const error = new Error(`子工作流节点输出不符合契约：${outputIssues[0]}`);
+                                error.code = 'AGENT_DAG_OUTPUT_CONTRACT'; error.contractIssues = outputIssues;
+                                result = { ...result, ok: false, error };
+                            }
+                        }
+                    }
                     if (result.ok) {
                         states.set(node.id, { status: 'completed', input: resolvedInput, output: result.output, compactOutput: clampText(result.output, 12000) });
-                        await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status: 'completed', input: resolvedInput, output: result.output, attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
+                        await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status: 'completed', input: resolvedInput, output: result.output, contractStatus: 'valid', contractIssues: [], attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
                         continue;
                     }
                     const errorInfo = buildDagErrorInfo(result.error, node, { attempt: result.attempt });
@@ -278,7 +301,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                     const output = fallbackApplied ? fallback.output : { error: result.error.message, continued: true, errorInfo };
                     const status = continued ? 'continued_error' : 'error';
                     states.set(node.id, { status, input: resolvedInput, error: result.error.message, errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo, fallbackApplied, ...(continued ? { output } : {}) });
-                    await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status, input: resolvedInput, ...(continued ? { output } : {}), errorMessage: result.error.message, errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo, contractIssues: fallback && !fallback.usable ? fallback.issues : [], attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
+                    await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status, input: resolvedInput, ...(continued ? { output } : {}), errorMessage: result.error.message, errorInfo: fallbackApplied ? fallback.errorInfo : errorInfo, contractStatus: result.error.contractIssues?.length ? 'invalid' : 'error', contractIssues: [...(result.error.contractIssues || []), ...(fallback && !fallback.usable ? fallback.issues : [])], attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
                     if (policy.onError === 'stop') throw result.error;
                 }
             }

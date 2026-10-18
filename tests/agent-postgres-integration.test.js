@@ -11,7 +11,7 @@ const { canonicalJson } = require('../server/services/agent-skills');
 const { createSkillVersion, publishSkillVersion, resolvePublishedSkill, validateSkillVersion } = require('../server/services/agent-releases');
 const { deliverWebhook } = require('../server/services/agent-channel-adapters');
 const { getAgentProfile, updateAgentProfile } = require('../server/services/agent-profile');
-const { createAgentWorkflow } = require('../server/services/agent-workflows');
+const { createAgentWorkflow, resolveAgentWorkflowVersion } = require('../server/services/agent-workflows');
 const { publishWorkflowRelease } = require('../server/services/agent-releases');
 const { archiveStalePersonalExperiences, learnAgentRun, getAgentLearningOverview } = require('../server/services/agent-learning');
 const { findBestPersonalSkill } = require('../server/services/agent-skills');
@@ -233,6 +233,8 @@ test('workflow publishing does not require an evaluation batch unless explicitly
     try {
         const releaseWithoutEvaluation = await publishWorkflowRelease(workflow.id, user, { version: 'current' });
         assert.equal(releaseWithoutEvaluation.status, 'published');
+        const resolvedInitialRelease = await resolveAgentWorkflowVersion(workflow.id, user, 'published');
+        assert.equal(Number(resolvedInitialRelease.releaseId), Number(releaseWithoutEvaluation.id));
         await assert.rejects(() => publishWorkflowRelease(workflow.id, user, { version: 'current', fixedEvaluationRequired: true }), error => error.code === 'WORKFLOW_EVALUATION_GATE_FAILED');
         const suite = await pool.query(`INSERT INTO agent_eval_suites (user_id, name, target_type, workflow_id, workflow_version, run_config, status, created_at, updated_at) VALUES ($1, $2, 'workflow', $3, 'current', '{}', 'active', NOW(), NOW()) RETURNING id`, [user.id, `gate-suite-${suffix}`, workflow.id]);
         const evalCase = await pool.query(`INSERT INTO agent_eval_cases (suite_id, name, input, input_variables, expected_output, assertions, sort_order, created_at, updated_at) VALUES ($1, 'gate', 'gate', '{}', '', '{}', 0, NOW(), NOW()) RETURNING id`, [suite.rows[0].id]);

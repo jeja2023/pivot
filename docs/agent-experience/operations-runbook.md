@@ -37,3 +37,7 @@ For disaster recovery, restore only into a staging database with `node scripts/r
 ## Recovery drills
 
 Exercise service restart, database short outage, webhook replay, approval expiry, outbox redelivery, sandbox failure, and non-idempotent tool recovery on a staging PostgreSQL database before production rollout.
+
+## Capability Worker isolation drill
+
+After a signed Worker image has been preloaded on every staging node, run `npm run preflight:capability-workers` and then `npm run drill:capability-workers -- --confirm-staging` separately on Windows Docker and Linux Worker nodes. Attach the resulting redacted JSON to the domain acceptance evidence. The drill is intentionally blocked in production; do not weaken it or use an unpinned/tagged image to obtain a passing result.

@@ -30,6 +30,7 @@ const ENHANCED_MEMORY_TYPE_LABELS = {
 const MEMORY_STATUS_LABELS = {
     active: '活跃',
     pending: '待确认',
+    review_required: '来源待复核',
     disabled: '禁用',
     deleted: '已删除'
 };
@@ -58,6 +59,7 @@ function renderEnhancedMemorySummary(summary = {}) {
         ['启用状态', summary.enabled ? '已启用' : '已关闭'],
         ['活跃记忆', Number(summary.active || 0)],
         ['待确认', Number(summary.pending || 0)],
+        ['来源待复核', Number(summary.reviewRequired || 0)],
         ['用户偏好', Number(byType.preference || 0)],
         ['项目事实', Number(byType.fact || 0)],
         ['长期决策', Number(byType.decision || 0)],
@@ -109,6 +111,102 @@ async function fetchMemorySource(memoryId) {
     const res = await apiFetch(`${API_BASE}/memories/${memoryId}/source`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '记忆来源加载失败');
+    return data;
+}
+
+async function approveMemorySourceReview(memoryId, sourceKind, sourceRef) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceKind, sourceRef })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '来源复核确认失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function attachKnowledgeDocumentSource(memoryId, documentId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/knowledge-document`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '关联知识文档来源失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function approveKnowledgeDocumentSourceReview(memoryId, sourceRef) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/knowledge-document/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceRef })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '知识文档来源复核失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function attachWorkflowSource(memoryId, workflowId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/workflow`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflowId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '关联工作流来源失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function approveWorkflowSourceReview(memoryId, sourceRef) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/workflow/review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceRef })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '工作流来源复核失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function attachSkillSource(memoryId, skillId) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/skill`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skillId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '关联技能来源失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function approveSkillSourceReview(memoryId, sourceRef) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/skill/review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceRef })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '技能来源复核失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function attachWorkspaceSource(memoryId, deviceId, worktreeName) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/workspace`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId, worktreeName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '关联代码工作区来源失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
+    return data;
+}
+
+async function approveWorkspaceSourceReview(memoryId, sourceRef) {
+    const res = await apiFetch(`${API_BASE}/memories/${memoryId}/sources/workspace/review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceRef })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '代码工作区来源复核失败');
+    document.dispatchEvent(new globalThis.CustomEvent('pivot:memory-changed'));
     return data;
 }
 
@@ -173,7 +271,7 @@ window.Pivot.legacy.closeMemoryEditModal = function() {
     modal?.setAttribute('aria-hidden', 'true');
 };
 
-function renderMemorySource(data = {}) {
+function renderMemorySource(data = {}, options = {}) {
     const body = document.getElementById('memory-source-body');
     if (!body) return;
     const session = data.session || {};
@@ -195,23 +293,143 @@ function renderMemorySource(data = {}) {
                 </article>
             `).join('') : '<p class="muted">暂无可追溯消息</p>'}
         </div>
-        ${evidence.length ? `<div class="memory-source-list">${evidence.map(item => `<article class="memory-source-message"><div><strong>${escapeHtml(item.assertedBy || 'user')}</strong><span>${escapeHtml(item.sourceKind || 'automatic')}</span></div><pre>${escapeHtml(`会话：${item.sessionId || '-'}；消息：${item.messageId || '-'}`)}</pre></article>`).join('')}</div>` : ''}
+        ${evidence.length ? `<div class="memory-source-list">${evidence.map(item => {
+            const pendingReview = Boolean(item.reviewRequiredAt);
+            const canConfirmMessage = pendingReview && item.sourceKind === 'message' && item.sourceRef;
+            const canConfirmKnowledge = pendingReview && item.sourceKind === 'knowledge_document' && /^knowledge_document:\d+$/.test(item.sourceRef || '');
+            const canConfirmWorkflow = pendingReview && item.sourceKind === 'agent_workflow' && /^agent_workflow:\d+$/.test(item.sourceRef || '');
+            const canConfirmSkill = pendingReview && item.sourceKind === 'agent_skill' && /^agent_skill:[A-Za-z0-9._-]{1,64}$/.test(item.sourceRef || '');
+            const canConfirmWorkspace = pendingReview && item.sourceKind === 'workspace' && /^workspace:[A-Za-z0-9._-]{1,64}:[A-Za-z0-9._-]{1,64}$/.test(item.sourceRef || '');
+            const sourceLabel = canConfirmKnowledge ? '知识文档' : canConfirmWorkflow ? '工作流' : canConfirmSkill ? '技能' : canConfirmWorkspace ? '代码工作区' : '消息';
+            const sourceKind = canConfirmKnowledge ? 'knowledge_document' : canConfirmWorkflow ? 'agent_workflow' : canConfirmSkill ? 'agent_skill' : canConfirmWorkspace ? 'workspace' : 'message';
+            const reviewControl = canConfirmMessage || canConfirmKnowledge || canConfirmWorkflow || canConfirmSkill || canConfirmWorkspace
+                ? `<button class="btn-primary" type="button" data-memory-source-review="1" data-memory-id="${escapeHtml(String(options.memoryId || ''))}" data-source-kind="${sourceKind}" data-source-ref="${escapeHtml(item.sourceRef)}">确认当前${sourceLabel}来源</button>`
+                : pendingReview
+                    ? '<p class="muted">此来源需由受控连接器提供当前内容后完成复核。</p>'
+                    : '';
+            const evidenceLocation = item.messageId
+                ? `会话：${item.sessionId || '-'}；消息：${item.messageId}`
+                : `来源引用：${item.sourceRef || '-'}；复核：${item.reviewedAt || (pendingReview ? '待处理' : '未记录')}`;
+            return `<article class="memory-source-message"><div><strong>${escapeHtml(item.assertedBy || 'user')}</strong><span>${escapeHtml(item.sourceKind || 'automatic')}${pendingReview ? ' · 待复核' : ' · 已复核'}</span></div><pre>${escapeHtml(evidenceLocation)}</pre>${reviewControl}</article>`;
+        }).join('')}</div>` : ''}
+        <form class="memory-source-link-form" data-memory-knowledge-source-form>
+            <label>关联已发布知识文档 <input class="form-input" inputmode="numeric" name="documentId" placeholder="知识文档 ID" aria-label="知识文档 ID"></label>
+            <button class="btn-secondary" type="submit">关联来源</button>
+        </form>
+        <form class="memory-source-link-form" data-memory-workflow-source-form>
+            <label>关联已发布工作流 <input class="form-input" inputmode="numeric" name="workflowId" placeholder="工作流 ID" aria-label="工作流 ID"></label>
+            <button class="btn-secondary" type="submit">关联来源</button>
+        </form>
+        <form class="memory-source-link-form" data-memory-skill-source-form>
+            <label>关联已发布技能 <input class="form-input" name="skillId" placeholder="技能 ID" aria-label="技能 ID"></label>
+            <button class="btn-secondary" type="submit">关联来源</button>
+        </form>
+        <form class="memory-source-link-form" data-memory-workspace-source-form>
+            <label>关联已授权代码工作区 <input class="form-input" name="deviceId" placeholder="设备 ID；单设备可留空" aria-label="代码工作区设备 ID"></label>
+            <label>受控工作树（可选） <input class="form-input" name="worktreeName" placeholder="主工作区可留空" aria-label="代码工作区工作树名称"></label>
+            <button class="btn-secondary" type="submit">关联来源</button>
+        </form>
     `);
 }
 
-window.Pivot.legacy.openMemorySourceModal = async function(memoryId) {
+window.Pivot.legacy.openMemorySourceModal = async function(memoryId, options = {}) {
     window.Pivot?.getModule?.('settings.memoryUi')?.ensureMemoryModalsAttached?.();
     const modal = document.getElementById('memory-source-modal');
     const title = document.getElementById('memory-source-title');
     if (!modal) return;
-    if (title) title.textContent = '来源';
+    if (title) title.textContent = options.review === true ? '复核来源' : '来源';
     const body = document.getElementById('memory-source-body');
     if (body) PivotSafeHtml.setHtml(body, '<p class="muted">正在加载...</p>');
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
     try {
         const data = await fetchMemorySource(memoryId);
-        renderMemorySource(data);
+        renderMemorySource(data, { memoryId });
+        body?.querySelectorAll('[data-memory-source-review]').forEach(button => {
+            button.addEventListener('click', async () => {
+                if (!globalThis.confirm('已核对当前可追溯来源与该记忆是否一致。确认后将记录复核人和时间；其他待复核来源仍会保持隔离。')) return;
+                button.disabled = true;
+                try {
+                    const result = button.dataset.sourceKind === 'knowledge_document'
+                        ? await approveKnowledgeDocumentSourceReview(memoryId, button.dataset.sourceRef)
+                        : button.dataset.sourceKind === 'agent_workflow'
+                            ? await approveWorkflowSourceReview(memoryId, button.dataset.sourceRef)
+                            : button.dataset.sourceKind === 'agent_skill'
+                                ? await approveSkillSourceReview(memoryId, button.dataset.sourceRef)
+                                : button.dataset.sourceKind === 'workspace'
+                                    ? await approveWorkspaceSourceReview(memoryId, button.dataset.sourceRef)
+                                : await approveMemorySourceReview(memoryId, button.dataset.sourceKind, button.dataset.sourceRef);
+                    showToast(result.activated ? '来源复核完成，记忆已恢复活跃' : `该来源已复核，仍有 ${Number(result.reviewRemaining || 0)} 个来源待确认`);
+                    await window.Pivot.legacy.openMemorySourceModal(memoryId, options);
+                    await window.Pivot?.getModule?.('settings.memory')?.loadMemories?.();
+                } catch (error) {
+                    showToast(error.message || '来源复核确认失败', 'error');
+                } finally {
+                    button.disabled = false;
+                }
+            });
+        });
+        body?.querySelector('[data-memory-knowledge-source-form]')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const documentId = Number.parseInt(new FormData(form).get('documentId'), 10);
+            if (!Number.isSafeInteger(documentId) || documentId <= 0) return showToast('请输入有效的已发布知识文档 ID', 'warning');
+            const button = form.querySelector('button[type="submit"]');
+            if (button) button.disabled = true;
+            try {
+                await attachKnowledgeDocumentSource(memoryId, documentId);
+                showToast('知识文档来源已关联；后续版本变化会自动隔离该记忆', 'success');
+                await window.Pivot.legacy.openMemorySourceModal(memoryId, options);
+                await window.Pivot?.getModule?.('settings.memory')?.loadMemories?.();
+            } catch (error) {
+                showToast(error.message || '关联知识文档来源失败', 'error');
+            } finally {
+                if (button) button.disabled = false;
+            }
+        });
+        const linkPublishedSource = async (formSelector, fieldName, label, attach, validate) => {
+            body?.querySelector(formSelector)?.addEventListener('submit', async event => {
+                event.preventDefault();
+                const form = event.currentTarget;
+                const sourceId = String(new FormData(form).get(fieldName) || '').trim();
+                if (!validate(sourceId)) return showToast(`请输入有效的已发布${label} ID`, 'warning');
+                const button = form.querySelector('button[type="submit"]');
+                if (button) button.disabled = true;
+                try {
+                    await attach(memoryId, sourceId);
+                    showToast(`${label}来源已关联；后续版本变化会自动隔离该记忆`, 'success');
+                    await window.Pivot.legacy.openMemorySourceModal(memoryId, options);
+                    await window.Pivot?.getModule?.('settings.memory')?.loadMemories?.();
+                } catch (error) {
+                    showToast(error.message || `关联${label}来源失败`, 'error');
+                } finally {
+                    if (button) button.disabled = false;
+                }
+            });
+        };
+        linkPublishedSource('[data-memory-workflow-source-form]', 'workflowId', '工作流', attachWorkflowSource, value => /^\d+$/.test(value) && Number(value) > 0);
+        linkPublishedSource('[data-memory-skill-source-form]', 'skillId', '技能', attachSkillSource, value => /^[A-Za-z0-9._-]{1,64}$/.test(value));
+        body?.querySelector('[data-memory-workspace-source-form]')?.addEventListener('submit', async event => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const fields = new FormData(form);
+            const deviceId = String(fields.get('deviceId') || '').trim();
+            const worktreeName = String(fields.get('worktreeName') || '').trim();
+            if (deviceId && !/^[A-Za-z0-9._-]{1,64}$/.test(deviceId)) return showToast('设备 ID 格式无效', 'warning');
+            if (worktreeName && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(worktreeName)) return showToast('受控工作树名称格式无效', 'warning');
+            const button = form.querySelector('button[type="submit"]');
+            if (button) button.disabled = true;
+            try {
+                await attachWorkspaceSource(memoryId, deviceId, worktreeName);
+                showToast('代码工作区来源已关联；受控变更会通过可重试事件自动隔离该记忆', 'success');
+                await window.Pivot.legacy.openMemorySourceModal(memoryId, options);
+                await window.Pivot?.getModule?.('settings.memory')?.loadMemories?.();
+            } catch (error) {
+                showToast(error.message || '关联代码工作区来源失败', 'error');
+            } finally {
+                if (button) button.disabled = false;
+            }
+        });
     } catch (e) {
         if (body) PivotSafeHtml.setHtml(body, `<p class="muted">${escapeHtml(e.message || '记忆来源加载失败')}</p>`);
         showToast(e.message || '记忆来源加载失败', 'error');
@@ -316,14 +534,22 @@ function renderMemoryQualityPanel(summary = {}) {
     if (!panel) return;
     const quality = summary.quality || {};
     const jobs = quality.jobSummary || {};
+    const outcomes = quality.outcomeMetrics || {};
+    const readiness = quality.outcomeReadiness || {};
     const statusLabel = quality.status === 'healthy' ? '健康' : quality.status === 'attention' ? '需关注' : '待复核';
+    const rate = value => value === null || value === undefined ? '暂无样本' : `${(Number(value || 0) * 100).toFixed(1)}%`;
     const items = [
         ['质量状态', statusLabel],
         ['重复建议', Number(quality.duplicateSuggestions || 0)],
         ['低置信', Number(quality.lowConfidence || 0)],
         ['过期', Number(quality.expired || 0)],
         ['任务积压', Number(jobs.queued || 0) + Number(jobs.running || 0)],
-        ['失败任务', Number(jobs.failed || 0)]
+        ['失败任务', Number(jobs.failed || 0)],
+        ['记忆有用率', rate(outcomes.helpfulRate)],
+        ['记忆冲突率', rate(outcomes.conflictRate)],
+        ['过期命中率', rate(outcomes.expiredHitRate)],
+        ['撤销残留率', rate(outcomes.revokedResidualRate)],
+        ['完整达标周期', `${Number(readiness.qualifyingPeriods || 0)}/${Number(readiness.requiredCompletedPeriods || 2)}`]
     ];
     PivotSafeHtml.setHtml(panel, items.map(([label, value]) => `
         <div class="memory-quality-card">
@@ -373,13 +599,17 @@ function renderProductMemoryRows(memories = []) {
             <td>${escapeHtml(memory.lastUsedAt || memory.updatedAt || '-')}</td>
             <td class="text-center memory-action-cell">
                 <div class="memory-action-buttons">
-                    <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${memory.sourceMessageIds?.length ? '' : 'disabled'}>来源</button>
+                    <button class="btn-secondary memory-source-btn" data-memory-action="source" data-memory-id="${memory.id}" ${(memory.sourceMessageIds?.length || memory.hasSourceEvidence || memory.status === 'review_required') ? '' : 'disabled'}>来源</button>
                     <button class="btn-secondary" data-memory-action="usage" data-memory-id="${memory.id}">使用记录</button>
                     <button class="btn-secondary" data-memory-action="edit" data-memory-id="${memory.id}">编辑</button>
                     ${memory.status === 'active'
                         ? `<button class="btn-secondary" data-memory-action="disable" data-memory-id="${memory.id}">禁用</button>`
                         : memory.status === 'pending'
                             ? `<button class="btn-primary" data-memory-action="restore" data-memory-id="${memory.id}">确认</button>`
+                        : memory.status === 'review_required'
+                            ? `<button class="btn-primary" data-memory-action="review" data-memory-id="${memory.id}">复核来源</button>`
+                        : String(memory.revocationReason || '').startsWith('source_missing:')
+                            ? '<button class="btn-secondary" disabled title="全部来源已失效，请以新来源重新创建">来源已失效</button>'
                         : `<button class="btn-secondary" data-memory-action="restore" data-memory-id="${memory.id}">恢复</button>`}
                     <button class="btn-danger" data-memory-action="delete" data-memory-id="${memory.id}">删除</button>
                 </div>
@@ -679,22 +909,17 @@ window.Pivot.legacy.exportMemories = async function() {
         base.set('status', document.getElementById('memory-status-filter')?.value || 'all');
         base.set('pageSize', '500');
         base.set('maxRecords', '100000');
+        base.set('snapshot', 'true');
         base.delete('limit');
         base.delete('offset');
-        const memories = [];
-        let offset = 0;
-        let exportMeta = null;
-        while (true) {
-            const params = new URLSearchParams(base);
-            params.set('offset', String(offset));
-            const res = await apiFetch(`${API_BASE}/memories/export?${params.toString()}`);
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '长期记忆导出失败');
-            exportMeta = data.export || {};
-            memories.push(...(Array.isArray(exportMeta.memories) ? exportMeta.memories : []));
-            if (exportMeta.complete || exportMeta.nextOffset == null) break;
-            offset = Number(exportMeta.nextOffset);
-            if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('长期记忆导出分页状态异常');
+        const res = await apiFetch(`${API_BASE}/memories/export?${base.toString()}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '长期记忆一致性导出失败');
+        const exportMeta = data.export || {};
+        const memories = Array.isArray(exportMeta.memories) ? exportMeta.memories : [];
+        if (exportMeta.consistency !== 'repeatable_read_snapshot' || exportMeta.complete !== true
+            || !Number.isSafeInteger(exportMeta.total) || exportMeta.total !== memories.length) {
+            throw new Error('长期记忆一致性快照无效，请重试');
         }
         const exportData = { ...exportMeta, memories, complete: true, exportedCount: memories.length };
         const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -704,7 +929,7 @@ window.Pivot.legacy.exportMemories = async function() {
         link.download = `pivot-memories-${Date.now()}.json`;
         link.click();
         URL.revokeObjectURL(url);
-        showToast(`长期记忆已导出 ${memories.length} 条`);
+        showToast(`长期记忆已导出 ${memories.length} 条（一致性快照）`);
     } catch (e) {
         showToast(e.message || '长期记忆导出失败', 'error');
     }

@@ -4,7 +4,7 @@ const { getBeijingTimestamp } = require('../time');
 const { recordAgentEvent } = require('./agent-event-log');
 
 const MESSAGE_TYPES = new Set(['steer', 'request', 'reply', 'system']);
-const MESSAGE_STATUSES = new Set(['pending', 'claimed', 'delivered', 'acknowledged', 'expired']);
+const MESSAGE_STATUSES = new Set(['pending', 'claimed', 'delivered', 'applied', 'acknowledged', 'expired']);
 const MAX_PAYLOAD_CHARS = 120000;
 const CONTROL_CLAIM_LEASE_MS = Math.max(30_000, Number.parseInt(process.env.AGENT_CONTROL_CLAIM_LEASE_MS || '60000', 10) || 60_000);
 const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
@@ -118,20 +118,23 @@ function parseMessage(row) {
     return { ...row, payload: payload || {} };
 }
 
-async function sendAgentControlMessage({ user, fromRunId = '', toRunId, type = 'steer', payload = {}, expiresAt = null } = {}) {
+async function sendAgentControlMessage({ user, fromRunId = '', toRunId, type = 'steer', payload = {}, expiresAt = null, idempotencyKey = '' } = {}) {
     const userId = Number(user?.id || 0);
     if (!userId || !toRunId) throw Object.assign(new Error('AgentControl 消息缺少用户或目标运行。'), { status: 400, code: 'AGENT_CONTROL_INVALID' });
     await assertRelatedRuns(fromRunId, toRunId, userId);
     const serialized = serializePayload(payload);
     const messageId = `acm_${crypto.randomUUID()}`;
     const now = getBeijingTimestamp();
+    const safeIdempotencyKey = String(idempotencyKey || '').trim().slice(0, 255) || null;
     const row = await queryOne(`
         INSERT INTO agent_control_messages (
             message_id, user_id, from_run_id, to_run_id, message_type, status,
-            payload, payload_hash, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+            payload, payload_hash, idempotency_key, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id, to_run_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+        DO UPDATE SET message_id = agent_control_messages.message_id
         RETURNING message_id, user_id, from_run_id, to_run_id, message_type, status,
-                  payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at
+                  payload, payload_hash, idempotency_key, created_at, delivered_at, acknowledged_at, expires_at
     `, [
         messageId,
         userId,
@@ -140,6 +143,7 @@ async function sendAgentControlMessage({ user, fromRunId = '', toRunId, type = '
         normalizeMessageType(type),
         serialized.text,
         payloadHash(serialized.safe),
+        safeIdempotencyKey,
         now,
         expiresAt || null
     ]);
@@ -189,13 +193,13 @@ async function claimAgentControlMessages(runId, user, { limit = 20 } = {}) {
         await trx.execute(`
             UPDATE agent_control_messages
             SET status = 'expired', claim_token = NULL, claim_expires_at = NULL
-            WHERE user_id = ? AND to_run_id = ? AND status IN ('pending', 'claimed')
+            WHERE user_id = ? AND to_run_id = ? AND status IN ('pending', 'claimed', 'delivered')
               AND expires_at IS NOT NULL AND expires_at <= ?
         `, [userId, runId, now]);
         await trx.execute(`
             UPDATE agent_control_messages
             SET status = 'pending', claim_token = NULL, claim_expires_at = NULL
-            WHERE user_id = ? AND to_run_id = ? AND status = 'claimed'
+            WHERE user_id = ? AND to_run_id = ? AND status IN ('claimed', 'delivered')
               AND claim_expires_at IS NOT NULL AND claim_expires_at <= ?
         `, [userId, runId, now]);
         const rows = await trx.query(`
@@ -213,10 +217,10 @@ async function claimAgentControlMessages(runId, user, { limit = 20 } = {}) {
             const claimToken = `acm_claim_${crypto.randomUUID()}`;
             await trx.execute(`
                 UPDATE agent_control_messages
-                SET status = 'claimed', delivered_at = COALESCE(delivered_at, ?), claim_token = ?, claim_expires_at = ?
+                SET status = 'delivered', delivered_at = COALESCE(delivered_at, ?), claim_token = ?, claim_expires_at = ?
                 WHERE id = ? AND status = 'pending'
             `, [now, claimToken, claimExpiresAt, row.id]);
-            claimed.push(parseMessage({ ...row, status: 'claimed', delivered_at: row.delivered_at || now, claim_token: claimToken, claim_expires_at: claimExpiresAt }));
+            claimed.push(parseMessage({ ...row, status: 'delivered', delivered_at: row.delivered_at || now, claim_token: claimToken, claim_expires_at: claimExpiresAt }));
         }
         return claimed;
     });
@@ -230,7 +234,7 @@ async function applyAgentControlMessages(runId, user, messages = []) {
     })).filter(item => item.messageId && item.claimToken);
     if (!userId || !runId || !requested.length) return [];
     const now = getBeijingTimestamp();
-    return transaction(async trx => {
+    const appliedMessages = await transaction(async trx => {
         const run = await trx.queryOne(`
             SELECT metadata FROM agent_runs
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
@@ -244,17 +248,17 @@ async function applyAgentControlMessages(runId, user, messages = []) {
                        payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at
                 FROM agent_control_messages
                 WHERE message_id = ? AND user_id = ? AND to_run_id = ?
-                  AND status = 'claimed' AND claim_token = ?
+                  AND status = 'delivered' AND claim_token = ?
                   AND (claim_expires_at IS NULL OR claim_expires_at > ?)
                 FOR UPDATE
             `, [item.messageId, userId, runId, item.claimToken, now]);
             if (!row) continue;
             const changed = await trx.execute(`
                 UPDATE agent_control_messages
-                SET status = 'acknowledged', applied_at = ?, acknowledged_at = ?, claim_token = NULL, claim_expires_at = NULL
-                WHERE id = ? AND status = 'claimed' AND claim_token = ?
-            `, [now, now, row.id, item.claimToken]);
-            if (changed > 0) applied.push(parseMessage({ ...row, status: 'acknowledged', applied_at: now, acknowledged_at: now }));
+                SET status = 'applied', applied_at = ?, claim_token = NULL, claim_expires_at = NULL
+                WHERE id = ? AND status = 'delivered' AND claim_token = ?
+            `, [now, row.id, item.claimToken]);
+            if (changed > 0) applied.push(parseMessage({ ...row, status: 'applied', applied_at: now }));
         }
         if (!applied.length) return [];
         const metadata = parseJson(run.metadata, {});
@@ -281,6 +285,19 @@ async function applyAgentControlMessages(runId, user, messages = []) {
         }), now, runId, userId]);
         return applied.map(message => ({ ...message, taskContract, workingState }));
     });
+    if (appliedMessages.length) {
+        try {
+            const { persistWorkingMemoryRevision } = require('./agent-working-memory-revisions');
+            const latest = appliedMessages.at(-1);
+            await persistWorkingMemoryRevision({
+                run: { id: runId, user_id: userId, goal: latest.taskContract?.goal || '' }, user,
+                state: latest.workingState, taskContract: latest.taskContract, reason: 'control_message'
+            });
+        } catch (_) {
+            // 控制消息的 ACK 已持久化；记忆审计写入可重试，不能撤销控制面的已应用事实。
+        }
+    }
+    return appliedMessages;
 }
 
 async function listAppliedAgentControlMessages(runId, user, { limit = 20 } = {}) {
@@ -292,10 +309,34 @@ async function listAppliedAgentControlMessages(runId, user, { limit = 20 } = {})
         SELECT id, message_id, user_id, from_run_id, to_run_id, message_type, status,
                payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at, applied_at
         FROM agent_control_messages
-        WHERE user_id = ? AND to_run_id = ? AND status = 'acknowledged' AND applied_at IS NOT NULL
+        WHERE user_id = ? AND to_run_id = ? AND status IN ('applied', 'acknowledged') AND applied_at IS NOT NULL
         ORDER BY applied_at ASC, id ASC
         LIMIT ?
     `, [userId, runId, safeLimit]);
+    return rows.map(parseMessage);
+}
+
+async function acknowledgeAppliedAgentControlMessages(runId, user, messages = []) {
+    const userId = Number(user?.id || 0);
+    if (!userId || !runId) return [];
+    const requestedIds = [...new Set((Array.isArray(messages) ? messages : [])
+        .map(message => String(message?.message_id || message?.messageId || message || '').trim())
+        .filter(Boolean))].slice(0, 100);
+    const params = [getBeijingTimestamp(), userId, String(runId)];
+    const messageClause = requestedIds.length ? `AND message_id IN (${requestedIds.map(() => '?').join(', ')})` : '';
+    params.push(...requestedIds);
+    const rows = await query(`
+        UPDATE agent_control_messages
+        SET status = 'acknowledged', acknowledged_at = ?
+        WHERE user_id = ? AND to_run_id = ? AND status = 'applied'${messageClause}
+        RETURNING message_id, user_id, from_run_id, to_run_id, message_type, status,
+                  payload, payload_hash, created_at, delivered_at, applied_at, acknowledged_at, expires_at
+    `, params);
+    for (const row of rows) {
+        try {
+            await recordAgentEvent({ runId, userId, type: 'control.message_acknowledged', payload: { messageId: row.message_id, mode: 'applied' }, eventKey: `control:${row.message_id}:ack` });
+        } catch (_) {}
+    }
     return rows.map(parseMessage);
 }
 
@@ -306,7 +347,7 @@ async function acknowledgeAgentControlMessage(messageId, user, runId = '') {
         UPDATE agent_control_messages
         SET status = 'acknowledged', acknowledged_at = ?
         WHERE message_id = ? AND user_id = ? AND to_run_id = ?
-          AND status IN ('pending', 'claimed', 'delivered')
+          AND status IN ('pending', 'claimed', 'delivered', 'applied')
         RETURNING message_id, user_id, from_run_id, to_run_id, message_type, status,
                   payload, payload_hash, created_at, delivered_at, acknowledged_at, expires_at
     `, [getBeijingTimestamp(), messageId, userId, runId]);
@@ -318,6 +359,7 @@ async function acknowledgeAgentControlMessage(messageId, user, runId = '') {
 module.exports = {
     MESSAGE_STATUSES,
     MESSAGE_TYPES,
+    acknowledgeAppliedAgentControlMessages,
     acknowledgeAgentControlMessage,
     applyAgentControlMessages,
     assertRelatedRuns,

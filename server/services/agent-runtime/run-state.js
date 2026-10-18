@@ -18,6 +18,8 @@ const {
     recordAgentRunOutcome,
     recordFirstTaskTerminal,
     recordAgentEvent,
+    dispatchPreLifecycleHook = async () => null,
+    dispatchPostLifecycleHook = async () => null,
     publishUserEvent,
     parseJsonObject,
     updateAgentRunMetadataWithRetry: updateMetadata
@@ -55,6 +57,45 @@ async function finalizeTerminalRun(runId, targetStatus) {
             logger.warn({ runId, err: experienceError.message }, 'Agent 首任务体验事件写入失败');
         }
     }
+    if (targetStatus !== 'deleted') {
+        try {
+            const user = await getRunUser(runId);
+            await dispatchPostLifecycleHook({
+                eventType: 'run.finished',
+                user,
+                run: { id: runId, user_id: user?.id || null },
+                payload: { runId, status: targetStatus },
+                eventKey: `lifecycle:run.finished:${runId}:${targetStatus}`
+            });
+        } catch (hookError) {
+            // 运行终态已经落库；后置 Hook 不可逆转已经发生的状态。
+            logger.warn({ runId, err: hookError.message }, 'Agent 完成后置 Hook 审计失败');
+        }
+    }
+}
+
+async function assertRunStartHookAllowsTransition(run, currentStatus, targetStatus) {
+    if (targetStatus !== 'planning' || !['queued', 'resuming'].includes(currentStatus)) return;
+    const user = await getRunUser(run.id);
+    const outcome = await dispatchPreLifecycleHook({
+        eventType: 'run.started',
+        user,
+        run: { id: run.id, user_id: user?.id || null, run_mode: run.run_mode || '' },
+        payload: {
+            run: { id: run.id, run_mode: run.run_mode || '' },
+            from: currentStatus,
+            to: targetStatus
+        },
+        eventKey: `lifecycle:run.started:${run.id}:${currentStatus}->${targetStatus}`
+    });
+    if (outcome?.denied) {
+        const blocking = outcome.blocking || {};
+        const error = new Error(`生命周期 Hook「${blocking.hookName || blocking.hookId || 'unknown'}」拒绝了当前运行启动。`);
+        error.code = 'AGENT_HOOK_DENIED';
+        error.category = 'policy';
+        error.hook = blocking;
+        throw error;
+    }
 }
 
 async function updateRun(runId, fields = {}, maxRetries = 3) {
@@ -82,10 +123,12 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         let currentStatus = '';
+        let currentRun = null;
         if (statusEntry) {
-            const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
-            currentStatus = row?.status || '';
+            currentRun = await queryOne('SELECT status, run_mode FROM agent_runs WHERE id = ?', [runId]);
+            currentStatus = currentRun?.status || '';
             assertAgentRunStatusTransition(currentStatus, targetStatus, { runId });
+            await assertRunStartHookAllowsTransition({ id: runId, run_mode: currentRun?.run_mode || '' }, currentStatus, targetStatus);
         }
         const set = entries.map(([key]) => `${key} = ?`).join(', ');
         const where = statusEntry ? 'WHERE id = ? AND status = ?' : 'WHERE id = ?';
@@ -108,7 +151,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                 try {
                     await recordAgentEvent({
                         runId,
-                        type: ['approval_required', 'waiting_approval', 'awaiting_approval'].includes(targetStatus)
+                        type: ['approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit'].includes(targetStatus)
                             ? 'run.paused'
                             : ['resuming'].includes(targetStatus)
                                 ? 'run.resumed'
@@ -120,6 +163,20 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                     });
                 } catch (eventError) {
                     logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
+                }
+                if (targetStatus === 'planning' && ['queued', 'resuming'].includes(currentStatus)) {
+                    try {
+                        const user = await getRunUser(runId);
+                        await dispatchPostLifecycleHook({
+                            eventType: 'run.started',
+                            user,
+                            run: { id: runId, user_id: user?.id || null },
+                            payload: { runId, from: currentStatus, to: targetStatus },
+                            eventKey: `lifecycle:run.started:${runId}`
+                        });
+                    } catch (hookError) {
+                        logger.warn({ runId, err: hookError.message }, 'Agent 开始后置 Hook 审计失败');
+                    }
                 }
                 await finalizeTerminalRun(runId, targetStatus);
             }
@@ -147,10 +204,11 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
         .map(value => String(value || '').trim())
         .filter(Boolean))];
     if (!allowedStatuses.length) return 0;
-    const row = await queryOne('SELECT status FROM agent_runs WHERE id = ?', [runId]);
+    const row = await queryOne('SELECT status, run_mode FROM agent_runs WHERE id = ?', [runId]);
     const currentStatus = row?.status || '';
     if (!allowedStatuses.includes(currentStatus)) return 0;
     if (fields.status) assertAgentRunStatusTransition(currentStatus, fields.status, { runId });
+    if (fields.status) await assertRunStartHookAllowsTransition({ id: runId, run_mode: row?.run_mode || '' }, currentStatus, fields.status);
     const allowed = [
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
@@ -215,7 +273,7 @@ async function getRunStatus(runId) {
 }
 
 async function getRunUser(runId) {
-    return await queryOne("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL", [runId]);
+    return await queryOne("SELECT u.id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, u.unit, u.role, r.tenant_id FROM agent_runs r JOIN users u ON u.id = r.user_id WHERE r.id = ? AND COALESCE(u.status, 'active') != 'disabled' AND u.deleted_at IS NULL", [runId]);
 }
 
 async function assertRunUserActive(user) {

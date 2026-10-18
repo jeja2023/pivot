@@ -3,6 +3,7 @@
  * 基于上下文智能推荐最合适的工具
  */
 
+const { logger } = require('../../logger');
 const natural = require('natural');
 const TfIdf = natural.TfIdf;
 
@@ -25,7 +26,7 @@ class ToolRecommendationEngine {
   async initialize() {
     if (this.initialized) return;
 
-    console.log('正在初始化工具推荐引擎...');
+    logger.debug('正在初始化工具推荐引擎...');
 
     // 加载所有可用工具
     const tools = await this.loadAllTools();
@@ -48,7 +49,7 @@ class ToolRecommendationEngine {
     await this.loadUsageStats();
 
     this.initialized = true;
-    console.log(`工具推荐引擎初始化完成，共加载 ${tools.length} 个工具`);
+    logger.debug({ count: tools.length }, '工具推荐引擎初始化完成');
   }
 
   /**

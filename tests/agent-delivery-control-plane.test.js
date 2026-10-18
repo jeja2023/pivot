@@ -11,7 +11,10 @@ const { createStandaloneArtifact } = require('../server/services/agent-artifacts
 const { deleteSkillReleasePermission, listSkillReleasePermissions, upsertSkillReleasePermission } = require('../server/services/agent-skill-access');
 const { recordSigningEnvelope } = require('../server/services/agent-skill-signing');
 const { claimConnectorTask, completeConnectorTask, createConnectorTask, heartbeatConnector, waitForConnectorTask } = require('../server/services/agent-local-connector');
+const { handleWorkspaceMemorySourceEvent } = require('../server/services/workspace-memory-source-lifecycle');
 const { listCachedMcpTools } = require('../server/services/mcp-client');
+const { issueExecutionGrant } = require('../server/services/agent-execution-grant');
+const { registerExecutionGrant } = require('../server/services/agent-execution-grant-ledger');
 const { putBuffer, readBuffer, buildCasRef, incrementRefCount, deleteIfUnreferenced, openReadStream } = require('../server/services/agent-artifact-cas');
 const { createRendition, issueDownloadToken, consumeDownloadToken, getRenditionForUser } = require('../server/services/agent-artifact-renditions');
 const {
@@ -695,8 +698,17 @@ test('本机代码工作区与原生桌面控制通过签名连接器发现、�
     const user = { ...(await ensureUser(`pivot_w18_${suffix}`)), tenant_id: tenantId };
     const deviceId = `device-${suffix}-w18`;
     const taskIds = [];
+    const grantIds = [];
+    const grantRunIds = [`connector-${suffix}-workspace`, `connector-${suffix}-desktop`];
+    const previousGrantSecret = process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET;
+    const executionGrantSecret = 'pivot-delivery-control-execution-grant-secret-0123456789';
+    process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET = executionGrantSecret;
     try {
         await registerTestDevice(user, deviceId);
+        await pool().query(
+            "INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES ($1, $2, '连接器授权测试', '验证一次性连接器授权', 'queued', '{}', NOW(), NOW()), ($3, $2, '桌面授权测试', '验证一次性连接器授权', 'queued', '{}', NOW(), NOW())",
+            [grantRunIds[0], user.id, grantRunIds[1]]
+        );
         await heartbeatConnector(user, {
             deviceId,
             grants: {
@@ -714,8 +726,34 @@ test('本机代码工作区与原生桌面控制通过签名连接器发现、�
         assert.equal(workspaceTool.requiresApproval, true);
         assert.equal(desktopTool.requiresApproval, true);
         assert.equal(workspaceTool.input_schema.properties.deviceId.default, deviceId);
-        const workspaceTask = await createConnectorTask('workspace.git_pr', { deviceId, title: '受控 PR', base: 'main' }, user);
-        const desktopTask = await createConnectorTask('desktop.inspect', { deviceId }, user);
+        const workspaceInput = { deviceId, title: '受控 PR', base: 'main' };
+        const workspaceGrant = issueExecutionGrant({
+            runId: `connector-${suffix}-workspace`, userId: user.id, tenantId, tool: 'workspace.git_pr',
+            capability: 'workspace.execute', input: workspaceInput,
+            policy: { decision: 'allow', approvalGranted: true },
+            workspace: { scopeId: `connector:${deviceId}:workspace`, mode: 'rw', target: '/workspace' },
+            network: { mode: 'deny', allowOrigins: [] }, resources: { timeoutMs: 30000 }
+        }, { secret: executionGrantSecret });
+        await registerExecutionGrant({ token: workspaceGrant.token, payload: workspaceGrant.payload });
+        grantIds.push(workspaceGrant.payload.grantId);
+        const desktopInput = { deviceId };
+        const desktopGrant = issueExecutionGrant({
+            runId: `connector-${suffix}-desktop`, userId: user.id, tenantId, tool: 'desktop.inspect',
+            capability: 'desktop.control', input: desktopInput,
+            policy: { decision: 'allow', approvalGranted: true },
+            workspace: { scopeId: `connector:${deviceId}:desktop`, mode: 'rw', target: '/workspace' },
+            network: { mode: 'deny', allowOrigins: [] }, resources: { timeoutMs: 30000 }
+        }, { secret: executionGrantSecret });
+        await registerExecutionGrant({ token: desktopGrant.token, payload: desktopGrant.payload });
+        grantIds.push(desktopGrant.payload.grantId);
+        const workspaceTask = await createConnectorTask('workspace.git_pr', workspaceInput, user, {
+            executionGrant: workspaceGrant.token,
+            executionGrantExpected: { runId: workspaceGrant.payload.runId, tool: 'workspace.git_pr', workspaceScopeId: workspaceGrant.payload.workspace.scopeId }
+        });
+        const desktopTask = await createConnectorTask('desktop.inspect', desktopInput, user, {
+            executionGrant: desktopGrant.token,
+            executionGrantExpected: { runId: desktopGrant.payload.runId, tool: 'desktop.inspect', workspaceScopeId: desktopGrant.payload.workspace.scopeId }
+        });
         taskIds.push(workspaceTask.id, desktopTask.id);
         const claimedNames = new Set();
         for (let index = 0; index < 2; index += 1) {
@@ -724,7 +762,14 @@ test('本机代码工作区与原生桌面控制通过签名连接器发现、�
             assert.equal(claimed.task.input.deviceId, undefined);
             if (claimed.task.toolName === 'workspace.git_pr') {
                 assert.equal(claimed.task.input.action, 'workspace.git_pr');
-                await completeConnectorTask(user, claimed.task.id, { deviceId, claimToken: claimed.claimToken, success: true, result: { url: 'https://example.invalid/pr/1' } });
+                await completeConnectorTask(user, claimed.task.id, { deviceId, claimToken: claimed.claimToken, success: true, result: { url: 'https://example.invalid/pr/1', workspace: { revision: 'a'.repeat(64) } } });
+                const sourceEvent = await pool().query(`
+                    SELECT source_ref, event_type, source_revision
+                    FROM workspace_memory_source_events WHERE device_id = $1
+                `, [deviceId]);
+                assert.deepEqual(sourceEvent.rows.map(row => ({
+                    sourceRef: row.source_ref, eventType: row.event_type, sourceRevision: row.source_revision
+                })), [{ sourceRef: `workspace:${deviceId}:primary`, eventType: 'source_changed', sourceRevision: 'a'.repeat(64) }]);
             } else {
                 assert.equal(claimed.task.toolName, 'desktop.inspect');
                 assert.equal(claimed.task.input.grant.processName, 'erp-client.exe');
@@ -734,10 +779,44 @@ test('本机代码工作区与原生桌面控制通过签名连接器发现、�
         assert.deepEqual(claimedNames, new Set(['workspace.git_pr', 'desktop.inspect']));
     } finally {
         if (taskIds.length) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = ANY($1)', [taskIds]);
+        if (grantIds.length) await pool().query('DELETE FROM agent_execution_grants WHERE grant_id = ANY($1)', [grantIds]);
+        await pool().query('DELETE FROM agent_runs WHERE id = ANY($1)', [grantRunIds]);
         await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id = $1', [deviceId]);
         await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
         await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+        if (previousGrantSecret === undefined) delete process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET;
+        else process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET = previousGrantSecret;
     }
+});
+
+test('工作区来源 outbox 仅将版本摘要交给记忆失效器，不暴露本机路径', async () => {
+    const calls = [];
+    const result = await handleWorkspaceMemorySourceEvent({
+        user_id: 7, source_ref: 'workspace:device-7:primary', event_type: 'source_changed', source_revision: 'b'.repeat(64)
+    }, {
+        memory: {
+            sourceFingerprint: input => { calls.push(['fingerprint', input]); return 'c'.repeat(64); },
+            markMemoriesForChangedSource: async (...args) => { calls.push(['changed', args]); return { reviewed: 2 }; }
+        }
+    });
+    assert.equal(result.reviewed, 2);
+    assert.deepEqual(calls[0], ['fingerprint', {
+        sourceKind: 'workspace', sourceRef: 'workspace:device-7:primary', content: 'b'.repeat(64), version: 'b'.repeat(64)
+    }]);
+    assert.equal(calls[1][1][1].sourceFingerprint, 'c'.repeat(64));
+});
+
+test('移除受控工作树会撤销该工作树关联的记忆来源', async () => {
+    const calls = [];
+    const result = await handleWorkspaceMemorySourceEvent({
+        user_id: 7, source_ref: 'workspace:device-7:review-tree', event_type: 'source_removed', source_revision: ''
+    }, {
+        memory: {
+            revokeMemoriesForSourceReference: async (...args) => { calls.push(args); return { revoked: 1, evidenceRemoved: 1 }; }
+        }
+    });
+    assert.equal(result.revoked, 1);
+    assert.deepEqual(calls[0], [7, 'workspace', 'workspace:device-7:review-tree', { reason: 'workspace_worktree_removed' }]);
 });
 
 test('本机交付四条件缺一即拒，领取回执与摘要不一致处置符合状态机', skipWithoutDatabase, async () => {

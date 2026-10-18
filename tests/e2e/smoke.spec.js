@@ -189,6 +189,41 @@ test.describe('Pivot browser smoke', () => {
         await page.screenshot({ path: path.join(process.cwd(), 'test-results', 'agent-profile-preferences-mobile.png'), fullPage: true });
     });
 
+    test('组织管理员可在 Agent 控制台编辑受限协作角色策略', async ({ page }) => {
+        const policies = {
+            researcher: { id: 'researcher-org-v1', toolPolicy: 'builtin_only', approvalPolicy: 'approve_all_mcp', maxSteps: 12, maxTokenBudget: 30000 },
+            analyst: { id: 'analyst-org-v1', toolPolicy: 'builtin_only', approvalPolicy: 'approve_all_mcp', maxSteps: 12, maxTokenBudget: 30000 },
+            reviewer: { id: 'reviewer-org-v1', toolPolicy: 'builtin_only', approvalPolicy: 'approve_all_mcp', maxSteps: 8, maxTokenBudget: 20000 },
+            writer: { id: 'writer-org-v1', toolPolicy: 'builtin_only', approvalPolicy: 'approve_all_mcp', maxSteps: 8, maxTokenBudget: 20000 }
+        };
+        let saved = null;
+        await page.route('**/api/agents/delegation/role-policies', async route => {
+            if (route.request().method() === 'PUT') {
+                saved = route.request().postDataJSON();
+                await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, data: { organizationId: 1, policies: { ...policies, ...saved.policies } } }) });
+                return;
+            }
+            await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: { organizationId: 1, policies } }) });
+        });
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'workbench', subview: 'governance' }));
+        await expect(page.locator('#agent-workbench-modal')).toBeVisible({ timeout: 15_000 });
+        const policyTab = page.locator('[data-agent-harness-nav="delegation-policies"]');
+        await expect(policyTab).toBeVisible();
+        await policyTab.click();
+        const panel = page.locator('[data-agent-harness-section="delegation-policies"]');
+        await expect(panel).toBeVisible();
+        const reviewerSteps = panel.locator('[data-agent-delegation-max-steps="reviewer"]');
+        await expect(reviewerSteps).toHaveClass(/form-input/);
+        await reviewerSteps.fill('5');
+        await panel.locator('[data-agent-delegation-max-tokens="reviewer"]').fill('10000');
+        await panel.locator('#agent-delegation-policy-save').click();
+        await expect.poll(() => saved?.policies?.reviewer?.maxSteps).toBe(5);
+        expect(saved.policies.reviewer.maxTokenBudget).toBe(10000);
+        await expect(panel).toContainText('仅内置工具');
+        await expect(panel).toContainText('始终审批 MCP');
+    });
+
     test('自动化任务与工作流在样式延迟时显示稳定加载页，样式就绪后再展示内容', async ({ page }) => {
         await ensureBrowserSession(page);
         const agentStylePreload = page.locator('link[data-pivot-workspace-style-preload="/chat/chat.workspace.agent.css"]');
@@ -864,6 +899,14 @@ test.describe('Pivot browser smoke', () => {
    });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
+        await page.route(/\/api\/agents\/runs\/run-lazy-detail\/context-windows(?:\?.*)?$/, route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: [{ window_version: 1, status: 'active', opened_reason: '开始执行' }] })
+        }));
+        await page.route(/\/api\/agents\/runs\/run-lazy-detail\/world-states(?:\?.*)?$/, route => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: [{ snapshot_version: 7, state: { detail: '<img src=x onerror=alert(1)>' } }] })
+        }));
         await page.route('**/api/agents/runs/run-lazy-detail', route => route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
@@ -887,7 +930,17 @@ test.describe('Pivot browser smoke', () => {
                 }],
                 dagNodes: [],
                 progress: { stepCount: 1, roundCount: 1, maxSteps: 30, percent: 20, totalDurationMs: 12 },
-                trace: {},
+                trace: {
+                    spans: [{
+                        id: 'trace-lazy-detail',
+                        name: 'plan',
+                        span_type: 'plan',
+                        status: 'error',
+                        duration_ms: 12,
+                        error_message: '<img src=x onerror=alert(1)>'
+                    }],
+                    summary: { errorCount: 1 }
+                },
                 checkpoints: { total: 0 }
             })
         }));
@@ -910,6 +963,85 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#chat-agent-detail-smoke .chat-agent-controls button', { hasText: '详情' }).click();
         await expect(page.locator('#agent-run-detail-modal')).toBeVisible();
         await expect(page.locator('#agent-run-detail')).toContainText('先检查当前任务上下文');
+        const processPanel = page.locator('#agent-run-detail details.agent-run-process');
+        if (!(await processPanel.evaluate(element => element.open))) await processPanel.locator(':scope > summary').click();
+        const tracePanel = processPanel.locator('details.agent-trace-panel');
+        await expect(tracePanel).toBeVisible();
+        await tracePanel.locator(':scope > summary').click();
+        const traceBar = tracePanel.locator('.agent-trace-track rect');
+        await expect(traceBar).toHaveAttribute('width', '100.00');
+        expect(await traceBar.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0);
+        const traceDetail = tracePanel.locator('details.agent-trace-detail');
+        await traceDetail.locator(':scope > summary').click();
+        await expect(traceDetail).toContainText('<img src=x onerror=alert(1)>');
+        await expect(traceDetail.locator('img')).toHaveCount(0);
+        const diagnostics = page.locator('#agent-run-detail .agent-run-harness-diagnostics');
+        await diagnostics.locator(':scope > summary').click();
+        await expect(diagnostics.locator('[data-agent-harness-panel="context"]')).toContainText('开始执行');
+        await diagnostics.locator('[data-agent-harness-diagnostic-tab="world"]').click();
+        await expect(diagnostics.locator('[data-agent-harness-panel="world"]')).toContainText('快照 7');
+        await expect(diagnostics.locator('[data-agent-harness-panel="world"] img')).toHaveCount(0);
+        await page.evaluate(() => window.Pivot.legacy.openAgentRun('run-lazy-detail', { silent: true }));
+        await expect(page.locator('#agent-run-detail details.agent-run-process')).toHaveAttribute('open', '');
+        await expect(page.locator('#agent-run-detail details.agent-trace-panel')).toHaveAttribute('open', '');
+        await expect(page.locator('#agent-run-detail details.agent-trace-detail')).toHaveAttribute('open', '');
+        await expect(page.locator('#agent-run-detail [data-agent-harness-diagnostic-tab="world"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#agent-run-detail [data-agent-harness-panel="world"]')).toContainText('快照 7');
+    });
+
+    test('chat desktop connector sync uses the desktop bridge without browser heartbeat', async ({ page }) => {
+        let browserHeartbeats = 0;
+        await page.route('**/api/mcp/local-device/heartbeat', async route => {
+            browserHeartbeats++;
+            await route.fulfill({ status: 500, body: 'unexpected' });
+        });
+        await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+        await page.waitForFunction('() => typeof window.syncChatLocalMcpBridgeBeforeSend === "function"');
+        const result = await page.evaluate(async () => {
+            const calls = [];
+            window.pivotDesktop = {
+                getLocalAuthorizationStatus: async () => ({ grants: { local_database: { authorized: true } } }),
+                syncLocalMcpConnector: async () => { calls.push('sync'); return { status: 'ok' }; },
+                getLocalMcpConnectorStatus: async () => { calls.push('status'); return { running: true, identity: { deviceName: '测试电脑' } }; }
+            };
+            const value = await window.syncChatLocalMcpBridgeBeforeSend();
+            return { value, calls, debug: window.getChatLocalMcpBridgeDebugSnapshot() };
+        });
+        expect(result.value).toBeNull();
+        expect(result.calls).toEqual(['sync', 'status']);
+        expect(result.debug.status).toBe('persistent_connector_synced');
+        expect(result.debug.grants.local_database).toBe(true);
+        expect(browserHeartbeats).toBe(0);
+    });
+
+    test('管理员可在设置工作台提交冻结金标的独立审核', async ({ page }) => {
+        let submitted = null;
+        await page.route(/\/api\/stats\/observability\/decision-evaluation-sets\/v2\/cases\?limit=500$/, async route => {
+            await route.fulfill({
+                contentType: 'application/json',
+                body: JSON.stringify({ data: [{
+                    caseId: 'tools-consent-001', scenario: 'chat.tools', language: 'zh', reviewStatus: 'pending_human_review',
+                    inputContext: { requestState: { routingText: '用户请求调用外部工具，必须先征得授权。' } },
+                    candidates: [{ id: 'candidate_only', description: '等待工具授权', allowed: true }, { id: 'direct_answer', description: '直接回答', allowed: true }]
+                }] })
+            });
+        });
+        await page.route(/\/api\/stats\/observability\/decision-evaluation-sets\/v2\/cases\/tools-consent-001\/review$/, async route => {
+            submitted = route.request().postDataJSON();
+            await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, review: { reviewStatus: 'pending_human_review', distinctReviewerCount: 1 } }) });
+        });
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-decision-gold-review').click();
+        const panel = page.locator('#tab-content-decision-gold-review');
+        await expect(panel).toBeVisible();
+        await expect(panel).toContainText('用户请求调用外部工具');
+        await panel.locator('[data-decision-gold-action="tools-consent-001"]').selectOption('candidate_only');
+        await panel.locator('[data-decision-gold-note="tools-consent-001"]').fill('独立确认需要先授权。');
+        await panel.locator('[data-decision-gold-review="tools-consent-001"]').click();
+        await expect.poll(() => submitted).toEqual({ expectedActionId: 'candidate_only', reviewNote: '独立确认需要先授权。' });
+        await expect(panel).toContainText('待第二审核');
     });
 
     test('usage audit workspace switches between statistics, details and report', async ({ page }) => {
@@ -996,6 +1128,32 @@ test.describe('Pivot browser smoke', () => {
                 ? Math.round(modal.getBoundingClientRect().width) === Math.round(Math.min(960, window.innerWidth - 32))
                 : false;
         })).toBe(true);
+    });
+
+    test('长期记忆导出提供真实下载并使用重复读一致性快照', async ({ page }) => {
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const createdIds = [];
+        for (const suffix of ['甲', '乙']) {
+            const response = await page.request.post('/api/memories/remember', {
+                headers: csrf ? { 'x-csrf-token': csrf } : {},
+                data: { content: `用于导出回归验证的独立长期记忆${suffix}。`, type: 'fact', scope: 'user' }
+            });
+            expect(response.ok()).toBeTruthy();
+            createdIds.push(String((await response.json()).id));
+        }
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.locator('#tab-memories').click();
+        const downloadEvent = page.waitForEvent('download');
+        await page.locator('#memory-export-btn').click();
+        const download = await downloadEvent;
+        const exported = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+        expect(exported.consistency).toBe('repeatable_read_snapshot');
+        expect(exported.complete).toBe(true);
+        expect(exported.exportedCount).toBe(exported.memories.length);
+        for (const id of createdIds) expect(exported.memories.some(memory => String(memory.id) === id)).toBe(true);
+        await expect(page.getByText(/一致性快照/)).toBeVisible();
     });
 
     test('长期记忆合并建议使用独立弹窗，评测取消编辑不占用字段操作行', async ({ page }) => {

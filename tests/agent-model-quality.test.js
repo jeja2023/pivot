@@ -2,8 +2,8 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { chooseModel, pickAutoQuality, pickEscalationModel } = require('../server/services/model-router');
-const { inferTaskType } = require('../server/services/agent-model-quality');
+const { chooseModel, isRecoverableModelProviderFailure, modelProviderFailureReason, pickAutoQuality, pickEscalationModel, pickFailoverModel } = require('../server/services/model-router');
+const { assessModelQualityProfile, inferTaskType } = require('../server/services/agent-model-quality');
 
 test('quality-aware routing selects the best eligible verified profile', () => {
     const choice = pickAutoQuality([
@@ -21,6 +21,22 @@ test('task type inference separates research and data analysis from general task
     assert.equal(inferTaskType({ goal: '检索知识库并给出引用' }), 'research');
     assert.equal(inferTaskType({ goal: '分析数据库 SQL 数据' }), 'analysis');
     assert.equal(inferTaskType({ goal: '普通问答' }), 'general');
+});
+
+test('quality profiles require sufficient, fresh evidence and a conservative pass bound', () => {
+    const now = new Date('2026-10-18T00:00:00.000Z');
+    const passing = assessModelQualityProfile({ samples: 60, verified: 55, partial: 3, failed: 2, updatedAt: now.toISOString() }, { now });
+    assert.equal(passing.eligible, true);
+    assert.equal(passing.status, 'passing');
+    assert.ok(passing.verifiedRateLowerBound >= passing.thresholds.verifiedRateLowerBound);
+
+    const insufficient = assessModelQualityProfile({ samples: 12, verified: 12, updatedAt: now.toISOString() }, { now });
+    assert.equal(insufficient.eligible, false);
+    assert.equal(insufficient.blockers.includes('sample_insufficient'), true);
+
+    const stale = assessModelQualityProfile({ samples: 60, verified: 59, updatedAt: '2026-08-01T00:00:00.000Z' }, { now });
+    assert.equal(stale.eligible, false);
+    assert.equal(stale.blockers.includes('profile_stale'), true);
 });
 
 test('自动模型路由同时满足视觉能力和输入窗口，不因成本选择不兼容模型', async () => {
@@ -50,4 +66,24 @@ test('auto-escalate 跳过更贵但更弱的候选，选择实际可升级的模
         ]
     });
     assert.equal(choice.id, 3);
+});
+
+test('提供方暂时故障只在自动路由下选择兼容候选，不把取消或预算错误伪装成降级', async () => {
+    const candidates = [
+        { id: 1, max_input_tokens: 8000, input_price_per_million: 1, output_price_per_million: 1 },
+        { id: 2, max_input_tokens: 8000, input_price_per_million: 2, output_price_per_million: 2 },
+        { id: 3, supports_vision: false, max_input_tokens: 8000, input_price_per_million: 0.5, output_price_per_million: 0.5 }
+    ];
+    const fallback = await pickFailoverModel({ user: { id: 7 }, currentModel: candidates[0], messages: [{ role: 'user', content: '完成任务' }], candidateModels: candidates });
+    assert.equal(fallback.id, 2);
+    assert.equal(isRecoverableModelProviderFailure({ code: 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT' }), true);
+    assert.equal(isRecoverableModelProviderFailure({ response: { status: 503 } }), true);
+    const unsupportedStructuredOutput = {
+        response: { status: 400, data: { error: { message: 'response_format json_schema is not supported by this endpoint' } } }
+    };
+    assert.equal(isRecoverableModelProviderFailure(unsupportedStructuredOutput), true);
+    assert.equal(modelProviderFailureReason(unsupportedStructuredOutput), 'structured_output_incompatible');
+    assert.equal(isRecoverableModelProviderFailure({ response: { status: 400, data: { error: { message: 'input is invalid' } } } }), false);
+    assert.equal(isRecoverableModelProviderFailure({ code: 'AGENT_RUN_CANCELLED' }), false);
+    assert.equal(isRecoverableModelProviderFailure({ code: 'AGENT_BUDGET_EXCEEDED' }), false);
 });

@@ -83,7 +83,7 @@ test('质量面板区分验收通过率和执行终态率，空样本不展示�
 });
 
 test('任务详情提供 Harness 运行诊断的四类面板', () => {
-    const script = read('client/chat/agent-harness.js');
+    const script = read('client/chat/agent-run-diagnostics.js');
     const detail = read('client/chat/agent-run-detail.js');
     assert.match(script, /data-agent-harness-diagnostic-tab="\$\{key\}"/);
     for (const tab of ['context', 'world', 'resources', 'control']) assert.match(script, new RegExp(`tab\\('${tab}'`));
@@ -99,10 +99,10 @@ test('任务详情刷新会按运行 ID 保留折叠面板状态', () => {
 });
 
 test('运行诊断刷新会保留当前子页面', () => {
-    const harness = read('client/chat/agent-harness.js');
+    const harness = read('client/chat/agent-run-diagnostics.js');
     const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
-    assert.match(harness, /state\.diagnostics\.get\(String\(runId\)\)/);
-    assert.match(harness, /state\.diagnostics\.set\(String\(runId\), active\)/);
+    assert.match(harness, /diagnostics\.get\(String\(runId\)\)/);
+    assert.match(harness, /diagnostics\.set\(String\(runId\), active\)/);
     assert.match(harness, /data-agent-harness-active-tab/);
     assert.match(harness, /aria-selected/);
     assert.match(harness, /data-agent-harness-panel=/);
@@ -117,4 +117,77 @@ test('Residency 管理 API 保留用户隔离并提供管理员范围控制', ()
     assert.match(route, /isSuperAdmin\(req\.user\)/);
     assert.match(route, /router\.post\('\/agents\/residencies\/sweep'/);
     assert.match(route, /router\.post\('\/agents\/residencies\/:residentId\/evict'/);
+});
+
+test('组织协作角色策略提供读取与管理员写入入口', () => {
+    const route = read('server/routes/agents.js');
+    const policy = read('server/services/agent-delegation-role-policies.js');
+    const harness = read('client/chat/agent-delegation-role-policies-ui.js');
+    const template = read('client/chat/partials/workspaces/agent.html');
+    assert.match(route, /\/agents\/delegation\/role-policies/);
+    assert.match(route, /saveDelegationRolePolicies/);
+    assert.match(policy, /agent_delegation_role_policies/);
+    assert.match(policy, /AGENT_DELEGATION_ROLE_POLICY_ADMIN_REQUIRED/);
+    assert.match(policy, /toolPolicy !== 'builtin_only'/);
+    assert.match(policy, /approvalPolicy !== 'approve_all_mcp'/);
+    assert.match(harness, /loadDelegationRolePolicies/);
+    assert.match(harness, /saveDelegationRolePolicies/);
+    assert.match(template, /data-agent-harness-nav="delegation-policies"/);
+    assert.match(template, /id="agent-delegation-policy-save"/);
+});
+
+test('受管生命周期 Hook 包提供管理员可见的签名状态与独立导入 API', () => {
+    const routes = read('server/routes/agent-lifecycle-hook-routes.js');
+    const packages = read('server/services/agent-lifecycle-hook-packages.js');
+    const harness = read('client/chat/agent-harness.js');
+    const packageUi = read('client/chat/agent-lifecycle-hook-packages-ui.js');
+    const template = read('client/chat/partials/workspaces/agent.html');
+    assert.match(routes, /\/agents\/lifecycle-hook-packages/);
+    assert.match(routes, /lifecycle-hook-packages\/import/);
+    assert.match(routes, /lifecycle-hook-packages\/:packageId\/:packageVersion\/status/);
+    assert.match(packages, /AGENT_HOOK_PACKAGE_ADMIN_REQUIRED/);
+    assert.match(packages, /verifyEnvelopeSignature/);
+    assert.match(harness, /agent\.lifecycleHookPackages/);
+    assert.match(packageUi, /canManage/);
+    assert.match(packageUi, /\/agents\/lifecycle-hook-packages\?limit=100/);
+    assert.match(packageUi, /lifecycle-hook-packages\/import/);
+    assert.match(packageUi, /data-agent-hook-package-status/);
+    assert.match(template, /id="agent-lifecycle-hook-packages"/);
+    assert.match(template, /id="agent-lifecycle-hook-package-import-submit"/);
+});
+
+test('已批准但仍排队的工具授权可被安全撤销', () => {
+    const routes = read('server/routes/agents.js');
+    const revocation = read('server/services/agent-runtime/approval-revocation.js');
+    const detail = read('client/chat/agent-run-detail.js');
+    const actions = read('client/chat/agent-run-actions.js');
+    assert.match(routes, /\/agents\/runs\/:id\/approval\/revoke/);
+    assert.match(routes, /revokeApprovedAgentTool/);
+    assert.match(revocation, /AGENT_APPROVAL_REVOCATION_TOO_LATE/);
+    assert.match(revocation, /updateRunCas\(runId, \['queued'\]/);
+    assert.match(revocation, /approval\.revoked/);
+    assert.match(detail, /data-agent-revoke-approval/);
+    assert.match(actions, /revokeAgentApproval/);
+});
+
+test('运行质量面板展示五分验收台账就绪度而不自动评分', () => {
+    const harness = read('client/chat/agent-harness.js');
+    const workspace = read('client/chat/app-workspaces.js');
+    const routes = read('server/routes/agents.js');
+    const css = read('client/chat/styles/workspaces/agent/agent-harness.css');
+    assert.match(routes, /\/agents\/acceptance-evidence/);
+    assert.match(routes, /acceptance-evidence\/committee-members/);
+    assert.match(routes, /committee-attestations/);
+    assert.match(harness, /acceptanceEvidence/);
+    assert.match(harness, /committeeMembers/);
+    assert.match(harness, /data-agent-committee-member/);
+    assert.match(harness, /data-agent-committee-attest/);
+    assert.match(harness, /五分验收台账/);
+    assert.match(harness, /ready_for_committee_score/);
+    assert.match(harness, /data-agent-acceptance-submit/);
+    assert.match(harness, /data-agent-acceptance-verify/);
+    assert.match(harness, /data-agent-acceptance-template/);
+    assert.match(workspace, /agent-acceptance-evidence-ui\.js/);
+    assert.match(harness, /提交五分验收证据/);
+    assert.match(css, /\.agent-quality-acceptance/);
 });

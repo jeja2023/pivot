@@ -327,13 +327,35 @@ test('持久化冻结集只在所有案例审核完成后才能进入正式基�
         loadReviewedDecisionEvaluationCases('v1', { query: async () => [{ set_version: 'v1', total: 1, verified: 0, pending: 1 }] }),
         /not_fully_reviewed/
     );
-    const review = await reviewDecisionEvaluationCase({ version: 'v1', caseId: 'case-1', expectedActionId: 'retrieve', reviewerId: 1 }, {
+    const firstReview = await reviewDecisionEvaluationCase({ version: 'v1', caseId: 'case-1', expectedActionId: 'retrieve', reviewerId: 1 }, {
         transaction: async fn => await fn({
             queryOne: async () => ({ candidate_actions: [{ id: 'retrieve', allowed: true }] }),
+            query: async () => [{ reviewer_id: 1, expected_action_id: 'retrieve' }],
             execute: async () => 1
         })
     });
-    assert.equal(review.expectedActionId, 'retrieve');
+    assert.equal(firstReview.reviewStatus, 'pending_human_review');
+    assert.equal(firstReview.expectedActionId, '');
+    assert.equal(firstReview.requiresAnotherReviewer, true);
+    const confirmedReview = await reviewDecisionEvaluationCase({ version: 'v1', caseId: 'case-1', expectedActionId: 'retrieve', reviewerId: 2 }, {
+        transaction: async fn => await fn({
+            queryOne: async () => ({ candidate_actions: [{ id: 'retrieve', allowed: true }] }),
+            query: async () => [{ reviewer_id: 1, expected_action_id: 'retrieve' }, { reviewer_id: 2, expected_action_id: 'retrieve' }],
+            execute: async () => 1
+        })
+    });
+    assert.equal(confirmedReview.reviewStatus, 'verified');
+    assert.equal(confirmedReview.expectedActionId, 'retrieve');
+    assert.equal(confirmedReview.distinctReviewerCount, 2);
+    const disagreement = await reviewDecisionEvaluationCase({ version: 'v1', caseId: 'case-1', expectedActionId: 'skip', reviewerId: 2 }, {
+        transaction: async fn => await fn({
+            queryOne: async () => ({ candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] }),
+            query: async () => [{ reviewer_id: 1, expected_action_id: 'retrieve' }, { reviewer_id: 2, expected_action_id: 'skip' }],
+            execute: async () => 1
+        })
+    });
+    assert.equal(disagreement.reviewStatus, 'human_review_conflict');
+    assert.equal(disagreement.requiresAnotherReviewer, true);
 });
 
 test('部署就绪度统一暴露迁移、审核、策略制品与灰度阻塞项', async () => {

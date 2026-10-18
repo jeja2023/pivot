@@ -1,11 +1,15 @@
 const { query, queryOne } = require('../db/client');
 const { updateAgentRunMetadataWithRetry } = require('./agent-run-metadata-patch');
 const { normalizeJsonSchema, schemaHasRules, validateJsonSchemaDefinition, validateValueAgainstSchema } = require('./agent-dag-contracts');
-const { normalizeToolAllowlist } = require('./agent-validators');
+const { normalizeMaxSteps, normalizeRunMode, normalizeToolAllowlist } = require('./agent-validators');
+const { DEFAULT_ROLE_POLICIES, getDelegationRolePolicySnapshot, normalizeRolePolicies } = require('./agent-delegation-role-policies');
 
 const MAX_DELEGATION_BATCH = 10;
 const MAX_DELEGATION_CONTEXT_CHARS = 24000;
 const MAX_COMPLETION_CHARS = 12000;
+// 预置协作角色不是 Prompt 中的装饰标签：它们只能收紧父任务能力。
+// custom 保留给已获授权的显式任务契约，绝不借“自定义角色”扩大父级边界。
+const DELEGATION_ROLE_POLICIES = DEFAULT_ROLE_POLICIES;
 
 function parseJson(value, fallback = {}) {
     if (value && typeof value === 'object') return value;
@@ -56,18 +60,99 @@ function normalizeDelegationBatchInput(input = {}) {
 }
 
 async function buildDelegationContext(parentRunId, user) {
-    const row = await query(`SELECT id, title, goal, status, metadata, model_id, chosen_model_id, tool_policy, tool_allowlist, approval_policy FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL`, [String(parentRunId || ''), user.id]);
+    const row = await query(`SELECT id, title, goal, status, metadata, tenant_id, model_id, chosen_model_id, run_mode, max_steps, max_token_budget, timeout_ms, tool_timeout_ms, network_policy, tool_policy, tool_allowlist, approval_policy FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL`, [String(parentRunId || ''), user.id]);
     if (!row.length) return null;
+    const rolePolicySnapshot = await getDelegationRolePolicySnapshot(row[0].tenant_id || user.tenant_id || user.tenantId || 1);
     return {
         parentRunId: row[0].id,
         parentTitle: row[0].title,
         parentGoal: row[0].goal,
         parentStatus: row[0].status,
+        rolePolicies: rolePolicySnapshot.policies,
+        rolePolicyRevision: rolePolicySnapshot.revision,
         parentMetadata: parseJson(row[0].metadata, {}),
         parentModelId: row[0].chosen_model_id || row[0].model_id || null,
+        parentRunMode: row[0].run_mode || 'standard',
+        parentMaxSteps: Number(row[0].max_steps || 0),
+        parentMaxTokenBudget: Number(row[0].max_token_budget || 0),
+        parentTimeoutMs: Number(row[0].timeout_ms || 0),
+        parentToolTimeoutMs: Number(row[0].tool_timeout_ms || 0),
+        parentNetworkPolicy: parseJson(row[0].network_policy, {}),
         parentToolPolicy: row[0].tool_policy || 'builtin_only',
         parentToolAllowlist: normalizeToolAllowlist(row[0].tool_allowlist),
         parentApprovalPolicy: row[0].approval_policy || 'safe_mcp_auto'
+    };
+}
+
+function delegationConstraintError(message, code = 'AGENT_DELEGATION_CONSTRAINT_ESCALATION') {
+    const error = new Error(message);
+    error.code = code;
+    error.status = 409;
+    error.category = 'policy';
+    return error;
+}
+
+function resolveChildDelegationConstraints(parent = {}, task = {}) {
+    const parentModelId = Number(parent.parentModelId ?? parent.chosen_model_id ?? parent.model_id ?? 0) || null;
+    const requestedModelId = Number(task.modelId ?? task.model_id ?? 0) || null;
+    if (parentModelId && requestedModelId && requestedModelId !== parentModelId) {
+        throw delegationConstraintError('子任务不能切换到与父任务不同的模型；如需升级模型，请先由父任务重新路由并记录原因。', 'AGENT_DELEGATION_MODEL_ESCALATION');
+    }
+    const parentMode = normalizeRunMode(parent.parentRunMode ?? parent.run_mode ?? 'standard');
+    const requestedMode = task.runMode || task.run_mode;
+    if (requestedMode && normalizeRunMode(requestedMode) !== parentMode) {
+        throw delegationConstraintError('子任务不能改变父任务的运行模式。', 'AGENT_DELEGATION_RUN_MODE_ESCALATION');
+    }
+    const parentLimit = Number(parent.parentMaxSteps ?? parent.max_steps ?? 0);
+    const requestedSteps = Number(task.maxSteps ?? task.max_steps ?? 0);
+    const defaultSteps = parentLimit > 0 ? parentLimit : 6;
+    let maxSteps = parentLimit > 0
+        ? Math.min(Math.max(requestedSteps || defaultSteps, 1), normalizeMaxSteps(parentLimit, parentMode))
+        : Math.max(Math.min(requestedSteps || defaultSteps, 60), 1);
+    const rolePolicies = parent.rolePolicies && typeof parent.rolePolicies === 'object'
+        ? normalizeRolePolicies(parent.rolePolicies)
+        : DELEGATION_ROLE_POLICIES;
+    const rolePolicy = rolePolicies[String(task.role || 'custom').trim().toLowerCase()] || null;
+    if (rolePolicy) maxSteps = Math.min(maxSteps, rolePolicy.maxSteps);
+    const parentAllowlist = normalizeToolAllowlist(parent.parentToolAllowlist ?? parent.tool_allowlist ?? []);
+    const requestedAllowlist = normalizeToolAllowlist(task.toolAllowlist || task.tool_allowlist || []);
+    const toolAllowlist = parentAllowlist.length
+        ? (requestedAllowlist.length ? parentAllowlist.filter(name => requestedAllowlist.includes(name)) : parentAllowlist)
+        : requestedAllowlist;
+    // 任务策略把空白名单解释为“不额外限制”，因此交集为空绝不能传给子任务，
+    // 否则反而由最小权限扩大为无限制。明确拒绝，要求调用方重新选择工具。
+    if (parentAllowlist.length && requestedAllowlist.length && !toolAllowlist.length) {
+        throw delegationConstraintError('子任务请求的工具与父任务允许列表没有交集，不能创建委派。', 'AGENT_DELEGATION_TOOL_ALLOWLIST_DISJOINT');
+    }
+    const parentToolPolicy = String(parent.parentToolPolicy ?? parent.tool_policy ?? 'builtin_only');
+    const requestedToolPolicy = String(task.toolPolicy ?? task.tool_policy ?? parentToolPolicy);
+    let toolPolicy = parentToolPolicy === 'builtin_only' || requestedToolPolicy === 'builtin_only' ? 'builtin_only' : 'all';
+    const parentApprovalPolicy = String(parent.parentApprovalPolicy ?? parent.approval_policy ?? 'safe_mcp_auto');
+    const requestedApprovalPolicy = String(task.approvalPolicy ?? task.approval_policy ?? parentApprovalPolicy);
+    let approvalPolicy = parentApprovalPolicy === 'approve_all_mcp' || requestedApprovalPolicy === 'approve_all_mcp'
+        ? 'approve_all_mcp' : 'safe_mcp_auto';
+    if (rolePolicy) {
+        toolPolicy = 'builtin_only';
+        approvalPolicy = rolePolicy.approvalPolicy;
+    }
+    const parentTokenBudget = Number(parent.parentMaxTokenBudget ?? parent.max_token_budget ?? 0) || 0;
+    const requestedTokenBudget = Math.max(0, Number(task.maxTokenBudget ?? task.max_token_budget ?? 0) || 0);
+    let maxTokenBudget = parentTokenBudget > 0
+        ? Math.min(requestedTokenBudget || parentTokenBudget, parentTokenBudget)
+        : requestedTokenBudget;
+    if (rolePolicy) maxTokenBudget = Math.min(maxTokenBudget || rolePolicy.maxTokenBudget, rolePolicy.maxTokenBudget);
+    return {
+        modelId: parentModelId || requestedModelId || null,
+        runMode: parentMode,
+        maxSteps,
+        maxTokenBudget,
+        timeoutMs: Number(parent.parentTimeoutMs ?? parent.timeout_ms ?? 0) || 0,
+        toolTimeoutMs: Number(parent.parentToolTimeoutMs ?? parent.tool_timeout_ms ?? 0) || 0,
+        approvalPolicy,
+        toolPolicy,
+        toolAllowlist,
+        networkPolicy: parseJson(parent.parentNetworkPolicy ?? parent.network_policy, {}),
+        rolePolicy: rolePolicy ? { ...rolePolicy } : null
     };
 }
 
@@ -135,18 +220,27 @@ async function recordCollaboratorCompletion(runId, status, options = {}) {
             `校验问题：${validation.issues.join('；')}`
         ].join('\n\n');
         try {
+            const repairConstraints = resolveChildDelegationConstraints(run, {
+                maxSteps: 3,
+                maxTokenBudget: 20000,
+                toolPolicy: 'builtin_only',
+                approvalPolicy: 'approve_all_mcp'
+            });
             const repair = await options.createAgentRun({
                 user,
                 parentRunId: run.id,
                 goal: repairGoal,
                 title: `修正结构化结果：${String(run.title || '').slice(0, 110)}`,
-                maxSteps: Math.min(Math.max(Number(run.max_steps || 2), 1), 3),
-                maxTokenBudget: Math.min(Math.max(Number(run.max_token_budget || 0), 0), 20000),
-                runMode: 'standard',
-                toolPolicy: 'builtin_only',
-                toolAllowlist: [],
-                approvalPolicy: 'safe_mcp_auto',
-                modelId: run.chosen_model_id || run.model_id || null,
+                maxSteps: repairConstraints.maxSteps,
+                maxTokenBudget: repairConstraints.maxTokenBudget,
+                runMode: repairConstraints.runMode,
+                toolPolicy: repairConstraints.toolPolicy,
+                toolAllowlist: repairConstraints.toolAllowlist,
+                approvalPolicy: repairConstraints.approvalPolicy,
+                networkPolicy: repairConstraints.networkPolicy,
+                timeoutMs: repairConstraints.timeoutMs,
+                toolTimeoutMs: repairConstraints.toolTimeoutMs,
+                modelId: repairConstraints.modelId,
                 dedupeKey: `delegation-repair:${run.id}`,
                 metadata: {
                     source: 'delegation',
@@ -177,7 +271,8 @@ async function recordCollaboratorCompletion(runId, status, options = {}) {
         toRunId: collaboration.supervisorRunId,
         type: 'reply',
         payload,
-        expiresAt: null
+        expiresAt: null,
+        idempotencyKey: `delegation-completion:${run.id}`
     });
     await updateAgentRunMetadataWithRetry(run.id, current => ({
         ...current,
@@ -187,11 +282,14 @@ async function recordCollaboratorCompletion(runId, status, options = {}) {
 }
 
 module.exports = {
+
     MAX_DELEGATION_BATCH,
     buildDelegationContext,
     listCollaboratorRuns,
     normalizeDelegationBatchInput,
     normalizeDelegationInput,
     recordCollaboratorCompletion,
+
+    resolveChildDelegationConstraints,
     validateDelegationOutput
 };

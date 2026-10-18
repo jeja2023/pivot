@@ -54,6 +54,7 @@ test('模板加载职责独立于工作区导航脚本，并在导航脚本之�
     const settingsScale = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-settings-scale.js'), 'utf8');
     assert.ok(scripts.indexOf('/chat/workspace-template-loader.js') < scripts.indexOf('/chat/app-workspaces.js'));
     assert.ok(scripts.indexOf('/chat/workspace-style-loader.js') < scripts.indexOf('/chat/app-workspaces.js'));
+    assert.ok(scripts.indexOf('/chat/workspace-accessibility.js') < scripts.indexOf('/chat/app-workspaces.js'));
     assert.ok(scripts.indexOf('/chat/workspace-settings-scale.js') < scripts.indexOf('/chat/app-workspaces.js'));
     assert.match(loader, /ensureWorkspaceMarkup/);
     assert.match(loader, /\/chat\/workspaces\/settings/);
@@ -80,9 +81,12 @@ test('聊天首屏只加载壳样式，懒加载工作区各自加载样式包',
     assert.doesNotMatch(workspaces, /await window\.Pivot\.moduleApi\('workspaces\.styleLoader'\)\.ensureWorkspaceStyles/);
     assert.match(workspaces, /样式资源不可成为功能入口的单点阻塞/);
     assert.match(styleLoader, /function preloadWorkspaceStyles/);
+    assert.doesNotMatch(styleLoader, /\.rel\s*=\s*'preload'/);
     assert.match(loader, /function preloadWorkspaceMarkup/);
     assert.match(workspaces, /function showWorkspaceWithStyleGate/);
     assert.match(workspaces, /function prewarmAutomationWorkspaces/);
+    assert.match(workspaces, /workspaces\.accessibility/);
+    assert.match(workspaces, /panel\.setAttribute\('inert', ''\)/);
     assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'agents.js'), 'utf8'), /showWorkspaceWithStyleGate/);
     assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'agent-workflows.js'), 'utf8'), /showWorkspaceWithStyleGate/);
     assert.match(fs.readFileSync(path.join(root, 'client', 'chat', 'auth.js'), 'utf8'), /pivot:app-shown/);

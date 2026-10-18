@@ -5,6 +5,7 @@ const MEMORY_REVISION_SETTING_KEY = 'long_term_memory_revision';
 const MEMORY_STATUS = Object.freeze({
     active: 'active',
     pending: 'pending',
+    reviewRequired: 'review_required',
     deleted: 'deleted',
     disabled: 'disabled'
 });
@@ -189,6 +190,14 @@ function normalizeOptionalTimestamp(value) {
     return text.slice(0, 64);
 }
 
+function normalizeMemoryIds(ids = []) {
+    const values = Array.isArray(ids) ? ids : [ids];
+    return [...new Set(values
+        .map(id => Number.parseInt(id, 10))
+        .filter(id => Number.isSafeInteger(id) && id > 0))]
+        .slice(0, 500);
+}
+
 
 module.exports = {
     MEMORY_SETTING_KEY,
@@ -229,5 +238,6 @@ module.exports = {
     fingerprintMemory,
     contentText,
     createMemoryValidationError,
-    normalizeOptionalTimestamp
+    normalizeOptionalTimestamp,
+    normalizeMemoryIds
 };

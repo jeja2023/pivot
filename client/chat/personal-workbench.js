@@ -146,6 +146,7 @@
                 item.sourceType === 'approval' ? '待审批'
                 : item.sourceType === 'evolution' ? '待审核'
                 : ['waiting_approval', 'approval_required', 'awaiting_approval'].includes(item.status) ? '待审批'
+                    : item.status === 'awaiting_commit' ? '待提交'
                 : item.risk === 'high' ? '高优先级'
                 : item.unread ? '待查看'
                 : '待处理'

@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { asyncHandler } = require('../http');
-const { normalizeDelegationBatchInput } = require('../services/agent-collaboration');
+const { normalizeDelegationBatchInput, resolveChildDelegationConstraints } = require('../services/agent-collaboration');
 
 // 批量协作是一项独立的高风险编排入口。拆出后可单独审计其“只能继承或收窄”
 // 的权限规则，避免普通 Agent 路由继续膨胀。
@@ -17,18 +17,16 @@ function registerAgentDelegationBatchRoute({ router, authMiddleware, automationG
         try {
             for (let index = 0; index < batch.tasks.length; index += 1) {
                 const task = batch.tasks[index];
-                const toolAllowlist = context.parentToolAllowlist.length
-                    ? (task.toolAllowlist.length ? context.parentToolAllowlist.filter(tool => task.toolAllowlist.includes(tool)) : context.parentToolAllowlist)
-                    : task.toolAllowlist;
+                const constraints = resolveChildDelegationConstraints(context, task);
                 const child = await createAgentRun({
                     user: req.user, parentRunId: context.parentRunId,
                     goal: task.context ? `${task.goal}\n\n可用上下文：\n${task.context}` : task.goal,
                     title: task.title || `${batch.batchTitle} · 子任务 ${index + 1}`,
-                    modelId: task.modelId || context.parentModelId || null,
-                    maxSteps: task.maxSteps, maxTokenBudget: task.maxTokenBudget,
-                    approvalPolicy: context.parentApprovalPolicy || 'safe_mcp_auto',
-                    toolPolicy: context.parentToolPolicy === 'builtin_only' ? 'builtin_only' : task.toolPolicy,
-                    toolAllowlist, forkHistory: task.forkHistory,
+                    modelId: constraints.modelId, maxSteps: constraints.maxSteps, maxTokenBudget: constraints.maxTokenBudget,
+                    timeoutMs: constraints.timeoutMs, toolTimeoutMs: constraints.toolTimeoutMs,
+                    runMode: constraints.runMode, approvalPolicy: constraints.approvalPolicy,
+                    toolPolicy: constraints.toolPolicy, toolAllowlist: constraints.toolAllowlist,
+                    networkPolicy: constraints.networkPolicy, forkHistory: task.forkHistory,
                     dedupeKey: idem ? `delegate-batch:${context.parentRunId}:${idem}:${index}` : null,
                     metadata: {
                         source: 'delegation', parentRunId: context.parentRunId,
@@ -36,7 +34,8 @@ function registerAgentDelegationBatchRoute({ router, authMiddleware, automationG
                             batchId, batchTitle: batch.batchTitle, taskIndex: index + 1, taskCount: batch.tasks.length,
                             supervisorRunId: context.parentRunId, agentName: task.agentName || `子智能体 ${index + 1}`,
                             role: task.role, instructions: task.instructions, outputSchema: task.outputSchema,
-                            responseFormat: task.responseFormat, repairAttempt: 0
+                            responseFormat: task.responseFormat, repairAttempt: 0, rolePolicy: constraints.rolePolicy,
+                            rolePolicies: context.rolePolicies, rolePolicyRevision: context.rolePolicyRevision
                         }
                     }
                 });

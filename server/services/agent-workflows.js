@@ -276,6 +276,7 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
     }
     let versionRow = null;
     let mode = requested || 'current';
+    let resolvedRelease = null;
     if (requested === 'published') {
         if (!workflow.published_version_id) {
             const err = new Error('工作流尚未发布，不能以发布版运行。');
@@ -314,6 +315,7 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
             throw error;
         }
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, fallbackVersionId);
+        resolvedRelease = effectiveRelease;
     } else if (requested === 'current') {
         versionRow = await workflowRepository.getWorkflowVersionById(workflow.id, workflow.current_version_id);
     } else {
@@ -342,6 +344,7 @@ async function resolveAgentWorkflowVersion(workflowId, user, version = 'current'
         version: Number(versionRow.version || 0),
         version_id: versionRow.id,
         mode,
+        releaseId: resolvedRelease?.id || null,
         dagSpec
     };
 }

@@ -11,6 +11,13 @@ const {
 } = require('../server/services/agent-terminal-runtime');
 const { executeBuiltInTool } = require('../server/services/agent-tools');
 
+const originalNodeEnv = process.env.NODE_ENV;
+test.before(() => { process.env.NODE_ENV = 'test'; });
+test.after(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+});
+
 function fixture() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-terminal-'));
     return {
@@ -79,9 +86,65 @@ test('terminal runtime fails closed without an audited worker or explicit develo
     } finally { fs.rmSync(item.root, { recursive: true, force: true }); }
 });
 
+test('production rejects the unsafe local override even when requested explicitly', async () => {
+    const item = fixture();
+    const prior = process.env.NODE_ENV;
+    try {
+        process.env.NODE_ENV = 'production';
+        const context = { ...item.context, allowUnsafeLocal: true, env: { NODE_ENV: 'development', PIVOT_AGENT_TERMINAL_ALLOW_UNSAFE_LOCAL: 'true' } };
+        assert.equal(isTerminalRuntimeAvailable(context), false);
+        await assert.rejects(() => executeTerminalRuntime({ action: 'exec', command: 'node', script: 'throw new Error("不应执行")' }, item.user, context), error => error.code === 'AGENT_TERMINAL_RUNTIME_UNAVAILABLE');
+    } finally {
+        if (prior === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = prior;
+        fs.rmSync(item.root, { recursive: true, force: true });
+    }
+    assert.equal(isTerminalRuntimeAvailable({ allowUnsafeLocal: true, env: { NODE_ENV: 'production' } }), false);
+});
+
 test('direct built-in terminal entry cannot bypass the runtime approval boundary', async () => {
     await assert.rejects(
         () => executeBuiltInTool('terminal.runtime', { action: 'list' }, { id: 71 }, {}),
         error => error.code === 'AGENT_SANDBOX_REQUIRED'
     );
+});
+
+test('non-development terminal workspace I/O consumes the same bound execution grant as command execution', async () => {
+    const item = fixture();
+    const original = process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET;
+    const executionSecret = 'terminal-workspace-io-grant-test-secret-01234567890123456789';
+    process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET = executionSecret;
+    try {
+        await assert.rejects(
+            () => executeTerminalRuntime({ action: 'list', path: '.' }, item.user, {
+                ...item.context,
+                env: {
+                    PIVOT_CAPABILITY_WORKER_ENABLED: 'true',
+                    PIVOT_AGENT_TERMINAL_WORKER_IMAGE: 'registry.example/pivot/runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    PIVOT_AGENT_EXECUTION_GRANT_SECRET: executionSecret
+                }
+            }),
+            error => error.status === 403 && /执行授权令牌/.test(error.message)
+        );
+    } finally {
+        if (original === undefined) delete process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET;
+        else process.env.PIVOT_AGENT_EXECUTION_GRANT_SECRET = original;
+        fs.rmSync(item.root, { recursive: true, force: true });
+    }
+});
+
+test('missing grant rejects inline code before creating a workspace or script', async () => {
+    const item = fixture();
+    try {
+        const context = {
+            ...item.context,
+            env: {
+                NODE_ENV: 'test', PIVOT_CAPABILITY_WORKER_ENABLED: 'true',
+                PIVOT_AGENT_TERMINAL_WORKER_IMAGE: 'registry.example/pivot/runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                PIVOT_AGENT_EXECUTION_GRANT_SECRET: 'terminal-inline-grant-test-secret-01234567890123456789'
+            }
+        };
+        await assert.rejects(() => executeTerminalRuntime({ action: 'exec', command: 'node', script: 'process.stdout.write("no")' }, item.user, context), error => error.status === 403);
+        assert.deepEqual(fs.readdirSync(item.root), []);
+    } finally { fs.rmSync(item.root, { recursive: true, force: true }); }
 });

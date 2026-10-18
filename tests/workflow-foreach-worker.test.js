@@ -3,12 +3,29 @@ const http = require('node:http');
 const test = require('node:test');
 const { executeBuiltInTool } = require('../server/services/agent-tools');
 const { getBuiltInToolDefinitions } = require('../server/services/agent-tools');
+const { executeWorkflowForeach } = require('../server/services/agent-tools-workflow-nodes');
 const { BUILTIN_TOOL_CAPABILITIES } = require('../server/services/agent-tool-capabilities');
 const { buildPlatformImPayload, deliverIm } = require('../server/services/agent-channel-adapters');
 const { normalizeBindingInput } = require('../server/services/agent-channels');
 
 process.env.NODE_ENV = 'test';
 process.env.PIVOT_AGENT_UNSAFE_LOCAL_TEST = 'true';
+
+test('workflow.foreach verifies the production Worker trust manifest before it needs an execution grant', async () => {
+    await assert.rejects(
+        () => executeWorkflowForeach({ items: [1], code: 'return item;' }, {
+            sandboxExecution: true,
+            runId: 'foreach-untrusted-worker',
+            user: { id: 1 },
+            env: {
+                NODE_ENV: 'production',
+                PIVOT_CAPABILITY_WORKER_ENABLED: 'true',
+                PIVOT_AGENT_FOREACH_WORKER_IMAGE: 'registry.example/pivot/foreach@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            }
+        }),
+        error => error.code === 'CAPABILITY_WORKER_SIGNING_KEY_REQUIRED'
+    );
+});
 
 test('workflow.foreach executes items in a separate controlled worker with bounded output', async () => {
     const result = await executeBuiltInTool('workflow.foreach', {

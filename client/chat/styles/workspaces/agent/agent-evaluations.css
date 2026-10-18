@@ -409,6 +409,108 @@
     margin-top: 12px;
 }
 
+.agent-eval-judge-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 9px 12px;
+    border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+    border-radius: 7px;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.agent-eval-judge-toolbar .btn-secondary {
+    flex: 0 0 auto;
+}
+
+.agent-eval-judge-evidence {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.agent-eval-judge-review-actions {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.agent-eval-judge-review-actions .btn-secondary,
+.agent-eval-judge-review-actions .btn-danger-outline {
+    min-height: 24px;
+    padding: 2px 7px;
+    font-size: 11px;
+}
+
+.agent-eval-judge-badge,
+.agent-eval-judge-empty {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 3px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.agent-eval-judge-badge.pass {
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.agent-eval-judge-badge.fail,
+.agent-eval-judge-badge.needs_human_review,
+.agent-eval-judge-badge.error {
+    border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.agent-judge-profile-modal {
+    height: min(650px, calc(100vh - 32px));
+}
+
+.agent-judge-profile-list {
+    display: grid;
+    gap: 7px;
+}
+
+.agent-judge-profile-row {
+    display: grid;
+    gap: 4px;
+    padding: 9px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--bg-primary);
+}
+
+.agent-judge-profile-row > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.agent-judge-profile-row strong {
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.agent-judge-profile-row span,
+.agent-judge-profile-row small {
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
 .agent-eval-result {
     border: 1px solid var(--border-color);
     border-left: 3px solid #94a3b8;
@@ -701,6 +803,18 @@ body.dark-mode .agent-eval-error,
         padding-left: 0;
     }
 
+}
+
+@media (max-width: 620px) {
+    .agent-eval-judge-toolbar,
+    .agent-judge-profile-row > div {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .agent-eval-judge-toolbar .btn-secondary {
+        width: 100%;
+    }
 }
 
 @media (max-width: 560px) {

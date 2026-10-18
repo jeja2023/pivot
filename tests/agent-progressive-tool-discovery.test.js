@@ -13,7 +13,7 @@ const {
     rememberSearch
 } = require('../server/services/agent-tool-progressive-discovery');
 const { executeReadOnlyDiscoveredBatch } = require('../server/services/agent-tools-discovery');
-const { describeToolForUser, searchToolsForUser } = require('../server/services/tool-discovery');
+const { describeToolForUser, executeDiscoveredTool, searchToolsForUser } = require('../server/services/tool-discovery');
 const { executeToolByName } = require('../server/services/agent-tool-runtime');
 const { formatToolList } = require('../server/services/agent-tool-catalog');
 
@@ -57,9 +57,63 @@ test('discovered batch read runs only described idempotent reads and preserves r
     rememberSearch(state, { candidates: [{ toolRef: unsafe }] });
     rememberDescription(state, unsafe, { toolRef: unsafe, name: 'orders.write', idempotent: false, sideEffect: true, concurrency: 'exclusive', requiresApproval: true });
     await assert.rejects(
-        () => executeReadOnlyDiscoveredBatch({ id: 1 }, [{ toolRef: unsafe, input: {} }], { toolDiscoveryState: state }, { toolDiscovery: { describeToolForUser: async () => null, executeDiscoveredTool: async () => null } }),
+        () => executeReadOnlyDiscoveredBatch({ id: 1 }, [{ toolRef: unsafe, input: {} }], { toolDiscoveryState: state }, { toolDiscovery: { describeToolForUser: async () => ({ name: 'orders.write', sideEffect: true }), executeDiscoveredTool: async () => null } }),
         error => error.code === 'TOOL_BATCH_READ_FORBIDDEN'
     );
+});
+
+test('batch reads recheck current authorization even when a safe description was remembered', async () => {
+    const state = createToolDiscoveryState();
+    const reference = { toolName: 'orders.search', releaseId: 1, definitionDigest: 'digest' };
+    rememberSearch(state, { candidates: [{ toolRef: reference }] });
+    rememberDescription(state, reference, { toolRef: reference, name: reference.toolName, idempotent: true, sideEffect: false, concurrency: 'read' });
+    let executed = false;
+    await assert.rejects(
+        () => executeReadOnlyDiscoveredBatch({ id: 1 }, [{ toolRef: reference, input: {} }], { toolDiscoveryState: state }, {
+            toolDiscovery: {
+                describeToolForUser: async () => { throw Object.assign(new Error('access revoked'), { code: 'ACCESS_REVOKED' }); },
+                executeDiscoveredTool: async () => { executed = true; }
+            }
+        }),
+        error => error.code === 'ACCESS_REVOKED'
+    );
+    assert.equal(executed, false);
+});
+
+test('batch reads refuse a tool that becomes unsafe before dispatch', async () => {
+    const state = createToolDiscoveryState();
+    const reference = { toolName: 'orders.search', releaseId: null, definitionDigest: 'fixed' };
+    rememberSearch(state, { candidates: [{ toolRef: reference }] });
+    rememberDescription(state, reference, { toolRef: reference, name: reference.toolName, idempotent: true, sideEffect: false, concurrency: 'read' });
+    let executed = false;
+    await assert.rejects(
+        () => executeReadOnlyDiscoveredBatch({ id: 1 }, [{ toolRef: reference, input: {} }], { toolDiscoveryState: state }, {
+            toolDiscovery: {
+                describeToolForUser: async () => ({ name: reference.toolName, idempotent: true, sideEffect: false, concurrency: 'read' }),
+                executeDiscoveredTool,
+                formatToolList: async () => [{ ...exampleTool, definitionDigest: 'fixed', side_effect: true }],
+                executeToolByName: async () => { executed = true; }
+            }
+        }),
+        error => error.code === 'TOOL_BATCH_READ_FORBIDDEN'
+    );
+    assert.equal(executed, false);
+});
+
+test('discovered execution validates and dispatches against the same authorized catalog snapshot', async () => {
+    let catalogReads = 0;
+    const catalog = [{ ...exampleTool, definitionDigest: 'fixed' }];
+    const result = await executeDiscoveredTool({ id: 1 }, {
+        toolRef: { toolName: exampleTool.name, definitionDigest: 'fixed' }, input: {}
+    }, {}, {
+        formatToolList: async () => { catalogReads += 1; return catalog; },
+        executeToolByName: async (_name, _input, _user, actualTools) => {
+            assert.equal(actualTools, catalog);
+            return 'ok';
+        }
+    });
+    assert.equal(result, 'ok');
+    assert.equal(catalogReads, 1);
 });
 
 test('discovery state refuses describe and execute when the required preceding step is absent', () => {
@@ -84,6 +138,57 @@ test('described contracts are cached only inside the current discovery state', (
     assert.equal(getRememberedDescription(first, { ...reference, definitionDigest: 'digest-v2' }), null);
 });
 
+test('discovery state expires search and description together, requiring a new current catalog lookup', () => {
+    let now = 10_000;
+    const state = createToolDiscoveryState({ ttlMs: 1_000, now: () => now });
+    const reference = { toolName: 'orders.search', releaseId: 3, definitionDigest: 'digest-v1' };
+    rememberSearch(state, { catalogVersion: 'catalog-v1', candidates: [{ toolRef: reference }] });
+    rememberDescription(state, reference, { toolRef: reference, name: reference.toolName });
+    assert.doesNotThrow(() => assertDescribed(state, reference));
+    now += 1_000;
+    assert.throws(() => assertDescribed(state, reference), error => error.code === 'TOOL_DISCOVERY_SEARCH_EXPIRED');
+    assert.throws(() => assertSearched(state, reference), error => error.code === 'TOOL_DISCOVERY_SEARCH_REQUIRED');
+});
+
+test('a changed authorization or release catalog version invalidates remembered discovery references', () => {
+    const state = createToolDiscoveryState();
+    const oldReference = { toolName: 'orders.search', releaseId: 1, definitionDigest: 'digest-v1' };
+    const currentReference = { toolName: 'orders.search', releaseId: 2, definitionDigest: 'digest-v2' };
+    rememberSearch(state, { catalogVersion: 'catalog-v1', candidates: [{ toolRef: oldReference }] });
+    rememberDescription(state, oldReference, { toolRef: oldReference, name: oldReference.toolName });
+    rememberSearch(state, { catalogVersion: 'catalog-v2', candidates: [{ toolRef: currentReference }] });
+    assert.throws(() => assertSearched(state, oldReference), error => error.code === 'TOOL_DISCOVERY_SEARCH_REQUIRED');
+    assert.doesNotThrow(() => assertSearched(state, currentReference));
+    assert.throws(() => assertDescribed(state, currentReference), error => error.code === 'TOOL_DISCOVERY_DESCRIBE_REQUIRED');
+});
+
+test('search cache is scoped by current authorization catalog and TTL, never by a stale result alone', async () => {
+    const cache = new Map();
+    let now = 20_000;
+    let rankings = 0;
+    let currentTool = { ...exampleTool, catalogReleaseId: 1, definitionDigest: 'release-v1' };
+    const deps = {
+        formatToolList: async () => [currentTool],
+        rankTools: (query, tools, filters) => {
+            rankings += 1;
+            return require('../server/services/tool-discovery').rankTools(query, tools, filters);
+        }
+    };
+    const options = { discoveryCache: cache, cacheTtlMs: 1_000, now: () => now };
+    const first = await searchToolsForUser({ id: 7, role: 'user' }, { query: '查询订单' }, deps, options);
+    const second = await searchToolsForUser({ id: 7, role: 'user' }, { query: '查询订单' }, deps, options);
+    assert.equal(rankings, 1, '同一授权/发布摘要和 TTL 内应复用搜索结果');
+    assert.equal(second.catalogVersion, first.catalogVersion);
+    currentTool = { ...currentTool, catalogReleaseId: 2, definitionDigest: 'release-v2' };
+    const updated = await searchToolsForUser({ id: 7, role: 'user' }, { query: '查询订单' }, deps, options);
+    assert.equal(rankings, 2, '发布摘要变化必须绕过旧缓存');
+    assert.notEqual(updated.catalogVersion, first.catalogVersion);
+    assert.equal(updated.candidates[0].toolRef.definitionDigest, 'release-v2');
+    now += 1_000;
+    await searchToolsForUser({ id: 7, role: 'user' }, { query: '查询订单' }, deps, options);
+    assert.equal(rankings, 3, 'TTL 到期后必须重算搜索结果');
+});
+
 test('search returns compact references and describe rejects a changed contract digest', async () => {
     const deps = { formatToolList: async () => [exampleTool] };
     const found = await searchToolsForUser({ id: 1 }, { query: '查询订单' }, deps);
@@ -93,6 +198,15 @@ test('search returns compact references and describe rejects a changed contract 
     assert.equal(described.name, 'orders.search');
     await assert.rejects(
         () => describeToolForUser({ id: 1 }, { ...reference, definitionDigest: 'stale' }, deps),
+        error => error.code === 'TOOL_REFERENCE_STALE'
+    );
+});
+
+test('describe rejects a changed release even when the definition digest is unchanged', async () => {
+    const deps = { formatToolList: async () => [{ ...exampleTool, catalogReleaseId: 2 }] };
+    const found = await searchToolsForUser({ id: 1 }, { query: '查询订单' }, deps);
+    await assert.rejects(
+        () => describeToolForUser({ id: 1 }, { ...found.candidates[0].toolRef, releaseId: 1 }, deps),
         error => error.code === 'TOOL_REFERENCE_STALE'
     );
 });

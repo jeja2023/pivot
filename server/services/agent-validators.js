@@ -23,13 +23,14 @@ const MAX_STEPS_BY_RUN_MODE = Object.freeze({
 });
 const ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
-    'running', 'verifying', 'approval_required', 'awaiting_approval', 'waiting_approval', 'resuming', 'needs_input'
+    'running', 'verifying', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit', 'resuming', 'needs_input'
 ]);
 // 统一智能体与工作流任务状态中文映射字典
 const AGENT_STATUS_LABELS = Object.freeze({
     awaiting_approval: '等待审批',
     approval_required: '待审批',
     waiting_approval: '待审批',
+    awaiting_commit: '等待提交',
     queued: '排队中',
     planning: '规划中',
     executing: '执行中',

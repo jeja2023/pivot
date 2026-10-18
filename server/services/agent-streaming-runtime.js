@@ -16,6 +16,7 @@ const {
     shouldUseNativeToolCalls
 } = require('./model-tool-call-capabilities');
 const { verifyTaskOutcome } = require('./agent-verification');
+const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -99,7 +100,7 @@ function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, chatContext = {} }, deps) {
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {} }, deps) {
     let roundsUsed = 0;
     try {
         const callStreamingModel = deps.callModelStreamingWithTools || callModelStreamingWithTools;
@@ -332,6 +333,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         eventKey: `model:${stepContext?.contextHash || step}:requested`
                     });
                 } catch (_) {}
+                await recordPlannerModelEvent('requested', {
+                    runId, user, turnId: stepContext?.turnId || `${runId}:turn:${step}`, step, stepContext, model: modelCfg,
+                    purpose: 'agent_streaming_requested', messageCount: conversationForModel.length,
+                    recordEvent: async () => {}, buildAuditFields: deps.buildAgentAuditFields || buildAgentAuditFields
+                });
                 result = await deps.withTimeout(
                     signal => callStreamingModel(modelCfg, conversationForModel, tools, {
                         temperature: 0.2,
@@ -410,6 +416,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         eventKey: `model:${stepContext?.contextHash || step}:completed`
                     });
                 } catch (_) {}
+                await recordPlannerModelEvent('completed', {
+                    runId, user, turnId: stepContext?.turnId || `${runId}:turn:${step}`, step, stepContext, model: modelCfg,
+                    purpose: 'agent_streaming_completed', responseLength: String(result?.content || '').length,
+                    recordEvent: async () => {}, buildAuditFields: deps.buildAgentAuditFields || buildAgentAuditFields
+                });
                 await deps.finishAgentTraceSpan?.(modelSpanId, {
                     output: {
                         responseLength: String(result?.content || '').length,
@@ -437,6 +448,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         eventKey: `model:${stepContext?.contextHash || step}:failed`
                     });
                 } catch (_) {}
+                await recordPlannerModelEvent('failed', {
+                    runId, user, turnId: stepContext?.turnId || `${runId}:turn:${step}`, step, stepContext, model: modelCfg,
+                    purpose: 'agent_streaming_failed', error: modelError,
+                    recordEvent: async () => {}, buildAuditFields: deps.buildAgentAuditFields || buildAgentAuditFields
+                });
                 await deps.finishAgentTraceSpan?.(modelSpanId, {
                     status: 'error',
                     errorMessage: modelError.message,
@@ -488,22 +504,27 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const budgetWarning = usageResult?.budgetExceeded ? '已达到总 Token 预算，以下为当前已生成结果。' : '';
                 await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning);
-                const finalStatus = verification.outcomeStatus === 'verified'
-                    ? 'completed'
+                const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
+                const finalStatus = awaitingCommit
+                    ? 'awaiting_commit'
+                    : verification.outcomeStatus === 'verified'
+                        ? 'completed'
                     : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
                 const verified = finalStatus === 'completed';
                 const verificationError = verified
                     ? ''
+                    : awaitingCommit
+                        ? '任务结果已验证，仍有外部副作用等待提交。'
                     : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
                 await deps.updateRun(runId, {
                     status: finalStatus,
                     final_answer: budgetWarning ? `注意：${budgetWarning}\n\n${answer}` : answer,
                     error_message: budgetWarning || verificationError,
-                    ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
+                    ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await deps.createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行已完成' : '任务需要补充或修复', deps.getAgentRunTitle(run));
+                await deps.createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行已完成' : awaitingCommit ? '任务等待提交' : '任务需要补充或修复', deps.getAgentRunTitle(run));
                 return { completed: true, roundsUsed };
             }
 
@@ -592,6 +613,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                             stepContext,
                             contextHash: stepContext?.contextHash || '',
                             budget: deps.taskBudget || null,
+                            taskTransactionId: String(taskTransactionId || ''),
                             budgetAlreadyConsumed: true,
                             approvalGranted: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),
                             allowApproval: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),

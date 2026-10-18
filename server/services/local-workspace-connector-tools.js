@@ -4,7 +4,11 @@ const WORKSPACE_TOOL_NAMES = Object.freeze([
     'workspace.inspect',
     'workspace.read',
     'workspace.search',
+    'workspace.symbols',
+    'workspace.definition',
+    'workspace.references',
     'workspace.patch',
+    'workspace.restore_snapshot',
     'workspace.install',
     'workspace.test',
     'workspace.git_status',
@@ -21,6 +25,7 @@ const SAFE_BRANCH_RE = /^(?:[A-Za-z0-9][A-Za-z0-9._/-]{0,119})$/;
 const SAFE_REMOTE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 const SAFE_WORKTREE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_RELATIVE_PATH_RE = /^(?!.*(?:^|[\\/])\.\.(?:[\\/]|$))(?!.*(?:^|[\\/])\.git(?:[\\/]|$))(?![\\/])(?!(?:[A-Za-z]:))[A-Za-z0-9._/ -]{1,240}$/;
+const SEMANTIC_LANGUAGES = new Set(['auto', 'javascript', 'typescript', 'python']);
 
 function workspaceError(message, code = 'LOCAL_WORKSPACE_INVALID', status = 400) {
     const error = new Error(message);
@@ -79,6 +84,20 @@ function normalizeWorkspaceTask(toolName, input = {}, grant = {}) {
         task.query = query;
         task.limit = Math.min(Math.max(Number.parseInt(input.limit, 10) || 50, 1), 200);
     }
+    if (name === 'workspace.symbols') {
+        task.query = String(input.query || '').trim().slice(0, 240);
+        task.limit = Math.min(Math.max(Number.parseInt(input.limit, 10) || 100, 1), 300);
+        task.language = String(input.language || 'auto').trim().toLowerCase() || 'auto';
+        if (!SEMANTIC_LANGUAGES.has(task.language)) throw workspaceError('语义查询语言必须是 auto、javascript、typescript 或 python。', 'LOCAL_WORKSPACE_SEMANTIC_LANGUAGE_INVALID');
+    }
+    if (name === 'workspace.definition' || name === 'workspace.references') {
+        task.path = safeRelativePath(input.path);
+        task.line = Math.min(Math.max(Number.parseInt(input.line, 10) || 0, 1), 1000000);
+        task.column = Math.min(Math.max(Number.parseInt(input.column, 10) || 0, 1), 1000000);
+        task.limit = Math.min(Math.max(Number.parseInt(input.limit, 10) || (name === 'workspace.definition' ? 20 : 100), 1), 300);
+        task.language = String(input.language || 'auto').trim().toLowerCase() || 'auto';
+        if (!SEMANTIC_LANGUAGES.has(task.language)) throw workspaceError('语义查询语言必须是 auto、javascript、typescript 或 python。', 'LOCAL_WORKSPACE_SEMANTIC_LANGUAGE_INVALID');
+    }
     if (name === 'workspace.patch') {
         const changes = Array.isArray(input.changes) ? input.changes.slice(0, 32) : [];
         if (!changes.length) throw workspaceError('代码修改需要至少一个文件变更。', 'LOCAL_WORKSPACE_CHANGES_REQUIRED');
@@ -91,6 +110,12 @@ function normalizeWorkspaceTask(toolName, input = {}, grant = {}) {
                 expectedDigest: String(change?.expectedDigest || change?.expected_digest || '').trim().slice(0, 128)
             };
         });
+    }
+    if (name === 'workspace.restore_snapshot') {
+        const archiveDigest = String(input.archiveDigest || input.archive_digest || '').trim().toLowerCase();
+        const restoreHandle = String(input.restoreHandle || input.restore_handle || '').trim();
+        if (!/^[a-f0-9]{64}$/.test(archiveDigest) || restoreHandle !== `local-recovery:${archiveDigest}`) throw workspaceError('恢复归档摘要或恢复句柄无效。', 'LOCAL_WORKSPACE_RECOVERY_HANDLE_INVALID', 403);
+        task.archiveDigest = archiveDigest; task.restoreHandle = restoreHandle; task.targetName = safeWorktreeName(input.targetName || input.target_name);
     }
     if (name === 'workspace.install') {
         const command = String(input.command || '').trim();
@@ -146,9 +171,13 @@ function localWorkspaceToolDefinitions() {
         ['workspace.inspect', '查看代码工作区', '读取已授权 Git 仓库或 Pivot 创建工作树的分支、状态和摘要。', { type: 'object', properties: worktreeName }],
         ['workspace.read', '读取代码文件', '读取当前授权工作区中的指定文本文件。', { type: 'object', properties: { path: { type: 'string' }, maxBytes: { type: 'integer', minimum: 1, maximum: 524288 }, ...worktreeName } }],
         ['workspace.search', '搜索代码', '在当前授权工作区内搜索文件名和文本，不执行代码。', { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 200 }, ...worktreeName }, required: ['query'] }],
-        ['workspace.patch', '修改代码', '按带摘要校验的完整文件内容修改授权工作区；桌面端每次会要求确认。', { type: 'object', properties: { changes: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object' } }, ...worktreeName }, required: ['changes'] }],
-        ['workspace.install', '安装隔离依赖', '仅在认证隔离 Worker 中安装当前授权工作区声明的依赖；不会在桌面主机直接运行包管理器。', { type: 'object', properties: { command: { type: 'string', enum: ['npm_ci', 'npm_install', 'pip_requirements'] }, ...worktreeName }, required: ['command'] }],
-        ['workspace.test', '运行受控测试', '在强制隔离 Worker 中运行已登记的测试命令；未配置 Worker 时拒绝执行。', { type: 'object', properties: { command: { type: 'string', enum: ['npm_test', 'npm_run', 'node_test', 'python_pytest'] }, args: { type: 'array', items: { type: 'string' } }, ...worktreeName }, required: ['command'] }],
+        ['workspace.symbols', '查询代码语义符号', '在当前授权工作区或影子工作树中使用 TypeScript 编译器和受控 Pyright LSP 查询 JS/TS/Python 声明；只读，不执行项目代码。', { type: 'object', properties: { path: { type: 'string' }, query: { type: 'string' }, language: { type: 'string', enum: ['auto', 'javascript', 'typescript', 'python'] }, limit: { type: 'integer', minimum: 1, maximum: 300 }, ...worktreeName } }],
+        ['workspace.definition', '查询代码定义', '在受控 TypeScript 或 Pyright 语言服务中定位 JS/TS/Python 符号定义；只读，不执行项目代码。', { type: 'object', properties: { path: { type: 'string' }, language: { type: 'string', enum: ['auto', 'javascript', 'typescript', 'python'] }, line: { type: 'integer', minimum: 1 }, column: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 300 }, ...worktreeName }, required: ['path', 'line', 'column'] }],
+        ['workspace.references', '查询代码引用', '在受控 TypeScript 或 Pyright 语言服务中定位 JS/TS/Python 符号引用；只读，不执行项目代码。', { type: 'object', properties: { path: { type: 'string' }, language: { type: 'string', enum: ['auto', 'javascript', 'typescript', 'python'] }, line: { type: 'integer', minimum: 1 }, column: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 300 }, ...worktreeName }, required: ['path', 'line', 'column'] }],
+        ['workspace.patch', '修改代码', '按带摘要校验修改文件。Agent 事务必须指定 Pivot 创建的影子工作树；主工作区改动只能在验收后经合并动作提交。', { type: 'object', properties: { changes: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object' } }, ...worktreeName }, required: ['changes'] }],
+        ['workspace.restore_snapshot', '恢复工作区快照', '仅在本机受控恢复目录创建新的工作区副本；必须经人工确认，绝不覆盖原工作区。', { type: 'object', properties: { archiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' }, restoreHandle: { type: 'string' }, targetName: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' } }, required: ['archiveDigest', 'restoreHandle', 'targetName'] }],
+        ['workspace.install', '安装隔离依赖', '仅在认证隔离 Worker 中安装当前授权工作区声明的依赖；事务化任务应在影子工作树中安装，不会在桌面主机直接运行包管理器。', { type: 'object', properties: { command: { type: 'string', enum: ['npm_ci', 'npm_install', 'pip_requirements'] }, ...worktreeName }, required: ['command'] }],
+        ['workspace.test', '运行受控测试', '在强制隔离 Worker 中运行已登记的测试命令；事务化代码修改后应在同一影子工作树中验收，未配置 Worker 时拒绝执行。', { type: 'object', properties: { command: { type: 'string', enum: ['npm_test', 'npm_run', 'node_test', 'python_pytest'] }, args: { type: 'array', items: { type: 'string' } }, ...worktreeName }, required: ['command'] }],
         ['workspace.git_status', '查看 Git 状态', '查看分支、改动和未跟踪文件。', { type: 'object', properties: worktreeName }],
         ['workspace.git_diff', '查看 Git 差异', '读取当前分支或指定基线的差异。', { type: 'object', properties: { base: { type: 'string' }, ...worktreeName } }],
         ['workspace.git_worktree', '创建隔离 Git 工作树', '在授权仓库内创建分支绑定的隔离工作树。', { type: 'object', properties: { branch: { type: 'string' }, name: { type: 'string' } }, required: ['branch'] }],

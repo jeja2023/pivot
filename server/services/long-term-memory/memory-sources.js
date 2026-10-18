@@ -50,7 +50,8 @@ async function getMemorySource(userId, memoryId) {
         ? await queryOne('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND user_id = ?', [row.source_session_id, userId])
         : null;
     const evidence = await query(`
-        SELECT session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
+        SELECT session_id, message_id, source_kind, source_ref, asserted_by, evidence_excerpt,
+               review_required_at, reviewed_at, reviewed_by_user_id, created_at
         FROM memory_source_evidence
         WHERE memory_id = ? AND user_id = ?
         ORDER BY created_at ASC, id ASC
@@ -68,8 +69,12 @@ async function getMemorySource(userId, memoryId) {
             sessionId: item.session_id || null,
             messageId: item.message_id ? Number(item.message_id) : null,
             sourceKind: item.source_kind || 'automatic',
+            sourceRef: item.source_ref || '',
             assertedBy: item.asserted_by || 'user',
             evidenceExcerpt: item.evidence_excerpt || '',
+            reviewRequiredAt: item.review_required_at || null,
+            reviewedAt: item.reviewed_at || null,
+            reviewedByUserId: item.reviewed_by_user_id ? Number(item.reviewed_by_user_id) : null,
             createdAt: item.created_at || null
         }))
     };
@@ -78,7 +83,10 @@ async function getMemorySource(userId, memoryId) {
 async function revokeMemoriesForSource(userId, options = {}, deps = {}) {
     const sessionId = normalizeScopeReference(options.sessionId || options.session_id);
     const messageIds = normalizeSourceMessageIds(options.messageIds || options.message_ids);
-    if (!sessionId && messageIds.length === 0) return { revoked: 0, evidenceRemoved: 0 };
+    const sourceKind = String(options.sourceKind || options.source_kind || '').trim().slice(0, 24);
+    const sourceRef = String(options.sourceRef || options.source_ref || '').trim().slice(0, 255);
+    const hasSourceReference = Boolean(sourceKind && sourceRef);
+    if (!sessionId && messageIds.length === 0 && !hasSourceReference) return { revoked: 0, evidenceRemoved: 0 };
     const where = ['e.user_id = ?'];
     const params = [Number(userId)];
     if (sessionId) {
@@ -88,6 +96,10 @@ async function revokeMemoriesForSource(userId, options = {}, deps = {}) {
     if (messageIds.length) {
         where.push(`e.message_id IN (${messageIds.map(() => '?').join(',')})`);
         params.push(...messageIds);
+    }
+    if (hasSourceReference) {
+        where.push('e.source_kind = ?', 'e.source_ref = ?');
+        params.push(sourceKind, sourceRef);
     }
     // 删除消息、撤销来源证据和取消待处理任务必须由调用方放在同一事务中。
     // 否则后处理抛错会出现“消息已删但 API 返回失败”的假象，或留下仍可被
@@ -124,6 +136,10 @@ async function revokeMemoriesForSource(userId, options = {}, deps = {}) {
                 removalWhere.push(`message_id IN (${messageIds.map(() => '?').join(',')})`);
                 removalParams.push(...messageIds);
             }
+            if (hasSourceReference) {
+                removalWhere.push('source_kind = ?', 'source_ref = ?');
+                removalParams.push(sourceKind, sourceRef);
+            }
             evidenceRemoved += await trx.execute(`DELETE FROM memory_source_evidence WHERE ${removalWhere.join(' AND ')}`, removalParams);
             const remaining = await trx.query(`
                 SELECT session_id, message_id FROM memory_source_evidence
@@ -143,11 +159,38 @@ async function revokeMemoriesForSource(userId, options = {}, deps = {}) {
                 `, [MEMORY_STATUS.deleted, now, String(options.reason || 'source_deleted').slice(0, 80), JSON.stringify([]), now, memory.id, Number(userId)]);
                 revoked += 1;
             } else {
+                const partialSourceLoss = before.length > remaining.length;
+                const sourceMissing = before.length > 0 && remaining.length === 0;
+                const nextStatus = partialSourceLoss && remaining.length > 0
+                    ? MEMORY_STATUS.reviewRequired
+                    : sourceMissing
+                        ? MEMORY_STATUS.disabled
+                        : memory.status;
+                const nextReason = sourceMissing
+                    ? `source_missing:${String(options.reason || 'source_deleted').slice(0, 60)}`
+                    : partialSourceLoss
+                        ? `source_changed:${String(options.reason || 'source_deleted').slice(0, 60)}`
+                        : memory.revocation_reason;
                 await trx.execute(`
                     UPDATE memories
-                    SET source_session_id = ?, source_message_ids = ?, updated_at = ?
+                    SET source_session_id = ?, source_message_ids = ?,
+                        status = ?,
+                        revocation_reason = ?,
+                        updated_at = ?
                     WHERE id = ? AND user_id = ?
-                `, [remainingSession, JSON.stringify(remainingIds), now, memory.id, Number(userId)]);
+                `, [
+                    remainingSession, JSON.stringify(remainingIds), nextStatus, nextReason,
+                    now, memory.id, Number(userId)
+                ]);
+                // 删除任一来源会改变其余证据的解释上下文；它们都必须重新由人或受控
+                // 连接器确认。否则 memory 已处于 review_required 却不存在可完成的复核项。
+                if (partialSourceLoss && remaining.length > 0) {
+                    await trx.execute(`
+                        UPDATE memory_source_evidence
+                        SET review_required_at = ?, reviewed_at = NULL, reviewed_by_user_id = NULL
+                        WHERE memory_id = ? AND user_id = ?
+                    `, [now, memory.id, Number(userId)]);
+                }
             }
         }
         return { revoked, evidenceRemoved };
@@ -167,8 +210,16 @@ async function revokeMemoriesForSourceMessages(userId, messageIds, options = {},
     return revokeMemoriesForSource(userId, { ...options, messageIds, reason: options.reason || 'source_message_deleted' }, deps);
 }
 
+async function revokeMemoriesForSourceReference(userId, sourceKind, sourceRef, options = {}, deps = {}) {
+    return revokeMemoriesForSource(userId, {
+        ...options, sourceKind, sourceRef,
+        reason: options.reason || 'source_reference_deleted'
+    }, deps);
+}
+
 module.exports = {
     getMemorySource,
     revokeMemoriesForSourceSession,
-    revokeMemoriesForSourceMessages
+    revokeMemoriesForSourceMessages,
+    revokeMemoriesForSourceReference
 };

@@ -628,7 +628,6 @@ async function toggleChatTool(button) {
     if (storageKey) localStorage.setItem(storageKey, enabled ? 'true' : 'false');
     await updateChatToolReadiness();
 }
-
 async function handleChatToolToggleEvent(event) {
     const button = findChatToolToggle(event.target);
     if (!button || button.disabled) return;
@@ -694,7 +693,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-report-assist.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-readiness.js', '/chat/dag-empty-canvas.js', '/chat/dag-inspector-special-fields.js', '/chat/dag-inspector-testing.js', '/chat/dag-inspector.js',
         '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
         '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
-        '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-status-views.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-profile-preferences.js', '/chat/agent-harness.js',
+        '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-status-views.js', '/chat/agent-run-trace-view.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-profile-preferences.js', '/chat/agent-run-diagnostics.js', '/chat/agent-delegation-role-policies-ui.js', '/chat/agent-lifecycle-hook-packages-ui.js', '/chat/agent-acceptance-evidence-ui.js', '/chat/agent-harness.js',
         '/chat/agent-skill-management.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
         '/chat/agent-workflow-editor.js', '/chat/agent-workflow-core.js', '/chat/agent-workflow-runners.js', '/chat/agent-workflows.js',
@@ -711,7 +710,6 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/mcp-workbench-form.js', '/chat/mcp-workbench-product.js', '/chat/mcp-workbench-actions.js', '/chat/mcp-workbench-api-operations.js', '/chat/mcp-workbench-main.js'
     ]
 };
-
 // 工作流编排器复用 Agent 脚本，但 DOM 根节点独立。此前只加载 agent 模板后
 // 就切换到 agent-dag，导致原面板隐藏而目标面板不存在，页面呈现为空白。
 const WORKSPACE_MARKUP_DEPENDENCIES = Object.freeze({
@@ -741,13 +739,8 @@ const WORKSPACE_PANEL_IDS = Object.freeze({
     settings: 'admin-container'
 });
 const AUTOMATION_WORKSPACES = Object.freeze(['agent', 'agent-dag']);
-function showWorkspaceWithStyleGate(...args) {
-    return (window.Pivot.moduleApi?.('workspaces.styleLoader')?.showWorkspaceWithStyleGate || showMainWorkspace)(...args);
-}
-function prewarmAutomationWorkspaces(...args) {
-    return window.Pivot.moduleApi?.('workspaces.styleLoader')?.prewarmAutomationWorkspaces?.(...args);
-}
-
+function showWorkspaceWithStyleGate(...args) { return (window.Pivot.moduleApi?.('workspaces.styleLoader')?.showWorkspaceWithStyleGate || showMainWorkspace)(...args); }
+function prewarmAutomationWorkspaces(...args) { return window.Pivot.moduleApi?.('workspaces.styleLoader')?.prewarmAutomationWorkspaces?.(...args); }
 const workspaceLoadPromises = {};
 
 async function ensureWorkspaceScripts(name) {
@@ -881,8 +874,15 @@ function showMainWorkspace(view = 'personal') {
     }
     Object.entries(viewMap).forEach(([key, id]) => {
         const panel = document.getElementById(id);
-        panel?.classList.toggle('hidden', key !== target);
-        if (key === 'apps') panel?.setAttribute('aria-hidden', key === target ? 'false' : 'true');
+        if (!panel) return;
+        const visible = key === target;
+        const moveFocus = window.Pivot.moduleApi?.('workspaces.accessibility')?.moveFocusOutsideHiddenWorkspace;
+        if (!visible && typeof moveFocus === 'function') moveFocus(panel, target);
+        else if (!visible && panel.contains(document.activeElement)) document.activeElement?.blur?.();
+        panel.classList.toggle('hidden', !visible);
+        panel.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        if (visible) panel.removeAttribute('inert');
+        else panel.setAttribute('inert', '');
     });
     document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
         const view = btn.dataset.workspaceView;
@@ -951,13 +951,11 @@ window.Pivot?.exposeModule?.('workspaces.navigation', {
     openManualWorkbench: () => showMainWorkspace('manual'),
     closeManualWorkbench: () => returnFromWorkspace()
 });
-
 const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) returnFromWorkspace(); };
 window.Pivot.legacy.closeAgentWorkbench = closeWs('agent');
 window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');
 window.Pivot.legacy.closeMcpWorkbench = closeWs('mcp');
 window.Pivot.legacy.closePersonalWorkbench = () => showMainWorkspace('chat');
-
 window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
     const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'personal';
     const openers = { settings: () => openAdminPanelEntrypoint({ restore: true }), personal: () => openPersonalWorkbenchEntrypoint(), apps: () => openAppsWorkbenchEntrypoint(), knowledge: () => openKnowledgeWorkbenchEntrypoint(), mcp: () => openMcpWorkbenchEntrypoint(), 'agent-dag': () => openAgentDagWorkbenchEntrypoint(), agent: () => openAgentWorkbenchEntrypoint(), manual: () => showMainWorkspace('manual') };

@@ -74,6 +74,24 @@ jobs:
           DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
         run: npm run test:all
 
+      # 发布门禁必须在 CI 中拥有独立的强制步骤：覆盖分层评测硬门、双裁判
+      # 分歧/人工复核、灰度熔断回滚与数据库级发布集成，避免它们被全量测试
+      # 输出淹没而在发布前未被单独审阅。
+      - name: Agent release quality gates
+        if: matrix.node-version == '22'
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+          DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+        run: npm run test:agent:release-gates
+
+      # 独立展示进程崩溃、非幂等恢复和资源争用门禁，避免被全量测试输出淹没。
+      - name: Agent runtime fault and resource gates
+        if: matrix.node-version == '22'
+        env:
+          TEST_DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+          DATABASE_URL: postgres://postgres:password@localhost:5432/pivot_test
+        run: npm run test:agent:quality
+
       # 原生 V8 覆盖率阈值防止测试退化为只读取源码文本而不执行关键分支。
       - name: Node test coverage threshold
         if: matrix.node-version == '22'

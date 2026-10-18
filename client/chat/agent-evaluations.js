@@ -7,6 +7,7 @@ let agentEvalRunTimer = null;
 let agentEvalEditorCases = [];
 let agentEvalWorkflowsCache = [];
 let agentEvalEditorRunConfig = {};
+let agentJudgeProfilesCache = [];
 
 function agentEvalSummary(value) {
     return value && typeof value === 'object' ? value : {};
@@ -103,6 +104,54 @@ function agentEvalRuleMarkup(rule = {}) {
     return `<span class="agent-eval-rule ${rule.passed ? 'passed' : 'failed'}" title="${agentEscapeAttr(rule.actual || '')}">${rule.passed ? '通过' : '未通过'} · ${agentEscape(rule.label || rule.key)}</span>`;
 }
 
+function agentJudgeDecisionLabel(value) {
+    return ({ pass: '裁判通过', fail: '裁判拒绝', needs_human_review: '需要人工复核', completed: '已完成', error: '裁判异常' })[value] || value || '等待裁判';
+}
+
+function renderAgentEvalJudgeEvidence(results = []) {
+    const byResult = new Map();
+    results.forEach(item => {
+        const key = String(item.evalResultId || '');
+        if (!key) return;
+        const list = byResult.get(key) || [];
+        list.push(item);
+        byResult.set(key, list);
+    });
+    document.querySelectorAll('[data-agent-eval-judge-result]').forEach(target => {
+        const items = byResult.get(String(target.dataset.agentEvalJudgeResult)) || [];
+        PivotSafeHtml.setHtml(target, items.length ? items.map(item => `
+            <span class="agent-eval-judge-badge ${agentEscapeAttr(item.humanDecision || item.decision || item.status)}" data-agent-eval-judge-tooltip="${agentEscapeAttr((item.verdict?.reasons || []).join('；') || item.errorMessage || '')}">${agentEscape(item.humanDecision ? `人工复核：${agentJudgeDecisionLabel(item.humanDecision)}` : agentJudgeDecisionLabel(item.decision || item.status))} · ${agentEscape(item.judgeName || '裁判')} · ${Math.round(Number(item.confidence || 0) * 100)}%</span>${item.decision === 'needs_human_review' && !item.humanDecision ? `<span class="agent-eval-judge-review-actions"><button type="button" class="btn-secondary" data-agent-eval-judge-review="${agentEscapeAttr(item.id)}" data-agent-eval-judge-decision="pass">人工通过</button><button type="button" class="btn-danger-outline" data-agent-eval-judge-review="${agentEscapeAttr(item.id)}" data-agent-eval-judge-decision="fail">人工拒绝</button></span>` : ''}
+        `).join('') : '<span class="agent-eval-judge-empty">尚未运行独立裁判</span>');
+        target.querySelectorAll('[data-agent-eval-judge-review]').forEach(button => {
+            button.addEventListener('click', () => reviewAgentJudgeResult(button.dataset.agentEvalJudgeReview, button.dataset.agentEvalJudgeDecision));
+        });
+        target.querySelectorAll('[data-agent-eval-judge-tooltip]').forEach(badge => {
+            badge.title = badge.dataset.agentEvalJudgeTooltip || '';
+        });
+    });
+}
+
+function reviewAgentJudgeResult(judgeResultId, decision) {
+    const label = decision === 'pass' ? '通过' : '拒绝';
+    window.Pivot.legacy.showConfirm('人工复核裁判结论', `确认以人工结论“${label}”覆盖该条需要仲裁的裁判结果吗？该决定会被记录到发布证据。`, async () => {
+        const response = await apiFetch(`${API_BASE}/agents/evaluations/judges/${encodeURIComponent(judgeResultId)}/human-review`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) return showToast(data.error || '人工复核提交失败', 'error');
+        if (data.review?.judgeProfileRetired) showToast('人工复核已保存；该裁判 Profile 因校准不达标被自动退役', 'warning');
+        else showToast('人工复核已保存', 'success');
+        if (activeAgentEvalRunId) await loadAgentEvalJudgeEvidence(activeAgentEvalRunId);
+    });
+}
+
+async function loadAgentEvalJudgeEvidence(evalRunId) {
+    if (!evalRunId) return;
+    const response = await apiFetch(`${API_BASE}/agents/evaluations/runs/${encodeURIComponent(evalRunId)}/judges`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) renderAgentEvalJudgeEvidence(data.data || []);
+}
+
 function renderAgentEvalRunDetail(payload = {}) {
     const target = document.getElementById('agent-eval-run-detail');
     if (!target) return;
@@ -117,6 +166,10 @@ function renderAgentEvalRunDetail(payload = {}) {
             <div><span>进度</span><strong>${Number(summary.completed || 0)}/${Number(summary.total || 0)}</strong><small>${agentEscape(agentEvalStatusLabel(batch.status))}</small></div>
             <div><span>总用量</span><strong>${Number(summary.totalTokens || 0).toLocaleString()}</strong><small>${Number(summary.durationMs || 0).toLocaleString()} 毫秒</small></div>
         </div>
+        <div class="agent-eval-judge-toolbar">
+            <span>独立裁判会使用与被测模型不同的 Profile；结论分歧或低置信度必须人工复核。</span>
+            <button type="button" class="btn-secondary" data-agent-eval-run-judges ${batch.status === 'completed' ? '' : 'disabled'}>运行独立裁判</button>
+        </div>
         <div class="agent-eval-results">
             ${results.map(result => {
                 const graded = result.grader_results || {};
@@ -129,6 +182,7 @@ function renderAgentEvalRunDetail(payload = {}) {
                         <div class="agent-eval-result-body">
                             ${result.error_message ? `<div class="agent-eval-error">${agentEscape(result.error_message)}</div>` : ''}
                             <div class="agent-eval-rules">${(graded.rules || []).map(agentEvalRuleMarkup).join('') || '<span>等待评分</span>'}</div>
+                            <div class="agent-eval-judge-evidence" data-agent-eval-judge-result="${agentEscapeAttr(result.id)}"><span class="agent-eval-judge-empty">正在读取裁判证据...</span></div>
                             ${result.actual_output ? `<details class="agent-eval-output"><summary>查看实际输出</summary>${renderAgentFinalAnswer(result.actual_output)}</details>` : ''}
                             ${result.agent_run_id ? `<button type="button" class="btn-secondary" data-agent-eval-open-run="${agentEscapeAttr(result.agent_run_id)}">查看任务追踪</button>` : ''}
                         </div>
@@ -140,6 +194,8 @@ function renderAgentEvalRunDetail(payload = {}) {
     target.querySelectorAll('[data-agent-eval-open-run]').forEach(button => {
         button.addEventListener('click', () => window.Pivot.legacy.openAgentRun(button.dataset.agentEvalOpenRun, { returnTab: 'workbench', returnSubview: 'quality', returnLabel: '质量评测' }));
     });
+    target.querySelector('[data-agent-eval-run-judges]')?.addEventListener('click', () => runAgentEvalJudges(batch.id));
+    if (batch.status === 'completed') loadAgentEvalJudgeEvidence(batch.id).catch(() => {});
 }
 
 async function loadAgentEvalRun(evalRunId, options = {}) {
@@ -225,7 +281,7 @@ function defaultAgentEvalCase(seed = null) {
         input: seed?.goal || '',
         input_variables: {},
         expected_output: '',
-        assertions: { requiredPhrases: [], forbiddenPhrases: [], minLength: 0, maxDurationMs: 0, maxTokens: 0, requireJson: false, outputSchema: {} }
+        assertions: { requiredPhrases: [], forbiddenPhrases: [], requiredEvidencePhrases: [], evaluationTier: 'scenario', minLength: 0, maxDurationMs: 0, maxTokens: 0, requireJson: false, outputSchema: {} }
     };
 }
 
@@ -243,6 +299,8 @@ function renderAgentEvalEditorCases() {
                     <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-case-${index}-input">任务输入</label><textarea id="agent-eval-case-${index}-input" class="form-input" data-eval-field="input" rows="2">${agentEscape(item.input || '')}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-required">必须包含</label><textarea id="agent-eval-case-${index}-required" class="form-input" data-eval-field="requiredPhrases" rows="2" placeholder="每行一个关键短语">${agentEscape((assertions.requiredPhrases || []).join('\n'))}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-forbidden">禁止包含</label><textarea id="agent-eval-case-${index}-forbidden" class="form-input" data-eval-field="forbiddenPhrases" rows="2" placeholder="每行一个禁用短语">${agentEscape((assertions.forbiddenPhrases || []).join('\n'))}</textarea></div>
+                    <div class="modal-form-field"><label for="agent-eval-case-${index}-tier">评测层级</label><select id="agent-eval-case-${index}-tier" class="form-input" data-eval-field="evaluationTier"><option value="legacy" ${assertions.evaluationTier === 'legacy' ? 'selected' : ''}>未分层（不可用于组织发布）</option><option value="contract" ${assertions.evaluationTier === 'contract' ? 'selected' : ''}>contract · 契约/安全硬门</option><option value="scenario" ${assertions.evaluationTier === 'scenario' || !assertions.evaluationTier ? 'selected' : ''}>scenario · 真实业务场景</option><option value="adversarial" ${assertions.evaluationTier === 'adversarial' ? 'selected' : ''}>adversarial · 对抗/故障场景</option></select></div>
+                    <div class="modal-form-field modal-form-field--span-2"><label for="agent-eval-case-${index}-evidence">必须包含的证据锚点</label><textarea id="agent-eval-case-${index}-evidence" class="form-input" data-eval-field="requiredEvidencePhrases" rows="2" placeholder="每行一个可审计来源、产物或验收锚点">${agentEscape((assertions.requiredEvidencePhrases || []).join('\n'))}</textarea></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-min-length">最少字数</label><input id="agent-eval-case-${index}-min-length" class="form-input" data-eval-field="minLength" type="number" min="0" value="${Number(assertions.minLength || 0)}"></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-max-duration">最长耗时（毫秒）</label><input id="agent-eval-case-${index}-max-duration" class="form-input" data-eval-field="maxDurationMs" type="number" min="0" value="${Number(assertions.maxDurationMs || 0)}"></div>
                     <div class="modal-form-field"><label for="agent-eval-case-${index}-max-tokens">输出用量上限</label><input id="agent-eval-case-${index}-max-tokens" class="form-input" data-eval-field="maxTokens" type="number" min="0" value="${Number(assertions.maxTokens || 0)}"></div>
@@ -291,6 +349,8 @@ function collectAgentEvalEditorCases(throwOnInvalid = true) {
             assertions: {
                 requiredPhrases: value('requiredPhrases')?.value.split(/\n/).map(text => text.trim()).filter(Boolean) || [],
                 forbiddenPhrases: value('forbiddenPhrases')?.value.split(/\n/).map(text => text.trim()).filter(Boolean) || [],
+                requiredEvidencePhrases: value('requiredEvidencePhrases')?.value.split(/\n/).map(text => text.trim()).filter(Boolean) || [],
+                evaluationTier: value('evaluationTier')?.value || 'legacy',
                 minLength: Number(value('minLength')?.value || 0),
                 maxDurationMs: Number(value('maxDurationMs')?.value || 0),
                 maxTokens: Number(value('maxTokens')?.value || 0),
@@ -466,6 +526,109 @@ function deleteAgentEvalSuite(suiteId) {
     });
 }
 
+async function loadAgentJudgeProfiles(options = {}) {
+    if (agentJudgeProfilesCache.length && !options.force) return agentJudgeProfilesCache;
+    const response = await apiFetch(`${API_BASE}/agents/evaluations/judge-profiles`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '裁判 Profile 加载失败');
+    agentJudgeProfilesCache = data.data || [];
+    return agentJudgeProfilesCache;
+}
+
+function ensureAgentJudgeProfileModal() {
+    let modal = document.getElementById('agent-judge-profile-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'agent-judge-profile-modal';
+    modal.className = 'modal-overlay hidden agent-eval-editor-overlay';
+    PivotSafeHtml.setHtml(modal, `
+        <div class="modal agent-eval-editor-modal agent-judge-profile-modal">
+            <div class="agent-config-modal-head"><div class="agent-eval-editor-heading"><h3>独立裁判 Profile</h3><p>裁判模型必须与被测模型不同；组织发布需要两名独立裁判且无分歧。</p></div></div>
+            <div class="agent-eval-editor-body">
+                <section class="agent-eval-editor-section"><div id="agent-judge-profile-list" class="agent-judge-profile-list"></div></section>
+                <section class="agent-eval-editor-section">
+                    <div class="agent-eval-editor-section-head"><strong>新建或更新 Profile</strong></div>
+                    <div class="modal-form-grid modal-form-grid--3 agent-eval-suite-fields">
+                        <div class="modal-form-field"><label for="agent-judge-name">名称</label><input id="agent-judge-name" class="form-input" maxlength="160" placeholder="例如：证据完整性裁判"></div>
+                        <div class="modal-form-field"><label for="agent-judge-model">裁判模型</label><select id="agent-judge-model" class="form-input"></select></div>
+                        <div class="modal-form-field"><label for="agent-judge-prompt-version">Prompt 版本</label><input id="agent-judge-prompt-version" class="form-input" value="v1" maxlength="80"></div>
+                        <div class="modal-form-field modal-form-field--span-2"><label for="agent-judge-criteria">评分准则</label><textarea id="agent-judge-criteria" class="form-input" rows="4" placeholder="每行一条，例如：结论必须由证据支持"></textarea></div>
+                        <div class="modal-form-field"><label for="agent-judge-hard-rules">硬规则</label><textarea id="agent-judge-hard-rules" class="form-input" rows="4" placeholder="每行一条，例如：不得泄露密钥"></textarea></div>
+                    </div>
+                </section>
+            </div>
+            <div class="agent-eval-editor-footer"><button type="button" class="btn-secondary" data-agent-judge-close>关闭</button><button type="button" class="btn-primary" data-agent-judge-save>保存并启用</button></div>
+        </div>
+    `);
+    document.body.appendChild(modal);
+    modal.addEventListener('click', event => {
+        if (event.target.closest('[data-agent-judge-close]')) modal.classList.add('hidden');
+    });
+    modal.querySelector('[data-agent-judge-save]').addEventListener('click', () => saveAgentJudgeProfile());
+    return modal;
+}
+
+function renderAgentJudgeProfileList(modal, profiles = []) {
+    const list = modal.querySelector('#agent-judge-profile-list');
+    if (!list) return;
+    PivotSafeHtml.setHtml(list, profiles.length ? profiles.map(profile => `
+        <article class="agent-judge-profile-row"><div><strong>${agentEscape(profile.name)}</strong><span>模型 ${Number(profile.modelId)} · ${agentEscape(profile.promptVersion)} · ${agentEscape(profile.status)}</span></div><small>${agentEscape((profile.rubric?.criteria || []).join('；'))}</small></article>
+    `).join('') : '<div class="empty-state compact">尚无已启用的裁判 Profile。至少配置两个独立模型，才能用于组织发布门禁。</div>');
+}
+
+async function openAgentJudgeProfiles() {
+    const modal = ensureAgentJudgeProfileModal();
+    const [profiles] = await Promise.all([loadAgentJudgeProfiles({ force: true }), window.Pivot.legacy._cachedAgentModels || []]);
+    const models = window.Pivot.legacy._cachedAgentModels || [];
+    PivotSafeHtml.setHtml(modal.querySelector('#agent-judge-model'), `<option value="">请选择可用模型</option>${models.map(model => `<option value="${agentEscapeAttr(model.id)}">${agentEscape(model.name)}</option>`).join('')}`);
+    renderAgentJudgeProfileList(modal, profiles);
+    modal.classList.remove('hidden');
+}
+
+async function saveAgentJudgeProfile() {
+    const modal = document.getElementById('agent-judge-profile-modal');
+    if (!modal) return;
+    try {
+        const name = modal.querySelector('#agent-judge-name').value.trim();
+        const modelId = modal.querySelector('#agent-judge-model').value;
+        const criteria = modal.querySelector('#agent-judge-criteria').value.split(/\n/).map(value => value.trim()).filter(Boolean);
+        const hardRules = modal.querySelector('#agent-judge-hard-rules').value.split(/\n/).map(value => value.trim()).filter(Boolean);
+        if (!name || !modelId || !criteria.length) throw new Error('请填写 Profile 名称、裁判模型和至少一条评分准则');
+        const response = await apiFetch(`${API_BASE}/agents/evaluations/judge-profiles`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, modelId, promptVersion: modal.querySelector('#agent-judge-prompt-version').value.trim() || 'v1', rubric: { criteria, hardRules }, status: 'active' })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || '裁判 Profile 保存失败');
+        modal.querySelector('#agent-judge-name').value = '';
+        modal.querySelector('#agent-judge-criteria').value = '';
+        modal.querySelector('#agent-judge-hard-rules').value = '';
+        await loadAgentJudgeProfiles({ force: true });
+        renderAgentJudgeProfileList(modal, agentJudgeProfilesCache);
+        showToast('裁判 Profile 已保存并启用', 'success');
+    } catch (error) {
+        showToast(error.message || '裁判 Profile 保存失败', 'error');
+    }
+}
+
+function runAgentEvalJudges(evalRunId) {
+    window.Pivot.legacy.showConfirm('运行独立裁判', '将调用已启用的裁判模型评估本批次结果。裁判模型必须不同于被测模型，并计入模型用量。确定继续吗？', async () => {
+        try {
+            const profiles = await loadAgentJudgeProfiles({ force: true });
+            if (profiles.length < 2) throw new Error('组织发布门禁至少需要两个已启用的独立裁判 Profile，请先完成配置');
+            const response = await apiFetch(`${API_BASE}/agents/evaluations/runs/${encodeURIComponent(evalRunId)}/judges`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileIds: profiles.map(profile => profile.id) })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || '独立裁判运行失败');
+            await loadAgentEvalJudgeEvidence(evalRunId);
+            showToast('独立裁判已完成；如有分歧将要求人工复核', 'success');
+        } catch (error) {
+            showToast(error.message || '独立裁判运行失败', 'error');
+        }
+    });
+}
+
 function bindAgentEvaluationCenter() {
     const createButton = document.getElementById('agent-eval-create-btn');
     if (createButton && createButton.dataset.boundAgentEval !== '1') {
@@ -476,6 +639,11 @@ function bindAgentEvaluationCenter() {
     if (refreshButton && refreshButton.dataset.boundAgentEval !== '1') {
         refreshButton.dataset.boundAgentEval = '1';
         refreshButton.addEventListener('click', () => loadAgentEvaluationSuites({ keepDetail: true }).catch(error => showToast(error.message, 'error')));
+    }
+    const judgesButton = document.getElementById('agent-eval-judges-btn');
+    if (judgesButton && judgesButton.dataset.boundAgentEval !== '1') {
+        judgesButton.dataset.boundAgentEval = '1';
+        judgesButton.addEventListener('click', () => openAgentJudgeProfiles().catch(error => showToast(error.message, 'error')));
     }
 }
 

@@ -2,12 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 const entries = JSON.parse(fs.readFileSync(path.join(__dirname, 'async_db_calls_allowlist.json'), 'utf8'));
-const signatures = new Set(entries.map(item => `${item.file}|${item.callee}|${item.code}`));
+const signatures = new Set(entries.map(item => `${item.file}|${item.callee}|${item.code}|${item.line || ''}`));
 const root = path.resolve(__dirname, '..');
 
 function isAllowedFinding(finding = {}) {
     const file = String(finding.file || '').replace(/\\/g, '/');
-    return signatures.has(`${file}|${finding.callee || ''}|${finding.code || ''}`);
+    return signatures.has(`${file}|${finding.callee || ''}|${finding.code || ''}|${finding.line || ''}`)
+        || signatures.has(`${file}|${finding.callee || ''}|${finding.code || ''}|`);
 }
 
 function validateAllowlist(targetFiles = []) {
@@ -15,7 +16,7 @@ function validateAllowlist(targetFiles = []) {
     const failures = [];
     const seen = new Set();
     for (const entry of entries) {
-        const signature = `${entry.file}|${entry.callee}|${entry.code}`;
+        const signature = `${entry.file}|${entry.callee}|${entry.code}|${entry.line || ''}`;
         if (seen.has(signature)) failures.push(`重复白名单签名：${signature}`);
         seen.add(signature);
         if (!targets.has(entry.file)) {

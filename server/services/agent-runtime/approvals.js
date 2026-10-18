@@ -24,10 +24,10 @@ function createApprovalHelpers({
             && String(grant.key || '') === String(approvalKey || '')
             && grant.inputHash === hash
             && (!grant.expiresAt || Date.parse(grant.expiresAt) > Date.now()));
-        if (grants.length) return Boolean(exactGrant);
-        const approvedTools = Array.isArray(metadata.approvedTools) ? metadata.approvedTools : [];
-        const approvedKeys = Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : [];
-        return (approvalKey && approvedKeys.includes(approvalKey)) || approvedTools.includes(toolName);
+        // 历史 approvedTools/approvedApprovalKeys 只绑定工具名或节点名，无法证明
+        // 输入、资源和有效期一致。高风险执行不得回退到这种宽授权记录；旧运行必须
+        // 重新走审批，而不是把兼容性当作权限扩大。
+        return Boolean(exactGrant);
     }
 
     function shouldPauseForApproval(run, tool, approvalKey = '', input = {}) {

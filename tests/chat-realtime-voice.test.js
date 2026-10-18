@@ -21,7 +21,7 @@ function createStream() {
     return { stream: { getTracks: () => [track] }, track };
 }
 
-function loadRealtimeVoice({ getUserMedia }) {
+function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null }) {
     const modules = new Map();
     const toasts = [];
     const requests = [];
@@ -41,6 +41,7 @@ function loadRealtimeVoice({ getUserMedia }) {
         showToast: (message, level) => toasts.push({ message, level }),
         apiFetch: async (url, options = {}) => {
             requests.push({ url, options });
+            if (apiFetchHandler) return await apiFetchHandler(url, options);
             return {
                 ok: true,
                 json: async () => ({ voiceSession: { id: 'voice-1' } })
@@ -105,4 +106,31 @@ test('实时语音将不存在的麦克风设备转换为可操作提示且不�
         level: 'error',
         message: '未检测到可用的麦克风。请确认系统已启用输入设备，并允许当前浏览器或桌面客户端访问麦克风后重试。'
     });
+});
+
+test('实时语音把明确任务控制口令送往绑定会话，而不提交为聊天文本', async () => {
+    const { stream } = createStream();
+    const voice = loadRealtimeVoice({
+        getUserMedia: async () => stream,
+        apiFetchHandler: async url => ({
+            ok: true,
+            json: async () => url.endsWith('/task-control')
+                ? { message: '任务已暂停，可说“继续任务”从安全检查点续跑。' }
+                : { voiceSession: { id: 'voice-1' } }
+        })
+    });
+    try {
+        const session = await voice.api.startRealtimeVoice();
+        session.recognition.onresult({
+            resultIndex: 0,
+            results: [{ isFinal: true, 0: { transcript: '暂停任务' } }]
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const taskControl = voice.requests.find(item => item.url.endsWith('/task-control'));
+        assert.ok(taskControl);
+        assert.equal(JSON.parse(taskControl.options.body).action, 'pause');
+        assert.equal(voice.elements['user-input'].value, '');
+    } finally {
+        voice.api.stopRealtimeVoice();
+    }
 });

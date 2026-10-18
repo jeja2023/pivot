@@ -14,8 +14,9 @@ function extractNetworkUrl(input = {}) {
 function sandboxChoice(tool, context = {}) {
     const name = String(tool?.name || '').trim();
     const explicit = String(context.sandboxMode || context.sandbox_mode || '').trim().toLowerCase();
-    const required = ['agent.code', 'workflow.foreach', 'terminal.runtime'].includes(name)
-        && (context.autonomous === true || name === 'terminal.runtime');
+    // 动态代码与终端始终是高风险执行面；不能因为调用入口不是 autonomous
+    // 而退化为宿主进程执行。审批只决定是否执行，不改变强隔离前提。
+    const required = ['agent.code', 'workflow.foreach', 'terminal.runtime'].includes(name);
     if (required) return { mode: explicit || 'workspace-worker', required: true, escalationAllowed: false };
     if (explicit) return { mode: explicit, required: false, escalationAllowed: false };
     return { mode: 'none', required: false, escalationAllowed: false };

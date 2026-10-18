@@ -1,0 +1,66 @@
+[
+  {
+    "id": "security-approval-zh",
+    "goal": "完成安全发布审计",
+    "constraints": ["不得泄露访问凭据", "生产发布必须经过人工审批", "结论必须包含证据引用"],
+    "pendingWork": ["等待审批结果", "输出发布审计报告"],
+    "evidenceRefs": ["artifact-cas://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "data-residency-zh",
+    "goal": "核验数据驻留配置",
+    "constraints": ["用户数据不得离开华北区域", "发现跨区副本必须阻断交付"],
+    "pendingWork": ["核验存储策略", "提交例外审批单"],
+    "evidenceRefs": ["artifact-cas://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "rollback-en",
+    "goal": "Validate a staged rollout",
+    "constraints": ["Rollback must be automatic on error budget breach", "Do not claim completion before verifier approval"],
+    "pendingWork": ["Collect canary metrics", "Wait for verifier decision"],
+    "evidenceRefs": ["artifact-cas://cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "browser-upload",
+    "goal": "执行受控浏览器表单提交",
+    "constraints": ["上传文件前必须二次确认", "Cookie 和令牌不得写入模型上下文", "失败后必须提供人工接管入口"],
+    "pendingWork": ["观察上传前页面", "等待用户确认"],
+    "evidenceRefs": ["artifact-cas://dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "workspace-change",
+    "goal": "完成工作区代码改造",
+    "constraints": ["只能在影子工作树修改", "必须运行格式化与测试", "主工作区写入需要审批"],
+    "pendingWork": ["生成可审查 Diff", "执行回归测试"],
+    "evidenceRefs": ["artifact-cas://eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "multi-agent",
+    "goal": "汇合多 Agent 审计结果",
+    "constraints": ["子任务不得扩大父级工具权限", "验证失败的 Handoff 不得被汇合为完成", "资源租约冲突必须可追溯"],
+    "pendingWork": ["等待三个子任务 Handoff", "执行 Supervisor 验收"],
+    "evidenceRefs": ["artifact-cas://ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "medical-sensitive",
+    "goal": "整理敏感健康数据报告",
+    "constraints": ["不得在摘要中暴露身份证号", "高风险结论必须标注待专业人员复核"],
+    "pendingWork": ["完成脱敏检查", "提交专业复核"],
+    "evidenceRefs": ["artifact-cas://1111111111111111111111111111111111111111111111111111111111111111"],
+    "minSavingsRate": 0.35
+  },
+  {
+    "id": "incident-response",
+    "goal": "处理生产故障复盘",
+    "constraints": ["不得删除原始事件证据", "缓解措施必须可回滚", "未满足 SLO 时不得关闭事件"],
+    "pendingWork": ["关联 Trace 证据", "复核 SLO 恢复"],
+    "evidenceRefs": ["artifact-cas://2222222222222222222222222222222222222222222222222222222222222222"],
+    "minSavingsRate": 0.35
+  }
+]

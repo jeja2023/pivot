@@ -27,7 +27,7 @@ function buildBrowserContextOptions(options = {}) {
         userDataDir: options.userDataDir || createIsolatedProfile(options.profileRoot, options.taskId),
         headless: options.headless !== false,
         viewport: options.viewport || { width: 1440, height: 900 },
-        acceptDownloads: false,
+        acceptDownloads: options.acceptDownloads === true,
         javaScriptEnabled: true,
         serviceWorkers: 'block'
     };
@@ -77,7 +77,7 @@ function loadPlaywrightBrowser(engine = 'chromium') {
     return browser;
 }
 
-async function attachBrowserNetworkGuards(context, policy) {
+async function attachBrowserNetworkGuards(context, policy, options = {}) {
     await context.route('**/*', async route => {
         try {
             const request = route.request();
@@ -114,7 +114,10 @@ async function attachBrowserNetworkGuards(context, policy) {
                 try { await page.close({ runBeforeUnload: false }); } catch (_) {}
             }
         });
-        page.on('download', download => download.cancel().catch(() => {}));
+        page.on('download', download => {
+            if (typeof options.isDownloadAllowed === 'function' && options.isDownloadAllowed(page) === true) return;
+            download.cancel().catch(() => {});
+        });
         page.on('close', () => {
             requestBytes.clear();
             try { cdp?.detach?.().catch?.(() => {}); } catch (_) {}
@@ -140,7 +143,7 @@ async function createManagedBrowserContext(options = {}) {
     const profile = path.resolve(String(contextOptions.userDataDir));
     delete contextOptions.userDataDir;
     const context = await browser.launchPersistentContext(profile, contextOptions);
-    await attachBrowserNetworkGuards(context, policy);
+    await attachBrowserNetworkGuards(context, policy, { isDownloadAllowed: options.isDownloadAllowed });
     return context;
 }
 

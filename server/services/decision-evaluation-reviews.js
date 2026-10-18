@@ -15,11 +15,21 @@ const INSERT_CASE_SQL = [
     'INSERT INTO decision_evaluation_cases (set_version, case_id, case_digest, scenario, language, input_context, candidate_actions, review_status, expected_action_id, reviewed_by, reviewed_at, review_note, updated_at)',
     "VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, 'pending_human_review', '', NULL, NULL, '', ?)"
 ].join(' ');
-const REVIEW_CASE_SQL = [
+const VERIFY_CASE_SQL = [
     "UPDATE decision_evaluation_cases SET review_status = 'verified', expected_action_id = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?, updated_at = ?",
     'WHERE set_version = ? AND case_id = ? RETURNING *'
 ].join(' ');
+const PENDING_CASE_SQL = [
+    "UPDATE decision_evaluation_cases SET review_status = ?, expected_action_id = '', reviewed_by = NULL, reviewed_at = NULL, review_note = '', updated_at = ?",
+    'WHERE set_version = ? AND case_id = ? RETURNING *'
+].join(' ');
 const INSERT_REVIEW_SQL = 'INSERT INTO decision_evaluation_reviews (id, set_version, case_id, expected_action_id, reviewer_id, review_note, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?)';
+const LATEST_REVIEWERS_SQL = [
+    'SELECT DISTINCT ON (reviewer_id) reviewer_id, expected_action_id',
+    'FROM decision_evaluation_reviews',
+    'WHERE set_version = ? AND case_id = ? AND reviewer_id IS NOT NULL',
+    'ORDER BY reviewer_id, reviewed_at DESC, id DESC'
+].join(' ');
 const LIST_CASES_SQL = [
     'SELECT c.set_version, c.case_id, c.scenario, c.language, c.input_context, c.candidate_actions, c.review_status,',
     'c.expected_action_id, c.reviewed_by, c.reviewed_at, c.review_note, c.updated_at,',
@@ -202,9 +212,19 @@ async function reviewDecisionEvaluationCase({ version = '', caseId = '', expecte
         if (!allowed.has(actionId)) throw new Error('decision_evaluation_action_not_allowed');
         const now = getBeijingTimestamp();
         const note = String(reviewNote || '').trim().slice(0, 2000);
-        const updated = await trx.queryOne(REVIEW_CASE_SQL, [actionId, safeReviewerId, now, note, now, setVersion, safeCaseId]);
         await trx.execute(INSERT_REVIEW_SQL, ['evaluation_review_' + crypto.randomUUID(), setVersion, safeCaseId, actionId, safeReviewerId, note, now]);
-        return updated ? { version: setVersion, caseId: safeCaseId, expectedActionId: actionId, reviewedBy: safeReviewerId, reviewedAt: now, reviewNote: note } : null;
+        const latest = await trx.query(LATEST_REVIEWERS_SQL, [setVersion, safeCaseId]);
+        const reviewers = Array.isArray(latest) ? latest : [];
+        const sameAction = reviewers.filter(item => normalizeActionId(item.expected_action_id) === actionId);
+        const consensus = reviewers.length >= 2 && sameAction.length === reviewers.length;
+        const updated = consensus
+            ? await trx.queryOne(VERIFY_CASE_SQL, [actionId, safeReviewerId, now, note, now, setVersion, safeCaseId])
+            : await trx.queryOne(PENDING_CASE_SQL, [reviewers.length > 1 ? 'human_review_conflict' : 'pending_human_review', now, setVersion, safeCaseId]);
+        return updated ? {
+            version: setVersion, caseId: safeCaseId, expectedActionId: consensus ? actionId : '', reviewedBy: consensus ? safeReviewerId : null,
+            reviewedAt: consensus ? now : null, reviewNote: consensus ? note : '', reviewStatus: consensus ? 'verified' : (reviewers.length > 1 ? 'human_review_conflict' : 'pending_human_review'),
+            distinctReviewerCount: reviewers.length, requiresAnotherReviewer: !consensus
+        } : null;
     });
 }
 

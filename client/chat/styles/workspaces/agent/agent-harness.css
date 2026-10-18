@@ -212,6 +212,36 @@
     overscroll-behavior: contain;
 }
 
+.agent-skill-discovery {
+    margin-bottom: 16px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-side);
+}
+
+.agent-skill-discovery-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+.agent-skill-discovery-form label {
+    display: grid;
+    flex: 1 1 145px;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.agent-skill-discovery-form .form-input { margin: 0; }
+.agent-skill-discovery-form button { min-height: 34px; }
+.agent-skill-discovery-detail { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.agent-skill-discovery-detail p { color: var(--text-muted); font-size: 0.76rem; overflow-wrap: anywhere; }
+.agent-skill-discovery-detail pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .agent-capability-catalog-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -974,6 +1004,39 @@
 
 .agent-harness-panel.hidden {
     display: none !important;
+}
+
+.agent-lifecycle-hook-audit-head {
+    margin-top: 16px;
+}
+
+.agent-harness-panel[data-agent-harness-section="hooks"] .aht td small {
+    display: block;
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: .66rem;
+}
+
+.agent-hook-package-import {
+    display: grid;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--primary, #3b82f6) 24%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--primary, #3b82f6) 4%, transparent);
+}
+
+.agent-hook-package-import > summary {
+    cursor: pointer;
+    color: var(--text-primary, #0f172a);
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+body.dark-mode .agent-hook-package-import,
+.dark-mode .agent-hook-package-import {
+    border-color: rgba(96, 165, 250, 0.35);
+    background: rgba(30, 64, 175, 0.14);
 }
 
 .agent-harness-panel-head,
@@ -4527,4 +4590,33 @@ body.dark-mode .agent-goal-template-chip:hover,
 body.dark-mode .agent-goal-template-chip .chip-name,
 .dark-mode .agent-goal-template-chip .chip-name {
     color: #f8fafc;
+}
+
+.agent-quality-acceptance {
+    margin-top: 12px;
+    padding: 11px 12px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-side, #f8fafc) 78%, transparent);
+}
+
+.agent-quality-acceptance > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.agent-quality-acceptance strong { color: var(--text-main, #1e293b); font-size: .82rem; }
+.agent-quality-acceptance span { color: var(--text-muted, #64748b); font-size: .74rem; }
+.agent-quality-acceptance ul { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
+.agent-quality-acceptance li { display: flex; gap: 8px; align-items: baseline; }
+.agent-quality-acceptance li b { min-width: 132px; color: var(--text-main, #1e293b); font-size: .74rem; }
+.agent-quality-acceptance-submit { margin-top: 10px; }
+.agent-quality-acceptance-submit summary { color: var(--text-muted, #64748b); cursor: pointer; font-size: .78rem; }
+.agent-quality-acceptance-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+.agent-quality-acceptance-form label { display: grid; gap: 4px; color: var(--text-muted, #64748b); font-size: .72rem; }
+.agent-quality-acceptance-form .agent-quality-acceptance-summary { grid-column: span 3; }
+.agent-quality-acceptance-form textarea { resize: vertical; min-height: 54px; }
+.agent-quality-acceptance-form button { justify-self: start; }
+
+@media (max-width: 720px) {
+    .agent-quality-acceptance > div, .agent-quality-acceptance li { display: grid; gap: 3px; }
+    .agent-quality-acceptance li b { min-width: 0; }
+    .agent-quality-acceptance-form { grid-template-columns: 1fr; }
+    .agent-quality-acceptance-form .agent-quality-acceptance-summary { grid-column: auto; }
 }

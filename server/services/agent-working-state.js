@@ -3,6 +3,7 @@
 const { normalizeTaskContract } = require('./agent-verification');
 
 const MAX_WORKING_STATE_ITEMS = 32;
+const CAS_REFERENCE_RE = /^artifact-cas:\/\/[a-f0-9]{16,64}$/;
 
 function text(value, max = 1000) {
     return String(value ?? '').replace(/[\u0000-\u001F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -23,7 +24,9 @@ function normalizeItems(value, prefix, max = MAX_WORKING_STATE_ITEMS) {
             text: text(sourceItem.text || sourceItem.summary || sourceItem.value || '', 2000),
             source: text(sourceItem.source || 'run', 80) || 'run',
             status: text(sourceItem.status || 'active', 40) || 'active',
-            at: sourceItem.at || sourceItem.createdAt || null
+            at: sourceItem.at || sourceItem.createdAt || null,
+            rawOutputRef: CAS_REFERENCE_RE.test(String(sourceItem.rawOutputRef || sourceItem.raw_output_ref || '')) ? String(sourceItem.rawOutputRef || sourceItem.raw_output_ref) : '',
+            rawOutputDigest: /^[a-f0-9]{64}$/.test(String(sourceItem.rawOutputDigest || sourceItem.raw_output_digest || '')) ? String(sourceItem.rawOutputDigest || sourceItem.raw_output_digest) : ''
         };
     }).filter(item => item.text);
 }
@@ -91,12 +94,17 @@ function recordWorkingObservation(value, observation = {}, taskContract = {}, go
     const state = normalizeTaskWorkingState(value, taskContract, goal);
     const summary = text(observation.summary || observation.output?.text || observation.tool || observation.title || '', 2000);
     if (summary) {
+        const output = observation.output && typeof observation.output === 'object' ? observation.output : {};
         state.evidence.push({
             id: stableId('evidence', `${observation.tool || ''}_${summary}`, state.evidence.length),
             text: summary,
             source: text(observation.tool || observation.node || 'observation', 120),
             status: observation.error ? 'error' : 'observed',
-            at: new Date().toISOString()
+            at: new Date().toISOString(),
+            rawOutputRef: CAS_REFERENCE_RE.test(String(observation.rawOutputRef || output.rawOutputRef || output.raw_output_ref || ''))
+                ? String(observation.rawOutputRef || output.rawOutputRef || output.raw_output_ref) : '',
+            rawOutputDigest: /^[a-f0-9]{64}$/.test(String(observation.rawOutputDigest || output.rawOutputDigest || output.raw_output_digest || ''))
+                ? String(observation.rawOutputDigest || output.rawOutputDigest || output.raw_output_digest) : ''
         });
     }
     state.evidence = state.evidence.slice(-MAX_WORKING_STATE_ITEMS);
@@ -123,5 +131,6 @@ module.exports = {
     applyControlMessagesToWorkingState,
     buildWorkingStatePrompt,
     createTaskWorkingState,
+    normalizeTaskWorkingState,
     recordWorkingObservation
 };

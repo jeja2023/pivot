@@ -7,7 +7,13 @@ const test = require('node:test');
 const [migration] = require('../server/db/migrations/knowledge-derived-governance');
 const [qualityMigration] = require('../server/db/migrations/knowledge-derived-quality');
 const [qualityRepairMigration] = require('../server/db/migrations/knowledge-derived-quality-repair');
-const { enqueueKnowledgeSourceLifecycleEvent, handleKnowledgeSourceLifecycleEvent, lifecycleEventKey } = require('../server/services/knowledge-source-lifecycle');
+const {
+    enqueueKnowledgeSourceLifecycleEvent,
+    handleKnowledgeSourceLifecycleEvent,
+    knowledgeMemorySourceFingerprintInput,
+    knowledgeMemorySourceReference,
+    lifecycleEventKey
+} = require('../server/services/knowledge-source-lifecycle');
 const { scoreKnowledgeEntityResolutionCandidates } = require('../server/services/knowledge-entity-resolution');
 const { selectWikiManifestSources } = require('../server/services/knowledge-wiki');
 
@@ -61,6 +67,14 @@ test('知识来源生命周期事件键按来源版本稳定去重', () => {
     assert.notEqual(lifecycleEventKey(base), lifecycleEventKey({ ...base, payload: { sourceHash: 'b', versionId: 2 } }));
 });
 
+test('知识来源映射到稳定的长期记忆来源引用与版本化摘要输入', () => {
+    const event = { document_id: 18, legacy_doc_id: 8 };
+    assert.equal(knowledgeMemorySourceReference(event), 'knowledge_document:18');
+    assert.deepEqual(knowledgeMemorySourceFingerprintInput(event, { sourceHash: 'source-hash-v2', versionId: 3 }), {
+        sourceKind: 'knowledge_document', sourceRef: 'knowledge_document:18', content: 'source-hash-v2', version: '3'
+    });
+});
+
 test('资料状态变更可在调用方事务中写入可重试 outbox', async () => {
     const calls = [];
     await enqueueKnowledgeSourceLifecycleEvent({
@@ -95,11 +109,36 @@ test('失效来源事件同时失效图谱、Wiki 和 RAG 缓存', async () => {
     }, {
         graph: { invalidateKnowledgeGraphSources: async input => { calls.push(['graph', input]); return { relations: 2, mentions: 3 }; } },
         wiki: { markWikiPagesStaleForDocument: async input => { calls.push(['wiki', input]); return { stalePages: 4 }; } },
-        clearRagCacheForUser: userId => calls.push(['cache', userId])
+        clearRagCacheForUser: userId => calls.push(['cache', userId]),
+        memory: {
+            revokeMemoriesForSourceReference: async (...args) => { calls.push(['memory', args]); return { revoked: 2, evidenceRemoved: 2 }; }
+        }
     });
     assert.equal(result.graphInvalidated, 5);
     assert.equal(result.wikiResult.stalePages, 4);
-    assert.deepEqual(calls.map(item => item[0]), ['graph', 'wiki', 'cache']);
+    assert.equal(result.memoryResult.revoked, 2);
+    assert.deepEqual(calls.map(item => item[0]), ['graph', 'wiki', 'memory', 'cache']);
+});
+
+test('知识新版本使用服务器内计算的来源摘要收紧关联记忆', async () => {
+    const captured = [];
+    const result = await handleKnowledgeSourceLifecycleEvent({
+        user_id: 7, legacy_doc_id: 71, document_id: 17, event_type: 'manual_version_published',
+        payload: { sourceHash: 'new-content-hash', versionId: 4 }
+    }, {
+        graph: { rebuildGraphForDocument: async () => ({ entities: 1, relations: 2 }) },
+        wiki: { markWikiPagesStaleForDocument: async () => ({ stalePages: 1 }) },
+        clearRagCacheForUser: () => {},
+        memory: {
+            sourceFingerprint: input => { captured.push(['fingerprint', input]); return 'f'.repeat(64); },
+            markMemoriesForChangedSource: async (...args) => { captured.push(['changed', args]); return { reviewed: 3, memoryIds: [1, 2, 3] }; }
+        }
+    });
+    assert.equal(result.memoryResult.reviewed, 3);
+    assert.deepEqual(captured[0], ['fingerprint', {
+        sourceKind: 'knowledge_document', sourceRef: 'knowledge_document:17', content: 'new-content-hash', version: '4'
+    }]);
+    assert.equal(captured[1][1][1].sourceFingerprint, 'f'.repeat(64));
 });
 
 test('Graph-RAG 只能以有效来源证据辅助原文召回，Wiki 搜索具有正向相关筛选', () => {

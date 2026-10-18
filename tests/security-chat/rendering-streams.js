@@ -759,7 +759,7 @@ test('long-term memory table and modals use shared controls', () => {
     assert.match(memorySettings, /params\.set\('limit', String\(limit\)\)/);
     assert.match(memorySettings, /params\.set\('offset', String\(\(currentPage - 1\) \* limit\)\)/);
     assert.match(memorySettings, /renderMemoryPagination\('memories', total, requestedPage\)/);
-    assert.match(memorySettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*pending: '待确认',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
+    assert.match(memorySettings, /const MEMORY_STATUS_LABELS = \{\s*active: '活跃',\s*pending: '待确认',\s*review_required: '来源待复核',\s*disabled: '禁用',\s*deleted: '已删除'\s*\}/s);
     assert.match(memorySettings, /fetchMemoryEvaluationRuns/);
     assert.match(memorySettings, /runMemoryEvaluation/);
     assert.match(memorySettings, /formatMemoryStatusLabel\(memory\.status\)/);

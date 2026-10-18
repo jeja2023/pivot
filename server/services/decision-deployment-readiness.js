@@ -10,7 +10,8 @@ const { checkLayaDecisionHealth } = require('./decision-provider-health');
 const DECISION_MIGRATION_IDS = [
     '202609280001_decision_learning_foundations',
     '202609280002_decision_evaluation_governance',
-    '202609290002_decision_artifact_governance'
+    '202609290002_decision_artifact_governance',
+    '202610180015_decision_evaluation_dual_human_review'
 ];
 const MIGRATION_STATUS_SQL = 'SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id = ?) AS applied';
 

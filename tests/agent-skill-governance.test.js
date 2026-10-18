@@ -111,7 +111,7 @@ test('Capability Worker 只接受固定摘要镜像并在未启用时 fail-close
             return child;
         }
     });
-    assert.deepEqual(output, { ok: true });
+    assert.deepEqual(output, { ok: true, workerTrust: { verified: false, mode: 'not_required' } });
     assert.equal(launched.command, 'docker-test');
     const nameIndex = launched.args.indexOf('--name');
     assert.match(launched.args[nameIndex + 1], /^pivot-capability-[a-f0-9]{32}$/);

@@ -843,6 +843,33 @@
     gap: 4px;
     max-width: 100%;
 }
+.settings-workspace-view .memory-source-link-form {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+.settings-workspace-view .memory-source-link-form label {
+    display: grid;
+    flex: 1 1 auto;
+    gap: 4px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.settings-workspace-view .memory-source-link-form .form-input {
+    height: 30px;
+    min-width: 0;
+    font-size: 0.76rem;
+}
+.settings-workspace-view .memory-source-link-form .btn-secondary {
+    height: 30px;
+    flex: 0 0 auto;
+    font-size: 0.76rem;
+}
 .settings-workspace-view .memories-table .memory-source-btn,
 .settings-workspace-view .memory-action-buttons .btn-secondary,
 .settings-workspace-view .memory-action-buttons .btn-primary,

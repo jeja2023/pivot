@@ -8,7 +8,9 @@ const DEFAULT_NETWORK_POLICY = Object.freeze({
     block_private_ranges: true,
     block_loopback: true,
     block_link_local: true,
-    max_download_size_bytes: 52428800
+    max_download_size_bytes: 52428800,
+    // 上传只能来自已登记的受控产物；保留独立上限，避免下载策略被错误复用。
+    max_upload_size_bytes: 10485760
 });
 
 function normalizeNetworkPolicy(value = {}) {
@@ -18,7 +20,8 @@ function normalizeNetworkPolicy(value = {}) {
         ...source,
         allowed_origins: Array.isArray(source.allowed_origins || source.allowedOrigins) ? (source.allowed_origins || source.allowedOrigins).map(String) : [],
         allowed_redirect_origins: Array.isArray(source.allowed_redirect_origins || source.allowedRedirectOrigins) ? (source.allowed_redirect_origins || source.allowedRedirectOrigins).map(String) : [],
-        allowed_ports: Array.isArray(source.allowed_ports || source.allowedPorts) ? (source.allowed_ports || source.allowedPorts).map(Number).filter(Number.isInteger) : [...DEFAULT_NETWORK_POLICY.allowed_ports]
+        allowed_ports: Array.isArray(source.allowed_ports || source.allowedPorts) ? (source.allowed_ports || source.allowedPorts).map(Number).filter(Number.isInteger) : [...DEFAULT_NETWORK_POLICY.allowed_ports],
+        max_upload_size_bytes: Math.min(Math.max(Number(source.max_upload_size_bytes ?? source.maxUploadSizeBytes) || DEFAULT_NETWORK_POLICY.max_upload_size_bytes, 1), DEFAULT_NETWORK_POLICY.max_upload_size_bytes)
     };
 }
 

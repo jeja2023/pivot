@@ -250,7 +250,7 @@ const getModelDailyUsage = getModelDailyUsageAsync;
 // recordModelTokenUsage — 走写队列
 // ──────────────────────────────────────────────────────────────────────────
 
-function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inputTokens = 0, outputTokens = 0) {
+function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inputTokens = 0, outputTokens = 0, cache = {}) {
     const uid = typeof userId === 'number' ? userId : Number.parseInt(userId, 10);
     const mid = typeof modelId === 'number' ? modelId : Number.parseInt(modelId, 10);
     if (!uid || Number.isNaN(uid) || !mid || Number.isNaN(mid)) return;
@@ -264,8 +264,79 @@ function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inpu
         tokenCount: usage.totalTokens,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
+        cacheReadTokens: Math.max(0, Number(cache.cacheReadTokens ?? cache.cache_read_tokens ?? 0) || 0),
+        cacheCreationTokens: Math.max(0, Number(cache.cacheCreationTokens ?? cache.cache_creation_tokens ?? 0) || 0),
+        cacheObserved: cache.cacheObserved === true || cache.cache_observed === true,
         createdAt: getBeijingTimestamp()
     });
+}
+
+function normalizePromptCacheDays(value) {
+    return Math.max(1, Math.min(Number.parseInt(value, 10) || 30, 90));
+}
+
+function serializePromptCacheMetric(row = {}) {
+    const totalCalls = Number(row.total_calls || 0);
+    const observedCalls = Number(row.observed_calls || 0);
+    return {
+        source: String(row.source || ''),
+        modelId: Number(row.model_id || 0) || null,
+        modelName: String(row.model_name || row.model_id || '未知模型'),
+        totalCalls,
+        observedCalls,
+        observationRate: totalCalls > 0 ? observedCalls / totalCalls : null,
+        cacheReadTokens: Number(row.cache_read_tokens || 0),
+        cacheCreationTokens: Number(row.cache_creation_tokens || 0),
+        lastObservedAt: row.last_observed_at || null
+    };
+}
+
+/**
+ * 返回当前用户的提供方 Prompt Cache 原始观测，不把“未返回该字段”误判为未命中。
+ * 用量事件目前按用户而非租户写入，因而此接口刻意只返回调用者自身的数据；租户
+ * 汇总必须等待事件携带可验证 tenant_id 后再开放，不能以用户名或模型归属猜测。
+ */
+async function getPromptCacheTelemetry(user, options = {}) {
+    if (!user?.id) return { days: normalizePromptCacheDays(options.days), scope: 'user', totalCalls: 0, observedCalls: 0, observationRate: null, cacheReadTokens: 0, cacheCreationTokens: 0, lastObservedAt: null, byModel: [] };
+    const days = normalizePromptCacheDays(options.days);
+    const cutoff = getBeijingTimestamp(new Date(Date.now() - days * 86400000));
+    const [summary, rows] = await Promise.all([
+        queryOne(`
+            SELECT COUNT(*) AS total_calls,
+                COUNT(*) FILTER (WHERE cache_observed = TRUE) AS observed_calls,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+                MAX(created_at) FILTER (WHERE cache_observed = TRUE) AS last_observed_at
+            FROM model_usage_events
+            WHERE user_id = ? AND created_at >= ?
+        `, [user.id, cutoff]),
+        query(`
+            SELECT e.source, e.model_id, COALESCE(m.name, m.model_name, '') AS model_name,
+                COUNT(*) AS total_calls,
+                COUNT(*) FILTER (WHERE e.cache_observed = TRUE) AS observed_calls,
+                COALESCE(SUM(e.cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(e.cache_creation_tokens), 0) AS cache_creation_tokens,
+                MAX(e.created_at) FILTER (WHERE e.cache_observed = TRUE) AS last_observed_at
+            FROM model_usage_events e
+            LEFT JOIN models m ON m.id = e.model_id
+            WHERE e.user_id = ? AND e.created_at >= ?
+            GROUP BY e.source, e.model_id, m.name, m.model_name
+            ORDER BY last_observed_at DESC NULLS LAST, total_calls DESC, e.source ASC
+            LIMIT 30
+        `, [user.id, cutoff])
+    ]);
+    const metric = serializePromptCacheMetric(summary);
+    return {
+        days,
+        scope: 'user',
+        totalCalls: metric.totalCalls,
+        observedCalls: metric.observedCalls,
+        observationRate: metric.observationRate,
+        cacheReadTokens: metric.cacheReadTokens,
+        cacheCreationTokens: metric.cacheCreationTokens,
+        lastObservedAt: metric.lastObservedAt,
+        byModel: rows.map(serializePromptCacheMetric)
+    };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -345,6 +416,8 @@ module.exports = {
     getModelDailyUsageAsync,
     getOrCreateEmbeddingUsageModelAsync,
     getUserAccessibleModelsAsync,
+    getPromptCacheTelemetry,
     recordModelTokenUsage,
+
     migrateModelSecrets
 };

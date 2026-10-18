@@ -1,0 +1,33 @@
+<section id="tab-content-decision-gold-review" class="admin-tab-content admin-only hidden" aria-labelledby="decision-gold-review-title">
+    <div class="settings-page-head">
+        <div>
+            <h3 id="decision-gold-review-title">冻结金标审核</h3>
+            <p>每个案例必须由两名不同管理员独立选择同一允许动作，才能成为可用于发布的金标。系统不会代填审核结论。</p>
+        </div>
+        <div class="settings-page-actions">
+            <label class="route-feedback-filter" for="decision-gold-review-version">
+                <span>冻结集版本</span>
+                <input id="decision-gold-review-version" class="form-input" value="v2" maxlength="128" aria-label="冻结集版本">
+            </label>
+            <button id="decision-gold-review-import" type="button" class="btn-secondary">导入冻结集</button>
+            <button id="decision-gold-review-refresh" type="button" class="btn-secondary">刷新</button>
+        </div>
+    </div>
+    <div id="decision-gold-review-summary" class="settings-state" role="status" aria-live="polite">尚未加载冻结金标审核队列。</div>
+    <div class="table-container route-feedback-table-wrap">
+        <table class="data-table compact-table route-feedback-table" aria-describedby="decision-gold-review-summary">
+            <thead>
+                <tr>
+                    <th class="text-center">案例</th>
+                    <th>场景</th>
+                    <th>脱敏路由上下文</th>
+                    <th>审核状态</th>
+                    <th>候选动作</th>
+                    <th>审核备注</th>
+                    <th class="text-center">提交</th>
+                </tr>
+            </thead>
+            <tbody id="decision-gold-review-list"></tbody>
+        </table>
+    </div>
+</section>

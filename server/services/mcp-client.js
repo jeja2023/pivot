@@ -840,7 +840,10 @@ async function executeMcpTool(fullName, input, user, options = {}) {
             const hasDirectLocalTool = directLocalTools.some(tool => tool.name === toolName);
             const result = hasDirectLocalTool
                 ? await executeLocalDeviceMcpTool(toolName, input || {}, user)
-                : await executeConnectorTool(toolName, input || {}, user);
+                : await executeConnectorTool(toolName, input || {}, user, {
+                    executionGrant: options.executionGrant,
+                    executionGrantExpected: options.executionGrantExpected
+                });
             options.signal?.throwIfAborted?.();
             recordMcpCallLog({
                 user,

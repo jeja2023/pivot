@@ -69,7 +69,9 @@ function createAgentRunFactory(deps = {}) {
     const {
         assertRunUserActive,
         enqueueAgentRun,
-        publishAgentRunEvent
+        publishAgentRunEvent,
+        createTaskTransaction,
+        persistWorkingMemoryRevision = async () => null
     } = deps;
 
     return async function createAgentRun({
@@ -225,6 +227,7 @@ function createAgentRunFactory(deps = {}) {
                 runMetadata.workflowVersion = resolvedWorkflow.version;
                 runMetadata.workflowVersionMode = resolvedWorkflow.mode;
                 runMetadata.workflowVersionId = resolvedWorkflow.version_id;
+                runMetadata.workflowReleaseId = resolvedWorkflow.releaseId || null;
                 runMetadata.workflowDependencyBinding = {
                     required: Boolean(resolvedWorkflow.dependency_binding?.required),
                     versionId: resolvedWorkflow.dependency_binding?.bound_version_id || null,
@@ -317,13 +320,43 @@ function createAgentRunFactory(deps = {}) {
             }
             throw err;
         }
-        await initializeAgentRunResources({
-            runId,
-            userId: user.id,
-            parentRunId,
-            tokenBudget: effectiveChildTokenBudget,
-            forkHistory: normalizedForkHistory
-        });
+        let taskTransaction = null;
+        try {
+            if (typeof createTaskTransaction === 'function') {
+                taskTransaction = await createTaskTransaction({
+                    run: { id: runId, user_id: user.id, tenant_id: user.tenant_id || user.tenantId || 0, goal: cleanGoal },
+                    user,
+                    taskContract: runMetadata.taskContract,
+                    workspaceSnapshot: {
+                        kind: 'run_control_plane',
+                        runMode: normalizedRunMode,
+                        createdAt: now
+                    }
+                });
+                runMetadata.taskTransactionId = taskTransaction.id;
+                runMetadata.taskTransactionStatus = taskTransaction.status;
+                await execute('UPDATE agent_runs SET metadata = ?::jsonb, updated_at = ? WHERE id = ? AND user_id = ?', [JSON.stringify(runMetadata), now, runId, user.id]);
+            }
+            await persistWorkingMemoryRevision({
+                run: { id: runId, user_id: user.id, goal: cleanGoal }, user,
+                state: runMetadata.workingState, taskContract: runMetadata.taskContract, reason: 'initial', now
+            });
+            await initializeAgentRunResources({
+                runId,
+                userId: user.id,
+                parentRunId,
+                tokenBudget: effectiveChildTokenBudget,
+                forkHistory: normalizedForkHistory
+            });
+        } catch (error) {
+            // 事务控制面是 Agent 任务的一部分；创建失败时不能留下可排队但
+            // 无法验收/回滚的半初始化任务。
+            await execute('DELETE FROM agent_runs WHERE id = ? AND user_id = ?', [runId, user.id]);
+            if (resourceReservation) {
+                try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
+            }
+            throw error;
+        }
         if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
             const { upsertDagNode } = require('../agent-dag-runtime');
             for (const node of runMetadata.dagSpec.nodes) {

@@ -3,7 +3,7 @@
  * 不保存本机绝对路径；实际路径始终只留在桌面端已有授权存储中。
  */
 const crypto = require('crypto');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { assertTenantContext } = require('./agent-tenant-context');
 const { loadActiveDevice, normalizeDeviceId } = require('./agent-local-devices');
@@ -11,12 +11,18 @@ const { getLocalDeviceMcpServerTypeForTool } = require('./local-device-mcp');
 const { isLocalBrowserConnectorTool, normalizeLocalBrowserGrant, normalizeLocalBrowserTask } = require('./local-browser-connector-tools');
 const { isLocalWorkspaceConnectorTool, normalizeWorkspaceGrant, normalizeWorkspaceTask } = require('./local-workspace-connector-tools');
 const { isLocalDesktopControlTool, normalizeDesktopControlGrant, normalizeDesktopControlTask } = require('./local-desktop-control-tools');
+const { verifyExecutionGrant } = require('./agent-execution-grant');
+const { consumeExecutionGrant } = require('./agent-execution-grant-ledger');
 
 const GRANT_TYPES = Object.freeze(['local_database', 'local_report_dir', 'local_browser', 'local_workspace', 'local_desktop_control']);
 const CONNECTOR_LEASE_SECONDS = 60;
 const CONNECTOR_TASK_TTL_SECONDS = 120;
 const LOCAL_BROWSER_TASK_TTL_SECONDS = 10 * 60;
 const CONNECTOR_MAX_ATTEMPTS = 3;
+const MUTATING_WORKSPACE_TOOLS = new Set([
+    'workspace.patch', 'workspace.install', 'workspace.test', 'workspace.git_worktree', 'workspace.git_worktree_remove',
+    'workspace.git_merge', 'workspace.git_abort_merge', 'workspace.git_commit', 'workspace.git_push', 'workspace.git_pr'
+]);
 
 function connectorError(message, code = 'LOCAL_CONNECTOR_INVALID', status = 400) {
     const error = new Error(message);
@@ -138,7 +144,36 @@ async function resolveConnectorDeviceForTool(user, toolName, input = {}, grantTy
     return resolveConnectorDeviceId(user, '', grantType);
 }
 
-async function createConnectorTask(toolName, input = {}, user) {
+function requiresConnectorExecutionGrant(toolName) {
+    return MUTATING_WORKSPACE_TOOLS.has(String(toolName || '').trim());
+}
+
+async function consumeConnectorExecutionGrant(toolName, input, user, options = {}, deps = {}) {
+    if (!requiresConnectorExecutionGrant(toolName)) return null;
+    const token = String(options.executionGrant || '').trim();
+    if (!token) throw connectorError('可变本机工作区操作缺少一次性执行授权。', 'AGENT_EXECUTION_GRANT_REQUIRED', 403);
+    const expected = options.executionGrantExpected && typeof options.executionGrantExpected === 'object' ? options.executionGrantExpected : {};
+    const verifyGrant = deps.verifyExecutionGrant || verifyExecutionGrant;
+    const consumeGrant = deps.consumeExecutionGrant || consumeExecutionGrant;
+    let verified;
+    try {
+        verified = verifyGrant(token, { ...expected, userId: user?.id, input });
+    } catch (error) {
+        throw connectorError(error.message || '本机工作区执行授权无效。', error.code || 'AGENT_EXECUTION_GRANT_INVALID', error.status || 403);
+    }
+    try {
+        await consumeGrant({
+            token,
+            payload: verified.payload,
+            consumer: `local-connector:${process.pid}`
+        });
+    } catch (error) {
+        throw connectorError(error.message || '本机工作区执行授权账本校验失败。', error.code || 'AGENT_EXECUTION_GRANT_UNAVAILABLE', error.status || 403);
+    }
+    return verified.summary;
+}
+
+async function createConnectorTask(toolName, input = {}, user, options = {}) {
     const grantType = grantTypeForTool(toolName);
     if (!grantType) throw connectorError('不支持的本机连接器工具。', 'LOCAL_CONNECTOR_TOOL_INVALID');
     const deviceId = await resolveConnectorDeviceForTool(user, toolName, input, grantType);
@@ -155,6 +190,7 @@ async function createConnectorTask(toolName, input = {}, user) {
             : { ...(input || {}) };
     delete safeInput.deviceId;
     delete safeInput.device_id;
+    const executionGrant = await consumeConnectorExecutionGrant(toolName, input, user, options);
     const inputJson = JSON.stringify(safeInput);
     const id = crypto.randomUUID();
     const now = getBeijingTimestamp();
@@ -164,7 +200,8 @@ async function createConnectorTask(toolName, input = {}, user) {
         INSERT INTO agent_local_connector_tasks (id, tenant_id, user_id, device_id, grant_type, tool_name, input_json, input_digest, state, expires_at, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, 'pending', ?, ?, ?)
     `, [id, tenant.tenantId, user.id, deviceId, grantType, String(toolName), inputJson, hash(inputJson), expiresAt, now, now]);
-    return await queryOne('SELECT * FROM agent_local_connector_tasks WHERE id = ?', [id]);
+    const task = await queryOne('SELECT * FROM agent_local_connector_tasks WHERE id = ?', [id]);
+    return task ? { ...task, execution_grant: executionGrant } : null;
 }
 
 async function reclaimConnectorTasks() {
@@ -204,17 +241,39 @@ async function claimConnectorTask(user, input = {}) {
 async function completeConnectorTask(user, taskId, input = {}) {
     const tenant = await assertTenantContext(user);
     const deviceId = normalizeDeviceId(input.deviceId);
-    const task = await queryOne(`SELECT * FROM agent_local_connector_tasks WHERE id = ? AND tenant_id = ? AND user_id = ?`, [taskId, tenant.tenantId, user.id]);
-    if (!task) throw connectorError('本机连接器任务不存在。', 'LOCAL_CONNECTOR_TASK_NOT_FOUND', 404);
-    if (task.device_id !== deviceId || task.state !== 'claimed' || task.claim_token_hash !== hash(input.claimToken || '')) {
-        throw connectorError('连接器任务凭据无效或已被重新领取。', 'LOCAL_CONNECTOR_CLAIM_INVALID', 403);
-    }
     const now = getBeijingTimestamp();
     if (input.success === false) {
-        await execute(`UPDATE agent_local_connector_tasks SET state = 'failed', failure_code = ?, failure_reason = ?, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`, [String(input.error?.code || 'device_failed').slice(0, 80), String(input.error?.message || '桌面端执行失败。').slice(0, 2000), now, task.id]);
+        const updated = await execute(`
+            UPDATE agent_local_connector_tasks SET state = 'failed', failure_code = ?, failure_reason = ?, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE id = ? AND tenant_id = ? AND user_id = ? AND device_id = ? AND state = 'claimed' AND claim_token_hash = ?
+        `, [String(input.error?.code || 'device_failed').slice(0, 80), String(input.error?.message || '桌面端执行失败。').slice(0, 2000), now, taskId, tenant.tenantId, user.id, deviceId, hash(input.claimToken || '')]);
+        if (updated !== 1) throw connectorError('连接器任务凭据无效或已被重新领取。', 'LOCAL_CONNECTOR_CLAIM_INVALID', 403);
         return { success: false };
     }
-    await execute(`UPDATE agent_local_connector_tasks SET state = 'completed', result_json = ?::jsonb, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`, [JSON.stringify(input.result ?? null), now, task.id]);
+    await transaction(async trx => {
+        const task = await trx.queryOne(`
+            SELECT * FROM agent_local_connector_tasks
+            WHERE id = ? AND tenant_id = ? AND user_id = ? FOR UPDATE
+        `, [taskId, tenant.tenantId, user.id]);
+        if (!task) throw connectorError('本机连接器任务不存在。', 'LOCAL_CONNECTOR_TASK_NOT_FOUND', 404);
+        if (task.device_id !== deviceId || task.state !== 'claimed' || task.claim_token_hash !== hash(input.claimToken || '')) {
+            throw connectorError('连接器任务凭据无效或已被重新领取。', 'LOCAL_CONNECTOR_CLAIM_INVALID', 403);
+        }
+        const result = input.result ?? null;
+        const { workspaceEventForConnectorTask, enqueueWorkspaceMemorySourceEvent } = require('./workspace-memory-source-lifecycle');
+        const workspaceEvent = workspaceEventForConnectorTask(task, result || {});
+        await trx.execute(`
+            UPDATE agent_local_connector_tasks
+            SET state = 'completed', result_json = ?::jsonb, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE id = ?
+        `, [JSON.stringify(result), now, task.id]);
+        if (workspaceEvent) {
+            await enqueueWorkspaceMemorySourceEvent({
+                userId: user.id, deviceId: task.device_id, sourceRef: workspaceEvent.sourceRef,
+                eventType: workspaceEvent.eventType, sourceRevision: workspaceEvent.sourceRevision
+            }, { trx });
+        }
+    });
     return { success: true };
 }
 
@@ -231,9 +290,13 @@ async function waitForConnectorTask(taskId, user, timeoutMs = LOCAL_BROWSER_TASK
     throw connectorError('等待桌面连接器响应超时。', 'LOCAL_CONNECTOR_TIMEOUT', 504);
 }
 
-async function executeConnectorTool(toolName, input, user) {
-    const task = await createConnectorTask(toolName, input, user);
+async function executeConnectorTool(toolName, input, user, options = {}) {
+    const task = await createConnectorTask(toolName, input, user, options);
     return await waitForConnectorTask(task.id, user);
 }
 
-module.exports = { claimConnectorTask, completeConnectorTask, connectorClaimPayload, connectorHeartbeatPayload, connectorResultPayload, createConnectorTask, executeConnectorTool, heartbeatConnector, listConnectorDevices, reclaimConnectorTasks, resolveConnectorDeviceForTool, resolveConnectorDeviceId, waitForConnectorTask };
+module.exports = {
+    claimConnectorTask, completeConnectorTask, connectorClaimPayload, connectorHeartbeatPayload, connectorResultPayload,
+    consumeConnectorExecutionGrant, createConnectorTask, executeConnectorTool, heartbeatConnector, listConnectorDevices,
+    reclaimConnectorTasks, requiresConnectorExecutionGrant, resolveConnectorDeviceForTool, resolveConnectorDeviceId, waitForConnectorTask
+};

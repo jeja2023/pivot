@@ -161,6 +161,17 @@ function isLongTermMemoryMessage(message) {
     return text.includes('PIVOT_LONG_TERM_MEMORY_BEGIN') || text.includes('PIVOT_LONG_TERM_MEMORY_END');
 }
 
+function isTaskWorkingMemoryMessage(message) {
+    const text = contentText(message.content);
+    return text.includes('PIVOT_TASK_WORKING_STATE_BEGIN') || text.includes('PIVOT_TASK_WORKING_STATE_END');
+}
+
+function isRetrievableEvidenceMessage(message) {
+    const text = contentText(message.content);
+    return text.includes('PIVOT_CONTEXT_RETRIEVABLE_EVIDENCE_BEGIN')
+        || text.includes('PIVOT_CONTEXT_RETRIEVABLE_EVIDENCE_END');
+}
+
 function truncateTextToTokens(text, maxTokens, suffix) {
     const source = String(text || '');
     if (maxTokens <= 0) return '';
@@ -322,6 +333,8 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
             || message.__originIndex === firstSystemOriginIndex
             || isRagMessage(message)
             || isLongTermMemoryMessage(message)
+            || isTaskWorkingMemoryMessage(message)
+            || isRetrievableEvidenceMessage(message)
             || isMcpMessage(message);
         if (pinned) {
             i += 1;

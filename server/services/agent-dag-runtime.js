@@ -12,6 +12,7 @@ const { clampText, executeToolByName, findAgentToolByName } = require('./agent-t
 const { buildToolTraceContext } = require('./tool-trace-context');
 const { normalizeToolInput } = require('./agent-policy');
 const { createSubworkflowRuntime } = require('./agent-dag-subworkflow-runtime');
+const { assertPreviewToolAllowed } = require('./agent-dag-execution-guard');
 const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
 const { parseCasRef, incrementRefCount } = require('./agent-artifact-cas');
 const {
@@ -326,7 +327,7 @@ const { executeSubworkflowDag, executeWorkflowIteration } = createSubworkflowRun
     upsertDagNode
 });
 
-async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, deps) {
+async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget, taskTransactionId = '' }, deps) {
     const readDagNodes = deps.listDagNodes || listDagNodes;
     const readSteps = deps.listSteps || listSteps;
     const writeDagNode = deps.upsertDagNode || upsertDagNode;
@@ -513,12 +514,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             stepIndex += 1;
             const selectedTool = findAgentToolByName(node.tool, toolList);
             const runMetadata = typeof run.metadata === 'string' ? (() => { try { return JSON.parse(run.metadata); } catch (_) { return {}; } })() : (run.metadata || {});
-            if (String(runMetadata.workflowRunSource || runMetadata.runSource || '').toLowerCase() === 'preview'
-                && (selectedTool?.side_effect || selectedTool?.sideEffect || selectedTool?.requiresApproval || selectedTool?.approval_required)) {
-                const previewError = new Error('预览模式禁止执行副作用节点。');
-                previewError.code = 'AGENT_PREVIEW_SIDE_EFFECT_BLOCKED';
-                throw previewError;
-            }
+            assertPreviewToolAllowed(run, selectedTool);
             const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, {
                 goal: run.goal,
                 inputs: dagInputs,
@@ -628,6 +624,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     dagInputs,
                     signal: batchSignal,
                     budget: deps.taskBudget,
+                    taskTransactionId: String(taskTransactionId || metadata.taskTransactionId || metadata.task_transaction_id || ''),
                     approvalKey,
                     // Reaching this point means the approval helper either found
                     // a prior grant or determined that this tool is safe to run.
@@ -647,6 +644,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                         toolList,
                         deadline,
                         deps,
+                        taskTransactionId: executionContext.taskTransactionId,
+                        signal: batchSignal,
                         stack: subworkflowStack,
                         invocation: { callerNodeId: node.id }
                     }),
@@ -658,7 +657,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                         toolList,
                         deadline,
                         deps,
-                        parentContext: { dagInputs, states, nodeMap, stack: subworkflowStack, callerNodeId: node.id }
+                        parentContext: { dagInputs, states, nodeMap, stack: subworkflowStack, callerNodeId: node.id, taskTransactionId: executionContext.taskTransactionId, signal: batchSignal }
                     }),
                     sandboxExecution: node.tool === 'workflow.foreach'
                 };
@@ -934,20 +933,25 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         partial,
         reason: partial ? '工作流存在失败、未完整或跳过节点。' : ''
     });
-    const finalStatus = verification.outcomeStatus === 'verified'
-        ? 'completed'
+    const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
+    const finalStatus = awaitingCommit
+        ? 'awaiting_commit'
+        : verification.outcomeStatus === 'verified'
+            ? 'completed'
         : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
     const verified = finalStatus === 'completed';
     const verificationError = verified
         ? ''
-        : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
+        : awaitingCommit
+            ? '任务结果已验证，仍有外部副作用等待提交。'
+            : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
     await deps.updateRun(run.id, {
         status: finalStatus,
         final_answer: answer,
         error_message: failedNodes.length
             ? `DAG 失败节点数：${failedNodes.length}`
             : (incompleteResultNodes.length ? `DAG 未完整处理节点数：${incompleteResultNodes.length}` : verificationError),
-        ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
+        ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
         last_heartbeat_at: getBeijingTimestamp(),
         updated_at: getBeijingTimestamp()
     });
@@ -955,7 +959,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         user.id,
         run.id,
         verified ? 'completed' : 'warning',
-        verified ? 'DAG 运行已完成' : 'DAG 运行需要补充或修复',
+        verified ? 'DAG 运行已完成' : awaitingCommit ? 'DAG 运行等待提交' : 'DAG 运行需要补充或修复',
         deps.getAgentRunTitle(run)
     );
 }

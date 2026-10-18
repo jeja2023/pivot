@@ -22,7 +22,7 @@
         inbox: [], inboxPage: 1, inboxLimit: 20,
         goals: [], goalsPage: 1, goalsLimit: 8,
         reliability: [], reliabilityPage: 1, reliabilityLimit: 15,
-        quality: null, channels: [], deliveries: [], residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
+        quality: null, acceptanceEvidence: [], committeeMembers: [], committeeEligibleAdmins: [], channels: [], deliveries: [], lifecycleHooks: [], lifecycleHookPackages: [], lifecycleHookAudits: [], delegationRolePolicies: null, residentScope: 'self', diagnostics: new Map(), organizationCandidateByVersion: new Map()
     };
     // 控制面会在打开工作台、切换子页和保存操作后重复刷新。只允许最新一轮
     // 请求提交状态，避免旧请求在创建目标后返回并把新列表覆盖掉。
@@ -52,7 +52,6 @@
         run: { label: '任务运行', badgeClass: 'badge-run' },
         notification: { label: '运行通知', badgeClass: 'badge-notification' }
     }[t] || { label: '系统事件', badgeClass: 'badge-event' });
-
     const INBOX_TITLE_MAP = {
         'dag run completed': '工作流执行完成', 'dag run failed': '工作流执行异常', 'dag run error': '工作流执行异常',
         'run completed': '自主任务执行完成', 'agent run completed': '自主任务执行完成', 'run failed': '自主任务运行失败', 'agent run failed': '自主任务运行失败',
@@ -80,7 +79,6 @@
         modal.setAttribute('aria-hidden', 'false');
         const notice = document.getElementById('agent-goal-token-notice');
         if (notice) { notice.textContent = ''; notice.classList.add('hidden'); }
-
         const titleEl = document.getElementById('agent-goal-modal-title');
         const descEl = document.getElementById('agent-goal-modal-desc');
         const editIdInput = document.getElementById('agent-goal-edit-id');
@@ -92,7 +90,6 @@
             setMarkup(deliverySelect, `<option value="">仅在 Pivot 待办中心查看</option>${state.channels.map(channel => `<option value="${escapeAttr(channel.id)}">${escape(channel.channelType)} · ${escape(channel.channelKey)}</option>`).join('')}`);
             deliverySelect.value = current;
         }
-
         if (goal) {
             if (titleEl) titleEl.textContent = '编辑持续目标';
             if (descEl) descEl.textContent = '修改自主 Agent 持续目标的目标描述与触发参数';
@@ -136,7 +133,6 @@
                 }
             }
         }
-
         setTimeout(() => document.getElementById('agent-goal-title')?.focus(), 50);
     }
     function closeGoalModal() {
@@ -174,7 +170,6 @@
             state.goalsPage = currentPage;
             const startIndex = (currentPage - 1) * limit;
             const pageGoals = state.goals.slice(startIndex, startIndex + limit);
-
             const goalStatusBadge = (status) => {
                 if (status === 'active') return `<span class="agent-inbox-type-badge badge-run">● 运行中</span>`;
                 if (status === 'paused') return `<span class="agent-inbox-type-badge badge-event">○ 已暂停</span>`;
@@ -210,7 +205,6 @@
                     </div>
                 </div>
             </div>`;
-
             setMarkup(goalsPanel, state.goals.length
                 ? `<div class="agent-goal-table-wrap"><table class="agent-goal-table"><thead><tr><th style="width:52px" class="text-center">序号</th><th style="width:90px" class="text-center">状态</th><th style="width:170px">目标名称</th><th style="width:120px">触发方式</th><th>目标内容</th><th style="width:170px" class="text-center">操作</th></tr></thead><tbody>${pageGoals.map((goal, index) => `<tr><td class="text-center">${startIndex + index + 1}</td><td class="text-center">${goalStatusBadge(goal.status)}</td><td title="${escapeAttr(goal.title)}">${escape(shortText(goal.title, 24))}</td><td>${escape(formatGoalTrigger(goal.triggerSpec))}</td><td title="${escapeAttr(goal.goal || '')}">${escape(shortText(goal.goal || '-', 80))}</td><td class="text-center"><div class="agent-goal-table-actions">${goal.status === 'active' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="pause" data-agent-goal-id="${escapeAttr(goal.id)}">暂停</button>` : goal.status === 'paused' ? `<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="resume" data-agent-goal-id="${escapeAttr(goal.id)}">恢复</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-goal-action="edit" data-agent-goal-id="${escapeAttr(goal.id)}">编辑</button><button type="button" class="btn-danger btn-xs" data-agent-goal-action="delete" data-agent-goal-id="${escapeAttr(goal.id)}">删除</button></div></td></tr>`).join('')}</tbody></table></div>`
                 : goalEmptyHero);
@@ -241,7 +235,6 @@
                 : currentFilter === 'notification' ? runItems
                 : currentFilter === 'evolution' ? evolutionItems
                 : allItems;
-
             const page = Math.max(1, Number(state.inboxPage || 1));
             const limit = Math.max(1, Number(state.inboxLimit || 20));
             const total = filteredItems.length;
@@ -250,7 +243,6 @@
             state.inboxPage = currentPage;
             const startIndex = (currentPage - 1) * limit;
             const pageItems = filteredItems.slice(startIndex, startIndex + limit);
-
             const filterBar = `<div class="agent-inbox-header-bar">
                 <div class="agent-inbox-filter-pills" role="tablist">
                     <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'all' ? 'active' : ''}" data-agent-inbox-filter="all">全部 (${allItems.length})</button>
@@ -259,7 +251,6 @@
                     <button type="button" class="agent-inbox-filter-pill ${currentFilter === 'evolution' ? 'active' : ''}" data-agent-inbox-filter="evolution">进化提案 (${evolutionItems.length})</button>
                 </div>
             </div>`;
-
             const tableHtml = pageItems.length ? `<div class="agent-inbox-table-wrap"><table class="agent-inbox-table"><thead><tr><th class="text-center" style="width: 50px;">序号</th><th class="text-center" style="width: 96px;">类型</th><th style="width: 200px;">事项名称</th><th>内容说明</th><th class="text-center" style="width: 130px;">发生时间</th><th class="text-center" style="width: 110px;">操作</th></tr></thead><tbody>${pageItems.map((item, index) => {
                 const meta = getInboxTypeMeta(item.sourceType);
                 const titleText = escape(formatInboxTitle(item));
@@ -270,7 +261,6 @@
             }).join('')}</tbody></table></div>` : '<div class="agent-harness-empty-card"><strong>收件箱暂无待处理事项</strong><span>所有事项均已处理完毕，新事项将在此实时汇聚</span></div>';
 
             setMarkup(inboxPanel, `${filterBar}${tableHtml}`);
-
             const paginationContainer = document.getElementById('agent-inbox-pagination');
             if (paginationContainer) {
                 if (window.Pivot.legacy.renderWorkspacePagination) {
@@ -352,10 +342,41 @@
             const q = state.quality || {};
             const rate = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) * 100)}%`;
             const minutes = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) / 60)} 分钟`;
-            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>验收通过率</span><strong>${rate(q.verification?.verifiedRate)}</strong><small>${Number(q.verification?.total || 0)} 个已验收任务</small></div><div class="agent-metric-tile"><span>执行终态率</span><strong>${rate(q.runs?.executionCompletionRate)}</strong><small>近 30 天任务运行</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${minutes(q.approvals?.medianSeconds)}</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${rate(q.tools?.errorRate)}</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>`);
+            const cache = q.promptCache || {};
+            const observedLabel = cache.observationRate === null || cache.observationRate === undefined ? '未观测' : rate(cache.observationRate); const cacheDetail = cache.observedCalls ? `${Number(cache.cacheReadTokens || 0).toLocaleString()} 读 / ${Number(cache.cacheCreationTokens || 0).toLocaleString()} 写 Token` : '提供方尚未返回缓存字段';
+            const acceptance = Array.isArray(state.acceptanceEvidence) ? state.acceptanceEvidence : []; const readyDomains = acceptance.filter(item => item.readiness === 'ready_for_committee_score').length;
+            const pendingAcceptanceReviews = acceptance.flatMap(item => Array.isArray(item.evidence) ? item.evidence : []).filter(item => item.status === 'submitted');
+            const acceptanceSubmission = isSuperAdminUser?.() ? `<details class="agent-quality-acceptance-submit"><summary>提交五分验收证据</summary><div class="agent-quality-acceptance-form"><label>领域<select id="agent-acceptance-domain" class="form-input"><option value="model_routing">模型路由与降级</option><option value="tool_discovery">工具按需发现</option><option value="tool_concurrency">工具并发与幂等</option><option value="tool_policy">工具策略与审批</option><option value="sandbox_execution">沙箱与本机执行</option><option value="long_task_recovery">长任务恢复</option><option value="multi_agent">多 Agent</option><option value="dag_orchestration">DAG 编排</option><option value="lifecycle_extensions">生命周期扩展</option><option value="context_governance">上下文治理</option><option value="prompt_structured_output">提示词与结构化输出</option><option value="long_term_memory">长期记忆/知识</option><option value="skill_ecosystem">技能生态</option><option value="browser_automation">浏览器自动化</option><option value="evaluation_release">评测与发布</option><option value="observability">可观测性</option><option value="code_semantics_ide">代码语义/IDE</option><option value="voice_multimodal">语音/多模态</option></select></label><label>证据类型<select id="agent-acceptance-type" class="form-input"><option value="implementation_review">实现审查</option><option value="automated">自动化</option><option value="nonfunctional">非功能</option><option value="canary">灰度</option><option value="committee">委员会</option></select></label><label>证据引用<input id="agent-acceptance-ref" class="form-input" maxlength="1024" placeholder="报告、工单或受控证据链接"></label><label class="agent-quality-acceptance-summary">证据摘要<textarea id="agent-acceptance-summary" class="form-input" rows="2" maxlength="4000" placeholder="至少 20 个字符；不得包含密钥、正文或个人数据"></textarea></label><label class="agent-quality-acceptance-summary">结构化验收清单 JSON<textarea id="agent-acceptance-manifest" class="form-input" rows="8" maxlength="16000" placeholder="按优化方案 3.3.1 粘贴；旧的自由文本不能计入五分认定"></textarea></label><button type="button" class="btn-secondary btn-xs" data-agent-acceptance-template>填入受控模板</button><button type="button" class="btn-primary btn-xs" data-agent-acceptance-submit>提交证据</button></div></details>`
+                : '';
+            const committeeAssignments = isSuperAdminUser?.() ? `<details class="agent-quality-acceptance-submit"><summary>配置委员会四方成员</summary><div class="agent-quality-acceptance-form">${['platform_security', 'runtime', 'qa_sre', 'product'].map(role => { const assigned = state.committeeMembers.find(item => item.role === role)?.userId; return `<label>${escape(role)}<select class="form-input" data-agent-committee-member="${escapeAttr(role)}"><option value="">选择活跃管理员</option>${state.committeeEligibleAdmins.map(admin => `<option value="${escapeAttr(admin.id)}"${Number(admin.id) === Number(assigned) ? ' selected' : ''}>${escape(admin.username)}</option>`).join('')}</select></label>`; }).join('')}</div></details>` : '';
+            const acceptanceMarkup = acceptance.length
+                ? `<section class="agent-quality-acceptance"><div><strong>五分验收台账</strong><span>${readyDomains}/${acceptance.length} 个领域证据齐备；齐备后仍须委员会评分。</span></div><ul>${acceptance.filter(item => item.missingEvidenceTypes?.length).slice(0, 6).map(item => `<li><b>${escape(item.domainKey)}</b><span>缺少：${escape(item.missingEvidenceTypes.join('、'))}</span></li>`).join('') || '<li><span>全部领域证据已齐备，等待委员会评分。</span></li>'}</ul></section>`
+                : '';
+            const acceptanceReviews = canReviewOrganizationExperience() && pendingAcceptanceReviews.length ? `<section class="agent-quality-acceptance"><div><strong>待独立核验</strong><span>${pendingAcceptanceReviews.length} 条证据待管理员复核。</span></div><ul>${pendingAcceptanceReviews.slice(0, 12).map(item => `<li><b>${escape(item.domainKey)} / ${escape(item.evidenceType)}</b><span>${escape(shortText(item.evidenceSummary, 100))}${item.evidenceType === 'committee' ? ` · 已签 ${Number(item.committeeAttestations?.length || 0)}/4` : ''}</span>${item.evidenceType === 'committee' ? `<button type="button" class="btn-secondary btn-xs" data-agent-committee-attest="${escapeAttr(item.id)}">委员会签署</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-acceptance-verify="${escapeAttr(item.id)}">核验</button></li>`).join('')}</ul></section>` : '';
+            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>验收通过率</span><strong>${rate(q.verification?.verifiedRate)}</strong><small>${Number(q.verification?.total || 0)} 个已验收任务</small></div><div class="agent-metric-tile"><span>执行终态率</span><strong>${rate(q.runs?.executionCompletionRate)}</strong><small>近 30 天任务运行</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${minutes(q.approvals?.medianSeconds)}</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${rate(q.tools?.errorRate)}</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>Prompt 缓存已观测</span><strong>${observedLabel}</strong><small title="${escapeAttr(cacheDetail)}">${escape(cacheDetail)}</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>${acceptanceMarkup}${acceptanceReviews}${committeeAssignments}${acceptanceSubmission}`);
+            qualityPanel.querySelector('[data-agent-acceptance-template]')?.addEventListener('click', () => { const domainKey = String(qualityPanel.querySelector('#agent-acceptance-domain')?.value || ''); const evidenceType = String(qualityPanel.querySelector('#agent-acceptance-type')?.value || ''); const requirements = acceptance.find(item => item.domainKey === domainKey)?.requirements; const manifest = window.Pivot?.moduleApi?.('agent.acceptanceEvidence')?.buildManifestTemplate?.(evidenceType, requirements); if (!manifest) return setNotice('验收模板模块尚未加载，请刷新后重试。', 'error'); const field = qualityPanel.querySelector('#agent-acceptance-manifest'); if (field) field.value = JSON.stringify(manifest, null, 2); setNotice('已填入受控模板；必须替换所有 REPLACE_WITH_* 占位值并提交真实测量结果。', 'info'); });
+            qualityPanel.querySelector('[data-agent-acceptance-submit]')?.addEventListener('click', async event => {
+                const domainKey = String(qualityPanel.querySelector('#agent-acceptance-domain')?.value || '');
+                const evidenceType = String(qualityPanel.querySelector('#agent-acceptance-type')?.value || '');
+                const evidenceRef = String(qualityPanel.querySelector('#agent-acceptance-ref')?.value || '').trim();
+                const evidenceSummary = String(qualityPanel.querySelector('#agent-acceptance-summary')?.value || '').trim();
+                if (evidenceSummary.length < 20) return setNotice('验收证据摘要至少需要 20 个字符。', 'error');
+                let evidenceManifest;
+                try { evidenceManifest = JSON.parse(String(qualityPanel.querySelector('#agent-acceptance-manifest')?.value || '')); }
+                catch { return setNotice('结构化验收清单必须是有效 JSON；请按优化方案 3.3.1 填写。', 'error'); }
+                event.currentTarget.disabled = true;
+                try {
+                    await apiJson(`${API_BASE}/agents/acceptance-evidence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domainKey, evidenceType, evidenceRef, evidenceSummary, evidenceManifest }) });
+                    setNotice('验收证据已提交，需由另一位管理员独立核验。', 'success');
+                    await loadControlPlane();
+                } catch (error) { setNotice(error.message || '提交验收证据失败。', 'error'); }
+                finally { event.currentTarget.disabled = false; }
+            });
+            qualityPanel.querySelectorAll('[data-agent-acceptance-verify]').forEach(button => button.addEventListener('click', async () => { const verificationNote = window.prompt('填写独立核验说明（至少 12 个字符）：', ''); if (verificationNote === null || verificationNote.trim().length < 12) return setNotice('核验说明至少需要 12 个字符。', 'error'); const status = window.confirm('确认该证据可核验通过？取消则记为拒绝。') ? 'verified' : 'rejected'; try { await apiJson(`${API_BASE}/agents/acceptance-evidence/${encodeURIComponent(button.dataset.agentAcceptanceVerify || '')}/verification`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, verificationNote }) }); setNotice(status === 'verified' ? '验收证据已独立核验。' : '验收证据已拒绝。', status === 'verified' ? 'success' : 'warn'); await loadControlPlane(); } catch (error) { setNotice(error.message || '核验验收证据失败。', 'error'); } }));
+            qualityPanel.querySelectorAll('[data-agent-committee-attest]').forEach(button => button.addEventListener('click', async () => { const role = window.prompt('填写本人委员会角色：platform_security、runtime、qa_sre 或 product', ''); if (!role) return; try { await apiJson(`${API_BASE}/agents/acceptance-evidence/${encodeURIComponent(button.dataset.agentCommitteeAttest || '')}/committee-attestations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) }); setNotice('委员会身份签署已记录；四个角色齐全后方可独立核验。', 'success'); await loadControlPlane(); } catch (error) { setNotice(error.message || '委员会签署失败。', 'error'); } }));
+            qualityPanel.querySelectorAll('[data-agent-committee-member]').forEach(select => select.addEventListener('change', async () => { if (!select.value) return; try { await apiJson(`${API_BASE}/agents/acceptance-evidence/committee-members/${encodeURIComponent(select.dataset.agentCommitteeMember || '')}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: Number(select.value) }) }); setNotice('委员会角色成员已更新。', 'success'); await loadControlPlane(); } catch (error) { setNotice(error.message || '配置委员会成员失败。', 'error'); } }));
         }
     }
-
     async function loadControlPlane() {
         const sequence = ++controlPlaneLoadSequence;
         controlPlaneLoadController?.abort();
@@ -363,19 +384,23 @@
         controlPlaneLoadController = controller;
         const requestOptions = { cache: 'no-store', ...(controller ? { signal: controller.signal } : {}) };
         try {
-            const [inbox, goals, reliability, quality, channels, deliveries] = await Promise.all([
+            const [inbox, goals, reliability, quality, channels, deliveries, acceptanceEvidence, committee] = await Promise.all([
                 apiJson(`${API_BASE}/agents/inbox?limit=100`, requestOptions),
                 apiJson(`${API_BASE}/agents/goals?limit=50`, requestOptions),
                 apiJson(`${API_BASE}/agents/tools/reliability?days=30`, requestOptions),
                 apiJson(`${API_BASE}/agents/quality?days=30`, requestOptions).catch(() => ({ dashboard: null })),
                 apiJson(`${API_BASE}/agents/channels?status=active`, requestOptions).catch(() => ({ data: [] })),
-                apiJson(`${API_BASE}/agents/channels/deliveries?limit=20`, requestOptions).catch(() => ({ data: [] }))
+                apiJson(`${API_BASE}/agents/channels/deliveries?limit=20`, requestOptions).catch(() => ({ data: [] })),
+                apiJson(`${API_BASE}/agents/acceptance-evidence`, requestOptions).catch(() => ({ data: [] })),
+                apiJson(`${API_BASE}/agents/acceptance-evidence/committee-members`, requestOptions).catch(() => ({ data: [], eligibleAdmins: [] }))
             ]);
             if (sequence !== controlPlaneLoadSequence) return false;
             state.inbox = Array.isArray(inbox.data) ? inbox.data : [];
             state.goals = Array.isArray(goals.data) ? goals.data : [];
             state.reliability = Array.isArray(reliability.signals) ? reliability.signals : [];
             state.quality = quality.dashboard || null;
+            state.acceptanceEvidence = Array.isArray(acceptanceEvidence.data) ? acceptanceEvidence.data : [];
+            state.committeeMembers = Array.isArray(committee.data) ? committee.data : []; state.committeeEligibleAdmins = Array.isArray(committee.eligibleAdmins) ? committee.eligibleAdmins : [];
             state.channels = Array.isArray(channels.data) ? channels.data : [];
             state.deliveries = Array.isArray(deliveries.data) ? deliveries.data : [];
             window.Pivot.modules = window.Pivot.modules || {};
@@ -396,7 +421,6 @@
             if (controlPlaneLoadController === controller) controlPlaneLoadController = null;
         }
     }
-
     async function deleteAgentGoal(id) {
         if (!confirm('确定要删除该持续目标吗？删除后将终止相关的自动化触发')) return;
         try {
@@ -413,7 +437,6 @@
         try { await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(id)}/${action}`, { method: 'POST' }); await loadControlPlane(); } catch (error) { setNotice(error.message || '持续目标操作失败。', 'error'); }
     }
     const jsonText = value => { try { return JSON.stringify(value ?? {}, null, 2); } catch (_) { return '{}'; } };
-
     const getCurrentUser = () => (typeof currentUser !== 'undefined' ? currentUser : window.Pivot.legacy.currentUser || null);
 
     function setNotice(message = '', tone = '') {
@@ -448,9 +471,15 @@
         return data;
     }
 
-    const personalExperience = window.Pivot.moduleApi('agent.personalExperience').create({
-        state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane, apiJson
+    const personalExperience = window.Pivot.moduleApi('agent.personalExperience').create({ state, escape, escapeAttr, formatDate, setMarkup, setNotice, renderAgentControlPlane, apiJson });
+    const runDiagnostics = window.Pivot.moduleApi('agent.runDiagnostics').create({ diagnostics: state.diagnostics, escape, escapeAttr, formatDate, shortText, jsonText, setMarkup, prependMarkup, setNotice, apiJson });
+    const delegationRolePolicies = window.Pivot.moduleApi('agent.delegationRolePolicies').create({ state, escape, escapeAttr, setMarkup, setNotice, apiJson });
+    const lifecycleHookPackages = window.Pivot.moduleApi('agent.lifecycleHookPackages').create({
+        state, escape, escapeAttr, setMarkup, setNotice, formatDate, apiJson,
+        canManage: () => Boolean(getCurrentUser()?.isSuperAdmin || getCurrentUser()?.is_super_admin || isSuperAdminUser?.())
     });
+    lifecycleHookPackages.bindControls();
+    const loadLifecycleHooks = () => lifecycleHookPackages.load();
 
     function renderSkills() {
         const list = document.getElementById('agent-harness-skill-list');
@@ -808,178 +837,13 @@
         const packsAvailable = await packs?.refreshStatus?.() || false;
         document.querySelectorAll('#agent-harness-residency-scope').forEach(el => el.classList.toggle('hidden', !isSuperAdminUser()));
         document.querySelectorAll('[data-agent-harness-nav="evolution"]').forEach(el => { el.classList.toggle('hidden', !canReviewOrganizationExperience()); el.hidden = !canReviewOrganizationExperience(); });
+        document.querySelectorAll('[data-agent-harness-nav="delegation-policies"]').forEach(el => { el.classList.toggle('hidden', !canReviewOrganizationExperience()); el.hidden = !canReviewOrganizationExperience(); });
         try {
             const learning = await loadLearningModule().catch(() => null);
-            await Promise.all([loadSkills(), ...(packsAvailable ? [packs?.load?.()] : []), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadControlPlane(), learning?.load?.()]);
+            await Promise.all([loadSkills(), loadLifecycleHooks(), ...(canReviewOrganizationExperience() ? [delegationRolePolicies.loadDelegationRolePolicies()] : []), ...(packsAvailable ? [packs?.load?.()] : []), loadProfile(), loadMemoryPolicy(), loadFeedback(), loadControlPlane(), learning?.load?.()]);
         } catch (error) {
             setNotice(error.message || '底座数据加载失败。', 'error');
         }
-    }
-
-    function renderDiagnosticValue(value, maxChars = 12000) {
-        const text = jsonText(value);
-        return `<pre class="agent-harness-json">${escape(text.length > maxChars ? `${text.slice(0, maxChars)}\n...` : text)}</pre>`;
-    }
-
-    const diagnosticCache = new Map();
-
-    function getDiagnosticCache(runId) {
-        const key = String(runId || '');
-        let item = diagnosticCache.get(key);
-        if (!item) {
-            item = {
-                activeTab: state.diagnostics.get(key) || 'context',
-                panels: { context: '', world: '', resources: '', control: '' },
-                loaded: { context: false, world: false, resources: false, control: false },
-                fetching: { context: false, world: false, resources: false, control: false },
-                sequence: 0
-            };
-            diagnosticCache.set(key, item);
-            if (diagnosticCache.size > 80) {
-                const oldest = diagnosticCache.keys().next().value;
-                if (oldest) diagnosticCache.delete(oldest);
-            }
-        }
-        return item;
-    }
-
-    function formatDiagnosticHtml(type, data) {
-        if (type === 'context') {
-            const list = Array.isArray(data) ? data : [];
-            return list.length
-                ? list.map(item => `<article class="agent-harness-diagnostic-card"><strong>窗口 ${escape(item.window_version)}</strong><span>${escape(item.status)} · ${escape(item.opened_reason)}</span><small>${escape(formatDate(item.created_at))} → ${escape(formatDate(item.closed_at))}</small><code>${escape(item.initial_state_hash || '-')}</code></article>`).join('')
-                : '<div class="empty-state">暂无上下文窗口记录。</div>';
-        }
-        if (type === 'world') {
-            const list = Array.isArray(data) ? data : [];
-            return list.length
-                ? list.slice().reverse().map(item => `<details class="agent-harness-diagnostic-card"><summary><strong>快照 ${escape(item.snapshot_version)}</strong><span>${escape(item.injection_mode === 'diff' ? '增量更新' : '完整更新')} · ${escape(item.full_refresh_reason || '常规更新')}</span><small>${escape(formatDate(item.created_at))}</small></summary><div class="agent-harness-diagnostic-meta">上下文摘要 ${escape(shortText(item.context_hash, 18))} · 状态摘要 ${escape(shortText(item.state_hash, 18))}</div>${renderDiagnosticValue({ state: item.state, patch: item.patch }, 9000)}</details>`).join('')
-                : '<div class="empty-state">暂无状态快照。</div>';
-        }
-        if (type === 'resources') {
-            const obj = data && typeof data === 'object' ? data : {};
-            const budget = Number(obj.token_budget || 0);
-            const consumed = Number(obj.tokens_consumed || 0);
-            return `<div class="agent-harness-resource-grid"><div><span>Token 预算</span><strong>${escape(budget > 0 ? budget.toLocaleString() : '不限')}</strong></div><div><span>已消耗</span><strong>${escape(consumed.toLocaleString())}</strong></div><div><span>已预留</span><strong>${escape(Number(obj.tokens_reserved || 0).toLocaleString())}</strong></div><div><span>子运行</span><strong>${escape(`${Number(obj.active_children || 0)} / ${Number(obj.max_children || 0) || '不限'}`)}</strong></div></div>${renderDiagnosticValue(obj, 6000)}`;
-        }
-        if (type === 'control') {
-            const list = Array.isArray(data) ? data : [];
-            return `<form class="agent-harness-control-form"><select class="form-input" data-agent-control-type><option value="steer">steer</option><option value="request">request</option><option value="reply">reply</option><option value="system">system</option></select><textarea class="form-input" rows="2" data-agent-control-payload placeholder="输入 JSON 载荷，例如 {&quot;message&quot;:&quot;请优先处理第二步&quot;}"></textarea><button class="btn-primary" type="submit">发送控制消息</button></form>${list.length ? list.map(item => `<article class="agent-harness-diagnostic-card"><div><strong>${escape(item.message_type)}</strong><span>${escape(item.status)}</span><small>${escape(formatDate(item.created_at))}</small></div>${renderDiagnosticValue(item.payload, 2600)}${['pending', 'delivered'].includes(String(item.status)) ? `<button type="button" class="btn-secondary btn-xs" data-agent-control-ack="${escapeAttr(item.message_id)}">确认</button>` : ''}</article>`).join('') : '<div class="empty-state">暂无控制消息。</div>'}`;
-        }
-        return '<div class="empty-state">暂无诊断数据。</div>';
-    }
-
-    function diagnosticTabMarkup(runId) {
-        const cache = getDiagnosticCache(runId), activeTab = cache.activeTab || state.diagnostics.get(String(runId)) || 'context';
-        cache.activeTab = activeTab;
-        const tab = (key, label) => `<button class="agent-harness-diagnostic-tab${activeTab === key ? ' active' : ''}" type="button" data-agent-harness-diagnostic-tab="${key}" role="tab" aria-selected="${activeTab === key ? 'true' : 'false'}" tabindex="${activeTab === key ? '0' : '-1'}">${label}</button>`;
-        const panelMarkup = (key, placeholder) => `<div class="agent-harness-diagnostic-panel${activeTab !== key ? ' hidden' : ''}" data-agent-harness-panel="${key}" role="tabpanel" aria-label="${key}">${cache.panels[key] || `<div class="empty-state">${placeholder}</div>`}</div>`;
-        return `<details class="agent-run-harness-diagnostics" data-agent-harness-diagnostics="${escapeAttr(runId)}" data-agent-harness-active-tab="${escapeAttr(activeTab)}"><summary><span>运行诊断</span><em>上下文、状态快照、资源与控制消息</em></summary><div class="agent-harness-diagnostics-body"><div class="agent-harness-diagnostic-tabs" role="tablist" aria-label="运行诊断">${tab('context', '上下文窗口')}${tab('world', '状态快照')}${tab('resources', '资源用量')}${tab('control', '控制消息')}</div><div class="agent-harness-diagnostic-panels">${panelMarkup('context', '正在加载上下文窗口记录...')}${panelMarkup('world', '正在加载状态快照...')}${panelMarkup('resources', '正在加载资源用量...')}${panelMarkup('control', '正在加载控制消息...')}</div></div></details>`;
-    }
-
-    async function loadDiagnostic(runId, type, detail, options = {}) {
-        const cache = getDiagnosticCache(runId), panel = detail?.querySelector?.(`[data-agent-harness-panel="${type}"]`);
-        if (!panel) return;
-        if (!cache.loaded[type] && !cache.panels[type] && !options.silent) setMarkup(panel, '<div class="empty-state">正在加载诊断数据...</div>');
-        const seq = ++cache.sequence;
-        cache.fetching[type] = true;
-        try {
-            let data;
-            if (type === 'context') data = (await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/context-windows?limit=100`, { cache: 'no-store' })).data || [];
-            if (type === 'world') data = (await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/world-states?limit=120`, { cache: 'no-store' })).data || [];
-            if (type === 'resources') data = (await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resources`, { cache: 'no-store' })).data || {};
-            if (type === 'control') data = (await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/control-messages?limit=100`, { cache: 'no-store' })).data || [];
-            if (seq !== cache.sequence) return;
-            const html = formatDiagnosticHtml(type, data);
-            cache.panels[type] = html;
-            cache.loaded[type] = true;
-            setMarkup(panel, html);
-        } catch (error) {
-            if (seq !== cache.sequence) return;
-            if (!cache.loaded[type] || !cache.panels[type]) setMarkup(panel, `<div class="empty-state agent-harness-error">${escape(error.message || '诊断数据加载失败。')}</div>`);
-        } finally { cache.fetching[type] = false; }
-    }
-
-    function bindRunDiagnostics(root, runId) {
-        const detail = root?.querySelector?.('.agent-run-harness-diagnostics');
-        if (!detail || detail.dataset.bound === '1') return;
-        detail.dataset.bound = '1';
-        const cache = getDiagnosticCache(runId);
-        let active = cache.activeTab || state.diagnostics.get(String(runId)) || 'context';
-        cache.activeTab = active;
-        state.diagnostics.set(String(runId), active);
-        detail.dataset.agentHarnessActiveTab = active;
-
-        const switchTab = (targetTab, shouldFetch = true) => {
-            active = targetTab;
-            cache.activeTab = active;
-            state.diagnostics.set(String(runId), active);
-            detail.dataset.agentHarnessActiveTab = active;
-
-            // 1. 切换按钮常驻高亮状态，不发生 DOM 重建
-            detail.querySelectorAll('[data-agent-harness-diagnostic-tab]').forEach(item => {
-                const selected = item.dataset.agentHarnessDiagnosticTab === active;
-                item.classList.toggle('active', selected);
-                item.setAttribute('aria-selected', selected ? 'true' : 'false');
-                item.tabIndex = selected ? 0 : -1;
-            });
-
-            // 2. 切换子面板常驻显示，零延迟且无内容闪烁
-            detail.querySelectorAll('[data-agent-harness-panel]').forEach(panelEl => {
-                const isMatch = panelEl.dataset.agentHarnessPanel === active;
-                panelEl.classList.toggle('hidden', !isMatch);
-            });
-
-            // 3. 静默或平滑更新数据
-            if (shouldFetch && detail.open) {
-                loadDiagnostic(runId, active, detail, { silent: Boolean(cache.loaded[active]) });
-            }
-        };
-
-        detail.addEventListener('toggle', () => {
-            if (detail.open) {
-                loadDiagnostic(runId, active, detail, { silent: Boolean(cache.loaded[active]) });
-            }
-        });
-
-        detail.querySelectorAll('[data-agent-harness-diagnostic-tab]').forEach(button => {
-            button.addEventListener('click', () => {
-                const targetTab = button.dataset.agentHarnessDiagnosticTab || 'context';
-                switchTab(targetTab, true);
-            });
-        });
-
-        // 初始应用标签与常驻面板状态
-        switchTab(active, false);
-        if (detail.open) {
-            loadDiagnostic(runId, active, detail, { silent: Boolean(cache.loaded[active]) });
-        }
-
-        // 控制表单提交与确认按钮绑定（事件委托）
-        detail.addEventListener('submit', async event => {
-            const form = event.target.closest('.agent-harness-control-form');
-            if (!form) return;
-            event.preventDefault();
-            let payload = {};
-            try { payload = JSON.parse(form.querySelector('[data-agent-control-payload]')?.value || '{}'); } catch (_) { return setNotice('控制消息内容必须是合法 JSON。', 'error'); }
-            try {
-                await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/control-messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: form.querySelector('[data-agent-control-type]')?.value, payload }) });
-                form.reset();
-                await loadDiagnostic(runId, 'control', detail, { silent: true });
-            } catch (error) {
-                const controlPanel = detail.querySelector('[data-agent-harness-panel="control"]');
-                if (controlPanel) prependMarkup(controlPanel, `<div class="empty-state agent-harness-error">${escape(error.message || '控制消息发送失败。')}</div>`);
-            }
-        });
-
-        detail.addEventListener('click', async event => {
-            const ack = event.target.closest('[data-agent-control-ack]');
-            if (!ack) return;
-            try {
-                await apiJson(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/control-messages/${encodeURIComponent(ack.dataset.agentControlAck)}/ack`, { method: 'POST' });
-                await loadDiagnostic(runId, 'control', detail, { silent: true });
-            } catch (error) { setNotice(error.message || '控制消息确认失败。', 'error'); }
-        });
     }
 
     function updateCpHeaderMeta(subview) {
@@ -1026,6 +890,7 @@
             const packs = window.Pivot?.moduleApi?.('agent.runtimePacks');
             packs?.refreshStatus?.().then(enabled => { if (enabled) return packs.load(); return null; }).catch(() => {});
             loadMemoryPolicy().catch(() => {});
+            loadLifecycleHooks().catch(() => {});
         }
     }
 
@@ -1049,6 +914,8 @@
                 if (target === 'learning') loadLearningModule().then(l => l?.load?.()).catch(() => {});
                 if (target === 'skills') loadSkills().catch(() => {});
                 if (target === 'memory') { loadMemoryPolicy().catch(() => {}); loadLearningModule().then(l => l?.loadMemories?.()).catch(() => {}); }
+                if (target === 'hooks') loadLifecycleHooks().catch(error => setNotice(error.message || '生命周期 Hook 加载失败。', 'error'));
+                if (target === 'delegation-policies') delegationRolePolicies.loadDelegationRolePolicies().catch(error => setNotice(error.message || '组织协作角色策略加载失败。', 'error'));
                 if (target === 'profile') loadProfile().catch(() => {});
             });
         });
@@ -1069,6 +936,9 @@
         });
 
         document.getElementById('agent-harness-skills-refresh')?.addEventListener('click', () => loadSkills().catch(error => setNotice(error.message, 'error')));
+        document.getElementById('agent-lifecycle-hooks-refresh')?.addEventListener('click', () => loadLifecycleHooks().catch(error => setNotice(error.message || '生命周期 Hook 加载失败。', 'error')));
+        document.getElementById('agent-delegation-policy-refresh')?.addEventListener('click', () => delegationRolePolicies.loadDelegationRolePolicies().catch(error => setNotice(error.message || '组织协作角色策略加载失败。', 'error')));
+        document.getElementById('agent-delegation-policy-save')?.addEventListener('click', delegationRolePolicies.saveDelegationRolePolicies);
         personalExperience.bindControls();
         document.getElementById('agent-harness-residency-refresh')?.addEventListener('click', () => loadResidents().catch(error => setNotice(error.message, 'error')));
         document.getElementById('agent-harness-residency-scope')?.addEventListener('change', () => loadResidents().catch(error => setNotice(error.message, 'error')));
@@ -1241,7 +1111,7 @@
 
     window.Pivot?.exposeModule?.('agent.harness', {
         loadAgentHarnessManagement: loadHarnessManagement, loadAgentControlPlane: loadControlPlane,
-        bindAgentRunHarnessDiagnostics: bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: diagnosticTabMarkup,
+        bindAgentRunHarnessDiagnostics: runDiagnostics.bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: runDiagnostics.diagnosticTabMarkup,
         loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || '',
         switchAgentCpSubview,
         openGoalModal

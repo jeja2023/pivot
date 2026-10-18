@@ -9,6 +9,7 @@ const {
 } = require('./memory-utils');
 const { serializeMemory } = require('./memory-serialization');
 const { prepareMemoryFeature, fastMemoryFeatureSimilarity } = require('./memory-merge');
+const { getMemoryOutcomeMetrics, getMemoryOutcomeReadiness } = require('./memory-outcome-metrics');
 
 const memoryQualityCache = new Map();
 const MEMORY_QUALITY_CACHE_TTL_MS = 30000;
@@ -56,6 +57,7 @@ async function getMemorySummary(userId, isLongTermMemoryEnabled) {
         enabled,
         active: 0,
         pending: 0,
+        reviewRequired: 0,
         deleted: 0,
         disabled: 0,
         byType: Object.fromEntries(Object.values(MEMORY_TYPES).map(type => [type, 0]))
@@ -67,6 +69,8 @@ async function getMemorySummary(userId, isLongTermMemoryEnabled) {
             summary.byType[normalizeMemoryType(row.type)] = (summary.byType[normalizeMemoryType(row.type)] || 0) + count;
         } else if (row.status === MEMORY_STATUS.pending) {
             summary.pending += count;
+        } else if (row.status === MEMORY_STATUS.reviewRequired) {
+            summary.reviewRequired += count;
         } else if (row.status === MEMORY_STATUS.deleted) {
             summary.deleted += count;
         } else if (row.status === MEMORY_STATUS.disabled) {
@@ -167,7 +171,7 @@ async function getMemoryQualitySummary(userId, isLongTermMemoryEnabled) {
     const now = getBeijingTimestamp();
     const unusedCutoff = getBeijingTimestamp(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
-    const [base, countsRow, mergeSuggestions, jobSummary] = await Promise.all([
+    const [base, countsRow, mergeSuggestions, jobSummary, outcomeMetrics, outcomeReadiness] = await Promise.all([
         getMemorySummary(userId, isLongTermMemoryEnabled),
         queryOne(`
             SELECT
@@ -178,7 +182,9 @@ async function getMemoryQualitySummary(userId, isLongTermMemoryEnabled) {
             WHERE user_id = ? AND status = ?
         `, [now, unusedCutoff, userId, MEMORY_STATUS.active]),
         getMemoryMergeSuggestions(userId, { limit: 20 }),
-        getMemoryJobSummary(userId)
+        getMemoryJobSummary(userId),
+        getMemoryOutcomeMetrics(userId),
+        getMemoryOutcomeReadiness(userId)
     ]);
 
     const lowConfidence = Number(countsRow?.low_confidence || 0);
@@ -188,9 +194,12 @@ async function getMemoryQualitySummary(userId, isLongTermMemoryEnabled) {
     const risks = [];
     if (lowConfidence > 0) risks.push({ type: 'low_confidence', count: lowConfidence });
     if (expired > 0) risks.push({ type: 'expired', count: expired });
+    if (Number(base.reviewRequired || 0) > 0) risks.push({ type: 'source_review_required', count: Number(base.reviewRequired || 0) });
     if (mergeSuggestions.length > 0) risks.push({ type: 'duplicates', count: mergeSuggestions.length });
     if (jobSummary.failed > 0) risks.push({ type: 'failed_jobs', count: jobSummary.failed });
     if (jobSummary.queued + jobSummary.running > 20) risks.push({ type: 'backlog', count: jobSummary.queued + jobSummary.running });
+    if (outcomeMetrics?.status === 'attention') risks.push({ type: 'outcome_metrics_below_threshold', count: Number(outcomeMetrics.evaluatedCount || 0) });
+    if (outcomeMetrics?.status === 'insufficient_data') risks.push({ type: 'outcome_metrics_insufficient_data', count: Number(outcomeMetrics.evaluatedCount || 0) });
 
     const result = {
         ...base,
@@ -200,6 +209,8 @@ async function getMemoryQualitySummary(userId, isLongTermMemoryEnabled) {
             unused,
             duplicateSuggestions: mergeSuggestions.length,
             jobSummary,
+            outcomeMetrics,
+            outcomeReadiness,
             risks,
             status: risks.length === 0 ? 'healthy' : risks.some(risk => ['failed_jobs', 'backlog'].includes(risk.type)) ? 'attention' : 'review'
         }

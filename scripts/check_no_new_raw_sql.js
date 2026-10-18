@@ -3,7 +3,9 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const baselinePath = path.join(__dirname, 'raw_sql_baseline.json');
+const reviewPath = path.join(__dirname, 'raw_sql_review.json');
 const writeBaseline = process.argv.includes('--write-baseline');
+const isMigration = file => file.startsWith('server/db/migrations/');
 
 function walk(dir, files = []) {
     if (!fs.existsSync(dir)) return files;
@@ -60,16 +62,40 @@ if (!fs.existsSync(baselinePath)) {
 
 const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
 const allowed = new Map((baseline.entries || []).map(item => [item.file, Number(item.count || 0)]));
+if (!fs.existsSync(reviewPath)) {
+    console.error('新增 raw SQL 检查失败：缺少 scripts/raw_sql_review.json。服务层新增直接 SQL 必须有文件级审核记录。');
+    process.exit(1);
+}
+const review = JSON.parse(fs.readFileSync(reviewPath, 'utf8'));
+const reviewed = new Map((review.entries || []).map(item => [item.file, item]));
 const current = summarize(collectRawSqlCounts());
 const failures = [];
 
 current.entries.forEach(item => {
+    if (isMigration(item.file)) return;
     const max = allowed.get(item.file) || 0;
-    if (item.count > max) failures.push(`${item.file}: 直接 SQL 字面量 ${item.count} > baseline ${max}`);
+    if (item.count > max) {
+        const entry = reviewed.get(item.file);
+        if (!entry || Number(entry.count) < item.count || !String(entry.rationale || '').trim() || !String(entry.verification || review.verification || '').trim()) {
+            failures.push(`${item.file}: 直接 SQL 字面量 ${item.count} > baseline ${max}，且缺少完整审核记录`);
+        }
+    }
 });
 
-if (current.total > Number(baseline.total || 0)) {
-    failures.push(`总数 ${current.total} > baseline ${baseline.total || 0}`);
+const currentRequestTotal = current.entries.filter(item => !isMigration(item.file)).reduce((sum, item) => sum + item.count, 0);
+const baselineRequestTotal = (baseline.entries || []).filter(item => !isMigration(item.file)).reduce((sum, item) => sum + Number(item.count || 0), 0);
+const reviewedAdditionalTotal = [...reviewed.values()].reduce((sum, item) => {
+    const baselineCount = allowed.get(item.file) || 0;
+    return sum + Math.max(0, Number(item.count || 0) - baselineCount);
+}, 0);
+if (currentRequestTotal > baselineRequestTotal + reviewedAdditionalTotal) {
+    failures.push(`请求路径总数 ${currentRequestTotal} > 基线 ${baselineRequestTotal} + 已审核增量 ${reviewedAdditionalTotal}`);
+}
+for (const entry of reviewed.values()) {
+    const currentEntry = current.entries.find(item => item.file === entry.file);
+    if (!currentEntry || currentEntry.count !== Number(entry.count)) {
+        failures.push(`${entry.file}: SQL 审核记录与当前计数不一致，必须重新审核`);
+    }
 }
 
 if (failures.length) {
@@ -77,5 +103,5 @@ if (failures.length) {
     failures.slice(0, 80).forEach(item => console.error(` - ${item}`));
     process.exit(1);
 } else {
-    console.log(`新增 raw SQL 检查通过：${current.total}/${baseline.total || 0} 个生产直接 SQL 字面量，未超出基线。`);
+    console.log(`新增 raw SQL 检查通过：请求路径 ${currentRequestTotal}/${baselineRequestTotal} + 已审核增量 ${reviewedAdditionalTotal}；迁移 SQL 由迁移门禁负责。`);
 }

@@ -10,7 +10,14 @@ const fs = require('fs');
 const path = require('path');
 const { createWorkspaceJail, runSandboxedProcess } = require('./agent-sandbox');
 const { resolvePythonExecutable } = require('./agent-python');
-const { isWorkerEnabled, normalizeDefinition: normalizeWorkerDefinition, runCapabilityWorker } = require('./agent-capability-worker');
+const {
+    isWorkerEnabled,
+    normalizeDefinition: normalizeWorkerDefinition,
+    runCapabilityWorker,
+    verifyWorkerSignature
+} = require('./agent-capability-worker');
+const { verifyExecutionGrant } = require('./agent-execution-grant');
+const { consumeExecutionGrant } = require('./agent-execution-grant-ledger');
 
 const MAX_SCRIPT_BYTES = 256 * 1024;
 const MAX_FILE_BYTES = 512 * 1024;
@@ -97,7 +104,7 @@ function resolveCommand(command) {
 function terminalWorkerDefinition(env = process.env) {
     const image = String(env.PIVOT_AGENT_TERMINAL_WORKER_IMAGE || '').trim();
     if (!image) return null;
-    const command = String(env.PIVOT_AGENT_TERMINAL_WORKER_COMMAND || 'pivot-terminal-runner')
+    const command = String(env.PIVOT_AGENT_TERMINAL_WORKER_COMMAND || 'node,/runner/runner.js')
         .split(',').map(item => item.trim()).filter(Boolean).slice(0, 8);
     return {
         image,
@@ -113,6 +120,9 @@ function terminalWorkerDefinition(env = process.env) {
 
 function allowUnsafeLocal(context = {}) {
     const env = context.env || process.env;
+    // 请求上下文不能覆盖真实进程的生产环境；生产误配置或调用方传入
+    // allowUnsafeLocal 时也必须保持 fail-closed。
+    if ([process.env.NODE_ENV, env.NODE_ENV].some(value => String(value || '').trim().toLowerCase() === 'production')) return false;
     return context.allowUnsafeLocal === true || String(env.PIVOT_AGENT_TERMINAL_ALLOW_UNSAFE_LOCAL || '').toLowerCase() === 'true';
 }
 
@@ -121,7 +131,11 @@ function isTerminalRuntimeAvailable(context = {}) {
     if (allowUnsafeLocal(context)) return true;
     const worker = terminalWorkerDefinition(env);
     if (!worker || !isWorkerEnabled(env)) return false;
-    try { normalizeWorkerDefinition(worker); return true; } catch (_) { return false; }
+    try {
+        const normalized = normalizeWorkerDefinition(worker);
+        verifyWorkerSignature(normalized, { env });
+        return true;
+    } catch (_) { return false; }
 }
 
 function validateReadOnlyCommand(command, args) {
@@ -142,6 +156,45 @@ function validateReadOnlyCommand(command, args) {
 
 function prepareJail(user, context = {}) {
     return createWorkspaceJail(terminalRoot(context), terminalTaskId(user, context));
+}
+
+function executionWorkspaceScopeId(context = {}) {
+    const runId = String(context.run?.id || context.runId || context.taskId || '').trim();
+    return String(context.executionWorkspaceScopeId || (runId ? `run:${runId}` : '')).slice(0, 160);
+}
+
+function assertTerminalExecutionGrant(input, user, context = {}) {
+    const env = context.env || process.env;
+    const runId = String(context.run?.id || context.runId || context.taskId || '').trim();
+    const workspaceScopeId = executionWorkspaceScopeId(context);
+    if (!runId || !workspaceScopeId) {
+        throw terminalError('受控终端执行必须关联运行与工作区授权范围。', 'AGENT_EXECUTION_GRANT_CONTEXT_INVALID', 403);
+    }
+    try {
+        return verifyExecutionGrant(context.executionGrant, {
+            runId,
+            userId: user?.id,
+            tool: 'terminal.runtime',
+            input,
+            workspaceScopeId
+        }, { env });
+    } catch (error) {
+        throw terminalError(error.message || '受控终端执行授权无效。', error.code || 'AGENT_EXECUTION_GRANT_INVALID', error.status || 403);
+    }
+}
+
+async function consumeTerminalExecutionGrant(input, user, context = {}) {
+    const executionGrant = assertTerminalExecutionGrant(input, user, context);
+    try {
+        await consumeExecutionGrant({
+            token: context.executionGrant,
+            payload: executionGrant.payload,
+            consumer: `terminal.runtime:${process.pid}`
+        });
+    } catch (error) {
+        throw terminalError(error.message || '受控终端执行授权账本校验失败。', error.code || 'AGENT_EXECUTION_GRANT_UNAVAILABLE', error.status || 403);
+    }
+    return executionGrant;
 }
 
 function publicWorkspace(jail) {
@@ -193,6 +246,10 @@ async function executeTerminalCommand(input = {}, user, context = {}) {
     const command = String(input.command || input.runtime || '').trim().toLowerCase();
     if (!TERMINAL_COMMANDS.includes(command)) throw terminalError(`受控终端仅支持：${TERMINAL_COMMANDS.join('、')}。`, 'AGENT_TERMINAL_COMMAND_DENIED', 403);
     const args = normalizeArgs(input.args);
+    // 生产环境在创建工作区或写入内联脚本前先消费绑定授权，避免无授权请求
+    // 留下宿主文件副作用。可用性与镜像信任已由 executeTerminalRuntime 校验。
+    const unsafeLocal = allowUnsafeLocal(context);
+    const executionGrant = unsafeLocal ? null : await consumeTerminalExecutionGrant(input, user, context);
     const jail = prepareJail(user, context);
     let effectiveArgs = args;
     let scriptPath = '';
@@ -220,7 +277,7 @@ async function executeTerminalCommand(input = {}, user, context = {}) {
     const timeoutMs = Math.min(Math.max(Number(input.timeoutMs || input.timeout_ms) || 30000, 100), MAX_TIMEOUT_MS);
     const env = context.env || process.env;
     const worker = terminalWorkerDefinition(env);
-    if (worker && isWorkerEnabled(env) && !allowUnsafeLocal(context)) {
+    if (worker && isWorkerEnabled(env) && !unsafeLocal) {
         const output = await runCapabilityWorker(worker, {
             version: 1,
             action: 'exec',
@@ -231,7 +288,16 @@ async function executeTerminalCommand(input = {}, user, context = {}) {
         }, {
             env,
             signal: context.signal || null,
-            workspaceMount: { source: jail.workspace, target: '/workspace', readOnly: false }
+            workspaceMount: { source: jail.workspace, target: '/workspace', readOnly: false },
+            requireExecutionGrant: true,
+            executionGrant: context.executionGrant,
+            executionGrantExpected: {
+                runId: String(context.run?.id || context.runId || context.taskId || ''),
+                userId: user?.id,
+                tool: 'terminal.runtime',
+                input,
+                workspaceScopeId: executionWorkspaceScopeId(context)
+            }
         });
         if (!output || typeof output !== 'object' || Array.isArray(output)) throw terminalError('受控终端 Worker 返回格式无效。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
         return {
@@ -239,7 +305,7 @@ async function executeTerminalCommand(input = {}, user, context = {}) {
             exitCode: Number.isInteger(output.exitCode) ? output.exitCode : 0,
             signal: output.signal ? String(output.signal) : null,
             stdout: String(output.stdout || ''), stderr: String(output.stderr || ''),
-            workspace: { ...publicWorkspace(jail), runner: 'capability-worker' }
+            workspace: { ...publicWorkspace(jail), runner: 'capability-worker', executionGrant: executionGrant.summary }
         };
     }
     if (!allowUnsafeLocal(context)) {
@@ -265,15 +331,95 @@ async function executeTerminalCommand(input = {}, user, context = {}) {
     };
 }
 
+function normalizeWorkerWorkspaceEntries(value) {
+    if (!Array.isArray(value) || value.length > MAX_LIST_ENTRIES) throw terminalError('终端 Worker 返回的目录条目无效。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
+    return value.map(item => {
+        const name = String(item?.name || '');
+        const type = String(item?.type || '');
+        if (!name || name.length > 240 || /[\\/\u0000\r\n]/.test(name) || !['file', 'directory', 'other'].includes(type)) {
+            throw terminalError('终端 Worker 返回的目录条目无效。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
+        }
+        return { name, type };
+    });
+}
+
+async function executeTerminalWorkspaceActionInWorker(action, input = {}, user, context = {}) {
+    const env = context.env || process.env;
+    const worker = terminalWorkerDefinition(env);
+    if (!worker || !isWorkerEnabled(env)) {
+        throw terminalError('终端文件操作需要已认证的隔离 Capability Worker。', 'AGENT_TERMINAL_RUNTIME_UNAVAILABLE', 503);
+    }
+    const relativePath = action === 'list'
+        ? (String(input.path || input.directory || '.').trim() === '.' ? '.' : safeRelativePath(input.path || input.directory))
+        : safeRelativePath(input.path || input.filePath || input.file_path);
+    const content = action === 'write' ? String(input.content ?? '') : undefined;
+    if (action === 'write' && Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) {
+        throw terminalError(`终端写入内容超过 ${MAX_FILE_BYTES} 字节限制。`, 'AGENT_TERMINAL_FILE_LIMIT');
+    }
+    const jail = prepareJail(user, context);
+    const executionGrant = await consumeTerminalExecutionGrant(input, user, context);
+    const output = await runCapabilityWorker(worker, {
+        version: 1,
+        action,
+        path: relativePath,
+        ...(action === 'write' ? { content } : {})
+    }, {
+        env,
+        signal: context.signal || null,
+        workspaceMount: { source: jail.workspace, target: '/workspace', readOnly: action !== 'write' },
+        requireExecutionGrant: true,
+        executionGrant: context.executionGrant,
+        executionGrantExpected: {
+            runId: String(context.run?.id || context.runId || context.taskId || ''),
+            userId: user?.id,
+            tool: 'terminal.runtime',
+            input,
+            workspaceScopeId: executionWorkspaceScopeId(context)
+        }
+    });
+    if (!output || typeof output !== 'object' || Array.isArray(output) || String(output.action || '') !== action) {
+        throw terminalError('终端 Worker 返回格式无效。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
+    }
+    const workspace = { ...publicWorkspace(jail), runner: 'capability-worker', executionGrant: executionGrant.summary };
+    if (action === 'write') {
+        const bytes = Number(output.bytes || 0);
+        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_FILE_BYTES) throw terminalError('终端 Worker 返回字节数无效。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
+        return { action, path: relativePath, bytes, workspace };
+    }
+    if (action === 'read') {
+        const value = String(output.content ?? '');
+        const bytes = Number(output.bytes || Buffer.byteLength(value, 'utf8'));
+        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_FILE_BYTES || Buffer.byteLength(value, 'utf8') > MAX_FILE_BYTES) {
+            throw terminalError('终端 Worker 返回内容超过限制。', 'AGENT_TERMINAL_WORKER_OUTPUT_INVALID', 502);
+        }
+        return { action, path: relativePath, content: value, bytes, workspace };
+    }
+    return {
+        action,
+        path: relativePath,
+        entries: normalizeWorkerWorkspaceEntries(output.entries),
+        truncated: output.truncated === true,
+        workspace
+    };
+}
+
 async function executeTerminalRuntime(input = {}, user, context = {}) {
     if (!isTerminalRuntimeAvailable(context)) {
         throw terminalError('受控终端尚未配置；请先启用已审计的 Capability Worker。', 'AGENT_TERMINAL_RUNTIME_UNAVAILABLE', 503);
     }
     const action = normalizeAction(input.action);
-    if (action === 'write') return await writeTerminalFile(input, user, context);
-    if (action === 'read') return await readTerminalFile(input, user, context);
-    if (action === 'list') return await listTerminalFiles(input, user, context);
+    if (action === 'write' || action === 'read' || action === 'list') {
+        // 生产文件 I/O 和命令执行使用同一已认证 Worker；宿主路径检查不能替代
+        // 文件系统隔离。只有显式开发诊断环境保留本地实现以支持离线单测。
+        if (!allowUnsafeLocal(context)) return await executeTerminalWorkspaceActionInWorker(action, input, user, context);
+        const result = action === 'write'
+            ? await writeTerminalFile(input, user, context)
+            : action === 'read'
+                ? await readTerminalFile(input, user, context)
+                : await listTerminalFiles(input, user, context);
+        return result;
+    }
     return await executeTerminalCommand(input, user, context);
 }
 
-module.exports = { executeTerminalRuntime, isTerminalRuntimeAvailable };
+module.exports = { executeTerminalRuntime, isTerminalRuntimeAvailable, assertTerminalExecutionGrant, executionWorkspaceScopeId };

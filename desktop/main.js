@@ -8,6 +8,7 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require('e
 function initEarlyDesktopEnv() {
     try {
         const userData = app.getPath('userData');
+        process.env.DOTENV_CONFIG_QUIET = 'true';
         process.env.PIVOT_DESKTOP = 'true';
         if (!process.env.LOG_DIR) process.env.LOG_DIR = path.join(userData, 'logs');
         if (!process.env.DATA_DIR) process.env.DATA_DIR = path.join(userData, 'data');

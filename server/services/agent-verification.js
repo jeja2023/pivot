@@ -166,6 +166,50 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
             // 质量指标汇聚属于参考性操作，指标记录失败不能覆盖确定性的任务验收结果。
         }
     }
+    // Task Transaction 与文本验收分层：先持久化独立 VerificationReport，
+    // 再推进事务。无副作用事务可在验收后自动提交；带副作用事务会停在
+    // awaiting_commit，直到每个 effect 提供提交证据，绝不因模型文本而自动交付。
+    const transactionId = String(metadata?.taskTransactionId || metadata?.task_transaction_id || '').trim();
+    if (runId && transactionId && (user?.id || run?.user_id)) {
+        const transactionUser = user || { id: run.user_id };
+        const {
+            commitTaskTransaction,
+            getTaskTransactionForUser,
+            recordTaskTransactionVerification
+        } = require('./agent-task-transactions');
+        let taskTransaction = await getTaskTransactionForUser(transactionId, transactionUser);
+        if (taskTransaction && ['executing', 'verifying'].includes(taskTransaction.status)) {
+            taskTransaction = await recordTaskTransactionVerification(transactionId, transactionUser, report);
+        }
+        if (taskTransaction?.status === 'awaiting_commit') {
+            const hasPendingEffect = taskTransaction.effects.some(effect => (
+                effect.commitMode !== 'preview' && effect.status !== 'committed'
+            ));
+            if (!hasPendingEffect) {
+                taskTransaction = await commitTaskTransaction(transactionId, transactionUser, {
+                    kind: 'verification_auto_commit',
+                    verificationId: `verify_${runId}`.slice(0, 128),
+                    verifiedAt: report.verifiedAt
+                });
+            }
+        }
+        if (taskTransaction) {
+            report.taskTransaction = {
+                id: taskTransaction.id,
+                status: taskTransaction.status,
+                effectCount: taskTransaction.effects.length,
+                compensationCount: taskTransaction.compensations.length,
+                committedAt: taskTransaction.committedAt || null
+            };
+            if (typeof setRunMetadata === 'function') {
+                await setRunMetadata(runId, {
+                    taskTransactionId: taskTransaction.id,
+                    taskTransactionStatus: taskTransaction.status,
+                    taskVerification: report
+                });
+            }
+        }
+    }
     return report;
 }
 

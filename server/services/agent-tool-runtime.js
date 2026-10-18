@@ -215,8 +215,8 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 status: 'error', retryable: Boolean(executionPlan.retry?.retryable), ...policyEvaluation.trace
             });
         },
-        execute: async ({ input: effectiveInput }) => {
-            if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName)) {
+        execute: async ({ input: effectiveInput, executionGrant = null }) => {
+            if (context.autonomous === true && ['agent.code', 'workflow.foreach'].includes(safeName) && !executionGrant) {
                 const error = new Error('自主 Agent 禁止在服务端进程内执行动态代码；请使用桌面 Worker 沙箱。');
                 error.code = 'AGENT_SANDBOX_REQUIRED';
                 error.category = 'policy';
@@ -224,11 +224,19 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             }
             let output;
             if (safeName.startsWith('mcp.')) {
-                output = await executeMcpTool(safeName, effectiveInput, user, { source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null });
+                output = await executeMcpTool(safeName, effectiveInput, user, {
+                    source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null,
+                    executionGrant: executionGrant?.token || null,
+                    executionGrantExpected: executionGrant ? {
+                        runId: String(context.run?.id || context.runId || context.taskId || ''),
+                        tool: safeName,
+                        workspaceScopeId: String(context.executionWorkspaceScopeId || `run:${context.run?.id || context.runId || context.taskId || ''}`)
+                    } : null
+                });
             } else if (safeName.startsWith('api.operation.')) {
                 const { executeAgentHttp } = require('./agent-http-tool');
                 const operationId = String(tool.apiOperationId || safeName.slice('api.operation.'.length));
-                output = await executeWorkflowApiOperation(operationId, effectiveInput, user, context, executeAgentHttp);
+                output = await executeWorkflowApiOperation(operationId, effectiveInput, user, { ...context, ...(executionGrant ? { executionGrant: executionGrant.token, executionGrantSummary: executionGrant.summary } : {}) }, executeAgentHttp);
             } else if (tool.databaseTool && safeName.startsWith('db.')) {
                 const rawConnectionId = effectiveInput?.connectionId ?? effectiveInput?.connection_id ?? effectiveInput?.databaseConnectionId ?? effectiveInput?.database_connection_id ?? effectiveInput?.mcpServerId ?? effectiveInput?.mcp_server_id;
                 const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
@@ -252,7 +260,10 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 delete toolInput.mcp_server_id;
                 output = await executeMcpTool(connection.fullName, toolInput, user, { source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null });
             } else {
-                output = await executeBuiltInTool(safeName, effectiveInput, user, context);
+                output = await executeBuiltInTool(safeName, effectiveInput, user, {
+                    ...context,
+                    ...(executionGrant ? { executionGrant: executionGrant.token, executionGrantSummary: executionGrant.summary } : {})
+                });
             }
             const outputIssues = validateToolOutput(tool, policyEvaluation.toolItem, output);
             if (outputIssues.length) {

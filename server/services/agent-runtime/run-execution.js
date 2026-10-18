@@ -6,6 +6,14 @@ const { continueRunFromCheckpoint: continueRunFromCheckpointHelper } = require('
 const { verifyTaskOutcome } = require('../agent-verification');
 const { inferTaskType } = require('../agent-model-quality');
 const { recordWorkingObservation } = require('../agent-working-state');
+const { plannerCoreSection } = require('../agent-prompt-registry');
+const { attachWorkingMemoryOutputReference, persistWorkingMemoryOutput } = require('../agent-working-memory-artifacts');
+const { createAgentRunErrorHandler } = require('./run-error-handler');
+const { createRunPreparation } = require('./run-preparation');
+const { createRunBudgetGuard, createRemainingModelRequestMs, createRunDeadlineTimer } = require('./run-budget-guard');
+const { createRunFinalizer } = require('./run-finalizer');
+const { executeAutomaticModelFailover } = require('./model-failover');
+const { recordPlannerModelEvent } = require('./planning-lifecycle');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -34,6 +42,9 @@ const {
     chooseModel,
     normalizeRouterStrategy,
     assessConfidence,
+    isRecoverableModelProviderFailure = () => false,
+    modelProviderFailureReason = error => String(error?.code || 'provider_failure'),
+    pickFailoverModel = async () => null,
     pickEscalationModel,
     getModelEndpointRuntimeStatus,
     getAgentRuntimeDeps,
@@ -61,6 +72,10 @@ const {
     createPersistedAgentStepContext,
     recordAgentEvent,
     verifyAgentOutcome = options => verifyTaskOutcome(options),
+    ensureTaskTransactionExecuting = async () => null,
+    persistWorkingMemoryRevision = async () => null,
+    recordPromptInvocation = async () => null,
+    resolveActivePromptSection = async (_key, fallback, _user) => fallback,
     buildAgentAuditFields,
     buildPlannerMessages,
     synthesizeFinalAnswer,
@@ -69,6 +84,7 @@ const {
     limitVisionImages,
     diagnoseError,
     buildAgentResumeContext,
+    acknowledgeAppliedAgentControlMessages = async () => [],
     applyAgentControlMessages,
     claimAgentControlMessages,
     listAppliedAgentControlMessages = async () => [],
@@ -90,7 +106,16 @@ const {
     getBeijingTimestamp,
     } = deps;
     const continueRunFromCheckpoint = options => continueRunFromCheckpointHelper(options, deps);
-
+    const loadRetryRow = runId => queryOne('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?', [runId]);
+    const { handle: handleAgentRunError } = createAgentRunErrorHandler({
+        requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, instanceId, logger,
+        updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
+        getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
+        setRunMetadata, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
+        loadRetryRow, TERMINAL_STATUSES
+    });
+    const preparation = createRunPreparation({ formatToolList, listToolReliability, selectToolOrder, setRunMetadata, logger, verifyAgentOutcome });
+    const { finalize: finalizeRun } = createRunFinalizer({ activeRunControllers, updateRun, getBeijingTimestamp, syncAgentTraceFromRun });
     async function runAgent(runId, user) {
     const runController = new AbortController();
     activeRunControllers.set(runId, runController);
@@ -106,6 +131,10 @@ const {
         runForSummary = run;
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
+        // 恢复路径先确认已持久化的控制应用；不会重放其指令。
+        try { await acknowledgeAppliedAgentControlMessages(runId, user); } catch (error) {
+            logger.warn({ runId, err: error.message }, '控制消息确认恢复失败，将在后续轮询重试');
+        }
         await ensureAgentTrace(run, {
             runMode: run.run_mode,
             modelRouter: run.model_router,
@@ -126,29 +155,14 @@ const {
             ? Number(normalizedBudget.max_runtime_seconds) * 1000
             : Infinity;
         const deadline = Date.now() + Math.min(normalizedRunTimeout, configuredRuntimeMs);
-        const remainingModelRequestMs = () => Math.min(
-            resolveAgentRequestTimeoutMs(),
-            Math.max(deadline - Date.now(), 1_000)
-        );
+        const remainingModelRequestMs = createRemainingModelRequestMs({ deadline, resolveAgentRequestTimeoutMs });
         taskBudget = new TaskBudget(normalizedBudget, {
             startedAt: Date.now(),
             enabled: true
         });
+        const assertRunWithinBudget = createRunBudgetGuard({ deadline, taskBudget });
         taskBudgetsBySignal.set(runController.signal, taskBudget);
-        deadlineTimer = setTimeout(() => {
-            const error = new Error('智能体运行超时。');
-            error.code = 'AGENT_TIMEOUT';
-            runController.abort(error);
-        }, Math.max(deadline - Date.now(), 1));
-        deadlineTimer.unref?.();
-        const assertRunWithinBudget = () => {
-            if (Date.now() > deadline) {
-                const err = new Error('任务执行超时。');
-                err.code = 'AGENT_TIMEOUT';
-                throw err;
-            }
-            taskBudget.assertWithin();
-        };
+        deadlineTimer = createRunDeadlineTimer({ deadline, runController });
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
         const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
         if (!initialModelCfg && !dagRun) throw new Error('当前智能体运行无可用的模型端点。');
@@ -180,7 +194,10 @@ const {
                     await insertStep(runId, (await listSteps(runId)).length + 1, {
                         type: 'control',
                         title: `模型路由选择：${routerStrategy}`,
-                        output: { strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '', reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0 }
+                        output: {
+                            strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
+                            reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
+                        }
                     });
                     logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
                 }
@@ -188,8 +205,11 @@ const {
                     type: 'routing',
                     name: '模型路由',
                     input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
-                    output: { chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '' },
-                    details: { strategy: routerStrategy }
+                    output: {
+                        chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
+                        reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
+                    },
+                    details: { strategy: routerStrategy, taskType: inferTaskType(run) }
                 });
             } catch (routerErr) {
                 // “没有兼容模型”不是路由器暂时故障；继续使用原模型会把包含
@@ -267,52 +287,19 @@ const {
                 }
             });
         }
-        let toolList = await formatToolList(user, { toolPolicy: run.tool_policy, toolAllowlist: run.tool_allowlist, preserveDiscoveryTools: true });
-        try {
-            const reliability = await listToolReliability(user, { days: 30, persist: false });
-            toolList = selectToolOrder(toolList, reliability.signals);
-            await setRunMetadata(runId, { toolReliabilityWindow: { days: reliability.days, minSampleCount: reliability.minSampleCount, signals: reliability.signals.slice(0, 100) } });
-        } catch (reliabilityError) {
-            logger.warn({ runId, err: reliabilityError.message }, '工具可靠性信号加载失败，继续固定排序');
-        }
         const chatBridge = runtimeMetadata.chatBridge;
+        const preparedTools = await preparation.prepareTools({ runId, user, run, runtimeMetadata, chatBridge });
+        const { toolList, plannerToolList, toolDiscoveryState, progressivePlannerToolNames } = preparedTools;
         let taskContract = runtimeMetadata.taskContract || runtimeMetadata.task_contract || null;
         let taskWorkingState = runtimeMetadata.workingState || null;
-        const plannerChatContext = chatBridge
-            ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }, longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState }
-            : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState };
-        const verifyOutcome = async (answer, partial = false, reason = '') => await verifyAgentOutcome({
-            runId,
-            run,
-            user,
-            taskContract,
-            answer,
-            observations,
-            partial,
-            reason
+        const taskTransaction = await ensureTaskTransactionExecuting(run, user, taskContract);
+        const taskTransactionId = String(taskTransaction?.id || runtimeMetadata.taskTransactionId || '').trim();
+        const plannerChatContext = preparation.buildPlannerContext({
+            chatBridge, plannerChatHistory, plannerCurrentMessage, longTermMemoryContext, runtimeMetadata, taskWorkingState
         });
-        if (chatBridge && chatBridge.mcpEnabled === true && Array.isArray(chatBridge.mcpToolAllowlist)) {
-            const allowedMcpTools = new Set(chatBridge.mcpToolAllowlist.map(value => String(value || '').trim()).filter(Boolean));
-            toolList = toolList.map(tool => {
-                if (tool?.source !== 'mcp') return tool;
-                if (allowedMcpTools.has(String(tool?.name || '').trim())) return tool;
-                if (!tool?.databaseTool || !Array.isArray(tool.databaseConnections)) return null;
-                const allowedConnections = tool.databaseConnections.filter(connection => allowedMcpTools.has(String(connection?.fullName || '').trim()));
-                return allowedConnections.length ? { ...tool, databaseConnections: allowedConnections } : null;
-            }).filter(Boolean);
-        }
-        if (chatBridge && chatBridge.ragEnabled !== true) {
-            toolList = toolList.filter(tool => !['rag.search', 'knowledge.list', 'knowledge.graph.query'].includes(String(tool?.name || '')));
-        }
-        if (runtimeMetadata.chatBridge && runtimeMetadata.chatBridge.mcpEnabled !== true) {
-            toolList = toolList.filter(tool => !tool?.network
-                && !tool?.side_effect
-                && !tool?.approval_required
-                && !tool?.requiresApproval
-                && !tool?.alwaysRequiresApproval);
-        }
-        const { prepareProgressiveToolDiscovery } = require('./progressive-tool-discovery');
-        const { plannerToolList, toolDiscoveryState, plannerToolNames: progressivePlannerToolNames } = prepareProgressiveToolDiscovery(toolList);
+        const verifyOutcome = preparation.createOutcomeVerifier({
+            runId, run, user, getTaskContract: () => taskContract, getObservations: () => observations
+        });
         await assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
         await updateRun(runId, {
@@ -325,7 +312,7 @@ const {
         if (dagRun) {
             await assertRunNotCancelled(runId);
             await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
-            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget }, getAgentRuntimeDeps(runController.signal));
+            await runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunWithinBudget, taskTransactionId }, getAgentRuntimeDeps(runController.signal));
             return;
         }
 
@@ -361,6 +348,7 @@ const {
                 assertRunWithinBudget,
                 assertRunNotCancelled,
                 observations,
+                taskTransactionId,
                 chatContext: plannerChatContext
             }, streamingDeps);
             if (streamingResult?.completed) return;
@@ -389,6 +377,11 @@ const {
             const controlMessages = claimedControlMessages.length && typeof applyAgentControlMessages === 'function'
                 ? await applyAgentControlMessages(runId, user, claimedControlMessages)
                 : [];
+            if (controlMessages.length) {
+                try { await acknowledgeAppliedAgentControlMessages(runId, user, controlMessages); } catch (error) {
+                    logger.warn({ runId, err: error.message }, '控制消息确认失败，将在后续轮询重试');
+                }
+            }
             if (controlMessages.length) {
                 const freshMessages = controlMessages.filter(message => !observedControlMessageIds.has(String(message.message_id || '')));
                 freshMessages.forEach(message => observedControlMessageIds.add(String(message.message_id || '')));
@@ -454,7 +447,66 @@ const {
                     ? { ...runtimeMetadata.chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }
                     : null
             };
-            const plannerMessages = buildPlannerMessages(run.goal, plannerToolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection);
+            const activePlannerCore = await resolveActivePromptSection('agent_planner_core', plannerCoreSection(), user);
+            const plannerMessages = buildPlannerMessages(run.goal, plannerToolList, observations, run.run_mode, plannerContextConfig, modelCfg, stepContext.worldState, stepContext.worldStateInjection, activePlannerCore);
+            const semanticCompaction = plannerMessages.contextCompaction;
+            if (semanticCompaction?.applied) {
+                // 压缩本身是影响后续模型决策的运行时边界，必须留下可关联的审计；
+                // 只记层级、Token 与引用数量，绝不把历史正文、Working Memory 正文或
+                // CAS 引用写入事件日志。
+                const compactionAudit = {
+                    targetTokens: Number(semanticCompaction.targetTokens || 0),
+                    inputTokensBefore: Number(semanticCompaction.inputTokensBefore || 0),
+                    inputTokensAfter: Number(semanticCompaction.inputTokensAfter || 0),
+                    levelOne: {
+                        applied: Boolean(semanticCompaction.levelOne?.applied),
+                        evidenceCards: Number(semanticCompaction.levelOne?.evidenceCards || 0),
+                        referencesRetained: Number(semanticCompaction.levelOne?.referencesRetained || 0)
+                    },
+                    levelTwo: { applied: Boolean(semanticCompaction.levelTwo?.applied) },
+                    levelThree: {
+                        applied: Boolean(semanticCompaction.levelThree?.applied),
+                        summarizedMessages: Number(semanticCompaction.levelThree?.summarizedMessages || 0)
+                    },
+                    retained: {
+                        constraints: Array.isArray(semanticCompaction.retention?.constraintIds) ? semanticCompaction.retention.constraintIds.length : 0,
+                        pending: Array.isArray(semanticCompaction.retention?.pendingIds) ? semanticCompaction.retention.pendingIds.length : 0,
+                        evidenceReferences: Array.isArray(semanticCompaction.retention?.evidenceRefs) ? semanticCompaction.retention.evidenceRefs.length : 0,
+                        constraintRetentionRate: Number(semanticCompaction.retention?.constraintRetentionRate ?? 0),
+                        pendingRetentionRate: Number(semanticCompaction.retention?.pendingRetentionRate ?? 0),
+                        evidenceReferenceRetentionRate: Number(semanticCompaction.retention?.evidenceReferenceRetentionRate ?? 0),
+                        hardFieldLoss: Boolean(semanticCompaction.retention?.blockingLoss)
+                    }
+                };
+                try {
+                    await recordAgentEvent({
+                        runId,
+                        userId: user.id,
+                        turnId: stepContext.turnId,
+                        stepIndex: step,
+                        type: 'context.compacted',
+                        payload: {
+                            ...buildAgentAuditFields(stepContext, { entrypoint: 'agent', purpose: 'agent_semantic_context_compacted' }),
+                            compaction: compactionAudit
+                        },
+                        eventKey: `${stepContext.contextHash}:semantic_context_compacted`
+                    });
+                } catch (eventError) {
+                    logger.warn({ runId, step, err: eventError.message }, 'Agent 语义上下文压缩审计写入失败');
+                }
+                try {
+                    await persistWorkingMemoryRevision({
+                        run, user, state: taskWorkingState, taskContract, reason: 'context_compacted'
+                    });
+                } catch (revisionError) {
+                    logger.warn({ runId, step, err: revisionError.message }, 'Agent 语义上下文压缩工作记忆修订失败');
+                }
+            }
+            try {
+                await recordPromptInvocation({ runId, user, source: 'agent_planner', manifest: plannerMessages.promptManifest || null });
+            } catch (promptAuditError) {
+                logger.warn({ runId, step, err: promptAuditError.message }, 'Agent Prompt Section 审计写入失败');
+            }
             await recordPlannerMemoryUsage(plannerMessages);
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
@@ -468,17 +520,7 @@ const {
             let plannedTextUsageRef = null;
             let plannedUsageResult = null;
             try {
-                try {
-                    await recordAgentEvent({
-                        runId,
-                        userId: user.id,
-                        turnId: stepContext.turnId,
-                        stepIndex: step,
-                        type: 'model.requested',
-                        payload: { ...buildAgentAuditFields(stepContext, { entrypoint: 'agent', purpose: 'agent_planner_requested' }), messageCount: plannerMessages.length },
-                        eventKey: `model:${stepContext.contextHash}:requested`
-                    });
-                } catch (_) {}
+                await recordPlannerModelEvent('requested', { runId, user, turnId: stepContext.turnId, step, stepContext, model: modelCfg, purpose: 'agent_planner_requested', messageCount: plannerMessages.length });
                 const usageRef = {};
                 // 规划一步可能直接内联 {"action":"final","answer":"…"} 给出完整答案，
                 // 那段 answer 同样受本次调用的输出预算限制，因此按最终答案的下限给足。
@@ -500,41 +542,58 @@ const {
                         outputTokens: usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens ?? null
                     }, 'Agent 规划输出因预算耗尽被截断，本步结果可能不完整');
                 }
-                try {
-                    await recordAgentEvent({
-                        runId,
-                        userId: user.id,
-                        turnId: stepContext.turnId,
-                        stepIndex: step,
-                        type: 'model.completed',
-                        payload: { ...buildAgentAuditFields(stepContext, { entrypoint: 'agent', purpose: 'agent_planner_completed' }), responseLength: String(plannedText || '').length },
-                        eventKey: `model:${stepContext.contextHash}:completed`
-                    });
-                } catch (_) {}
+                await recordPlannerModelEvent('completed', { runId, user, turnId: stepContext.turnId, step, stepContext, model: modelCfg, purpose: 'agent_planner_completed', responseLength: String(plannedText || '').length });
                 await finishAgentTraceSpan(plannerSpanId, {
                     output: { responseLength: String(plannedText || '').length },
                     durationMs: Date.now() - plannerStartedAt,
                     contextHash: stepContext.contextHash
                 });
             } catch (plannerError) {
-                try {
-                    await recordAgentEvent({
-                        runId,
-                        userId: user.id,
-                        turnId: stepContext.turnId,
-                        stepIndex: step,
-                        type: 'model.failed',
-                        payload: { ...buildAgentAuditFields(stepContext, { entrypoint: 'agent', purpose: 'agent_planner_failed' }), errorCode: plannerError.code || '', errorMessage: plannerError.message },
-                        eventKey: `model:${stepContext.contextHash}:failed`
-                    });
-                } catch (_) {}
+                await recordPlannerModelEvent('failed', { runId, user, turnId: stepContext.turnId, step, stepContext, model: modelCfg, purpose: 'agent_planner_failed', error: plannerError });
                 await finishAgentTraceSpan(plannerSpanId, {
                     status: 'error',
                     errorMessage: plannerError.message,
                     durationMs: Date.now() - plannerStartedAt,
                     contextHash: stepContext.contextHash
                 });
-                throw plannerError;
+                // 固定模型与非可恢复错误不能降级；可恢复的供应方故障最多只切换一次。
+                const failover = await executeAutomaticModelFailover({
+                    routerStrategy,
+                    error: plannerError,
+                    user,
+                    currentModel: modelCfg,
+                    messages: plannerMessages,
+                    endpointStatusGetter: getModelEndpointRuntimeStatus,
+                    isRecoverableModelProviderFailure,
+                    modelProviderFailureReason,
+                    pickFailoverModel,
+                    runId,
+                    step,
+                    turnId: stepContext.turnId,
+                    contextHash: stepContext.contextHash,
+                    stepContext,
+                    signal: runController.signal,
+                    getTimestamp: getBeijingTimestamp,
+                    updateRun,
+                    listSteps,
+                    insertStep,
+                    recordAgentTraceSpan,
+                    startAgentTraceSpan,
+                    finishAgentTraceSpan,
+                    recordAgentEvent,
+                    buildAgentAuditFields,
+                    callModelText,
+                    remainingModelRequestMs,
+                    resolveAgentPlanningThinking,
+                    withTimeout,
+                    minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS,
+                    recordPlannerModelEvent
+                });
+                if (!failover) throw plannerError;
+                modelCfg = failover.model;
+                modelCfgForSummary = failover.model;
+                plannedText = failover.plannedText;
+                plannedTextUsageRef = failover.usageRef;
             }
             plannedUsageResult = await recordAgentModelUsage(user, modelCfg, plannerMessages, plannedText, 'agent_planner', runId, {
                 budget: taskBudget,
@@ -581,22 +640,27 @@ const {
                 });
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer);
-                const finalStatus = verification.outcomeStatus === 'verified'
-                    ? 'completed'
+                const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
+                const finalStatus = awaitingCommit
+                    ? 'awaiting_commit'
+                    : verification.outcomeStatus === 'verified'
+                        ? 'completed'
                     : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
                 const verified = finalStatus === 'completed';
                 const verificationError = verified
                     ? ''
+                    : awaitingCommit
+                        ? '任务结果已验证，仍有外部副作用等待提交。'
                     : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
                 await updateRun(runId, {
                     status: finalStatus,
                     final_answer: answer,
                     error_message: verificationError,
-                    ...(finalStatus === 'needs_input' ? {} : { completed_at: getBeijingTimestamp() }),
+                    ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行完成' : '任务需要补充或修复', getAgentRunTitle(run));
+                await createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行完成' : awaitingCommit ? '任务等待提交' : '任务需要补充或修复', getAgentRunTitle(run));
                 return;
             }
 
@@ -649,6 +713,7 @@ const {
                     contextHash: stepContext.contextHash,
                     traceContext: buildToolTraceContext({ runId, spanId: `${runId}:${step}`, requestId: stepContext?.requestId || '' }),
                     budget: taskBudget,
+                    taskTransactionId,
                     approvalGranted: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
                     allowApproval: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
                     toolDiscoveryState,
@@ -666,7 +731,18 @@ const {
                 );
                 await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
-                const compactOutput = compactToolOutputForModel(output, modelCfg);
+                let compactOutput = compactToolOutputForModel(output, modelCfg);
+                try {
+                    const reference = compactOutput && typeof compactOutput === 'object' && (compactOutput.__partial === true || compactOutput.structuredContent?.__partial === true)
+                        ? await persistWorkingMemoryOutput(output, user, { tenantId: run.tenant_id || user.tenant_id || user.tenantId, force: true })
+                        : null;
+                    if (reference) compactOutput = attachWorkingMemoryOutputReference(compactOutput, reference);
+                } catch (error) {
+                    // 原文存储不可用时不能把摘要伪装为可完整追溯；仍保留工具事实并让验收看到缺口。
+                    if (compactOutput && typeof compactOutput === 'object' && !Array.isArray(compactOutput)) {
+                        compactOutput = { ...compactOutput, rawOutputStorageError: String(error.message || '原文存储失败').slice(0, 240) };
+                    }
+                }
                 await updateRun(runId, { status: 'observing', updated_at: getBeijingTimestamp() });
                 observations.push({
                     step,
@@ -676,6 +752,9 @@ const {
                 });
                 taskWorkingState = recordWorkingObservation(taskWorkingState, { tool: plan.tool, output: compactOutput }, taskContract, run.goal);
                 await setRunMetadata(runId, { taskContract, workingState: taskWorkingState });
+                await persistWorkingMemoryRevision({
+                    run, user, state: taskWorkingState, taskContract, reason: 'tool_observation'
+                });
                 await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行完成：${plan.tool}`,
@@ -862,133 +941,13 @@ const {
         });
         await createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
     } catch (e) {
-        if (e.code === 'AGENT_RUN_LEASE_LOST') {
-            // 持久化取消状态和租约归属为准。旧实例失去执行权后不能提交结果；
-            // 仍归属本实例的任务会安全回到队列。
-            lostExecutionLease = true;
-            await requeueAgentRunAfterLeaseLoss({ execute, getTimestamp: getBeijingTimestamp, enqueueAgentRun, instanceId, runId, error: e })
-                .catch(error => logger.warn({ runId, err: error.message }, '执行租约失效后的安全回队失败'));
-            return;
-        }
-        if (e.code === 'AGENT_RUN_CANCELLED') {
-            return;
-        }
-        if (e.code === 'AGENT_APPROVAL_REQUIRED') {
-            await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
-            return;
-        }
-        logger.error({ err: e.message, runId }, '智能体运行失败');
-        const currentStatus = await getRunStatus(runId);
-        if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId) || currentStatus === 'cancelled') {
-            if (currentStatus !== 'cancelled' && currentStatus !== 'deleted') {
-                await updateRun(runId, {
-                    status: 'cancelled',
-                    error_message: e.message,
-                    cancelled_at: getBeijingTimestamp(),
-                    completed_at: getBeijingTimestamp(),
-                    updated_at: getBeijingTimestamp()
-                });
-            }
-            return;
-        }
-        if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
-            if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, error: e, reason: 'timeout' })) {
-                return;
-            }
-            const isModelRequestTimeout = /(?:智能体规划|流式工具规划|final summary|escalated final summary)执行超时/i.test(String(e.message || ''));
-            const reason = e.code === 'AGENT_TIMEOUT'
-                ? (isModelRequestTimeout
-                    ? '模型响应超过单次调用时限，以下为已完成的部分结果。'
-                    : '任务已达到运行时间上限，以下为已完成的部分结果。')
-                : '任务已达到预算上限，以下为已完成的部分结果。';
-            let answer = '';
-            if (modelCfgForSummary && runForSummary) {
-                try {
-                    answer = await withTimeout(
-                        () => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {
-                            budget: taskBudget,
-                            allowBudgetExceeded: true,
-                            chatAgent: runForSummary ? getRunMetadata(runForSummary).chatBridge : null
-                        }),
-                        30000,
-                        'partial final summary'
-                    );
-                } catch (summaryError) {
-                    logger.warn({ runId, err: summaryError.message }, '资源受限后的部分结果总结失败');
-                }
-            }
-            if (!String(answer || '').trim()) {
-                answer = observations.length
-                    ? `已完成 ${observations.length} 项执行观察，但未能生成完整总结。`
-                    : '任务在产生可用总结前被中止。';
-            }
-            if (!TERMINAL_STATUSES.has(currentStatus)) {
-                await updateRun(runId, {
-                    status: 'completed_with_errors',
-                    final_answer: `${reason}\n\n${answer}`,
-                    error_message: e.message || reason,
-                    completed_at: getBeijingTimestamp(),
-                    last_heartbeat_at: getBeijingTimestamp(),
-                    updated_at: getBeijingTimestamp()
-                });
-                await createAgentNotification(user.id, runId, 'warning', '任务已生成部分结果', reason);
-            }
-            return;
-        }
-        if (currentStatus === 'cancelled' || currentStatus === 'deleted' || isRunCancelled(runId)) {
-            return;
-        }
-        const retryRow = await queryOne('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?', [runId]);
-        const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
-        const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
-        if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT' && e.code !== 'AGENT_INVALID_STATUS_TRANSITION') {
-            const resumeContext = await buildAgentResumeContext(runId);
-            const retryAttempt = retryCount + 1;
-            const retryDelayMs = calculateAgentRetryDelayMs(retryAttempt);
-            const retryAfter = getBeijingTimestamp(new Date(Date.now() + retryDelayMs));
-            await setRunMetadata(runId, { resumeContext });
-            await recordRunRetryReason(runId, {
-                attempt: retryAttempt,
-                limit: retryLimit,
-                code: e.code || '',
-                error: e.message,
-                retryAfter,
-                retryDelayMs
-            });
-            await updateRun(runId, {
-                status: 'queued',
-                error_message: e.message,
-                retry_count: retryAttempt,
-                retry_after: retryAfter,
-                resume_from_step: Number(resumeContext.latestStepIndex || 0),
-                updated_at: getBeijingTimestamp()
-            });
-            await insertStep(runId, (await listSteps(runId)).length + 1, {
-                type: 'control',
-                title: `任务失败重试：${retryCount + 1}/${retryLimit}`,
-                output: { error: e.message }
-            });
-            // 重新拉取用户，避免复用运行开始时捕获的过期用户对象（运行中用户可能被禁用或修改）
-            enqueueAgentRun(runId, (await getRunUser(runId)) || user, { retryAfter });
-            return;
-        }
-        const latestStatus = await getRunStatus(runId);
-        if (TERMINAL_STATUSES.has(latestStatus)) return;
-        await updateRun(runId, {
-            status: 'error',
-            error_message: e.message,
-            completed_at: getBeijingTimestamp(),
-            last_heartbeat_at: getBeijingTimestamp(),
-            updated_at: getBeijingTimestamp()
+        await handleAgentRunError(e, {
+            runId, user, runForSummary, modelCfgForSummary, observations, taskBudget,
+            markExecutionLeaseLost: () => { lostExecutionLease = true; }
         });
-        await createAgentNotification(user.id, runId, 'error', '智能体运行失败', e.message);
+
     } finally {
-        if (deadlineTimer) clearTimeout(deadlineTimer);
-        if (activeRunControllers.get(runId) === runController) activeRunControllers.delete(runId);
-        if (taskBudget && !lostExecutionLease) {
-            try { await updateRun(runId, { usage_stats: JSON.stringify(taskBudget.snapshot()), updated_at: getBeijingTimestamp() }); } catch (_) {}
-        }
-        if (!lostExecutionLease) await syncAgentTraceFromRun(runId);
+        await finalizeRun({ runId, runController, deadlineTimer, taskBudget, lostExecutionLease });
     }
 }
 

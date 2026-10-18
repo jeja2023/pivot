@@ -106,9 +106,9 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'announcements']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
 
@@ -210,6 +210,7 @@ const adminFeatureScripts = [
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
     '/chat/decision-feedback-review.js',
+    '/chat/decision-gold-review.js',
     '/chat/admin-settings.js',
     '/chat/admin-settings-memory.js',
     '/chat/admin-stealth.js',
@@ -351,7 +352,6 @@ window.Pivot.legacy.closeModal = () => {
     window.Pivot.legacy.cancelOpsSummaryLoad?.();
     window.Pivot.legacy.cancelMonitorSummaryLoad?.();
     window.Pivot.legacy.clearMonitorRefreshTimer?.();
-    document.getElementById('admin-container')?.setAttribute('aria-hidden', 'true');
     return window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
 };
 
@@ -459,6 +459,7 @@ async function loadTabDataInternal(tab, page = 1) {
             if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
             if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
             if (tab === 'route-feedback') await window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
+            if (tab === 'decision-gold-review') await window.Pivot?.moduleApi?.('decision.goldReview')?.loadDecisionGoldReviewQueue?.();
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);

@@ -10,7 +10,15 @@ const { createAgentQueue } = require('../agent-queue');
 const { callModelText, recordAgentModelUsage, resolveAgentPlanningThinking, resolveAgentRequestTimeoutMs, AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
 const { normalizeToolInput } = require('../agent-policy');
 const { publishUserEvent } = require('../realtime-events');
-const { chooseModel, normalizeStrategy: normalizeRouterStrategy, assessConfidence, pickEscalationModel } = require('../model-router');
+const {
+    chooseModel,
+    normalizeStrategy: normalizeRouterStrategy,
+    assessConfidence,
+    isRecoverableModelProviderFailure,
+    modelProviderFailureReason,
+    pickFailoverModel,
+    pickEscalationModel
+} = require('../model-router');
 const { getModelEndpointRuntimeStatus } = require('../model-runtime');
 const {
     configureAgentSchedules,
@@ -78,6 +86,7 @@ const {
 const { formatToolList } = require('../agent-tool-catalog');
 const {
     getAgentMetrics,
+    runAgentRuntimeSloMonitor,
     getAgentRuntimeStatus: buildAgentRuntimeStatus
 } = require('../agent-monitoring');
 const {
@@ -126,9 +135,12 @@ const { configureAgentChannelGateway, deliverChannelGatewayRunResult } = require
 const { recordCollaboratorCompletion } = require('../agent-collaboration');
 const { createAgentInboxEvent } = require('../agent-inbox');
 const { createPersistedAgentStepContext } = require('../agent-world-state-store');
+const { persistWorkingMemoryRevision } = require('../agent-working-memory-revisions');
+const { recordPromptInvocation, resolveActivePromptSection } = require('../agent-prompt-registry');
 const { buildAgentAuditFields } = require('../agent-step-context');
 const { recordAgentEvent } = require('../agent-event-log');
 const {
+    acknowledgeAppliedAgentControlMessages,
     applyAgentControlMessages,
     claimAgentControlMessages,
     listAppliedAgentControlMessages
@@ -162,11 +174,17 @@ const {
 } = require('../agent-goals');
 const { maybeArchiveStalePersonalExperiences, processAgentLearningJobs } = require('../agent-learning');
 const { verifyAndRecordTaskOutcome } = require('../agent-verification');
-
+const {
+    createTaskTransaction,
+    getTaskTransactionForUser,
+    transitionTaskTransaction
+} = require('../agent-task-transactions');
+const { dispatchPreLifecycleHook, dispatchPostLifecycleHook } = require('../agent-lifecycle-dispatcher');
 const { buildPlannerMessages, synthesizeFinalAnswer, isMissingFinalAnswer } = require('./planner');
 const { createAgentNotificationFactory } = require('./notifications');
 const { createApprovalHelpers } = require('./approvals');
 const { createRunState } = require('./run-state');
+const { createApprovalRevocation } = require('./approval-revocation');
 const { createRunLifecycle } = require('./run-lifecycle');
 const { createAgentRunner } = require('./run-execution');
 const { calculateAgentRetryDelayMs } = require('./retry-policy');
@@ -177,7 +195,6 @@ const {
     persistAgentRunChatResult,
     recoverChatAgentResults
 } = require('../chat-agent-bridge');
-
 
 let agentQueue = null;
 const activeRunControllers = new Map();
@@ -217,6 +234,8 @@ const runState = createRunState({
     recordAgentRunOutcome,
     recordFirstTaskTerminal,
     recordAgentEvent,
+    dispatchPreLifecycleHook,
+    dispatchPostLifecycleHook,
     crypto,
     publishUserEvent,
     parseJsonObject,
@@ -234,7 +253,6 @@ const {
     updateRun,
     updateRunCas
 } = runState;
-
 const { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval } = createApprovalHelpers({
     getRunMetadata,
     normalizeApprovalPolicy,
@@ -401,10 +419,51 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         recordAgentEvent,
         verifyAgentOutcome: options => verifyAndRecordTaskOutcome({ ...options, setRunMetadata }),
         pollAgentControlMessages: async (runId, user, options) => {
+            // 进程在 apply 后、ack 前崩溃时，先补发 ACK；状态已是 applied 的消息
+            // 不会再次进入 claim/apply，从而保持恰好一次的业务应用语义。
+            try { await acknowledgeAppliedAgentControlMessages(runId, user); } catch (_) {}
             const claimed = await claimAgentControlMessages(runId, user, options);
-            return claimed.length ? await applyAgentControlMessages(runId, user, claimed) : [];
+            const applied = claimed.length ? await applyAgentControlMessages(runId, user, claimed) : [];
+            if (applied.length) {
+                try { await acknowledgeAppliedAgentControlMessages(runId, user, applied); } catch (_) {}
+            }
+            return applied;
         }
     };
+}
+
+async function ensureTaskTransactionExecuting(run, user, taskContract = null) {
+    const metadata = getRunMetadata(run);
+    let transactionId = String(metadata.taskTransactionId || metadata.task_transaction_id || '').trim();
+    let taskTransaction = transactionId ? await getTaskTransactionForUser(transactionId, user) : null;
+    if (!taskTransaction) {
+        taskTransaction = await createTaskTransaction({
+            run,
+            user,
+            taskContract: taskContract || metadata.taskContract || metadata.task_contract || {},
+            workspaceSnapshot: {
+                kind: 'recovered_run_control_plane',
+                runMode: run.run_mode || 'standard',
+                recoveredAt: getBeijingTimestamp()
+            }
+        });
+        transactionId = taskTransaction.id;
+        await setRunMetadata(run.id, {
+            taskTransactionId: transactionId,
+            taskTransactionStatus: taskTransaction.status
+        });
+    }
+    if (taskTransaction.status === 'planned') {
+        taskTransaction = await transitionTaskTransaction(taskTransaction.id, user, 'executing');
+        await setRunMetadata(run.id, { taskTransactionStatus: taskTransaction.status });
+    }
+    if (taskTransaction.status !== 'executing') {
+        const error = new Error(`任务事务当前状态为 ${taskTransaction.status}，不能继续执行。`);
+        error.code = 'AGENT_TASK_TRANSACTION_NOT_EXECUTABLE';
+        error.status = 409;
+        throw error;
+    }
+    return taskTransaction;
 }
 
 const { runAgent } = createAgentRunner({
@@ -440,6 +499,9 @@ const { runAgent } = createAgentRunner({
     chooseModel,
     normalizeRouterStrategy,
     assessConfidence,
+    isRecoverableModelProviderFailure,
+    modelProviderFailureReason,
+    pickFailoverModel,
     pickEscalationModel,
     getModelEndpointRuntimeStatus,
     getAgentRuntimeDeps,
@@ -468,6 +530,9 @@ const { runAgent } = createAgentRunner({
     createAgentNotification,
     createPersistedAgentStepContext,
     recordAgentEvent,
+    persistWorkingMemoryRevision,
+    recordPromptInvocation,
+        resolveActivePromptSection,
     buildAgentAuditFields,
     buildPlannerMessages,
     synthesizeFinalAnswer,
@@ -478,6 +543,7 @@ const { runAgent } = createAgentRunner({
     diagnoseError,
     buildAgentResumeContext,
     applyAgentControlMessages,
+    acknowledgeAppliedAgentControlMessages,
     claimAgentControlMessages,
     listAppliedAgentControlMessages,
     approvalInputHash,
@@ -493,6 +559,7 @@ const { runAgent } = createAgentRunner({
     finishAgentTraceSpan,
     syncAgentTraceFromRun,
     TERMINAL_STATUSES,
+    ensureTaskTransactionExecuting,
     instanceId: AGENT_INSTANCE_ID,
     logger,
     getBeijingTimestamp,
@@ -686,6 +753,19 @@ async function approveAgentTool(runId, user, approve = true) {
     return await getRunForUser(runId, user);
 }
 
+const { revokeApprovedAgentTool } = createApprovalRevocation({
+    getRunForUser,
+    getRunMetadata,
+    updateRunCas,
+    setRunMetadata,
+    insertStep,
+    listSteps,
+    recordAgentEvent,
+    createAgentNotification,
+    getAgentRunTitle,
+    getTimestamp: getBeijingTimestamp
+});
+
 async function getAgentRuntimeStatus(user = null) {
     const queueStatus = await getAgentQueue().getStatusAsync();
     return await buildAgentRuntimeStatus({
@@ -711,7 +791,9 @@ const createAgentRun = createAgentRunFactory({
     assertRunUserActive,
     enqueueAgentRun,
     publishAgentRunEvent,
-    recordFirstTaskCreated
+    recordFirstTaskCreated,
+    createTaskTransaction,
+    persistWorkingMemoryRevision
 });
 
 configureAgentChannelGateway({ createAgentRun });
@@ -734,12 +816,15 @@ const lifecycle = createRunLifecycle({
     normalizeDagSpec,
     normalizeToolAllowlist,
     parseJsonObject,
+    publishAgentRunEvent,
     query,
-    updateRun
+    updateRun,
+    updateRunCas
 });
 const {
     assertRunNotCancelled,
     cancelAgentRun,
+    pauseAgentRun,
     rerunAgentDagFromNode,
     rerunAgentRun,
     resumeAgentRun,
@@ -753,6 +838,12 @@ const {
 async function assertRunCanContinue(runId) {
     assertRunNotCancelled(runId);
     const row = await queryOne('SELECT status, locked_by FROM agent_runs WHERE id = ?', [runId]);
+    if (row?.status === 'needs_input') {
+        const error = new Error('任务已暂停或需要用户处理。');
+        error.code = 'AGENT_RUN_PAUSED';
+        activeRunControllers.get(runId)?.abort(error);
+        throw error;
+    }
     if (!row || ['cancelled', 'deleted'].includes(String(row.status || ''))) {
         const error = new Error('任务已停止。');
         error.code = 'AGENT_RUN_CANCELLED';
@@ -765,6 +856,46 @@ async function assertRunCanContinue(runId) {
         activeRunControllers.get(runId)?.abort(error);
         throw error;
     }
+}
+
+async function finalizeCommittedTaskTransactionRun(runId, user, transaction) {
+    const run = await getRunForUser(runId, user);
+    if (!run) return null;
+    if (run.status !== 'awaiting_commit') return run;
+    await updateRun(run.id, {
+        status: 'completed',
+        error_message: '',
+        completed_at: getBeijingTimestamp(),
+        updated_at: getBeijingTimestamp()
+    });
+    await setRunMetadata(run.id, {
+        taskTransactionId: transaction.id,
+        taskTransactionStatus: transaction.status,
+        taskTransactionCommittedAt: transaction.committedAt || getBeijingTimestamp()
+    });
+    await createAgentNotification(user.id, run.id, 'completed', '任务已提交', getAgentRunTitle(run));
+    return await getRunForUser(run.id, user);
+}
+
+async function finalizeRolledBackTaskTransactionRun(runId, user, transaction) {
+    const run = await getRunForUser(runId, user);
+    if (!run) return null;
+    if (run.status !== 'awaiting_commit') return run;
+    const rolledBack = transaction.status === 'rolled_back';
+    const targetStatus = rolledBack ? 'cancelled' : 'needs_input';
+    await updateRun(run.id, {
+        status: targetStatus,
+        error_message: rolledBack ? '用户放弃提交，已完成事务回滚。' : '任务事务补偿未完整完成，需要人工处理。',
+        ...(rolledBack ? { cancelled_at: getBeijingTimestamp(), completed_at: getBeijingTimestamp() } : {}),
+        updated_at: getBeijingTimestamp()
+    });
+    await setRunMetadata(run.id, {
+        taskTransactionId: transaction.id,
+        taskTransactionStatus: transaction.status,
+        taskTransactionRolledBackAt: transaction.rolledBackAt || null
+    });
+    await createAgentNotification(user.id, run.id, rolledBack ? 'cancelled' : 'warning', rolledBack ? '任务事务已回滚' : '任务事务需要人工补偿', getAgentRunTitle(run));
+    return await getRunForUser(run.id, user);
 }
 
 configureAgentSchedules({
@@ -788,7 +919,8 @@ configureAgentSchedules({
         const jobs = await processAgentLearningJobs({ limit: 2 });
         await maybeArchiveStalePersonalExperiences();
         return jobs;
-    }
+    },
+    runSloMonitor: () => runAgentRuntimeSloMonitor()
 });
 
 configureAgentGoals({
@@ -823,9 +955,9 @@ configureAgentArtifacts({
 // 新调用方按领域获取能力，避免继续把运行、工作流、产物和调度当作一个无边界平铺 API。
 // 保留下面的平铺导出，确保历史扩展和桌面兼容层不发生破坏性变更。
 const runs = {
-    approveAgentTool, cancelAgentRun, createAgentRun, rerunAgentDagFromNode,
+    approveAgentTool, revokeApprovedAgentTool, cancelAgentRun, createAgentRun, pauseAgentRun, rerunAgentDagFromNode,
     rerunAgentRun, resumeAgentRun, runAgent, shouldPauseForApproval, softDeleteAgentRun,
-    recoverAgentRuns, startAgentRecoveryRunner
+    recoverAgentRuns, startAgentRecoveryRunner, finalizeCommittedTaskTransactionRun, finalizeRolledBackTaskTransactionRun
 };
 const schedules = {
     computeNextScheduleRun, createAgentSchedule, deleteAgentSchedule, listAgentSchedules,

@@ -48,7 +48,7 @@ const MCP_TOOL_PRESENTATIONS = Object.freeze({
     'workspace.inspect': { title: '查看代码工作区', description: '读取已授权 Git 工作区的分支和状态摘要。' },
     'workspace.read': { title: '读取代码文件', description: '读取已授权代码工作区中的文本文件。' },
     'workspace.search': { title: '搜索代码', description: '在已授权代码工作区内搜索文本。' },
-    'workspace.patch': { title: '修改代码', description: '按内容摘要校验修改已授权工作区文件。' },
+    'workspace.patch': { title: '修改代码', description: '事务化任务仅在 Pivot 影子工作树中按内容摘要校验修改；验收后才可合并主工作区。' },
     'workspace.install': { title: '安装隔离依赖', description: '在认证隔离 Worker 中安装工作区依赖。' },
     'workspace.test': { title: '运行隔离代码测试', description: '在认证隔离 Worker 中运行已登记的测试命令。' },
     'workspace.git_status': { title: '查看 Git 状态', description: '查看已授权工作区的分支和改动。' },

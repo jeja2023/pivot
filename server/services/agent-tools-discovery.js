@@ -26,14 +26,14 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
     }
     const state = context?.toolDiscoveryState;
     const {
-        assertDescribed, getRememberedDescription
+        assertDescribed
     } = require('./agent-tool-progressive-discovery');
     const { describeToolForUser, executeDiscoveredTool } = deps.toolDiscovery || require('./tool-discovery');
     const descriptions = [];
     for (const item of items) {
         const reference = item?.toolRef || item?.tool_ref || {};
         assertDescribed(state, reference);
-        const description = getRememberedDescription(state, reference) || await describeToolForUser(user, reference, {}, {
+        const description = await describeToolForUser(user, reference, {}, {
             toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
             toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
         });
@@ -48,7 +48,7 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
         return await executeDiscoveredTool(user, {
             toolRef: reference,
             input: entry.item.input && typeof entry.item.input === 'object' ? entry.item.input : {}
-        }, context, deps.toolDiscovery || {});
+        }, context, { ...deps.toolDiscovery, requireReadOnly: true });
     }, { signal: context.signal, maxReadConcurrency: context.maxReadConcurrency });
     return {
         type: 'tools_batch_read',
@@ -74,7 +74,12 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
             }, ['query']),
             output_schema: {
                 type: 'object', required: ['query', 'candidates', 'totalAuthorizedTools'],
-                properties: { query: { type: 'string' }, candidates: { type: 'array', items: { type: 'object' } }, totalAuthorizedTools: { type: 'integer' } }
+                properties: {
+                    query: { type: 'string' },
+                    candidates: { type: 'array', items: { type: 'object' } },
+                    totalAuthorizedTools: { type: 'integer' },
+                    catalogVersion: { type: 'string', pattern: '^[a-f0-9]{64}$', description: '当前授权目录、发布版本和工具契约的不可逆摘要；变化时旧发现状态失效。' }
+                }
             }
         },
         {
@@ -121,13 +126,18 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
 async function executeToolDiscoveryMeta(name, input, user, context) {
     const state = context?.toolDiscoveryState;
     const {
-        assertDescribed, assertSearched, getRememberedDescription, rememberDescription, rememberSearch
+        assertDescribed, assertSearched, rememberDescription, rememberSearch
     } = require('./agent-tool-progressive-discovery');
     if (name === 'tools.search') {
         const { searchToolsForUser } = require('./tool-discovery');
         const value = await searchToolsForUser(user, input, {}, {
             toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
-            toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
+            toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null,
+            // 缓存仅附着当前 Run 的发现状态；每次检索仍先重建用户当前可见
+            // 目录并以授权/发布摘要比对，绝不将缓存当成授权事实来源。
+            discoveryCache: state?.searchCache,
+            cacheTtlMs: state?.ttlMs,
+            now: state?.now
         });
         rememberSearch(state, value);
         return { handled: true, value };
@@ -136,8 +146,6 @@ async function executeToolDiscoveryMeta(name, input, user, context) {
         const { describeToolForUser } = require('./tool-discovery');
         const reference = input.toolRef || input.tool_ref || {};
         assertSearched(state, reference);
-        const cached = getRememberedDescription(state, reference);
-        if (cached) return { handled: true, value: cached, cached: true };
         const value = await describeToolForUser(user, reference, {}, {
             toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
             toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null

@@ -528,6 +528,8 @@
                                 <div class="agent-cp-card-actions">
                                     <button id="agent-eval-refresh-btn" class="btn-secondary btn-xs"
                                         type="button">刷新评测集</button>
+                                    <button id="agent-eval-judges-btn" class="btn-secondary btn-xs"
+                                        type="button">裁判配置</button>
                                     <button id="agent-eval-create-btn" class="btn-primary btn-xs" type="button">+
                                         新建评测集</button>
                                 </div>
@@ -598,6 +600,10 @@
                         aria-selected="false">经验沉淀</button>
                     <button class="agent-harness-nav-tab" type="button" data-agent-harness-nav="skills" role="tab"
                         aria-selected="false">技能管理</button>
+                    <button class="btn-secondary agent-harness-nav-tab" type="button" data-agent-harness-nav="hooks" role="tab"
+                        aria-selected="false">生命周期 Hook</button>
+                    <button class="btn-secondary agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="delegation-policies" role="tab"
+                        aria-selected="false" hidden>协作角色策略</button>
                     <button class="agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="residency" role="tab"
                         aria-selected="false" hidden>常驻实例</button>
                     <button class="agent-harness-nav-tab hidden" type="button" data-agent-harness-nav="packs" role="tab"
@@ -909,6 +915,48 @@
                     <div id="agent-learning-pagination" class="pagination workspace-pagination agent-learning-pagination"></div>
                 </section>
 
+                <section class="agent-harness-panel hidden" data-agent-harness-section="hooks" aria-labelledby="agent-lifecycle-hooks-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-lifecycle-hooks-title">生命周期 Hook</strong>
+                            <span>查看已验证 Hook 的事件、顺序、失败策略及脱敏调用审计；启用和变更仍须经过签名发布门禁。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-lifecycle-hooks-refresh" class="btn-secondary" type="button">刷新</button>
+                        </div>
+                    </div>
+                    <div id="agent-lifecycle-hooks-list" class="agent-harness-list full-width"></div>
+                    <div class="agent-harness-subhead agent-lifecycle-hook-package-head"><strong>受管 Hook 包</strong><span>仅系统管理员可查看签名包、版本、状态和摘要；导入必须由服务端验证组织签名。</span></div>
+                    <details id="agent-lifecycle-hook-package-import" class="agent-hook-package-import" hidden>
+                        <summary>导入已签名声明式 Hook 包</summary>
+                        <div class="agent-harness-form-grid">
+                            <label class="agent-harness-form-field-wide"><span>规范化清单 JSON</span><textarea id="agent-lifecycle-hook-package-manifest" class="form-input form-input-mono" rows="7" spellcheck="false" placeholder='{"schemaVersion":1,"kind":"pivot.lifecycle-hook-package","packageId":"org.policy.example","packageVersion":"1.0.0","hooks":[...]}'></textarea></label>
+                            <label><span>签名密钥标识</span><input id="agent-lifecycle-hook-package-key-id" class="form-input" maxlength="128" placeholder="organization-default"></label>
+                            <label class="agent-harness-form-field-wide"><span>组织签名（Base64）</span><textarea id="agent-lifecycle-hook-package-signature" class="form-input form-input-mono" rows="3" spellcheck="false" placeholder="粘贴由组织私钥离线生成的 Base64 签名；私钥不会进入浏览器。"></textarea></label>
+                        </div>
+                        <div class="agent-harness-form-actions"><button id="agent-lifecycle-hook-package-import-submit" class="btn-primary" type="button">验证并导入</button></div>
+                    </details>
+                    <div id="agent-lifecycle-hook-packages" class="agent-harness-list full-width"></div>
+                    <div class="agent-harness-subhead agent-lifecycle-hook-audit-head"><strong>最近调用审计</strong><span>不展示 Hook 输入正文，仅显示摘要指纹和结果。</span></div>
+                    <div id="agent-lifecycle-hook-audits" class="agent-harness-list full-width"></div>
+                </section>
+
+                <section class="agent-harness-panel hidden" data-agent-harness-section="delegation-policies" aria-labelledby="agent-delegation-policy-title">
+                    <div class="agent-harness-panel-head">
+                        <div>
+                            <strong id="agent-delegation-policy-title">协作角色策略</strong>
+                            <span>仅组织管理员可配置。角色只能收紧内置工具、审批、步数和 Token 边界，不能扩大父任务权限。</span>
+                        </div>
+                        <div class="agent-harness-inline-actions">
+                            <button id="agent-delegation-policy-refresh" class="btn-secondary" type="button">刷新</button>
+                        </div>
+                    </div>
+                    <div id="agent-delegation-policy-list" class="agent-harness-list full-width"></div>
+                    <div class="agent-harness-form-actions">
+                        <button id="agent-delegation-policy-save" class="btn-primary" type="button">保存组织策略</button>
+                    </div>
+                </section>
+
                 <!-- 2. 常驻实例 -->
                 <section class="agent-harness-panel hidden" data-agent-harness-section="residency"
                     aria-labelledby="agent-harness-residency-title">
@@ -1177,6 +1225,17 @@ outputs: {}
                 <span id="agent-capability-catalog-modal-count" class="mcp-catalog-modal-count">共 0 个可用能力</span>
             </div>
             <div class="agent-capability-catalog-modal-body">
+                <section class="agent-skill-discovery" aria-labelledby="agent-skill-discovery-title">
+                    <div class="agent-harness-subhead"><strong id="agent-skill-discovery-title">按领域发现技能</strong><span>仅显示当前账号可使用且命中灰度的已发布技能</span></div>
+                    <form id="agent-skill-discovery-form" class="agent-skill-discovery-form">
+                        <label><span>关键词</span><input id="agent-skill-discovery-query" class="form-input" type="search" maxlength="200" placeholder="名称或用途"></label>
+                        <label><span>领域标签</span><input id="agent-skill-discovery-domain" class="form-input" type="text" maxlength="100" placeholder="精确标签"></label>
+                        <label><span>声明能力</span><input id="agent-skill-discovery-capability" class="form-input" type="text" maxlength="100" placeholder="能力标识"></label>
+                        <button class="btn-secondary" type="submit">查找技能</button>
+                    </form>
+                    <div id="agent-skill-discovery-results" aria-live="polite"></div>
+                    <div id="agent-skill-discovery-detail" aria-live="polite"></div>
+                </section>
                 <div id="agent-capability-catalog-list" class="agent-capability-catalog-list" aria-live="polite"></div>
             </div>
         </div>

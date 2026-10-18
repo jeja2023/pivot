@@ -137,6 +137,26 @@
         voice.speechBuffer = '';
     }
 
+    function voiceTaskControlAction(transcript) {
+        const value = String(transcript || '').trim().replace(/[。！!？?]+$/u, '');
+        if (/^(暂停|暂停任务|先暂停|等等|等一下)$/u.test(value)) return 'pause';
+        if (/^(继续|继续任务|恢复|恢复任务|继续执行)$/u.test(value)) return 'resume';
+        if (/^(停止|停止任务|取消|取消任务|终止任务)$/u.test(value)) return 'cancel';
+        return '';
+    }
+
+    async function controlVoiceTask(session, action) {
+        const response = await apiFetch(`${API_BASE}/chat/voice-sessions/${encodeURIComponent(session.id)}/task-control`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || '语音任务控制失败。');
+        const message = String(data.message || '').trim();
+        if (message) queueSpeech(message);
+        showToast(message || '任务控制已执行。', 'success');
+        return data;
+    }
+
     async function submitTranscript(text) {
         const session = voice;
         const input = document.getElementById('user-input');
@@ -148,6 +168,17 @@
             session.speechQueue = [];
             session.speechBuffer = '';
             void recordEvent(session.id, 'barge_in').catch(() => {});
+        }
+        const taskAction = voiceTaskControlAction(text);
+        if (taskAction) {
+            try {
+                await controlVoiceTask(session, taskAction);
+            } catch (error) {
+                showToast(error.message || '语音任务控制失败。', 'error');
+            } finally {
+                if (voice === session) session.submitting = false;
+            }
+            return;
         }
         input.value = text;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -265,7 +296,7 @@
             recognition.onend = () => { if (voice === session && session.active) setTimeout(() => startRecognition(session), 120); };
             session.heartbeatTimer = setInterval(() => { if (voice === session && session.active) void recordEvent(session.id, 'heartbeat').catch(() => {}); }, VOICE_HEARTBEAT_MS);
             startRecognition(session);
-            showToast('实时语音已启动。Pivot 不上传录音；识别文本只用于当前模型请求，不保存为聊天消息或语音转写。', 'success');
+            showToast('实时语音已启动。Pivot 不上传录音；识别文本只用于当前模型请求，不保存为聊天消息或语音转写。可说“暂停任务”“继续任务”或“停止任务”控制当前聊天任务。', 'success');
             return session;
         } catch (error) {
             stopTracks(stream);

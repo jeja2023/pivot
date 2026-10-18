@@ -144,6 +144,7 @@ test('DAG 节点执行条件与状态中文化', () => {
     assert.strictEqual(env.agentStatusLabel('queued'), '排队中');
     assert.strictEqual(env.agentStatusLabel('running'), '运行中');
     assert.strictEqual(env.agentStatusLabel('completed'), '已完成');
+    assert.strictEqual(env.agentStatusLabel('awaiting_commit'), '等待提交');
     assert.strictEqual(env.agentStatusLabel('error'), '失败');
     assert.strictEqual(env.agentStatusLabel('continued_error'), '失败后继续');
     assert.strictEqual(env.agentStatusLabel('skipped'), '已跳过');

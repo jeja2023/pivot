@@ -5,9 +5,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logger } = require('../../logger');
 
 exports.seed = async function (knex) {
-    console.log('🌱 Seeding workflow templates...');
+    logger.debug('开始同步内置工作流模板...');
 
     // 1. 获取分类映射
     const categories = await knex('agent_workflow_template_categories')
@@ -22,27 +23,25 @@ exports.seed = async function (knex) {
     const templatesDir = path.join(__dirname, 'workflow-templates');
 
     if (!fs.existsSync(templatesDir)) {
-        console.log('📁 Templates directory not found, skipping');
+        logger.debug('内置工作流模板目录不存在，跳过同步');
         return;
     }
 
     const templateFiles = fs.readdirSync(templatesDir).filter(f => f.endsWith('.json'));
 
-    console.log(`📁 Found ${templateFiles.length} template files`);
+    logger.debug({ count: templateFiles.length }, '扫描到内置工作流模板文件');
 
     // 3. 导入模板
     for (const file of templateFiles) {
         const filePath = path.join(templatesDir, file);
         const templateData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-        console.log(`  📄 Processing: ${templateData.name}`);
-
         try {
             // 获取分类 ID（先获取，以便在更新和插入时都能使用）
             const categorySlug = templateData.category || templateData.category_slug;
             const categoryId = categoryMap[categorySlug];
             if (!categoryId) {
-                console.error(`    ❌ Category "${categorySlug}" not found for template "${templateData.slug}"`);
+                logger.warn({ category: categorySlug, template: templateData.slug }, '内置工作流模板分类不存在，跳过导入');
                 continue;
             }
 
@@ -52,7 +51,6 @@ exports.seed = async function (knex) {
                 .first();
 
             if (existingTemplate) {
-                console.log(`    🔄 Template "${templateData.slug}" already exists, updating...`);
                 // 更新现有模板
                 await knex('agent_workflow_templates')
                     .where('slug', templateData.slug)
@@ -71,7 +69,7 @@ exports.seed = async function (knex) {
                         variables: JSON.stringify(templateData.variables || []),
                         updated_at: new Date()
                     });
-                console.log(`    ✅ Template "${templateData.name}" updated successfully (ID: ${existingTemplate.id})`);
+                logger.debug({ template: templateData.name, id: existingTemplate.id }, '内置工作流模板已更新');
                 continue;
             }
 
@@ -100,12 +98,11 @@ exports.seed = async function (knex) {
                 })
                 .returning('*');
 
-            console.log(`    ✅ Template "${templateData.name}" imported successfully (ID: ${template.id})`);
+            logger.debug({ template: templateData.name, id: template?.id }, '内置工作流模板已导入');
         } catch (error) {
-            console.error(`    ❌ Failed to import template "${templateData.name}":`, error.message);
-            console.error(`       Stack: ${error.stack}`);
+            logger.error({ err: error, template: templateData.name }, '导入内置工作流模板失败');
         }
     }
 
-    console.log('✅ Workflow templates seeding completed');
+    logger.debug('内置工作流模板同步完成');
 };

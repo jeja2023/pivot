@@ -40,6 +40,19 @@ function lifecycleEventKey({ legacyDocId, documentId, eventType, payload = {} })
     return 'sha256:' + crypto.createHash('sha256').update(identity).digest('hex');
 }
 
+function knowledgeMemorySourceReference(event = {}) {
+    const documentId = normalizeId(event.document_id ?? event.documentId);
+    const legacyDocId = normalizeId(event.legacy_doc_id ?? event.legacyDocId);
+    return documentId ? `knowledge_document:${documentId}` : legacyDocId ? `knowledge_legacy_document:${legacyDocId}` : '';
+}
+
+function knowledgeMemorySourceFingerprintInput(event = {}, payload = {}) {
+    const sourceRef = knowledgeMemorySourceReference(event);
+    const sourceHash = String(payload?.sourceHash ?? payload?.source_hash ?? '').trim().slice(0, 160);
+    const version = String(payload?.versionId ?? payload?.version_id ?? '').trim().slice(0, 80);
+    return { sourceKind: 'knowledge_document', sourceRef, content: sourceHash, version };
+}
+
 async function enqueueKnowledgeSourceLifecycleEvent({
     userId,
     legacyDocId = null,
@@ -145,8 +158,31 @@ async function handleKnowledgeSourceLifecycleEvent(event, deps = {}) {
         legacyDocId,
         reason: eventType || payload.reason || 'source_changed'
     }, deps);
+    const sourceRef = knowledgeMemorySourceReference(event);
+    let memoryResult = { reviewed: 0, revoked: 0, skipped: !sourceRef };
+    if (sourceRef && event?.user_id) {
+        const memory = deps.memory || require('./long-term-memory');
+        if (['source_deleted', 'source_archived'].includes(eventType)) {
+            memoryResult = await memory.revokeMemoriesForSourceReference(event.user_id, 'knowledge_document', sourceRef, {
+                reason: `knowledge_${eventType}`
+            });
+        } else if (['source_disabled', 'source_expired'].includes(eventType)) {
+            memoryResult = await memory.markMemoriesForSourceReview(event.user_id, {
+                sourceKind: 'knowledge_document', sourceRef, reason: `knowledge_${eventType}`
+            });
+        } else {
+            const input = knowledgeMemorySourceFingerprintInput(event, payload);
+            const fingerprint = memory.sourceFingerprint(input);
+            memoryResult = fingerprint
+                ? await memory.markMemoriesForChangedSource(event.user_id, {
+                    sourceKind: input.sourceKind, sourceRef: input.sourceRef, sourceFingerprint: fingerprint,
+                    reason: `knowledge_${eventType || 'source_changed'}`
+                })
+                : { reviewed: 0, revoked: 0, skipped: true, reason: 'fingerprint_secret_missing' };
+        }
+    }
     clearCache?.(event.user_id);
-    return { graphInvalidated, wikiResult: wikiResult || { stalePages: 0 } };
+    return { graphInvalidated, wikiResult: wikiResult || { stalePages: 0 }, memoryResult };
 }
 
 async function dispatchKnowledgeSourceLifecycleBatch({ workerId = '', limit = DEFAULT_CLAIM_LIMIT } = {}, deps = {}) {
@@ -223,5 +259,7 @@ module.exports = {
     enqueueKnowledgeSourceLifecycleEvent,
     getKnowledgeSourceLifecycleMetrics,
     handleKnowledgeSourceLifecycleEvent,
+    knowledgeMemorySourceFingerprintInput,
+    knowledgeMemorySourceReference,
     lifecycleEventKey
 };

@@ -43,8 +43,8 @@ const QUEUE_SPECS = {
     },
     modelUsageEvents: {
         table: 'model_usage_events',
-        columns: ['user_id', 'model_id', 'source', 'token_count', 'input_tokens', 'output_tokens', 'created_at'],
-        fields: ['userId', 'modelId', 'source', 'tokenCount', 'inputTokens', 'outputTokens', 'createdAt'],
+        columns: ['user_id', 'model_id', 'source', 'token_count', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cache_observed', 'created_at'],
+        fields: ['userId', 'modelId', 'source', 'tokenCount', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'cacheObserved', 'createdAt'],
     },
 };
 
@@ -248,6 +248,7 @@ function sanitizeQueueValue(field, val) {
     if (field === 'stream') {
         return val === true || val === 1 || val === '1' ? 1 : 0;
     }
+    if (field === 'cacheObserved') return val === true || val === 1 || val === '1' ? true : false;
     if (typeof val === 'object' && !(val instanceof Date)) {
         try { return JSON.stringify(val); } catch (_) { return String(val); }
     }

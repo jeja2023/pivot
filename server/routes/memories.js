@@ -2,17 +2,29 @@ const express = require('express');
 const { asyncHandler } = require('../http');
 const {
     MEMORY_STATUS,
+    attachKnowledgeDocumentSource,
+    attachMemorySourceEvidence,
+    approveKnowledgeDocumentSourceReview,
+    attachWorkflowSource,
+    approveWorkflowSourceReview,
+    attachWorkspaceSource,
+    approveWorkspaceSourceReview,
     archiveExpiredMemories,
+    approveMemorySourceReview,
     cleanupMemoryExtractionJobs,
     exportMemories,
     getMemoryQualitySummary,
+    getMemoryOutcomeMetrics,
+    getMemoryOutcomeReadiness,
     getMemoryMergeSuggestions,
     getMemorySummary,
     getMemorySource,
     getMemoryUsage,
     listMemoryExtractionJobs,
+    listMemoryOutcomePeriods,
     listMemories,
     mergeMemories,
+    markMemoriesForChangedSource,
     processMemoryExtractionJobs,
     retryFailedMemoryExtractionJobs,
     setLongTermMemoryEnabled,
@@ -22,6 +34,7 @@ const {
     updateMemoryStatuses,
     upsertMemory
 } = require('../services/long-term-memory');
+const { resolvePublishedSkillMemorySource } = require('../services/agent-releases');
 const { getMemoryPolicy, listMemoryPolicyVersions, updateMemoryPolicy } = require('../services/memory-governance');
 const { applyMemoryIntent, previewMemoryIntent } = require('../services/agent-memory-intents');
 const {
@@ -124,6 +137,15 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
         res.json({ success: true, summary });
     }));
 
+    router.get('/memories/outcomes', authMiddleware, asyncHandler(async (req, res) => {
+        const [metrics, readiness, periods] = await Promise.all([
+            getMemoryOutcomeMetrics(req.user.id, { days: req.query.days }),
+            getMemoryOutcomeReadiness(req.user.id),
+            listMemoryOutcomePeriods(req.user.id, { limit: req.query.limit })
+        ]);
+        res.json({ success: true, metrics, readiness, periods });
+    }));
+
     router.get('/memories/evaluations/cases', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, cases: await listMemoryEvaluationCases(req.user, req.query || {}) });
     }));
@@ -163,7 +185,8 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
             search: req.query.search || '',
             offset: req.query.offset,
             pageSize: req.query.pageSize || req.query.limit,
-            maxRecords: req.query.maxRecords
+            maxRecords: req.query.maxRecords,
+            snapshot: String(req.query.snapshot || '').toLowerCase() === 'true' || String(req.query.snapshot || '') === '1'
         });
         res.json({
             success: true,
@@ -291,6 +314,129 @@ function createMemoriesRouter({ authMiddleware, logAction }) {
 
     router.get('/memories/policy/versions', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, data: await listMemoryPolicyVersions(req.user.id, req.query.limit) });
+    }));
+
+    // 受控连接器、文档/工作区版本服务在来源内容或版本变化时调用此入口。
+    // 该动作只能把当前用户的记忆收紧为待复核，不能新增、恢复或扩大任何记忆。
+    router.post('/memories/sources/revalidate', authMiddleware, asyncHandler(async (req, res) => {
+        const sourceKind = String(req.body?.sourceKind || req.body?.source_kind || '').trim();
+        const sourceRef = String(req.body?.sourceRef || req.body?.source_ref || '').trim();
+        if (!sourceKind || !sourceRef || !Object.prototype.hasOwnProperty.call(req.body || {}, 'sourceContent') && !Object.prototype.hasOwnProperty.call(req.body || {}, 'source_content')) {
+            return res.status(400).json({ error: '来源类型、来源引用和当前来源内容为必填项。', code: 'MEMORY_SOURCE_REVALIDATE_INPUT_INVALID' });
+        }
+        const { sourceFingerprint } = require('../services/long-term-memory');
+        const sourceFingerprintValue = sourceFingerprint({
+            sourceKind, sourceRef,
+            content: String(req.body?.sourceContent ?? req.body?.source_content ?? '').slice(0, 500000),
+            version: String(req.body?.sourceVersion ?? req.body?.source_version ?? '').slice(0, 255)
+        });
+        if (!sourceFingerprintValue) return res.status(503).json({ error: '未配置独立的来源指纹密钥，不能安全复核来源。', code: 'MEMORY_SOURCE_FINGERPRINT_SECRET_MISSING' });
+        const result = await markMemoriesForChangedSource(req.user.id, {
+            sourceKind, sourceRef, sourceFingerprint: sourceFingerprintValue, reason: req.body?.reason || 'source_changed'
+        });
+        if (typeof logAction === 'function') logAction(req, '复核长期记忆来源', `来源: ${sourceKind}/${sourceRef}，待复核: ${result.reviewed}`);
+        res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+    }));
+
+    router.post('/memories/:id/sources/review', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await approveMemorySourceReview(req.user.id, req.params.id, req.body || {});
+            if (typeof logAction === 'function') logAction(req, '确认长期记忆来源复核', `记忆: ${result.memoryId}，复核证据: ${result.reviewed}，仍待复核: ${result.reviewRemaining}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/knowledge-document', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await attachKnowledgeDocumentSource(req.user.id, req.params.id, req.body?.documentId ?? req.body?.document_id);
+            if (typeof logAction === 'function') logAction(req, '关联长期记忆知识来源', `记忆: ${result.memoryId}，来源: ${result.sourceRef}`);
+            res.status(201).json({ success: true, ...result });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/knowledge-document/review', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await approveKnowledgeDocumentSourceReview(req.user.id, req.params.id, req.body?.sourceRef || req.body?.source_ref);
+            if (typeof logAction === 'function') logAction(req, '确认长期记忆知识来源复核', `记忆: ${result.memoryId}，复核证据: ${result.reviewed}，仍待复核: ${result.reviewRemaining}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/workflow', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await attachWorkflowSource(req.user.id, req.params.id, req.body?.workflowId ?? req.body?.workflow_id);
+            if (typeof logAction === 'function') logAction(req, '关联长期记忆工作流来源', `记忆: ${result.memoryId}，来源: ${result.sourceRef}`);
+            res.status(201).json({ success: true, ...result });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/workflow/review', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await approveWorkflowSourceReview(req.user.id, req.params.id, req.body?.sourceRef || req.body?.source_ref);
+            if (typeof logAction === 'function') logAction(req, '确认长期记忆工作流来源复核', `记忆: ${result.memoryId}，复核证据: ${result.reviewed}，仍待复核: ${result.reviewRemaining}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/skill', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const source = await resolvePublishedSkillMemorySource(req.body?.skillId ?? req.body?.skill_id, req.user);
+            const result = await attachMemorySourceEvidence(req.user.id, req.params.id, {
+                sourceKind: 'agent_skill', sourceRef: `agent_skill:${source.skillId}`,
+                sourceContent: source.content, sourceVersion: String(source.versionId),
+                assertedBy: 'user', evidenceExcerpt: source.name
+            });
+            if (typeof logAction === 'function') logAction(req, '关联长期记忆技能来源', `记忆: ${result.memoryId}，来源: ${result.sourceRef}`);
+            res.status(201).json({ success: true, ...result });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/skill/review', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const match = String(req.body?.sourceRef || req.body?.source_ref || '').trim().match(/^agent_skill:([A-Za-z0-9._-]{1,64})$/);
+            if (!match) return res.status(400).json({ error: '技能来源引用无效。', code: 'MEMORY_SKILL_SOURCE_REF_INVALID' });
+            const source = await resolvePublishedSkillMemorySource(match[1], req.user);
+            const result = await approveMemorySourceReview(req.user.id, req.params.id, {
+                sourceKind: 'agent_skill', sourceRef: `agent_skill:${source.skillId}`,
+                sourceContent: source.content, sourceVersion: String(source.versionId)
+            });
+            if (typeof logAction === 'function') logAction(req, '确认长期记忆技能来源复核', `记忆: ${result.memoryId}，复核证据: ${result.reviewed}，仍待复核: ${result.reviewRemaining}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/workspace', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await attachWorkspaceSource(req.user, req.params.id, req.body || {});
+            if (typeof logAction === 'function') logAction(req, '关联长期记忆代码工作区来源', `记忆: ${result.memoryId}，来源: ${result.sourceRef}`);
+            res.status(201).json({ success: true, ...result });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
+    }));
+
+    router.post('/memories/:id/sources/workspace/review', authMiddleware, asyncHandler(async (req, res) => {
+        try {
+            const result = await approveWorkspaceSourceReview(req.user, req.params.id, req.body?.sourceRef || req.body?.source_ref);
+            if (typeof logAction === 'function') logAction(req, '确认长期记忆代码工作区来源复核', `记忆: ${result.memoryId}，复核证据: ${result.reviewed}，仍待复核: ${result.reviewRemaining}`);
+            res.json({ success: true, ...result, summary: await getMemorySummary(req.user.id) });
+        } catch (error) {
+            return sendServiceError(res, error);
+        }
     }));
 
     router.put('/memories/status/bulk', authMiddleware, asyncHandler(async (req, res) => {

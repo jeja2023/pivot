@@ -173,6 +173,19 @@ window.Pivot.legacy.approveAgentRun = async function(runId, approve = true) {
     }, '审批处理失败');
 };
 
+window.Pivot.legacy.revokeAgentApproval = async function(runId, approvalKey) {
+    await runAgentActionOnce(`approval-revoke:${runId}:${approvalKey}`, runId, '[data-agent-revoke-approval]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval/revoke`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approvalKey })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '撤销审批失败');
+        showToast('工具授权已撤销，继续任务时将重新请求审批。', 'success');
+        await loadAgentRuns();
+        await window.Pivot.legacy.openAgentRun(runId);
+    }, '撤销审批失败');
+};
+
 window.Pivot.legacy.cancelAgentRun = function(runId) {
     window.Pivot.legacy.showConfirm('停止自主任务', '确定停止这个正在执行的自主任务吗？', async () => {
         await runAgentActionOnce(`cancel:${runId}`, runId, '[data-agent-cancel]', async () => {

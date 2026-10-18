@@ -1,4 +1,5 @@
 const { isPersistedDagOutputPartial, resolvePersistedDagOutput } = require('../agent-dag-output');
+const { transaction: dbTransaction } = require('../../db/client');
 
 function createRunLifecycle(deps = {}) {
 const {
@@ -19,9 +20,12 @@ const {
     normalizeDagSpec,
     normalizeToolAllowlist,
     parseJsonObject,
+    publishAgentRunEvent,
     query,
-    updateRun
+    updateRun,
+    updateRunCas
 } = deps;
+const runTransaction = deps.transaction || dbTransaction;
 
 
 function isRunCancelled(runId) {
@@ -38,21 +42,36 @@ function isRunCancelled(runId) {
     }
 
 async function cancelAgentRun(runId, user) {
-    const abortError = new Error('智能体运行已被用户主动取消。');
-    abortError.code = 'AGENT_RUN_CANCELLED';
-    activeRunControllers.get(runId)?.abort(abortError);
-
     const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (!ACTIVE_STATUSES.has(run.status)) return run;
+    if (run.status === 'awaiting_commit') {
+        const error = new Error('任务事务正在等待提交决定，请在事务详情中确认提交或执行回滚。');
+        error.code = 'AGENT_TASK_COMMIT_DECISION_REQUIRED';
+        error.status = 409;
+        throw error;
+    }
     const now = getBeijingTimestamp();
-    await updateRun(runId, {
+    const changed = await updateRunCas(runId, [run.status], {
         status: 'cancelled',
         error_message: '智能体运行已被用户主动取消。',
         cancelled_at: now,
         completed_at: now,
         updated_at: now
     });
+    if (!changed) {
+        const current = await getRunForUser(runId, user);
+        if (!current || !ACTIVE_STATUSES.has(current.status)) return current;
+        const error = new Error(current.status === 'awaiting_commit'
+            ? '任务事务正在等待提交决定，请在事务详情中确认提交或执行回滚。'
+            : '任务状态已发生变化，请刷新后重试。');
+        error.code = current.status === 'awaiting_commit' ? 'AGENT_TASK_COMMIT_DECISION_REQUIRED' : 'AGENT_RUN_STATUS_CONFLICT';
+        error.status = 409;
+        throw error;
+    }
+    const abortError = new Error('智能体运行已被用户主动取消。');
+    abortError.code = 'AGENT_RUN_CANCELLED';
+    activeRunControllers.get(runId)?.abort(abortError);
     // Parent cancellation propagates through the persisted Agent tree so a
     // child cannot continue consuming tools after its supervisor has stopped.
     const childRuns = await query(`
@@ -60,19 +79,62 @@ async function cancelAgentRun(runId, user) {
         FROM agent_runs
         WHERE parent_run_id = ?
           AND user_id = ?
-          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required', 'awaiting_approval', 'waiting_approval')
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit')
           AND deleted_at IS NULL
     `, [runId, user.id]);
+    const pendingCommitChildren = [];
     for (const child of childRuns) {
-        await cancelAgentRun(child.id, user);
+        try {
+            await cancelAgentRun(child.id, user);
+        } catch (error) {
+            if (error?.code !== 'AGENT_TASK_COMMIT_DECISION_REQUIRED') throw error;
+            pendingCommitChildren.push(child.id);
+        }
     }
     const steps = await listSteps(runId);
     await insertStep(runId, (steps || []).length + 1, {
         type: 'control',
         title: '用户主动取消运行',
-        output: { status: 'cancelled' }
+        output: { status: 'cancelled', pendingCommitChildren }
     });
-    await createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', getAgentRunTitle(run));
+    await createAgentNotification(user.id, runId, 'cancelled', '任务运行已停止', pendingCommitChildren.length
+        ? `${getAgentRunTitle(run)}；${pendingCommitChildren.length} 个子任务仍需处理提交或回滚。`
+        : getAgentRunTitle(run));
+    return await getRunForUser(runId, user);
+}
+
+async function pauseAgentRun(runId, user) {
+    const run = await getRunForUser(runId, user);
+    if (!run) return null;
+    // `needs_input` 是既有的、可从检查点续跑的非终态。只暂停真正还在执行
+    // 的阶段；审批和提交边界本来就在等待用户，不能被伪装成另一种暂停。
+    const pausableStatuses = new Set(['queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'running', 'resuming']);
+    if (!pausableStatuses.has(String(run.status || ''))) return run;
+    const pauseError = new Error('智能体运行已由用户暂停，可从安全检查点续跑。');
+    pauseError.code = 'AGENT_RUN_PAUSED';
+    activeRunControllers.get(runId)?.abort(pauseError);
+    const now = getBeijingTimestamp();
+    await updateRun(runId, {
+        status: 'needs_input',
+        error_message: '智能体运行已由用户暂停，可从安全检查点续跑。',
+        updated_at: now,
+        last_heartbeat_at: now
+    });
+    const childRuns = await query(`
+        SELECT id
+        FROM agent_runs
+        WHERE parent_run_id = ? AND user_id = ?
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming')
+          AND deleted_at IS NULL
+    `, [runId, user.id]);
+    for (const child of childRuns) await pauseAgentRun(child.id, user);
+    const steps = await listSteps(runId);
+    await insertStep(runId, (steps || []).length + 1, {
+        type: 'control',
+        title: '用户暂停运行',
+        output: { status: 'needs_input', resumable: true }
+    });
+    await createAgentNotification(user.id, runId, 'warning', '任务已暂停', getAgentRunTitle(run));
     return await getRunForUser(runId, user);
 }
 
@@ -319,20 +381,46 @@ async function resumeAgentRun(runId, user) {
 }
 
 async function softDeleteAgentRun(runId, user, reason = '') {
-    const run = await getRunForUser(runId, user);
-    if (!run) return null;
-    if (ACTIVE_STATUSES.has(run.status)) {
-        const err = new Error('正在执行的任务不能删除。');
-        err.status = 400;
-        throw err;
-    }
+    if (!user?.id) return null;
     const now = getBeijingTimestamp();
-    await updateRun(runId, {
-        deleted_at: now,
-        deleted_by_user: user.id,
-        delete_reason: String(reason || '').trim().slice(0, 500),
-        updated_at: now
+    const deleted = await runTransaction(async trx => {
+        const run = await trx.queryOne('SELECT id, status FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [runId, user.id]);
+        if (!run) return false;
+        if (ACTIVE_STATUSES.has(run.status)) {
+            const err = new Error('正在执行的任务不能删除。');
+            err.status = 400;
+            throw err;
+        }
+        const risk = await trx.queryOne(`
+        SELECT EXISTS (
+            SELECT 1 FROM agent_task_transactions t
+            JOIN agent_task_effects e ON e.transaction_id = t.id
+            WHERE t.run_id = ? AND t.user_id = ? AND (
+                e.status IN ('executing', 'failed', 'compensation_pending')
+                OR (e.commit_mode = 'preview' AND e.status = 'staged' AND t.status <> 'committed')
+                OR (e.status = 'committed' AND t.status <> 'committed')
+                OR (e.status = 'staged' AND t.status IN ('awaiting_commit', 'compensating'))
+            )
+        ) AS unresolved_effect,
+        EXISTS (
+            SELECT 1 FROM agent_run_checkpoints c
+            JOIN agent_runs r ON r.id = c.run_id
+            WHERE c.run_id = ? AND r.user_id = ?
+              AND (c.status = 'uncertain' OR (c.status = 'pending' AND c.idempotent IS NOT TRUE))
+        ) AS unresolved_checkpoint
+        `, [runId, user.id, runId, user.id]);
+        if (risk?.unresolved_effect || risk?.unresolved_checkpoint) {
+            const error = new Error('任务仍有待核实的副作用或检查点，不能隐藏；请先核对事务和外部状态。');
+            error.code = 'AGENT_RUN_UNRESOLVED_EFFECTS';
+            error.status = 409;
+            throw error;
+        }
+        return await trx.execute('UPDATE agent_runs SET deleted_at = ?, deleted_by_user = ?, delete_reason = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [
+            now, user.id, String(reason || '').trim().slice(0, 500), now, runId, user.id
+        ]) > 0;
     });
+    if (!deleted) return null;
+    try { await publishAgentRunEvent?.(runId, 'updated'); } catch (_) {}
     await insertStep(runId, (await listSteps(runId)).length + 1, {
         type: 'control',
         title: '任务记录已移除',
@@ -350,6 +438,7 @@ async function softDeleteAgentRun(runId, user, reason = '') {
         buildDagResumeSpec,
         cancelAgentRun,
         isRunCancelled,
+        pauseAgentRun,
         rerunAgentDagFromNode,
         rerunAgentRun,
         resumeAgentRun,

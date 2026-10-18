@@ -27,7 +27,9 @@ async function resolveRunLongTermMemory({
             projectId: contextConfig?.projectId || ''
         });
         const message = buildLongTermMemoryContextMessage(longTermMemoryMatches, {
-            inputBudget: getModelContextBudget(modelCfg).inputBudget
+            // 模型路由/故障降级阶段可能尚未取得完整配置；预算模块支持空配置的
+            // 无界安全回退，不能因读取 null 字段把正常记忆检索误记为失败。
+            inputBudget: getModelContextBudget(modelCfg || {}).inputBudget
         });
         longTermMemoryContext = message?.content || '';
         if (longTermMemoryContext) {

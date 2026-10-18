@@ -1,11 +1,13 @@
 'use strict';
 
 const { query, queryOne } = require('../db/client');
-const { normalizeToolAllowlist } = require('./agent-validators');
 const { sendAgentControlMessage } = require('./agent-control');
+const { resolveChildDelegationConstraints } = require('./agent-collaboration');
+const { getDelegationRolePolicySnapshot } = require('./agent-delegation-role-policies');
 
 const MAX_CHILDREN_PER_SPAWN = 8;
 const TERMINAL_CHILD_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
+const APPLIED_HANDOFF_STATUSES = new Set(['applied', 'acknowledged']);
 
 function getAgentCollaborationToolDefinitions(asJsonSchema) {
     return [
@@ -58,17 +60,6 @@ function parentRun(context = {}) {
     return run;
 }
 
-function parentAllowlist(run = {}) {
-    return normalizeToolAllowlist(run.tool_allowlist || run.toolAllowlist || []);
-}
-
-function inheritedToolAllowlist(run, requested) {
-    const parent = parentAllowlist(run);
-    const child = normalizeToolAllowlist(requested || []);
-    if (!parent.length) return child;
-    return child.length ? parent.filter(name => child.includes(name)) : parent;
-}
-
 function runtimeFor(context = {}) {
     if (context.collaborationRuntime) return context.collaborationRuntime;
     const runtime = require('./agent-runtime');
@@ -77,14 +68,42 @@ function runtimeFor(context = {}) {
 
 async function loadDirectChildren(run, user) {
     return await query(`
-        SELECT id, title, goal, status, final_answer, error_message, created_at, updated_at, completed_at, metadata
-        FROM agent_runs
-        WHERE parent_run_id = ? AND user_id = ? AND deleted_at IS NULL
-        ORDER BY created_at ASC
-    `, [run.id, user.id]);
+        SELECT r.id, r.title, r.goal, r.status, r.final_answer, r.error_message, r.created_at, r.updated_at, r.completed_at, r.metadata,
+               v.outcome_status AS verification_outcome_status, v.report AS verification_report,
+               handoff.status AS handoff_status, handoff.message_id AS handoff_message_id
+        FROM agent_runs r
+        LEFT JOIN agent_verifications v ON v.run_id = r.id
+        LEFT JOIN LATERAL (
+            SELECT c.status, c.message_id
+            FROM agent_control_messages c
+            WHERE c.from_run_id = r.id AND c.to_run_id = ? AND c.message_type = 'reply'
+              AND c.payload ->> 'kind' = 'delegation_completion'
+            ORDER BY c.id DESC LIMIT 1
+        ) handoff ON true
+        WHERE r.parent_run_id = ? AND r.user_id = ? AND r.deleted_at IS NULL
+        ORDER BY r.created_at ASC
+    `, [run.id, run.id, user.id]);
+}
+
+function childJoinAcceptance(row = {}) {
+    const status = String(row.status || '');
+    const verification = row.verification_outcome_status || '';
+    const handoffStatus = String(row.handoff_status || '');
+    const hasAnswer = Boolean(String(row.final_answer || '').trim());
+    const terminal = TERMINAL_CHILD_STATUSES.has(status);
+    const accepted = status === 'completed' && verification === 'verified' && hasAnswer && APPLIED_HANDOFF_STATUSES.has(handoffStatus);
+    let reason = '';
+    if (!terminal) reason = '子任务尚未结束。';
+    else if (status !== 'completed') reason = `子任务终态为 ${status}，不能作为已验收交付。`;
+    else if (verification !== 'verified') reason = verification ? `子任务验收状态为 ${verification}，未达到 verified。` : '子任务缺少独立 VerificationReport。';
+    else if (!hasAnswer) reason = '子任务没有可汇合的最终结果。';
+    else if (!APPLIED_HANDOFF_STATUSES.has(handoffStatus)) reason = handoffStatus ? `完成 Handoff 当前为 ${handoffStatus}，尚未由 Supervisor 持久应用。` : '子任务缺少已应用的完成 Handoff。';
+    return { terminal, accepted, verificationOutcome: String(verification || ''), handoffStatus, rejectionReason: reason };
 }
 
 function publicChild(row) {
+    const metadata = parseJson(row.metadata, {});
+    const acceptance = childJoinAcceptance(row);
     return {
         id: row.id,
         title: row.title || '',
@@ -92,7 +111,8 @@ function publicChild(row) {
         finalAnswer: String(row.final_answer || '').slice(0, 12000),
         error: String(row.error_message || '').slice(0, 2000),
         completedAt: row.completed_at || null,
-        metadata: parseJson(row.metadata, {})
+        metadata,
+        ...acceptance
     };
 }
 
@@ -107,6 +127,7 @@ async function assertDirectChild(run, user, childRunId) {
 
 async function executeAgentSpawn(input = {}, user, context = {}) {
     const run = parentRun(context);
+    const rolePolicySnapshot = await getDelegationRolePolicySnapshot(run.tenant_id || user.tenant_id || user.tenantId || 1);
     const tasks = Array.isArray(input.tasks) ? input.tasks : [input];
     if (!tasks.length || tasks.length > MAX_CHILDREN_PER_SPAWN) {
         throw collaborationError(`一次委派必须包含 1 至 ${MAX_CHILDREN_PER_SPAWN} 个子任务。`, 'AGENT_CHILD_BATCH_LIMIT');
@@ -118,27 +139,34 @@ async function executeAgentSpawn(input = {}, user, context = {}) {
         const task = tasks[index] && typeof tasks[index] === 'object' ? tasks[index] : {};
         const goal = String(task.goal || task.task || '').trim().slice(0, 12000);
         if (!goal) throw collaborationError(`第 ${index + 1} 个子任务缺少目标。`, 'AGENT_CHILD_GOAL_REQUIRED');
+        const constraints = resolveChildDelegationConstraints({ ...run, rolePolicies: rolePolicySnapshot.policies }, task);
         const child = await runtime.createAgentRun({
             user,
             parentRunId: run.id,
             goal,
             title: String(task.title || `子任务 ${index + 1}`).trim().slice(0, 160),
-            modelId: task.modelId || task.model_id || run.chosen_model_id || run.model_id || null,
-            maxSteps: task.maxSteps || task.max_steps || Math.min(Number(run.max_steps || 6), 12),
-            maxTokenBudget: task.maxTokenBudget || task.max_token_budget || 0,
-            runMode: task.runMode || task.run_mode || run.run_mode || 'standard',
-            toolPolicy: String(run.tool_policy || '') === 'builtin_only' ? 'builtin_only' : (task.toolPolicy || task.tool_policy || run.tool_policy || 'builtin_only'),
-            toolAllowlist: inheritedToolAllowlist(run, task.toolAllowlist || task.tool_allowlist),
-            approvalPolicy: task.approvalPolicy || task.approval_policy || run.approval_policy || 'safe_mcp_auto',
-            networkPolicy: parseJson(run.network_policy, {}),
+            modelId: constraints.modelId,
+            maxSteps: constraints.maxSteps,
+            maxTokenBudget: constraints.maxTokenBudget,
+            timeoutMs: constraints.timeoutMs,
+            toolTimeoutMs: constraints.toolTimeoutMs,
+            runMode: constraints.runMode,
+            toolPolicy: constraints.toolPolicy,
+            toolAllowlist: constraints.toolAllowlist,
+            approvalPolicy: constraints.approvalPolicy,
+            networkPolicy: constraints.networkPolicy,
             taskContract: task.taskContract || task.task_contract || null,
             forkHistory: task.forkHistory || task.fork_history || 'none',
             metadata: {
-                source: 'agent_spawn',
+                // 与 API 委派统一为 delegation，确保终态会生成持久化、可重试的
+                // completion Handoff；否则 Supervisor 只能凭数据库终态猜测结果。
+                source: 'delegation',
                 collaboration: {
                     supervisorRunId: run.id,
                     agentName: String(task.agentName || task.agent_name || `子智能体 ${index + 1}`).slice(0, 80),
                     role: String(task.role || 'custom').slice(0, 30),
+                    rolePolicy: constraints.rolePolicy,
+                    rolePolicyRevision: rolePolicySnapshot.revision,
                     instructions: String(task.instructions || '').slice(0, 6000),
                     spawnedAt: new Date().toISOString()
                 }
@@ -156,6 +184,9 @@ async function executeAgentWait(input = {}, user, context = {}) {
     const children = (await loadDirectChildren(run, user))
         .filter(child => !requested || requested.has(String(child.id)))
         .map(publicChild);
+    if (requested && [...requested].some(id => !children.some(child => String(child.id) === id))) {
+        throw collaborationError('指定的子任务不存在、无权访问或不是当前任务的直接子任务。', 'AGENT_CHILD_NOT_FOUND', 404);
+    }
     const complete = children.length > 0 && children.every(child => TERMINAL_CHILD_STATUSES.has(child.status));
     return { type: 'agent_wait', parentRunId: run.id, complete, children, text: complete ? '所有目标子任务均已结束。' : '子任务仍在运行或等待输入。' };
 }
@@ -184,14 +215,22 @@ async function executeAgentCancel(input = {}, user, context = {}) {
 
 async function executeAgentJoin(input = {}, user, context = {}) {
     const waiting = await executeAgentWait(input, user, context);
-    const failures = waiting.children.filter(child => !['completed', 'partial'].includes(child.status));
+    const failures = waiting.children.filter(child => !child.accepted);
+    const accepted = waiting.complete && failures.length === 0;
     return {
         type: 'agent_join',
         parentRunId: waiting.parentRunId,
         complete: waiting.complete,
+        accepted,
         failures,
-        results: waiting.children.map(child => ({ id: child.id, title: child.title, status: child.status, finalAnswer: child.finalAnswer, error: child.error })),
-        text: waiting.complete ? '子任务结果已汇总。' : '仍有子任务未结束，不能生成完整汇总。'
+        results: waiting.children.map(child => ({
+            id: child.id, title: child.title, status: child.status, finalAnswer: child.finalAnswer, error: child.error,
+            terminal: child.terminal, accepted: child.accepted, verificationOutcome: child.verificationOutcome,
+            handoffStatus: child.handoffStatus, rejectionReason: child.rejectionReason
+        })),
+        text: !waiting.complete
+            ? '仍有子任务未结束，不能生成完整汇总。'
+            : accepted ? '所有子任务均已通过独立验收，结果可汇总。' : '子任务虽已结束，但至少一项未通过汇合验收；不得生成完整交付结论。'
     };
 }
 
@@ -201,5 +240,6 @@ module.exports = {
     executeAgentMessage,
     executeAgentSpawn,
     executeAgentWait,
+    childJoinAcceptance,
     getAgentCollaborationToolDefinitions
 };

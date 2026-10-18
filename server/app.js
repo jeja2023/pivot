@@ -1,3 +1,4 @@
+process.env.DOTENV_CONFIG_QUIET = 'true';
 require('dotenv').config();
 
 // 自动处理 Windows 控制台中文乱码

@@ -253,8 +253,15 @@ document.getElementById('memory-select-all')?.addEventListener('change', (event)
         const button = event.currentTarget;
         button.disabled = true;
         try {
-            await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, status);
-            showToast(success);
+            const result = await callSettingsMemoryAction('bulkUpdateMemoryStatus', ids, status);
+            const reviewSkipped = Number(result?.reviewRequiredIds?.length || 0);
+            const missingSkipped = Number(result?.sourceEvidenceMissingIds?.length || 0);
+            const skipped = reviewSkipped + missingSkipped;
+            const detail = [
+                reviewSkipped ? `${reviewSkipped} 条来源待复核` : '',
+                missingSkipped ? `${missingSkipped} 条来源已失效` : ''
+            ].filter(Boolean).join('，');
+            showToast(skipped ? `${success}；${detail}记忆未被恢复` : success, skipped ? 'warning' : 'success');
             await callSettingsMemoryAction('loadMemories');
         } catch (error) {
             showToast(error.message || err, 'error');
@@ -289,6 +296,8 @@ document.getElementById('memory-list-body')?.addEventListener('click', async (ev
     try {
         if (action === 'source') {
             await callSettingsMemoryAction('openMemorySourceModal', memoryId);
+        } else if (action === 'review') {
+            await callSettingsMemoryAction('openMemorySourceModal', memoryId, { review: true });
         } else if (action === 'disable' || action === 'restore') {
             const isDisable = action === 'disable';
             await callSettingsMemoryAction('updateMemoryStatus', memoryId, isDisable ? 'disabled' : 'active');

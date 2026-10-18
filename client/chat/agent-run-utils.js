@@ -94,6 +94,7 @@ function agentStatusLabel(status) {
         awaiting_approval: '等待审批',
         approval_required: '待审批',
         waiting_approval: '待审批',
+        awaiting_commit: '等待提交',
         queued: '排队中',
         planning: '规划中',
         executing: '执行中',
@@ -136,7 +137,7 @@ window.Pivot?.exposeModule?.('agent.runUtils', { statusLabel: agentStatusLabel }
 
 const AGENT_ACTIVE_STATUS_SET = new Set([
     'queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming',
-    'approval_required', 'awaiting_approval', 'waiting_approval'
+    'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit'
 ]);
 
 function isAgentRunActive(status) {

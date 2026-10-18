@@ -6,9 +6,11 @@ const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-depen
 const { formatToolList } = require('./agent-tool-catalog');
 const { getAgentEvalRun } = require('./agent-evaluations');
 const { createAgentInboxEvent } = require('./agent-inbox');
+const { createBreakerNotifier } = require('./agent-release-breaker');
+const { notifyBreakerAction } = createBreakerNotifier({ createAgentInboxEvent });
 const { getPrimaryTenantId, getUserEnterpriseContext } = require('./enterprise-access');
 const { assertTenantContext, resolveTenantContext } = require('./agent-tenant-context');
-const { RELEASE_SCOPES, deriveOwnerKey, normalizeReleaseScope } = require('./agent-skill-scope');
+const { RELEASE_SCOPES, deriveOwnerKey } = require('./agent-skill-scope');
 const {
     evaluateSkillReleaseAccess,
     evaluateSkillVersionAccess,
@@ -16,9 +18,13 @@ const {
     resolveAccessSubjects
 } = require('./agent-skill-access');
 const {
-    chooseRolloutRelease,
-    normalizeBreakerThresholds
+    chooseRolloutRelease
 } = require('./agent-skill-rollout');
+const {
+    assessEvaluationReleaseGate,
+    requiresAdversarialCoverage
+} = require('./agent-evaluation-gates');
+const { getJudgeConsensusForEvaluation } = require('./agent-judge-governance');
 const {
     registerVerifiedEnvelope,
     signOrganizationEnvelope,
@@ -28,83 +34,77 @@ const { runDeclarativeSkillChecks, sandboxValidateSkill, scanInstalledPackage } 
 const { recordSkillReleaseResolveMiss } = require('./agent-governance-metrics');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
 const { persistWorkflowToolReleaseBindings } = require('./workflow-tool-releases');
+const { sourceFingerprint, markMemoriesForChangedSource, markMemoriesForSourceReview } = require('./long-term-memory');
+const { invalid } = require('./agent-release-errors');
+const { createReleaseAccessFilters } = require('./agent-release-access');
+const { formatWorkflowReleaseForRead } = require('./agent-release-read-model');
+const { filterAccessibleReleases, filterAccessibleReleasesAny } = createReleaseAccessFilters({
+    resolveAccessSubjects, evaluateSkillReleaseAccess
+});
+const {
+    parseJson,
+    allowedSkillPermissionsFromEnv,
+    normalizeSkillSourceId,
+    skillMemorySourceContent,
+    normalizeWorkflowReleaseNote,
+    normalizeRollout
+} = require('./agent-release-inputs');
 
 
-function invalid(message, status = 400, code = 'AGENT_RELEASE_INVALID') {
-    const error = new Error(message);
-    error.status = status;
-    error.statusCode = status;
-    error.code = code;
-    error.expose = true;
-    return error;
+async function revalidateMemorySource(userId, sourceKind, sourceRef, content, version, reason) {
+    if (!userId || !sourceRef) return { reviewed: 0, skipped: true };
+    const fingerprint = sourceFingerprint({ sourceKind, sourceRef, content, version });
+    if (!fingerprint) return { reviewed: 0, skipped: true, reason: 'fingerprint_secret_missing' };
+    return await markMemoriesForChangedSource(userId, { sourceKind, sourceRef, sourceFingerprint: fingerprint, reason });
 }
 
-function parseJson(value, fallback = {}) {
-    if (value && typeof value === 'object') return value;
-    try { return JSON.parse(String(value || '')); } catch (_) { return fallback; }
+async function markSkillReleaseMemoriesForReview(release, reason) {
+    const source = release?.skill_id
+        ? release
+        : await queryOne('SELECT skill_id FROM agent_skill_versions WHERE id = ?', [release?.skill_version_id]);
+    const skillId = String(source?.skill_id || '').trim();
+    if (!skillId || !release?.published_by) return { reviewed: 0, skipped: true };
+    return await markMemoriesForSourceReview(release.published_by, {
+        sourceKind: 'agent_skill', sourceRef: `agent_skill:${skillId}`, reason
+    });
 }
 
-function allowedSkillPermissionsFromEnv(env = process.env) {
-    const permissions = String(env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
-    return permissions.length ? permissions : undefined;
-}
-
-/** 对数据库候选执行统一 Release ACL/成员/角色判定，避免仅靠 SQL scope 造成 ACL 旁路。 */
-async function filterAccessibleReleases(releases, user, action = 'use') {
-    const rows = Array.isArray(releases) ? releases : [];
-    if (!rows.length) return [];
-    const subjects = await resolveAccessSubjects(user);
-    const decisions = await Promise.all(rows.map(release => evaluateSkillReleaseAccess({ user, release, action, subjects })));
-    return rows.filter((_release, index) => decisions[index]?.allowed === true);
-}
-
-async function filterAccessibleReleasesAny(releases, user, actions = ['use']) {
-    const rows = Array.isArray(releases) ? releases : [];
-    if (!rows.length) return [];
-    const subjects = await resolveAccessSubjects(user);
-    const requiredActions = Array.isArray(actions) && actions.length ? actions : ['use'];
-    const decisions = await Promise.all(rows.map(release => Promise.all(
-        requiredActions.map(action => evaluateSkillReleaseAccess({ user, release, action, subjects }))
-    )));
-    return rows.filter((_release, index) => decisions[index].some(item => item?.allowed === true));
-}
-
-function normalizeScope(value) {
-    try {
-        return normalizeReleaseScope(value, 'personal');
-    } catch (_) {
-        throw invalid('发布范围只能是 personal、team 或 organization。');
-    }
-}
-
-function normalizeWorkflowReleaseNote(value, label = '发布说明') {
-    const note = String(value || '').trim();
-    if (note.length > 2000) throw invalid(`${label}最多 2000 个字符。`);
-    return note;
-}
-
-function normalizeIdList(value, limit) {
-    return [...new Set((Array.isArray(value) ? value : [])
-        .map(item => Number.parseInt(item, 10))
-        .filter(item => Number.isSafeInteger(item) && item > 0))].slice(0, limit);
-}
-
-/**
- * 规范化灰度输入。
- * 落地方案 v1.2 §6.3：target_units 由「匹配 user.unit 字符串」迁移为 team_id 引用，
- * 并在运行时经 team_members 实时校验；熔断阈值在发布时冻结。
- */
-function normalizeRollout(input = {}) {
+async function resolvePublishedSkillMemorySource(skillId, user) {
+    const normalizedSkillId = normalizeSkillSourceId(skillId);
+    const tenant = await resolveTenantContext(user);
+    const context = tenant.resolvable ? await getUserEnterpriseContext(user.id) : { teams: [] };
+    const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
+    const personalOwnerKey = `user:${Number.parseInt(user.id, 10) || 0}`;
+    const rows = await withControlPlaneFallback(async () => {
+        if (!tenant.resolvable) {
+            return await query(`
+                SELECT r.*, v.skill_id, v.name AS version_name, v.version, v.digest, v.content_digest, v.manifest_json, v.instructions_md
+                FROM agent_skill_releases r
+                JOIN agent_skill_versions v ON v.id = r.skill_version_id
+                WHERE v.skill_id = ? AND r.status = 'published' AND r.owner_key = ?
+                ORDER BY r.published_at DESC
+            `, [normalizedSkillId, personalOwnerKey]);
+        }
+        return await query(`
+            SELECT r.*, v.skill_id, v.name AS version_name, v.version, v.digest, v.content_digest, v.manifest_json, v.instructions_md
+            FROM agent_skill_releases r
+            JOIN agent_skill_versions v ON v.id = r.skill_version_id
+            WHERE v.skill_id = ? AND r.status = 'published'
+              AND (r.owner_key = ? OR r.tenant_id = ?)
+            ORDER BY r.published_at DESC
+        `, [normalizedSkillId, personalOwnerKey, tenant.tenantId]);
+    }, []);
+    const accessible = await filterAccessibleReleases(rows, user, 'use');
+    const release = chooseRolloutRelease(accessible, user, { teamIds });
+    if (!release) throw invalid('技能不存在、未发布或无权作为记忆来源。', 404, 'MEMORY_SKILL_SOURCE_NOT_FOUND');
     return {
-        rolloutScope: normalizeScope(input.rolloutScope || input.rollout_scope || input.scope),
-        rolloutPercent: Math.max(1, Math.min(Number.parseInt(input.rolloutPercent ?? input.rollout_percent, 10) || 100, 100)),
-        targetUserIds: normalizeIdList(input.targetUserIds || input.target_user_ids, 500),
-        targetUnits: normalizeIdList(input.targetTeamIds || input.target_team_ids || input.targetUnits || input.target_units, 100),
-        teamId: Number.parseInt(input.teamId ?? input.team_id, 10) || null,
-        breakerThresholds: normalizeBreakerThresholds(input.breakerThresholds || input.breaker_thresholds)
+        skillId: String(release.skill_id), name: String(release.version_name || release.name || ''),
+        versionId: Number(release.skill_version_id), version: String(release.version || ''),
+        content: skillMemorySourceContent(release)
     };
 }
 
+/** 对数据库候选执行统一 Release ACL/成员/角色判定，避免仅靠 SQL scope 造成 ACL 旁路。 */
 /**
  * 创建技能版本草稿。
  * 落地方案 v1.2 A2、B1、阶段 0.4：
@@ -345,6 +345,11 @@ async function publishSkillVersion(id, user, input = {}) {
     } catch (_) {
         // 收件箱不可用不影响发布结果，发布事件仍在审计与 release 表中。
     }
+    try {
+        await revalidateMemorySource(user.id, 'agent_skill', `agent_skill:${version.skill_id}`,
+            skillMemorySourceContent(version),
+            String(version.id), 'skill_version_published');
+    } catch (_) {}
     // 这是 API 返回元数据，不会写入 release 表；用于审计与界面提示一次操作完成了批准、签名和发布。
     release.autoApproved = Boolean(automaticApproval);
     release.organizationSigningKeyId = automaticApproval?.envelope?.keyId || null;
@@ -426,6 +431,7 @@ async function rollbackSkillRelease(id, user) {
         // 没有可恢复的上一版：投影置为 disabled，避免目录继续展示已回滚内容。
         await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
     }
+    try { await markSkillReleaseMemoriesForReview(release, 'skill_release_rolled_back'); } catch (_) {}
     return queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [id]);
 }
 
@@ -436,6 +442,7 @@ async function pauseSkillRelease(id, user, reason = '') {
     const now = getBeijingTimestamp();
     await execute("UPDATE agent_skill_releases SET status = 'paused', rolled_back_at = ? WHERE id = ?", [now, id]);
     await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
+    try { await markSkillReleaseMemoriesForReview(release, 'skill_release_paused'); } catch (_) {}
     try {
         await createAgentInboxEvent(user, {
             eventKey: `skill.release.paused:${release.id}`,
@@ -526,9 +533,12 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
     const resolved = await resolveAgentWorkflowVersion(workflowId, user, input.version || 'current', { allowTenantAdmin: Boolean(tenantForAdmin), tenantId: tenantForAdmin });
     if (!resolved) return null;
     const impact = await getWorkflowReleaseImpact(workflowId, user, { version: input.version || 'current', resolved });
-    // 评测是发布前的可选质量检查。只有调用方明确声明时才作为门禁，
-    // 避免新工作流在首次发布前因没有已发布版本可供评测而无法发布。
-    const requireFixedEvaluation = input.fixedEvaluationRequired === true;
+    const rollout = normalizeRollout(input);
+    // 个人草稿可显式选择固定评测，团队/组织灰度则不能拿“无评测”或只含
+    // 冒烟检查的结果发布。这样既避免首次个人草稿的创建死锁，又把实际扩大
+    // 影响面的发布收进不可绕过的质量门禁。
+    const productionGate = input.productionEvaluationRequired === true || rollout.rolloutScope !== 'personal';
+    const requireFixedEvaluation = input.fixedEvaluationRequired === true || productionGate;
     if (requireFixedEvaluation) {
         let evaluation = input.evaluationRunId ? await getAgentEvalRun(input.evaluationRunId, user) : null;
         if (evaluation && Number(evaluation.run?.target_snapshot?.workflowVersionId || 0) !== Number(resolved.version_id)) evaluation = null;
@@ -542,11 +552,33 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
                 }
             }
         }
-        if (!evaluation?.run || Number(evaluation.run.summary?.passRate || 0) < Number(input.minPassRate || 80)) {
-            throw invalid('工作流固定评测集未通过发布门禁。', 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
+        const minimumPassRate = Number(input.minPassRate || 80);
+        const adversarialRequired = requiresAdversarialCoverage(impact);
+        const judgeConsensus = productionGate && evaluation?.run
+            ? await getJudgeConsensusForEvaluation(evaluation.run.id, user)
+            : [];
+        const gate = productionGate
+            ? assessEvaluationReleaseGate(evaluation, {
+                targetVersionId: resolved.version_id,
+                minPassRate: minimumPassRate,
+                minCases: adversarialRequired ? 3 : 2,
+                requiredTiers: ['contract', 'scenario'],
+                requireAdversarial: adversarialRequired,
+                // 组织/团队发布一律要求两名独立裁判；高风险场景另外要求对抗层覆盖。
+                requiredJudgeCount: 2,
+                judgeConsensus: judgeConsensus || []
+            })
+            : {
+                passed: Boolean(evaluation?.run) && Number(evaluation.run.summary?.passRate || 0) >= minimumPassRate,
+                blockers: []
+            };
+        if (!gate.passed) {
+            const first = gate.blockers?.[0]?.message || '工作流固定评测集未通过发布门禁。';
+            const error = invalid(first, 409, 'WORKFLOW_EVALUATION_GATE_FAILED');
+            error.details = { evaluationGate: gate };
+            throw error;
         }
     }
-    const rollout = normalizeRollout(input);
     const releaseNote = normalizeWorkflowReleaseNote(input.releaseNote ?? input.release_note);
     if (rollout.rolloutScope !== 'personal' && !isTenantAdmin(user)) throw invalid('团队或组织工作流发布需要管理员权限。', 403, 'WORKFLOW_ROLLOUT_SCOPE_FORBIDDEN');
     const tenant = await assertTenantContext(user);
@@ -582,14 +614,15 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         }
         const previous = await trx.queryOne("SELECT * FROM agent_workflow_releases WHERE workflow_id = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1 FOR UPDATE", [resolved.workflow.id]);
         const next = await trx.queryOne(`
-            INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, status, previous_release_id, published_by, published_at, release_note, review_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)
+            INSERT INTO agent_workflow_releases (workflow_id, workflow_version_id, tenant_id, rollout_scope, rollout_percent, target_user_ids, target_units, breaker_thresholds, status, previous_release_id, published_by, published_at, release_note, review_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, 'published', ?, ?, ?, ?, ?)
             ON CONFLICT(workflow_id, workflow_version_id) DO UPDATE SET
                 tenant_id = excluded.tenant_id,
                 rollout_scope = excluded.rollout_scope,
                 rollout_percent = excluded.rollout_percent,
                 target_user_ids = excluded.target_user_ids,
                 target_units = excluded.target_units,
+                breaker_thresholds = excluded.breaker_thresholds,
                 status = 'published',
                 published_by = excluded.published_by,
                 published_at = excluded.published_at,
@@ -597,7 +630,7 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
                 review_status = excluded.review_status,
                 review_note = '', reviewed_by = NULL, reviewed_at = NULL
             RETURNING *
-        `, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), previous?.id || null, user.id, now, releaseNote, rollout.rolloutScope === 'personal' ? 'not_required' : 'pending']);
+        `, [resolved.workflow.id, resolved.version_id, tenant.tenantId, rollout.rolloutScope, rollout.rolloutPercent, JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), JSON.stringify(rollout.breakerThresholds), previous?.id || null, user.id, now, releaseNote, rollout.rolloutScope === 'personal' ? 'not_required' : 'pending']);
         const updated = await trx.execute(`
             UPDATE agent_workflows
             SET published_version_id = ?, published_at = ?, updated_at = ?
@@ -618,6 +651,12 @@ async function publishWorkflowRelease(workflowId, user, input = {}) {
         return { ...next, toolReleaseBindings };
     });
     try { await createAgentInboxEvent(user, { eventKey: `workflow.release:${release.id}`, eventType: 'release.published', sourceId: String(release.id), title: '工作流版本已发布', body: `工作流 ${resolved.workflow.name} 已进入 ${rollout.rolloutScope} 灰度。`, risk: 'medium', payload: { releaseId: release.id, workflowId: resolved.workflow.id, version: resolved.version } }); } catch (_) {}
+    // 发布新版本后，以当前发布 DAG 和不可变 version_id 重算来源指纹。仅当已关联
+    // 的记忆所见版本不同才会收紧为待复核，不会因无关工作流发布影响其他记忆。
+    try {
+        await revalidateMemorySource(user.id, 'agent_workflow', `agent_workflow:${resolved.workflow.id}`,
+            JSON.stringify(resolved.dagSpec || {}), String(resolved.version_id), 'workflow_version_published');
+    } catch (_) {}
     return { ...release, impact };
 }
 
@@ -735,37 +774,49 @@ async function rollbackWorkflowRelease(id, user) {
     } else {
         await execute('UPDATE agent_workflows SET published_version_id = NULL, published_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NULL', [now, release.workflow_id]);
     }
+    try {
+        await markMemoriesForSourceReview(release.workflow_owner_id, {
+            sourceKind: 'agent_workflow', sourceRef: `agent_workflow:${release.workflow_id}`,
+            reason: 'workflow_release_rolled_back'
+        });
+    } catch (_) {}
     return queryOne('SELECT * FROM agent_workflow_releases WHERE id = ?', [id]);
 }
 
-function formatWorkflowReleaseForRead(row, { includeTargets = false } = {}) {
-    if (!row) return null;
-    return {
-        id: row.id,
-        workflow_id: row.workflow_id,
-        workflow_version_id: row.workflow_version_id,
-        version: Number(row.version || 0),
-        note: row.note || '',
-        rollout_scope: row.rollout_scope || 'personal',
-        rollout_percent: Number(row.rollout_percent || 0),
-        ...(includeTargets ? {
-            target_user_ids: parseJson(row.target_user_ids, []),
-            target_units: parseJson(row.target_units, []),
-            release_note: row.release_note || '',
-            review_status: row.review_status || 'not_required',
-            review_note: row.review_note || '',
-            reviewed_by: row.reviewed_by || null,
-            reviewed_at: row.reviewed_at || null
-        } : {}),
-        tool_dependency_stale: Boolean(row.tool_dependency_stale),
-        tool_dependency_stale_at: row.tool_dependency_stale_at || null,
-        tool_dependency_stale_reason: row.tool_dependency_stale_reason || '',
-        status: row.status,
-        published_by: row.published_by,
-        published_at: row.published_at,
-        rolled_back_at: row.rolled_back_at || null,
-        previous_release_id: row.previous_release_id || null
-    };
+async function containWorkflowReleaseBySystem(release, reason = '', { rollback = false } = {}) {
+    if (!release?.id || !release?.workflow_id) return { action: 'skipped' };
+    const now = getBeijingTimestamp();
+    const targetStatus = rollback ? 'rolled_back' : 'paused';
+    const updated = await query(`
+        UPDATE agent_workflow_releases SET status = ?, rolled_back_at = ?
+        WHERE id = ? AND status = 'published' RETURNING id
+    `, [targetStatus, now, release.id]);
+    if (!updated.length) return { action: 'skipped' };
+    const previous = release.previous_release_id
+        ? await queryOne('SELECT workflow_version_id FROM agent_workflow_releases WHERE id = ?', [release.previous_release_id]) : null;
+    if (release.previous_release_id) {
+        await execute("UPDATE agent_workflow_releases SET status = 'published' WHERE id = ? AND status IN ('paused', 'rolled_back')", [release.previous_release_id]);
+        await execute('UPDATE agent_workflows SET published_version_id = ?, published_at = ?, updated_at = ? WHERE id = ?', [previous?.workflow_version_id || null, now, now, release.workflow_id]);
+    } else {
+        await execute('UPDATE agent_workflows SET published_version_id = NULL, published_at = NULL, updated_at = ? WHERE id = ?', [now, release.workflow_id]);
+    }
+    if (release.workflow_owner_id) {
+        try {
+            await markMemoriesForSourceReview(release.workflow_owner_id, {
+                sourceKind: 'agent_workflow', sourceRef: `agent_workflow:${release.workflow_id}`,
+                reason: rollback ? 'workflow_release_breaker_rolled_back' : 'workflow_release_breaker_paused'
+            });
+        } catch (_) {}
+    }
+    return { action: targetStatus, reason };
+}
+
+async function pauseWorkflowReleaseBySystem(release, reason = '') {
+    return await containWorkflowReleaseBySystem(release, reason, { rollback: false });
+}
+
+async function rollbackWorkflowReleaseBySystem(release, reason = '') {
+    return await containWorkflowReleaseBySystem(release, reason, { rollback: true });
 }
 
 async function listWorkflowReleasesForUser(workflowId, user, options = {}) {
@@ -852,7 +903,8 @@ async function listSkillReleasesForUser(user, options = {}) {
 async function listSkillCatalogForUser(user, options = {}) {
     const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 200, 500));
     const releases = await listSkillReleasesForUser(user, { limit });
-    const published = releases.filter(item => item.status === 'published');
+    const publishedRows = releases.filter(item => item.status === 'published');
+    const published = options.useOnly === true ? await filterAccessibleReleases(publishedRows, user, 'use') : publishedRows;
     const context = await getUserEnterpriseContext(user.id);
     const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
     const byName = new Map();
@@ -879,6 +931,7 @@ async function pauseSkillReleaseBySystem(release, reason = '') {
     const updated = await query("UPDATE agent_skill_releases SET status = 'paused', rolled_back_at = ? WHERE id = ? AND status = 'published' RETURNING id", [now, release.id]);
     if (!updated.length) return { action: 'skipped' };
     await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
+    try { await markSkillReleaseMemoriesForReview(release, 'skill_release_paused_by_system'); } catch (_) {}
     await notifyBreakerAction(release, 'release.paused', 'Skill 发布已自动暂停', reason);
     return { action: 'paused' };
 }
@@ -908,27 +961,9 @@ async function rollbackSkillReleaseBySystem(release, reason = '') {
     } else {
         await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
     }
+    try { await markSkillReleaseMemoriesForReview(release, 'skill_release_rolled_back_by_system'); } catch (_) {}
     await notifyBreakerAction(release, 'release.rolled_back', 'Skill 发布已自动回滚', reason);
     return { action: 'rolled_back', restoredReleaseId: restored?.id || null };
-}
-
-/** 熔断通知发给发布者；通知失败不影响熔断结果。 */
-async function notifyBreakerAction(release, eventType, title, reason) {
-    const publisherId = Number.parseInt(release.published_by, 10) || 0;
-    if (!publisherId) return;
-    try {
-        await createAgentInboxEvent({ id: publisherId }, {
-            eventKey: `skill.release.breaker:${release.id}:${eventType}`,
-            eventType,
-            sourceId: String(release.id),
-            title,
-            body: `${release.name} 触发熔断阈值：${reason || '未说明'}。`,
-            risk: 'high',
-            payload: { releaseId: release.id, reason }
-        });
-    } catch (_) {
-        // 收件箱不可用时熔断仍然生效，事件已记录在 release 状态与日志中。
-    }
 }
 
 module.exports = {
@@ -942,10 +977,14 @@ module.exports = {
     listSkillReleasesForUser,
     listSkillVersionsForUser,
     listWorkflowReleasesForUser,
+
     normalizeRollout,
     pauseSkillRelease,
     pauseSkillReleaseBySystem,
+    pauseWorkflowReleaseBySystem,
     publishSkillVersion,
+    resolvePublishedSkillMemorySource,
+    skillMemorySourceContent,
     publishWorkflowRelease,
     reviewWorkflowRelease,
     resolvePublishedSkill,
@@ -953,6 +992,7 @@ module.exports = {
     rollbackSkillRelease,
     rollbackSkillReleaseBySystem,
     rollbackWorkflowRelease,
+    rollbackWorkflowReleaseBySystem,
     runDeclarativeSkillChecks,
     scanInstalledPackage,
     validateSkillVersion

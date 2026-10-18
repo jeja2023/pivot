@@ -5,6 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createAgentRunner } = require('../server/services/agent-runtime/run-execution');
+const { executeAutomaticModelFailover, resolveAutomaticModelFailover } = require('../server/services/agent-runtime/model-failover');
 const { TaskBudget, normalizeTaskBudget } = require('../server/services/agent-budget');
 const { TERMINAL_STATUSES } = require('../server/services/agent-runtime/state-machine');
 
@@ -135,4 +136,67 @@ test('轮次时间片耗尽会复用安全检查点续跑，而不是直接生�
     assert.match(source, /reason: 'step_limit'/);
     assert.match(source, /roundsUsed \+ maxSteps/);
     assert.match(streaming, /stepLimitReached: roundsUsed >= sliceEndStep/);
+});
+
+test('运行时向执行器注入模型故障降级依赖，结构化输出不兼容不会触发未定义函数', () => {
+    const root = path.join(__dirname, '..', 'server', 'services', 'agent-runtime');
+    const runtime = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+    const execution = fs.readFileSync(path.join(root, 'run-execution.js'), 'utf8');
+    const failover = fs.readFileSync(path.join(root, 'model-failover.js'), 'utf8');
+    assert.match(runtime, /isRecoverableModelProviderFailure/);
+    assert.match(runtime, /modelProviderFailureReason/);
+    assert.match(runtime, /pickFailoverModel/);
+    assert.match(failover, /可恢复供应方失败/);
+    assert.match(execution, /executeAutomaticModelFailover\(\{/);
+    assert.match(execution, /plannedTextUsageRef = failover\.usageRef/);
+});
+
+test('自动路由只对明确可恢复的结构化输出不兼容执行一次候选切换', async () => {
+    const error = { response: { status: 400, data: { error: { message: 'response_format json_schema is not supported' } } } };
+    let calls = 0;
+    const switched = await resolveAutomaticModelFailover({
+        routerStrategy: 'auto-context',
+        error,
+        user: { id: 7 },
+        currentModel: { id: 1 },
+        messages: [{ role: 'user', content: '返回 JSON' }],
+        isRecoverableModelProviderFailure: candidate => candidate === error,
+        modelProviderFailureReason: () => 'structured_output_incompatible',
+        pickFailoverModel: async ({ currentModel }) => { calls += 1; assert.equal(currentModel.id, 1); return { id: 2 }; }
+    });
+    assert.deepEqual(switched, { model: { id: 2 }, reason: 'structured_output_incompatible' });
+    assert.equal(calls, 1);
+    const fixed = await resolveAutomaticModelFailover({
+        routerStrategy: 'fixed', error, isRecoverableModelProviderFailure: () => true,
+        pickFailoverModel: async () => { calls += 1; return { id: 3 }; }
+    });
+    assert.equal(fixed, null);
+    assert.equal(calls, 1);
+});
+
+test('降级执行器写入路由审计、保留安全约束并返回候选的模型输出', async () => {
+    const calls = [];
+    const outcome = await executeAutomaticModelFailover({
+        routerStrategy: 'auto-context',
+        error: { code: 'UPSTREAM' },
+        user: { id: 7 },
+        currentModel: { id: 1 },
+        messages: [{ role: 'user', content: '返回 JSON' }],
+        isRecoverableModelProviderFailure: () => true,
+        modelProviderFailureReason: () => 'structured_output_incompatible',
+        pickFailoverModel: async () => ({ id: 2, name: '候选模型' }),
+        runId: 'run-model-failover', step: 1, turnId: 'turn-1', contextHash: 'context-hash', signal: new AbortController().signal,
+        getTimestamp: () => '2026-10-18T00:00:00.000Z', updateRun: async () => 1, listSteps: async () => [],
+        insertStep: async (_runId, _index, item) => calls.push(['step', item]),
+        recordAgentTraceSpan: async (_runId, item) => calls.push(['routing', item]),
+        startAgentTraceSpan: async () => 'span-1', finishAgentTraceSpan: async (_id, item) => calls.push(['finish', item]),
+        recordAgentEvent: async item => calls.push(['event', item]), buildAgentAuditFields: () => ({ safe: true }),
+        callModelText: async () => '{"action":"final"}', remainingModelRequestMs: () => 30000,
+        resolveAgentPlanningThinking: () => false, withTimeout: async operation => await operation(new AbortController().signal), minMaxTokens: 1024
+    });
+    assert.equal(outcome.model.id, 2);
+    assert.equal(outcome.reason, 'structured_output_incompatible');
+    assert.equal(outcome.plannedText, '{"action":"final"}');
+    assert.equal(calls.find(item => item[0] === 'routing')[1].details.preservedConstraints.length, 4);
+    assert.equal(calls.find(item => item[0] === 'event')[1].payload.safe, true);
 });

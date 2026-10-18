@@ -33,6 +33,7 @@ function serializeMemory(row) {
         confidence: Number(row.confidence || 0),
         sourceSessionId: row.source_session_id || '',
         sourceMessageIds: parseJsonArray(row.source_message_ids),
+        hasSourceEvidence: row.has_source_evidence === true || row.has_source_evidence === 1 || row.has_source_evidence === '1',
         status: row.status || MEMORY_STATUS.active,
         embeddingDimensions: Number(row.embedding_dimensions || 0),
         embeddingStatus: row.embedding_status || (row.embedding ? 'ready' : 'lexical_ready'),

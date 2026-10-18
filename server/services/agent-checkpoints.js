@@ -1,5 +1,5 @@
 const { randomUUID, createHash } = require('crypto');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 
 const MAX_CHECKPOINT_STATE_LENGTH = 120000;
@@ -126,48 +126,62 @@ async function recordAgentCheckpoint(runId, data = {}) {
 async function beginAgentToolCheckpoint(runId, data = {}) {
     if (!runId || !data.operationKey || !data.toolName) return { created: false, replay: false };
     const operationKey = String(data.operationKey).slice(0, 255);
-    const existing = await queryOne('SELECT * FROM agent_run_checkpoints WHERE operation_key = ?', [operationKey]);
-    if (existing) {
-        const state = parseCheckpointState(existing.state);
-        if (existing.input_hash && data.inputHash && String(existing.input_hash) !== String(data.inputHash)) {
-            const error = new Error('工具操作键与输入摘要不匹配，已拒绝潜在重放混淆。');
-            error.code = 'AGENT_OPERATION_INPUT_MISMATCH';
-            error.category = 'policy';
-            throw error;
+    const inputHash = String(data.inputHash || checkpointInputHash(data.input));
+    const toolName = String(data.toolName).slice(0, 128);
+    const result = await transaction(async trx => {
+        const run = await trx.queryOne('SELECT id, user_id, tenant_id, status, deleted_at FROM agent_runs WHERE id = ? FOR UPDATE', [runId]);
+        if (!run || (data.user?.id && Number(data.user.id) !== Number(run.user_id))) {
+            const error = new Error('无权访问该任务的工具检查点。');
+            error.code = 'AGENT_CHECKPOINT_SCOPE_DENIED'; error.status = 403; throw error;
         }
-        if (String(existing.status) === 'completed') {
-            const owner = await resolveCheckpointUser(existing.run_id || runId, data.user || null);
-            const hydrated = await hydrateCheckpointState(state, owner, { strict: true });
-            if (!Object.hasOwn(hydrated, 'output')) throw recoveryOutputError();
-            return { created: false, replay: true, output: hydrated.output, checkpointId: existing.checkpoint_id };
+        if (run.deleted_at || ['cancelled', 'deleted', 'completed', 'completed_with_errors', 'error', 'failed', 'partial'].includes(String(run.status || ''))) {
+            const error = new Error('任务已停止、完成或隐藏，不能开始工具检查点。');
+            error.code = 'AGENT_CHECKPOINT_RUN_INACTIVE'; error.status = 409; throw error;
         }
-        if (String(existing.status) === 'uncertain') {
-            throw recoveryOutputError('工具调用是否已提交但完整结果不可用，必须人工核对后才能继续。');
+        const existing = await trx.queryOne('SELECT * FROM agent_run_checkpoints WHERE operation_key = ? FOR UPDATE', [operationKey]);
+        if (existing) {
+            if (String(existing.run_id) !== String(runId) || (existing.tool_name && String(existing.tool_name) !== toolName)) {
+                const error = new Error('工具操作键不属于当前运行或工具，已拒绝重放。');
+                error.code = 'AGENT_OPERATION_SCOPE_MISMATCH'; error.category = 'policy'; error.status = 409; throw error;
+            }
+            const state = parseCheckpointState(existing.state);
+            if (existing.input_hash && String(existing.input_hash) !== inputHash) {
+                const error = new Error('工具操作键与输入摘要不匹配，已拒绝潜在重放混淆。');
+                error.code = 'AGENT_OPERATION_INPUT_MISMATCH'; error.category = 'policy'; error.status = 409; throw error;
+            }
+            if (String(existing.status) === 'completed') {
+                return { created: false, replay: true, state, owner: { id: Number(run.user_id), tenant_id: run.tenant_id || null }, checkpointId: existing.checkpoint_id };
+            }
+            if (String(existing.status) === 'uncertain') {
+                throw recoveryOutputError('工具调用结果不确定或完整输出不可用，必须人工核对外部状态后才能继续。');
+            }
+            const idempotent = existing.idempotent === true && data.idempotent === true;
+            if (String(existing.status) === 'pending' && !idempotent && data.approvalGranted !== true) {
+                const error = new Error('检测到未完成的非幂等工具调用，必须重新审批后才能继续。');
+                error.code = 'AGENT_RECOVERY_REQUIRES_APPROVAL'; error.category = 'policy'; error.operationKey = operationKey; throw error;
+            }
+            await trx.execute("UPDATE agent_run_checkpoints SET status = 'pending', attempt = COALESCE(attempt, 1) + 1, state = ? WHERE operation_key = ?", [
+                serializeCheckpointState({ toolName, input: data.input || {}, inputHash, recovery: true, approvalGranted: data.approvalGranted === true }), operationKey
+            ]);
+            return { created: false, replay: false, checkpointId: existing.checkpoint_id, recovered: true };
         }
-        if (String(existing.status) === 'pending' && !data.idempotent && data.approvalGranted !== true) {
-            const error = new Error('检测到未完成的非幂等工具调用，必须重新审批后才能继续。');
-            error.code = 'AGENT_RECOVERY_REQUIRES_APPROVAL';
-            error.category = 'policy';
-            error.operationKey = operationKey;
-            throw error;
-        }
-        await execute(`UPDATE agent_run_checkpoints SET status = 'pending', attempt = COALESCE(attempt, 1) + 1, state = ? WHERE operation_key = ?`, [
-            serializeCheckpointState({ toolName: data.toolName, input: data.input || {}, inputHash: data.inputHash || checkpointInputHash(data.input), recovery: true, approvalGranted: data.approvalGranted === true }), operationKey
+        const checkpointId = randomUUID();
+        await trx.execute(`
+            INSERT INTO agent_run_checkpoints (
+                checkpoint_id, run_id, step_index, checkpoint_type, status, state, created_at,
+                operation_key, tool_name, input_hash, idempotent, attempt
+            ) VALUES (?, ?, ?, 'tool', 'pending', ?, ?, ?, ?, ?, ?, 1)
+        `, [
+            checkpointId, runId, Math.max(Number(data.stepIndex) || 0, 0),
+            serializeCheckpointState({ toolName, input: data.input || {}, inputHash }),
+            data.createdAt || getBeijingTimestamp(), operationKey, toolName, inputHash, Boolean(data.idempotent)
         ]);
-        return { created: false, replay: false, checkpointId: existing.checkpoint_id, recovered: true };
-    }
-    const checkpointId = randomUUID();
-    await execute(`
-        INSERT INTO agent_run_checkpoints (
-            checkpoint_id, run_id, step_index, checkpoint_type, status, state, created_at,
-            operation_key, tool_name, input_hash, idempotent, attempt
-        ) VALUES (?, ?, ?, 'tool', 'pending', ?, ?, ?, ?, ?, ?, 1)
-    `, [
-        checkpointId, runId, Math.max(Number(data.stepIndex) || 0, 0),
-        serializeCheckpointState({ toolName: data.toolName, input: data.input || {}, inputHash: data.inputHash || checkpointInputHash(data.input) }),
-        data.createdAt || getBeijingTimestamp(), operationKey, String(data.toolName).slice(0, 128), data.inputHash || checkpointInputHash(data.input), Boolean(data.idempotent)
-    ]);
-    return { created: true, replay: false, checkpointId };
+        return { created: true, replay: false, checkpointId };
+    });
+    if (!result.replay) return result;
+    const hydrated = await hydrateCheckpointState(result.state, result.owner, { strict: true });
+    if (!Object.hasOwn(hydrated, 'output')) throw recoveryOutputError();
+    return { created: false, replay: true, output: hydrated.output, checkpointId: result.checkpointId };
 }
 
 async function completeAgentToolCheckpoint(operationKey, output, options = {}) {
@@ -208,20 +222,22 @@ async function completeAgentToolCheckpoint(operationKey, output, options = {}) {
 
 async function failAgentToolCheckpoint(operationKey, error, options = {}) {
     if (!operationKey) return false;
-    const row = await queryOne('SELECT state FROM agent_run_checkpoints WHERE operation_key = ?', [String(operationKey)]);
+    const row = await queryOne('SELECT state, idempotent FROM agent_run_checkpoints WHERE operation_key = ?', [String(operationKey)]);
     const current = parseCheckpointState(row?.state);
+    const outcomeUncertain = options.executionMayHaveOccurred === true && row?.idempotent !== true;
     const next = {
         ...current,
         errorMessage: String(error?.message || error || '工具执行失败').slice(0, 2000),
         errorCode: String(error?.code || '').slice(0, 80),
-        committed: false,
+        committed: outcomeUncertain ? null : false,
+        ...(outcomeUncertain ? { outcomeUncertain: true } : {}),
         failedAt: getBeijingTimestamp()
     };
     const changed = await execute(`
         UPDATE agent_run_checkpoints
-        SET status = 'error', state = ?, created_at = COALESCE(created_at, ?)
+        SET status = ?, state = ?, created_at = COALESCE(created_at, ?)
         WHERE operation_key = ? AND status = 'pending'
-    `, [serializeCheckpointState(next), options.createdAt || getBeijingTimestamp(), String(operationKey)]);
+    `, [outcomeUncertain ? 'uncertain' : 'error', serializeCheckpointState(next), options.createdAt || getBeijingTimestamp(), String(operationKey)]);
     return changed > 0;
 }
 

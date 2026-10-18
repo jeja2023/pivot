@@ -1,6 +1,7 @@
 const { callModelText, recordAgentModelUsage } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
-const { fitMessagesToContextBudget } = require('../context-budget');
+const { fitMessagesToContextBudget, getModelContextBudget } = require('../context-budget');
+const { compactAgentContextMessages } = require('../agent-context-semantic-compression');
 const { logger } = require('../../logger');
 const { AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
 const { sanitizeUserVisibleText } = require('../../llm');
@@ -11,15 +12,40 @@ const AGENT_CONTEXT_FALLBACK_TOKENS = Math.max(
 );
 
 function fitAgentMessages(messages, modelCfg, options = {}) {
-    const fitted = fitMessagesToContextBudget(messages, modelCfg, options);
-    if (!fitted.metadata?.unbounded) return fitted.messages;
-    return fitMessagesToContextBudget(messages, modelCfg, {
-        ...options,
-        contextWindowTokens: AGENT_CONTEXT_FALLBACK_TOKENS
-    }).messages;
+    const configuredBudget = getModelContextBudget(modelCfg, options);
+    const effectiveOptions = configuredBudget.unbounded
+        ? { ...options, contextWindowTokens: AGENT_CONTEXT_FALLBACK_TOKENS }
+        : options;
+    const effectiveBudget = configuredBudget.unbounded
+        ? getModelContextBudget(modelCfg, effectiveOptions)
+        : configuredBudget;
+    const compacted = compactAgentContextMessages(messages, {
+        inputBudget: effectiveBudget.inputBudget,
+        taskWorkingState: options.taskWorkingState || null
+    });
+    const fitted = fitMessagesToContextBudget(compacted.messages, modelCfg, effectiveOptions);
+    Object.defineProperty(fitted.messages, 'contextCompaction', {
+        value: {
+            ...compacted.metadata,
+            budget: fitted.metadata
+        },
+        enumerable: false,
+        configurable: true
+    });
+    return fitted.messages;
 }
 const { buildWorldStatePrompt } = require('../agent-step-context');
 const { buildWorkingStatePrompt } = require('../agent-working-state');
+const {
+    attachPromptManifest,
+    createPromptSection,
+    manifestForSections,
+    plannerCoreSection,
+    recordPromptInvocation,
+    renderPromptSections,
+    resolveActivePromptSection,
+    summaryCoreSection
+} = require('../agent-prompt-registry');
 
 function observationMessages(observations = []) {
     return observations.map((observation, index) => ({
@@ -78,7 +104,7 @@ function buildCurrentGoalContent(goal, observations, contextConfig = {}) {
     return [{ type: 'text', text: prefix }, ...(mediaParts.length ? mediaParts : parts)];
 }
 
-function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null, worldState = null, worldStateInjection = null) {
+function buildPlannerMessages(goal, toolList, observations, runMode = 'standard', contextConfig = {}, modelCfg = null, worldState = null, worldStateInjection = null, coreSection = null) {
     const context = normalizeContextConfig(contextConfig);
     const contextLines = [];
     if (context.mode === 'recent') contextLines.push('使用最近的对话上下文。');
@@ -108,35 +134,38 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     if (String(contextConfig?.skillInstructions || '').trim()) {
         contextLines.push(`个人经验（已验证 Skill）：${String(contextConfig.skillTitle || '个人经验')}\n${String(contextConfig.skillInstructions).slice(0, 12000)}`);
     }
-    if (contextConfig?.taskWorkingState && typeof contextConfig.taskWorkingState === 'object') {
-        contextLines.push(buildWorkingStatePrompt(contextConfig.taskWorkingState));
-    }
     const projectCollections = Array.isArray(contextConfig?.projectContextPack?.collections)
         ? contextConfig.projectContextPack.collections : [];
     if (projectCollections.length) {
         contextLines.push(`本任务仅可把以下项目资料包作为知识库检索范围：${projectCollections.map(collection => String(collection.name || collection.id)).join('、')}。需要资料时使用 rag.search；不要声称可访问包外资料。`);
     }
     const runModeLabel = { standard: '标准模式—稳扎稳打', deep: '深度模式—允许额外检索', audit: '审计模式—必须强调证据、限制和风险', dag: 'DAG 模式—按工作流图执行' }[normalizeRunMode(runMode)] || normalizeRunMode(runMode);
+    const sections = [
+        coreSection || plannerCoreSection(),
+        createPromptSection({
+            key: 'agent_planner_runtime', version: 'runtime-context-v1', owner: 'platform.runtime', stability: 'dynamic',
+            content: [`运行模式：${runModeLabel}。`, contextLines.length ? `上下文指导：${contextLines.join(' ')}` : '无额外上下文指导。'].join('\n'),
+            changeReason: 'run mode and authorized context'
+        }),
+        createPromptSection({
+            key: 'agent_planner_world_state', version: 'world-state-v1', owner: 'platform.runtime', stability: 'dynamic',
+            content: worldState ? buildWorldStatePrompt(worldState, { injection: worldStateInjection }) : '',
+            changeReason: 'task state snapshot'
+        }),
+        createPromptSection({
+            key: 'agent_planner_tools', version: 'tool-catalog-v1', owner: 'platform.runtime', stability: 'dynamic',
+            content: `可用工具：\n${JSON.stringify(toolList, null, 2)}`,
+            changeReason: 'release/ACL scoped tool catalog'
+        })
+    ];
     const messages = [
         {
             role: 'system',
-            content: [
-                '你是 Pivot Agent。请仔细规划，在需要时调用工具，并返回简洁的结果。',
-                '选择操作时只返回 JSON；仅在最终答案中使用 Markdown。',
-                '【重要语言规则】你的思考（thought）、推理和最终答案必须使用中文。禁止使用英文提纲或英文推理过程。',
-                '不得声称已经把文件写入用户电脑；只有用户明确点击保存并收到交付结果后，才能说明文件已保存。生成代码时请输出代码，并提示用户使用代码块中的“保存到本机”。',
-                '运行中收到的 PIVOT_AGENT_CONTROL 消息代表用户最新的明确指令，必须在不违反安全策略和既有审批边界的前提下优先执行；不要重复已经完成的工作。',
-                'Schema: {"thought":"简短推理（中文）","action":"tool|final","tool":"tool.name","input":{},"answer":"最终答案（中文）"}',
-                `运行模式：${runModeLabel}。`,
-                '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
-                '工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。',
-                '以观察结果为依据，不要编造工具返回结果。',
-                contextLines.length ? `上下文指导：${contextLines.join(' ')}` : '无额外上下文指导。',
-                worldState ? buildWorldStatePrompt(worldState, { injection: worldStateInjection }) : '',
-                '可用工具：',
-                JSON.stringify(toolList, null, 2)
-            ].join('\n')
+            content: renderPromptSections(sections)
         },
+        ...(contextConfig?.taskWorkingState && typeof contextConfig.taskWorkingState === 'object'
+            ? [{ role: 'system', content: buildWorkingStatePrompt(contextConfig.taskWorkingState) }]
+            : []),
         ...chatHistoryMessages(contextConfig),
         ...longTermMemoryContextMessages(contextConfig),
         ...chatAgentContextMessages(contextConfig),
@@ -146,7 +175,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             content: buildCurrentGoalContent(goal, observations, contextConfig)
         }
     ];
-    return modelCfg ? fitAgentMessages(messages, modelCfg) : messages;
+    return attachPromptManifest(modelCfg ? fitAgentMessages(messages, modelCfg, { taskWorkingState: contextConfig.taskWorkingState }) : messages, manifestForSections(sections));
 }
 
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
@@ -155,10 +184,19 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         chatAgent: options.chatAgent,
         longTermMemoryContext: options.longTermMemoryContext
     };
+    const activeSummaryCore = user ? await resolveActivePromptSection('agent_summary_core', summaryCoreSection(), user) : summaryCoreSection();
+    const sections = [
+        activeSummaryCore,
+        createPromptSection({
+            key: 'agent_summary_runtime', version: 'summary-runtime-v1', owner: 'platform.runtime', stability: 'dynamic',
+            content: `任务目标：${goal}\n观察数量：${observations.length}`,
+            changeReason: 'task goal and observation count'
+        })
+    ];
     const messages = [
         {
             role: 'system',
-            content: '你是 Pivot Agent。请将 Agent 的观察记录总结为清晰的最终答案。如适用，请说明局限性和有用的后续步骤。输出请使用中文。'
+            content: renderPromptSections(sections)
         },
         ...chatHistoryMessages(finalContext),
         ...longTermMemoryContextMessages(finalContext),
@@ -173,7 +211,10 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             )
         }
     ];
-    const fitted = { messages: fitAgentMessages(messages, modelCfg) };
+    const fitted = { messages: attachPromptManifest(fitAgentMessages(messages, modelCfg), manifestForSections(sections)) };
+    if (user && runId) {
+        try { await recordPromptInvocation({ runId, user, source: 'agent_summary', manifest: fitted.messages.promptManifest }); } catch (_) {}
+    }
     const usageRef = {};
     // 最终答案是面向用户的完整回复，不能沿用规划一步的 1200 兜底预算，否则综合
     // 多步观察的答案会被直接截断。minMaxTokens 只抬下限，模型配置更高时不被压低。

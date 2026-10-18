@@ -33,5 +33,29 @@
     "file": "server/services/database-mcp/index.js",
     "callee": "withSqlServer",
     "code": "const run = withSqlServer(testConnection, async pool => {"
+  },
+  {
+    "file": "server/services/regulations/parser.js",
+    "callee": "finalize",
+    "code": "if (current) finalize();",
+    "line": 166,
+    "reason": "法规纯文本解析器的同步局部收尾函数；不访问数据库、不返回 Promise。",
+    "reviewedAt": "2026-10-18"
+  },
+  {
+    "file": "server/services/regulations/parser.js",
+    "callee": "finalize",
+    "code": "if (current) finalize();",
+    "line": 175,
+    "reason": "法规纯文本解析器的同步局部收尾函数；不访问数据库、不返回 Promise。",
+    "reviewedAt": "2026-10-18"
+  },
+  {
+    "file": "server/services/regulations/parser.js",
+    "callee": "finalize",
+    "code": "if (current) finalize();",
+    "line": 183,
+    "reason": "法规纯文本解析器的同步局部收尾函数；不访问数据库、不返回 Promise。",
+    "reviewedAt": "2026-10-18"
   }
 ]

@@ -7,6 +7,7 @@ const CHAT_AGENT_TERMINAL_STATUSES = new Set(['completed', 'completed_with_error
 function chatAgentStatusText(status) {
     const value = String(status || '').toLowerCase();
     if (value === 'approval_required' || value === 'waiting_approval' || value === 'awaiting_approval') return '连续 Agent 等待审批';
+    if (value === 'awaiting_commit') return '连续 Agent 等待提交';
     if (['executing', 'observing', 'replanning', 'running'].includes(value)) return '连续 Agent 正在执行任务';
     if (value === 'queued') return '连续 Agent 正在排队';
     return '连续 Agent 正在规划任务';

@@ -185,9 +185,11 @@ async function callModelJson(modelCfg, messages, options = {}) {
             signal: options.signal || null
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
+        const promptCache = extractPromptCacheUsage(usage);
         const finishReason = String(response.data?.choices?.[0]?.finish_reason || '');
         if (options.usageRef && typeof options.usageRef === 'object') {
             options.usageRef.usage = usage;
+            options.usageRef.promptCache = promptCache;
             // 回传截断信号：finish_reason='length' 意味着输出预算耗尽、内容不完整。
             // 静默返回半截答案是最难排查的故障，调用方据此告警或改走更大预算重试。
             options.usageRef.finishReason = finishReason;
@@ -199,6 +201,20 @@ async function callModelJson(modelCfg, messages, options = {}) {
         }
         return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     }, options);
+}
+
+function extractPromptCacheUsage(usage = null) {
+    const value = usage && typeof usage === 'object' && !Array.isArray(usage) ? usage : {};
+    const details = value.prompt_tokens_details || value.input_tokens_details || value.cache_details || {};
+    const readRaw = value.cache_read_input_tokens ?? value.cache_read_tokens ?? value.cached_input_tokens
+        ?? details.cached_tokens ?? details.cache_read_tokens ?? details.read_tokens;
+    const creationRaw = value.cache_creation_input_tokens ?? value.cache_creation_tokens
+        ?? details.cache_creation_tokens ?? details.creation_tokens;
+    const number = item => Math.max(0, Number(item || 0) || 0);
+    const observed = [
+        'cache_read_input_tokens', 'cache_read_tokens', 'cached_input_tokens', 'cache_creation_input_tokens', 'cache_creation_tokens'
+    ].some(key => Object.hasOwn(value, key)) || Object.keys(details).some(key => /cache|cached/i.test(key));
+    return { cacheReadTokens: number(readRaw), cacheCreationTokens: number(creationRaw), cacheObserved: observed };
 }
 
 async function callModelText(modelCfg, messages, options = {}) {
@@ -361,7 +377,8 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
     const estimated = estimateProviderUsage(messages, output);
     const inputTokens = usageInput > 0 ? usageInput : estimated.inputTokens;
     const outputTokens = usageOutput > 0 ? usageOutput : estimated.outputTokens;
-    recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens);
+    const promptCache = options.promptCache || options.usageRef?.promptCache || extractPromptCacheUsage(usage);
+    recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
     let calibration = null;
     if (usage) {
         try {
@@ -415,15 +432,16 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 budgetExceeded = true;
             }
         }
-        if (budgetExceeded) return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, calibration, budgetExceeded: true };
+        if (budgetExceeded) return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, promptCache, calibration, budgetExceeded: true };
     }
-    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, calibration };
+    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, promptCache, calibration };
 }
 
 module.exports = {
     callModelJson,
     callModelText,
     callModelStreamingWithTools,
+    extractPromptCacheUsage,
     recordAgentModelUsage,
     withAgentModelConcurrency,
     resolveAgentMaxTokens,

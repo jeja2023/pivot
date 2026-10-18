@@ -7,6 +7,7 @@ const {
     validateJsonSchemaDefinition,
     validateValueAgainstSchema
 } = require('./agent-dag-contracts');
+const { normalizeEvaluationTier } = require('./agent-evaluation-gates');
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'cancelled']);
 const MAX_CASES_PER_SUITE = 50;
@@ -39,6 +40,11 @@ function normalizeAssertions(value = {}) {
     return {
         requiredPhrases: normalizeStringList(source.requiredPhrases || source.required_phrases),
         forbiddenPhrases: normalizeStringList(source.forbiddenPhrases || source.forbidden_phrases),
+        // 证据短语属于硬门：它们表达可审计来源/产物的最小锚点，而不是文字润色偏好。
+        requiredEvidencePhrases: normalizeStringList(source.requiredEvidencePhrases || source.required_evidence_phrases),
+        // 只有显式标层的冻结用例可进入组织发布门禁；缺省 legacy 保留历史可读性，
+        // 但不会被 production gate 当作 contract/scenario/adversarial 覆盖。
+        evaluationTier: normalizeEvaluationTier(source.evaluationTier || source.evaluation_tier, 'legacy'),
         minLength: clampInt(source.minLength || source.min_length, 0, 0, 100000),
         maxDurationMs: clampInt(source.maxDurationMs || source.max_duration_ms, 0, 0, 24 * 60 * 60 * 1000),
         maxTokens: clampInt(source.maxTokens || source.max_tokens, 0, 0, 10000000),
@@ -321,6 +327,7 @@ function hasQualityAssertion(assertions = {}, evalCase = {}) {
         String(evalCase.expected_output || evalCase.expectedOutput || '').trim()
         || assertions.requiredPhrases?.length
         || assertions.forbiddenPhrases?.length
+        || assertions.requiredEvidencePhrases?.length
         || assertions.minLength > 0
         || assertions.maxDurationMs > 0
         || assertions.maxTokens > 0
@@ -342,6 +349,9 @@ function gradeAgentOutput({ run = {}, evalCase = {}, passThreshold = 80 } = {}) 
     });
     assertions.forbiddenPhrases.forEach(phrase => {
         addRule(rules, 'forbidden_phrase', `不包含“${phrase}”`, !output.includes(phrase), phrase, { hard: true });
+    });
+    assertions.requiredEvidencePhrases.forEach(phrase => {
+        addRule(rules, 'required_evidence', `包含证据锚点“${phrase}”`, output.includes(phrase), phrase, { hard: true });
     });
     if (evalCase.expected_output) {
         addRule(rules, 'expected_output', '包含参考答案要点', output.includes(String(evalCase.expected_output).trim()), evalCase.expected_output);

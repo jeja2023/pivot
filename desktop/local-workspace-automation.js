@@ -11,6 +11,15 @@ const {
     workspaceError
 } = require('../server/services/local-workspace-connector-tools');
 const { runCapabilityWorker } = require('../server/services/agent-capability-worker');
+const { createWorkspaceRecoverySnapshot, restoreWorkspaceRecoverySnapshot, snapshotRoot } = require('./workspace-recovery-snapshot');
+const {
+    findPythonWorkspaceDefinition,
+    findPythonWorkspaceReferences,
+    findPythonWorkspaceSymbols,
+    findWorkspaceDefinition,
+    findWorkspaceReferences,
+    findWorkspaceSymbols
+} = require('./workspace-semantic-index');
 
 const MAX_READ_BYTES = 512 * 1024;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -171,8 +180,12 @@ async function confirm(confirmAction, details) {
 
 async function workspaceSummary(root) {
     const branch = (await runGit(root, ['branch', '--show-current'])).trim();
-    const status = (await runGit(root, ['status', '--porcelain=v1', '--untracked-files=all'])).split(/\r?\n/).filter(Boolean).slice(0, 200);
-    return { rootHint: path.basename(root), branch, changedFiles: status, dirty: status.length > 0 };
+    let head = '';
+    try { head = (await runGit(root, ['rev-parse', '--verify', 'HEAD'])).trim(); } catch (_) {}
+    const fullStatus = (await runGit(root, ['status', '--porcelain=v1', '--untracked-files=all'])).split(/\r?\n/).filter(Boolean);
+    // revision 只传播由当前已授权桌面端计算的摘要；服务端不会保存路径、文件名或源代码。
+    const revision = crypto.createHash('sha256').update(JSON.stringify({ head, branch, status: fullStatus })).digest('hex');
+    return { rootHint: path.basename(root), branch, head, revision, changedFiles: fullStatus.slice(0, 200), dirty: fullStatus.length > 0 };
 }
 
 function managedWorktreeNames(grant = {}) {
@@ -253,6 +266,11 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
     const primaryRoot = resolveWorkspace(grant);
     const task = normalizeWorkspaceTask(toolName, input, normalizeWorkspaceGrant(grant));
     const root = task.worktreeName ? resolveManagedWorktree(primaryRoot, grant, task.worktreeName) : primaryRoot;
+    if (task.action === 'workspace.restore_snapshot') {
+        await confirm(confirmAction, { kind: 'workspace_restore_snapshot', title: '确认恢复工作区快照', message: '将在 Pivot 受控新目录创建恢复副本，不会覆盖原工作区。', workspace: path.basename(root) });
+        const recoveryRoot = path.join(snapshotRoot(env || process.env), 'restored', task.targetName);
+        return { action: task.action, ...restoreWorkspaceRecoverySnapshot({ archiveDigest: task.archiveDigest, restoreHandle: task.restoreHandle, targetRoot: recoveryRoot, env: env || process.env }), targetName: task.targetName };
+    }
     if (task.action === 'workspace.inspect') return { action: task.action, ...await workspaceSummary(root), worktreeName: task.worktreeName || null };
     if (task.action === 'workspace.read') {
         const file = resolvePath(root, task.path); ensureTextFile(file);
@@ -283,6 +301,41 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
         if (![0, 1].includes(result.code)) throw workspaceAutomationError(result.stderr || '代码搜索失败。', 'LOCAL_WORKSPACE_SEARCH_FAILED', 502);
         return { action: task.action, query: task.query, matches: result.stdout.split(/\r?\n/).filter(Boolean).slice(0, task.limit), truncated: result.stdout.split(/\r?\n/).filter(Boolean).length > task.limit };
     }
+    if (task.action === 'workspace.symbols') {
+        try {
+            if (task.language === 'python') return { action: task.action, ...await findPythonWorkspaceSymbols(root, task), worktreeName: task.worktreeName || null };
+            if (task.language === 'javascript' || task.language === 'typescript') {
+                return { action: task.action, ...findWorkspaceSymbols(root, task), worktreeName: task.worktreeName || null };
+            }
+            const [typescript, python] = await Promise.all([
+                Promise.resolve(findWorkspaceSymbols(root, task)),
+                findPythonWorkspaceSymbols(root, task)
+            ]);
+            const symbols = [...typescript.symbols, ...python.symbols].slice(0, task.limit);
+            return {
+                action: task.action,
+                symbols,
+                scannedFiles: typescript.scannedFiles,
+                truncated: typescript.truncated || python.truncated || symbols.length >= task.limit,
+                language: 'mixed',
+                index: typescript.index || null,
+                worktreeName: task.worktreeName || null
+            };
+        } catch (error) {
+            throw workspaceAutomationError(`代码语义索引失败：${error.message}`, 'LOCAL_WORKSPACE_SEMANTIC_INDEX_FAILED', 422);
+        }
+    }
+    if (task.action === 'workspace.definition' || task.action === 'workspace.references') {
+        try {
+            const isPython = task.language === 'python' || (task.language === 'auto' && /\.pyi?$/i.test(task.path));
+            const semantic = isPython
+                ? (task.action === 'workspace.definition' ? await findPythonWorkspaceDefinition(root, task) : await findPythonWorkspaceReferences(root, task))
+                : (task.action === 'workspace.definition' ? findWorkspaceDefinition(root, task) : findWorkspaceReferences(root, task));
+            return { action: task.action, ...semantic, worktreeName: task.worktreeName || null };
+        } catch (error) {
+            throw workspaceAutomationError(`代码语义查询失败：${error.message}`, 'LOCAL_WORKSPACE_SEMANTIC_QUERY_FAILED', 422);
+        }
+    }
     if (task.action === 'workspace.patch') {
         const prepared = task.changes.map(change => {
             const file = resolvePath(root, change.path, { forWrite: true });
@@ -303,15 +356,17 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
             fs.writeFileSync(file, change.content, { encoding: 'utf8', mode: 0o600 });
             changed.push({ path: change.path, digest: sha256(change.content), bytes: Buffer.byteLength(change.content, 'utf8') });
         }
-        return { action: task.action, changed, workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
+        const workspace = await workspaceSummary(root);
+        const recoverySnapshot = task.worktreeName ? createWorkspaceRecoverySnapshot({ root, worktreeName: task.worktreeName, branch: workspace.branch, head: workspace.head, revision: workspace.revision, env: env || process.env }) : null;
+        return { action: task.action, changed, workspace, worktreeName: task.worktreeName || null, ...(recoverySnapshot ? { recoverySnapshot } : {}) };
     }
     if (task.action === 'workspace.install') {
         await confirm(confirmAction, { kind: 'workspace_install', title: '确认安装隔离依赖', message: `将在认证隔离 Worker 中运行 ${task.command}。`, workspace: path.basename(root) });
-        return { action: task.action, result: await installWorkspaceDependencies(root, task, { workerDefinition: workerDefinition || workspaceWorkerDefinition(env || process.env), env }) };
+        return { action: task.action, result: await installWorkspaceDependencies(root, task, { workerDefinition: workerDefinition || workspaceWorkerDefinition(env || process.env), env }), workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     if (task.action === 'workspace.test') {
         await confirm(confirmAction, { kind: 'workspace_test', title: '确认运行隔离代码测试', message: `将在认证隔离 Worker 中运行 ${task.command}。`, workspace: path.basename(root) });
-        return { action: task.action, result: await runWorkspaceTest(root, task, { workerDefinition: workerDefinition || workspaceWorkerDefinition(env || process.env), env }) };
+        return { action: task.action, result: await runWorkspaceTest(root, task, { workerDefinition: workerDefinition || workspaceWorkerDefinition(env || process.env), env }), workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     if (task.action === 'workspace.git_status') return { action: task.action, ...await workspaceSummary(root), worktreeName: task.worktreeName || null };
     if (task.action === 'workspace.git_diff') return { action: task.action, diff: await runGit(root, task.base ? ['diff', '--no-ext-diff', `${task.base}...HEAD`] : ['diff', '--no-ext-diff']), workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
@@ -329,7 +384,7 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
             try { await runGit(primaryRoot, ['worktree', 'remove', '--force', target]); } catch (_) {}
             throw error;
         }
-        return { action: task.action, branch: task.branch, worktreeName: task.name, worktreeHint: path.relative(primaryRoot, target) };
+        return { action: task.action, branch: task.branch, worktreeName: task.name, worktreeHint: path.relative(primaryRoot, target), workspace: await workspaceSummary(target) };
     }
     if (task.action === 'workspace.git_worktree_remove') {
         const target = resolveManagedWorktree(primaryRoot, grant, task.name);
@@ -342,17 +397,17 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
         } catch (error) {
             throw workspaceAutomationError(`工作树已移除，但本机登记清理失败：${error.message}`, 'LOCAL_WORKSPACE_WORKTREE_REGISTRY_FAILED', 502);
         }
-        return { action: task.action, name: task.name, removed: true };
+        return { action: task.action, name: task.name, removed: true, workspace: await workspaceSummary(primaryRoot) };
     }
     if (task.action === 'workspace.git_merge') {
         await confirm(confirmAction, { kind: 'git_merge', title: '确认合并 Git 分支', message: `将分支 ${task.branch} 合并到当前工作区。发生冲突时不会自动覆盖。`, workspace: path.basename(root) });
         try {
             const output = await runGit(root, ['merge', '--no-commit', '--no-ff', task.branch]);
-            return { action: task.action, merged: true, output };
+            return { action: task.action, merged: true, output, workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
         } catch (error) {
             let conflicts = [];
             try { conflicts = (await runGit(root, ['diff', '--no-ext-diff', '--name-only', '--diff-filter=U'])).split(/\r?\n/).filter(Boolean).slice(0, 200); } catch (_) {}
-            if (conflicts.length) return { action: task.action, merged: false, conflicts, requiresResolution: true };
+            if (conflicts.length) return { action: task.action, merged: false, conflicts, requiresResolution: true, workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
             throw error;
         }
     }
@@ -360,18 +415,18 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
         await confirm(confirmAction, { kind: 'git_abort_merge', title: '确认中止 Git 合并', message: '将撤销当前尚未提交的合并状态。', workspace: path.basename(root) });
         try { await runGit(root, ['merge', '--abort']); }
         catch (error) { throw workspaceAutomationError('当前没有可中止的 Git 合并。', 'LOCAL_WORKSPACE_MERGE_NOT_ACTIVE', 409); }
-        return { action: task.action, aborted: true };
+        return { action: task.action, aborted: true, workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     if (task.action === 'workspace.git_commit') {
         await confirm(confirmAction, { kind: 'git_commit', title: '确认提交 Git 变更', message: `将提交 ${task.paths.length} 个已列出文件：${task.message}`, workspace: path.basename(root), files: task.paths });
         await runGit(root, ['add', '--', ...task.paths]);
         const commit = await runGit(root, ['commit', '--only', '--no-verify', '-m', task.message, '--', ...task.paths]);
-        return { action: task.action, paths: task.paths, commit };
+        return { action: task.action, paths: task.paths, commit, workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     if (task.action === 'workspace.git_push') {
         await confirm(confirmAction, { kind: 'git_push', title: '确认推送 Git 分支', message: `将向远程 ${task.remote} 推送当前分支。`, workspace: path.basename(root) });
         const remoteUrl = await safeRemoteUrl(root, task.remote);
-        return { action: task.action, remoteUrl, output: await runGit(root, ['push', '--no-verify', remoteUrl, 'HEAD']) };
+        return { action: task.action, remoteUrl, output: await runGit(root, ['push', '--no-verify', remoteUrl, 'HEAD']), workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     if (task.action === 'workspace.git_pr') {
         await confirm(confirmAction, { kind: 'git_pr', title: '确认创建 Pull Request', message: `将创建面向 ${task.base} 的 Pull Request：${task.title}`, workspace: path.basename(root) });
@@ -381,7 +436,7 @@ async function runLocalWorkspaceTask({ toolName, input, grant, confirmAction, wo
         if (!head) throw workspaceAutomationError('当前 Git 工作区没有可创建 Pull Request 的分支。', 'LOCAL_WORKSPACE_PR_BRANCH_REQUIRED', 409);
         const output = await runProcess('gh', ['pr', 'create', '--repo', repository, '--head', head, '--base', task.base, '--title', task.title, '--body', task.body], { cwd: root, timeoutMs: 120000, env: safeGitEnvironment() });
         if (output.code !== 0) throw workspaceAutomationError(output.stderr || '创建 Pull Request 失败。', 'LOCAL_WORKSPACE_PR_FAILED', 502);
-        return { action: task.action, remoteUrl, url: output.stdout.trim() };
+        return { action: task.action, remoteUrl, url: output.stdout.trim(), workspace: await workspaceSummary(root), worktreeName: task.worktreeName || null };
     }
     throw workspaceError('未实现的本机代码工作区操作。', 'LOCAL_WORKSPACE_TOOL_INVALID');
 }

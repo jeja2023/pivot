@@ -81,41 +81,11 @@ const {
     recordAgentVoiceEvent,
     startAgentVoiceSession
 } = require('../../services/agent-voice-sessions');
+const { controlVoiceSessionAgentRun } = require('./voice-task-control');
+const { registerChatRequestLocalBridge } = require('./local-bridge');
 
 const MAX_STREAM_FALLBACK_CAPTURE_CHARS = 2_000_000;
 const SLOW_CHAT_TRACE_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_CHAT_MS || '45000', 10) || 45000, 1000);
-function normalizeChatLocalBridgeDebug(payload) {
-    if (!payload || typeof payload !== 'object') return null;
-    const grants = payload.grants && typeof payload.grants === 'object' ? payload.grants : {};
-    return {
-        page: String(payload.page || '').slice(0, 40),
-        status: String(payload.status || '').slice(0, 80),
-        reason: String(payload.reason || '').slice(0, 300),
-        hasDesktopBridge: payload.hasDesktopBridge === true,
-        hasStatusBridge: payload.hasStatusBridge === true,
-        hasExecuteBridge: payload.hasExecuteBridge === true,
-        statusAvailable: payload.statusAvailable === true,
-        mode: String(payload.mode || '').slice(0, 40),
-        deviceName: String(payload.deviceName || '').slice(0, 120),
-        toolCount: Number.isFinite(Number(payload.toolCount)) ? Number(payload.toolCount) : null,
-        originCount: Number.isFinite(Number(payload.originCount)) ? Number(payload.originCount) : null,
-        grants: {
-            local_database: grants.local_database === true,
-            local_report_dir: grants.local_report_dir === true,
-            local_browser: grants.local_browser === true,
-            local_browser_origin_count: Number.isFinite(Number(grants.local_browser_origin_count)) ? Number(grants.local_browser_origin_count) : 0
-        }
-    };
-}
-
-function registerChatRequestLocalBridge(req) {
-    req.localMcpBridgeDebug = normalizeChatLocalBridgeDebug(req.body?.localMcpBridgeDebug);
-    // 本机执行器 v2 由桌面主进程凭设备私钥直接登记；聊天请求中自报的 deviceId/grants
-    // 不再参与设备注册或任务路由，防止网页输入伪造本机授权。
-    return null;
-}
-
-
 const {
     appendStreamedChartsToAssistantContent,
     buildAssistantSpeedStats,
@@ -185,6 +155,12 @@ function createChatRouter({
     router.post('/chat/voice-sessions/:id/events', authMiddleware, asyncHandler(async (req, res) => {
         const voiceSession = await recordAgentVoiceEvent(req.user, req.params.id, req.body || {});
         res.json({ success: true, voiceSession });
+    }));
+
+    router.post('/chat/voice-sessions/:id/task-control', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await controlVoiceSessionAgentRun(req.user, req.params.id, req.body?.action);
+        logAction(req, '语音控制智能体任务', `语音会话: ${req.params.id}，动作: ${result.action}，来源任务: ${result.sourceRunId}`);
+        res.status(result.action === 'resume' ? 202 : 200).json({ success: true, ...result });
     }));
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
@@ -988,6 +964,7 @@ module.exports = {
     buildRagContextMessage,
     createChartSseCapture,
     createChatRouter,
+    controlVoiceSessionAgentRun,
     detectStrongDataQueryIntent,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner,

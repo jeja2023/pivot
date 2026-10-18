@@ -112,9 +112,19 @@
                 const list = document.createElement('div'); list.className = 'agent-collaborator-list';
                 rows.forEach(item => {
                     const row = document.createElement('button'); row.type = 'button'; row.className = `agent-collaborator-row is-${String(item.status || 'unknown')}`;
+                    const collaboration = item.metadata?.collaboration && typeof item.metadata.collaboration === 'object' ? item.metadata.collaboration : {};
+                    const roleLabels = { researcher: '研究员', analyst: '分析师', reviewer: '审查员', writer: '撰稿人', custom: '自定义角色' };
+                    const role = roleLabels[String(collaboration.role || 'custom')] || '自定义角色';
+                    const policy = collaboration.rolePolicy && typeof collaboration.rolePolicy === 'object' ? collaboration.rolePolicy : null;
+                    const main = document.createElement('div'); main.className = 'agent-collaborator-main';
                     const label = document.createElement('strong'); label.textContent = item.title || '子任务';
+                    const meta = document.createElement('small'); meta.className = 'agent-collaborator-meta';
+                    meta.textContent = policy
+                        ? `${role} · 内置工具 · 严格审批 · 最多 ${Number(policy.maxSteps || 0)} 步 / ${Number(policy.maxTokenBudget || 0).toLocaleString()} Token`
+                        : `${role} · 继承父级策略`;
+                    main.append(label, meta);
                     const status = document.createElement('span'); status.textContent = window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(item.status) || item.status || '等待中';
-                    row.append(label, status); row.addEventListener('click', () => window.Pivot?.legacy?.openAgentRun?.(item.id)); list.appendChild(row);
+                    row.append(main, status); row.addEventListener('click', () => window.Pivot?.legacy?.openAgentRun?.(item.id)); list.appendChild(row);
                 });
                 group.appendChild(list); container.appendChild(group);
             }).catch(() => {});

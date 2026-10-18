@@ -245,11 +245,22 @@ async function loadAgentMetrics() {
         PivotSafeHtml.setHtml(target, '');
         return;
     }
+    const compression = data.contextCompaction || {};
+    const compressionText = Number(compression.eventCount || 0) > 0
+        ? `节省 ${Math.round(Number(compression.savingsRate || 0) * 100)}% · 硬丢失 ${Number(compression.hardFieldLosses || 0)}`
+        : '暂无样本';
+    const slo = data.runtimeSlo || {};
+    const sloLabel = slo.status === 'passing' ? '通过' : slo.status === 'attention' ? '关注' : '证据不足';
+    const sloDetail = Number(slo.total || 0)
+        ? `${Number(slo.total)} 样本 · p95 ${Math.round(Number(slo.p95DurationMs || 0) / 1000)} 秒`
+        : '暂无样本';
     PivotSafeHtml.setHtml(target, `
         <span>7日任务 ${Number(data.total || 0)}</span>
         <span>成功率 ${Number(data.successRate || 0)}%</span>
         <span>失败 ${Number(data.error || 0)}</span>
+        <span title="${agentEscapeAttr((slo.blockers || []).join('、') || '满足当前运行 SLO 阈值')}">运行 SLO ${agentEscape(sloLabel)} · ${agentEscape(sloDetail)}</span>
         <span>模型用量 ${agentEscape(formatAgentCompactCount(data.totalTokens || 0))}</span>
+        <span>上下文压缩 ${agentEscape(compressionText)}</span>
     `);
 }
 

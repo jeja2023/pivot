@@ -27,10 +27,13 @@ const {
     hasUnsafeMemoryInstruction,
     fingerprintMemory,
     createMemoryValidationError,
-    normalizeOptionalTimestamp
+    normalizeOptionalTimestamp,
+    normalizeMemoryIds
 } = require('./memory-utils');
 
 const { serializeMemory } = require('./memory-serialization');
+const { createMemoryExporter } = require('./memory-export');
+const { createMemorySnapshotExporter } = require('./memory-export-snapshot');
 const {
     extractMemoryCandidatesWithModel,
     extractMemoryCandidatesFromMessages,
@@ -53,6 +56,13 @@ const {
     getMemoryQualitySummary,
     invalidateMemoryQualityCache
 } = require('./memory-quality');
+const {
+    getMemoryOutcomeMetrics,
+    getMemoryOutcomeReadiness,
+    listMemoryOutcomePeriods,
+    snapshotMemoryOutcomePeriod,
+    createMemoryOutcomeMetricsRunner
+} = require('./memory-outcome-metrics');
 
 const {
     isLongTermMemoryEnabled,
@@ -78,10 +88,25 @@ const {
 const {
     getMemorySource,
     revokeMemoriesForSourceMessages,
-    revokeMemoriesForSourceSession
+    revokeMemoriesForSourceSession,
+    revokeMemoriesForSourceReference
 } = require('./memory-sources');
 
 const { retrieveLongTermMemories } = require('./memory-retrieval-query');
+const {
+    attachKnowledgeDocumentSource,
+    attachMemorySourceEvidence,
+    attachWorkflowSource,
+    attachWorkspaceSource,
+    approveKnowledgeDocumentSourceReview,
+    approveWorkflowSourceReview,
+    approveWorkspaceSourceReview,
+    approveMemorySourceReview,
+    markMemoriesForChangedSource,
+    markMemoriesForSourceReview,
+    refreshMessageSourceFingerprints,
+    sourceFingerprint
+} = require('./memory-source-fingerprints');
 
 const {
     setRunMemoryExtractionHandler,
@@ -146,13 +171,17 @@ async function listMemories(userId, options = {}) {
         params.push(`%${search}%`, `%${search}%`);
     }
     const rows = await query(`
-        SELECT *
-        FROM memories
+        SELECT m.*, EXISTS (
+            SELECT 1 FROM memory_source_evidence e
+            WHERE e.memory_id = m.id AND e.user_id = m.user_id
+        ) AS has_source_evidence
+        FROM memories m
         WHERE ${where.join(' AND ')}
         ORDER BY
             CASE status WHEN 'active' THEN 0 ELSE 1 END,
             salience DESC,
-            COALESCE(last_used_at, updated_at, created_at) DESC
+            COALESCE(last_used_at, updated_at, created_at) DESC,
+            m.id DESC
         LIMIT ? OFFSET ?
     `, [...params, limit, offset]);
     const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM memories WHERE ${where.join(' AND ')}`, params);
@@ -228,6 +257,21 @@ async function updateMemoryStatus(userId, memoryId, status) {
     if (status === MEMORY_STATUS.deleted) return softDeleteMemory(userId, memoryId);
     invalidateMemoryQualityCache(userId);
     const normalized = Object.values(MEMORY_STATUS).includes(status) ? status : MEMORY_STATUS.active;
+    if (normalized === MEMORY_STATUS.active) {
+        const existing = await queryOne('SELECT status, revocation_reason FROM memories WHERE id = ? AND user_id = ?', [memoryId, userId]);
+        if (existing?.status === MEMORY_STATUS.reviewRequired) {
+            const error = new Error('该记忆的来源已变化，必须完成来源复核后才能恢复活跃。');
+            error.code = 'MEMORY_SOURCE_REVIEW_REQUIRED';
+            error.statusCode = 409;
+            throw error;
+        }
+        if (String(existing?.revocation_reason || '').startsWith('source_missing:')) {
+            const error = new Error('该记忆的全部来源已失效；请以新的可追溯来源重新创建，而不能直接恢复。');
+            error.code = 'MEMORY_SOURCE_EVIDENCE_MISSING';
+            error.statusCode = 409;
+            throw error;
+        }
+    }
     const now = getBeijingTimestamp();
     const changes = await execute(`
         UPDATE memories
@@ -235,14 +279,6 @@ async function updateMemoryStatus(userId, memoryId, status) {
         WHERE id = ? AND user_id = ?
     `, [normalized, now, memoryId, userId]);
     return changes > 0;
-}
-
-function normalizeMemoryIds(ids = []) {
-    const values = Array.isArray(ids) ? ids : [ids];
-    return [...new Set(values
-        .map(id => Number.parseInt(id, 10))
-        .filter(id => Number.isSafeInteger(id) && id > 0))]
-        .slice(0, 500);
 }
 
 async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STATUS.active) {
@@ -254,48 +290,37 @@ async function updateMemoryStatuses(userId, memoryIds = [], status = MEMORY_STAT
         const results = await Promise.all(ids.map(id => softDeleteMemory(userId, id)));
         return { updated: results.filter(Boolean).length, ids };
     }
+    const blockedSourceIds = normalized === MEMORY_STATUS.active
+        ? (await query(`
+            SELECT id, status, revocation_reason FROM memories
+            WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})
+              AND (status = ? OR revocation_reason LIKE 'source_missing:%')
+        `, [userId, ...ids, MEMORY_STATUS.reviewRequired])).map(row => ({
+            id: Number(row.id), reason: row.status === MEMORY_STATUS.reviewRequired ? 'review_required' : 'source_missing'
+        }))
+        : [];
     const now = getBeijingTimestamp();
+    const skipBlockedSources = normalized === MEMORY_STATUS.active
+        ? " AND status <> ? AND revocation_reason NOT LIKE 'source_missing:%'"
+        : '';
     const changes = await execute(`
         UPDATE memories
         SET status = ?, updated_at = ?
-        WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})
-    `, [normalized, now, userId, ...ids]);
-    return { updated: changes, ids };
-}
-
-async function exportMemories(userId, options = {}) {
-    const pageSize = Math.max(1, Math.min(Number.parseInt(options.pageSize || options.limit, 10) || 500, 500));
-    const maxRecords = Math.max(pageSize, Math.min(Number.parseInt(options.maxRecords, 10) || 10000, 100000));
-    const memories = [];
-    let offset = Math.max(0, Number.parseInt(options.offset, 10) || 0);
-    let total = 0;
-    let enabled = true;
-    while (memories.length < maxRecords) {
-        const listed = await listMemories(userId, {
-            status: options.status || 'all',
-            type: options.type || '',
-            search: options.search || '',
-            limit: Math.min(pageSize, maxRecords - memories.length),
-            offset
-        });
-        total = listed.total;
-        enabled = listed.enabled;
-        memories.push(...listed.memories);
-        offset += listed.memories.length;
-        if (listed.memories.length < pageSize || offset >= total) break;
-    }
-    const summary = await getMemorySummary(userId);
+        WHERE user_id = ? AND id IN (${ids.map(() => '?').join(',')})${skipBlockedSources}
+    `, normalized === MEMORY_STATUS.active
+        ? [normalized, now, userId, ...ids, MEMORY_STATUS.reviewRequired]
+        : [normalized, now, userId, ...ids]);
     return {
-        exportedAt: getBeijingTimestamp(),
-        version: 2,
-        summary,
-        enabled,
-        total,
-        complete: memories.length >= total,
-        nextOffset: memories.length >= total ? null : offset,
-        memories
+        updated: changes,
+        ids,
+        reviewRequiredIds: blockedSourceIds.filter(item => item.reason === 'review_required').map(item => item.id),
+        sourceEvidenceMissingIds: blockedSourceIds.filter(item => item.reason === 'source_missing').map(item => item.id)
     };
 }
+
+const legacyExportMemories = createMemoryExporter({ listMemories, getMemorySummary, getTimestamp: getBeijingTimestamp });
+const exportMemorySnapshot = createMemorySnapshotExporter({ transaction, serializeMemory, normalizeMemoryType, normalizeMemoryContent, memoryStatus: MEMORY_STATUS, isLongTermMemoryEnabled, getTimestamp: getBeijingTimestamp });
+const exportMemories = async (userId, options = {}) => options.snapshot === true ? await exportMemorySnapshot(userId, options) : await legacyExportMemories(userId, options);
 
 async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     invalidateMemoryQualityCache(userId);
@@ -334,6 +359,18 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
     if (status === MEMORY_STATUS.deleted) {
         throw createMemoryValidationError('Use delete endpoint to remove a memory');
     }
+    if (existing.status === MEMORY_STATUS.reviewRequired && status === MEMORY_STATUS.active) {
+        const error = new Error('该记忆的来源已变化，必须完成来源复核后才能恢复活跃。');
+        error.code = 'MEMORY_SOURCE_REVIEW_REQUIRED';
+        error.statusCode = 409;
+        throw error;
+    }
+    if (status === MEMORY_STATUS.active && String(existing.revocation_reason || '').startsWith('source_missing:')) {
+        const error = new Error('该记忆的全部来源已失效；请以新的可追溯来源重新创建，而不能直接恢复。');
+        error.code = 'MEMORY_SOURCE_EVIDENCE_MISSING';
+        error.statusCode = 409;
+        throw error;
+    }
     const expiresAt = Object.prototype.hasOwnProperty.call(updates, 'expiresAt') || Object.prototype.hasOwnProperty.call(updates, 'expires_at')
         ? normalizeOptionalTimestamp(updates.expiresAt ?? updates.expires_at)
         : existing.expires_at;
@@ -368,9 +405,11 @@ async function updateMemory(userId, memoryId, updates = {}, options = {}) {
             ]);
             await trx.execute(`
                 INSERT INTO memory_source_evidence (
-                    memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
+                    memory_id, user_id, session_id, message_id, source_kind, source_ref, source_fingerprint, asserted_by, evidence_excerpt,
+                    review_required_at, reviewed_at, reviewed_by_user_id, created_at
                 )
-                SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, ?
+                SELECT ?, user_id, session_id, message_id, source_kind, source_ref, source_fingerprint, asserted_by, evidence_excerpt,
+                       review_required_at, reviewed_at, reviewed_by_user_id, ?
                 FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
                 ON CONFLICT(memory_id, message_id) DO NOTHING
             `, [inserted.id, now, existing.id, Number(userId)]);
@@ -490,9 +529,11 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
         ]);
         await trx.execute(`
                 INSERT INTO memory_source_evidence (
-                memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
+                memory_id, user_id, session_id, message_id, source_kind, source_ref, source_fingerprint, asserted_by, evidence_excerpt,
+                review_required_at, reviewed_at, reviewed_by_user_id, created_at
             )
-            SELECT ?, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, ?
+            SELECT ?, user_id, session_id, message_id, source_kind, source_ref, source_fingerprint, asserted_by, evidence_excerpt,
+                   review_required_at, reviewed_at, reviewed_by_user_id, ?
             FROM memory_source_evidence WHERE memory_id = ? AND user_id = ?
             ON CONFLICT(memory_id, message_id) DO NOTHING
         `, [target.id, now, source.id, Number(userId)]);
@@ -574,15 +615,24 @@ async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin
         .map(item => [Number(item?.messageId ?? item?.message_id), normalizeMemoryContent(item?.excerpt || item?.evidenceExcerpt || '').slice(0, 400)])
         .filter(([messageId, excerpt]) => Number.isSafeInteger(messageId) && messageId > 0 && excerpt));
     if (sourceMessageIds.length === 0) return;
+    const sourceRows = await trx.query(`
+        SELECT id, content FROM messages
+        WHERE user_id = ? AND id IN (${sourceMessageIds.map(() => '?').join(',')}) AND deleted_at IS NULL
+    `, [Number(userId), ...sourceMessageIds]);
+    const contentById = new Map(sourceRows.map(row => [Number(row.id), String(row.content || '')]));
     for (const messageId of sourceMessageIds) {
+        const ref = `message:${messageId}`;
         await trx.execute(`
             INSERT INTO memory_source_evidence (
-                memory_id, user_id, session_id, message_id, source_kind, asserted_by, evidence_excerpt, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                memory_id, user_id, session_id, message_id, source_kind, source_ref, source_fingerprint, asserted_by, evidence_excerpt, review_required_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
             ON CONFLICT(memory_id, message_id) DO UPDATE SET
                 session_id = COALESCE(excluded.session_id, memory_source_evidence.session_id),
                 source_kind = excluded.source_kind,
+                source_ref = excluded.source_ref,
+                source_fingerprint = excluded.source_fingerprint,
                 asserted_by = excluded.asserted_by,
+                review_required_at = NULL,
                 evidence_excerpt = CASE
                     WHEN excluded.evidence_excerpt <> '' THEN excluded.evidence_excerpt
                     ELSE memory_source_evidence.evidence_excerpt
@@ -593,6 +643,8 @@ async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin
             sessionId,
             messageId,
             normalizeMemoryOrigin(origin),
+            ref,
+            sourceFingerprint({ sourceKind: 'message', sourceRef: ref, content: contentById.get(messageId) || '' }),
             normalizeMemoryAssertedBy(assertedBy),
             excerpts.get(messageId) || '',
             getBeijingTimestamp()
@@ -884,6 +936,14 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
 setRunMemoryExtractionHandler(runMemoryExtraction);
 
 module.exports = {
+    attachKnowledgeDocumentSource,
+    attachMemorySourceEvidence,
+    approveKnowledgeDocumentSourceReview,
+    approveWorkflowSourceReview,
+    approveWorkspaceSourceReview,
+    attachWorkflowSource,
+    attachWorkspaceSource,
+    approveMemorySourceReview,
     MEMORY_SETTING_KEY,
     MEMORY_JOB_STATUS,
     MEMORY_STATUS,
@@ -901,23 +961,33 @@ module.exports = {
     getMemoryById,
     getMemoryMergeSuggestions,
     getMemoryQualitySummary,
+    getMemoryOutcomeMetrics,
+    getMemoryOutcomeReadiness,
     getMemorySummary,
     getMemorySource,
     getMemoryUsage,
     injectLongTermMemoryBeforeLatestUser,
     isLongTermMemoryEnabled,
     listMemoryExtractionJobs,
+    listMemoryOutcomePeriods,
     listMemories,
     mergeMemories,
+    markMemoriesForChangedSource,
+    markMemoriesForSourceReview,
     processMemoryExtractionJobs,
     recordMemoryUsage,
+    refreshMessageSourceFingerprints,
     retrieveLongTermMemories,
     retryFailedMemoryExtractionJobs,
     revokeMemoriesForSourceMessages,
+    revokeMemoriesForSourceReference,
     revokeMemoriesForSourceSession,
     runMemoryExtraction,
     scheduleMemoryExtraction,
     setLongTermMemoryEnabled,
+    snapshotMemoryOutcomePeriod,
+    createMemoryOutcomeMetricsRunner,
+    sourceFingerprint,
     startLongTermMemoryMaintenanceRunner,
     softDeleteMemory,
     updateMemory,

@@ -21,8 +21,9 @@ const CHAT_AGENT_HISTORY_ITEM_CHARS = 8000;
 const CHAT_AGENT_CONTEXT_CHARS = 24000;
 const CHAT_AGENT_ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
-    'running', 'approval_required', 'waiting_approval', 'awaiting_approval', 'resuming'
+    'running', 'approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit', 'resuming'
 ]);
+const CHAT_AGENT_CONTROLLABLE_STATUSES = new Set([...CHAT_AGENT_ACTIVE_STATUSES, 'needs_input']);
 const CHAT_AGENT_TERMINAL_STATUSES = new Set([
     'completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted'
 ]);
@@ -301,7 +302,7 @@ async function listChatAgentRunsForSession(sessionId, userId, { limit = 20 } = {
             ? bridgeInfo.bridge.messageId
             : null;
         if (linkedMessage) continue;
-        if (CHAT_AGENT_ACTIVE_STATUSES.has(String(row.status || '').toLowerCase())) {
+        if (CHAT_AGENT_CONTROLLABLE_STATUSES.has(String(row.status || '').toLowerCase())) {
             result.push(row);
             continue;
         }

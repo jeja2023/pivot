@@ -230,6 +230,9 @@ async function openAgentWorkbench(options = {}) {
             panel.querySelector(`[data-agent-cp-subview="${subview}"]`)?.click();
         }
         await (harnessApi?.loadAgentControlPlane?.() || window.Pivot.legacy?.loadAgentControlPlane?.());
+        if (subview === 'governance') {
+            await (harnessApi?.loadAgentHarnessManagement?.() || window.Pivot.legacy?.loadAgentHarnessManagement?.());
+        }
         if (options.create && subview === 'goals') {
             setTimeout(() => {
                 harnessApi?.openGoalModal?.() || window.Pivot.legacy?.openGoalModal?.() || document.getElementById('agent-goal-create-top-btn')?.click();

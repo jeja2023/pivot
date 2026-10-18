@@ -118,9 +118,16 @@ async function createPersistedAgentStepContext(options = {}) {
     });
     const now = getBeijingTimestamp();
 
+    let workingMemoryInput = null;
     const stepContext = await transaction(async trx => {
-        const ownedRun = await trx.queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? FOR UPDATE', [runId, userId]);
+        const ownedRun = await trx.queryOne('SELECT id, goal, metadata FROM agent_runs WHERE id = ? AND user_id = ? FOR UPDATE', [runId, userId]);
         if (!ownedRun) return draft;
+        const metadata = parseJson(ownedRun.metadata, {});
+        workingMemoryInput = {
+            run: { id: runId, user_id: userId, goal: ownedRun.goal || '' },
+            state: metadata.workingState || metadata.working_state || {},
+            taskContract: metadata.taskContract || metadata.task_contract || {}
+        };
 
         const previousSnapshot = await getLatestWorldStateSnapshot(runId, userId, trx);
         const previousState = previousSnapshot?.state || null;
@@ -257,6 +264,57 @@ async function createPersistedAgentStepContext(options = {}) {
             });
         } catch (_) {
             // Context capture remains durable even if the explanatory event is unavailable.
+        }
+        try {
+            const { persistWorkingMemoryRevision } = require('./agent-working-memory-revisions');
+            const revision = await persistWorkingMemoryRevision({
+                ...workingMemoryInput,
+                user: { id: userId },
+                reason: 'context_compacted'
+            });
+            await recordAgentEvent({
+                runId,
+                userId,
+                turnId: stepContext.turnId,
+                stepIndex: stepContext.stepIndex,
+                type: 'working_memory.compacted',
+                payload: {
+                    revision: Number(revision?.revision || 0),
+                    stateHash: revision?.stateHash || '',
+                    retention: revision?.retention || {}
+                },
+                eventKey: `${stepContext.contextHash}:working_memory_compacted`
+            });
+        } catch (_) {
+            // 压缩的世界状态已持久化；工作记忆审计故障不应损害正在运行的任务。
+        }
+    }
+    const lifecycleEventType = stepContext?.worldStateWindow?.fullRefreshReason === 'context_compacted'
+        ? 'context.compacted'
+        : stepContext?.worldStateWindow?.fullRefreshReason === 'workspace_changed'
+            ? 'workspace.changed'
+            : '';
+    if (lifecycleEventType) {
+        try {
+            const { dispatchPostLifecycleHook } = require('./agent-lifecycle-dispatcher');
+            await dispatchPostLifecycleHook({
+                eventType: lifecycleEventType,
+                user: { id: userId },
+                run: { id: runId, user_id: userId },
+                payload: {
+                    contextHash: stepContext.contextHash,
+                    worldStateHash: stepContext.worldStateHash,
+                    contextWindow: stepContext.worldStateWindow,
+                    reason: stepContext.worldStateWindow.fullRefreshReason
+                },
+                context: {
+                    lifecycleHooksEnabled: options.lifecycleHooksEnabled === true,
+                    env: options.env || process.env
+                },
+                eventKey: `lifecycle:${lifecycleEventType}:${stepContext.contextHash}`
+            });
+        } catch (_) {
+            // 上下文快照已持久化。扩展审计故障不能影响恢复边界。
         }
     }
     const snapshotVersion = Number(stepContext?.worldStateWindow?.snapshotVersion || 0);

@@ -63,6 +63,20 @@ function validateConfig() {
     if (process.env.JWT_SECRET && process.env.DATA_ENCRYPTION_KEY && process.env.JWT_SECRET === process.env.DATA_ENCRYPTION_KEY) {
         configurationErrors.push('JWT_SECRET 与 DATA_ENCRYPTION_KEY 必须使用不同的随机密钥');
     }
+    if (process.env.NODE_ENV === 'production') {
+        try { validateSecret('PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET', process.env.PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET); } catch (error) { configurationErrors.push(error.message); }
+        const sourceFingerprintSecret = String(process.env.PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET || '').trim();
+        if (sourceFingerprintSecret && [process.env.JWT_SECRET, process.env.DATA_ENCRYPTION_KEY].includes(sourceFingerprintSecret)) {
+            configurationErrors.push('PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET 必须与 JWT_SECRET、DATA_ENCRYPTION_KEY 使用不同的随机密钥');
+        }
+        if (String(process.env.PIVOT_AGENT_LIFECYCLE_HOOKS_ENABLED || '').toLowerCase() === 'true') {
+            try { validateSecret('PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET', process.env.PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET); } catch (error) { configurationErrors.push(error.message); }
+            const hookAuditSecret = String(process.env.PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET || '').trim();
+            if (hookAuditSecret && [process.env.JWT_SECRET, process.env.DATA_ENCRYPTION_KEY, sourceFingerprintSecret].includes(hookAuditSecret)) {
+                configurationErrors.push('PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET 必须与 JWT_SECRET、DATA_ENCRYPTION_KEY、PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET 使用不同的随机密钥');
+            }
+        }
+    }
     const databaseError = validateDatabaseUrl(process.env.DATABASE_URL);
     if (databaseError) configurationErrors.push(databaseError);
     if (configurationErrors.length) throw new Error(`启动配置无效：\n- ${configurationErrors.join('\n- ')}`);

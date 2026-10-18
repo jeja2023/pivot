@@ -80,6 +80,7 @@ function readAgentSourceBundle() {
         'agent-run-visuals.js',
         'agent-run-loaders.js',
         'agent-run-dag-focus.js',
+        'agent-run-trace-view.js',
         'agent-run-detail.js',
         'agent-run-realtime.js',
         'agent-run-actions.js',
@@ -1008,7 +1009,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.doesNotMatch(dagRunConfig, /inferDagLlmRuntimeSettings|primaryLlmNodeId/);
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);
-    assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget \}, getAgentRuntimeDeps\(runController\.signal\)\)/);
+    assert.match(runtime, /runAgentDag\(\{ run, user, modelCfg, toolList, deadline, assertRunWithinBudget, taskTransactionId \}, getAgentRuntimeDeps\(runController\.signal\)\)/);
     assert.match(dagRuntime, /const executeDagTool = deps\.executeToolByName \|\| executeToolByName/);
     assert.match(dagRuntime, /executeDagTool\(node\.tool, resolvedInput, user, toolList, \{ run, modelCfg, node, \.\.\.executionContext, signal \}\)/);
     assert.match(model, /const temperature = typeof options\.temperature === 'number'/);
@@ -1213,7 +1214,7 @@ test('built-in agent tools expose user-safe tool definitions and execute model l
     assert.equal(shouldPauseForApproval(
         { approval_policy: 'approve_all_mcp', metadata: '{"approvedTools":["mcp.db"]}' },
         { name: 'mcp.db', source: 'mcp', risk: 'low', requiresApproval: false }
-    ), false);
+    ), true, '历史宽工具审批不能绕过输入摘要、有效期与资源绑定');
     await assert.rejects(
         () => executeBuiltInTool('system.health', {}, { id: 1, username: 'admin', role: 'user', unit: '' }),
         /admin/
@@ -1647,6 +1648,19 @@ test('agent model visibility excludes other users private models', async () => {
 
 test('enterprise agent templates schedules artifacts and resume are user scoped', async () => {
     const parseMaybeJson = value => (value && typeof value === 'object' ? value : JSON.parse(value || '{}'));
+    const cancelEventually = async runId => {
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+            try {
+                return await cancelAgentRun(runId, user);
+            } catch (error) {
+                if (error?.code !== 'AGENT_RUN_STATUS_CONFLICT' || attempt === 3) throw error;
+                const current = await getRunForUser(runId, user);
+                if (!current || !['queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required'].includes(current.status)) return current;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+        }
+        return null;
+    };
     const suffix = Date.now();
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
@@ -1693,7 +1707,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     assert.equal(run.template_id, template.id);
     assert.equal(run.max_steps, 60);
     assert.equal(parseMaybeJson(run.context_config).mode, 'knowledge');
-    await cancelAgentRun(run.id, user);
+    await cancelEventually(run.id);
     const scheduledRuns = (await listRuns(user, { limit: 30, runType: 'scheduled' })).data;
     const freeRuns = (await listRuns(user, { limit: 30, runType: 'free' })).data;
     assert.equal(scheduledRuns.some(item => item.id === run.id), true);
@@ -1706,7 +1720,7 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
     const resumed = await resumeAgentRun(run.id, user);
     assert.equal(resumed.parent_run_id, run.id);
     assert.equal(resumed.resume_from_step >= 1, true);
-    await cancelAgentRun(resumed.id, user);
+    await cancelEventually(resumed.id);
 
     const dagRun = await createAgentRun({
         user,
@@ -1731,11 +1745,11 @@ test('enterprise agent templates schedules artifacts and resume are user scoped'
             ]
         }
     });
-    await cancelAgentRun(dagRun.id, user);
+    await cancelEventually(dagRun.id);
     const dagResumed = await resumeAgentRun(dagRun.id, user);
     const dagMetadata = parseMaybeJson(dagResumed.metadata);
     assert.equal(dagMetadata.dagSpec.nodes[0].tool, 'models.list');
-    await cancelAgentRun(dagResumed.id, user);
+    await cancelEventually(dagResumed.id);
 });
 
 test('DAG final answer uses the terminal node output without an implicit summary call', async () => {

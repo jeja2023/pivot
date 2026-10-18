@@ -10,33 +10,10 @@ const WORKSPACE_STYLE_GROUPS = Object.freeze({
 });
 
 const workspaceStylePromises = {};
-const workspaceStylePreloadPromises = {};
 const WORKSPACE_STYLE_WAIT_TIMEOUT_MS = 2500;
 
 function workspaceStyleSelectorValue(href) {
     return String(href || '').trim().replace(/"/g, '\\"');
-}
-
-function preloadWorkspaceStyleOnce(href) {
-    const rawHref = String(href || '').trim();
-    if (!rawHref) return Promise.resolve();
-    const versionedHref = window.Pivot.versionedAssetUrl?.(rawHref) || rawHref;
-    const selectorValue = workspaceStyleSelectorValue(rawHref);
-    const loadedStyle = document.querySelector(`link[data-pivot-workspace-style="${selectorValue}"][data-loaded="true"]`);
-    if (loadedStyle) return Promise.resolve();
-    if (workspaceStylePreloadPromises[rawHref]) return workspaceStylePreloadPromises[rawHref];
-    const existing = document.querySelector(`link[data-pivot-workspace-style-preload="${selectorValue}"]`);
-    const preload = existing || document.createElement('link');
-    preload.rel = 'preload';
-    preload.as = 'style';
-    preload.dataset.pivotWorkspaceStylePreload = rawHref;
-    preload.href = versionedHref;
-    workspaceStylePreloadPromises[rawHref] = new Promise(resolve => {
-        preload.onload = () => resolve();
-        preload.onerror = () => resolve();
-    });
-    if (!existing) document.head.appendChild(preload);
-    return workspaceStylePreloadPromises[rawHref];
 }
 
 function loadWorkspaceStyleOnce(href) {
@@ -81,10 +58,11 @@ function loadWorkspaceStyleOnce(href) {
     return link._pivotLoadPromise;
 }
 
-function preloadWorkspaceStyles(name) {
-    const styles = WORKSPACE_STYLE_GROUPS[name] || [];
-    if (!styles.length) return Promise.resolve();
-    return Promise.all(styles.map(preloadWorkspaceStyleOnce));
+function preloadWorkspaceStyles(_name) {
+    // CSS preloads may stay unused when the user never opens that workspace,
+    // producing browser warnings and needless bandwidth. Actual entry uses the
+    // style gate below, which loads a real stylesheet immediately before use.
+    return Promise.resolve();
 }
 
 function isWorkspaceStyleLoaded(name) {
@@ -228,7 +206,6 @@ function showWorkspaceWithStyleGate(name, options = {}) {
 
 function prewarmAutomationWorkspaces() {
     const templateLoader = window.Pivot.moduleApi?.('workspaces.templateLoader');
-    preloadWorkspaceStyles('agent').catch(() => {});
     AUTOMATION_WORKSPACES.forEach(name => templateLoader?.preloadWorkspaceMarkup?.(name)?.catch?.(() => {}));
 }
 
@@ -245,16 +222,6 @@ function isAutomationWorkspaceTrigger(target) {
 }
 
 if (typeof document !== 'undefined') {
-    // 自动化入口会在个人工作台、导航和快捷操作之间频繁切换。仅在应用展示（已登录）
-    // 后预取其样式，避免登录页面停留期间触发浏览器 link preload 未使用告警。
-    const triggerAgentPreload = () => {
-        preloadWorkspaceStyles('agent').catch(() => {});
-    };
-    if (typeof currentUser !== 'undefined' && currentUser) {
-        triggerAgentPreload();
-    } else {
-        document.addEventListener('pivot:app-shown', triggerAgentPreload, { once: true });
-    }
     document.addEventListener('pointerover', event => {
         if (isAutomationWorkspaceTrigger(event.target)) prewarmAutomationWorkspaces();
     }, { passive: true });

@@ -1,6 +1,7 @@
 {
   "CI": "CI/CD 流水线自动注入的环境变量，用于运行环境识别。",
   "DISPLAY": "Linux X11 显示服务环境变量，由系统或桌面会话自动注入。",
+  "DOTENV_CONFIG_QUIET": "用于静音 dotenv/dotenvx 第三方控制台提示与注入日志。",
   "HEADLESS": "自动化测试或无头运行模式开关，非持久业务配置。",
   "KUBERNETES_SERVICE_HOST": "Kubernetes 自动注入，用于环境识别，不应由 .env 配置。",
   "PATH": "操作系统进程路径变量，不属于应用配置。",
