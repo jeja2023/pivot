@@ -247,7 +247,7 @@ bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
 document.querySelectorAll('[data-usage-subtab]').forEach(button => {
     button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
 });
-bind('admin-modal-close', () => window.Pivot.legacy.closeModal());
+bind('admin-modal-close', (e) => { e?.currentTarget?.blur?.(); window.Pivot.legacy.closeModal(); });
 bind('apps-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
 bind('personal-workbench-btn', () => window.Pivot.moduleApi('workspaces.navigation').openPersonalWorkbench?.());
 bind('admin-panel-btn', () => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.());
@@ -300,7 +300,7 @@ function bindMountedWorkspaceControls(name) {
     document.querySelectorAll('[data-usage-subtab]').forEach(button => {
         button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
     });
-    bind('admin-modal-close', () => window.Pivot.legacy.closeModal());
+    bind('admin-modal-close', (e) => { e?.currentTarget?.blur?.(); window.Pivot.legacy.closeModal(); });
     bind('ops-refresh-btn', () => window.Pivot.legacy.loadOpsSummary());
     bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
     bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');

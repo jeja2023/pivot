@@ -1,33 +1,110 @@
-<section id="tab-content-decision-gold-review" class="admin-tab-content admin-only hidden" aria-labelledby="decision-gold-review-title">
-    <div class="settings-page-head">
-        <div>
-            <h3 id="decision-gold-review-title">冻结金标审核</h3>
-            <p>每个案例必须由两名不同管理员独立选择同一允许动作，才能成为可用于发布的金标。系统不会代填审核结论。</p>
+<section id="tab-content-decision-gold-review" class="admin-tab-content admin-only hidden decision-gold-review-tab" aria-labelledby="decision-gold-review-title">
+    <div class="settings-page-head decision-gold-page-head">
+        <div class="decision-gold-head-info">
+            <div class="decision-gold-title-wrap">
+                <h3 id="decision-gold-review-title">冻结金标审核</h3>
+                <span class="decision-gold-version-pill" id="decision-gold-active-version-badge" title="当前加载的冻结评测集版本">v2</span>
+            </div>
+            <p class="decision-gold-head-desc">每个案例必须由两名不同管理员独立选择同一允许动作，才能解除发布阻断并成为可用于训练与发布的金标。系统严格执行双盲机制，不代填结论、不展示前序审核人动作，防止锚定偏差。</p>
         </div>
-        <div class="settings-page-actions">
-            <label class="route-feedback-filter" for="decision-gold-review-version">
-                <span>冻结集版本</span>
-                <input id="decision-gold-review-version" class="form-input" value="v2" maxlength="128" aria-label="冻结集版本">
-            </label>
-            <button id="decision-gold-review-import" type="button" class="btn-secondary">导入冻结集</button>
-            <button id="decision-gold-review-refresh" type="button" class="btn-secondary">刷新</button>
+        <div class="settings-page-actions decision-gold-toolbar" role="toolbar" aria-label="审核过滤与操作">
+            <div class="decision-gold-filter-unit">
+                <span class="decision-gold-filter-label">版本</span>
+                <input id="decision-gold-review-version" class="form-input decision-gold-version-input" value="v2" maxlength="128" aria-label="冻结集版本" placeholder="版本">
+            </div>
+            <div class="decision-gold-filter-unit">
+                <span class="decision-gold-filter-label">状态</span>
+                <select id="decision-gold-review-status-filter" class="form-input decision-gold-status-select" aria-label="按审核状态筛选">
+                    <option value="all">全部状态</option>
+                    <option value="pending_human_review">待第二审核</option>
+                    <option value="human_review_conflict">审核冲突</option>
+                    <option value="verified">已核验</option>
+                </select>
+            </div>
+            <div class="decision-gold-search-unit">
+                <svg class="decision-gold-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input id="decision-gold-review-search" class="form-input decision-gold-search-input" placeholder="输入案例ID / 场景 / 路由文本过滤..." maxlength="128" aria-label="检索案例">
+            </div>
+            <div class="decision-gold-btn-group">
+                <button id="decision-gold-review-import" type="button" class="btn-secondary decision-gold-action-btn" title="从服务器预置基准文件导入评测集">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>导入冻结集</span>
+                </button>
+                <button id="decision-gold-review-refresh" type="button" class="btn-secondary decision-gold-action-btn" title="刷新审核队列列表">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    <span>刷新</span>
+                </button>
+            </div>
         </div>
     </div>
-    <div id="decision-gold-review-summary" class="settings-state" role="status" aria-live="polite">尚未加载冻结金标审核队列。</div>
-    <div class="table-container route-feedback-table-wrap">
-        <table class="data-table compact-table route-feedback-table" aria-describedby="decision-gold-review-summary">
+
+    <!-- 统计指标卡片栏 -->
+    <div class="decision-gold-kpi-bar" id="decision-gold-kpi-bar" aria-label="审核状态概览">
+        <div class="decision-gold-kpi-card total" id="kpi-card-total" title="当前版本冻结集案例总数">
+            <span class="kpi-num" id="kpi-val-total">0</span>
+            <span class="kpi-label">案例总数</span>
+        </div>
+        <div class="decision-gold-kpi-card pending" id="kpi-card-pending" title="仅经一人审核或尚未被第二人独立复核的案例">
+            <span class="kpi-num" id="kpi-val-pending">0</span>
+            <span class="kpi-label">待第二审核</span>
+        </div>
+        <div class="decision-gold-kpi-card conflict" id="kpi-card-conflict" title="两名审核员选择了不同允许动作，存在分歧并阻断发布的案例">
+            <span class="kpi-num" id="kpi-val-conflict">0</span>
+            <span class="kpi-label">审核冲突</span>
+        </div>
+        <div class="decision-gold-kpi-card verified" id="kpi-card-verified" title="两名不同管理员独立确认且动作完全一致的合格金标">
+            <span class="kpi-num" id="kpi-val-verified">0</span>
+            <span class="kpi-label">已核验金标</span>
+        </div>
+    </div>
+
+    <!-- 状态追踪节点（供无障碍与状态脚本追踪，不占用页面视觉空间） -->
+    <div id="decision-gold-review-summary" class="decision-gold-accessible-summary hidden" role="status" aria-live="polite">尚未加载冻结金标审核队列。</div>
+
+    <!-- 全局统一数据表格 -->
+    <div class="table-container decision-gold-review-table-wrap">
+        <table class="data-table compact-table decision-gold-review-table" aria-describedby="decision-gold-review-summary">
+            <colgroup>
+                <col class="col-decision-case">
+                <col class="col-decision-scenario">
+                <col class="col-decision-context">
+                <col class="col-decision-status">
+                <col class="col-decision-candidate">
+                <col class="col-decision-note">
+                <col class="col-decision-action">
+            </colgroup>
             <thead>
                 <tr>
-                    <th class="text-center">案例</th>
-                    <th>场景</th>
-                    <th>脱敏路由上下文</th>
-                    <th>审核状态</th>
-                    <th>候选动作</th>
-                    <th>审核备注</th>
-                    <th class="text-center">提交</th>
+                    <th class="text-center col-decision-case">案例 ID</th>
+                    <th class="col-decision-scenario">场景</th>
+                    <th class="col-decision-context">脱敏路由上下文</th>
+                    <th class="text-center col-decision-status">审核状态</th>
+                    <th class="col-decision-candidate">候选动作</th>
+                    <th class="col-decision-note">审核备注</th>
+                    <th class="text-center col-decision-action">操作</th>
                 </tr>
             </thead>
             <tbody id="decision-gold-review-list"></tbody>
         </table>
+    </div>
+
+    <!-- 全局统一分页控件 -->
+    <div id="pagination-decision-gold-review" class="pagination workspace-pagination"></div>
+
+    <!-- 案例脱敏详情弹窗 -->
+    <div id="decision-gold-detail-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="decision-gold-detail-title">
+        <div class="decision-gold-detail-dialog">
+            <div class="modal-header">
+                <div class="decision-gold-modal-title-box">
+                    <h3 id="decision-gold-detail-title">案例脱敏详情</h3>
+                    <span id="decision-gold-detail-case-badge" class="decision-case-tag font-mono"></span>
+                </div>
+                <button type="button" class="workspace-modal-close btn-secondary" id="decision-gold-detail-close" aria-label="关闭详情弹窗">&times;</button>
+            </div>
+            <div class="modal-body decision-gold-detail-body" id="decision-gold-detail-content"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="decision-gold-detail-close-btn">关闭</button>
+            </div>
+        </div>
     </div>
 </section>

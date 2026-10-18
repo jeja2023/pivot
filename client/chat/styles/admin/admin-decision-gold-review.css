@@ -1,0 +1,871 @@
+/* 冻结决策金标双人审核工作台专有样式 */
+
+.decision-gold-review-tab {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 顶部信息与操作工具栏 */
+.settings-workspace-view #tab-content-decision-gold-review.admin-tab-content > .decision-gold-page-head,
+.decision-gold-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px !important;
+}
+
+.decision-gold-head-info {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.decision-gold-title-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.decision-gold-title-wrap h3 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.decision-gold-head-desc {
+    margin: 1px 0 0 0;
+    font-size: 0.70rem;
+    line-height: 1.32;
+    color: var(--text-muted, #64748b);
+}
+
+.decision-gold-version-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 9999px;
+    font-size: 0.70rem;
+    font-weight: 700;
+    font-family: var(--font-mono, Consolas, monospace);
+    background: color-mix(in srgb, var(--primary, #2563eb) 12%, transparent);
+    color: var(--primary, #2563eb);
+    border: 1px solid color-mix(in srgb, var(--primary, #2563eb) 25%, transparent);
+    line-height: 1.2;
+}
+
+/* 顶部过滤工具栏 */
+.decision-gold-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+/* 一体化紧凑分段输入单元（版本与状态） */
+.decision-gold-filter-unit {
+    display: inline-flex;
+    align-items: center;
+    height: 28px !important;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    padding: 0 !important;
+    box-sizing: border-box;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main, #000) 3%, transparent);
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.decision-gold-filter-unit:focus-within {
+    border-color: var(--primary, #2563eb);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #2563eb) 15%, transparent);
+}
+
+.decision-gold-filter-label {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 8px;
+    background: color-mix(in srgb, var(--text-main, #000) 4%, var(--surface, #ffffff));
+    border-right: 1px solid var(--border, #cbd5e1);
+    font-size: 0.70rem;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    white-space: nowrap;
+    user-select: none;
+    line-height: 26px;
+}
+
+.decision-gold-version-input {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 26px !important;
+    max-height: 26px !important;
+    padding: 0 4px !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    text-align: center;
+    font-size: 0.75rem !important;
+    font-weight: 700;
+    font-family: var(--font-mono, Consolas, monospace);
+    color: var(--text-main, #1e293b);
+    outline: none;
+    box-shadow: none !important;
+}
+
+.decision-gold-status-select {
+    width: auto !important;
+    min-width: 86px;
+    height: 26px !important;
+    max-height: 26px !important;
+    padding: 0 8px 0 6px !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    font-size: 0.73rem !important;
+    font-weight: 500;
+    color: var(--text-main, #1e293b);
+    cursor: pointer;
+    outline: none;
+    box-shadow: none !important;
+}
+
+/* 案例搜索单元 */
+.decision-gold-search-unit {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 230px;
+    height: 28px !important;
+}
+
+.decision-gold-search-icon {
+    position: absolute;
+    left: 8px;
+    color: var(--text-muted, #94a3b8);
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
+.decision-gold-search-input {
+    width: 100% !important;
+    height: 28px !important;
+    max-height: 28px !important;
+    padding: 0 8px 0 26px !important;
+    margin: 0 !important;
+    border-radius: 6px !important;
+    font-size: 0.73rem !important;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #1e293b);
+    box-sizing: border-box;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main, #000) 3%, transparent);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.decision-gold-search-input:focus {
+    border-color: var(--primary, #2563eb);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #2563eb) 15%, transparent);
+}
+
+/* 操作按钮组 */
+.decision-gold-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.decision-gold-action-btn {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    height: 28px !important;
+    min-height: 28px !important;
+    max-height: 28px !important;
+    line-height: 26px !important;
+    padding: 0 10px !important;
+    font-size: 0.73rem !important;
+    white-space: nowrap;
+    border-radius: 6px !important;
+    font-weight: 600;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #1e293b);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main, #000) 3%, transparent);
+    transition: all 0.15s ease;
+}
+
+.decision-gold-action-btn:hover {
+    background: color-mix(in srgb, var(--primary, #2563eb) 6%, transparent);
+    border-color: color-mix(in srgb, var(--primary, #2563eb) 35%, transparent);
+    color: var(--primary, #2563eb);
+}
+
+/* 统计卡片指标栏 */
+.decision-gold-kpi-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin: 2px 0 6px 0;
+}
+
+.decision-gold-kpi-card {
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #e2e8f0);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main, #000) 2%, transparent);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    cursor: default;
+    height: 38px;
+    box-sizing: border-box;
+    justify-content: center;
+}
+
+.decision-gold-kpi-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px color-mix(in srgb, var(--text-main, #000) 5%, transparent);
+}
+
+.decision-gold-kpi-card .kpi-num {
+    font-size: 1.12rem;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-main, #1e293b);
+}
+
+.decision-gold-kpi-card .kpi-label {
+    font-size: 0.67rem;
+    color: var(--text-muted, #64748b);
+    font-weight: 500;
+    line-height: 1;
+}
+
+.decision-gold-kpi-card.total {
+    border-left: 3px solid var(--primary, #2563eb);
+}
+
+.decision-gold-kpi-card.pending {
+    border-left: 3px solid var(--warning, #f59e0b);
+}
+
+.decision-gold-kpi-card.pending .kpi-num {
+    color: var(--warning, #d97706);
+}
+
+.decision-gold-kpi-card.conflict {
+    border-left: 3px solid var(--danger, #ef4444);
+}
+
+.decision-gold-kpi-card.conflict .kpi-num {
+    color: var(--danger, #dc2626);
+}
+
+.decision-gold-kpi-card.verified {
+    border-left: 3px solid var(--success, #10b981);
+}
+
+.decision-gold-kpi-card.verified .kpi-num {
+    color: var(--success, #059669);
+}
+
+/* 屏幕阅读与状态追踪元素（隐藏视觉显示，数据已由 KPI 指标卡片完整呈现） */
+.decision-gold-accessible-summary {
+    display: none !important;
+}
+
+/* 数据表格容器与结构 */
+.decision-gold-review-table-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--border, rgba(148, 163, 184, 0.16));
+    border-radius: 6px;
+    background: var(--surface, #ffffff);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main, #000) 2%, transparent);
+    margin-bottom: 0;
+}
+
+.decision-gold-review-table {
+    width: 100%;
+    min-width: 980px;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+.decision-gold-review-table .col-decision-case { width: 125px; }
+.decision-gold-review-table .col-decision-scenario { width: 105px; }
+.decision-gold-review-table .col-decision-context { width: auto; min-width: 220px; }
+.decision-gold-review-table .col-decision-status { width: 95px; }
+.decision-gold-review-table .col-decision-candidate { width: 185px; }
+.decision-gold-review-table .col-decision-note { width: 165px; }
+.decision-gold-review-table .col-decision-action { width: 100px; }
+
+.decision-gold-review-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-side, #f8fafc);
+    border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.2));
+    font-size: 0.70rem;
+    font-weight: 700;
+    color: var(--text-muted, #64748b);
+    height: 28px !important;
+    line-height: 24px;
+    padding: 2px 8px !important;
+    box-sizing: border-box;
+    text-transform: none;
+    letter-spacing: 0.01em;
+}
+
+/* 紧凑单元格：行高 30px，杜绝内容撑高与垂直溢出 */
+.decision-gold-review-table tbody td {
+    height: 30px !important;
+    max-height: 30px !important;
+    line-height: 1.2 !important;
+    padding: 2px 8px !important;
+    border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.12));
+    box-sizing: border-box;
+    vertical-align: middle;
+    font-size: 0.74rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.decision-gold-review-table tbody tr:hover td {
+    background: color-mix(in srgb, var(--primary, #2563eb) 3.5%, transparent);
+}
+
+/* 单元格控件精细化 */
+.decision-case-tag {
+    display: inline-block;
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--text-main, #1e293b) 5%, transparent);
+    color: var(--text-main, #1e293b);
+    border: 1px solid color-mix(in srgb, var(--border, #cbd5e1) 70%, transparent);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    line-height: 18px;
+    height: 20px;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.decision-case-tag:hover {
+    color: var(--primary, #2563eb);
+    background: color-mix(in srgb, var(--primary, #2563eb) 10%, transparent);
+    border-color: color-mix(in srgb, var(--primary, #2563eb) 30%, transparent);
+}
+
+.decision-scenario-pill {
+    display: inline-block;
+    font-size: 0.69rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    line-height: 18px;
+    height: 20px;
+    box-sizing: border-box;
+}
+
+.decision-scenario-pill.scenario-rag {
+    background: color-mix(in srgb, var(--primary, #0ea5e9) 9%, transparent);
+    color: var(--primary, #0284c7);
+    border: 1px solid color-mix(in srgb, var(--primary, #0ea5e9) 22%, transparent);
+}
+
+.decision-scenario-pill.scenario-next_step {
+    background: color-mix(in srgb, var(--primary, #6366f1) 9%, transparent);
+    color: var(--primary, #4f46e5);
+    border: 1px solid color-mix(in srgb, var(--primary, #6366f1) 22%, transparent);
+}
+
+.decision-scenario-pill.scenario-tools {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 9%, transparent);
+    color: var(--warning, #d97706);
+    border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 22%, transparent);
+}
+
+.decision-scenario-pill.scenario-workflow {
+    background: color-mix(in srgb, var(--success, #10b981) 9%, transparent);
+    color: var(--success, #059669);
+    border: 1px solid color-mix(in srgb, var(--success, #10b981) 22%, transparent);
+}
+
+.decision-scenario-pill.scenario-default {
+    background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+    color: var(--text-muted);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.decision-context-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-main, #1e293b);
+    font-size: 0.74rem;
+    line-height: 24px;
+    cursor: pointer;
+}
+
+.decision-context-text:hover {
+    color: var(--primary, #2563eb);
+    text-decoration: underline;
+}
+
+/* 审核状态胶囊标签 */
+.decision-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-size: 0.69rem;
+    font-weight: 600;
+    line-height: 16px;
+    height: 18px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+.decision-status-badge.is-verified {
+    background: color-mix(in srgb, var(--success, #10b981) 10%, transparent);
+    color: var(--success, #059669);
+    border: 1px solid color-mix(in srgb, var(--success, #10b981) 25%, transparent);
+}
+
+.decision-status-badge.is-pending {
+    background: color-mix(in srgb, var(--warning, #f59e0b) 10%, transparent);
+    color: var(--warning, #d97706);
+    border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 25%, transparent);
+}
+
+.decision-status-badge.is-conflict {
+    background: color-mix(in srgb, var(--danger, #ef4444) 10%, transparent);
+    color: var(--danger, #dc2626);
+    border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 25%, transparent);
+}
+
+/* 表单输入控件规范：高度精细收敛至 24px，匹配 30px 行高 */
+.decision-gold-review-table .decision-action-select {
+    width: 100% !important;
+    max-width: 100%;
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+    line-height: 22px !important;
+    font-size: 0.72rem !important;
+    padding: 0 4px !important;
+    margin: 0 !important;
+    border-radius: 4px !important;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #1e293b);
+    box-sizing: border-box;
+}
+
+.decision-gold-review-table .decision-action-select:focus {
+    border-color: var(--primary, #2563eb);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #2563eb) 18%, transparent);
+}
+
+.decision-gold-review-table .decision-action-select:disabled {
+    opacity: 0.65;
+    background: var(--bg-side, #f8fafc);
+    cursor: not-allowed;
+}
+
+.decision-gold-review-table .decision-note-input {
+    width: 100% !important;
+    max-width: 100%;
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+    line-height: 22px !important;
+    font-size: 0.72rem !important;
+    padding: 0 6px !important;
+    margin: 0 !important;
+    border-radius: 4px !important;
+    border: 1px solid var(--border, #cbd5e1);
+    background: var(--surface, #ffffff);
+    color: var(--text-main, #1e293b);
+    box-sizing: border-box;
+}
+
+.decision-gold-review-table .decision-note-input:focus {
+    border-color: var(--primary, #2563eb);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #2563eb) 18%, transparent);
+}
+
+.decision-gold-review-table .decision-note-input:disabled {
+    opacity: 0.65;
+    background: var(--bg-side, #f8fafc);
+    cursor: not-allowed;
+}
+
+/* 提交按钮与完成态 */
+.decision-gold-review-table .decision-submit-btn {
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+    padding: 0 8px !important;
+    font-size: 0.72rem !important;
+    line-height: 22px !important;
+    border-radius: 4px !important;
+    white-space: nowrap;
+    min-width: 68px !important;
+}
+
+.decision-gold-review-table .decision-submit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.decision-gold-review-table .decision-verified-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    font-size: 0.70rem;
+    color: var(--success, #059669);
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.decision-gold-review-table .decision-verified-time {
+    font-size: 0.64rem;
+    color: var(--text-muted, #64748b);
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 紧凑统一分页控件 */
+.settings-workspace-view #tab-content-decision-gold-review > .pagination,
+#pagination-decision-gold-review {
+    margin-top: 6px !important;
+    padding-top: 6px !important;
+    border-top: 1px solid var(--border, rgba(148, 163, 184, 0.16));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+#pagination-decision-gold-review button,
+#pagination-decision-gold-review .btn-secondary {
+    height: 24px !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+    line-height: 22px !important;
+    padding: 0 8px !important;
+    border-radius: 4px !important;
+    font-size: 0.72rem !important;
+    white-space: nowrap;
+}
+
+#pagination-decision-gold-review span {
+    font-size: 0.72rem !important;
+    color: var(--text-muted, #64748b);
+    line-height: 24px;
+}
+
+
+/* 详情弹窗样式 */
+#decision-gold-detail-modal.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-modal-backdrop, color-mix(in srgb, var(--text-main) 50%, transparent));
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+#decision-gold-detail-modal.hidden {
+    display: none !important;
+}
+
+.decision-gold-detail-dialog {
+    width: min(720px, calc(100vw - 32px)) !important;
+    max-width: min(720px, calc(100vw - 32px)) !important;
+    height: auto !important;
+    max-height: min(780px, calc(100vh - 48px)) !important;
+    padding: 0 !important;
+    margin: auto !important;
+    text-align: left !important;
+    border-radius: 12px !important;
+    border: 1px solid var(--border, #e2e8f0);
+    background: var(--surface, #ffffff) !important;
+    box-shadow: 0 25px 50px -12px color-mix(in srgb, var(--text-main, #000) 25%, transparent);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.decision-gold-detail-dialog .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.decision-gold-modal-title-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.decision-gold-modal-title-box h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.decision-gold-detail-body {
+    padding: 18px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    text-align: left !important;
+}
+
+.decision-gold-detail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.decision-gold-detail-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.decision-gold-detail-card {
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--bg-side, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-main);
+    word-break: break-word;
+    white-space: pre-wrap;
+    user-select: text;
+}
+
+.decision-gold-candidates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 8px;
+}
+
+.decision-gold-candidate-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border, #e2e8f0);
+    font-size: 0.78rem;
+}
+
+.decision-gold-candidate-item .candidate-id {
+    font-family: var(--font-mono, monospace);
+    font-weight: 600;
+    color: var(--primary, #2563eb);
+}
+
+.decision-gold-candidate-item .candidate-desc {
+    color: var(--text-main);
+}
+
+.decision-gold-detail-dialog .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border, #e2e8f0);
+    background: var(--surface, #ffffff);
+}
+
+/* 深色模式适配 */
+body.dark-mode .decision-gold-filter-unit,
+.dark-mode .decision-gold-filter-unit {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .decision-gold-filter-label,
+.dark-mode .decision-gold-filter-label {
+    background: color-mix(in srgb, var(--text-main, #ffffff) 6%, var(--surface, #1e293b));
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+
+body.dark-mode .decision-gold-version-input,
+.dark-mode .decision-gold-version-input,
+body.dark-mode .decision-gold-status-select,
+.dark-mode .decision-gold-status-select {
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .decision-gold-search-input,
+.dark-mode .decision-gold-search-input {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .decision-gold-action-btn,
+.dark-mode .decision-gold-action-btn {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .decision-gold-kpi-card,
+.dark-mode .decision-gold-kpi-card {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .decision-gold-kpi-card .kpi-num,
+.dark-mode .decision-gold-kpi-card .kpi-num {
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .decision-gold-kpi-card.pending .kpi-num,
+.dark-mode .decision-gold-kpi-card.pending .kpi-num {
+    color: var(--warning, #fbbf24);
+}
+
+body.dark-mode .decision-gold-kpi-card.conflict .kpi-num,
+.dark-mode .decision-gold-kpi-card.conflict .kpi-num {
+    color: var(--danger, #f87171);
+}
+
+body.dark-mode .decision-gold-kpi-card.verified .kpi-num,
+.dark-mode .decision-gold-kpi-card.verified .kpi-num {
+    color: var(--success, #34d399);
+}
+
+body.dark-mode .decision-gold-review-table thead th,
+.dark-mode .decision-gold-review-table thead th {
+    background: var(--bg-side, #1e293b);
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+
+body.dark-mode .decision-gold-review-table tbody td,
+.dark-mode .decision-gold-review-table tbody td {
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .decision-gold-review-table tbody tr:hover td,
+.dark-mode .decision-gold-review-table tbody tr:hover td {
+    background: color-mix(in srgb, var(--text-main) 6%, transparent);
+}
+
+body.dark-mode .decision-case-tag,
+.dark-mode .decision-case-tag {
+    background: color-mix(in srgb, var(--surface) 60%, var(--bg-side));
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .decision-gold-review-table-wrap,
+.dark-mode .decision-gold-review-table-wrap {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .decision-gold-review-table .decision-action-select,
+.dark-mode .decision-gold-review-table .decision-action-select,
+body.dark-mode .decision-gold-review-table .decision-note-input,
+.dark-mode .decision-gold-review-table .decision-note-input {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode #decision-gold-detail-modal .decision-gold-detail-dialog,
+.dark-mode #decision-gold-detail-modal .decision-gold-detail-dialog {
+    background: var(--surface, #1e293b) !important;
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode #decision-gold-detail-modal .modal-header,
+.dark-mode #decision-gold-detail-modal .modal-header,
+body.dark-mode #decision-gold-detail-modal .modal-footer,
+.dark-mode #decision-gold-detail-modal .modal-footer {
+    border-color: var(--border, #334155);
+    background: var(--surface, #1e293b);
+}
+
+body.dark-mode .decision-gold-detail-card,
+.dark-mode .decision-gold-detail-card {
+    background: var(--bg-side, #0f172a);
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .decision-gold-candidate-item,
+.dark-mode .decision-gold-candidate-item {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+
+/* 响应式调整 */
+@media (max-width: 900px) {
+    .decision-gold-kpi-bar {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .decision-gold-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .decision-gold-filter-unit,
+    .decision-gold-search-unit {
+        width: 100% !important;
+    }
+    .decision-gold-kpi-bar {
+        grid-template-columns: 1fr;
+    }
+}

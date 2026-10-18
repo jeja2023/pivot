@@ -817,31 +817,12 @@ function returnFromWorkspace(fallback = 'personal') {
     return showMainWorkspace(target);
 }
 
-window.Pivot.legacy.persistSettingsTab = function(tab) {
-    if (tab) setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab);
-};
-
-window.Pivot.legacy.getStoredSettingsTab = function() {
-    return getStoredSessionValue(SETTINGS_TAB_STORAGE_KEY);
-};
-
-window.Pivot.legacy.persistActiveChatSession = function(sessionId) {
-    if (!sessionId) return removeStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
-    setStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY, String(sessionId));
-};
-
-window.Pivot.legacy.getStoredActiveChatSession = function() {
-    return getStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
-};
-
-window.Pivot.legacy.persistPrintWorkspaceSession = function(sessionId) {
-    if (!sessionId) return removeStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
-    setStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY, String(sessionId));
-};
-
-window.Pivot.legacy.getStoredPrintWorkspaceSession = function() {
-    return getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
-};
+window.Pivot.legacy.persistSettingsTab = tab => { if (tab) setStoredSessionValue(SETTINGS_TAB_STORAGE_KEY, tab); };
+window.Pivot.legacy.getStoredSettingsTab = () => getStoredSessionValue(SETTINGS_TAB_STORAGE_KEY);
+window.Pivot.legacy.persistActiveChatSession = sessionId => { if (!sessionId) return removeStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY); setStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY, String(sessionId)); };
+window.Pivot.legacy.getStoredActiveChatSession = () => getStoredSessionValue(ACTIVE_CHAT_SESSION_STORAGE_KEY);
+window.Pivot.legacy.persistPrintWorkspaceSession = sessionId => { if (!sessionId) return removeStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY); setStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY, String(sessionId)); };
+window.Pivot.legacy.getStoredPrintWorkspaceSession = () => getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 
 function showMainWorkspace(view = 'personal') {
     const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
@@ -876,13 +857,20 @@ function showMainWorkspace(view = 'personal') {
         const panel = document.getElementById(id);
         if (!panel) return;
         const visible = key === target;
-        const moveFocus = window.Pivot.moduleApi?.('workspaces.accessibility')?.moveFocusOutsideHiddenWorkspace;
-        if (!visible && typeof moveFocus === 'function') moveFocus(panel, target);
-        else if (!visible && panel.contains(document.activeElement)) document.activeElement?.blur?.();
-        panel.classList.toggle('hidden', !visible);
-        panel.setAttribute('aria-hidden', visible ? 'false' : 'true');
-        if (visible) panel.removeAttribute('inert');
-        else panel.setAttribute('inert', '');
+        if (!visible) {
+            const moveFocus = window.Pivot.moduleApi?.('workspaces.accessibility')?.moveFocusOutsideHiddenWorkspace;
+            if (typeof moveFocus === 'function') moveFocus(panel, target);
+            if (panel.contains(document.activeElement)) document.activeElement?.blur?.();
+            panel.setAttribute('inert', '');
+            if (!panel.contains(document.activeElement)) {
+                panel.setAttribute('aria-hidden', 'true');
+            }
+            panel.classList.add('hidden');
+        } else {
+            panel.classList.remove('hidden');
+            panel.removeAttribute('inert');
+            panel.setAttribute('aria-hidden', 'false');
+        }
     });
     document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
         const view = btn.dataset.workspaceView;

@@ -59,9 +59,8 @@ function loadWorkspaceStyleOnce(href) {
 }
 
 function preloadWorkspaceStyles(_name) {
-    // CSS preloads may stay unused when the user never opens that workspace,
-    // producing browser warnings and needless bandwidth. Actual entry uses the
-    // style gate below, which loads a real stylesheet immediately before use.
+    // 若用户未实际进入该工作区，提前预加载 CSS 会导致样式闲置，产生浏览器告警与多余带宽。
+    // 实际进入工作区时统一走下方样式门禁，在激活前按需注入真实样式表。
     return Promise.resolve();
 }
 

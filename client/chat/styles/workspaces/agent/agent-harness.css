@@ -1035,8 +1035,8 @@
 
 body.dark-mode .agent-hook-package-import,
 .dark-mode .agent-hook-package-import {
-    border-color: rgba(96, 165, 250, 0.35);
-    background: rgba(30, 64, 175, 0.14);
+    border-color: color-mix(in srgb, var(--primary, #60a5fa) 35%, transparent);
+    background: color-mix(in srgb, var(--primary, #1e40af) 14%, var(--surface));
 }
 
 .agent-harness-panel-head,

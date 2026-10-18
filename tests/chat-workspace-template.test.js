@@ -168,3 +168,20 @@ test('设置事件可在模板挂载后通过模块 API 补绑且不新增 legac
     assert.match(admin, /moduleApi\?\.\('settings\.events'\)\?\.bindAdminSettingsEvents/);
     assert.doesNotMatch(`${settings}\n${admin}`, /legacy\.bindAdminSettingsEvents/);
 });
+
+test('工作区隐藏时具备焦点保护机制，杜绝子元素滞留焦点导致的 aria-hidden 报警', () => {
+    const root = path.resolve(__dirname, '..');
+    const a11y = fs.readFileSync(path.join(root, 'client', 'chat', 'workspace-accessibility.js'), 'utf8');
+    const workspaces = fs.readFileSync(path.join(root, 'client', 'chat', 'app-workspaces.js'), 'utf8');
+    const admin = fs.readFileSync(path.join(root, 'client', 'chat', 'admin.js'), 'utf8');
+
+    // 焦点移出保护必须包含可见性检测与失焦兜底
+    assert.match(a11y, /function isElementVisible/);
+    assert.match(a11y, /document\.activeElement\?\.blur\?\.\(\)/);
+    // 面板隐藏时必须先置入 inert，并在焦点未残留时才设置 aria-hidden
+    assert.match(workspaces, /panel\.setAttribute\('inert',\s*''\)/);
+    assert.match(workspaces, /if\s*\(!panel\.contains\(document\.activeElement\)\)\s*\{\s*panel\.setAttribute\('aria-hidden',\s*'true'\);/);
+    // 设置模态关闭时主动清理焦点
+    assert.match(admin, /adminContainer\?\.contains\(document\.activeElement\)/);
+});
+

@@ -254,11 +254,12 @@ async function loadAgentMetrics() {
     const sloDetail = Number(slo.total || 0)
         ? `${Number(slo.total)} 样本 · p95 ${Math.round(Number(slo.p95DurationMs || 0) / 1000)} 秒`
         : '暂无样本';
+    const sloBlockers = Array.isArray(slo.blockers) && slo.blockers.length ? slo.blockers.join('、') : '满足当前运行 SLO 阈值';
     PivotSafeHtml.setHtml(target, `
         <span>7日任务 ${Number(data.total || 0)}</span>
         <span>成功率 ${Number(data.successRate || 0)}%</span>
         <span>失败 ${Number(data.error || 0)}</span>
-        <span title="${agentEscapeAttr((slo.blockers || []).join('、') || '满足当前运行 SLO 阈值')}">运行 SLO ${agentEscape(sloLabel)} · ${agentEscape(sloDetail)}</span>
+        <span title="${agentEscapeAttr(sloBlockers)}">运行 SLO ${agentEscape(sloLabel)} · ${agentEscape(sloDetail)}</span>
         <span>模型用量 ${agentEscape(formatAgentCompactCount(data.totalTokens || 0))}</span>
         <span>上下文压缩 ${agentEscape(compressionText)}</span>
     `);

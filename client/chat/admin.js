@@ -348,6 +348,10 @@ async function openAdminPanel(options = {}) {
 window.Pivot.exposeModule('workspaces.implementations', { openAdminPanel });
 
 window.Pivot.legacy.closeModal = () => {
+    const adminContainer = document.getElementById('admin-container');
+    if (document.activeElement && (adminContainer?.contains(document.activeElement) || document.activeElement.id === 'admin-modal-close')) {
+        document.activeElement.blur?.();
+    }
     window.Pivot.legacy.cancelSettingsLoad?.();
     window.Pivot.legacy.cancelOpsSummaryLoad?.();
     window.Pivot.legacy.cancelMonitorSummaryLoad?.();
