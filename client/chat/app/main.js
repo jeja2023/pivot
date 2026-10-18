@@ -240,10 +240,19 @@ bind('api-call-logs-open-btn', () => window.Pivot.legacy.openApiCallLogsModal?.(
 bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
 bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
 
+function bindDecisionReviewSubtabs() {
+    document.querySelectorAll('[data-decision-review-subtab]').forEach(button => {
+        if (button.dataset.decisionReviewBound === '1') return;
+        button.dataset.decisionReviewBound = '1';
+        button.addEventListener('click', () => window.Pivot?.modules['settings.decisionReview']?.switchSubtab?.(button.dataset.decisionReviewSubtab));
+    });
+}
+
 // 管理面板切换
-['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'usage', 'keys', 'account'].forEach(tab => {
+['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'decision-review', 'usage', 'keys', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
 });
+bindDecisionReviewSubtabs();
 document.querySelectorAll('[data-usage-subtab]').forEach(button => {
     button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
 });
@@ -294,9 +303,10 @@ function bindMountedWorkspaceControls(name) {
     bind('api-call-logs-open-btn', () => window.Pivot.legacy.openApiCallLogsModal?.());
     bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
     bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
-    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'usage', 'keys', 'account'].forEach(tab => {
+    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'decision-review', 'usage', 'keys', 'account'].forEach(tab => {
         bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
     });
+    bindDecisionReviewSubtabs();
     document.querySelectorAll('[data-usage-subtab]').forEach(button => {
         button.addEventListener('click', () => window.Pivot?.modules['settings.usage']?.switchSubtab?.(button.dataset.usageSubtab));
     });

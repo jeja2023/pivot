@@ -106,11 +106,13 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'decision-review', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'route-feedback', 'decision-gold-review', 'announcements']);
+const DECISION_REVIEW_LEGACY_TAB_ALIASES = Object.freeze({ 'route-feedback': 'feedback', 'decision-gold-review': 'gold' });
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'decision-review', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
+const SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY = 'pivot_settings_decision_review_subtab';
 
 function normalizeUsageSubtab(subtab) {
     const target = String(subtab || '').trim();
@@ -184,17 +186,79 @@ window.Pivot?.exposeModule?.('settings.usage', {
     getSubtab: getActiveUsageSubtab
 });
 
+function normalizeDecisionReviewSubtab(subtab) {
+    return String(subtab || '').trim() === 'gold' ? 'gold' : 'feedback';
+}
+
+function getDecisionReviewSubtab() {
+    try {
+        return normalizeDecisionReviewSubtab(sessionStorage.getItem(SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY));
+    } catch (_error) {
+        return 'feedback';
+    }
+}
+
+function getActiveDecisionReviewSubtab() {
+    const active = document.querySelector('[data-decision-review-subtab].active');
+    return normalizeDecisionReviewSubtab(active?.dataset.decisionReviewSubtab || getDecisionReviewSubtab());
+}
+
+function persistDecisionReviewSubtab(subtab) {
+    try {
+        sessionStorage.setItem(SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY, normalizeDecisionReviewSubtab(subtab));
+    } catch (_error) {
+        // 浏览器禁用 sessionStorage 时仅回退到反馈核验。
+    }
+}
+
+async function loadDecisionReviewSubtab(subtab, page = 1) {
+    const target = normalizeDecisionReviewSubtab(subtab);
+    if (target === 'gold') return window.Pivot?.moduleApi?.('decision.goldReview')?.loadDecisionGoldReviewQueue?.();
+    return window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
+}
+
+function switchDecisionReviewSubtab(subtab, options = {}) {
+    const target = normalizeDecisionReviewSubtab(subtab);
+    document.querySelectorAll('[data-decision-review-subtab]').forEach(button => {
+        const active = button.dataset.decisionReviewSubtab === target;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        button.tabIndex = active ? 0 : -1;
+    });
+    document.querySelectorAll('[data-decision-review-panel]').forEach(panel => {
+        const active = panel.dataset.decisionReviewPanel === target;
+        panel.classList.toggle('hidden', !active);
+        panel.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+    if (!options.skipPersist) persistDecisionReviewSubtab(target);
+    if (!options.skipLoad) {
+        loadDecisionReviewSubtab(target, options.page || 1).catch(error => {
+            showToast(error.message || '决策审核数据加载失败', 'error');
+        });
+    }
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+    setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
+    return target;
+}
+
+window.Pivot?.exposeModule?.('settings.decisionReview', {
+    switchSubtab: switchDecisionReviewSubtab,
+    getSubtab: getActiveDecisionReviewSubtab
+});
+
 function getDefaultSettingsTab() {
     return isAdminUser() ? 'ops' : 'models';
 }
 
 function normalizeSettingsTab(tab) {
     const requested = String(tab || '').trim();
-    let target = SETTINGS_TABS.includes(requested) ? requested : getDefaultSettingsTab();
+    const legacyDecisionReviewSubtab = DECISION_REVIEW_LEGACY_TAB_ALIASES[requested];
+    let target = legacyDecisionReviewSubtab ? 'decision-review' : (SETTINGS_TABS.includes(requested) ? requested : getDefaultSettingsTab());
     if (LEGACY_SETTINGS_TAB_ALIASES.has(requested)) {
         target = 'usage';
         persistUsageSubtab(requested);
     }
+    if (legacyDecisionReviewSubtab) persistDecisionReviewSubtab(legacyDecisionReviewSubtab);
     if (SUPER_ADMIN_ONLY_SETTINGS_TABS.has(target) && !isSuperAdminUser()) {
         target = getDefaultSettingsTab();
     }
@@ -420,6 +484,12 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         });
         if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
     }
+    if (tab === 'decision-review') {
+        switchDecisionReviewSubtab(options.subtab || DECISION_REVIEW_LEGACY_TAB_ALIASES[requestedTab] || getDecisionReviewSubtab(), {
+            skipPersist: false,
+            skipLoad: true
+        });
+    }
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (content) content.scrollTop = 0;
     window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
@@ -462,8 +532,7 @@ async function loadTabDataInternal(tab, page = 1) {
             }
             if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
             if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
-            if (tab === 'route-feedback') await window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
-            if (tab === 'decision-gold-review') await window.Pivot?.moduleApi?.('decision.goldReview')?.loadDecisionGoldReviewQueue?.();
+            if (tab === 'decision-review') await loadDecisionReviewSubtab(getActiveDecisionReviewSubtab(), page);
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);

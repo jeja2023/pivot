@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../client/chat/engine-streaming.js'), 'utf8');
 const settingsShell = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/shell-start.html'), 'utf8');
+const decisionReviewHtml = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/decision-review.html'), 'utf8');
 const reviewQueueSource = fs.readFileSync(path.join(__dirname, '../client/chat/decision-feedback-review.js'), 'utf8');
 
 test('路由建议以对话内选择面板提交，需显式选择替代路径，且不依赖原生 prompt 或用户输入内部动作 ID', () => {
@@ -20,10 +21,14 @@ test('路由建议以对话内选择面板提交，需显式选择替代路径�
     assert.doesNotMatch(source, /window\.prompt\(`请输入“序号:动作ID”提交路由修正/);
 });
 
-test('路由反馈核验菜单沿用侧边栏标签样式，不继承次级操作按钮外观', () => {
-    assert.match(settingsShell, /id="tab-route-feedback"[^>]*class="admin-tab admin-only hidden"/);
-    assert.match(settingsShell, /id="tab-route-feedback"[^>]*>反馈核验<\/button>/);
-    assert.doesNotMatch(settingsShell, /id="tab-route-feedback"[^>]*btn-secondary/);
+test('反馈核验归入单一决策审核入口，仍保留独立的子页签与侧边栏标签样式', () => {
+    assert.match(settingsShell, /id="tab-decision-review"[^>]*class="admin-tab admin-only hidden"/);
+    assert.match(settingsShell, /id="tab-decision-review"[^>]*>决策审核<\/button>/);
+    assert.doesNotMatch(settingsShell, /id="tab-decision-review"[^>]*btn-secondary/);
+    assert.doesNotMatch(settingsShell, /id="tab-route-feedback"/);
+    assert.match(decisionReviewHtml, /data-decision-review-subtab="feedback"/);
+    assert.match(decisionReviewHtml, /data-decision-review-subtab="gold"/);
+    assert.match(reviewQueueSource, /decision-review-feedback-panel/);
 });
 
 test('路由反馈核验队列使用统计路由前缀，避免请求不存在的 observability 根路径', () => {

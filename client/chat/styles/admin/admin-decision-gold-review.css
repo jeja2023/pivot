@@ -7,7 +7,7 @@
 }
 
 /* 顶部信息与操作工具栏 */
-.settings-workspace-view #tab-content-decision-gold-review.admin-tab-content > .decision-gold-page-head,
+.settings-workspace-view #decision-review-gold-panel > .decision-gold-page-head,
 .decision-gold-page-head {
     display: flex;
     align-items: center;
@@ -564,7 +564,7 @@
 }
 
 /* 紧凑统一分页控件 */
-.settings-workspace-view #tab-content-decision-gold-review > .pagination,
+.settings-workspace-view #decision-review-gold-panel > .pagination,
 #pagination-decision-gold-review {
     margin-top: 6px !important;
     padding-top: 6px !important;

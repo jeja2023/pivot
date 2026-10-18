@@ -871,6 +871,7 @@ function showMainWorkspace(view = 'personal') {
             panel.removeAttribute('inert');
             panel.setAttribute('aria-hidden', 'false');
         }
+        if (key === 'apps') panel.setAttribute('aria-hidden', visible ? 'false' : 'true');
     });
     document.querySelectorAll('.sidebar-tool-btn[data-workspace-view]').forEach(btn => {
         const view = btn.dataset.workspaceView;

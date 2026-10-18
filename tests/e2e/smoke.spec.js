@@ -1033,8 +1033,9 @@ test.describe('Pivot browser smoke', () => {
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
         await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
-        await page.locator('#tab-decision-gold-review').click();
-        const panel = page.locator('#tab-content-decision-gold-review');
+        await page.locator('#tab-decision-review').click();
+        await page.locator('#decision-review-gold-tab').click();
+        const panel = page.locator('#decision-review-gold-panel');
         await expect(panel).toBeVisible();
         await expect(panel).toContainText('用户请求调用外部工具');
         await panel.locator('[data-decision-gold-action="tools-consent-001"]').selectOption('candidate_only');

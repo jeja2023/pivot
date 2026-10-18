@@ -1,0 +1,14 @@
+<section id="tab-content-decision-review" class="admin-tab-content admin-only hidden decision-review-tab" aria-label="决策审核">
+    <div class="decision-review-page-head">
+        <div class="decision-review-subtabs" role="tablist" aria-label="决策审核类型">
+            <button id="decision-review-feedback-tab" type="button" role="tab" data-decision-review-subtab="feedback" aria-controls="decision-review-feedback-panel" aria-selected="true" tabindex="0" class="decision-review-subtab active">反馈核验</button>
+            <button id="decision-review-gold-tab" type="button" role="tab" data-decision-review-subtab="gold" aria-controls="decision-review-gold-panel" aria-selected="false" tabindex="-1" class="decision-review-subtab">金标审核</button>
+        </div>
+    </div>
+    <section id="decision-review-feedback-panel" class="decision-review-pane" data-decision-review-panel="feedback" role="tabpanel" aria-labelledby="decision-review-feedback-tab">
+        <!-- @include partials/settings/route-feedback.html -->
+    </section>
+    <section id="decision-review-gold-panel" class="decision-review-pane decision-review-gold-pane decision-gold-review-tab hidden" data-decision-review-panel="gold" role="tabpanel" aria-labelledby="decision-review-gold-tab" aria-hidden="true">
+        <!-- @include partials/settings/decision-gold-review.html -->
+    </section>
+</section>

@@ -489,7 +489,7 @@
     }
 
     function bindDecisionGoldReviewQueue() {
-        const section = document.getElementById('tab-content-decision-gold-review');
+        const section = document.getElementById('decision-review-gold-panel');
         if (!section || section.dataset.decisionGoldBound === '1') return;
         section.dataset.decisionGoldBound = '1';
 

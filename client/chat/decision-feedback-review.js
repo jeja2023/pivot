@@ -446,7 +446,7 @@
     }
 
     function bindRouteFeedbackReviewQueue() {
-        const section = document.getElementById('tab-content-route-feedback');
+        const section = document.getElementById('decision-review-feedback-panel');
         if (!section || section.dataset.routeFeedbackBound === '1') return;
         section.dataset.routeFeedbackBound = '1';
         document.getElementById('route-feedback-refresh-btn')?.addEventListener('click', () => {
