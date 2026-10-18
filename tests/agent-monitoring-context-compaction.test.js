@@ -16,7 +16,7 @@ test('context compaction metrics aggregate only redacted numeric audit fields', 
         }
     });
     assert.deepEqual(captured.params, [7, 3]);
-    assert.match(captured.sql, /e\.payload \? 'compaction'/);
+    assert.match(captured.sql, /jsonb_exists\(e\.payload,\s*'compaction'\)/);
     assert.match(captured.sql, /hardFieldLoss/);
     assert.equal(result.eventCount, 5);
     assert.equal(result.runCount, 3);
