@@ -227,7 +227,7 @@ test.describe('Pivot browser smoke', () => {
     test('自动化任务与工作流在样式延迟时显示稳定加载页，样式就绪后再展示内容', async ({ page }) => {
         await ensureBrowserSession(page);
         const agentStylePreload = page.locator('link[data-pivot-workspace-style-preload="/chat/chat.workspace.agent.css"]');
-        await expect(agentStylePreload).toHaveCount(1, { timeout: 5_000 });
+        await expect(agentStylePreload).toHaveCount(0);
 
         await page.evaluate(() => {
             const styles = window.Pivot.moduleApi('workspaces.styleLoader');
