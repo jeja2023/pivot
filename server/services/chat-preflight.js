@@ -32,6 +32,7 @@ function buildChatRequestState(req) {
             .slice(0, 300)
         : null;
     return {
+        timing: { startedAt: Date.now(), firstContentMs: null },
         content,
         displayContent,
         regenerate: normalizeRegenerateFlag(body.regenerate),

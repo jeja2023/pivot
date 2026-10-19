@@ -167,6 +167,9 @@ async function getAgentSkillExecutionContext(user, reference) {
     const { resolvePublishedSkill } = require('./agent-releases');
     const release = await resolvePublishedSkill(value, user);
     if (release) {
+        if (!await require('../repositories/agent-learning-evaluation').sourceIsActive(release.skill_version_id)) {
+            throw Object.assign(new Error('个人经验的来源已删除或撤销，当前不能复用。'), { code: 'AGENT_SKILL_SOURCE_REVOKED', status: 409 });
+        }
         const context = buildSkillExecutionContext(release.manifest_yaml);
         const legacyUnrestricted = release.legacy_unrestricted === true || release.legacy_unrestricted === 1;
         return {
@@ -250,11 +253,21 @@ async function findBestPersonalSkill(user, goal, options = {}) {
         const score = matched.length * 2 + Math.min(bigramHits.length, 6) + (manifest.tags || []).filter(tag => text.includes(String(tag).toLowerCase())).length;
         return { release, manifest, matched, bigramHits, score };
     }).filter(item => item.score >= Number(options.minScore || 2)).sort((a, b) => b.score - a.score || String(b.release.published_at || '').localeCompare(String(a.release.published_at || '')));
-    const selected = candidates[0];
+    let selected = null;
+    for (const candidate of candidates) {
+        const repository = require('../repositories/agent-learning-evaluation');
+        if (!await repository.sourceIsActive(candidate.release.skill_version_id)) continue;
+        const rollout = await repository.personalExperienceRollout(candidate.release.id, user.id);
+        const bucket = crypto.createHash('sha256').update(`${user.id}:${candidate.release.id}:${options.exposureKey || text}`).digest()[0] % 100;
+        if (bucket >= rollout.percent) continue;
+        selected = { ...candidate, rollout };
+        break;
+    }
     if (!selected) return null;
     return {
         ...selected.release,
         matchReason: {
+            rollout: selected.rollout,
             type: 'keyword_and_tag_overlap',
             score: selected.score,
             matchedTerms: selected.matched.slice(0, 20),

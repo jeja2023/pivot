@@ -2,7 +2,7 @@ const { estimateTokens, getStoredMessageContextTokens } = require('../llm');
 const { getBeijingTimestamp } = require('../time');
 const sessionsRepository = require('../repositories/sessions');
 
-async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, agentRunId = null, routeMetadata = null, createdAt }) {
+async function insertMessage({ sessionId, userId, role, content, tokenCount, modelId, agentRunId = null, routeMetadata = null, conversationTurnId = null, createdAt }) {
     const finalTokenCount = Number.isFinite(Number(tokenCount)) ? Number(tokenCount) : estimateTokens(content);
     const contextTokenCount = getStoredMessageContextTokens({ role, content, token_count: finalTokenCount });
     const finalCreatedAt = createdAt || getBeijingTimestamp();
@@ -16,6 +16,7 @@ async function insertMessage({ sessionId, userId, role, content, tokenCount, mod
         modelId,
         agentRunId,
         routeMetadata,
+        conversationTurnId,
         createdAt: finalCreatedAt
     });
 }
@@ -30,7 +31,7 @@ async function saveUserMessage({ sessionId, userId, content, modelId }) {
     });
 }
 
-async function saveAssistantMessage({ sessionId, userId, content, modelId, tokenCount, agentRunId = null, routeMetadata = null }) {
+async function saveAssistantMessage({ sessionId, userId, content, modelId, tokenCount, agentRunId = null, routeMetadata = null, conversationTurnId = null }) {
     return await insertMessage({
         sessionId,
         userId,
@@ -39,7 +40,8 @@ async function saveAssistantMessage({ sessionId, userId, content, modelId, token
         modelId,
         tokenCount,
         agentRunId,
-        routeMetadata
+        routeMetadata,
+        conversationTurnId
     });
 }
 

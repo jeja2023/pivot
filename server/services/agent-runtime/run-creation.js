@@ -108,7 +108,8 @@ function createAgentRunFactory(deps = {}) {
         skillName = null,
         forkHistory = 'none',
         taskContract = null,
-        chatAgent = false
+        chatAgent = false,
+        evaluationSkillVersionId = null
     }) {
         if (typeof assertRunUserActive === 'function') {
             await assertRunUserActive(user);
@@ -147,6 +148,7 @@ function createAgentRunFactory(deps = {}) {
         const normalizedRunMode = normalizeRunMode(runMode);
         const normalizedRouter = normalizeRouterStrategy(modelRouter);
         const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+        delete runMetadata.evaluationCandidate;
         // 项目资料包必须由服务端按当前 ACL 解析；请求体不能伪造包名或快照。
         delete runMetadata.projectContextPack;
         const resolvedContext = await resolveAgentContextPack(user, normalizeContextConfig(contextConfig));
@@ -168,9 +170,9 @@ function createAgentRunFactory(deps = {}) {
         // 因此先剥离调用方自报的全部 skill 相关键（尤其是 skillConstraints 与 legacy 兜底标记），
         // 再只由服务端解析结果写回，避免通过请求体关掉默认拒绝语义。
         SKILL_METADATA_KEYS.forEach(key => { delete runMetadata[key]; });
-        const learningSettings = await getAgentLearningSettings(user.id).catch(() => ({ autoLearning: true }));
+        const learningSettings = await getAgentLearningSettings(user.id).catch(() => ({ autoLearning: false }));
         if (!skillReference && learningSettings.autoLearning !== false && runMetadata.autoPersonalSkill !== false && runMode !== 'dag') {
-            const learned = await findBestPersonalSkill(user, goal, { minScore: 2 });
+            const learned = await findBestPersonalSkill(user, goal, { minScore: 2, exposureKey: normalizedDedupeKey || createRunId() });
             if (learned?.name) {
                 skillReference = learned.name;
                 runMetadata.learnedSkillAuto = true;
@@ -195,6 +197,14 @@ function createAgentRunFactory(deps = {}) {
             if (!runMetadata.skillMatchReason) {
                 runMetadata.skillMatchReason = { type: 'explicit_skill_selection', summary: '用户或流程明确选择了此已发布 Skill。' };
             }
+        }
+        if (evaluationSkillVersionId && runMetadata.evaluation) {
+            const version = await require('../agent-releases').getSkillVersion(evaluationSkillVersionId, user, { action: 'write' });
+            if (!version || version.status !== 'validated') throw new Error('候选经验尚未通过隔离验证，不能开始评测。');
+            const context = require('../agent-skills').buildSkillExecutionContext(version.manifest_yaml);
+            runMetadata.skillInstructions = String(version.instructions_md || '').slice(0, 16000);
+            runMetadata.skillConstraints = { present: true, reference: context.skillId, capabilities: context.skillCapabilities, tools: context.skillTools };
+            runMetadata.evaluationCandidate = { versionId: String(version.id), digest: version.content_digest };
         }
         const goalMaxLength = chatAgent === true ? MAX_CHAT_AGENT_GOAL_LENGTH : undefined;
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'

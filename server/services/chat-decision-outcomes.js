@@ -10,7 +10,7 @@ async function persistFinalChatResponse({
     if (routePlan) routePlan.providerUsage = providerUsage || routePlan.providerUsage || null;
     const persisted = await persistAssistantResponse({
         sessionId, userId, userMessageId, user, modelCfg, visibleContent, assistantContent, assistantTokens,
-        costTime, tps: tokensPerSec, routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
+        costTime, tps: tokensPerSec, providerUsage, routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null
     });
     recordFinalChatDecisionOutcomes({
         routePlan, assistantMessageId: persisted.assistantMessageId, sessionId, durationMs: costTime

@@ -117,6 +117,11 @@ function createToolOrchestrator(overrides = {}) {
             throw error;
         }
         let policy;
+        if (executionPlan?.policy?.decision === 'denied') {
+            const error = Object.assign(new Error(executionPlan.policy.reasons?.join('；') || '工具执行前策略复核拒绝。'), { code: 'AGENT_POLICY_DENIED', category: 'policy' });
+            await event('tool.denied', request, { errorCode: error.code, reasonCodes: executionPlan.policy.reasonCodes || [] });
+            throw error;
+        }
         if (executionPlan?.network?.preflight === 'denied') {
             const error = new Error(executionPlan.network.error?.message || '工具网络预检被策略拒绝。');
             error.code = executionPlan.network.error?.code || 'AGENT_NETWORK_POLICY_DENIED';

@@ -1,11 +1,15 @@
 'use strict';
 
 const { prepareProgressiveToolDiscovery } = require('./progressive-tool-discovery');
+const { capabilitiesCoverTool } = require('../agent-capability-registry');
 
 function createRunPreparation(deps = {}) {
     const { formatToolList, listToolReliability, selectToolOrder, setRunMetadata, logger, verifyAgentOutcome } = deps;
     async function prepareTools({ runId, user, run, runtimeMetadata, chatBridge }) {
         let toolList = await formatToolList(user, { toolPolicy: run.tool_policy, toolAllowlist: run.tool_allowlist, preserveDiscoveryTools: true });
+        if (runtimeMetadata.capabilityConstraints?.present === true) {
+            toolList = toolList.filter(tool => (tool.capabilities || []).length && tool.capabilities.every(cap => capabilitiesCoverTool(runtimeMetadata.capabilityConstraints.capabilities || [], [cap])));
+        }
         try {
             const reliability = await listToolReliability(user, { days: 30, persist: false });
             toolList = selectToolOrder(toolList, reliability.signals);
@@ -26,7 +30,7 @@ function createRunPreparation(deps = {}) {
         if (chatBridge && chatBridge.ragEnabled !== true) {
             toolList = toolList.filter(tool => !['rag.search', 'knowledge.list', 'knowledge.graph.query'].includes(String(tool?.name || '')));
         }
-        if (runtimeMetadata.chatBridge && runtimeMetadata.chatBridge.mcpEnabled !== true) {
+        if (runtimeMetadata.chatBridge && runtimeMetadata.chatBridge.mcpEnabled !== true && !runtimeMetadata.automaticExecution) {
             toolList = toolList.filter(tool => !tool?.network
                 && !tool?.side_effect
                 && !tool?.approval_required

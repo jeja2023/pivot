@@ -137,6 +137,8 @@ function triggerMemoryExtractionWorker() {
 }
 
 async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, triggerWorker = true } = {}) {
+    const learning = await require('../agent-learning').getAgentLearningSettings(user?.id || userId);
+    if (!learning.autoLearning) return { scheduled: false, queued: false, reason: 'learning_disabled' };
     const queued = await enqueueMemoryExtractionJob({
         userId: user?.id || userId,
         sessionId,
@@ -226,6 +228,11 @@ async function finishMemoryExtractionJob(jobId, status, fields = {}) {
 }
 
 async function processMemoryExtractionJob(row, options = {}) {
+    if (!(await require('../agent-learning').getAgentLearningSettings(row.user_id)).autoLearning) {
+        const result = { skipped: true, reason: 'learning_disabled' };
+        await finishMemoryExtractionJob(row.id, MEMORY_JOB_STATUS.skipped, { result });
+        return result;
+    }
     const runExtraction = options.runMemoryExtraction || runMemoryExtractionHandler;
     if (typeof runExtraction !== 'function') throw new Error('长期记忆抽取处理器尚未配置。');
     const user = await resolveMemoryJobUser(row);

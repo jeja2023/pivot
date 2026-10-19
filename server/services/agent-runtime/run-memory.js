@@ -8,6 +8,7 @@ const { getModelContextBudget } = require('../context-budget');
 const { readTypedEnv } = require('../../config/env-registry');
 const { getBeijingTimestamp } = require('../../time');
 const { setRunMetadata } = require('./metadata');
+const { parseJsonObject } = require('../agent-validators');
 
 async function resolveRunLongTermMemory({
     run,
@@ -24,7 +25,7 @@ async function resolveRunLongTermMemory({
         longTermMemoryMatches = await retrieveLongTermMemories(user?.id, run?.goal, {
             user,
             sessionId: run?.session_id || '',
-            projectId: contextConfig?.projectId || ''
+            projectId: contextConfig?.projectId || parseJsonObject(run?.metadata)?.projectId || ''
         });
         const message = buildLongTermMemoryContextMessage(longTermMemoryMatches, {
             // 模型路由/故障降级阶段可能尚未取得完整配置；预算模块支持空配置的

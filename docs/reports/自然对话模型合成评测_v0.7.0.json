@@ -1,0 +1,278 @@
+{
+  "fixtureVersion": "chat-intent-engineering-v3",
+  "fixtureDigest": "dcbc81b479c3adcd9006bc07e947efd58609e5ba57ee64bb8ddb9843ab0c33f1",
+  "modelId": 18,
+  "generatedAt": "2026-10-19T05:01:27.886Z",
+  "kind": "synthetic_model_evaluation",
+  "businessToolsExecuted": false,
+  "results": [
+    {
+      "id": "direct-concept",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 2,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-writing",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-translation",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-quote",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-stop-discussion",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-future",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "direct-exploration",
+      "expected": [
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "exploratory_request"
+    },
+    {
+      "id": "first-attachment",
+      "expected": [
+        "agent_run"
+      ],
+      "actual": "agent_run",
+      "passed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 4461,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "delegate-report",
+      "expected": [
+        "agent_run"
+      ],
+      "actual": "agent_run",
+      "passed": true,
+      "critical": false,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 5620,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "delegate-code",
+      "expected": [
+        "agent_run"
+      ],
+      "actual": "agent_run",
+      "passed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 11341,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "polite-delegation",
+      "expected": [
+        "agent_run"
+      ],
+      "actual": "agent_run",
+      "passed": true,
+      "critical": false,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 15929,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "only-plan",
+      "expected": [
+        "plan_only"
+      ],
+      "actual": "plan_only",
+      "passed": true,
+      "critical": true,
+      "baseline": "plan_only",
+      "baselinePassed": true,
+      "durationMs": 4412,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "continue-active",
+      "expected": [
+        "continue_run"
+      ],
+      "actual": "continue_run",
+      "passed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 12589,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "continue-new-format",
+      "expected": [
+        "continue_run"
+      ],
+      "actual": "continue_run",
+      "passed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 4235,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "ambiguous-orders",
+      "expected": [
+        "clarify"
+      ],
+      "actual": "clarify",
+      "passed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 4045,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "missing-recipient",
+      "expected": [
+        "clarify",
+        "agent_run"
+      ],
+      "actual": "clarify",
+      "passed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 6827,
+      "reason": "semantic_intent"
+    },
+    {
+      "id": "stop",
+      "expected": [
+        "control"
+      ],
+      "actual": "control",
+      "passed": true,
+      "critical": true,
+      "baseline": "control",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_stop"
+    },
+    {
+      "id": "memory",
+      "expected": [
+        "memory"
+      ],
+      "actual": "memory",
+      "passed": true,
+      "critical": true,
+      "baseline": "memory",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_memory_intent"
+    },
+    {
+      "id": "forget",
+      "expected": [
+        "memory"
+      ],
+      "actual": "memory",
+      "passed": true,
+      "critical": true,
+      "baseline": "memory",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_memory_intent"
+    },
+    {
+      "id": "quote-only",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "actual": "direct_answer",
+      "passed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": false,
+      "durationMs": 4377,
+      "reason": "semantic_intent"
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "baselinePassed": 16,
+    "criticalFailures": 0
+  }
+}

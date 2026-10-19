@@ -56,12 +56,16 @@ async function previewMemoryIntent(user, text, options = {}) {
             }
         }
         if ((!listed.memories || listed.memories.length === 0) && Number.isInteger(explicitId) && explicitId > 0) {
-            const memory = await getMemoryById(user.id, explicitId);
+        const memory = await getMemoryById(user.id, explicitId);
             if (memory && memory.status === MEMORY_STATUS.active) {
                 listed = { memories: [memory] };
             }
         }
-        candidates = (listed.memories || []).map(memory => ({
+        candidates = (listed.memories || []).filter(memory => {
+            if (!options.sessionId) return true;
+            return memory.scope === 'user' || (memory.scope === 'session' && memory.scopeReference === options.sessionId)
+                || (memory.scope === 'project' && memory.projectId === options.projectId);
+        }).map(memory => ({
             id: Number(memory.id), content: clean(memory.content, 240), type: memory.type || 'preference', updatedAt: memory.updatedAt || memory.updated_at || null
         }));
     }
@@ -87,13 +91,25 @@ async function applyMemoryIntent(user, input = {}) {
     const text = input.text || input.intent || '';
     const selectedId = Number.parseInt(input.memoryId ?? input.memory_id, 10);
     const intent = parseMemoryIntent(text);
-    const preview = await previewMemoryIntent(user, text, { memoryId: selectedId });
+    const sourceSessionId = input.sourceSessionId || input.source_session_id || null;
+    if (sourceSessionId && !await require('../repositories/sessions').getSessionById(sourceSessionId, user.id)) throw intentError('记忆来源会话不存在或无权访问。', 'MEMORY_SOURCE_FORBIDDEN', 403);
+    const sourceMessageIds = Array.isArray(input.sourceMessageIds) ? input.sourceMessageIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 20) : [];
+    if (sourceMessageIds.length) {
+        if (!sourceSessionId) throw intentError('记忆消息来源必须指定本人会话。', 'MEMORY_SOURCE_FORBIDDEN', 403);
+        const messages = await require('../repositories/sessions').listMessages(sourceSessionId, user.id);
+        const allowed = new Set(messages.filter(message => message.role === 'user').map(message => Number(message.id)));
+        if (sourceMessageIds.some(id => !allowed.has(id))) throw intentError('记忆只能引用当前账号在该会话中的有效用户消息。', 'MEMORY_SOURCE_FORBIDDEN', 403);
+    }
+    const preview = await previewMemoryIntent(user, text, { memoryId: selectedId, sessionId: input.sessionId, projectId: input.projectId });
     if (!preview.canConfirm) throw intentError('没有找到可确认的记忆，请先调整描述。', 'MEMORY_INTENT_TARGET_NOT_FOUND', 404);
     if (intent.action === 'remember') {
         const created = await upsertMemory(user.id, {
-            content: intent.content, type: 'preference', scope: 'user', salience: 0.8, confidence: 0.9,
+            content: intent.content, type: 'preference', scope: ['session','project'].includes(input.scope) ? input.scope : 'user',
+            scopeReference: input.scope === 'session' ? sourceSessionId : input.scope === 'project' ? input.projectId : '',
+            projectId: input.scope === 'project' ? input.projectId : '', factKey: input.factKey || '', salience: 0.8, confidence: 0.9,
             origin: 'explicit', assertedBy: 'user',
-            sourceSessionId: input.sourceSessionId || input.source_session_id || null
+            sourceSessionId: input.sourceSessionId || input.source_session_id || null,
+            sourceMessageIds
         }, { user, confirmed: true, explicit: true, origin: 'explicit', assertedBy: 'user' });
         if (created?.skipped) throw intentError('该内容不符合当前记忆策略或可能包含敏感信息。', 'MEMORY_INTENT_BLOCKED', 422);
         return { action: intent.action, result: created, message: created.merged ? '已合并到现有个人记忆。' : '已保存为个人长期记忆。' };

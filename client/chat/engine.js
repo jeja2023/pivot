@@ -432,8 +432,9 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     }
     const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date(), modelName: assistantModelName });
     const textBody = aiMsgEl.querySelector('.text-body');
+    let serverPlanOnly = false;
     const showTaskPromotionForResponse = () => {
-        if (!shouldOfferTaskPromotion || !isRequestMessageVisible()) return;
+        if (serverPlanOnly || !shouldOfferTaskPromotion || !isRequestMessageVisible()) return;
         window.Pivot.moduleApi('chat.taskSuggestion')?.showForResponse?.({
             messageContent: aiMsgEl,
             goal: userVisibleContent,
@@ -477,6 +478,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
             body: JSON.stringify({
                 sessionId: requestSessionId,
+                clientRequestId: typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
                 content,
                 displayContent: stripInternalReferenceText(displayContent || content),
                 modelId,
@@ -709,8 +711,9 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                     return;
                 }
                 if (data.type === 'route') {
+                    if (data.status === 'plan_only') serverPlanOnly = true;
                     window.Pivot.legacy.renderAssistantTraceEvent?.(aiMsgEl, data);
-                    if (data.status !== 'shadow') updateAssistantStatus('正在准备回答');
+                    if (data.status !== 'shadow') updateAssistantStatus(['automatic_execution','understanding'].includes(data.status) ? data.message || '正在安排处理' : '正在准备回答');
                     return;
                 }
                 if (data.type === 'mcp_consent_required') {

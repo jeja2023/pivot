@@ -932,11 +932,13 @@ test.describe('Pivot browser smoke', () => {
         expect(defaultResponse.ok()).toBeTruthy();
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await page.evaluate(() => Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined }));
         await expect(page.locator('#user-input')).toBeVisible({ timeout: 10_000 });
         await page.locator('#user-input').fill('请简要解释什么是向量检索。');
         await page.locator('#send-btn').click();
         await expect.poll(() => requests.length).toBe(1);
         expect(requests[0].chatMode).toBe('normal');
+        expect(requests[0].clientRequestId).toMatch(/^[A-Za-z0-9_-]{8,128}$/);
         await expect(page.locator('#send-btn')).toBeVisible();
         await expect(page.locator('.chat-task-suggestion-card')).toHaveCount(0);
 
@@ -944,6 +946,7 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#send-btn').click();
         await expect.poll(() => requests.length).toBe(2);
         expect(requests[1].chatMode).toBe('normal');
+        expect(requests[1].clientRequestId).not.toBe(requests[0].clientRequestId);
         await expect.poll(() => agentRunRequests.length).toBeGreaterThan(0);
         await expect(page.locator('.chat-task-suggestion-card')).toHaveCount(0);
         expect(requests).toHaveLength(2);

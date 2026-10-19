@@ -140,12 +140,14 @@ function updateSessionTitle(sessionId, userId, title) {
     );
 }
 
-async function insertMessage({ sessionId, userId, role, content, tokenCount, contextTokenCount = null, modelId, agentRunId = null, routeMetadata = null, createdAt }) {
+async function insertMessage({ sessionId, userId, role, content, tokenCount, contextTokenCount = null, modelId, agentRunId = null, routeMetadata = null, conversationTurnId = null, createdAt }) {
     const row = await queryOne(`
-        INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, model_id, agent_run_id, route_metadata, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, model_id, agent_run_id, route_metadata, conversation_turn_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (conversation_turn_id) WHERE conversation_turn_id IS NOT NULL AND role = 'assistant'
+        DO UPDATE SET conversation_turn_id = EXCLUDED.conversation_turn_id
         RETURNING id
-    `, [sessionId, userId, role, content, tokenCount, contextTokenCount, modelId || null, agentRunId || null, routeMetadata || '{}', createdAt]);
+    `, [sessionId, userId, role, content, tokenCount, contextTokenCount, modelId || null, agentRunId || null, routeMetadata || '{}', conversationTurnId, createdAt]);
     return { changes: 1, lastInsertRowid: row ? row.id : null };
 }
 

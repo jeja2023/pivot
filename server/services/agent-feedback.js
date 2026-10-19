@@ -57,7 +57,7 @@ function serializeFeedback(row) {
 }
 
 async function getOwnedRun(userId, runId) {
-    return queryOne('SELECT id, user_id, status, final_answer, error_message, retry_count FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [String(runId || ''), userId]);
+    return queryOne('SELECT id, user_id, status, final_answer, error_message, retry_count, metadata FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [String(runId || ''), userId]);
 }
 
 async function recordAgentFeedback(user, runId, input = {}, options = {}) {
@@ -76,7 +76,7 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
         modifiedAnswer: redactSensitiveText(input.modifiedAnswer || input.modified_answer || '', 12000),
         toolFailures: normalizeFailures(input.toolFailures || input.tool_failures),
         metadata: input.metadata && typeof input.metadata === 'object' ? input.metadata : {},
-        source: String(options.source || input.source || 'user').slice(0, 32)
+        source: String(options.source || 'user').slice(0, 32)
     };
     if (JSON.stringify(feedback.metadata).length > 8000) feedback.metadata = { truncated: true };
     if (feedback.source !== 'user' && !['runtime', 'system'].includes(feedback.source)) feedback.source = 'user';
@@ -95,6 +95,16 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
         RETURNING *
     `, [userId, tenantId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
     const serialized = serializeFeedback(row);
+    if (feedback.source === 'user' && (feedback.correction || feedback.modifiedAnswer || Number(feedback.rating) <= 2 && feedback.rating !== null)) {
+        const metadata = parseJson(run.metadata, {});
+        const { recordRunOutcome } = require('../repositories/chat-conversation-turns');
+        await recordRunOutcome(run.id, { correction: true });
+        if (metadata.learnedSkillAuto && metadata.skillReleaseId) {
+            const releases = require('./agent-releases');
+            const release = await releases.getSkillReleaseForUser(metadata.skillReleaseId, user, 'manage');
+            if (release?.rollout_scope === 'personal') await releases.pauseSkillReleaseBySystem(release, '用户纠正了自动复用结果，暂停该个人经验以避免重复错误。');
+        }
+    }
     let learning = { scheduled: false, reason: 'not_requested' };
     try {
         const { enqueueAgentLearningJob } = require('./agent-learning');
@@ -119,8 +129,15 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
 }
 
 async function recordAgentRunOutcome(runId, status, options = {}) {
-    const run = await queryOne('SELECT id, user_id, status, retry_count, final_answer, error_message FROM agent_runs WHERE id = ?', [String(runId || '')]);
+    const run = await queryOne('SELECT id, user_id, status, retry_count, final_answer, error_message, metadata, total_tokens, created_at, completed_at FROM agent_runs WHERE id = ?', [String(runId || '')]);
     if (!run?.user_id) return null;
+    const metadata = typeof run.metadata === 'string' ? JSON.parse(run.metadata) : run.metadata || {};
+    const verificationPassed = metadata.taskVerification?.outcomeStatus === 'verified';
+    if (metadata.automaticExecution) {
+        const { recordRunOutcome } = require('../repositories/chat-conversation-turns');
+        await recordRunOutcome(run.id, { status, verified: verificationPassed, learnedSkillAuto: metadata.learnedSkillAuto === true, totalTokens: Number(run.total_tokens || 0), durationMs: Math.max(0, Date.parse(run.completed_at || new Date()) - Date.parse(run.created_at)) });
+        if (metadata.automaticExecution.decisionId) require('./decision-observability').recordDecisionOutcome({ decisionId: metadata.automaticExecution.decisionId, source: 'runtime', eventType: 'execution', status: verificationPassed ? 'success' : 'failure', reasonCode: verificationPassed ? 'delivery_verified' : 'delivery_not_verified', resultReference: run.id });
+    }
     let failures = [];
     let successfulToolCalls = 0;
     try {
@@ -138,7 +155,7 @@ async function recordAgentRunOutcome(runId, status, options = {}) {
             error: String(run.error_message || '').slice(0, 500),
             successfulToolCalls,
             // 自动学习仅来自多步骤成功或失败恢复成功；显式用户反馈另走 correction。
-            learningEligible: successfulToolCalls >= 2 || Number(run.retry_count || 0) > 0
+            learningEligible: verificationPassed && (successfulToolCalls >= 2 || Number(run.retry_count || 0) > 0)
         }
     }, { source: options.source || 'runtime' });
     try {

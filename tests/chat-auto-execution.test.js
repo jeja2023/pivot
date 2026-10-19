@@ -3,48 +3,104 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { classifyChatAutoExecution } = require('../server/services/chat-auto-execution');
+const { resolveChatIntent, normalizeIntent } = require('../server/services/chat-intent-resolver');
+const { evaluateToolPolicy } = require('../server/services/agent-policy');
+const { verifyTaskOutcome } = require('../server/services/agent-verification');
+const { verifyAutomaticTask } = require('../server/services/chat-task-verification');
+const { reviewChatAction } = require('../server/services/chat-action-review');
+const { createToolOrchestrator } = require('../server/services/agent-tool-orchestrator');
 
-test('明确委托且具备多步骤交付物时自动进入受控 Agent 处理', () => {
-    const decision = classifyChatAutoExecution({
-        prompt: '请汇总本周订单，核对异常并生成一份风险报告。'
-    });
-    assert.equal(decision.action, 'agent_run');
-    assert.equal(decision.reasonCode, 'explicit_delegated_task');
-    assert.ok(decision.confidence >= 0.74);
-    assert.equal(decision.intent, 'delegate');
-    assert.equal(decision.nextAction, 'create_agent_run');
-    assert.deepEqual(decision.evidenceRefs, ['current_message']);
-    assert.equal(decision.allowMcp, false);
-    const crmDecision = classifyChatAutoExecution({
-        prompt: '请查询 CRM 中本周订单，核对异常并生成风险报告。'
-    });
-    assert.equal(crmDecision.allowMcp, true, '明确委托外部能力只开放已有授权能力候选，实际调用仍由运行时审批');
-    assert.deepEqual(crmDecision.requiredCapabilities, ['data.read']);
+const config = { mode: 'active', timeoutMs: 1000, rolloutPercent: 100 };
+const input = { prompt: '请分析附件并生成风险报告', user: { id: 9 }, userMessageId: 11, sessionId: 'test-session', modelCfg: { id: 8 }, history: [] };
+const modelDecision = { action: 'agent_run', intent: 'delegate', objective: '分析附件并生成风险报告', constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.2 };
+const deps = output => ({ config, callModelJson: async () => JSON.stringify(output), recordDecision() {} });
+
+test('普通问答、创作、讨论和引用保持直答，不调用分类模型', async () => {
+    for (const prompt of ['请解释向量检索','请写一份产品发布报告','请翻译这份报告并生成英文版','他让我完成报告的要求是什么？','停止当前任务的功能如何实现？']) {
+        assert.equal(classifyChatAutoExecution({ prompt }).action, 'direct_answer', prompt);
+        const result = await resolveChatIntent({ ...input, prompt }, { ...deps(null), callModelJson: async () => { throw new Error('普通对话不能调用分类模型'); } });
+        assert.equal(result.action, 'direct_answer');
+    }
 });
 
-test('探索、创作和明确只规划请求保持普通回答或计划路径', () => {
-    assert.equal(classifyChatAutoExecution({ prompt: '解释一下如何分析订单异常。' }).action, 'direct_answer');
-    assert.equal(classifyChatAutoExecution({ prompt: '写一封订单异常通知邮件。' }).action, 'direct_answer');
-    assert.equal(classifyChatAutoExecution({ prompt: '先给出订单风险处理方案，不要执行。' }).action, 'plan_only');
+test('候选任务以结构化语义结果选择运行，模型自报置信不授予权限', async () => {
+    const result = await resolveChatIntent(input, deps(modelDecision));
+    assert.equal(result.action, 'agent_run');
+    assert.deepEqual(result.evidenceRefs, ['message:11']);
+    assert.ok(result.decisionId);
+    const direct = await resolveChatIntent(input, deps({ ...modelDecision, action: 'direct_answer' }));
+    assert.equal(direct.action, 'direct_answer', '候选规则不得推翻主模型的处理方式');
 });
 
-test('有连续上下文的明确续接可自动恢复任务处理，但停用开关立即回退直答', () => {
-    const decision = classifyChatAutoExecution({
-        prompt: '继续按刚才的方案处理。',
-        history: [{ role: 'user', content: '请汇总本周订单，核对异常并生成风险报告。' }]
-    });
-    assert.equal(decision.action, 'agent_run');
-    assert.equal(decision.reasonCode, 'contextual_task_continuation');
-    assert.equal(classifyChatAutoExecution({ prompt: '请汇总订单并生成报告。', enabled: false }).action, 'direct_answer');
+test('续接必须指向当前会话给定任务，不接受模型发明或跨用户运行', async () => {
+    const context = { baseline: {}, tasks: [{ id: 'owned' }], history: [], userMessageId: 11 };
+    assert.throws(() => normalizeIntent({ ...modelDecision, action: 'continue_run', continuationOf: 'other-user-run' }, context));
+    assert.equal(normalizeIntent({ ...modelDecision, action: 'continue_run', continuationOf: 'owned' }, context).continuationOf, 'owned');
+    assert.equal(classifyChatAutoExecution({ prompt: '按刚才的方案修改，并跑测试', history: [{ role: 'user', content: '请分析项目代码' }] }).action, 'continue_run');
 });
 
-test('自然语言停止指令路由到现有任务控制，而不是生成普通回答', () => {
-    const decision = classifyChatAutoExecution({ prompt: '停止当前任务' });
-    assert.equal(decision.action, 'control');
-    assert.equal(decision.control, 'stop');
-    assert.equal(
-        classifyChatAutoExecution({ prompt: '停止当前任务的功能应该如何实现？' }).action,
-        'direct_answer',
-        '讨论任务控制功能不能误触取消正在运行的任务'
-    );
+test('只规划硬限制不会被语义结果推翻；无效能力与响应失败给出明确阻断', async () => {
+    const planned = await resolveChatIntent({ ...input, prompt: '先给出修复方案，不要改代码' }, deps(modelDecision));
+    assert.equal(planned.action, 'plan_only');
+    for (const output of [{ ...modelDecision, requiredCapabilities: ['admin.all'] }, {}, { ...modelDecision, action: 'execute_everything' }]) {
+        const result = await resolveChatIntent(input, deps(output));
+        assert.equal(result.action, 'clarify');
+        assert.equal(result.reasonCode, 'intent_unavailable');
+    }
+});
+
+test('影子与零比例灰度保留建议证据但不自动执行', async () => {
+    const result = await resolveChatIntent(input, { ...deps(modelDecision), config: { ...config, mode: 'shadow' } });
+    assert.equal(result.action, 'direct_answer');
+    assert.equal(result.shadow, true);
+    const zero = await resolveChatIntent(input, { ...deps(modelDecision), config: { ...config, rolloutPercent: 0 } });
+    assert.equal(zero.action, 'direct_answer');
+});
+
+test('停止和遗忘不依赖自动执行许可；讨论停止功能不取消任务', () => {
+    assert.equal(classifyChatAutoExecution({ prompt: '停止' }).action, 'control');
+    assert.equal(classifyChatAutoExecution({ prompt: '暂停当前任务' }).control, 'pause');
+    assert.equal(classifyChatAutoExecution({ prompt: '停止当前任务如何实现？' }).action, 'direct_answer');
+    assert.equal(classifyChatAutoExecution({ prompt: '忘掉刚才那个偏好' }).action, 'memory');
+    assert.equal(classifyChatAutoExecution({ prompt: '以后会出现什么趋势？' }).action, 'direct_answer');
+});
+
+test('委托能力约束必须覆盖工具的每项能力，审批也不能越过作用域', () => {
+    const tool = { name: 'test.readwrite', source: 'builtin', capabilities: ['filesystem.read_workspace','filesystem.write_workspace'], input_schema: { type: 'object' } };
+    const result = evaluateToolPolicy({ run: { metadata: { capabilityConstraints: { present: true, capabilities: ['filesystem.read_workspace'] } } }, tool, input: {}, allowApproval: true });
+    assert.equal(result.decision, 'denied');
+    assert.ok(result.reasonCodes.includes('conversation_capability_scope'));
+});
+
+test('自动任务缺少独立交付核验或真实产物不能被标记为已完成', async () => {
+    const contract = { goal: '报告', deliverables: ['风险报告'], acceptance: { requireSemanticVerification: true, artifactRequired: true } };
+    assert.equal(verifyTaskOutcome({ taskContract: contract, answer: '已经完成' }).outcomeStatus, 'needs_input');
+    const evidence = await verifyAutomaticTask({ run: { id: 'r', model_id: 8 }, user: { id: 9 }, contract, answer: '已完成' }, { readyRunArtifacts: async () => [], getModel: async () => { throw new Error('未生成文件时不能进入模型自评'); } });
+    assert.equal(evidence.reason, 'artifact_not_materialized');
+    const failed = await verifyAutomaticTask({ run: { id: 'r' }, user: { id: 9 }, contract: { ...contract, acceptance: {} }, answer: '报告' }, { getModel: async () => ({}), callModelJson: async () => JSON.stringify({ passed: true, coveredDeliverables: [], missing: [] }) });
+    assert.equal(failed.passed, false);
+});
+
+test('独立后台审查只处理已知只读范围，强制人工、写入和策略拒绝均不可覆盖', async () => {
+    const run = { user_id: 9, goal: '查询订单', metadata: { automaticExecution: {}, capabilityConstraints: { present: true, capabilities: ['data.sql.query'] } } };
+    const tool = { name: 'db.run_readonly_query', source: 'mcp', databaseTool: true, risk: 'high', capabilities: ['data.sql.query'], idempotent: true, network: false, input_schema: { type: 'object' } };
+    const base = { run, tool, input: {}, user: { id: 9 } };
+    const options = { enabled: true, getModel: async () => ({}), callModelJson: async () => '{"withinScope":true,"readOnly":true}' };
+    assert.equal((await reviewChatAction(base, options)).allowed, true);
+    for (const denied of [
+        { ...base, tool: { ...tool, side_effect: true } },
+        { ...base, tool: { ...tool, alwaysRequiresApproval: true } },
+        { ...base, run: { ...run, approval_policy: 'approve_all_mcp' } },
+        { ...base, tool: { ...tool, capabilities: ['filesystem.write_workspace'] } }
+    ]) assert.equal((await reviewChatAction(denied, options)).allowed, false);
+    assert.equal((await reviewChatAction(base, { ...options, evaluateToolPolicy: () => ({ decision: 'denied' }) })).allowed, false);
+    assert.equal((await reviewChatAction(base, { ...options, callModelJson: async () => { throw new Error('核验超时'); } })).allowed, false);
+});
+
+test('执行器必须接受最新策略拒绝，不能用内存旧快照覆盖撤销', async () => {
+    let executed = false;
+    const orchestrator = createToolOrchestrator({ recordAgentEvent: async () => {}, enforceToolPolicy: () => ({ decision: 'allow', input: {} }) });
+    await assert.rejects(orchestrator.execute({ run: { id: 'stale' }, user: { id: 9 }, tool: { name: 'workspace.patch' }, input: {},
+        executionPlan: { policy: { decision: 'denied', reasons: ['能力范围已撤回'] } }, execute: async () => { executed = true; } }), error => error.code === 'AGENT_POLICY_DENIED');
+    assert.equal(executed, false);
 });

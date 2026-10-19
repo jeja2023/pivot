@@ -100,6 +100,23 @@ const loadMonitorSummary = async function(options = {}) {
         const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`, signalOptions);
         if (!res.ok) throw new Error(`系统监控加载失败（HTTP ${res.status}）`);
         const data = await res.json();
+        const executionPanel = document.getElementById('monitor-chat-execution');
+        if (executionPanel) {
+            try {
+                const response = await apiFetch(`${API_BASE}/chat/execution-metrics?scope=organization`, signalOptions);
+                if (!response.ok) throw new Error('任务指标暂时不可用');
+                const body = await response.json();
+                const rows = Array.isArray(body.metrics) ? body.metrics : [];
+                const sum = key => rows.reduce((total, item) => total + Number(item[key] || 0), 0);
+                const tasks = rows.filter(row => ['agent_run','continue_run'].includes(row.action)).reduce((total, row) => total + Number(row.count || 0), 0);
+                const metrics = [['请求数', sum('count')], ['任务与续接', tasks], ['交付核验通过', sum('verified')], ['执行失败或部分完成', sum('failures')], ['用户纠正', sum('corrections')], ['个人经验复用', sum('experience_reuse')], ['已复核路由', sum('reviewed_routes')], ['已核实误路由', sum('verified_route_mismatches')]];
+                const rowsHtml = metrics.map(([label, value]) => `<div class="monitor-row"><span>${escapeHtml(label)}</span><strong>${formatMetricNumber(value)}</strong></div>`).join('');
+                const noteHtml = '<p class="text-muted">核验通过表示交付检查结果；用户纠正独立统计。没有核验样本时不计算成功率。</p>';
+                PivotSafeHtml.setHtml(executionPanel, `${rowsHtml}${noteHtml}`);
+            } catch (error) {
+                executionPanel.textContent = error.name === 'AbortError' ? '刷新已取消' : '任务指标暂时不可用，请稍后刷新。';
+            }
+        }
         const system = data.system || {};
         const processInfo = data.process || {};
         const tokens = data.tokens || {};

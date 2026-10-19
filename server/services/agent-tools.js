@@ -1,4 +1,5 @@
 const { query } = require('../db/client');
+const { chatSourceToolDefinition, executeChatSource } = require('./chat-source-tool');
 const { searchUserSessions } = require('./agent-session-search');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
@@ -117,6 +118,7 @@ function asJsonSchema(properties = {}, required = []) {
 function getBuiltInToolDefinitions(user) {
     const adminOnly = isSuperAdmin(user);
     const definitions = [
+        chatSourceToolDefinition(asJsonSchema),
         {
             name: 'agent.llm',
             title: '大模型节点',
@@ -902,17 +904,14 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
+    if (name === 'chat.read_source') return executeChatSource(input, user, context);
     assertDynamicCodeExecutionIsSandboxed(name, context);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);
-    if (name === 'agent.llm') {
-        return executeAgentLlmNode(input, user, context);
-    }
+    if (name === 'agent.llm') return executeAgentLlmNode(input, user, context);
     if (name === 'agent.code') {
         return await executeAgentCode(input, user, context);
     }
-    if (name === 'agent.content_review') {
-        return executeContentReview(input, user, context);
-    }
+    if (name === 'agent.content_review') return executeContentReview(input, user, context);
     if (name === 'agent.delegate') {
         return executeAgentDelegate(input, user, context);
     }

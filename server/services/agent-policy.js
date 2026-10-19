@@ -208,6 +208,10 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     if (policy === 'builtin_only' && tool.source === 'mcp') deny('tool_policy_builtin_only', '当前任务仅允许内置工具。');
     // 任务级 allowlist 保持「未设置表示不额外收窄」语义，与 Skill 级默认拒绝语义相互独立。
     if (allowlist.length && !allowlist.includes(tool.name)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
+    const conversationScope = parseRunMetadata(run.metadata).capabilityConstraints;
+    if (conversationScope?.present === true && (!(tool.capabilities || []).length || !tool.capabilities.every(cap => capabilitiesCoverTool(conversationScope.capabilities || [], [cap])))) {
+        deny('conversation_capability_scope', '工具超出本次用户委托的能力范围，请补充具体处理要求后再尝试。');
+    }
     const capabilityAllowlist = normalizeAllowlist(run.capability_allowlist || run.capabilityAllowlist || run.capabilities);
     if (capabilityAllowlist.length && !tool.capabilities.some(capability => capabilityAllowlist.includes(capability))) {
         deny('task_capability_allowlist', '工具能力不在当前任务能力上下文中。');

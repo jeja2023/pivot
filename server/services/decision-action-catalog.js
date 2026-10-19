@@ -3,6 +3,10 @@
 const { normalizeActionId } = require('./decision-provider');
 
 const ACTION_CATALOG = Object.freeze({
+    'chat.execution': Object.freeze(Object.fromEntries([
+        ['direct_answer', '直接回答，无持久任务'], ['plan_only', '只提供受约束的计划'],
+        ['agent_run', '建立持久受控任务'], ['continue_run', '向同一任务补充要求'], ['clarify', '补充一个确实阻断的业务事实']
+    ].map(([id, description]) => [id, Object.freeze({ id, description, type: 'chat_execution', source: 'chat_intent_v2', successDefinition: '以独立核验或用户纠正标注路由正确性，自动启动或用户沉默不作为成功标签。' })]))),
     'chat.rag': Object.freeze({
         retrieve: Object.freeze({ id: 'retrieve', type: 'knowledge_retrieval', source: 'semantic_router_rag', description: '在已授权的知识库范围内检索证据', successDefinition: '检索到可引用依据，并由后续业务结果或人工核验确认路径正确。' }),
         skip: Object.freeze({ id: 'skip', type: 'knowledge_retrieval', source: 'semantic_router_rag', description: '本轮不执行知识库检索，继续受控回退路径', successDefinition: '后续回答不要求知识库依据，且经业务结果或人工核验确认无需检索。' })

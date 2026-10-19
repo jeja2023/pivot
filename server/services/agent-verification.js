@@ -25,7 +25,10 @@ function normalizeAcceptance(value = {}) {
         requireJson: source.requireJson === true || source.require_json === true,
         outputSchema: schemaHasRules(schema) ? schema : {},
         requiredArtifacts: list(source.requiredArtifacts || source.required_artifacts, 16),
-        requireEvidence: source.requireEvidence === true || source.require_evidence === true
+        requireEvidence: source.requireEvidence === true || source.require_evidence === true,
+        ...(source.artifactRequired === true ? { artifactRequired: true } : {}),
+        ...(source.requireSemanticVerification === true ? { requireSemanticVerification: true } : {}),
+        ...(source.requireCompleteSource === true ? { requireCompleteSource: true } : {})
     };
 }
 
@@ -41,7 +44,9 @@ function normalizeTaskContract(value = {}, goal = '') {
         deliverables: Array.isArray(source.deliverables) ? source.deliverables.slice(0, 16) : [],
         acceptance,
         repairAttempts: Math.max(0, Math.min(Number.parseInt(source.repairAttempts || source.repair_attempts, 10) || 0, 3)),
-        source: text(source.source || 'server_generated', 40) || 'server_generated'
+        source: text(source.source || 'server_generated', 40) || 'server_generated',
+        ...(source.authorizationRef ? { authorizationRef: text(source.authorizationRef, 160) } : {}),
+        ...(source.budgetRef ? { budgetRef: text(source.budgetRef, 160) } : {})
     };
 }
 
@@ -77,7 +82,7 @@ function hasEvidence(observations = []) {
     });
 }
 
-function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations = [], evidence = [], partial = false, reason = '' } = {}) {
+function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations = [], evidence = [], partial = false, reason = '', semanticVerification = null } = {}) {
     const contract = normalizeTaskContract(taskContract, goal);
     const output = text(answer, 2_000_000);
     const acceptance = contract.acceptance;
@@ -94,6 +99,8 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
         add('output_schema', issues.length === 0, issues[0] || 'valid');
     }
     const artifactNames = findArtifactNames(observations);
+    if (acceptance.artifactRequired) add('artifact_required', artifactNames.length > 0, artifactNames.join('、'));
+    if (acceptance.requireSemanticVerification) add('deliverables_verified', semanticVerification?.passed === true, semanticVerification?.reason || (semanticVerification?.missing || []).join('；'));
     acceptance.requiredArtifacts.forEach(required => add('required_artifact', artifactNames.includes(required), required));
     if (acceptance.requireEvidence) add('evidence', hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0), 'evidence');
     const hardFailures = rules.filter(rule => rule.hard && !rule.passed);
@@ -125,6 +132,9 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
             evidence = [];
         }
     }
+    const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '');
+    const semanticVerification = contract.acceptance.requireSemanticVerification && !partial
+        ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run.user_id }, contract, answer, observations }) : null;
     const report = verifyTaskOutcome({
         taskContract: taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract,
         goal: run?.goal || '',
@@ -132,8 +142,10 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         observations,
         evidence,
         partial,
-        reason
+        reason,
+        semanticVerification
     });
+    if (semanticVerification) report.semanticVerification = semanticVerification;
     if (typeof setRunMetadata === 'function' && runId) {
         await setRunMetadata(runId, { taskContract: report.taskContract, taskVerification: report });
     }

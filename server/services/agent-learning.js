@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { getUserSettingValueAsync, setUserSettingAsync } = require('./user-settings');
+const { refreshUserSettingsCacheForUser } = require('./user-settings');
 const { getRunnableModelForUserAsync } = require('./models');
 const { callModelText } = require('./agent-model');
 const { parseJsonObject } = require('./agent-validators');
@@ -47,12 +47,13 @@ function normalizeSettings(value = {}) {
 }
 
 async function getAgentLearningSettings(userId) {
-    return normalizeSettings(await getUserSettingValueAsync(userId, SETTINGS_KEY));
+    return normalizeSettings((await require('../repositories/agent-learning-evaluation').readLearningSettings(userId))?.value);
 }
 
 async function updateAgentLearningSettings(userId, patch = {}) {
     const settings = normalizeSettings({ ...(await getAgentLearningSettings(userId)), ...(patch || {}) });
-    await setUserSettingAsync(userId, SETTINGS_KEY, JSON.stringify(settings));
+    await require('../repositories/agent-learning-evaluation').saveLearningSettings(userId, settings);
+    await refreshUserSettingsCacheForUser(userId);
     return settings;
 }
 
@@ -61,7 +62,7 @@ function normalizeTrigger(value) {
     return TRIGGERS.includes(trigger) ? trigger : 'success';
 }
 
-async function getSkillAutoPromotionEvaluation(user, evaluationRunId = '') {
+async function getSkillAutoPromotionEvaluation(user, evaluationRunId = '', versionId = null) {
     const id = String(evaluationRunId || '').trim();
     if (!id) return { eligible: false, reason: 'missing_evaluation' };
     try {
@@ -70,7 +71,11 @@ async function getSkillAutoPromotionEvaluation(user, evaluationRunId = '') {
         const summary = evaluation?.run?.summary || {};
         const completed = Number(summary.completed || 0);
         const passRate = Number(summary.passRate || 0);
-        const eligible = evaluation?.run?.status === 'completed'
+        const binding = versionId ? await require('../repositories/agent-learning-evaluation').evaluationBinding(id, versionId, user.id) : null;
+        const gate = require('./agent-evaluation-gates').assessEvaluationReleaseGate(evaluation, { minCases: MIN_SKILL_AUTO_PROMOTION_CASES, minPassRate: MIN_SKILL_AUTO_PROMOTION_PASS_RATE, requiredTiers: ['contract','scenario'] });
+        const eligible = Boolean(binding && binding.total >= MIN_SKILL_AUTO_PROMOTION_CASES && binding.matched === binding.total)
+            && gate.passed
+            && evaluation?.run?.status === 'completed'
             && completed >= MIN_SKILL_AUTO_PROMOTION_CASES
             && passRate >= MIN_SKILL_AUTO_PROMOTION_PASS_RATE;
         return {
@@ -279,6 +284,10 @@ async function setJobResult(jobIdValue, fields = {}) {
 }
 
 async function processAgentLearningJob(row, options = {}) {
+    if (!(await getAgentLearningSettings(row.user_id)).autoLearning && row.trigger_type !== 'explicit') {
+        return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'learning_disabled' } });
+    }
+    const memoryGate = await require('./long-term-memory/memory-gate').assertMemoryWriteGate(row.user_id);
     const run = await queryOne('SELECT * FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [row.source_run_id, row.user_id]);
     if (!run) return setJobResult(row.id, { status: 'failed', errorCode: 'SOURCE_RUN_MISSING', errorMessage: '来源任务不存在。' });
     if (run.session_id && !(await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [run.session_id, row.user_id]))) {
@@ -295,7 +304,8 @@ async function processAgentLearningJob(row, options = {}) {
     const feedbackRows = await query(`SELECT correction, modified_answer FROM agent_feedback WHERE user_id = ? AND run_id = ? AND source = 'user' ORDER BY updated_at DESC LIMIT 3`, [row.user_id, run.id]);
     const corrections = feedbackRows.flatMap(item => [item.correction, item.modified_answer])
         .map(item => String(item || '').trim()).filter(item => item && !hasSensitiveContent(item));
-    const candidate = await reflectCandidate(run, calls, requestedKind, user, modelCfg, corrections);
+    const candidate = stored.candidate || await reflectCandidate(run, calls, requestedKind, user, modelCfg, corrections);
+    if (row.trigger_type !== 'explicit' && !(await getAgentLearningSettings(row.user_id)).autoLearning) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'learning_disabled_during_reflection' } });
     if (hasSensitiveContent(`${candidate.title || ''}\n${candidate.summary || ''}`) || candidate.kind !== 'memory' && !isSafeLearningInstruction(candidate.instructions)) {
         return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'unsafe_instruction' } });
     }
@@ -307,7 +317,8 @@ async function processAgentLearningJob(row, options = {}) {
             salience: candidate.confidence, confidence: candidate.confidence,
             sourceRunId: run.id, sourceSessionId: run.session_id,
             origin: 'learning', assertedBy: 'system'
-        }, { user, origin: 'learning', assertedBy: 'system', stagePending: true, requireActiveSources: true });
+        }, { user, origin: 'learning', assertedBy: 'system', stagePending: true, requireActiveSources: true, memoryRevision: memoryGate.gate.revision });
+        if (memory?.skipped) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: memory.reason } });
         return setJobResult(row.id, { status: 'completed', resultSummary: { kind: 'memory', memoryId: memory?.id || null, confidence: candidate.confidence } });
     }
     if (candidate.kind === 'workflow') {
@@ -327,8 +338,8 @@ async function processAgentLearningJob(row, options = {}) {
     const settings = await getAgentLearningSettings(row.user_id);
     if (candidate.tools.length < 2 || candidate.permissionDiff?.added?.length) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'insufficient_safe_steps', tools: candidate.tools } });
     const request = parseJson(row.result_summary, {});
-    const evaluation = await getSkillAutoPromotionEvaluation(user, request.evaluationRunId);
-    const allowAutoActivate = settings.autoLearning
+    let evaluation = await getSkillAutoPromotionEvaluation(user, request.evaluationRunId, stored.candidateVersionId);
+    let allowAutoActivate = settings.autoLearning
         && settings.autoActivate
         && candidate.confidence >= settings.minConfidence
         && evaluation.eligible;
@@ -347,6 +358,8 @@ async function processAgentLearningJob(row, options = {}) {
         : null;
     if (!version) version = await queryOne('SELECT * FROM agent_skill_versions WHERE created_by = ? AND source_run_id = ? AND owner_key = ? AND name = ? ORDER BY id DESC LIMIT 1', [user.id, run.id, `user:${user.id}`, candidate.manifest.name]);
     if (!version) version = await createSkillVersion(user, { manifest: candidate.manifest, instructions: candidate.instructions, sourceRunId: run.id, strictSpec: true });
+    evaluation = await getSkillAutoPromotionEvaluation(user, request.evaluationRunId, version.id);
+    allowAutoActivate = settings.autoLearning && settings.autoActivate && candidate.confidence >= settings.minConfidence && evaluation.eligible;
     const validation = await validateSkillVersion(version.id, user, {
         strictSpec: true,
         requireSignature: false,
@@ -354,13 +367,23 @@ async function processAgentLearningJob(row, options = {}) {
     });
     await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id) });
     if (!validation?.passed) return setJobResult(row.id, { status: 'validation_failed', proposalId: proposal.id, errorCode: 'SKILL_VALIDATION_FAILED', errorMessage: validation?.manifest?.errors?.[0] || validation?.sandbox?.result?.stderr || 'Skill 验证未通过。', resultSummary: { kind: 'skill', proposalId: proposal.id, validation: validation?.passed === true } });
+    if (!request.evaluationRunId && settings.autoLearning && settings.autoActivate) {
+        const scheduled = await require('./agent-learning-evaluation').startLearningEvaluation({ user, run, candidate, version });
+        if (scheduled.scheduled) return setJobResult(row.id, { status: 'validating', proposalId: proposal.id, resultSummary: { ...request, kind: 'skill', candidate, candidateVersionId: version.id, evaluationRunId: scheduled.evaluationRunId } });
+    }
+    const currentSettings = await getAgentLearningSettings(row.user_id);
+    allowAutoActivate = allowAutoActivate && currentSettings.autoLearning && currentSettings.autoActivate;
     if (allowAutoActivate) {
-        let release = proposal.releaseId
-            ? await queryOne("SELECT * FROM agent_skill_releases WHERE id = ? AND status = 'published'", [proposal.releaseId])
-            : null;
-        if (!release) release = await queryOne("SELECT * FROM agent_skill_releases WHERE skill_version_id = ? AND owner_key = ? AND rollout_scope = 'personal' AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1", [version.id, `user:${user.id}`]);
-        if (!release) release = await publishSkillVersion(version.id, user, { scope: 'personal', rolloutScope: 'personal', rolloutPercent: 100 });
-        await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id), releaseId: String(release.id), status: 'personal_active', activationMode: 'auto' });
+        const release = await require('../repositories/agent-learning-evaluation').withLearningPublication(user.id, async () => {
+            let publishedRelease = proposal.releaseId
+                ? await queryOne("SELECT * FROM agent_skill_releases WHERE id = ? AND status = 'published'", [proposal.releaseId])
+                : null;
+            if (!publishedRelease) publishedRelease = await queryOne("SELECT * FROM agent_skill_releases WHERE skill_version_id = ? AND owner_key = ? AND rollout_scope = 'personal' AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1", [version.id, `user:${user.id}`]);
+            if (!publishedRelease) publishedRelease = await publishSkillVersion(version.id, user, { scope: 'personal', rolloutScope: 'personal', rolloutPercent: 100 });
+            await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id), releaseId: String(publishedRelease.id), status: 'personal_active', activationMode: 'auto' });
+            return publishedRelease;
+        });
+        if (!release) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'learning_disabled_before_publication' } });
         return setJobResult(row.id, { status: 'completed', proposalId: proposal.id, resultSummary: { kind: 'skill', proposalId: proposal.id, releaseId: release.id, autoActivated: true, confidence: candidate.confidence, evaluation } });
     }
     await updateEvolutionArtifact(proposal.id, user, { artifactType: 'skill', artifactId: String(version.skill_id || version.id), artifactVersionId: String(version.id), status: 'waiting_user_review', activationMode: 'user_confirmed' });
@@ -368,6 +391,7 @@ async function processAgentLearningJob(row, options = {}) {
 }
 
 async function processAgentLearningJobs(options = {}) {
+    await require('./agent-learning-evaluation').resumeFinishedLearningEvaluations();
     const claimed = await claimAgentLearningJobs(options.limit || 2);
     const results = [];
     for (const row of claimed) {

@@ -73,6 +73,12 @@ function applyControlMessagesToWorkingState(value, messages = [], taskContract =
         if (!messageId || existing.has(messageId)) continue;
         existing.add(messageId);
         const payload = message?.payload && typeof message.payload === 'object' ? message.payload : {};
+        if (!message.from_run_id && payload.source === 'chat' && payload.taskContractPatch) {
+            const revised = createTaskWorkingState(taskContract, goal);
+            state.goal = revised.goal;
+            state.pendingWork = revised.pendingWork;
+            state.constraints = revised.constraints;
+        }
         const instruction = text(payload.instruction || payload.message || payload.text || '', 2000);
         if (instruction) {
             state.constraints.push({

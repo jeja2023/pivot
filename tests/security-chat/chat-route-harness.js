@@ -43,6 +43,10 @@ async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usag
                     res.statusCode = 200;
                     res.setHeader('Content-Type', 'application/json; charset=utf-8');
                     let content = replyChunks.join('');
+                    if (parsed.messages?.some(message => String(message.content || '').includes('你是对话下一步决策器'))) {
+                        const request = JSON.parse(parsed.messages.find(message => message.role === 'user').content);
+                        content = JSON.stringify({ action: 'agent_run', intent: 'delegate', objective: request.prompt, constraints: [], deliverables: ['管理报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.95 });
+                    }
                     const isSemanticVerifier = parsed.messages?.some(m => String(m.content || '').includes('知识库证据蕴含核验器'));
                     if (isSemanticVerifier) {
                         try {

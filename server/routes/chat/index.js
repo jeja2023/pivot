@@ -38,7 +38,6 @@ const {
 } = require('../../services/chat-rag-context');
 const { createChatRagResponseFlow } = require('../../services/chat-rag-grounding');
 const {
-    saveUserMessage,
     touchSession,
     updateLastAssistantStats
 } = require('../../services/chat-messages');
@@ -66,17 +65,16 @@ const { persistFinalChatResponse } = require('../../services/chat-decision-outco
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { createChatAgentHandoff } = require('../../services/chat-agent-handoff');
+const { beginChatTurn } = require('../../services/chat-turn-ledger');
+const conversationTurns = require('../../repositories/chat-conversation-turns');
 const { decideAutomaticChatExecution, handleAutomaticTaskControl } = require('../../services/chat-auto-execution-handler');
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
 const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
 const {
-    assertActiveAgentVoiceSession,
-    getAgentVoiceSession,
-    listAgentVoiceSessions,
-    recordAgentVoiceEvent,
-    startAgentVoiceSession
+    assertActiveAgentVoiceSession
 } = require('../../services/agent-voice-sessions');
+const { registerChatAuxiliaryRoutes } = require('./auxiliary');
 const { controlVoiceSessionAgentRun } = require('./voice-task-control');
 const { registerChatRequestLocalBridge } = require('./local-bridge');
 
@@ -110,6 +108,8 @@ function createChatRouter({
         return typeof autoAgent === 'function' ? autoAgent() === true : autoAgent === true;
     };
     const readAutoExecutionEnabled = () => {
+        const routeConfig = getChatAutoRouteConfig();
+        if (!routeConfig.enabled || routeConfig.shadowMode) return false;
         if (typeof autoExecutionEnabled === 'function') return autoExecutionEnabled() === true;
         if (autoExecutionEnabled !== undefined && autoExecutionEnabled !== null) return autoExecutionEnabled === true;
         return getChatAutoRouteConfig().autoExecutionEnabled === true;
@@ -139,32 +139,7 @@ function createChatRouter({
         res.json({ success: true });
     }));
 
-    router.get('/chat/voice-sessions', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ success: true, sessions: await listAgentVoiceSessions(req.user, { limit: req.query.limit }) });
-    }));
-
-    router.post('/chat/voice-sessions', authMiddleware, asyncHandler(async (req, res) => {
-        const voiceSession = await startAgentVoiceSession(req.user, req.body || {});
-        logAction(req, '启动实时语音会话', `语音会话: ${voiceSession.id}，传输: ${voiceSession.transport}`);
-        res.status(201).json({ success: true, voiceSession });
-    }));
-
-    router.get('/chat/voice-sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const voiceSession = await getAgentVoiceSession(req.user, req.params.id);
-        if (!voiceSession) return res.status(404).json({ error: '语音会话不存在或无权访问。' });
-        res.json({ success: true, voiceSession });
-    }));
-
-    router.post('/chat/voice-sessions/:id/events', authMiddleware, asyncHandler(async (req, res) => {
-        const voiceSession = await recordAgentVoiceEvent(req.user, req.params.id, req.body || {});
-        res.json({ success: true, voiceSession });
-    }));
-
-    router.post('/chat/voice-sessions/:id/task-control', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await controlVoiceSessionAgentRun(req.user, req.params.id, req.body?.action);
-        logAction(req, '语音控制智能体任务', `语音会话: ${req.params.id}，动作: ${result.action}，来源任务: ${result.sourceRunId}`);
-        res.status(result.action === 'resume' ? 202 : 200).json({ success: true, ...result });
-    }));
+    registerChatAuxiliaryRoutes(router, { authMiddleware, logAction });
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
         const chatState = buildChatRequestState(req);
@@ -206,9 +181,14 @@ function createChatRouter({
                 details
             });
         };
+        let conversationTurn = null;
         const persistAssistantResponse = async options => {
             if (ephemeralVoice) return { assistantMessageResult: null, assistantMessageId: null };
-            return await persistAssistantTurn(options);
+            const intent = chatState.intentDecision;
+            const routeMetadata = intent?.decisionId ? { ...(options.routeMetadata || {}), decisions: [...(options.routeMetadata?.decisions || []), { decisionId: intent.decisionId, scenario: 'chat.execution', selectedActionId: intent.action, allowedActionIds: ['direct_answer','plan_only','agent_run','continue_run','clarify'] }] } : options.routeMetadata;
+            const result = await persistAssistantTurn({ ...options, routeMetadata, conversationTurnId: conversationTurn?.id || null });
+            await conversationTurns.updateTurn(conversationTurn, { assistant_message_id: result.assistantMessageId, status: 'completed', outcome: { durationMs: Date.now() - chatState.timing.startedAt, firstContentMs: chatState.timing.firstContentMs, routerModelCalls: intent?.modelCalls || 0, totalTokens: options.providerUsage?.total_tokens || null } });
+            return result;
         };
         const abortController = new AbortController();
         const onClientDisconnect = () => {
@@ -234,6 +214,7 @@ function createChatRouter({
         const streamedChartSpecs = chartSseCapture.streamedChartSpecs;
         const writeSse = (payload) => {
             if (res.writableEnded) return;
+            if (chatState.timing.firstContentMs === null && typeof payload === 'string' && payload.startsWith('{"content":')) chatState.timing.firstContentMs = Date.now() - chatState.timing.startedAt;
             chartSseCapture.writeSse(payload);
         };
 
@@ -342,23 +323,17 @@ function createChatRouter({
         }
 
         let userMessageId = regenerationUserMessageId;
-        if (!regenerate && !ephemeralVoice) {
-            try {
-                const userMessageResult = await saveUserMessage({ sessionId, userId, content: modelContent, modelId: modelCfg.id });
+        try {
+            conversationTurn = await beginChatTurn({ req, res, state: chatState, modelCfg, writeSse });
+            if (conversationTurn?.handled) return res.end();
+            if (conversationTurn?.user_message_id) {
+                userMessageId = Number(conversationTurn.user_message_id);
                 userMessagePersisted = true;
-                userMessageId = Number(userMessageResult.lastInsertRowid || 0) || null;
-                writeSse(JSON.stringify({
-                    type: 'message_saved',
-                    role: 'user',
-                    messageId: userMessageResult.lastInsertRowid
-                }));
-            } catch (dbErr) {
-                req.log.error({ sessionId, err: dbErr.message }, '用户消息入库失败');
-                writeSse(JSON.stringify({ error: '消息保存失败，请稍后重试', code: 'DB_ERROR' }));
-                return res.end();
             }
+        } catch (error) {
+            writeSse(JSON.stringify({ error: error.message, code: error.code || 'CHAT_REQUEST_UNAVAILABLE' }));
+            return res.end();
         }
-
         let automaticExecution = await decideAutomaticChatExecution({
             regenerate,
             ephemeralVoice,
@@ -370,9 +345,18 @@ function createChatRouter({
             sessionId,
             userId,
             user: req.user,
+            userMessageId,
+            modelCfg,
+            signal: abortController.signal,
+            projectId: chatState.projectId,
+            writeSse,
             sessionsRepository,
             log: req.log
         });
+        automaticExecution.projectId = chatState.projectId;
+        automaticExecution.modelId = modelCfg.id;
+        await conversationTurns.updateTurn(conversationTurn, { decision: automaticExecution });
+        chatState.intentDecision = automaticExecution;
         if (automaticExecution.action === 'agent_run') {
             writeSse(JSON.stringify({
                 type: 'route',
@@ -398,10 +382,23 @@ function createChatRouter({
             persistAssistantResponse,
             writeSse,
             finishChatTrace,
+            turn: conversationTurn,
+            projectId: chatState.projectId,
+            modelContent,
             log: req.log
         });
         automaticExecution = controlResult.decision || automaticExecution;
         if (controlResult.handled) return res.end();
+        chatState.intentDecision = automaticExecution;
+        await conversationTurns.updateTurn(conversationTurn, { decision: automaticExecution });
+        if (automaticExecution.action === 'plan_only') {
+            chatState.mcpEnabled = mcpEnabled = false;
+            chatState.ragEnabled = ragEnabled = false;
+            chatState.routeOverrides = { ...chatState.routeOverrides, excludeTools: true, excludeRag: true };
+        } else if (automaticExecution.action === 'direct_answer' && automaticExecution.reasonCode === 'semantic_intent' && automaticExecution.requiredCapabilities?.some(cap => /^(?:data\.|network\.)/.test(cap))) {
+            chatState.mcpEnabled = mcpEnabled = true;
+            chatState.automaticReadCapabilities = automaticExecution.requiredCapabilities;
+        }
         const audit = continuationKind === 'mcp_authorized'
             ? { action: '工具授权后继续处理', detail: `用户授权工具库后继续处理会话: ${sessionId}` }
             : continuationKind === 'mcp_skipped'
@@ -470,7 +467,7 @@ function createChatRouter({
         // 显式 Agent 请求保持兼容。在普通对话中，
         // 服务端高置信度决策可直接接入同一治理运行时，无需手动模式选择或指令。
         const useChatAgent = chatMode === 'agent' || automaticExecution.action === 'agent_run';
-        if (useChatAgent && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
+        if (useChatAgent && (automaticExecution.action === 'agent_run' || modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH)) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const handoff = await createChatAgentHandoff({
@@ -490,9 +487,13 @@ function createChatRouter({
                     retrieveContext,
                     isRagEnabled,
                     agentRunFactory,
-                    automaticExecution
+                    automaticExecution,
+                    turn: conversationTurn,
+                    regenerate,
+                    requestKey: req.body.clientRequestId || ''
                 });
                 const { run, agentContext } = handoff;
+                await conversationTurns.updateTurn(conversationTurn, { run_id: run.id, conversation_task_id: run.metadata?.conversationTaskId || automaticExecution.conversationTaskId || run.id, status: 'handed_off' });
                 if (agentContext.memoryCount > 0) {
                     writeSse(JSON.stringify({
                         type: 'memory',

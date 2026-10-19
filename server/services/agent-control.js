@@ -46,11 +46,19 @@ function serializePayload(payload) {
 
 function applyMessagesToTaskContract(value, messages = {}, goal = '') {
     const { normalizeTaskContract } = require('./agent-verification');
-    const contract = normalizeTaskContract(value, goal);
+    let contract = normalizeTaskContract(value, goal);
     const existing = new Set(contract.constraints.map(item => String(item || '').trim()).filter(Boolean));
     let changed = 0;
     for (const message of Array.isArray(messages) ? messages : []) {
         const payload = message?.payload && typeof message.payload === 'object' ? message.payload : {};
+        if (!message.from_run_id && payload.source === 'chat' && payload.taskContractPatch) {
+            const patch = payload.taskContractPatch;
+            contract = normalizeTaskContract({ ...contract, goal: patch.goal || contract.goal, constraints: Array.isArray(patch.constraints) ? patch.constraints : contract.constraints,
+                deliverables: Array.isArray(patch.deliverables) && patch.deliverables.length ? patch.deliverables : contract.deliverables,
+                acceptance: { ...contract.acceptance, ...patch.acceptance, requireSemanticVerification: true }, authorizationRef: patch.authorizationRef || contract.authorizationRef }, goal);
+            existing.clear();
+            contract.constraints.forEach(item => existing.add(item));
+        }
         const instruction = String(payload.instruction || payload.message || payload.text || '').trim().slice(0, 4000);
         if (!instruction || existing.has(instruction)) continue;
         existing.add(instruction);

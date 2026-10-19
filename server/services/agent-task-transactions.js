@@ -210,6 +210,23 @@ function createTaskTransactionStore(deps = {}) {
         });
     }
 
+    async function resumeTaskTransactionAfterInput(transactionId, user, taskContract) {
+        return runTransaction(async trx => {
+            const current = await loadTransaction(trx, String(transactionId), user?.id, true);
+            if (!current) throw transactionNotFound();
+            if (['planned','executing'].includes(current.status)) return current;
+            if (current.status !== 'needs_input' || current.effects.some(effect => !['cancelled','compensated'].includes(effect.status))) {
+                throw transactionError('任务仍有待核对的外部动作或工作区预览，请先在事务详情完成处理，再继续。', 'AGENT_TASK_RESUME_EFFECT_REVIEW_REQUIRED', 409);
+            }
+            await assertTaskRunAvailable(trx, current);
+            const contract = require('./agent-verification').normalizeTaskContract(taskContract, current.taskContract?.goal || '');
+            // 此专用入口只恢复没有未决副作用的等待输入事务，不放开通用状态 API。
+            const snapshot = { ...current.workspaceSnapshot, inputResume: { at: now(), priorVerification: current.verification, contractRevision: contract.revision } };
+            await trx.execute("UPDATE agent_task_transactions SET status = 'executing', task_contract = ?::jsonb, verification = '{}'::jsonb, workspace_snapshot = ?::jsonb, failure_reason = '', updated_at = ? WHERE id = ? AND status = 'needs_input'", [JSON.stringify(contract), JSON.stringify(snapshot), now(), current.id]);
+            return loadTransaction(trx, current.id, user.id, false);
+        });
+    }
+
     async function transitionTaskTransaction(id, user, targetStatus, { failureReason = '', commitEvidence = null } = {}) {
         return await runTransaction(async trx => {
             const current = await loadTransaction(trx, String(id), user?.id, true);
@@ -523,6 +540,7 @@ function createTaskTransactionStore(deps = {}) {
         finalizeTaskRollback,
         getTaskTransactionForUser,
         listTaskTransactionsForRun,
+        resumeTaskTransactionAfterInput,
         recordTaskTransactionVerification,
         recordTaskWorkspaceSnapshot,
         resolveUncertainTaskEffect,
@@ -543,6 +561,7 @@ module.exports = {
     finalizeTaskRollback: defaultStore.finalizeTaskRollback,
     getTaskTransactionForUser: defaultStore.getTaskTransactionForUser,
     listTaskTransactionsForRun: defaultStore.listTaskTransactionsForRun,
+    resumeTaskTransactionAfterInput: defaultStore.resumeTaskTransactionAfterInput,
     recordTaskTransactionVerification: defaultStore.recordTaskTransactionVerification,
     recordTaskWorkspaceSnapshot: defaultStore.recordTaskWorkspaceSnapshot,
     resolveUncertainTaskEffect: defaultStore.resolveUncertainTaskEffect,

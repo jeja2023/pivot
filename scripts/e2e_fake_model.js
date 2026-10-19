@@ -22,10 +22,15 @@ const server = http.createServer((req, res) => {
         const semanticDelayMs = JSON.stringify(payload).includes('E2E_SEMANTIC_DELAY') ? 1_500 : 0;
         const respond = () => {
         if (payload.stream === false) {
+            let content = '真实 E2E 回答';
+            if (payload.messages?.some(message => String(message.content || '').includes('你是对话下一步决策器'))) {
+                const request = JSON.parse(payload.messages.find(message => message.role === 'user').content);
+                content = JSON.stringify({ action: 'agent_run', intent: 'delegate', objective: request.prompt, constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.9 });
+            }
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({
                 id: 'e2e-completion', object: 'chat.completion',
-                choices: [{ index: 0, message: { role: 'assistant', content: '真实 E2E 回答' }, finish_reason: 'stop' }],
+                choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
                 usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }
             }));
             return;

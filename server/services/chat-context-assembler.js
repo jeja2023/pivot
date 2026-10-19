@@ -19,6 +19,8 @@ const { saveUserMessage } = require('./chat-messages');
 const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
+const { capabilitiesCoverTool } = require('./agent-capability-registry');
+const { normalizeToolContract } = require('./agent-contracts');
 const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
 const { retrieveWikiContext } = require('./knowledge-wiki');
@@ -126,6 +128,16 @@ async function assembleChatContext({
 }) {
     const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
+    try {
+        const { getAgentProfile, buildAgentProfileContext } = require('./agent-profile');
+        const profile = await getAgentProfile(userId);
+        history = [{ role: 'system', content: buildAgentProfileContext(profile) }, ...history];
+    } catch (_) {
+        // 档案不可用时继续当前请求；不会把默认偏好写成用户已选择的偏好。
+    }
+    if (state.intentDecision?.action === 'plan_only') {
+        history = [{ role: 'system', content: '本轮用户只要求计划。请交付目标、步骤、依赖、验收方法和阻断信息，不调用工具、不宣称已经执行；不要要求用户选择普通或智能体模式。' }, ...history];
+    }
     let pendingMemoryUsage = null;
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     // 检索只使用本轮结构化任务状态中的 currentQuestion/retrievalQuery，
@@ -160,6 +172,13 @@ async function assembleChatContext({
         try {
             const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
             accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist);
+            if (Array.isArray(state.automaticReadCapabilities)) {
+                accessibleMcpTools = accessibleMcpTools.filter(raw => {
+                    const tool = normalizeToolContract(raw);
+                    return !tool.side_effect && !tool.approval_required && tool.capabilities.length
+                        && tool.capabilities.every(cap => capabilitiesCoverTool(state.automaticReadCapabilities, [cap]));
+                });
+            }
         } catch (error) {
             req.log.warn({ sessionId, userId, err: error.message }, '读取工具目录失败，已按无工具候选继续');
         }
@@ -248,7 +267,7 @@ async function assembleChatContext({
         }))).then(contexts => mergeRagContexts(contexts, { maxCitations: Math.max(8, (getModelContextBudget(modelCfg).inputBudget > 0 ? 12 : 8)) }))
         : Promise.resolve(null);
     const [memoryResult, ragResult] = await Promise.allSettled([
-        !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId }) : Promise.resolve([]),
+        !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId, projectId: state.projectId }) : Promise.resolve([]),
         ragPromise
     ]);
 

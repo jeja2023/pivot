@@ -31,6 +31,7 @@ const AGENT_CAPABILITY_DEFINITIONS = Object.freeze([
 
     // ── 平台观测域 ──
     { id: 'system.observe', title: '平台状态查看', parent: null, risk: 'low' },
+    { id: 'conversation.read_source', title: '当前任务原始资料读取', parent: null, risk: 'low' },
 
     // ── 文件读域：filesystem.read 覆盖工作区读，工作区读是其真子集 ──
     { id: 'filesystem.read', title: '文件读取', parent: null, risk: 'medium' },

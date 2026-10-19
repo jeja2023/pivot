@@ -126,6 +126,8 @@ function buildChatAgentMetadata({
 async function prepareChatAgentContext({
     userId,
     user,
+    sessionId,
+    projectId,
     modelCfg,
     modelContent,
     ragEnabled = false,
@@ -142,7 +144,7 @@ async function prepareChatAgentContext({
 
     if (queryText && Number(userId) > 0) {
         try {
-            const matches = await retrieveLongTermMemories(userId, queryText, { user });
+            const matches = await retrieveLongTermMemories(userId, queryText, { user, sessionId, projectId });
             memoryCount = Array.isArray(matches) ? matches.length : 0;
             const memoryMessage = buildLongTermMemoryContextMessage(matches, {
                 inputBudget: modelCfg ? getModelContextBudget(modelCfg).inputBudget : 4000
@@ -238,7 +240,11 @@ async function persistAgentRunChatResult(runId) {
             content,
             modelId,
             tokenCount,
-            agentRunId: run.id
+            agentRunId: run.id,
+            routeMetadata: metadata.automaticExecution?.decisionId ? JSON.stringify({ decisions: [{
+                decisionId: metadata.automaticExecution.decisionId, scenario: 'chat.execution', selectedActionId: 'agent_run',
+                allowedActionIds: ['direct_answer','plan_only','agent_run','continue_run','clarify']
+            }] }) : null
         });
     } catch (error) {
         // Two terminal callbacks can race before either metadata marker is visible.

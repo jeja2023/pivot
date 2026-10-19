@@ -71,6 +71,10 @@
 | `PIVOT_CHAT_AUTO_RAG_ENABLED` | boolean | `true` | true / false | 是否在问题明确要求或确实依赖受控资料时，自动检索并缩小知识库 Collection 范围；普通问答不会触发检索。 |
 | `PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED` | boolean | `true` | true / false | 是否在用户明确需要实时数据、本机文件、指定网页或外部操作时，自动发现受治理的 MCP 工具；普通回答不会触发授权。 |
 | `PIVOT_CHAT_AUTO_EXECUTION_ENABLED` | boolean | `true` | true / false | 是否允许服务端将明确委托、范围充分的多步骤对话自动进入受控 Agent Run。此开关不授予工具、网络或副作用权限；具体动作仍由运行时策略和审批决定。 |
+| `PIVOT_CHAT_INTENT_MODE` | enum | `active` | active、shadow、disabled | 任务语义裁决模式。shadow 只记录建议；disabled 关闭语义调用和自动任务。 |
+| `PIVOT_CHAT_BACKGROUND_REVIEW_ENABLED` | boolean | `true` | true / false | 是否允许独立审查组件核对已知只读适配器的任务范围。不能放行策略拒绝、强制人工、写入、发送或权限变更；失败时回到原审批边界。 |
+| `PIVOT_CHAT_INTENT_TIMEOUT_MS` | integer | `30000` | 1000–120000 | 候选任务语义裁决超时，包含排队。失败时保留请求并说明阻断。普通问答不调用分类模型。 |
+| `PIVOT_CHAT_INTENT_ROLLOUT_PERCENT` | integer | `100` | 0–100 | 按用户和会话稳定分桶的任务自动处理比例。设为 0 立即回退影子模式。 |
 | `PIVOT_CHAT_DIRECT_PATH_ENABLED` | boolean | `true` | true / false | 是否启用普通对话直答快路径。无资料、工具或显式范围信号时跳过决策器、偏好读取与逐条决策审计，仅保留异步聚合指标。 |
 | `PIVOT_CHAT_ROUTE_SHADOW_MODE` | boolean | `false` | true / false | 是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。 |
 | `PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES` | integer | `4` | 1–12 | 自动工具发现传给 MCP Planner 的最大候选工具数。 |

@@ -1,6 +1,7 @@
 const { evaluateToolPolicy, normalizeToolInput } = require('./agent-policy');
 const { normalizeToolContract } = require('./agent-contracts');
 const { assertNetworkPolicyUrl } = require('./agent-network-policy');
+const { parseJsonObject } = require('./agent-validators');
 
 function extractNetworkUrl(input = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
@@ -35,6 +36,15 @@ function retrySemantics(tool, policy = {}) {
 }
 
 async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}, user = null, context = {}, policyEvaluator = evaluateToolPolicy } = {}) {
+    const metadata = parseJsonObject(run.metadata) || {};
+    if (run.id && user?.id && metadata.capabilityConstraints?.present === true) {
+        const fresh = await require('../repositories/chat-conversation-turns').currentExecutionScope(run.id, user.id);
+        const current = parseJsonObject(fresh?.metadata) || {};
+        // 调度器手中的旧快照不能覆盖用户刚撤回的权限或暂停要求。
+        const scope = !fresh || fresh.source_active === false || ['needs_input','cancelled','deleted'].includes(fresh.status)
+            ? { present: true, capabilities: [] } : current.capabilityConstraints;
+        run = { ...run, metadata: { ...metadata, capabilityConstraints: scope || { present: true, capabilities: [] } } };
+    }
     const tool = normalizeToolContract(rawTool);
     const normalizedInput = normalizeToolInput(tool.name, input, run);
     const policy = policyEvaluator({

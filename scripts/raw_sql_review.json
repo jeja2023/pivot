@@ -5,6 +5,8 @@
   "reviewer": "architecture-governance",
   "verification": "npm run test:all",
   "entries": [
+    { "file": "server/repositories/chat-conversation-turns.js", "count": 16, "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。", "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；security-chat HTTP 回归。" },
+    { "file": "server/repositories/agent-learning-evaluation.js", "count": 11, "rationale": "候选经验只用本人已获正面人工反馈的独立任务建立评测；发布证明绑定真实评测子运行的候选版本和内容摘要；来源撤销实时复校，个人灰度统计按 user_id 与 release_id 隔离；学习开关使用新鲜读取，关闭时与记忆修订栅栏同事务写入，并与自动发布共用设置行锁，固定为设置行先于记忆栅栏的加锁顺序；等待评测的学习作业以状态条件恢复。", "verification": "tests/chat-conversation-product.test.js 独立样本筛选、关闭学习栅栏与隔离；tests/agent-evaluation-gates.test.js 冻结目标与质量门禁；tests/long-term-memory-skill-source.test.js 来源撤销。" },
     { "file": "server/services/agent-browser-action-evidence.js", "count": 3, "rationale": "浏览器动作证据的用户与运行归属查询，使用参数化 SQL 并由浏览器证据回归覆盖。" },
     { "file": "server/services/agent-browser-session-leases.js", "count": 16, "rationale": "浏览器会话租约、令牌栅栏和恢复状态必须在同一 PostgreSQL 事务内锁定，不能替换为无锁查询。" },
     { "file": "server/services/agent-browser-sessions.js", "count": 8, "rationale": "浏览器会话生命周期查询与 CAS 状态写入，参数化且由 Chromium/租约回归覆盖。" },
@@ -21,7 +23,7 @@
     { "file": "server/services/agent-task-effect-executor.js", "count": 2, "rationale": "外部效果执行认领与完成状态需要条件更新，防止跨进程重复副作用。" },
     { "file": "server/services/agent-task-drafts.js", "count": 17, "rationale": "聊天任务草案的会话归属、可恢复草案列表、版本 CAS、确认/启动状态机和不可变审计事件必须在同一 PostgreSQL 行锁事务中完成；所有查询均参数化，草案阶段不调用模型、检索或工具。" },
     { "file": "server/services/agent-task-resource-leases.js", "count": 11, "rationale": "跨运行资源租约必须在 PostgreSQL 行锁和条件更新下取得、续期和释放。" },
-    { "file": "server/services/agent-task-transactions.js", "count": 35, "rationale": "Task Transaction、效果、补偿和工作区快照共享事务边界；人工核对与跨 Run 业务幂等键需在同一行锁事务内按租户判定，拆出查询会破坏提交/回滚与去重原子性。" },
+    { "file": "server/services/agent-task-transactions.js", "count": 36, "rationale": "Task Transaction、效果、补偿和工作区快照共享事务边界；人工核对与跨 Run 业务幂等键需在同一行锁事务内按租户判定，拆出查询会破坏提交/回滚与去重原子性。" },
     { "file": "server/services/agent-working-memory-revisions.js", "count": 5, "rationale": "工作记忆修订使用 CAS 和引用状态条件更新，SQL 与修订回归一并审计。" },
     { "file": "server/services/models.js", "count": 10, "rationale": "模型配置和租户可见性查询使用参数化条件，受模型路由和配置注册门禁覆盖。" },
     { "file": "server/services/workspace-memory-source-lifecycle.js", "count": 4, "rationale": "代码工作区来源生命周期状态需和授权快照在事务中一致更新。" },

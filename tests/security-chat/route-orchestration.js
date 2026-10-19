@@ -308,6 +308,7 @@ test('普通聊天中的明确委托会自动创建受控 Agent，探索性问�
         agentRunFactory: async options => {
             agentCalled = true;
             capturedRun = options;
+            await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES ('auto-delegated-agent-run',?,?,?,?,'queued',?,NOW(),NOW())", [fixture.userId, fixture.sessionId, options.title, options.goal, JSON.stringify(options.metadata)]);
             return { id: 'auto-delegated-agent-run', status: 'queued' };
         }
     });
@@ -322,7 +323,7 @@ test('普通聊天中的明确委托会自动创建受控 Agent，探索性问�
         const handoff = result.findByType('agent_handoff');
         assert.equal(handoff?.runId, 'auto-delegated-agent-run');
         assert.equal(handoff?.automatic, true);
-        assert.equal(handoff?.executionReason, 'explicit_delegated_task');
+        assert.equal(handoff?.executionReason, 'semantic_intent');
         assert.equal(capturedRun?.chatAgent, true);
         assert.equal(capturedRun?.metadata?.automaticExecution?.source, 'chat_auto_execution');
         assert.equal(capturedRun?.toolPolicy, 'builtin_only');
@@ -342,6 +343,7 @@ test('显式 Agent 模式允许普通聊天使用较长任务目标', async () =
         autoAgent: true,
         agentRunFactory: async options => {
             capturedRun = options;
+            await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES ('long-agent-run',?,?,?,?,'queued',?,NOW(),NOW())", [fixture.userId, fixture.sessionId, options.title, options.goal, JSON.stringify(options.metadata)]);
             return { id: 'long-agent-run', status: 'queued' };
         }
     });
