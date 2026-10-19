@@ -84,10 +84,10 @@
      * 弹出甘特耗时瀑布图弹层
      */
     function showTimelineWaterfallModal({ nodes = [], runStates = new Map(), onFocusNode } = {}) {
-        const safeHtml = window.Pivot?.safeHtml;
-        if (!safeHtml || typeof document === 'undefined') return;
+        const safeHtml = window.Pivot?.html;
+        if (typeof safeHtml?.setHtml !== 'function' || typeof document === 'undefined') return;
 
-        const existing = document.querySelector('.pivot-dag-waterfall-modal');
+        const existing = document.querySelector('.pivot-dag-waterfall-modal-backdrop');
         if (existing) existing.remove();
 
         const data = computeTimelineData(nodes, runStates);
