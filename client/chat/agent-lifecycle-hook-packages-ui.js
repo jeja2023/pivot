@@ -4,6 +4,19 @@
         const statusLabel = value => ({ active: '已生效', enabled: '已启用', disabled: '已停用', revoked: '已吊销', succeeded: '成功', failed: '失败', observe: '观察', deny: '拒绝', error_open: '开放失败', skipped_scope: '范围不足' })[String(value || '')] || String(value || '-');
         const packagesAllowed = () => typeof canManage === 'function' && canManage();
 
+        function setImportModalOpen(isOpen) {
+            const modal = document.getElementById('agent-lifecycle-hook-package-import-modal');
+            if (!modal) return;
+            const open = Boolean(isOpen && packagesAllowed());
+            modal.classList.toggle('hidden', !open);
+            modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+            if (open) {
+                setTimeout(() => {
+                    document.getElementById('agent-lifecycle-hook-package-manifest')?.focus();
+                }, 50);
+            }
+        }
+
         function renderHooks() {
             const target = document.getElementById('agent-lifecycle-hooks-list');
             if (!target) return;
@@ -13,8 +26,11 @@
 
         function renderPackages() {
             const target = document.getElementById('agent-lifecycle-hook-packages');
-            const importer = document.getElementById('agent-lifecycle-hook-package-import');
-            if (importer) { importer.hidden = !packagesAllowed(); if (!packagesAllowed()) importer.open = false; }
+            const openBtn = document.getElementById('agent-lifecycle-hook-package-import-open-btn');
+            if (openBtn) openBtn.hidden = !packagesAllowed();
+            const legacyImporter = document.getElementById('agent-lifecycle-hook-package-import');
+            if (legacyImporter) { legacyImporter.hidden = !packagesAllowed(); if (!packagesAllowed()) legacyImporter.open = false; }
+            if (!packagesAllowed()) setImportModalOpen(false);
             if (!target) return;
             const packages = Array.isArray(state.lifecycleHookPackages) ? state.lifecycleHookPackages : [];
             setMarkup(target, packagesAllowed()
@@ -72,9 +88,15 @@
                 await apiJson(`${API_BASE}/agents/lifecycle-hook-packages/import`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, signature: { keyId, signature } })
                 });
-                document.getElementById('agent-lifecycle-hook-package-manifest').value = '';
-                document.getElementById('agent-lifecycle-hook-package-signature').value = '';
-                document.getElementById('agent-lifecycle-hook-package-import').open = false;
+                const manifestInput = document.getElementById('agent-lifecycle-hook-package-manifest');
+                if (manifestInput) manifestInput.value = '';
+                const signatureInput = document.getElementById('agent-lifecycle-hook-package-signature');
+                if (signatureInput) signatureInput.value = '';
+                const keyIdInput = document.getElementById('agent-lifecycle-hook-package-key-id');
+                if (keyIdInput) keyIdInput.value = '';
+                const legacyImporter = document.getElementById('agent-lifecycle-hook-package-import');
+                if (legacyImporter) legacyImporter.open = false;
+                setImportModalOpen(false);
                 await load();
                 setNotice?.('受管 Hook 包已通过签名验证并导入。', 'success');
             } catch (error) { setNotice?.(error.message || '导入受管 Hook 包失败。', 'error'); }
@@ -89,12 +111,30 @@
                 const button = event.target.closest('[data-agent-hook-package-status]');
                 if (button && packagesAllowed()) setPackageStatus(button);
             });
+            document.getElementById('agent-lifecycle-hook-package-import-open-btn')?.addEventListener('click', () => {
+                if (packagesAllowed()) setImportModalOpen(true);
+            });
+            document.getElementById('agent-lifecycle-hook-package-import-close-btn')?.addEventListener('click', () => {
+                setImportModalOpen(false);
+            });
+            document.getElementById('agent-lifecycle-hook-package-import-cancel-btn')?.addEventListener('click', () => {
+                setImportModalOpen(false);
+            });
+            const importModal = document.getElementById('agent-lifecycle-hook-package-import-modal');
+            importModal?.addEventListener('click', event => {
+                if (event.target === importModal) setImportModalOpen(false);
+            });
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Escape' && importModal && !importModal.classList.contains('hidden')) {
+                    setImportModalOpen(false);
+                }
+            });
             document.getElementById('agent-lifecycle-hook-package-import-submit')?.addEventListener('click', event => {
                 if (packagesAllowed()) importPackage(event.currentTarget);
             });
         }
 
-        return { bindControls, load, render };
+        return { bindControls, load, render, setImportModalOpen };
     }
 
     window.Pivot?.exposeModule?.('agent.lifecycleHookPackages', { create });

@@ -1039,6 +1039,41 @@ body.dark-mode .agent-hook-package-import,
     background: color-mix(in srgb, var(--primary, #1e40af) 14%, var(--surface));
 }
 
+.agent-lifecycle-hook-package-modal {
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(840px, calc(100dvh - 32px));
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.agent-lifecycle-hook-package-modal .agent-lifecycle-hook-package-modal-body {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+}
+
+.agent-lifecycle-hook-package-modal .agent-harness-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.agent-lifecycle-hook-package-modal .agent-harness-form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+}
+
+.agent-lifecycle-hook-package-modal .agent-harness-form-grid label span {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
 .agent-harness-panel-head,
 .agent-harness-subhead {
     display: flex;
@@ -1048,7 +1083,8 @@ body.dark-mode .agent-hook-package-import,
     text-align: left;
 }
 
-.agent-harness-panel-head>div:first-child {
+.agent-harness-panel-head>div:first-child,
+.agent-harness-subhead>div:first-child {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -4592,27 +4628,327 @@ body.dark-mode .agent-goal-template-chip .chip-name,
     color: #f8fafc;
 }
 
+/* ==========================================================================
+   五分验收台账卡片与弹窗体系 (Five-Point Acceptance Ledger & Modals)
+   ========================================================================== */
 .agent-quality-acceptance {
-    margin-top: 12px;
-    padding: 11px 12px;
+    margin-top: 14px;
+    padding: 16px;
     border: 1px solid var(--border, #e2e8f0);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--bg-side, #f8fafc) 78%, transparent);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    text-align: left;
 }
 
-.agent-quality-acceptance > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.agent-quality-acceptance strong { color: var(--text-main, #1e293b); font-size: .82rem; }
-.agent-quality-acceptance span { color: var(--text-muted, #64748b); font-size: .74rem; }
-.agent-quality-acceptance ul { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
-.agent-quality-acceptance li { display: flex; gap: 8px; align-items: baseline; }
-.agent-quality-acceptance li b { min-width: 132px; color: var(--text-main, #1e293b); font-size: .74rem; }
-.agent-quality-acceptance-submit { margin-top: 10px; }
-.agent-quality-acceptance-submit summary { color: var(--text-muted, #64748b); cursor: pointer; font-size: .78rem; }
-.agent-quality-acceptance-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
-.agent-quality-acceptance-form label { display: grid; gap: 4px; color: var(--text-muted, #64748b); font-size: .72rem; }
-.agent-quality-acceptance-form .agent-quality-acceptance-summary { grid-column: span 3; }
-.agent-quality-acceptance-form textarea { resize: vertical; min-height: 54px; }
-.agent-quality-acceptance-form button { justify-self: start; }
+.agent-quality-acceptance-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.agent-quality-acceptance-head > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.agent-quality-acceptance-head strong {
+    font-size: 0.88rem;
+    font-weight: 750;
+    color: var(--text-main, #0f172a);
+}
+
+.agent-quality-acceptance-head span {
+    font-size: 0.72rem;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-quality-acceptance-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.agent-acceptance-overview-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    margin-bottom: 12px;
+}
+
+.agent-acceptance-progress-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.agent-acceptance-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #10b981);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.agent-acceptance-progress-stats {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--text-muted, #64748b);
+    font-weight: 600;
+}
+
+.agent-acceptance-summary-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.agent-acceptance-summary-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #f8fafc;
+    border: 1px solid rgba(226, 232, 240, 0.6);
+    font-size: 0.74rem;
+}
+
+.agent-acceptance-domain-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.agent-acceptance-missing-text {
+    color: var(--text-muted, #64748b);
+    font-size: 0.7rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 待核验列表样式 */
+.agent-acceptance-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.agent-acceptance-review-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    font-size: 0.74rem;
+}
+
+.agent-acceptance-review-list b {
+    color: var(--text-main, #0f172a);
+    font-weight: 700;
+}
+
+.agent-acceptance-review-list span {
+    color: var(--text-muted, #64748b);
+    flex: 1 1 auto;
+}
+
+.agent-acceptance-review-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 弹窗内部样式 (Acceptance Modals) */
+.agent-acceptance-modal-body {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+}
+
+.agent-acceptance-ledger-dialog {
+    width: min(860px, calc(100vw - 32px));
+    max-height: min(880px, calc(100dvh - 32px));
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.agent-acceptance-committee-dialog {
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(840px, calc(100dvh - 32px));
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.agent-acceptance-submission-dialog {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(880px, calc(100dvh - 32px));
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.agent-acceptance-ledger-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.agent-acceptance-filter-tags {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-acceptance-ledger-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.agent-acceptance-ledger-card {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #e2e8f0);
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.agent-acceptance-ledger-card.is-ready {
+    border-color: rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.03);
+}
+
+.agent-acceptance-ledger-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.agent-acceptance-ledger-card-head > div {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-acceptance-ledger-card-head strong {
+    font-size: 0.78rem;
+    font-weight: 750;
+    color: var(--text-main, #0f172a);
+}
+
+.agent-acceptance-ledger-card-head code {
+    font-size: 0.65rem;
+    color: var(--text-muted, #64748b);
+    background: rgba(148, 163, 184, 0.12);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.agent-acceptance-missing-chips {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.agent-acceptance-chip-label {
+    font-size: 0.66rem;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-acceptance-chip {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(245, 158, 11, 0.12);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    font-weight: 600;
+}
+
+.agent-acceptance-card-ready-tip {
+    font-size: 0.68rem;
+    color: #059669;
+    font-weight: 600;
+}
+
+.agent-acceptance-ledger-footer-stats {
+    font-size: 0.72rem;
+    color: var(--text-muted, #64748b);
+    font-weight: 600;
+}
+
+/* Dark mode 适配 */
+body.dark-mode .agent-quality-acceptance,
+.dark-mode .agent-quality-acceptance,
+body.dark-mode .agent-acceptance-ledger-card,
+.dark-mode .agent-acceptance-ledger-card,
+body.dark-mode .agent-acceptance-summary-item,
+.dark-mode .agent-acceptance-summary-item,
+body.dark-mode .agent-acceptance-review-list li,
+.dark-mode .agent-acceptance-review-list li,
+body.dark-mode .agent-acceptance-overview-progress,
+.dark-mode .agent-acceptance-overview-progress {
+    background: var(--surface, #1e293b);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .agent-acceptance-domain-badge,
+.dark-mode .agent-acceptance-domain-badge {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+@media (max-width: 760px) {
+    .agent-acceptance-summary-list,
+    .agent-acceptance-ledger-grid {
+        grid-template-columns: 1fr;
+    }
+}
 
 @media (max-width: 720px) {
     .agent-quality-acceptance > div, .agent-quality-acceptance li { display: grid; gap: 3px; }
@@ -4620,3 +4956,563 @@ body.dark-mode .agent-goal-template-chip .chip-name,
     .agent-quality-acceptance-form { grid-template-columns: 1fr; }
     .agent-quality-acceptance-form .agent-quality-acceptance-summary { grid-column: auto; }
 }
+
+/* ==========================================================================
+   协作角色策略治理面板优化 (Delegation Role Policies Workbench)
+   ========================================================================== */
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 6px 12px 8px;
+    box-sizing: border-box;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"].hidden {
+    display: none !important;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] .agent-harness-panel-head {
+    margin: 0;
+    padding: 2px 0 4px;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] .agent-harness-panel-head strong {
+    font-size: 0.88rem;
+    font-weight: 750;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] .agent-harness-panel-head span {
+    font-size: 0.68rem;
+    line-height: 1.25;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] .agent-harness-panel-head button {
+    height: 24px;
+    padding: 0 10px;
+    font-size: 0.7rem;
+}
+
+.agent-harness-panel[data-agent-harness-section="delegation-policies"] .agent-harness-list.full-width {
+    max-height: none !important;
+    min-height: auto !important;
+    overflow-y: visible !important;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+}
+
+/* 顶部治理指标网格 (Metrics Stats Grid) - 紧凑横向展示 */
+.agent-delegation-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.agent-delegation-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+    text-align: left;
+}
+
+.agent-delegation-metric-card .metric-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    line-height: 1.2;
+}
+
+.agent-delegation-metric-card .metric-header .agent-inbox-type-badge {
+    padding: 1px 5px;
+    font-size: 0.62rem;
+    border-radius: 4px;
+}
+
+.agent-delegation-metric-card .metric-value {
+    font-size: 0.98rem;
+    font-weight: 750;
+    color: var(--text-main, #0f172a);
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+}
+
+.agent-delegation-metric-card .metric-hint {
+    font-size: 0.63rem;
+    color: var(--text-muted, #94a3b8);
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 工具栏与快捷预设 (Toolbar & Presets) - 单行紧凑设计 */
+.agent-delegation-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 10px;
+    background: #f8fafc;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+}
+
+.agent-delegation-toolbar-info {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.agent-delegation-toolbar-info strong {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    flex-shrink: 0;
+}
+
+.agent-delegation-toolbar-info strong span {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-delegation-toolbar-info span.agent-delegation-toolbar-desc {
+    font-size: 0.67rem;
+    color: var(--text-muted, #64748b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-delegation-presets {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #e2e8f0);
+    flex-shrink: 0;
+}
+
+.agent-delegation-preset-btn {
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary, #475569);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.agent-delegation-preset-btn:hover {
+    background: var(--bg-hover, #f1f5f9);
+    color: var(--primary, #2563eb);
+}
+
+/* 角色策略矩阵表格 (Role Policy Matrix Table) - 超紧凑自适应排版 */
+.agent-delegation-table-wrap {
+    width: 100%;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    overflow-x: auto;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.agent-delegation-matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+}
+
+.agent-delegation-matrix-table th {
+    padding: 5px 10px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    color: var(--text-muted, #475569);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-align: left;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.agent-delegation-matrix-table td {
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border, #f1f5f9);
+    vertical-align: middle;
+    color: var(--text-main, #1e293b);
+    font-size: 0.72rem;
+    height: auto;
+    white-space: normal;
+}
+
+.agent-delegation-matrix-table tr:last-child td {
+    border-bottom: none;
+}
+
+.agent-delegation-matrix-table tr:hover td {
+    background: rgba(248, 250, 252, 0.6);
+}
+
+/* 角色标识单元格 */
+.agent-delegation-role-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 190px;
+}
+
+.agent-delegation-role-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.agent-delegation-role-avatar svg {
+    width: 14px;
+    height: 14px;
+}
+
+.agent-delegation-role-avatar.role-researcher {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.agent-delegation-role-avatar.role-analyst {
+    background: rgba(139, 92, 246, 0.12);
+    color: #7c3aed;
+    border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.agent-delegation-role-avatar.role-reviewer {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.agent-delegation-role-avatar.role-writer {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.agent-delegation-role-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    text-align: left;
+}
+
+.agent-delegation-role-meta strong {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1.2;
+}
+
+.agent-delegation-role-meta .role-id-tag {
+    font-size: 0.62rem;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-muted, #64748b);
+    background: rgba(148, 163, 184, 0.12);
+    padding: 0 4px;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+.agent-delegation-role-meta span.role-subtitle {
+    font-size: 0.64rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1.15;
+}
+
+/* 安全边界徽章 */
+.agent-delegation-boundary-wrap {
+    display: inline-flex;
+    align-items: center;
+}
+
+.agent-delegation-boundary-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.67rem;
+    font-weight: 600;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+/* 步长/Token 输入与进度条 */
+.agent-delegation-config-cell {
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.agent-delegation-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.agent-stepper-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border, #cbd5e1);
+    background: #fff;
+    color: var(--text-secondary, #475569);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.agent-stepper-btn:hover {
+    background: var(--bg-hover, #f1f5f9);
+    border-color: var(--primary, #3b82f6);
+    color: var(--primary, #3b82f6);
+}
+
+.agent-stepper-btn.agent-stepper-token {
+    width: 26px;
+    font-size: 0.62rem;
+    font-weight: 600;
+}
+
+.agent-delegation-num-input {
+    height: 22px !important;
+    width: 68px !important;
+    padding: 0 4px !important;
+    margin-bottom: 0 !important;
+    text-align: center;
+    font-size: 0.72rem !important;
+    font-weight: 600;
+    border-radius: 4px !important;
+    border: 1px solid var(--border, #cbd5e1) !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    box-sizing: border-box !important;
+}
+
+.agent-delegation-num-input.token-input {
+    width: 80px !important;
+}
+
+.agent-delegation-num-input.is-invalid {
+    border-color: var(--danger, #ef4444) !important;
+    background: rgba(254, 226, 226, 0.4) !important;
+    color: var(--danger, #b91c1c) !important;
+}
+
+.agent-delegation-progress-bar {
+    width: 100%;
+    height: 3px;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 1.5px;
+    overflow: hidden;
+    margin: 1px 0 0;
+}
+
+.agent-delegation-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #6366f1);
+    border-radius: 1.5px;
+    transition: width 0.2s ease;
+}
+
+.agent-delegation-progress-caption {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.61rem;
+    color: var(--text-muted, #64748b);
+    line-height: 1;
+}
+
+.agent-delegation-error-hint {
+    font-size: 0.62rem;
+    color: var(--danger, #ef4444);
+    font-weight: 600;
+    margin-top: 1px;
+}
+
+/* 行重置按钮 */
+.agent-delegation-row-reset {
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--text-muted, #64748b);
+    font-size: 0.67rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.agent-delegation-row-reset:hover {
+    border-color: var(--primary, #3b82f6);
+    color: var(--primary, #3b82f6);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+/* 底部操作栏 (Actions Bar) */
+.agent-delegation-policy-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 12px;
+    background: #fff;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    margin-top: 0;
+}
+
+.agent-delegation-dirty-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    color: var(--text-muted, #64748b);
+}
+
+.agent-delegation-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+    display: inline-block;
+    transition: all 0.2s ease;
+}
+
+.agent-delegation-status-dot.dirty {
+    background: #f59e0b;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.agent-delegation-action-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-delegation-action-buttons button {
+    height: 26px;
+    padding: 0 12px;
+    font-size: 0.72rem;
+}
+
+/* Dark mode 适配 */
+body.dark-mode .agent-delegation-metric-card,
+.dark-mode .agent-delegation-metric-card,
+body.dark-mode .agent-delegation-toolbar,
+.dark-mode .agent-delegation-toolbar,
+body.dark-mode .agent-delegation-table-wrap,
+.dark-mode .agent-delegation-table-wrap,
+body.dark-mode .agent-delegation-policy-actions,
+.dark-mode .agent-delegation-policy-actions {
+    background: var(--surface, #1e293b);
+    border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.dark-mode .agent-delegation-matrix-table th,
+.dark-mode .agent-delegation-matrix-table th {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(148, 163, 184, 0.16);
+    color: #94a3b8;
+}
+
+body.dark-mode .agent-delegation-matrix-table td,
+.dark-mode .agent-delegation-matrix-table td {
+    border-color: rgba(148, 163, 184, 0.1);
+    color: #f1f5f9;
+}
+
+body.dark-mode .agent-delegation-matrix-table tr:hover td,
+.dark-mode .agent-delegation-matrix-table tr:hover td {
+    background: rgba(30, 41, 59, 0.7);
+}
+
+body.dark-mode .agent-delegation-presets,
+.dark-mode .agent-delegation-presets {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
+body.dark-mode .agent-stepper-btn,
+.dark-mode .agent-stepper-btn,
+body.dark-mode .agent-delegation-row-reset,
+.dark-mode .agent-delegation-row-reset {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(148, 163, 184, 0.24);
+    color: #cbd5e1;
+}
+
+body.dark-mode .agent-delegation-num-input,
+.dark-mode .agent-delegation-num-input {
+    background: rgba(15, 23, 42, 0.8) !important;
+    border-color: rgba(148, 163, 184, 0.24) !important;
+    color: #f1f5f9 !important;
+}
+
+body.dark-mode .agent-delegation-metric-card .metric-value,
+.dark-mode .agent-delegation-metric-card .metric-value {
+    color: #f8fafc;
+}
+
+@media (max-width: 900px) {
+    .agent-delegation-metrics {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 580px) {
+    .agent-delegation-metrics {
+        grid-template-columns: 1fr;
+    }
+    .agent-delegation-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
+

@@ -3,7 +3,7 @@
             <label class="route-feedback-filter" for="route-feedback-status-filter">
                 <span>状态</span>
                 <select id="route-feedback-status-filter" class="form-input">
-                    <option value="pending">待核验</option>
+                    <option value="pending">待复核</option>
                     <option value="accepted">已采纳</option>
                     <option value="rejected">未采纳</option>
                     <option value="superseded">已替换</option>
@@ -39,7 +39,7 @@
                     <th>当前 → 建议</th>
                     <th>原因与补充说明</th>
                     <th class="text-center">状态</th>
-                    <th class="text-center">核验</th>
+                    <th class="text-center">复核</th>
                 </tr>
             </thead>
             <tbody id="route-feedback-review-list"></tbody>
@@ -50,7 +50,7 @@
     <div id="route-feedback-detail-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="route-feedback-detail-title">
         <div class="route-feedback-detail-dialog">
             <div class="modal-header">
-                <h3 id="route-feedback-detail-title">反馈核验详情</h3>
+                <h3 id="route-feedback-detail-title">路由复核详情</h3>
             </div>
             <div class="modal-body route-feedback-detail-body" id="route-feedback-detail-content"></div>
             <div class="modal-footer" id="route-feedback-detail-footer"></div>

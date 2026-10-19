@@ -248,7 +248,7 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
             <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
-                <span class="status-dot status-unknown" id="status-${m.id}" title="等待检测"></span>
+                <span class="status-dot status-unknown" id="status-${m.id}" title="未检测"></span>
                 <small id="latency-${m.id}"></small>
             </td>
             <td title="${escapeHtml(formatDateToCN(m.created_at))}">${escapeHtml(formatDateToCN(m.created_at))}</td>
@@ -267,7 +267,6 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
         document.querySelector(`#model-row-${model.id} [data-model-action="test"]`)?.remove();
     });
     
-    data.filter(canTestModelConnection).forEach(m => checkSingleModelStatus(m.id));
     renderPagination('models', total, page);
     window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
 }
@@ -293,7 +292,7 @@ document.getElementById('model-list-body')?.addEventListener('click', async (eve
     }
 });
 
-async function checkSingleModelStatus(id) {
+async function checkSingleModelStatus(id, source = 'manual') {
     if (pendingTests.has(id)) return;
     const dot = document.getElementById(`status-${id}`);
     const latencyEl = document.getElementById(`latency-${id}`);
@@ -304,22 +303,25 @@ async function checkSingleModelStatus(id) {
         const res = await apiFetch('/api/models/test', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ id, source: 'auto' })
+            body: JSON.stringify({ id, source })
         });
         const duration = Date.now() - startTime;
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success !== false) {
             dot.className = 'status-dot status-online';
             dot.title = '在线';
-            latencyEl.innerText = `${duration}ms`;
+            if (latencyEl) latencyEl.innerText = `${duration}ms`;
+            if (source === 'manual') showToast('连接成功');
         } else {
             dot.className = 'status-dot status-offline';
             dot.title = data.error || '连接失败';
-            latencyEl.innerText = '';
+            if (latencyEl) latencyEl.innerText = '';
+            if (source === 'manual') showToast('连接失败: ' + (data.error || '未知错误'), 'error');
         }
     } catch (e) {
         dot.className = 'status-dot status-offline';
         dot.title = '网络错误';
+        if (source === 'manual') showToast('网络错误', 'error');
     } finally {
         pendingTests.delete(id);
     }
@@ -390,8 +392,9 @@ window.Pivot.legacy.prepareEditModel = (model) => {
 
 window.Pivot.legacy.testExistingModel = async (model) => {
     if (!canTestModelConnection(model)) return showToast('无权测试该模型', 'error');
-    if (pendingTests.has(model.id)) return showToast('该模型正在自动检测，请稍后再试', 'info');
-    await testConnection(null, null, null, model.id);
+    if (pendingTests.has(model.id)) return showToast('该模型正在检测，请稍后再试', 'info');
+    showToast('正在测试连接...', 'info');
+    await checkSingleModelStatus(model.id, 'manual');
 };
 
 window.Pivot.legacy.testModelConfig = async () => {
@@ -405,13 +408,30 @@ window.Pivot.legacy.testModelConfig = async () => {
 async function testConnection(url, api_key, model_name, id = null) {
     if (!id && !url) return showToast('请输入接口地址', 'error');
     showToast('正在测试连接...', 'info');
+    const startTime = Date.now();
     try {
         const res = await apiFetch('/api/models/test', {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ id, url, api_key, model_name, source: 'manual' })
         });
-        const data = await res.json();
+        const duration = Date.now() - startTime;
+        const data = await res.json().catch(() => ({}));
+        if (id) {
+            const dot = document.getElementById(`status-${id}`);
+            const latencyEl = document.getElementById(`latency-${id}`);
+            if (dot) {
+                if (res.ok && data.success !== false) {
+                    dot.className = 'status-dot status-online';
+                    dot.title = '在线';
+                    if (latencyEl) latencyEl.innerText = `${duration}ms`;
+                } else {
+                    dot.className = 'status-dot status-offline';
+                    dot.title = data.error || '连接失败';
+                    if (latencyEl) latencyEl.innerText = '';
+                }
+            }
+        }
         if (res.ok && data.success === false) return showToast('连接失败: ' + (data.error || '未知错误'), 'error');
         if (res.ok) showToast('连接成功');
         else showToast('连接失败: ' + (data.error || '未知错误'), 'error');

@@ -21,22 +21,23 @@ test('路由建议以对话内选择面板提交，需显式选择替代路径�
     assert.doesNotMatch(source, /window\.prompt\(`请输入“序号:动作ID”提交路由修正/);
 });
 
-test('反馈核验归入单一决策审核入口，仍保留独立的子页签与侧边栏标签样式', () => {
+test('路由复核归入单一决策审核入口，仍保留独立的子页签与侧边栏标签样式', () => {
     assert.match(settingsShell, /id="tab-decision-review"[^>]*class="admin-tab admin-only hidden"/);
     assert.match(settingsShell, /id="tab-decision-review"[^>]*>决策审核<\/button>/);
     assert.doesNotMatch(settingsShell, /id="tab-decision-review"[^>]*btn-secondary/);
     assert.doesNotMatch(settingsShell, /id="tab-route-feedback"/);
     assert.match(decisionReviewHtml, /data-decision-review-subtab="feedback"/);
+    assert.match(decisionReviewHtml, />路由复核<\/button>/);
     assert.match(decisionReviewHtml, /data-decision-review-subtab="gold"/);
     assert.match(reviewQueueSource, /decision-review-feedback-panel/);
 });
 
-test('路由反馈核验队列使用统计路由前缀，避免请求不存在的 observability 根路径', () => {
+test('路由复核队列使用统计路由前缀，避免请求不存在的 observability 根路径', () => {
     assert.match(reviewQueueSource, /\$\{API_BASE\}\/stats\/observability\/decision-feedback/);
     assert.doesNotMatch(reviewQueueSource, /\$\{API_BASE\}\/observability\/decision-feedback/);
 });
 
-test('反馈核验详情中的提问和补充说明不会把模板缩进渲染为前导空白', () => {
+test('路由复核详情中的提问和补充说明不会把模板缩进渲染为前导空白', () => {
     assert.match(reviewQueueSource, /route-feedback-query-card \$\{queryText \? '' : 'text-muted'\}\">\$\{escapeHtml\(queryText/);
     assert.match(reviewQueueSource, /route-feedback-note-card \$\{noteText \? '' : 'text-muted'\}\">\$\{escapeHtml\(noteText/);
     assert.doesNotMatch(reviewQueueSource, /route-feedback-query-card \$\{queryText \? '' : 'text-muted'\}\">\s+\$\{escapeHtml\(queryText/);
@@ -46,7 +47,7 @@ test('反馈核验详情中的提问和补充说明不会把模板缩进渲染�
 const reviewHtml = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/route-feedback.html'), 'utf8');
 const adminLayoutCss = fs.readFileSync(path.join(__dirname, '../client/chat/styles/admin/admin-layout.css'), 'utf8');
 
-test('路由反馈核验表格采用全局统一 compact-table 紧凑表格与标准分页布局，提供序号列且无多余提示', () => {
+test('路由复核表格采用全局统一 compact-table 紧凑表格与标准分页布局，提供序号列且无多余提示', () => {
     assert.match(reviewHtml, /class="data-table compact-table route-feedback-table"/);
     assert.match(reviewHtml, /<th[^>]*class="[^"]*col-index[^"]*"[^>]*>序号<\/th>/);
     assert.doesNotMatch(reviewHtml, /route-feedback-review-summary/);

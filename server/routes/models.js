@@ -208,6 +208,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         let { id, url, api_key, model_name, source } = req.body;
         const testId = crypto.randomUUID().slice(0, 8);
         const testSource = source || (id ? 'auto' : 'manual');
+        const isManual = testSource === 'manual';
 
         if (id) {
             const storedModel = await getTestableModel(id, req.user);
@@ -215,7 +216,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 return res.status(403).json({ error: '无权测试该模型或模型不存在' });
             }
             if (storedModel.secret_error) {
-                logAction(req, '模型测试拦截', `模型 ID: ${id}，原因: ${storedModel.secret_error}`);
+                if (isManual) logAction(req, '模型测试拦截', `模型 ID: ${id}，原因: ${storedModel.secret_error}`);
                 return res.json({ success: false, requestId: testId, error: `${storedModel.secret_error}，请重新保存该模型的 API Key` });
             }
             // 允许请求中的新值覆盖数据库值，除非请求值为掩码或空
@@ -232,7 +233,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         try {
             await assertSafeOutboundUrl(url, req.user);
         } catch (e) {
-            logAction(req, '模型测试拦截', e.message);
+            if (isManual) logAction(req, '模型测试拦截', e.message);
             return res.json({ success: false, requestId: testId, error: e.message });
         }
 
@@ -265,12 +266,12 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 timeout: 10000
             });
             req.log.info(`模型测试成功: ${testLabel} (ID: ${testId})`);
-            logAction(req, '测试模型', `模型连接成功: ${model_name || url}`);
+            if (isManual) logAction(req, '测试模型', `模型连接成功: ${model_name || url}`);
             res.json({ success: true, requestId: testId, message: '连接成功' });
         } catch (e) {
             const errMsg = e.response?.data?.error?.message || e.message || e.code || '未知连接错误';
             req.log.error({ testId, err: errMsg }, '模型连接失败');
-            logAction(req, '测试模型失败', `模型: ${model_name || url}，原因: ${errMsg}`);
+            if (isManual) logAction(req, '测试模型失败', `模型: ${model_name || url}，原因: ${errMsg}`);
             res.json({ success: false, requestId: testId, error: errMsg });
         }
     }));

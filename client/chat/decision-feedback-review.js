@@ -1,4 +1,4 @@
-/* 管理员路由反馈核验队列。用户建议与可训练标签保持分离。 */
+/* 管理员路由复核队列。用户建议与可训练标签保持分离。 */
 (function installDecisionFeedbackReviewQueue() {
     const SCENARIO_LABELS = {
         'chat.rag': '知识库检索',
@@ -21,7 +21,7 @@
         other: '其他原因'
     };
     const REVIEW_STATUS_LABELS = {
-        pending: '待核验',
+        pending: '待复核',
         accepted: '已采纳',
         rejected: '未采纳',
         superseded: '已替换'
@@ -76,7 +76,7 @@
             const cell = document.createElement('td');
             cell.colSpan = 10;
             cell.className = 'text-center route-feedback-empty';
-            cell.textContent = reviewStatus === 'pending' ? '暂无待核验的路由建议。' : '暂无符合筛选条件的路由建议。';
+            cell.textContent = reviewStatus === 'pending' ? '暂无待复核的路由建议。' : '暂无符合筛选条件的路由建议。';
             row.appendChild(cell);
             fragment.appendChild(row);
         } else {
@@ -172,7 +172,7 @@
                 const status = document.createElement('span');
                 const normalizedStatus = String(item.review_status || '').toLowerCase();
                 status.className = `route-feedback-status is-${normalizedStatus || 'pending'}`;
-                status.textContent = label(REVIEW_STATUS_LABELS, normalizedStatus, '待核验');
+                status.textContent = label(REVIEW_STATUS_LABELS, normalizedStatus, '待复核');
                 statusCell.appendChild(status);
                 row.appendChild(statusCell);
 
@@ -183,7 +183,7 @@
                 detailBtn.className = 'btn-secondary route-feedback-detail-btn';
                 detailBtn.dataset.routeFeedbackDetail = String(item.feedback_id || '');
                 detailBtn.textContent = '详情';
-                detailBtn.title = '查看脱敏提问与核验详情';
+                detailBtn.title = '查看脱敏提问与复核详情';
                 actionCell.appendChild(detailBtn);
 
                 if (normalizedStatus === 'pending') {
@@ -201,12 +201,12 @@
                     if (item.reviewed_at) {
                         const reviewedSpan = document.createElement('span');
                         reviewedSpan.className = 'route-feedback-reviewed-time';
-                        reviewedSpan.textContent = `已于 ${formatTime(item.reviewed_at)} 核验`;
+                        reviewedSpan.textContent = `已于 ${formatTime(item.reviewed_at)} 复核`;
                         actionCell.appendChild(reviewedSpan);
                     } else {
                         const reviewedSpan = document.createElement('span');
                         reviewedSpan.className = 'route-feedback-reviewed-time';
-                        reviewedSpan.textContent = '已核验';
+                        reviewedSpan.textContent = '已复核';
                         actionCell.appendChild(reviewedSpan);
                     }
                 }
@@ -290,7 +290,7 @@
         const correctedActionText = label(ACTION_LABELS, item.corrected_action_id, '未命名动作');
         const reasonText = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
         const noteText = String(metadata.note || '').trim();
-        const statusText = label(REVIEW_STATUS_LABELS, item.review_status, '待核验');
+        const statusText = label(REVIEW_STATUS_LABELS, item.review_status, '待复核');
         const userDisplay = [
             item.nickname || '',
             item.username ? `(@${item.username})` : '',
@@ -313,7 +313,7 @@
                     <span class="route-feedback-item-value">${escapeHtml(scenarioText)}</span>
                 </div>
                 <div class="route-feedback-detail-item">
-                    <span class="route-feedback-item-label">当前核验状态</span>
+                    <span class="route-feedback-item-label">当前复核状态</span>
                     <span class="route-feedback-item-value">
                         <span class="route-feedback-status is-${escapeHtml(String(item.review_status || 'pending').toLowerCase())}">
                             ${escapeHtml(statusText)}
@@ -356,14 +356,14 @@
 
             ${item.review_status === 'pending' ? `
                 <div class="route-feedback-detail-section">
-                    <div class="route-feedback-detail-label">核验备注（可选）</div>
-                    <input type="text" id="route-feedback-modal-note" class="form-input route-feedback-review-note-input" placeholder="输入核验意见或采纳说明（可选，最多500字）" maxlength="500">
+                    <div class="route-feedback-detail-label">复核备注（可选）</div>
+                    <input type="text" id="route-feedback-modal-note" class="form-input route-feedback-review-note-input" placeholder="输入复核意见或采纳说明（可选，最多500字）" maxlength="500">
                 </div>
             ` : `
                 <div class="route-feedback-detail-section">
-                    <div class="route-feedback-detail-label">核验记录</div>
+                    <div class="route-feedback-detail-label">复核记录</div>
                     <div class="route-feedback-note-card">
-                        ${item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成核验` : '已核验'}
+                        ${item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成复核` : '已复核'}
                         ${item.review_note ? ` · 备注：${escapeHtml(item.review_note)}` : ''}
                     </div>
                 </div>
@@ -434,14 +434,14 @@
                 body: JSON.stringify(bodyPayload)
             });
             const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload.error) throw new Error(payload.error || '核验路由反馈失败');
+            if (!response.ok || payload.error) throw new Error(payload.error || '复核路由反馈失败');
             const toastMessage = reviewStatus === 'accepted' ? '已采纳，并加入待训练的已核验样本。' : '已标记为未采纳。';
             if (typeof showToast === 'function') showToast(toastMessage, 'success');
             closeDetailModal();
             await loadRouteFeedbackReviewQueue();
         } catch (error) {
             siblingButtons.forEach(control => { control.disabled = false; });
-            if (typeof showToast === 'function') showToast(error.message || '核验路由反馈失败', 'error');
+            if (typeof showToast === 'function') showToast(error.message || '复核路由反馈失败', 'error');
         }
     }
 

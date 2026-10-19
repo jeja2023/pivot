@@ -207,7 +207,7 @@ function persistDecisionReviewSubtab(subtab) {
     try {
         sessionStorage.setItem(SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY, normalizeDecisionReviewSubtab(subtab));
     } catch (_error) {
-        // 浏览器禁用 sessionStorage 时仅回退到反馈核验。
+        // 浏览器禁用 sessionStorage 时仅回退到路由复核。
     }
 }
 
@@ -219,8 +219,8 @@ async function loadDecisionReviewSubtab(subtab, page = 1) {
 
 const DECISION_REVIEW_SUBTAB_METAS = {
     feedback: {
-        title: '反馈核验',
-        desc: '审核用户对检索、工具和回复方式的建议；只有采纳后的建议才会成为训练样本。'
+        title: '路由复核',
+        desc: '复核用户对检索、工具和回复方式的路由建议；只有采纳后的建议才会成为训练样本。'
     },
     gold: {
         title: '冻结金标审核',
