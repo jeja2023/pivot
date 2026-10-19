@@ -1,165 +1,975 @@
-/* 系统监控采用自然高度布局，复用设置工作区的滚动容器与主题。 */
+/* 系统监控采用自然高度紧凑布局，复用设置工作区的滚动容器与全局主题体系。 */
 #tab-content-monitor,
 .settings-workspace-view #tab-content-monitor {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     width: 100%;
     min-width: 0;
     height: auto;
     max-height: none;
     box-sizing: border-box;
 }
+
 #tab-content-monitor.hidden,
 #tab-content-monitor [role="tabpanel"].hidden,
-#tab-content-monitor .observability-webhook-drawer.hidden { display: none !important; }
+#tab-content-monitor .observability-webhook-drawer.hidden {
+    display: none !important;
+}
+
 #tab-content-monitor [role="tabpanel"] {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    min-width: 0;
-}
-#tab-content-monitor .settings-page-head { margin-bottom: 0; min-width: 0; }
-#tab-content-monitor .monitor-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
     gap: 10px;
     min-width: 0;
+    height: auto;
 }
-#tab-content-monitor .monitor-updated-at {
-    margin: 0 auto 0 0;
+
+/* 页头与头部操作区 */
+#tab-content-monitor .settings-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 0;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+#tab-content-monitor .monitor-head-title-wrap {
+    min-width: 0;
+}
+
+#tab-content-monitor .settings-page-head h3 {
+    margin: 0 0 2px;
+    font-size: 1.04rem;
+    line-height: 1.25;
+    color: var(--text-main);
+    font-weight: 700;
+}
+
+#tab-content-monitor .settings-page-head p {
+    margin: 0;
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.74rem;
+    line-height: 1.4;
 }
-#tab-content-monitor .monitor-auto-refresh { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.8rem; }
-#tab-content-monitor .monitor-auto-refresh input { margin: 0; accent-color: var(--primary); }
-#tab-content-monitor .monitor-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+
+#tab-content-monitor .settings-page-actions.monitor-head-actions {
+    flex: 0 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+#tab-content-monitor .monitor-head-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#tab-content-monitor .monitor-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+#tab-content-monitor .monitor-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 2px var(--border);
+    flex-shrink: 0;
+}
+
+#tab-content-monitor .monitor-updated-at {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35;
+}
+
+#tab-content-monitor .monitor-auto-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease;
+}
+
+#tab-content-monitor .monitor-auto-refresh:hover {
+    color: var(--text-main);
+}
+
+#tab-content-monitor .monitor-auto-refresh input {
+    margin: 0;
+    width: 13px;
+    height: 13px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+#tab-content-monitor #monitor-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+    border-radius: var(--radius-sm);
+    line-height: 1;
+}
+
+/* 概览 KPI 指标卡片网格 */
+#tab-content-monitor .monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+    min-width: 0;
+}
+
 #tab-content-monitor .monitor-card {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 14px;
+    justify-content: space-between;
+    gap: 4px;
+    min-height: 64px;
+    padding: 8px 10px 7px;
     min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface);
+    box-shadow: var(--shadow-sm);
     text-align: left;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+    overflow: hidden;
+    box-sizing: border-box;
 }
-#tab-content-monitor .monitor-card span { font-size: 0.8rem; color: var(--text-muted); }
-#tab-content-monitor .monitor-card:hover { transform: none; box-shadow: none; }
-#tab-content-monitor .monitor-card strong { font-size: 1.25rem; color: var(--text-main); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; white-space: normal; overflow: visible; text-overflow: clip; letter-spacing: normal; }
-#tab-content-monitor .monitor-card small { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; white-space: normal; overflow: visible; text-overflow: clip; }
-#tab-content-monitor .monitor-card.is-warning strong { color: var(--warning); }
-#tab-content-monitor .monitor-card.is-critical strong { color: var(--danger); }
+
+#tab-content-monitor .monitor-card::after {
+    content: '';
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 2px var(--border);
+}
+
+#tab-content-monitor .monitor-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary);
+}
+
+#tab-content-monitor .monitor-card span {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    padding-right: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#tab-content-monitor .monitor-card strong {
+    font-size: 1.14rem;
+    font-weight: 700;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    letter-spacing: normal;
+    margin: 1px 0;
+}
+
+#tab-content-monitor .monitor-card small {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    opacity: 0.9;
+}
+
+#tab-content-monitor .monitor-card.is-warning {
+    border-color: var(--warning);
+}
+
+#tab-content-monitor .monitor-card.is-warning::after {
+    background: var(--warning);
+    box-shadow: 0 0 0 2px var(--border);
+}
+
+#tab-content-monitor .monitor-card.is-warning strong {
+    color: var(--warning);
+}
+
+#tab-content-monitor .monitor-card.is-critical {
+    border-color: var(--danger);
+}
+
+#tab-content-monitor .monitor-card.is-critical::after {
+    background: var(--danger);
+    box-shadow: 0 0 0 2px var(--border);
+}
+
+#tab-content-monitor .monitor-card.is-critical strong {
+    color: var(--danger);
+}
+
+/* 主面板网格与卡片 */
 .settings-workspace-view #tab-content-monitor .monitor-panels {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
-    gap: 16px;
+    gap: 10px;
     min-width: 0;
 }
+
 .settings-workspace-view #tab-content-monitor .monitor-panel-card {
     min-width: 0;
     height: auto;
     max-height: none;
-    padding: 18px;
+    padding: 12px 14px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface);
-    box-shadow: none;
+    box-shadow: var(--shadow-sm);
     text-align: left;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    box-sizing: border-box;
 }
-#tab-content-monitor .monitor-panel-card h4 { margin: 0 0 10px; font-size: 0.95rem; line-height: 1.5; }
-#tab-content-monitor .monitor-panel-card h5 { margin: 16px 0 8px; font-size: 0.8rem; }
-#tab-content-monitor .monitor-panel-description { margin: -4px 0 12px; color: var(--text-muted); font-size: 0.78rem; line-height: 1.6; }
-#tab-content-monitor .monitor-list { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+
+.settings-workspace-view #tab-content-monitor .monitor-panel-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--border);
+}
+
+#tab-content-monitor .monitor-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+#tab-content-monitor .monitor-panel-card h4 {
+    margin: 0;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.35;
+    letter-spacing: 0;
+}
+
+#tab-content-monitor .monitor-badge-subtle {
+    font-size: 0.66rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+#tab-content-monitor .monitor-panel-card h5 {
+    margin: 8px 0 4px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+#tab-content-monitor .monitor-panel-description {
+    margin: 0 0 6px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+/* 键值行排版 */
+#tab-content-monitor .monitor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+}
+
 #tab-content-monitor .monitor-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: center;
-    gap: 12px;
-    padding: 9px 0;
+    gap: 8px;
+    padding: 5px 6px;
     border-bottom: 1px solid var(--border);
     min-width: 0;
-    font-size: 0.8rem;
-    line-height: 1.6;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.12s ease;
 }
-#tab-content-monitor .monitor-row:last-child { border-bottom: 0; }
-#tab-content-monitor .monitor-row span { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
-#tab-content-monitor .monitor-row strong { color: var(--text-main); min-width: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+#tab-content-monitor .monitor-row:hover {
+    background-color: var(--bg-side);
+}
+
+#tab-content-monitor .monitor-row:last-child {
+    border-bottom: 0;
+}
+
+#tab-content-monitor .monitor-row span {
+    color: var(--text-muted);
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 0.74rem;
+}
+
+#tab-content-monitor .monitor-row strong {
+    color: var(--text-main);
+    font-weight: 600;
+    min-width: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.76rem;
+}
+
 #tab-content-monitor .monitor-row.is-warning strong,
-#tab-content-monitor .monitor-split-row > .is-warning strong { color: var(--warning); }
-#tab-content-monitor .monitor-split-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-#tab-content-monitor .monitor-split-row.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-#tab-content-monitor .monitor-single-row,
-#tab-content-monitor .monitor-split-row.is-single { grid-template-columns: 1fr; }
-#tab-content-monitor .monitor-split-row > div { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 10px; }
-#tab-content-monitor .monitor-split-row > div > span { flex: 0 1 auto; }
-#tab-content-monitor .monitor-split-row strong { flex: 0 1 auto; }
-#tab-content-monitor .monitor-meter-cell { display: flex; flex-direction: column; flex: 1 1 auto; gap: 4px; min-width: 0; }
-#tab-content-monitor .monitor-meter-track { height: 5px; border-radius: var(--radius-sm); background: var(--bg-side); overflow: hidden; width: 100%; }
-#tab-content-monitor .monitor-meter-fill { height: 100%; background: var(--success); }
-#tab-content-monitor .monitor-meter-fill.is-warning { background: var(--warning); }
-#tab-content-monitor .monitor-meter-fill.is-danger { background: var(--danger); }
-#tab-content-monitor .monitor-empty { color: var(--text-muted); font-size: 0.8rem; line-height: 1.6; margin: 0; padding: 8px 0; overflow-wrap: anywhere; }
-#tab-content-monitor .monitor-empty.compact { font-size: 0.75rem; }
-#tab-content-monitor .monitor-endpoint { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-#tab-content-monitor .monitor-endpoint:last-child { border-bottom: 0; padding-bottom: 0; }
-#tab-content-monitor .monitor-panel-endpoints { grid-column: 1 / -1; }
-#tab-content-monitor .monitor-endpoint-badge { display: inline-block; margin-right: 6px; color: var(--primary); }
-#tab-content-monitor .monitor-rag-latency-trend { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--primary); }
-#tab-content-monitor .monitor-rag-latency-head,
-#tab-content-monitor .monitor-rag-latency-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 0.78rem; color: var(--text-muted); }
-#tab-content-monitor .monitor-rag-latency-trend svg { display: block; width: 100%; height: 72px; margin: 8px 0; overflow: visible; }
-#tab-content-monitor .monitor-rag-latency-empty { color: var(--text-muted); font-size: 0.8rem; line-height: 1.6; }
-#tab-content-monitor .monitor-gpu-cards-wrap { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-#tab-content-monitor .monitor-gpu-cards-wrap.is-single { grid-template-columns: 1fr; }
-#tab-content-monitor .monitor-gpu-card-item { min-width: 0; padding: 10px; background: var(--bg-side); border-radius: var(--radius-sm); }
-#tab-content-monitor .monitor-gpu-item-head,
-#tab-content-monitor .monitor-gpu-item-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.78rem; line-height: 1.6; }
-#tab-content-monitor .monitor-gpu-name { overflow-wrap: anywhere; }
-#tab-content-monitor .monitor-gpu-card-item .monitor-meter-track { margin: 8px 0; }
-#tab-content-monitor .monitor-gpu-overflow { grid-column: 1 / -1; }
-#tab-content-monitor .monitor-hardware-banner { margin-top: 12px; padding: 12px; background: var(--bg-side); border-radius: var(--radius-sm); }
-#tab-content-monitor .monitor-hardware-banner-head { display: flex; gap: 8px; align-items: center; font-size: 0.8rem; }
-#tab-content-monitor .monitor-hardware-banner-head svg { width: 16px; height: 16px; flex-shrink: 0; }
-#tab-content-monitor .monitor-hardware-banner p { color: var(--text-muted); font-size: 0.78rem; line-height: 1.6; margin: 6px 0 0; }
-#tab-content-monitor .monitor-panel-head { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
-#tab-content-monitor .monitor-panel-head h4 { margin: 0; }
-#tab-content-monitor .observability-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#tab-content-monitor .observability-status-badge { color: var(--text-muted); font-size: 0.78rem; }
-#tab-content-monitor .observability-status-badge.is-active { color: var(--success); }
-#tab-content-monitor .observability-webhook-drawer { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-side); }
-#tab-content-monitor .observability-webhook-tip { color: var(--text-muted); font-size: 0.8rem; line-height: 1.6; margin-bottom: 10px; }
-#tab-content-monitor .observability-webhook-inline { display: flex; gap: 8px; align-items: center; }
-#tab-content-monitor .observability-webhook-inline .form-input { flex: 1; min-width: 0; margin: 0; }
-#tab-content-monitor .monitor-panel-observability .monitor-list { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
-#tab-content-monitor .monitor-observability-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); min-width: 0; }
-#tab-content-monitor .monitor-observability-row.is-warning { border-left: 3px solid var(--warning); padding-left: 10px; }
-#tab-content-monitor .monitor-observability-row.is-critical { border-left: 3px solid var(--danger); padding-left: 10px; }
-#tab-content-monitor .monitor-observability-item-left { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 0.8rem; }
-#tab-content-monitor .monitor-observability-item-title { color: var(--text-main); overflow-wrap: anywhere; }
-#tab-content-monitor .monitor-observability-item-source { color: var(--text-muted); overflow-wrap: anywhere; }
-#tab-content-monitor .monitor-observability-badges { display: flex; gap: 6px; flex-wrap: wrap; color: var(--text-muted); font-size: 0.75rem; }
-#tab-content-monitor .monitor-observability-item-right { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; font-size: 0.75rem; color: var(--text-muted); text-align: right; }
-#tab-content-monitor .monitor-observability-item-duration strong { color: var(--text-main); }
-#tab-content-monitor .monitor-observability-item-duration small { margin-left: 4px; }
-@media (max-width: 1100px) {
-    #tab-content-monitor .monitor-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#tab-content-monitor .monitor-split-row > .is-warning strong {
+    color: var(--warning);
 }
+
+#tab-content-monitor .monitor-split-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+#tab-content-monitor .monitor-split-row.is-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#tab-content-monitor .monitor-single-row,
+#tab-content-monitor .monitor-split-row.is-single {
+    grid-template-columns: 1fr;
+}
+
+#tab-content-monitor .monitor-split-row > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 6px;
+}
+
+#tab-content-monitor .monitor-split-row > div > span {
+    flex: 0 1 auto;
+}
+
+#tab-content-monitor .monitor-split-row strong {
+    flex: 0 1 auto;
+}
+
+/* 进度条组件 */
+#tab-content-monitor .monitor-meter-cell {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    gap: 3px;
+    min-width: 0;
+}
+
+#tab-content-monitor .monitor-meter-track {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#tab-content-monitor .monitor-meter-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--success);
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#tab-content-monitor .monitor-meter-fill.is-warning {
+    background: var(--warning);
+}
+
+#tab-content-monitor .monitor-meter-fill.is-danger {
+    background: var(--danger);
+}
+
+/* 提示与空状态 */
+#tab-content-monitor .monitor-empty {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.45;
+    margin: 0;
+    padding: 6px 0;
+    overflow-wrap: anywhere;
+}
+
+#tab-content-monitor .monitor-empty.compact {
+    font-size: 0.72rem;
+}
+
+#tab-content-monitor .monitor-services-tip {
+    padding: 6px 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.74rem;
+}
+
+/* 模型端点 */
+#tab-content-monitor .monitor-endpoint {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.76rem;
+}
+
+#tab-content-monitor .monitor-endpoint:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+#tab-content-monitor .monitor-panel-endpoints {
+    grid-column: 1 / -1;
+}
+
+#tab-content-monitor .monitor-endpoint-badge {
+    display: inline-block;
+    margin-right: 6px;
+    color: var(--primary);
+    font-weight: 600;
+}
+
+/* RAG 趋势图 */
+#tab-content-monitor .monitor-rag-latency-trend {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    color: var(--primary);
+}
+
+#tab-content-monitor .monitor-rag-latency-head,
+#tab-content-monitor .monitor-rag-latency-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+#tab-content-monitor .monitor-rag-latency-head strong {
+    color: var(--primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+#tab-content-monitor .monitor-rag-latency-trend svg {
+    display: block;
+    width: 100%;
+    height: 48px;
+    margin: 4px 0;
+    overflow: visible;
+}
+
+#tab-content-monitor .monitor-rag-latency-empty {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    line-height: 1.5;
+}
+
+/* GPU 算力卡片 */
+#tab-content-monitor .monitor-gpu-cards-wrap {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 6px;
+}
+
+#tab-content-monitor .monitor-gpu-cards-wrap.is-single {
+    grid-template-columns: 1fr;
+}
+
+#tab-content-monitor .monitor-gpu-card-item {
+    min-width: 0;
+    padding: 8px 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+
+#tab-content-monitor .monitor-gpu-item-head,
+#tab-content-monitor .monitor-gpu-item-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.74rem;
+    line-height: 1.4;
+}
+
+#tab-content-monitor .monitor-gpu-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+#tab-content-monitor .monitor-gpu-card-item .monitor-meter-track {
+    margin: 5px 0;
+}
+
+#tab-content-monitor .monitor-gpu-overflow {
+    grid-column: 1 / -1;
+}
+
+#tab-content-monitor .monitor-hardware-banner {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+#tab-content-monitor .monitor-hardware-banner-head {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+#tab-content-monitor .monitor-hardware-banner-head svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--warning);
+}
+
+#tab-content-monitor .monitor-hardware-banner p {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.4;
+    margin: 4px 0 0;
+}
+
+/* 异常告警与 Webhook */
+#tab-content-monitor .observability-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+#tab-content-monitor .observability-status-badge {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+}
+
+#tab-content-monitor .observability-status-badge.is-active {
+    color: var(--success);
+    border-color: var(--success);
+    font-weight: 600;
+}
+
+#tab-content-monitor .observability-webhook-drawer {
+    margin: 6px 0 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    box-shadow: var(--shadow-sm);
+}
+
+#tab-content-monitor .observability-webhook-tip {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    margin-bottom: 6px;
+}
+
+#tab-content-monitor .observability-webhook-inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#tab-content-monitor .observability-webhook-inline .form-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    font-size: 0.74rem;
+}
+
+#tab-content-monitor .observability-webhook-inline .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+}
+
+#tab-content-monitor .monitor-panel-observability .monitor-list {
+    max-height: 260px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
+#tab-content-monitor .monitor-observability-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 6px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-width: 0;
+    transition: background-color 0.15s ease;
+}
+
+#tab-content-monitor .monitor-observability-row:hover {
+    background: var(--bg-side);
+}
+
+#tab-content-monitor .monitor-observability-row.is-warning {
+    border-left: 3px solid var(--warning);
+    padding-left: 8px;
+}
+
+#tab-content-monitor .monitor-observability-row.is-critical {
+    border-left: 3px solid var(--danger);
+    padding-left: 8px;
+}
+
+#tab-content-monitor .monitor-observability-item-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    font-size: 0.74rem;
+}
+
+#tab-content-monitor .monitor-observability-item-title {
+    color: var(--text-main);
+    font-size: 0.78rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+#tab-content-monitor .monitor-observability-item-source {
+    color: var(--text-muted);
+    font-size: 0.70rem;
+    overflow-wrap: anywhere;
+}
+
+#tab-content-monitor .monitor-observability-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+}
+
+#tab-content-monitor .monitor-observability-badges span {
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+#tab-content-monitor .monitor-observability-item-right {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-shrink: 0;
+    font-size: 0.70rem;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+#tab-content-monitor .monitor-observability-item-duration strong {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+#tab-content-monitor .monitor-observability-item-duration small {
+    margin-left: 2px;
+    color: var(--text-muted);
+}
+
+/* 接口详情独立区域与热点接口表格 */
+.settings-workspace-view #tab-content-monitor .monitor-panel-routes {
+    grid-column: 1 / -1;
+}
+
+#tab-content-monitor .monitor-panel-routes.is-highlighted {
+    animation: monitor-card-glow 1.8s ease-out;
+}
+
+@keyframes monitor-card-glow {
+    0% {
+        box-shadow: 0 0 0 3px var(--primary);
+        border-color: var(--primary);
+    }
+    100% {
+        box-shadow: var(--shadow-sm);
+        border-color: var(--border);
+    }
+}
+
+#tab-content-monitor .monitor-routes-table-wrap {
+    margin-top: 6px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-sizing: border-box;
+}
+
+#tab-content-monitor .monitor-routes-table {
+    width: 100%;
+    min-width: 680px;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+#tab-content-monitor .monitor-routes-table th {
+    background: var(--bg-side);
+    color: var(--text-muted);
+    font-size: 0.70rem;
+    font-weight: 700;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+#tab-content-monitor .monitor-routes-table td {
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    color: var(--text-main);
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#tab-content-monitor .monitor-routes-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+#tab-content-monitor .monitor-routes-table tbody tr:hover {
+    background: var(--bg-side);
+}
+
+#tab-content-monitor .col-route-idx {
+    width: 48px;
+}
+
+#tab-content-monitor .col-route-name {
+    width: 18%;
+    min-width: 120px;
+}
+
+#tab-content-monitor .col-route-method {
+    width: 68px;
+}
+
+#tab-content-monitor .col-route-path {
+    width: auto;
+}
+
+#tab-content-monitor .col-route-status {
+    width: 66px;
+}
+
+#tab-content-monitor .col-route-requests {
+    width: 84px;
+}
+
+#tab-content-monitor .col-route-latency {
+    width: 92px;
+}
+
+#tab-content-monitor .monitor-routes-table .col-route-name {
+    font-weight: 600;
+}
+
+#tab-content-monitor .monitor-routes-table .col-route-path code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.70rem;
+    color: var(--text-muted);
+    background: transparent;
+    padding: 0;
+}
+
+#tab-content-monitor .monitor-routes-table .col-route-requests,
+#tab-content-monitor .monitor-routes-table .col-route-latency {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+#tab-content-monitor .monitor-table-empty {
+    padding: 16px 12px;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+}
+
+/* HTTP 方法胶囊小标签 */
+.monitor-method-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: uppercase;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+.monitor-method-tag.method-get {
+    color: var(--primary);
+}
+
+.monitor-method-tag.method-post {
+    color: var(--success);
+}
+
+.monitor-method-tag.method-put,
+.monitor-method-tag.method-patch {
+    color: var(--warning);
+}
+
+.monitor-method-tag.method-delete {
+    color: var(--danger);
+}
+
+/* 状态码胶囊小标签 */
+.monitor-status-pill-mini {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1.2;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+}
+
+.monitor-status-pill-mini.status-success {
+    color: var(--success);
+}
+
+.monitor-status-pill-mini.status-warning {
+    color: var(--warning);
+}
+
+.monitor-status-pill-mini.status-danger {
+    color: var(--danger);
+}
+
+/* 响应式断点适配 */
+@media (max-width: 1100px) {
+    #tab-content-monitor .monitor-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+    }
+}
+
 @media (max-width: 700px) {
-    .settings-workspace-view #tab-content-monitor .monitor-panels { grid-template-columns: minmax(0, 1fr); }
-    #tab-content-monitor .monitor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    #tab-content-monitor .monitor-card { padding: 12px; }
-    .settings-workspace-view #tab-content-monitor .monitor-panel-card { padding: 14px; }
-    #tab-content-monitor .settings-page-head { align-items: flex-start; flex-direction: column; gap: 12px; }
-    #tab-content-monitor .monitor-updated-at { flex-basis: 100%; }
+    .settings-workspace-view #tab-content-monitor .monitor-panels {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+    }
+    #tab-content-monitor .monitor-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+    }
+    #tab-content-monitor .monitor-card {
+        padding: 6px 8px;
+        min-height: 54px;
+    }
+    .settings-workspace-view #tab-content-monitor .monitor-panel-card {
+        padding: 10px 12px;
+    }
+    #tab-content-monitor .settings-page-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+    }
+    #tab-content-monitor .settings-page-actions.monitor-head-actions {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 8px;
+    }
+    #tab-content-monitor .monitor-head-meta {
+        width: 100%;
+        justify-content: space-between;
+        gap: 6px;
+    }
     #tab-content-monitor .monitor-split-row,
-    #tab-content-monitor .monitor-split-row.is-three { grid-template-columns: 1fr; gap: 10px; }
-    #tab-content-monitor .monitor-gpu-cards-wrap { grid-template-columns: 1fr; }
-    #tab-content-monitor .monitor-row { gap: 8px; }
-    #tab-content-monitor .monitor-observability-row { flex-direction: column; }
-    #tab-content-monitor .monitor-observability-item-right { flex-direction: row; justify-content: space-between; }
+    #tab-content-monitor .monitor-split-row.is-three {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    #tab-content-monitor .monitor-gpu-cards-wrap {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    #tab-content-monitor .monitor-row {
+        gap: 6px;
+        padding: 4px;
+    }
+    #tab-content-monitor .monitor-observability-row {
+        flex-direction: column;
+        gap: 4px;
+    }
+    #tab-content-monitor .monitor-observability-item-right {
+        flex-direction: row;
+        justify-content: space-between;
+        text-align: left;
+    }
 }

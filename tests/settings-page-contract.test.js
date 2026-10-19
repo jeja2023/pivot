@@ -63,6 +63,10 @@ test('系统监控分区使用自然高度，全部健康检查可见', () => {
     const html = read('client/chat/partials/settings/monitor.html');
     assert.match(html, /id="monitor-services-panel"/);
     assert.match(html, /id="monitor-routing-quality"/);
+    assert.match(html, /id="monitor-routes-panel-card"/);
+    assert.match(html, /id="monitor-routes-list-body"/);
+    assert.match(monitor, /monitor-routes-list-body/);
+    assert.match(monitorCss, /\.monitor-panel-routes/);
     assert.match(monitorCss, /height: auto/);
     assert.doesNotMatch(monitorCss, /grid-template-areas|grid-template-rows|contain: layout paint/);
     assert.doesNotMatch(scale, /MONITOR_MIN_CANVAS_HEIGHT/);

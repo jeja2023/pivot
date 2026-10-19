@@ -384,6 +384,19 @@ window.Pivot.legacy.exportCompliancePackage = () => {
 };
 
 window.Pivot.legacy.openMonitorRoutesModal = () => {
+    const routesCard = document.getElementById('monitor-routes-panel-card');
+    if (routesCard) {
+        const overviewTab = document.getElementById('monitor-overview-tab');
+        if (overviewTab && !overviewTab.classList.contains('active')) {
+            overviewTab.click();
+        }
+        routesCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        routesCard.classList.remove('is-highlighted');
+        void routesCard.offsetWidth;
+        routesCard.classList.add('is-highlighted');
+        setTimeout(() => routesCard.classList.remove('is-highlighted'), 2000);
+        return;
+    }
     const modal = document.getElementById('monitor-routes-modal');
     modal?.classList.remove('hidden');
     modal?.setAttribute('aria-hidden', 'false');

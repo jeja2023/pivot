@@ -121,17 +121,15 @@ const loadMonitorSummary = async function(options = {}) {
         const loadAvgStr = system.platform === 'win32' ? '当前平台不支持' : (Array.isArray(system.loadAverage) ? system.loadAverage.map(v => Number(v || 0).toFixed(2)).join(' / ') : '暂无数据');
 
         const memBarWidth = Math.min(100, Math.round(memoryUsedRate * 100));
-        const memBarColor = memBarWidth > 90 ? 'var(--danger)' : (memBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
+        const memStatusClass = memBarWidth > 90 ? 'is-danger' : (memBarWidth > 75 ? 'is-warning' : '');
         const diskBarWidth = Math.min(100, Math.round(diskUsedRate * 100));
         const diskAvailable = Number(disk.total) > 0;
-        const diskBarColor = diskBarWidth > 90 ? 'var(--danger)' : (diskBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
-
         const diskStatusClass = diskBarWidth > 90 ? 'is-danger' : (diskBarWidth > 75 ? 'is-warning' : '');
 
         const heapUsed = processInfo.memory?.heapUsed || 0;
         const heapTotal = data.runtime?.heap?.heapLimit || 0;
         const heapBarWidth = Math.min(100, Math.round((heapTotal > 0 ? heapUsed / heapTotal : 0) * 100));
-        const heapBarColor = heapBarWidth > 90 ? 'var(--danger)' : (heapBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
+        const heapStatusClass = heapBarWidth > 90 ? 'is-danger' : (heapBarWidth > 75 ? 'is-warning' : '');
 
         const osType = String(system.type || '').replace(/^Windows_NT$/i, 'Windows');
         const osDisplay = `${osType} ${system.release || ''}`.trim() || '-';
@@ -166,7 +164,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <div class="monitor-meter-cell" title="${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)">
                         <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
                         <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${memBarWidth}%; background: ${memBarColor};"></div>
+                            <div class="monitor-meter-fill ${memStatusClass}" data-meter-rate="${memBarWidth}"></div>
                         </div>
                     </div>
                 </div>
@@ -175,7 +173,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <div class="monitor-meter-cell" title="V8 对象堆：${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)">
                         <strong>${heapTotal > 0 ? `${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)` : '暂无数据'}</strong>
                         <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${heapBarWidth}%; background: ${heapBarColor};"></div>
+                            <div class="monitor-meter-fill ${heapStatusClass}" data-meter-rate="${heapBarWidth}"></div>
                         </div>
                     </div>
                 </div>
@@ -308,10 +306,10 @@ const loadMonitorSummary = async function(options = {}) {
         const gpuActiveStatus = gpu.status === 'error' ? '过载熔断' : (concurrencyActive >= concurrencyEffectiveMax && concurrencyEffectiveMax > 0 ? '峰值排队' : gpuProtectionStatus);
 
         const aiMeterWidth = concurrencyEffectiveMax > 0 ? Math.min(100, Math.round((concurrencyActive / concurrencyEffectiveMax) * 100)) : 0;
-        const aiMeterColor = aiMeterWidth > 85 ? 'var(--danger)' : (aiMeterWidth > 65 ? 'var(--warning)' : 'var(--success)');
+        const aiStatusClass = aiMeterWidth > 85 ? 'is-danger' : (aiMeterWidth > 65 ? 'is-warning' : '');
 
         const queueMeterWidth = concurrencyMaxQueue > 0 ? Math.min(100, Math.round((concurrencyQueued / concurrencyMaxQueue) * 100)) : 0;
-        const queueMeterColor = queueMeterWidth > 80 ? 'var(--danger)' : (queueMeterWidth > 50 ? 'var(--warning)' : 'var(--success)');
+        const queueStatusClass = queueMeterWidth > 80 ? 'is-danger' : (queueMeterWidth > 50 ? 'is-warning' : '');
 
         const gpuRejectThreshold = ((gpu.thresholds?.reject || 0.98) * 100).toFixed(0);
         const gpuSafeThreshold = ((gpu.thresholds?.safe || 0.85) * 100).toFixed(0);
@@ -400,7 +398,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <div class="monitor-meter-cell" title="${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)">
                         <strong>${formatMetricNumber(concurrencyActive)} / ${formatMetricNumber(concurrencyEffectiveMax)} (${aiMeterWidth}%)</strong>
                         <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${aiMeterWidth}%; background: ${aiMeterColor};"></div>
+                            <div class="monitor-meter-fill ${aiStatusClass}" data-meter-rate="${aiMeterWidth}"></div>
                         </div>
                     </div>
                 </div>
@@ -409,7 +407,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <div class="monitor-meter-cell" title="超过 ${queueTimeoutSec} 秒自动解挂 · ${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)">
                         <strong>${formatMetricNumber(concurrencyQueued)} / ${formatMetricNumber(concurrencyMaxQueue)} (${queueMeterWidth}%)</strong>
                         <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${queueMeterWidth}%; background: ${queueMeterColor};"></div>
+                            <div class="monitor-meter-fill ${queueStatusClass}" data-meter-rate="${queueMeterWidth}"></div>
                         </div>
                     </div>
                 </div>
@@ -549,21 +547,26 @@ const loadMonitorSummary = async function(options = {}) {
         const routesHtml = routes.length
             ? routes.map((route, idx) => {
                 const name = describeMonitorRoute(route.route);
+                const statusNum = Number(route.status);
+                const statusClass = statusNum >= 500 ? 'status-danger' : statusNum >= 400 ? 'status-warning' : 'status-success';
+                const methodClass = `method-${String(route.method || '').toLowerCase()}`;
                 return `
                 <tr>
-                    <td class="text-center">${idx + 1}</td>
-                    <td title="${escapeHtml(name)}">${escapeHtml(name)}</td>
-                    <td class="text-center">${escapeHtml(route.method)}</td>
-                    <td title="${escapeHtml(route.route)}">${escapeHtml(route.route)}</td>
-                    <td class="text-center">${escapeHtml(route.status)}</td>
-                    <td class="text-center">${formatMetricNumber(route.requests)}</td>
-                    <td class="text-center">${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
+                    <td class="text-center col-route-idx">${idx + 1}</td>
+                    <td class="col-route-name" title="${escapeHtml(name)}">${escapeHtml(name)}</td>
+                    <td class="text-center col-route-method"><span class="monitor-method-tag ${escapeHtml(methodClass)}">${escapeHtml(route.method)}</span></td>
+                    <td class="col-route-path" title="${escapeHtml(route.route)}"><code>${escapeHtml(route.route)}</code></td>
+                    <td class="text-center col-route-status"><span class="monitor-status-pill-mini ${statusClass}">${escapeHtml(route.status)}</span></td>
+                    <td class="text-center col-route-requests">${formatMetricNumber(route.requests)}</td>
+                    <td class="text-center col-route-latency">${formatMetricNumber(route.avgLatencyMs, 1)} ms</td>
                 </tr>
             `}).join('')
-            : '<tr><td colspan="7" class="text-center">暂无请求数据</td></tr>';
+            : '<tr><td colspan="7" class="text-center monitor-table-empty">暂无请求数据</td></tr>';
 
         const modalBody = document.getElementById('monitor-routes-modal-body');
         if (modalBody) PivotSafeHtml.setHtml(modalBody, routesHtml);
+        const pageBody = document.getElementById('monitor-routes-list-body');
+        if (pageBody) PivotSafeHtml.setHtml(pageBody, routesHtml);
 
         document.getElementById('monitor-updated-at').innerText = `最近刷新：${formatDateToCN(data.updatedAt)}`;
         scheduleMonitorRefresh();

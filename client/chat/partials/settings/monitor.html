@@ -1,31 +1,50 @@
 <section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
-    <div class="settings-page-head">
-        <div><h3>系统监控</h3><p>先看运行异常，再按需查看资源与对话质量。</p></div>
-        <div class="settings-subnav" role="tablist" aria-label="系统监控分区">
-            <button id="monitor-overview-tab" type="button" class="settings-subtab active" role="tab" aria-controls="monitor-overview-panel" aria-selected="true" tabindex="0" data-quality-tab="monitor" data-quality-section="overview">运行概览</button>
-            <button id="monitor-services-tab" type="button" class="settings-subtab" role="tab" aria-controls="monitor-services-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="services">服务与资源</button>
-            <button id="monitor-quality-tab" type="button" class="settings-subtab" role="tab" aria-controls="decision-review-feedback-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="quality">对话质量</button>
+    <div class="settings-page-head monitor-page-head">
+        <div class="monitor-head-title-wrap">
+            <h3>系统监控</h3>
+            <p>系统运行健康、硬件利用率、服务负载与请求指标监控。</p>
         </div>
-    </div>
-    <div class="monitor-toolbar">
-        <p id="monitor-updated-at" class="monitor-updated-at" role="status">等待刷新</p>
-        <label class="monitor-auto-refresh"><input type="checkbox" id="monitor-auto-refresh" checked><span>每 10 秒刷新</span></label>
-        <button type="button" class="btn-secondary monitor-routes-btn" data-static-action="open-monitor-routes">接口详情</button>
-        <button id="monitor-refresh-btn" type="button" class="btn-secondary">刷新指标</button>
+        <div class="settings-page-actions monitor-head-actions">
+            <div class="settings-subnav" role="tablist" aria-label="系统监控分区">
+                <button id="monitor-overview-tab" type="button" class="settings-subtab active" role="tab" aria-controls="monitor-overview-panel" aria-selected="true" tabindex="0" data-quality-tab="monitor" data-quality-section="overview">运行概览</button>
+                <button id="monitor-services-tab" type="button" class="settings-subtab" role="tab" aria-controls="monitor-services-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="services">服务与资源</button>
+                <button id="monitor-quality-tab" type="button" class="settings-subtab" role="tab" aria-controls="decision-review-feedback-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="quality">对话质量</button>
+            </div>
+            <div class="monitor-head-meta">
+                <span class="monitor-status-pill">
+                    <span class="monitor-status-dot"></span>
+                    <span id="monitor-updated-at" class="monitor-updated-at" role="status">等待刷新</span>
+                </span>
+                <label class="monitor-auto-refresh" title="定时拉取最新系统状态"><input type="checkbox" id="monitor-auto-refresh" checked><span>每 10 秒刷新</span></label>
+                <button id="monitor-refresh-btn" type="button" class="btn-secondary" title="立即拉取最新指标">刷新指标</button>
+            </div>
+        </div>
     </div>
     <section id="monitor-overview-panel" role="tabpanel" aria-labelledby="monitor-overview-tab" data-quality-panels="monitor" data-quality-panel="overview">
         <div id="monitor-summary-grid" class="monitor-grid"></div>
         <div class="monitor-panels">
             <div class="stat-card monitor-panel-card monitor-panel-health">
-                <h4>健康与维护</h4><p class="monitor-panel-description">全部健康检查与最近一次维护结果</p>
+                <div class="monitor-panel-head">
+                    <h4>健康与维护</h4>
+                    <span class="monitor-badge-subtle">系统探针</span>
+                </div>
+                <p class="monitor-panel-description">全部健康检查与最近一次维护结果</p>
                 <div id="monitor-health-maintenance-list" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card">
-                <h4>任务队列</h4><p class="monitor-panel-description">全局当前状态；失败按最近 24 小时完成时间统计</p>
+                <div class="monitor-panel-head">
+                    <h4>任务队列</h4>
+                    <span class="monitor-badge-subtle">全局状态</span>
+                </div>
+                <p class="monitor-panel-description">全局当前状态；失败按最近 24 小时完成时间统计</p>
                 <div id="monitor-task-queue" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card">
-                <h4>运行压力</h4><p class="monitor-panel-description">本实例的事件循环、数据库连接池与写入队列</p>
+                <div class="monitor-panel-head">
+                    <h4>运行压力</h4>
+                    <span class="monitor-badge-subtle">实例负载</span>
+                </div>
+                <p class="monitor-panel-description">本实例的事件循环、数据库连接池与写入队列</p>
                 <div id="monitor-runtime-pressure" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card monitor-panel-observability">
@@ -48,45 +67,112 @@
                 <p class="monitor-panel-description">最近 12 条事件，包含已恢复记录；模型探针详情见“服务与资源”。</p>
                 <div id="monitor-observability-list" class="monitor-list"></div>
             </div>
-
+            <div id="monitor-routes-panel-card" class="stat-card monitor-panel-card monitor-panel-routes">
+                <div class="monitor-panel-head">
+                    <h4>热点接口性能与调用明细</h4>
+                    <span class="monitor-badge-subtle">最近 10 分钟</span>
+                </div>
+                <p class="monitor-panel-description">按调用频次与平均耗时汇总本实例当前统计窗口内各核心业务接口的运行状态；数据随监控面板同步刷新。</p>
+                <div class="table-container monitor-routes-table-wrap">
+                    <table class="data-table compact-table monitor-routes-table">
+                        <colgroup>
+                            <col class="col-route-idx">
+                            <col class="col-route-name">
+                            <col class="col-route-method">
+                            <col class="col-route-path">
+                            <col class="col-route-status">
+                            <col class="col-route-requests">
+                            <col class="col-route-latency">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="text-center">序号</th>
+                                <th>接口功能</th>
+                                <th class="text-center">方法</th>
+                                <th>路由路径</th>
+                                <th class="text-center">状态</th>
+                                <th class="text-center">请求量</th>
+                                <th class="text-center">平均延迟</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monitor-routes-list-body">
+                            <tr>
+                                <td colspan="7" class="text-center monitor-table-empty">正在加载接口数据...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </section>
     <section id="monitor-services-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-services-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="services">
-        <p class="monitor-empty">资源为本实例可见范围；GPU 仅代表本机探针，远端模型状态见端点列表。用量按北京时间统计。</p>
+        <p class="monitor-empty monitor-services-tip">资源为本实例可见范围；GPU 仅代表本机探针，远端模型状态见端点列表。用量按北京时间统计。</p>
         <div class="monitor-panels">
             <div class="stat-card monitor-panel-card monitor-panel-gpu">
-                <h4>GPU 与并发保护</h4><div id="monitor-gpu-list" class="monitor-list"></div>
+                <div class="monitor-panel-head">
+                    <h4>GPU 与并发保护</h4>
+                    <span class="monitor-badge-subtle">算力探针</span>
+                </div>
+                <div id="monitor-gpu-list" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card monitor-panel-resource">
-                <h4>系统资源</h4><div id="monitor-resource-list" class="monitor-list"></div>
+                <div class="monitor-panel-head">
+                    <h4>系统资源</h4>
+                    <span class="monitor-badge-subtle">主机硬件</span>
+                </div>
+                <div id="monitor-resource-list" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card monitor-panel-rag">
-                <h4>知识库、检索与向量服务</h4><p class="monitor-panel-description">检索计数为本实例启动以来；Embedding 趋势与诊断按各自时间窗口统计</p>
+                <div class="monitor-panel-head">
+                    <h4>知识库、检索与向量服务</h4>
+                    <span class="monitor-badge-subtle">RAG 性能</span>
+                </div>
+                <p class="monitor-panel-description">检索计数为本实例启动以来；Embedding 趋势与诊断按各自时间窗口统计</p>
                 <div id="monitor-rag-storage-list" class="monitor-list"></div>
                 <div id="monitor-rag-latency-trend" class="monitor-rag-latency-trend"></div>
             </div>
             <div class="stat-card monitor-panel-card monitor-panel-models">
-                <h4>消息与模型用量</h4><div id="monitor-usage-summary" class="monitor-list"></div>
-                <h5>今日模型 Token 分布（前 8 项）</h5><div id="monitor-model-list" class="monitor-list"></div>
+                <div class="monitor-panel-head">
+                    <h4>消息与模型用量</h4>
+                    <span class="monitor-badge-subtle">Token 消耗</span>
+                </div>
+                <div id="monitor-usage-summary" class="monitor-list"></div>
+                <h5>今日模型 Token 分布（前 8 项）</h5>
+                <div id="monitor-model-list" class="monitor-list"></div>
             </div>
             <div class="stat-card monitor-panel-card monitor-panel-endpoints">
-                <h4>模型端点状态</h4><div id="monitor-service-endpoint-list" class="monitor-list js-monitor-endpoint-list"></div>
+                <div class="monitor-panel-head">
+                    <h4>模型端点状态</h4>
+                    <span class="monitor-badge-subtle">连接健康</span>
+                </div>
+                <div id="monitor-service-endpoint-list" class="monitor-list js-monitor-endpoint-list"></div>
             </div>
         </div>
     </section>
     <section id="decision-review-feedback-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-quality-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="quality">
         <div class="monitor-panels">
             <div class="stat-card monitor-panel-card">
-                <h4>自然对话与自动任务</h4><p class="monitor-panel-description">全局 · 最近 30 天</p>
+                <div class="monitor-panel-head">
+                    <h4>自然对话与自动任务</h4>
+                    <span class="monitor-badge-subtle">全局 30 天</span>
+                </div>
+                <p class="monitor-panel-description">全局 · 最近 30 天</p>
                 <div id="monitor-chat-execution" class="monitor-list">等待加载</div>
             </div>
             <div class="stat-card monitor-panel-card">
-                <h4>检索与工具路由</h4><p class="monitor-panel-description">全局 · 最近 24 小时；P95 为各决策服务中的最高值</p>
+                <div class="monitor-panel-head">
+                    <h4>检索与工具路由</h4>
+                    <span class="monitor-badge-subtle">全局 24 小时</span>
+                </div>
+                <p class="monitor-panel-description">全局 · 最近 24 小时；P95 为各决策服务中的最高值</p>
                 <div id="monitor-routing-quality" class="monitor-list"></div>
             </div>
         </div>
-        <div class="settings-page-head">
-            <div><h4>对话质量异常处理</h4><p>集中处理执行范围、反复误判及证据冲突；常规纠正自动归档。复核不改变当前任务，不直接发布全局策略。</p></div>
+        <div class="settings-page-head quality-feedback-head">
+            <div>
+                <h4>对话质量异常处理</h4>
+                <p>集中处理执行范围、反复误判及证据冲突；常规纠正自动归档。复核不改变当前任务，不直接发布全局策略。</p>
+            </div>
         </div>
         <!-- @include partials/settings/route-feedback.html -->
     </section>
