@@ -153,6 +153,85 @@ test('真实音频工作线程按块输出单声道 PCM，兼容多通道输入'
     assert.equal(packets.length, 1);
     assert.equal(packets[0].length, 2048);
     assert.ok(Math.abs(packets[0][0] - 0.3) < 0.0001);
+    for (let index = 0; index < 3; index++) processor.process([[new Float32Array(128).fill(0.2)]]);
+    processor.port.onmessage({ data: { type: 'flush' } });
+    assert.equal(packets[1].length, 384, '停止时吐出未凑满一块的最后音频');
+    assert.equal(packets[2].type, 'flushed');
+});
+
+async function clientCapture({ hold = false, drain = false } = {}) {
+    const modules = new Map();
+    const pending = [];
+    const lengths = [];
+    let port;
+    let stops = 0;
+    const context = { isSecureContext: true, navigator: { mediaDevices: { getUserMedia() {} } },
+        document: { documentElement: { dataset: {} } }, setTimeout, clearTimeout, AbortController,
+        API_BASE: '/api', showToast() {}, AudioContext: class {
+            constructor() { this.sampleRate = 16000; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; }
+            createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+            createGain() { return { gain: {}, connect() {}, disconnect() {} }; }
+            async resume() {} async close() {}
+        }, AudioWorkletNode: class {
+            constructor() {
+                this.port = {}; port = this.port;
+                if (drain) this.port.postMessage = () => {
+                    port.onmessage({ data: new Float32Array(384).fill(0.004) });
+                    port.onmessage({ data: { type: 'flushed' } });
+                };
+            }
+            connect() {} disconnect() {}
+        },
+        apiFetch: async url => {
+            if (url.endsWith('voice-recognition')) return { ok: true, json: async () => ({ available: true, languages: ['zh-CN'] }) };
+            if (hold) return new Promise(resolve => pending.push(resolve));
+            return { ok: true, json: async () => ({ text: '完整识别结果' }) };
+        }, Pivot: { exposeModule: (name, value) => modules.set(name, value), moduleApi: name => modules.get(name) } };
+    context.window = context;
+    modules.set('chat.voiceAudio', { encodeWave(chunks) { lengths.push(chunks.reduce((sum, chunk) => sum + chunk.length, 0)); return audioInput().audioBase64; } });
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/server-voice-recognition.js'), 'utf8'), context);
+    const recognition = await modules.get('chat.serverVoiceRecognition').prepare('zh-CN');
+    recognition.attachStream({ getTracks: () => [{ stop() { stops++; } }] });
+    recognition.start();
+    await new Promise(resolve => setImmediate(resolve));
+    return { recognition, lengths, pending, send: (length, value) => port.onmessage({ data: new Float32Array(length).fill(value) }),
+        get stops() { return stops; } };
+}
+
+test('低音量语音和 800ms 自然停顿不被截断，句首预录也保留', async () => {
+    const capture = await clientCapture();
+    try {
+        capture.recognition.continuous = true;
+        capture.send(3200, 0);
+        capture.send(4000, 0.004);
+        capture.send(12800, 0);
+        assert.equal(capture.lengths.length, 0, '800ms 内的停顿仍等待后半句');
+        capture.send(4000, 0.004);
+        capture.send(16000, 0);
+        assert.equal(capture.lengths[0], 40000, '低于旧 0.008 阈值的说话仍能完整提交');
+        await new Promise(resolve => setImmediate(resolve));
+    } finally { capture.recognition.abort(); }
+});
+
+test('完成录音时等待工作线程尾包和全部排队转写，不因第一段返回就丢掉第二段', async () => {
+    const capture = await clientCapture({ hold: true, drain: true });
+    let text = '';
+    capture.recognition.onresult = event => { text = event.results.map(item => item[0].transcript).join(''); };
+    try {
+        capture.send(4000, 0.02);
+        capture.send(16000, 0);
+        await new Promise(resolve => setImmediate(resolve));
+        capture.send(4000, 0.004);
+        capture.recognition.stop();
+        assert.equal(capture.stops, 1);
+        assert.deepEqual(capture.lengths, [20000, 4384]);
+        capture.pending[0]({ ok: true, json: async () => ({ text: '第一段' }) });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(capture.pending.length, 2, '第一段返回后继续处理已收尾的第二段');
+        capture.pending[1]({ ok: true, json: async () => ({ text: '第二段尾句' }) });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(text, '第一段第二段尾句');
+    } finally { capture.recognition.abort(); }
 });
 
 test('服务器录音适配器停止时立即释放麦克风，取消后迟到文字不会覆盖输入', async () => {

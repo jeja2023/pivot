@@ -27,7 +27,7 @@ async function createRun(userId, id, parentRunId = null, budgetConfig = '{}', ma
     `, [id, userId, id, id, parentRunId, budgetConfig, maxTokenBudget, now, now]);
 }
 
-test('Agent event outbox is retryable and event replay advances by seq', async () => {
+test('Agent event outbox is retryable and event replay advances by seq', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
     const runId = `event-outbox-${process.pid}-${Date.now()}`;
     await createRun(user.id, runId);
@@ -71,7 +71,7 @@ test('Agent event outbox is retryable and event replay advances by seq', async (
     }
 });
 
-test('Agent child resources inherit budget, enforce concurrency, and roll usage into parent', async () => {
+test('Agent child resources inherit budget, enforce concurrency, and roll usage into parent', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
     const suffix = `${process.pid}-${Date.now()}`;
     const parentId = `resource-parent-${suffix}`;
@@ -87,7 +87,7 @@ test('Agent child resources inherit budget, enforce concurrency, and roll usage 
         assert.equal(reservation.tokenBudget, 120);
         await assert.rejects(
             () => reserveChildRunResources({ parentRunId: parentId, userId: user.id, requestedTokenBudget: 20 }),
-            error => error.code === 'AGENT_CHILD_CONCURRENCY_EXCEEDED'
+            error => error.code === 'AGENT_CHILD_CONCURRENCY_EXCEEDED' && error.status === 409
         );
         await createRun(user.id, childId, parentId);
         await initializeAgentRunResources({

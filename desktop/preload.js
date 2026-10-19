@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('pivotDesktop', {
         return ipcRenderer.invoke('pivot-voice:start', { id: String(options.id || ''), language: String(options.language || '') });
     },
     stopVoiceRecognition(id) { return ipcRenderer.invoke('pivot-voice:stop', String(id || '')); },
+    finishVoiceRecognition(id) { return ipcRenderer.invoke('pivot-voice:finish', String(id || '')); },
     onVoiceRecognitionEvent(callback) {
         if (typeof callback !== 'function') return () => {};
         const listener = (_event, payload) => callback(payload || {});

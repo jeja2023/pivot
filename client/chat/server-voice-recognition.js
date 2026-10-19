@@ -20,6 +20,8 @@
     function createRecognition(language) {
         let generation = 0;
         let active = false;
+        let stopping = false;
+        let stopTimer = null;
         let stream = null;
         let context = null;
         let source = null;
@@ -30,6 +32,7 @@
         let voiced = 0;
         let silence = 0;
         let idle = 0;
+        let noiseFloor = 0.0008;
         let results = [];
         let chain = Promise.resolve();
         let queued = 0;
@@ -40,8 +43,9 @@
                 if (active) throw Object.assign(new Error('识别已开始。'), { name: 'InvalidStateError' });
                 if (!stream) throw Error('录音设备尚未就绪。');
                 active = true;
+                stopping = false;
                 const current = ++generation;
-                chunks = []; size = 0; voiced = 0; silence = 0; idle = 0; results = [];
+                chunks = []; size = 0; voiced = 0; silence = 0; idle = 0; noiseFloor = 0.0008; results = [];
                 const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
                 const nextContext = new AudioContext();
                 context = nextContext;
@@ -57,13 +61,20 @@
                         capture.port.onmessage = event => {
                             if (!active || generation !== current) return;
                             const samples = event.data;
+                            if (samples?.type === 'flushed') { finishCapture(); return; }
+                            if (!samples?.length) return;
                             idle += samples.length;
                             const energy = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
                             chunks.push(samples); size += samples.length;
-                            if (energy > 0.008) { voiced += samples.length; silence = 0; idle = 0; }
-                            else silence += samples.length;
-                            if (!voiced && size > nextContext.sampleRate * 0.3) { const old = chunks.shift(); size -= old.length; old.fill(0); }
-                            if (voiced > nextContext.sampleRate * 0.15 && (silence > nextContext.sampleRate * 0.7 || size >= nextContext.sampleRate * 19)) flush(current);
+                            // 低音量语音仍能起录，保留句首预录；短停顿不立即截断上下文。
+                            const threshold = Math.max(0.0025, Math.min(0.012, noiseFloor * 2.5));
+                            if (energy > threshold) { voiced += samples.length; silence = 0; idle = 0; }
+                            else {
+                                silence += samples.length;
+                                if (!voiced) noiseFloor = noiseFloor * 0.95 + energy * 0.05;
+                            }
+                            while (!voiced && size > nextContext.sampleRate * 0.4) { const old = chunks.shift(); size -= old.length; old.fill(0); }
+                            if (voiced > nextContext.sampleRate * 0.15 && (silence > nextContext.sampleRate * 0.95 || size >= nextContext.sampleRate * 19)) flush(current);
                             if (!recognition.continuous && !voiced && idle > nextContext.sampleRate * 15) recognition.abort();
                         };
                         await nextContext.resume();
@@ -74,16 +85,18 @@
                 })();
             },
             stop() {
-                if (!active) return;
-                flush(generation);
-                disconnect();
-                stream?.getTracks?.().forEach(track => track.stop());
-                const current = generation;
-                void chain.finally(() => { if (active && generation === current) recognition.abort(); });
+                if (!active || stopping) return;
+                stopping = true;
+                // 取回音频线程尚未凑满一块的句尾，收到确认后再关闭采集。
+                if (capture?.port?.postMessage) {
+                    stopTimer = setTimeout(finishCapture, 250);
+                    capture.port.postMessage({ type: 'flush' });
+                } else finishCapture();
             },
             abort() {
                 if (!active) return;
                 active = false; generation++;
+                clearTimeout(stopTimer); stopTimer = null;
                 for (const request of requests) request.abort();
                 requests.clear();
                 disconnect();
@@ -91,6 +104,15 @@
                 recognition.onend?.();
             }
         };
+        function finishCapture() {
+            if (!active || !stopping || !context) return;
+            clearTimeout(stopTimer); stopTimer = null;
+            flush(generation);
+            disconnect();
+            stream?.getTracks?.().forEach(track => track.stop());
+            const current = generation;
+            void chain.finally(() => { if (active && generation === current) recognition.abort(); });
+        }
         function clearAudio() { for (const chunk of chunks) chunk.fill(0); chunks = []; size = 0; voiced = 0; silence = 0; }
         function disconnect() {
             if (capture) capture.port.onmessage = null;
@@ -109,6 +131,7 @@
             chain = chain.then(async () => {
                 if (!active || current !== generation) { queued--; return; }
                 const controller = new AbortController(); requests.add(controller);
+                const timer = setTimeout(() => controller.abort(), 35000);
                 try {
                     const response = await apiFetch(`${API_BASE}/chat/voice-transcriptions`, { method: 'POST',
                         headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
@@ -120,10 +143,10 @@
                         results.push({ isFinal: true, 0: { transcript: data.text } });
                         recognition.onresult?.({ resultIndex: results.length - 1, results: results.slice() });
                     }
-                    if (!recognition.continuous) recognition.abort();
+                    if (!recognition.continuous && !stopping) recognition.abort();
                 } catch (error) {
-                    if (active && current === generation && error.name !== 'AbortError') fail(error.message);
-                } finally { requests.delete(controller); queued--; }
+                    if (active && current === generation) fail(error.name === 'AbortError' ? '语音识别超时，请稍后重试。' : error.message);
+                } finally { clearTimeout(timer); requests.delete(controller); queued--; }
             });
         }
         return recognition;

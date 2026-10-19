@@ -23,7 +23,7 @@ function createDesktopVoiceRecognition({ spawnProcess = spawn, platform = proces
     function worker(mode, language) {
         const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
         return spawnProcess(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(readScript(), 'utf16le').toString('base64')], {
-            windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
             env: { ...process.env, PIVOT_NATIVE_VOICE_MODE: mode, PIVOT_NATIVE_VOICE_LANGUAGE: language }
         });
     }
@@ -72,8 +72,19 @@ function createDesktopVoiceRecognition({ spawnProcess = spawn, platform = proces
         if (!session || owner && session.owner !== owner || requestId && session.id !== requestId) return cancelled;
         active = null;
         session.cancel?.();
+        clearTimeout(session.finishTimer);
         session.child.kill();
         session.emit({ type: 'ended', id: session.id });
+        return true;
+    }
+    function finish(owner, requestId) {
+        const session = active;
+        if (!session || session.owner !== owner || session.id !== requestId) return false;
+        if (session.finishing) return true;
+        session.finishing = true;
+        session.finishTimer = setTimeout(() => stop(owner, requestId), 5000);
+        try { session.child.stdin.write('finish\n'); }
+        catch (_) { stop(owner, requestId); return false; }
         return true;
     }
     async function start(owner, input, emit) {
@@ -97,12 +108,14 @@ function createDesktopVoiceRecognition({ spawnProcess = spawn, platform = proces
                 if (done) return;
                 done = true;
                 clearTimeout(timer);
+                clearTimeout(session.finishTimer);
                 if (active === session) active = null;
                 child.kill();
                 if (started) emit({ id, type: 'error', error: code, voiceMessage: voiceError(code).message });
                 else reject(voiceError(code));
             }
             active = session;
+            child.stdin?.on('error', () => { if (active === session) fail('native-recognition-unavailable'); });
             consume(child, event => {
                 if (active !== session) return;
                 if (event.type === 'started' && !started) {
@@ -111,11 +124,16 @@ function createDesktopVoiceRecognition({ spawnProcess = spawn, platform = proces
                     emit({ id, type: 'started' });
                     resolve({ id, language, provider: 'windows_system_speech' });
                 } else if (event.type === 'result' && started) emit({ id, type: 'result', text: String(event.text || '').slice(0, 4000) });
-                else if (event.type === 'error') fail(event.code);
+                else if (event.type === 'ended' && started) {
+                    done = true;
+                    clearTimeout(session.finishTimer);
+                    active = null;
+                    emit({ id, type: 'ended' });
+                } else if (event.type === 'error') fail(event.code);
             }, code => { if (active === session) fail(code || 'native-recognition-unavailable'); });
         });
     }
-    return { capabilities, start, stop };
+    return { capabilities, start, stop, finish };
 }
 
 function installDesktopVoiceRecognition({ ipcMain, authorize, send, broker = createDesktopVoiceRecognition() }) {
@@ -129,6 +147,7 @@ function installDesktopVoiceRecognition({ ipcMain, authorize, send, broker = cre
         }
     });
     ipcMain.handle('pivot-voice:stop', async (event, id) => { authorize(event); return broker.stop(event.sender.id, String(id || '')); });
+    ipcMain.handle('pivot-voice:finish', async (event, id) => { authorize(event); return broker.finish(event.sender.id, String(id || '')); });
     return broker;
 }
 

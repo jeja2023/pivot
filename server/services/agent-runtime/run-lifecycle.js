@@ -155,7 +155,8 @@ async function createChildRunFromExisting(run, user) {
         timeoutMs: run.timeout_ms,
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
-        maxTokenBudget: run.max_token_budget,
+        // 重跑仍共享原任务额度，由资源账本原子分配剩余预算。
+        maxTokenBudget: 0,
         budgetConfig: parseJsonObject(run.budget_config) || {},
         networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,
@@ -302,7 +303,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
         timeoutMs: run.timeout_ms,
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
-        maxTokenBudget: run.max_token_budget,
+        maxTokenBudget: 0,
         budgetConfig: parseJsonObject(run.budget_config) || {},
         networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,
@@ -355,7 +356,8 @@ async function resumeAgentRun(runId, user) {
         timeoutMs: run.timeout_ms,
         toolTimeoutMs: run.tool_timeout_ms,
         retryLimit: run.retry_limit,
-        maxTokenBudget: run.max_token_budget,
+        // 续跑不能重新申请原始总额，0 表示继承账本的实际剩余额度。
+        maxTokenBudget: 0,
         budgetConfig: parseJsonObject(run.budget_config) || {},
         networkPolicy: parseJsonObject(run.network_policy) || {},
         templateId: run.template_id,

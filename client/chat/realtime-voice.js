@@ -5,6 +5,30 @@
     let voiceStart = null;
 
     const VOICE_HEARTBEAT_MS = 30000;
+    const voiceText = () => window.Pivot.moduleApi('chat.voiceText');
+
+    function isPlaybackEcho(session, text) {
+        session.playbackEchoes = session.playbackEchoes.filter(item => item.expiresAt > Date.now());
+        return voiceText().isPlaybackEcho(text, session.playbackEchoes.map(item => item.text));
+    }
+
+    function echoDeadline(session) { return Date.now() + (session.recognition.usesServerInput ? 30000 : 1500); }
+
+    function interruptReply(session) {
+        if (!session.speaking && (!session.submitting || session.replyInterrupted)) return;
+        session.replyInterrupted = true;
+        clearTimeout(session.playbackTimer);
+        session.playbackTimer = null;
+        // 先废弃朗读实例，再取消播放，避免取消回调被当成设备故障。
+        session.utterance = null;
+        session.speaking = false;
+        session.speechQueue = [];
+        session.speechBuffer = '';
+        session.playbackEchoes.forEach(item => { item.expiresAt = Math.min(item.expiresAt, echoDeadline(session)); });
+        globalThis.speechSynthesis?.cancel?.();
+        window.Pivot.moduleApi('chat.execution')?.stopVoiceRequest?.(session.id);
+        void recordEvent(session.id, 'barge_in').catch(() => {});
+    }
 
     function setStatus(message = '', state = '') {
         const element = document.getElementById('chat-voice-status');
@@ -104,29 +128,36 @@
         session.speaking = true;
         session.utterance = utterance;
         setStatus('正在准备朗读…', 'speaking');
-        // 浏览器识别器不使用上面 getUserMedia 的回声消除轨道，朗读时暂停识别以防自问自答。
-        try { session.recognition?.abort?.(); } catch (_) {}
+        // 朗读时继续识别，用正在播放的文本过滤回声，保留用户插话通道。
+        const echo = { text, expiresAt: Infinity };
+        session.playbackEchoes = [...session.playbackEchoes.filter(item => item.expiresAt > Date.now()).slice(-63), echo];
         session.spokenAny = true;
         const failPlayback = () => {
             if (voice !== session || session.utterance !== utterance) return;
             showToast('本地朗读未能播放，实时语音已停止。请检查系统音量、默认输出设备和中文语音组件；仍可使用语音输入。', 'error');
             release({ event: 'failed' });
         };
-        session.playbackTimer = setTimeout(failPlayback, 8000);
+        // 某些本地声音不触发 onstart；引擎已在播放时不能据此结束整场对话。
+        session.playbackTimer = setTimeout(() => {
+            if (voice !== session || session.utterance !== utterance) return;
+            session.playbackTimer = null;
+            if (!globalThis.speechSynthesis.speaking && !globalThis.speechSynthesis.pending) failPlayback();
+        }, 15000);
         utterance.onstart = () => {
             if (voice !== session || session.utterance !== utterance) return;
             clearTimeout(session.playbackTimer);
             session.playbackTimer = null;
-            setStatus('正在朗读，结束后继续聆听。', 'speaking');
+            setStatus('正在朗读，可直接说话打断。', 'speaking');
         };
         utterance.onend = () => {
             if (voice !== session || session.utterance !== utterance) return;
             clearTimeout(session.playbackTimer);
             session.playbackTimer = null;
+            echo.expiresAt = echoDeadline(session);
             session.utterance = null;
             session.speaking = false;
-            speakNext();
-            if (!session.speaking) { startRecognition(session); listeningStatus(session); }
+            setTimeout(() => { if (voice === session && session.active) speakNext(); }, 0);
+            if (!session.speechQueue.length) { startRecognition(session); listeningStatus(session); }
         };
         utterance.onerror = failPlayback;
         try {
@@ -143,14 +174,15 @@
     function queueSpeech(text) {
         const value = String(text || '').trim();
         if (!voice?.active || !value) return;
-        voice.speechQueue.push(value.slice(0, 2000));
+        voice.speechQueue.push(...voiceText().speechSegments(value));
         speakNext();
     }
 
     function handleAssistantDelta(delta, voiceSessionId) {
-        if (!voice?.active || voiceSessionId && voice.id !== voiceSessionId) return;
-        voice.answerText += String(delta || '');
-        voice.speechBuffer += String(delta || '');
+        if (!voice?.active || voice.replyInterrupted || voiceSessionId && voice.id !== voiceSessionId) return;
+        const value = String(delta || '');
+        voice.answerText += value;
+        voice.speechBuffer += value;
         const buffer = voice.speechBuffer;
         const sentenceEnd = /[。！？!?；;]\s*/gu;
         let boundary = 0;
@@ -164,11 +196,17 @@
     }
 
     function flushAssistantSpeech(content = '', voiceSessionId) {
-        if (!voice?.active || voiceSessionId && voice.id !== voiceSessionId) return;
+        if (!voice?.active || voice.replyInterrupted || voiceSessionId && voice.id !== voiceSessionId) return;
         const session = voice;
-        if (content) voice.answerText = content;
-        if (content && !voice.spokenAny && !voice.speechBuffer) queueSpeech(content);
-        else if (voice.speechBuffer.trim()) queueSpeech(voice.speechBuffer);
+        // 最终全文可能包含流式阶段未到达的尾部，只追加差量，重复完成事件不会重读。
+        if (content) {
+            const fullText = String(content);
+            if (fullText.startsWith(session.answerText)) {
+                session.speechBuffer += fullText.slice(session.answerText.length);
+            } else if (!session.spokenAny) session.speechBuffer = fullText;
+            session.answerText = fullText;
+        }
+        if (session.speechBuffer.trim()) queueSpeech(session.speechBuffer);
         session.speechBuffer = '';
     }
 
@@ -185,7 +223,8 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action })
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || '语音任务控制失败。');
+        if (!response.ok) throw Object.assign(new Error(data.error || '语音任务控制失败。'), { code: data.code });
+        if (voice !== session || !session.active) return data;
         const message = String(data.message || '').trim();
         if (message) queueSpeech(message);
         showToast(message || '任务控制已执行。', 'success');
@@ -197,25 +236,26 @@
         const input = document.getElementById('user-input');
         if (!session?.active || !input || !text) return;
         if (String(currentSessionId || '') !== session.chatSessionId) { release(); return; }
+        if (voiceText().isExitCommand(text)) {
+            release();
+            showToast('已退出实时语音。', 'info');
+            return;
+        }
         const taskAction = voiceTaskControlAction(text);
         if (taskAction) {
             try { await controlVoiceTask(session, taskAction); }
-            catch (error) { showToast(error.message || '语音任务控制失败。', 'error'); }
+            catch (error) {
+                if (voice !== session || !session.active) return;
+                if (session.replyInterrupted && taskAction !== 'resume' && error.code === 'AGENT_VOICE_TASK_TARGET_NOT_FOUND') {
+                    showToast('已停止当前回复。', 'info');
+                } else showToast(error.message || '语音任务控制失败。', 'error');
+            }
             return;
         }
-        if (session.submitting) { session.pendingTranscript = `${session.pendingTranscript || ''} ${text}`.trim().slice(0, 4000); return; }
+        if (session.submitting) { session.pendingTranscript = voiceText().joinTranscript(session.pendingTranscript, text).slice(0, 4000); return; }
+        session.replyInterrupted = false;
         session.submitting = true;
         setStatus('已完成识别，正在等待模型回答…', 'thinking');
-        if (session.speaking) {
-            clearTimeout(session.playbackTimer);
-            session.playbackTimer = null;
-            session.utterance = null;
-            globalThis.speechSynthesis?.cancel?.();
-            session.speaking = false;
-            session.speechQueue = [];
-            session.speechBuffer = '';
-            void recordEvent(session.id, 'barge_in').catch(() => {});
-        }
         session.spokenAny = false;
         session.answerText = '';
         session.speechBuffer = '';
@@ -234,8 +274,10 @@
                 }
             }
         } catch (error) {
-            showToast(error.message || '语音消息发送失败。', 'error');
-            if (voice === session && session.active) void recordEvent(session.id, 'failed').catch(() => {});
+            if (voice === session && session.active && !session.replyInterrupted && error.name !== 'AbortError') {
+                showToast(error.message || '语音消息发送失败。', 'error');
+                void recordEvent(session.id, 'failed').catch(() => {});
+            }
         } finally {
             if (voice === session) {
                 session.submitting = false;
@@ -248,7 +290,7 @@
     }
 
     function startRecognition(session = voice) {
-        if (!session?.active || voice !== session || !session.recognition || session.speaking) return;
+        if (!session?.active || voice !== session || !session.recognition) return;
         try { session.recognition.start(); }
         catch (error) {
             if (error.name === 'InvalidStateError') return;
@@ -273,6 +315,11 @@
         if (current) {
             current.active = false;
             current.history = [];
+            current.playbackEchoes = [];
+            current.pendingTranscript = '';
+            current.speechQueue = [];
+            current.speechBuffer = '';
+            current.answerText = '';
             clearTimeout(current.playbackTimer);
             current.utterance = null;
             current.cancelStart?.();
@@ -324,6 +371,11 @@
             if (!localVoice) throw Object.assign(new Error(), { voiceMessage: '当前浏览器没有可用的本地朗读声音，实时语音无法启动；可使用语音输入。' });
             stream = recognition.usesDesktopInput ? null : await getUserMedia({ audio: true });
             if (start.cancelled) { stopTracks(stream); return null; }
+            // 服务器识别直接使用该轨道；默认采集成功后再尝试回声消除，不兼容时沿用原轨道。
+            if (recognition.usesServerInput) {
+                try { await stream?.getAudioTracks?.()[0]?.applyConstraints?.({ echoCancellation: true, noiseSuppression: true }); } catch (_) {}
+                if (start.cancelled) { stopTracks(stream); return null; }
+            }
             recognition.attachStream?.(stream);
             if (!currentSessionId) {
                 const created = await window.Pivot?.moduleApi?.('chat.sessions')?.createSession?.('临时语音会话');
@@ -357,18 +409,25 @@
             recognition.continuous = true;
             recognition.interimResults = true;
             const session = { id: start.id, chatSessionId, active: true, stream, recognition, localVoice, history: [], answerText: '',
-                speaking: false, spokenAny: false, submitting: false, speechBuffer: '', speechQueue: [], heartbeatTimer: null };
+                speaking: false, spokenAny: false, submitting: false, replyInterrupted: false, playbackEchoes: [],
+                speechBuffer: '', speechQueue: [], heartbeatTimer: null };
             voice = session;
             recognition.onresult = event => {
+                if (voice !== session || !session.active) return;
                 let finalText = '';
                 let interimText = '';
                 for (let index = event.resultIndex; index < event.results.length; index += 1) {
-                    if (event.results[index].isFinal) finalText += String(event.results[index]?.[0]?.transcript || '');
-                    else interimText += String(event.results[index]?.[0]?.transcript || '');
+                    const transcript = String(event.results[index]?.[0]?.transcript || '').trim();
+                    const exitCommand = event.results[index].isFinal && voiceText().isExitCommand(transcript);
+                    if (!exitCommand && isPlaybackEcho(session, transcript)) continue;
+                    if (event.results[index].isFinal) finalText = voiceText().joinTranscript(finalText, transcript);
+                    else interimText = voiceText().joinTranscript(interimText, transcript);
                 }
                 const text = finalText.trim();
-                if (interimText && !session.speaking && !session.submitting) setStatus('正在识别，请在一句话说完后稍作停顿…', 'recognizing');
-                if (text && !session.speaking) void submitTranscript(text);
+                // 临时结果常含回声或尚未稳定的错字，只用最终识别结果中断回复。
+                if (text && !voiceText().isExitCommand(text)) interruptReply(session);
+                if (interimText && !session.speaking) setStatus('正在识别，请在一句话说完后稍作停顿…', 'recognizing');
+                if (text) void submitTranscript(text);
             };
             recognition.onerror = event => {
                 if (!voice || voice !== session) return;
@@ -380,7 +439,7 @@
                     }
                 }
             };
-            recognition.onend = () => { if (voice === session && session.active && !session.speaking) setTimeout(() => startRecognition(session), 250); };
+            recognition.onend = () => { if (voice === session && session.active) setTimeout(() => startRecognition(session), 250); };
             session.heartbeatTimer = setInterval(() => { if (voice === session && session.active) void recordEvent(session.id, 'heartbeat').catch(() => {}); }, VOICE_HEARTBEAT_MS);
             await new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(Object.assign(new Error(), { voiceMessage: '本地识别服务未响应，实时语音未启动。请检查语音包和麦克风。' })), 8000);

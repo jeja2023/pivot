@@ -274,6 +274,11 @@ function createAgentRunFactory(deps = {}) {
                 }
             }
         }
+        const effectiveTaskBudget = normalizeModelTaskBudget(budgetConfig, modelCfg || {});
+        if (parentRunId && effectiveChildTokenBudget > 0) {
+            // 子运行的两层 Token 限额保持一致或更紧，不能沿用父运行的完整总额。
+            effectiveTaskBudget.max_tokens_total = Math.min(effectiveTaskBudget.max_tokens_total, effectiveChildTokenBudget);
+        }
         try {
             await execute(`
                 INSERT INTO agent_runs (
@@ -313,7 +318,7 @@ function createAgentRunFactory(deps = {}) {
                 normalizePositiveInt(resumeFromStep, 0, 0, 999),
                 JSON.stringify(runMetadata),
                 normalizedRouter,
-                JSON.stringify(normalizeModelTaskBudget(budgetConfig, modelCfg || {})),
+                JSON.stringify(effectiveTaskBudget),
                 JSON.stringify({}),
                 JSON.stringify(networkPolicy || {}),
                 user.tenant_id || user.tenantId || null,

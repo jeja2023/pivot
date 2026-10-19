@@ -134,6 +134,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
         payload.metadata = {
             ...(payload.metadata || {}),
             workflowRunSource: 'preview',
+            workflowEditorId: String(workflow?.id || ''),
             workflowVersionMode: 'draft',
             workflowName: currentAgentWorkflowName()
         };
@@ -207,6 +208,10 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || '工作流运行失败');
+            window.Pivot.moduleApi('agent.dagTimelineSource')?.rememberRun?.(data.run, {
+                spec: payload.dagSpec || options.workflow?.dag_spec || selectedAgentWorkflow()?.dag_spec,
+                workflowId: workflowId === 'draft' ? '' : workflowId
+            });
             if (sourceMode === 'draft') {
                 setAgentWorkflowRunConsoleStatus('预览运行已入队，可在预览详情查看节点轨迹。', 'ready');
                 showToast('预览运行已入队', 'success');

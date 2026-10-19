@@ -18,6 +18,9 @@ try {
     $voiceStream = New-Object System.IO.MemoryStream(,$voiceBytes)
     $voiceEngine = New-Object System.Speech.Recognition.SpeechRecognitionEngine($voiceRecognizer)
     $voiceEngine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+    # 与桌面听写保持相同的停顿容忍度，减少短暂停顿造成的上下文割裂。
+    $voiceEngine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(850)
+    $voiceEngine.EndSilenceTimeoutAmbiguous = [TimeSpan]::FromMilliseconds(1200)
     $voiceEngine.SetInputToWaveStream($voiceStream)
     $voiceText = New-Object System.Collections.Generic.List[string]
     while ($true) {

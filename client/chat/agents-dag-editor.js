@@ -902,7 +902,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         toolbarStatus = renderDagToolbar({
             toolbar,
             readOnly,
-            spec,
+            get spec() { return spec; },
             render,
             flushOut,
             recordHistory,

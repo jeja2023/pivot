@@ -586,6 +586,14 @@ body.dark-mode .summary-chip {
     max-height: 60vh;
 }
 
+.pivot-dag-waterfall-status {
+    margin: 0;
+    padding: 10px 20px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
 .pivot-waterfall-row {
     display: grid;
     grid-template-columns: 240px 1fr 80px;
@@ -625,6 +633,9 @@ body.dark-mode .pivot-waterfall-row:hover {
     text-overflow: ellipsis;
 }
 .pivot-waterfall-tool-tag {
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: 0.7rem;
     padding: 1px 6px;
     background: var(--surface-muted, rgba(148, 163, 184, 0.2));
@@ -685,5 +696,14 @@ body.dark-mode .pivot-waterfall-duration {
     text-align: center;
     color: var(--text-muted, #94a3b8);
     font-size: 0.88rem;
+}
+
+@media (max-width: 640px) {
+    .pivot-dag-waterfall-modal-backdrop { padding: 12px; }
+    .pivot-dag-waterfall-card { width: 100%; }
+    .pivot-waterfall-row { grid-template-columns: minmax(0, 1fr) 64px; gap: 8px; }
+    .pivot-waterfall-row-meta { grid-column: 1; }
+    .pivot-waterfall-duration { grid-column: 2; grid-row: 1; }
+    .pivot-waterfall-track { grid-column: 1 / -1; }
 }
 

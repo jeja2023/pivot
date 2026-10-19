@@ -39,6 +39,7 @@ function loadVoiceActions({ Recognition, getUserMedia }) {
         'user-input': createElement({ value: '' })
     };
     const context = {
+        setTimeout, clearTimeout,
         API_BASE: '',
         Event: class Event { constructor(type, options) { this.type = type; this.options = options; } },
         SpeechRecognition: Recognition,
@@ -63,6 +64,7 @@ function loadVoiceActions({ Recognition, getUserMedia }) {
     };
     if (Recognition) Recognition.prototype.processLocally = false;
     vm.runInNewContext(platform, context, { filename: 'voice-platform.js' });
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/voice-text.js'), 'utf8'), context);
     vm.runInNewContext(source, context, { filename: 'engine-personal-actions.js' });
     return {
         api: modules.get('chat.memoryActions'),
@@ -161,5 +163,47 @@ test('语音输入保留已完成文本与最新中间结果，强制使用设�
     assert.equal(voice.elements['user-input'].value, '已有草稿 第一句。第二');
     recognition.onresult({ resultIndex: 1, results: [{ isFinal: true, 0: { transcript: '第一句。' } }, { isFinal: true, 0: { transcript: '第二句。' } }] });
     assert.equal(voice.elements['user-input'].value, '已有草稿 第一句。第二句。');
+    voice.api.stopChatVoiceInput();
+});
+
+test('点击完成语音输入保留最终尾句，页面关闭仍立即取消且忽略迟到结果', async () => {
+    let recognition;
+    class Recognition {
+        constructor() { recognition = this; }
+        start() {}
+        stop() { this.stopped = true; }
+        abort() { this.aborted = true; }
+    }
+    const { stream, track } = createStream();
+    const voice = loadVoiceActions({ Recognition, getUserMedia: async () => stream });
+    try {
+        const current = await voice.api.startChatVoiceInput();
+        current.onresult({ resultIndex: 0, results: [{ isFinal: false, 0: { transcript: '还没有说完' } }] });
+        await voice.api.startChatVoiceInput();
+        assert.equal(current.stopped, true);
+        assert.equal(current.aborted, undefined);
+        current.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '还没有说完的完整句子' } }] });
+        const lateResult = current.onresult;
+        current.onend();
+        assert.equal(track.stopped, true);
+        assert.equal(voice.elements['user-input'].value, '还没有说完的完整句子');
+        lateResult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '不应覆盖草稿' } }] });
+        assert.equal(voice.elements['user-input'].value, '还没有说完的完整句子');
+
+        await voice.api.startChatVoiceInput();
+        voice.globalListeners.get('pagehide')();
+        assert.equal(recognition.aborted, true);
+    } finally { voice.api.stopChatVoiceInput(); }
+});
+
+test('语音输入多段英文保留词间空格', async () => {
+    let recognition;
+    class Recognition { constructor() { recognition = this; } start() {} }
+    const voice = loadVoiceActions({ Recognition, getUserMedia: async () => createStream().stream });
+    await voice.api.startChatVoiceInput();
+    recognition.onresult({ resultIndex: 0, results: [
+        { isFinal: true, 0: { transcript: 'hello' } }, { isFinal: true, 0: { transcript: 'world' } }
+    ] });
+    assert.equal(voice.elements['user-input'].value, 'hello world');
     voice.api.stopChatVoiceInput();
 });

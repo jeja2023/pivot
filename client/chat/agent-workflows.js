@@ -558,6 +558,7 @@ window.Pivot.exposeModule('agent.automation', {
     openWorkflowShare: openAgentWorkflowShare,
     openWorkflowDependencies: openAgentWorkflowDependencies,
     listWorkflows: () => agentWorkflowsCache.map(item => ({ ...item })),
-    currentWorkflowId: () => String(activeAgentWorkflowId || '')
+    currentWorkflowId: () => String(activeAgentWorkflowId || ''),
+    currentWorkflowName: currentAgentWorkflowName
 });
 window.Pivot.exposeModule('workspaces.implementations', { openAgentDagWorkbench });

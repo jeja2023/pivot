@@ -82,25 +82,35 @@ async function reserveChildRunResources({ parentRunId, userId, requestedTokenBud
             const error = new Error(`父 Agent 子运行并发已达到上限 ${parentLedger.max_children}。`);
             error.code = 'AGENT_CHILD_CONCURRENCY_EXCEEDED';
             error.category = 'resource';
+            error.status = 409;
             throw error;
         }
-        const parentBudget = Number(parentLedger.token_budget || 0);
+        const ledgerBudget = Number(parentLedger.token_budget || 0);
+        const budgetConfig = parseJson(parent.budget_config, {});
+        const configuredValue = budgetConfig.max_tokens_total ?? budgetConfig.maxTokensTotal;
+        const configuredBudget = Number(configuredValue);
+        const hasConfiguredLimit = configuredValue != null && Number.isFinite(configuredBudget) && configuredBudget >= 0;
+        // 总预算比模型用量上限更紧时，也必须扣除已用量；显式 0 仍是零额度。
+        const hasBudgetLimit = ledgerBudget > 0 || hasConfiguredLimit;
+        const parentBudget = hasConfiguredLimit ? (ledgerBudget > 0 ? Math.min(ledgerBudget, configuredBudget) : configuredBudget) : ledgerBudget;
         const reserved = Number(parentLedger.tokens_reserved || 0);
         const consumed = Number(parentLedger.tokens_consumed || 0);
-        const remaining = parentBudget > 0 ? Math.max(parentBudget - reserved - consumed, 0) : 0;
-        if (parentBudget > 0 && remaining <= 0) {
+        const remaining = hasBudgetLimit ? Math.max(parentBudget - reserved - consumed, 0) : 0;
+        if (hasBudgetLimit && remaining <= 0) {
             const error = new Error('父 Agent 没有可继承的剩余 Token 预算。');
             error.code = 'AGENT_CHILD_BUDGET_EXCEEDED';
             error.category = 'resource';
+            error.status = 409;
             throw error;
         }
-        const effectiveBudget = parentBudget > 0
+        const effectiveBudget = hasBudgetLimit
             ? (requested > 0 ? Math.min(requested, remaining) : remaining)
             : requested;
-        if (parentBudget > 0 && requested > 0 && requested > remaining) {
+        if (hasBudgetLimit && requested > 0 && requested > remaining) {
             const error = new Error(`子 Agent 请求预算 ${requested} 超过父 Agent 剩余预算 ${remaining}。`);
             error.code = 'AGENT_CHILD_BUDGET_EXCEEDED';
             error.category = 'resource';
+            error.status = 409;
             throw error;
         }
         const now = getBeijingTimestamp();

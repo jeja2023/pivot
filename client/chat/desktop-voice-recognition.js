@@ -7,6 +7,7 @@
     function createRecognition(language) {
         const bridge = window.pivotDesktop;
         let running = false;
+        let stopping = false;
         let id = '';
         let unsubscribe = null;
         let results = [];
@@ -15,6 +16,7 @@
             start() {
                 if (running) throw Object.assign(new Error('识别已开始。'), { name: 'InvalidStateError' });
                 running = true;
+                stopping = false;
                 results = [];
                 const requestId = `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 id = requestId;
@@ -25,7 +27,7 @@
                     if (event.type === 'result') {
                         results.push({ isFinal: true, 0: { transcript: event.text || '' } });
                         recognition.onresult?.({ resultIndex: results.length - 1, results: results.slice() });
-                        if (!recognition.continuous) recognition.abort();
+                        if (!recognition.continuous && !stopping) recognition.abort();
                     }
                     if (event.type === 'error') { recognition.onerror?.(event); recognition.abort(); }
                     if (event.type === 'ended') recognition.abort();
@@ -52,7 +54,15 @@
                 void bridge.stopVoiceRecognition(stoppedId).catch(() => {});
                 recognition.onend?.();
             },
-            stop() { recognition.abort(); }
+            stop() {
+                if (!running || stopping) return;
+                if (typeof bridge.finishVoiceRecognition !== 'function') { recognition.abort(); return; }
+                stopping = true;
+                const finishingId = id;
+                Promise.resolve(bridge.finishVoiceRecognition(finishingId)).then(finished => {
+                    if (running && id === finishingId && !finished) recognition.abort();
+                }).catch(() => { if (running && id === finishingId) recognition.abort(); });
+            }
         };
         return recognition;
     }

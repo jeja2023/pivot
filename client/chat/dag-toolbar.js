@@ -225,9 +225,14 @@ function renderDagToolbar(ctx) {
             })();
             const showTimelineWaterfall = () => {
                 const api = window.Pivot?.moduleApi?.('agent.dagTimeline');
+                const spec = ctx.getSpec?.() || ctx.spec || { nodes: [] };
+                const workflowId = window.Pivot.moduleApi('agent.automation')?.currentWorkflowId?.() || '';
+                const workflowName = window.Pivot.moduleApi('agent.automation')?.currentWorkflowName?.() || '';
+                const source = window.Pivot.moduleApi('agent.dagTimelineSource');
                 api?.showTimelineWaterfallModal?.({
-                    nodes: ctx.spec?.nodes || [],
-                    runStates: window.Pivot?.legacy?.dagNodeRunStates || new Map(),
+                    nodes: spec.nodes || [],
+                    loadState: source?.createSource?.({ spec, workflowId, workflowName }),
+                    runStates: typeof source?.createSource === 'function' ? new Map() : window.Pivot?.legacy?.dagNodeRunStates || new Map(),
                     onFocusNode: id => ctx.selectNode?.(id, false)
                 });
             };

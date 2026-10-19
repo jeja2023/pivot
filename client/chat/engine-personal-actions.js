@@ -31,6 +31,7 @@
 
         const recognition = session.recognition;
         session.recognition = null;
+        clearTimeout(session.finishTimer);
         if (recognition) {
             recognition.onresult = null;
             recognition.onerror = null;
@@ -77,17 +78,25 @@
         const input = document.getElementById('user-input');
         const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
         const reason = platform?.availability?.() || (!platform ? '语音组件尚未加载，请刷新后重试。' : '');
+        if (activeVoiceSession || pendingVoiceRequest !== null) {
+            const current = activeVoiceSession;
+            if (current?.recognition && typeof current.recognition.stop === 'function') {
+                if (!current.finishing) {
+                    current.finishing = true;
+                    current.recognition.stop();
+                    // 允许识别器送回句尾结果，超时仍释放设备；页面退出走立即取消。
+                    if (!current.released) current.finishTimer = setTimeout(() => releaseVoiceSession(current, { abortRecognition: true }), 35000);
+                }
+                return null;
+            }
+            stopChatVoiceInput();
+            return null;
+        }
         if (reason || !getUserMedia && !platform.usesDesktopInput?.()) {
             showToast(reason || '当前浏览器无法访问麦克风。', 'warning');
             return null;
         }
         if (!input) return null;
-
-        if (activeVoiceSession || pendingVoiceRequest !== null) {
-            if (activeVoiceSession?.recognition?.usesServerInput) { activeVoiceSession.recognition.stop(); return null; }
-            stopChatVoiceInput();
-            return null;
-        }
         window.Pivot.moduleApi('chat.realtimeVoice')?.stopRealtimeVoice?.();
 
         const requestId = ++voiceRequestSequence;
@@ -121,12 +130,14 @@
             recognition.interimResults = true;
             recognition.continuous = false;
             recognition.onresult = event => {
+                if (session.released || activeVoiceSession !== session) return;
                 let finalTranscript = '';
                 let interimTranscript = '';
+                const join = window.Pivot.moduleApi('chat.voiceText').joinTranscript;
                 for (let index = 0; index < event.results.length; index += 1) {
                     const transcript = String(event.results[index]?.[0]?.transcript || '');
-                    if (event.results[index].isFinal) finalTranscript += transcript;
-                    else interimTranscript += transcript;
+                    if (event.results[index].isFinal) finalTranscript = join(finalTranscript, transcript);
+                    else interimTranscript = join(interimTranscript, transcript);
                 }
                 const prefix = original ? `${original}${/[\s。！？!?]$/.test(original) ? '' : ' '}` : '';
                 input.value = `${prefix}${finalTranscript}${interimTranscript}`.trim();

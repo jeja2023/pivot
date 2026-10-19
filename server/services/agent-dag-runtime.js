@@ -42,7 +42,7 @@ const { buildDagFallbackFinalAnswer, buildIncompleteDagAnswer, extractReadableDa
 
 async function upsertDagNode(runId, node, patch = {}) {
     const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
-    const existing = await queryOne('SELECT id, output FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
+    const existing = await queryOne('SELECT id, output, started_at FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
     const now = getBeijingTimestamp();
     const row = {
         title: patch.title ?? node.title,
@@ -62,7 +62,7 @@ async function upsertDagNode(runId, node, patch = {}) {
         contractIssues: patch.contractIssues ?? [],
         attemptCount: patch.attemptCount ?? 0,
         durationMs: patch.durationMs ?? null,
-        startedAt: patch.startedAt ?? null,
+        startedAt: patch.startedAt ?? (patch.status === 'pending' ? null : existing?.started_at) ?? null,
         completedAt: patch.completedAt ?? null
     };
     const extractOutputRef = value => {

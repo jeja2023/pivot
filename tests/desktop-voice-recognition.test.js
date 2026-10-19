@@ -14,6 +14,8 @@ function fixture() {
         const child = new EventEmitter();
         child.stdout = new EventEmitter();
         child.stderr = new EventEmitter();
+        child.stdin = new EventEmitter();
+        child.stdin.write = value => { child.command = value; };
         child.killed = false;
         child.kill = () => { if (!child.killed) { child.killed = true; setImmediate(() => child.emit('close')); } };
         child.send = event => child.stdout.emit('data', Buffer.from(`${JSON.stringify(event)}\n`));
@@ -48,6 +50,28 @@ test('桌面识别安全启动专用隐藏进程，只接受语言与请求标�
     await assert.rejects(broker.start(7, { id: 'speech-invalid-123', language: 'zh-CN;calc' }, () => {}));
 });
 
+test('桌面收尾只接受所属页面与匹配请求，返回最后识别结果后正常结束', async () => {
+    const { broker, children } = fixture();
+    await broker.capabilities();
+    const events = [];
+    const starting = broker.start(7, { id: 'speech-finish-123', language: 'zh-CN' }, event => events.push(event));
+    await new Promise(resolve => setImmediate(resolve));
+    const child = children[1].child;
+    child.send({ type: 'started' });
+    await starting;
+    assert.equal(broker.finish(8, 'speech-finish-123'), false);
+    assert.equal(broker.finish(7, 'wrong-id'), false);
+    assert.equal(broker.finish(7, 'speech-finish-123'), true);
+    assert.equal(child.command, 'finish\n');
+    assert.equal(child.killed, false);
+    child.send({ type: 'result', text: '停止前的完整尾句' });
+    child.send({ type: 'ended' });
+    assert.deepEqual(events.map(event => event.type), ['started', 'result', 'ended']);
+    assert.equal(events[1].text, '停止前的完整尾句');
+    child.emit('close', 0);
+    assert.equal(events.length, 3, '正常结束不再误报识别失败');
+});
+
 test('探测期间取消启动不会在探测完成后重新打开设备', async () => {
     const { broker, children } = fixture();
     const starting = broker.start(7, { id: 'speech-cancel-123', language: 'zh-CN' }, () => {});
@@ -75,7 +99,7 @@ test('原生语音 IPC 严格要求授权，其他页面不能探测、启动或
     let calls = 0;
     installDesktopVoiceRecognition({ ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
         authorize() { throw Error('已拒绝'); }, send() {},
-        broker: { capabilities() { calls++; }, start() { calls++; }, stop() { calls++; } } });
+        broker: { capabilities() { calls++; }, start() { calls++; }, stop() { calls++; }, finish() { calls++; } } });
     for (const handler of handlers.values()) await assert.rejects(handler({ sender: { id: 1 } }, {}), /已拒绝/);
     assert.equal(calls, 0);
 });
@@ -140,4 +164,35 @@ test('桌面桥存在但安装包未注册语音 IPC 时提示更新，不误报
     context.window = context;
     for (const name of ['desktop-voice-recognition.js', 'voice-platform.js']) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat', name), 'utf8'), context);
     await assert.rejects(modules.get('chat.voicePlatform').prepareRecognition(), error => /原生语音通道未就绪/.test(error.voiceMessage));
+});
+
+test('桌面适配器点击完成时保留事件监听直到尾句返回，旧收尾响应不取消新识别', async () => {
+    const modules = new Map();
+    let listener;
+    let finishResult;
+    let lastId;
+    const context = { pivotDesktop: {
+        getVoiceRecognitionStatus: async () => ({ available: true, languages: ['zh-CN'] }),
+        onVoiceRecognitionEvent(fn) { listener = fn; return () => { listener = null; }; },
+        async startVoiceRecognition(input) { lastId = input.id; listener({ id: lastId, type: 'started' }); return { success: true }; },
+        async stopVoiceRecognition() {},
+        finishVoiceRecognition() { return new Promise(resolve => { finishResult = resolve; }); }
+    }, Pivot: { exposeModule: (name, value) => modules.set(name, value) } };
+    context.window = context;
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/desktop-voice-recognition.js'), 'utf8'), context);
+    const recognition = await modules.get('chat.desktopVoiceRecognition').prepare('zh-CN');
+    let text = '';
+    recognition.onresult = event => { text = event.results.at(-1)[0].transcript; };
+    recognition.start();
+    recognition.stop();
+    listener({ id: lastId, type: 'result', text: '完整尾句' });
+    assert.equal(text, '完整尾句');
+    assert.equal(typeof listener, 'function');
+    listener({ id: lastId, type: 'ended' });
+    assert.equal(listener, null);
+    recognition.start();
+    finishResult(false);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof listener, 'function', '旧收尾响应不会关闭新一轮监听');
+    recognition.abort();
 });
