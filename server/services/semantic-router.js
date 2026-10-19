@@ -208,6 +208,74 @@ function buildLegacyExecution(state, tools = [], { ragRequested = false, ragScop
     };
 }
 
+function classifyChatRouteAdmission({ prompt, state = {}, config = {} } = {}) {
+    const cleanPrompt = normalizeRoutePrompt(prompt);
+    const overrides = normalizeRouteOverrides(state.routeOverrides);
+    const explicitScope = normalizeRetrievalScope({
+        ...(state.ragScope || {}),
+        ...(overrides.collections.length ? { collectionIds: overrides.collections } : {}),
+        ...(overrides.tagNames.length ? { tagNames: overrides.tagNames } : {})
+    });
+    const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
+    const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag;
+    const explicitToolIntent = cleanPrompt ? detectExplicitMcpCapabilityIntent(cleanPrompt) : false;
+    const toolRequested = explicitToolIntent || overrides.tools.length > 0;
+    const knowledgeRequested = requiresKnowledgeRetrieval(cleanPrompt);
+    const routeEnabled = config.enabled !== false && state.autoRouteEnabled !== false;
+
+    if (hasExplicitRagRequest || overrides.tools.length) {
+        return { tier: 'explicit', reasonCode: hasExplicitRagRequest ? 'explicit_rag_request' : 'explicit_tool_override', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    if (config.directPathEnabled === false) {
+        return { tier: 'candidate', reasonCode: 'direct_path_disabled', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    if (!routeEnabled) {
+        return { tier: 'direct', reasonCode: 'route_disabled', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    if (overrides.excludeRag && !toolRequested) {
+        return { tier: 'direct', reasonCode: 'explicit_rag_excluded', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    if (overrides.excludeTools && !knowledgeRequested) {
+        return { tier: 'direct', reasonCode: 'explicit_tools_excluded', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    if (knowledgeRequested || toolRequested) {
+        return { tier: 'candidate', reasonCode: knowledgeRequested ? 'knowledge_candidate' : 'tool_candidate', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+    }
+    return { tier: 'direct', reasonCode: isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'no_capability_signal', overrides, explicitScope, cleanPrompt, knowledgeRequested, toolRequested, routeEnabled };
+}
+
+function buildDirectChatRoutePlan({ prompt, taskState = null, state = {}, admission = {}, startedAt = Date.now() } = {}) {
+    const cleanPrompt = String(admission.cleanPrompt || normalizeRoutePrompt(prompt));
+    const overrides = admission.overrides || normalizeRouteOverrides(state.routeOverrides);
+    const scope = admission.explicitScope || normalizeRetrievalScope(state.ragScope || {});
+    const ragReason = state.ragEnabled === false ? 'rag_disabled'
+        : overrides.excludeRag ? 'explicit_rag_excluded'
+            : admission.reasonCode || 'direct_chat';
+    const toolReason = overrides.excludeTools ? 'explicit_tool_excluded' : admission.reasonCode || 'direct_chat';
+    return {
+        version: 1,
+        mode: 'direct',
+        shadow: false,
+        query: { textHash: routePromptHash(cleanPrompt), source: taskState ? 'task_state.retrievalQuery' : 'current_prompt' },
+        taskState: taskState && typeof taskState === 'object' ? {
+            hash: String(taskState.hash || ''),
+            evidenceNeeds: Array.isArray(taskState.evidenceNeeds) ? taskState.evidenceNeeds.slice(0, 8) : [],
+            toolIntent: taskState.toolIntent || {}
+        } : null,
+        rag: { action: 'skip', confidence: 0, reasonCode: ragReason, collections: [], scope, queryVector: null, fallback: 'none' },
+        tools: { action: 'skip', confidence: 0, reasonCode: toolReason, candidates: [], candidateTools: [] },
+        nextStep: { action: 'direct_answer', confidence: 1, reasonCode: 'direct_chat_fast_path' },
+        overrides,
+        decisions: null,
+        execution: {
+            rag: { shouldRetrieve: false, scope, queryVector: null },
+            tools: { shouldPlan: false, candidates: [] },
+            nextStep: { action: 'direct_answer' }
+        },
+        timing: { routeDurationMs: Math.max(0, Date.now() - startedAt), embeddingDurationMs: 0 }
+    };
+}
+
 function buildRouteMetadata(plan = {}) {
     const rawUsage = plan.providerUsage?.usage || plan.providerUsage || {};
     const cacheDetails = rawUsage?.input_tokens_details || rawUsage?.inputTokensDetails || rawUsage?.prompt_tokens_details || {};
@@ -348,17 +416,31 @@ function createSemanticRouter(deps = {}) {
         const structuredTaskState = taskState && typeof taskState === 'object'
             ? taskState
             : state.taskState && typeof state.taskState === 'object' ? state.taskState : null;
-        const cleanPrompt = normalizeRoutePrompt(structuredTaskState?.retrievalQuery || structuredTaskState?.currentQuestion || prompt);
-        const overrides = normalizeRouteOverrides(state.routeOverrides);
-        const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
-        const autoRequested = state.autoRouteEnabled !== false;
-        const routeEnabled = config.enabled && autoRequested;
-        const shadow = routeEnabled && config.shadowMode;
-        const explicitScope = normalizeRetrievalScope({
-            ...(state.ragScope || {}),
-            ...(overrides.collections.length ? { collectionIds: overrides.collections } : {}),
-            ...(overrides.tagNames.length ? { tagNames: overrides.tagNames } : {})
+        const admission = classifyChatRouteAdmission({
+            prompt: structuredTaskState?.retrievalQuery || structuredTaskState?.currentQuestion || prompt,
+            state,
+            config
         });
+        const cleanPrompt = admission.cleanPrompt;
+        const overrides = admission.overrides;
+        const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
+        const routeEnabled = admission.routeEnabled;
+        if (admission.tier === 'direct') {
+            const plan = buildDirectChatRoutePlan({ prompt: cleanPrompt, taskState: structuredTaskState, state, admission, startedAt });
+            recordMetric({
+                routeMode: plan.mode,
+                ragAction: plan.rag.action,
+                toolAction: plan.tools.action,
+                routeDurationMs: plan.timing.routeDurationMs,
+                embeddingDurationMs: 0,
+                ragCandidates: 0,
+                toolCandidates: 0,
+                error: false
+            });
+            return plan;
+        }
+        const shadow = routeEnabled && config.shadowMode;
+        const explicitScope = admission.explicitScope;
         const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
         // “带着问题去聊天”和手动开启知识库都代表用户的明确检索意图。
         // 此时智能路由只能优化排序与范围，不能把该轮请求误判为无需检索。
@@ -377,9 +459,9 @@ function createSemanticRouter(deps = {}) {
         let queryVector = null;
         let embeddingDurationMs = 0;
         let embeddingError = '';
-        const knowledgeRequested = requiresKnowledgeRetrieval(cleanPrompt);
+        const knowledgeRequested = admission.knowledgeRequested;
         const explicitToolIntent = cleanPrompt ? detectExplicitMcpCapabilityIntent(cleanPrompt) : false;
-        const toolRequested = explicitToolIntent || overrides.tools.length > 0;
+        const toolRequested = admission.toolRequested;
         // 路由本身是按需增强，不是每一轮对话的前置成本。普通问答不读取
         // 目录、不计算 embedding，也不把“可能有工具”转换为授权弹窗。
         const needAutoRag = routeEnabled && config.autoRagEnabled && state.ragEnabled && !hasExplicitRagRequest && !overrides.excludeRag && knowledgeRequested;

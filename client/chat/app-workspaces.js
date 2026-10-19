@@ -3,48 +3,30 @@
 const userInput = document.getElementById('user-input');
 const CHAT_MCP_TOOL_ALLOWLIST_KEY = 'pivot_chat_mcp_tool_allowlist';
 const CHAT_MCP_TOOL_MODE_KEY = 'pivot_chat_mcp_tool_mode';
-const CHAT_MODE_KEY = 'pivot_chat_mode';
 let chatMcpToolsCache = [];
 let chatAgentExecutionEnabled = true;
 
 function getChatMode() {
-    try {
-        return localStorage.getItem(CHAT_MODE_KEY) === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
-    } catch (_error) { return 'normal'; }
+    return 'normal';
 }
 
-function applyChatModeState(mode = getChatMode()) {
-    const normalized = mode === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
-    document.querySelectorAll('[data-chat-mode-option]').forEach(option => {
-        const selected = option.dataset.chatModeOption === normalized;
-        option.setAttribute('aria-selected', selected ? 'true' : 'false');
-        option.disabled = option.dataset.chatModeOption === 'agent' && !chatAgentExecutionEnabled;
-        option.classList.toggle('is-active', selected);
-    });
-    const label = document.getElementById('chat-mode-label');
-    if (label) label.textContent = normalized === 'agent' ? 'Agent' : '普通';
-    const option = document.getElementById('chat-agent-mode-option');
-    const hint = document.getElementById('chat-agent-mode-hint');
-    option?.classList.toggle('is-disabled', !chatAgentExecutionEnabled);
-    if (hint) hint.textContent = chatAgentExecutionEnabled ? '连续规划、工具调用和后台恢复' : '管理员已暂时关闭此模式';
-    return normalized;
+function applyChatAgentExecutionState() {
+    const button = document.getElementById('chat-agent-execute-btn');
+    if (!button) return chatAgentExecutionEnabled;
+    button.disabled = !chatAgentExecutionEnabled;
+    button.setAttribute('aria-disabled', chatAgentExecutionEnabled ? 'false' : 'true');
+    button.title = chatAgentExecutionEnabled
+        ? '以 Agent 执行：连续规划、受控工具调用、审批与后台恢复'
+        : '管理员已暂时关闭 Agent 执行';
+    return chatAgentExecutionEnabled;
 }
 
-function setChatMode(mode) {
-    const normalized = mode === 'agent' && chatAgentExecutionEnabled ? 'agent' : 'normal';
-    try { localStorage.setItem(CHAT_MODE_KEY, normalized); } catch (_error) {}
-    applyChatModeState(normalized);
-    setChatModePanelOpen(false);
-    return normalized;
-}
-
-function setChatModePanelOpen(open) {
-    const trigger = document.getElementById('chat-mode-trigger');
-    const panel = document.getElementById('chat-mode-panel');
-    if (!trigger || !panel) return;
-    panel.hidden = !open;
-    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-    document.getElementById('chat-mode-selector')?.classList.toggle('is-open', open);
+function requestChatAgentExecution() {
+    if (!chatAgentExecutionEnabled) {
+        showToast('管理员已暂时关闭 Agent 执行，请直接发送普通消息。', 'warning');
+        return false;
+    }
+    return window.Pivot.legacy.sendMessage?.({ chatMode: 'agent' }) || false;
 }
 
 async function loadChatModeCapabilities() {
@@ -55,7 +37,7 @@ async function loadChatModeCapabilities() {
         chatAgentExecutionEnabled = data.agentExecutionEnabled !== false;
         window.Pivot.moduleApi('chat.autoRoute').setAvailable?.(data.autoRoute?.enabled !== false);
     } catch (_error) { chatAgentExecutionEnabled = true; }
-    applyChatModeState();
+    applyChatAgentExecutionState();
     return chatAgentExecutionEnabled;
 }
 function setChatToolsMenuOpen(open) {
@@ -272,23 +254,12 @@ function initChatToolsMenu() {
         event.stopPropagation();
         setChatToolsMenuOpen(document.getElementById('chat-tools-menu-panel')?.hidden !== false);
     });
-    const modeTrigger = document.getElementById('chat-mode-trigger');
-    modeTrigger?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        const open = document.getElementById('chat-mode-panel')?.hidden !== false;
-        setChatToolsMenuOpen(false);
-        setChatModePanelOpen(open);
-        if (open) loadChatModeCapabilities().catch(() => {});
-    });
     document.addEventListener('click', event => {
         if (!event.target.closest('#chat-tools-menu')) setChatToolsMenuOpen(false);
-        if (!event.target.closest('#chat-mode-selector')) setChatModePanelOpen(false);
     });
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
             setChatToolsMenuOpen(false);
-            setChatModePanelOpen(false);
         }
     });
     window.addEventListener('resize', () => {
@@ -306,15 +277,6 @@ function initChatToolsMenu() {
     document.querySelectorAll('input[name="chat-mcp-mode"]').forEach(option => {
         option.addEventListener('change', event => {
             if (event.target.checked) setChatMcpToolMode(event.target.value);
-        });
-    });
-    document.querySelectorAll('[data-chat-mode-option]').forEach(option => {
-        option.addEventListener('change', event => {
-            if (event.target.dataset.chatModeOption) setChatMode(event.target.dataset.chatModeOption);
-        });
-        option.addEventListener('click', event => {
-            event.preventDefault();
-            setChatMode(option.dataset.chatModeOption);
         });
     });
     document.getElementById('chat-mcp-all-tools')?.addEventListener('change', event => {
@@ -360,7 +322,7 @@ function initChatToolsMenu() {
     });
     syncChatToolsMenuLabels();
     updateChatMcpToolSummary();
-    applyChatModeState();
+    applyChatAgentExecutionState();
     window.Pivot.moduleApi('chat.autoRoute').syncState?.();
 }
 initChatToolsMenu();
@@ -380,7 +342,7 @@ window.Pivot.exposeModule('chat.inputMenu', {
     enableMcpFromRouteTrace: () => window.Pivot.moduleApi('chat.autoRoute').enableMcpFromRouteTrace?.(),
     getMcpToolAllowlist: getChatMcpToolAllowlist,
     getChatMode,
-    setChatMode,
+    sendAsAgent: requestChatAgentExecution,
     isAgentExecutionEnabled: () => chatAgentExecutionEnabled,
     setOpen: setChatToolsMenuOpen
 });

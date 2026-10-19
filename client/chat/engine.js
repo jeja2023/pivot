@@ -231,6 +231,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
         : '';
     const ephemeralVoice = sendOptions.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(sendOptions.voiceSessionId || '').trim() : '';
+    const chatMode = sendOptions.chatMode === 'agent' ? 'agent' : 'normal';
     const resumeRouteOverrides = sendOptions.routeOverrides && typeof sendOptions.routeOverrides === 'object'
         ? sendOptions.routeOverrides
         : null;
@@ -250,7 +251,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
     if (sendEpoch !== latestSendEpoch) return;
 
-    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId, continuationKind });
+    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId, continuationKind, chatMode });
     activeSendTask = task;
     try {
         await task;
@@ -263,6 +264,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const ephemeralVoice = options.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(options.voiceSessionId || '').trim() : '';
     const continuationKind = String(options.continuationKind || '');
+    const requestedChatMode = options.chatMode === 'agent' ? 'agent' : 'normal';
     if (ephemeralVoice && (!voiceSessionId || shouldRegenerate)) {
         showToast('临时语音会话参数无效，已拒绝发送。', 'error');
         return;
@@ -330,7 +332,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const manualRagEnabled = isChatToolEnabled('chat-rag-enabled', 'pivot_chat_rag_enabled');
     const ragEnabled = ragPreference === 'disabled' ? false : (ragPreference === 'enabled' || autoRouteEnabled || manualRagEnabled);
     const routeOverrides = ephemeralVoice ? {} : (resumeRouteOverrides || chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {});
-    const chatMode = ephemeralVoice ? 'normal' : (chatInputMenu?.getChatMode?.() || 'normal');
+    const chatMode = ephemeralVoice ? 'normal' : requestedChatMode;
     // 旧版本保存的工具启用状态不应绕过本会话的明确授权。
     // 只有用户在路由提示中完成授权后，才将 MCP 候选交给执行链路。
     let mcpEnabled = !ephemeralVoice && window.Pivot.legacy.hasChatMcpConsent?.() === true
@@ -390,6 +392,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     };
 
     document.getElementById('send-btn').classList.add('hidden');
+    document.getElementById('chat-agent-execute-btn')?.classList.add('hidden');
     document.getElementById('stop-btn').classList.remove('hidden');
     const myController = new AbortController();
     currentAbortController = myController;
@@ -819,6 +822,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         }
         document.getElementById('stop-btn').classList.add('hidden');
         document.getElementById('send-btn').classList.remove('hidden');
+        document.getElementById('chat-agent-execute-btn')?.classList.remove('hidden');
         currentAbortController = null;
     }
 }

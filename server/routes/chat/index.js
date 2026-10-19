@@ -283,7 +283,7 @@ function createChatRouter({
 
         if (chatMode === 'agent' && !agentExecutionAllowed) {
             writeSse(JSON.stringify({
-                error: '管理员已暂时关闭聊天 Agent 执行模式，请切换为普通回答。',
+                error: '管理员已暂时关闭以 Agent 执行，请直接发送普通消息。',
                 code: 'AGENT_EXECUTION_DISABLED',
                 chatMode: 'normal'
             }));

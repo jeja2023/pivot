@@ -40,11 +40,11 @@
     }
     function safeSetHtml(element, markup) {
         if (!element) return;
-        const safeHtml = typeof PivotSafeHtml !== 'undefined'
-            ? PivotSafeHtml
-            : (typeof window !== 'undefined' ? window.PivotSafeHtml || window.Pivot?.legacy?.PivotSafeHtml : null);
+        const safeHtml = typeof window !== 'undefined' ? window.Pivot?.legacy?.PivotSafeHtml : null;
         if (safeHtml?.setHtml) {
             safeHtml.setHtml(element, markup);
+        } else {
+            element.textContent = String(markup || '');
         }
     }
 

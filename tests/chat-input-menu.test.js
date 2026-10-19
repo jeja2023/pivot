@@ -94,6 +94,10 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.match(shell, /id="chat-route-override-state" hidden/);
     assert.match(shell, /id="upload-file-choice"/);
     assert.match(shell, /id="upload-folder-choice"/);
+    assert.match(shell, /id="chat-agent-execute-btn"/);
+    assert.match(shell, />以 Agent 执行<\/span>/);
+    assert.doesNotMatch(shell, /id="chat-mode-trigger"/);
+    assert.doesNotMatch(shell, /data-chat-mode-option=/);
     assert.doesNotMatch(shell, /id="chat-auto-route-enabled"/);
     assert.doesNotMatch(shell, /id="chat-rag-enabled"/);
     assert.doesNotMatch(shell, /id="chat-mcp-enabled"/);
@@ -115,9 +119,12 @@ test('聊天输入框默认使用智能自适应，并将资料和工具控制�
     assert.match(autoRoute, /allowlist\.has\(item\.fullName\)/);
     assert.doesNotMatch(autoRoute, /pivot_chat_auto_route_enabled/);
     assert.match(main, /function canSelectChatAttachment\(\)/);
+    assert.match(main, /bind\('chat-agent-execute-btn', \(\) => window\.Pivot\.moduleApi\('chat\.inputMenu'\)\.sendAsAgent\?\.\(\)\)/);
     assert.equal(workspace.includes("if (getChatMcpToolMode() === 'auto') return null;"), true);
     assert.match(workspace, /window\.Pivot\.exposeModule\('chat\.inputMenu'/);
     const engine = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine.js'), 'utf8');
+    assert.match(engine, /const chatMode = sendOptions\.chatMode === 'agent' \? 'agent' : 'normal';/);
+    assert.match(engine, /const chatMode = ephemeralVoice \? 'normal' : requestedChatMode;/);
     assert.match(engine, /data\.type === 'mcp_consent_required'[\s\S]*textBody\.classList\.add\('hidden'\)/);
 });
 

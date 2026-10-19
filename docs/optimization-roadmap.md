@@ -2,6 +2,12 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-10-19 聊天 Agent 任务升级深化方案（待实施）
+
+> 状态：已完成 v0.4.6 的普通对话默认发送与显式 Agent 入口收敛；任务草案、计划审阅、自主等级与后台接管尚未实施，不能按已上线功能宣传。
+
+- 📋 后续方案见 [Pivot 聊天 Agent 任务升级产品级优化方案](design/Pivot聊天Agent任务升级产品级优化方案_2026-10-19.md)。方案以“任务建议 → 草案计划 → 用户批准 → 受控 Run”替代点击后立即创建后台任务，并明确普通聊天、候选路由、任务草案、审批和实际执行的边界。
+
 ## 2026-09-06 个人工作台全面升级与极简会话体验（v0.1.85）
 
 > 状态：本节列出的工程项已全部完成；包括个人工作台一级主中枢重构、二级页面关闭返回闭环及纯粹极简会话侧栏改造。

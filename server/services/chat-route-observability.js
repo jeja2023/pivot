@@ -19,7 +19,7 @@ function normalizeAction(value, fallback = 'skip') {
 
 function normalizeMode(value) {
     const text = String(value || '').trim().toLowerCase();
-    return ['auto', 'explicit', 'disabled', 'shadow', 'legacy'].includes(text) ? text : 'legacy';
+    return ['auto', 'direct', 'explicit', 'disabled', 'shadow', 'legacy'].includes(text) ? text : 'legacy';
 }
 
 function metricKey(metric = {}) {

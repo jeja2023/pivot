@@ -850,6 +850,8 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#chat-auto-route-enabled')).toHaveCount(0);
         await expect(page.locator('#chat-rag-enabled')).toHaveCount(0);
         await expect(page.locator('#chat-mcp-enabled')).toHaveCount(0);
+        await expect(page.locator('#chat-mode-trigger')).toHaveCount(0);
+        await expect(page.locator('#chat-agent-execute-btn')).toBeVisible();
         await expect(page.locator('#user-input')).toHaveAttribute('placeholder', '输入消息… 需要指定资料或工具时可输入 @');
         await expect.poll(() => page.evaluate(() => (
             window.Pivot.moduleApi('chat.inputMenu').getAutoRouteEnabled()
@@ -897,6 +899,46 @@ test.describe('Pivot browser smoke', () => {
             window.Pivot.moduleApi('chat.inputMenu').getRouteOverrides(document.getElementById('user-input').value)
         ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'], wikiSpaces: [] });
    });
+
+    test('普通发送固定直答，只有主动入口才以 Agent 执行', async ({ page }) => {
+        const requests = [];
+        page.on('request', request => {
+            if (new URL(request.url()).pathname === '/api/chat' && request.method() === 'POST') {
+                requests.push(request.postDataJSON());
+            }
+        });
+        const login = await page.request.post('/api/auth/login', {
+            data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
+        });
+        expect(login.ok()).toBeTruthy();
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const modelName = `E2E explicit agent ${Date.now()}`;
+        const created = await page.request.post('/api/models', {
+            headers: { 'x-csrf-token': csrf },
+            data: { name: modelName, url: process.env.E2E_MODEL_URL, model_name: 'e2e-explicit-agent' }
+        });
+        expect(created.ok()).toBeTruthy();
+        const models = await (await page.request.get('/api/models?limit=100')).json();
+        const model = (models.data || []).find(item => item.name === modelName);
+        expect(model).toBeTruthy();
+        const defaultResponse = await page.request.put('/api/settings/default-model', {
+            headers: { 'x-csrf-token': csrf }, data: { default_model_id: model.id }
+        });
+        expect(defaultResponse.ok()).toBeTruthy();
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await expect(page.locator('#user-input')).toBeVisible({ timeout: 10_000 });
+        await page.locator('#user-input').fill('请简要解释什么是向量检索。');
+        await page.locator('#send-btn').click();
+        await expect.poll(() => requests.length).toBe(1);
+        expect(requests[0].chatMode).toBe('normal');
+        await expect(page.locator('#send-btn')).toBeVisible();
+
+        await page.locator('#user-input').fill('请规划一项可恢复的订单汇总任务。');
+        await page.locator('#chat-agent-execute-btn').click();
+        await expect.poll(() => requests.length).toBe(2);
+        expect(requests[1].chatMode).toBe('agent');
+    });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
         await page.route(/\/api\/agents\/runs\/run-lazy-detail\/context-windows(?:\?.*)?$/, route => route.fulfill({

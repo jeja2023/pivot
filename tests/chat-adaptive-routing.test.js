@@ -148,9 +148,36 @@ test('纯闲聊不触发知识库或工具发现', async () => {
         state: { ragEnabled: true, mcpEnabled: false, autoRouteEnabled: true }
     });
     assert.equal(isConversationOnlyPrompt('你好！'), true);
+    assert.equal(plan.mode, 'direct');
     assert.equal(plan.rag.action, 'skip');
     assert.equal(plan.rag.reasonCode, 'conversation_only');
     assert.equal(plan.tools.action, 'skip');
+});
+
+test('直答快路径可由配置关闭以安全回退到旧路由链', async () => {
+    const decisions = [];
+    const router = createSemanticRouter({
+        getChatAutoRouteConfig: () => ({
+            enabled: true, autoRagEnabled: true, autoToolDiscoveryEnabled: true, directPathEnabled: false,
+            shadowMode: false, maxToolCandidates: 2, maxCollections: 2, ragThreshold: 0.34,
+            ragGrayThreshold: 0.16, toolThreshold: 0.2, embeddingTimeoutMs: 100
+        }),
+        getPrimaryTenantId: async () => 4,
+        getEmbeddingConfig: () => ({ http: { url: '' } }),
+        knowledgeCatalogIndex: { getVisibleEntries: async () => [], scheduleRefresh() {} },
+        mcpToolCatalogIndex: { getEntries: () => [], scheduleRefresh() {} },
+        recordChatRouteMetric() {},
+        resolveBusinessDecision: async input => {
+            decisions.push(input.scenario);
+            return { decisionId: input.scenario, context: { scenario: input.scenario, candidates: input.candidates }, selectedActionId: input.fallbackActionId, policy: { applied: false } };
+        }
+    });
+    const plan = await router.resolveRoutePlan({
+        prompt: '请帮我润色下面这段文字', user: { id: 7, tenant_id: 4 },
+        state: { ragEnabled: true, ragPreference: 'auto', mcpEnabled: false, autoRouteEnabled: true }
+    });
+    assert.equal(plan.mode, 'auto');
+    assert.deepEqual(decisions, ['chat.next_step']);
 });
 
 test('知识库自动路由只使用可访问目录并把整数 Collection ID 放入范围', async () => {
@@ -329,11 +356,13 @@ test('影子模式保持原始 RAG 与 MCP 执行集合，并透出安全摘要'
 test('类型化路由配置收敛布尔、数字与边界值', () => {
     const config = getChatAutoRouteConfig({
         PIVOT_CHAT_AUTO_ROUTE_ENABLED: 'off',
+        PIVOT_CHAT_DIRECT_PATH_ENABLED: 'off',
         PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES: '999',
         PIVOT_CHAT_ROUTE_RAG_THRESHOLD: '1.8',
         PIVOT_CHAT_ROUTE_RAG_GRAY_THRESHOLD: '-1'
     });
     assert.equal(config.enabled, false);
+    assert.equal(config.directPathEnabled, false);
     assert.equal(config.maxToolCandidates, 12);
     assert.equal(config.ragThreshold, 1);
     assert.equal(config.ragGrayThreshold, 0);
@@ -501,10 +530,11 @@ test('普通回答不加载知识库或工具目录，只有受控资料和真�
         prompt: '帮我写一份季度经营分析报告', user: { id: 7 }, availableMcpTools: [dbTool],
         state: { ragEnabled: true, mcpEnabled: false, autoRouteEnabled: true }
     });
-    assert.equal(ordinary.rag.reasonCode, 'rag_not_requested');
-    assert.equal(ordinary.tools.reasonCode, 'tool_not_requested');
+    assert.equal(ordinary.mode, 'direct');
+    assert.equal(ordinary.rag.reasonCode, 'no_capability_signal');
+    assert.equal(ordinary.tools.reasonCode, 'no_capability_signal');
     assert.equal(requiresMcpConsentForRoute(ordinary, false), false);
-    assert.deepEqual(calls, { embedding: 0, collections: 0, tools: 0, decisions: ['chat.next_step'] });
+    assert.deepEqual(calls, { embedding: 0, collections: 0, tools: 0, decisions: [] });
 
     const knowledge = await router.resolveRoutePlan({
         prompt: '请依据公司差旅报销制度说明发票审批流程', user: { id: 7 }, availableMcpTools: [dbTool],
