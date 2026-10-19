@@ -43,6 +43,7 @@ const {
     clearModelExtractionCooldown
 } = require('./memory-extraction');
 const { mergeMemoryContent } = require('./memory-merge');
+const { shouldIgnoreStaleCandidate } = require('./memory-candidate-policy');
 const { ensureMemoryVectorIndex } = require('./memory-vector-index');
 const {
     buildLongTermMemoryContextMessage,
@@ -553,12 +554,12 @@ async function mergeMemories(userId, targetId, sourceId, options = {}) {
     };
 }
 
-async function findSimilarMemory(userId, type, content, factKey = '', scope = {}) {
+async function findSimilarMemory(userId, type, content, factKey = '', scope = {}, executor = { query }) {
     const fingerprint = fingerprintMemory(type, content);
     const normalizedScope = normalizeMemoryScope(scope.scope);
     const scopeReference = normalizeScopeReference(scope.scopeReference || scope.scope_reference);
     const projectId = normalizeScopeReference(scope.projectId || scope.project_id);
-    const rows = await query(`
+    const rows = await executor.query(`
         SELECT *
         FROM memories
         WHERE user_id = ? AND type = ? AND status = ?
@@ -602,8 +603,8 @@ async function findActiveMemorySuppression(userId, fingerprint, candidate = {}) 
     const sourceMessageIds = new Set(normalizeSourceMessageIds(candidate.sourceMessageIds));
     return rows.find(row => {
         if (String(row.fingerprint || '') === fingerprint) return true;
-        if (sourceSessionId && String(row.source_session_id || '') === sourceSessionId) return true;
         const suppressedIds = parseJsonArray(row.source_message_ids).map(Number);
+        if (!suppressedIds.length && sourceSessionId && String(row.source_session_id || '') === sourceSessionId) return true;
         return suppressedIds.some(id => sourceMessageIds.has(id));
     }) || null;
 }
@@ -654,12 +655,6 @@ async function writeMemoryEvidence(trx, memoryId, userId, candidate = {}, origin
 
 async function stagePendingMemory(userId, candidate, options, fields = {}) {
     const now = getBeijingTimestamp();
-    const existing = await queryOne(`
-        SELECT id FROM memories
-        WHERE user_id = ? AND type = ? AND fact_key = ? AND status IN (?, ?)
-        ORDER BY id DESC LIMIT 1
-    `, [Number(userId), fields.type, fields.factKey, MEMORY_STATUS.active, MEMORY_STATUS.pending]);
-    if (existing) return { staged: true, deduped: true, id: existing.id, reason: 'confirmation_required' };
     const row = await transaction(async trx => {
         const lockedGate = await lockMemoryGateState(userId, trx);
         if (!lockedGate.enabled || lockedGate.revision !== Number(options.memoryRevision || 0)) {
@@ -667,6 +662,14 @@ async function stagePendingMemory(userId, candidate, options, fields = {}) {
             error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
             throw error;
         }
+        const existing = await trx.queryOne(`
+            SELECT id FROM memories
+            WHERE user_id = ? AND type = ? AND fact_key = ? AND status IN (?, ?)
+              AND scope = ? AND scope_reference = ? AND project_id = ?
+            ORDER BY id DESC LIMIT 1
+        `, [Number(userId), fields.type, fields.factKey, MEMORY_STATUS.active, MEMORY_STATUS.pending,
+            fields.scope, fields.scopeReference, fields.projectId]);
+        if (existing) return { ...existing, deduped: true };
         const inserted = await trx.queryOne(`
             INSERT INTO memories (
                 user_id, scope, scope_reference, project_id, type, governance_class, retention_mode,
@@ -702,7 +705,7 @@ async function stagePendingMemory(userId, candidate, options, fields = {}) {
         return inserted;
     });
     invalidateMemoryQualityCache(userId);
-    return { staged: true, id: row?.id, reason: 'confirmation_required' };
+    return { staged: true, id: row?.id, deduped: row?.deduped === true, reason: 'confirmation_required' };
 }
 
 async function upsertMemory(userId, candidate, options = {}) {
@@ -757,54 +760,32 @@ async function upsertMemory(userId, candidate, options = {}) {
     });
     const existing = similar.exact;
 
-    if (existing) {
-        invalidateMemoryQualityCache(userId);
-        const mergedMessageIds = [...new Set([
-            ...parseJsonArray(existing.source_message_ids),
-            ...sourceMessageIds
-        ])].slice(-20);
-        await transaction(async trx => {
-            const lockedGate = await lockMemoryGateState(userId, trx);
-            if (!lockedGate.enabled || lockedGate.revision !== gate.gate.revision) {
-                const error = new Error('记忆写入门禁状态已变化。');
-                error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
-                throw error;
-            }
-            await trx.execute(`
-                UPDATE memories
-                SET scope = ?, scope_reference = ?, project_id = ?, salience = ?, confidence = ?,
-                    source_session_id = COALESCE(?, source_session_id), source_message_ids = ?,
-                    search_content = ?, updated_at = ?
-                WHERE id = ? AND user_id = ?
-            `, [
-                scope,
-                scopeReference,
-                projectId,
-                Math.max(Number(existing.salience || 0), salience),
-                Math.max(Number(existing.confidence || 0), confidence),
-                candidate.sourceSessionId || null,
-                JSON.stringify(mergedMessageIds),
-                content,
-                now,
-                existing.id,
-                userId
-            ]);
-            await writeMemoryEvidence(trx, existing.id, userId, candidate, origin, assertedBy);
-        });
-        return { merged: true, id: existing.id };
-    }
-
-    const embedding = options.skipEmbedding ? null : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
+    const embedding = existing || options.skipEmbedding ? null : await maybeGenerateMemoryEmbedding(content, userId, options.user || null);
     const dimensions = embeddingDimensions(embedding);
     const finalGate = await assertMemoryWriteGate(userId, { ...options, memoryRevision: gate.gate.revision });
     if (!finalGate.allowed) return { skipped: true, reason: finalGate.reason };
-    const row = await transaction(async trx => {
+    const result = await transaction(async trx => {
         const lockedGate = await lockMemoryGateState(userId, trx);
         if (!lockedGate.enabled || lockedGate.revision !== gate.gate.revision) {
             const error = new Error('记忆写入门禁状态已变化。');
             error.code = !lockedGate.enabled ? 'MEMORY_DISABLED' : 'MEMORY_REVISION_CHANGED';
             throw error;
         }
+        // 用户级门禁锁持有期间重新查重，多个抽取任务不能同时写入相同偏好。
+        const current = await findSimilarMemory(userId, type, content, factKey, { scope, scopeReference, projectId }, trx);
+        if (current.exact) {
+            const item = current.exact;
+            const mergedMessageIds = [...new Set([...parseJsonArray(item.source_message_ids), ...sourceMessageIds])].slice(-20);
+            await trx.execute(`
+                UPDATE memories
+                SET salience = ?, confidence = ?, source_message_ids = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+            `, [Math.max(Number(item.salience || 0), salience), Math.max(Number(item.confidence || 0), confidence),
+                JSON.stringify(mergedMessageIds), now, item.id, userId]);
+            await writeMemoryEvidence(trx, item.id, userId, candidate, origin, assertedBy);
+            return { merged: true, id: item.id };
+        }
+        if (shouldIgnoreStaleCandidate(current.sameFact, candidate, origin)) return { skipped: true, reason: 'newer_memory_exists' };
         if (suppression && origin === MEMORY_ORIGINS.explicit && options.confirmed === true) {
             await trx.execute(`
                 UPDATE memory_suppressions
@@ -812,11 +793,11 @@ async function upsertMemory(userId, candidate, options = {}) {
                 WHERE id = ? AND user_id = ?
             `, [now, 'user', suppression.id, Number(userId)]);
         }
-        if (similar.sameFact) {
+        if (current.sameFact) {
             await trx.execute(`
                 UPDATE memories SET status = ?, supersedes_id = ?, updated_at = ?
                 WHERE id = ? AND user_id = ? AND status = ?
-            `, [MEMORY_STATUS.disabled, null, now, similar.sameFact.id, Number(userId), MEMORY_STATUS.active]);
+            `, [MEMORY_STATUS.disabled, null, now, current.sameFact.id, Number(userId), MEMORY_STATUS.active]);
         }
         const inserted = await trx.queryOne(`
             INSERT INTO memories (
@@ -837,7 +818,7 @@ async function upsertMemory(userId, candidate, options = {}) {
             origin,
             assertedBy,
             factKey,
-            similar.sameFact?.id || null,
+            current.sameFact?.id || null,
             content,
             embedding,
             embedding ? 'ready' : 'lexical_ready',
@@ -854,14 +835,14 @@ async function upsertMemory(userId, candidate, options = {}) {
             now
         ]);
         await writeMemoryEvidence(trx, inserted.id, userId, candidate, origin, assertedBy);
-        return inserted;
+        return { inserted: true, id: inserted?.id, supersededId: current.sameFact?.id || null };
     });
     invalidateMemoryQualityCache(userId);
     if (dimensions > 0) void ensureMemoryVectorIndex(dimensions).catch(error => logger.warn({ userId, err: error.message }, '长期记忆向量索引检查失败'));
-    return { inserted: true, id: row?.id, supersededId: similar.sameFact?.id || null };
+    return result;
 }
 
-async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, memoryRevision } = {}) {
+async function runMemoryExtraction({ userId, sessionId, projectId = '', messageIds = [], user = null, modelCfg = null, memoryRevision } = {}) {
     const ids = normalizeSourceMessageIds(messageIds);
     const gate = await assertMemoryWriteGate(userId, { memoryRevision });
     if (!gate.allowed || ids.length === 0) return { skipped: true, reason: !gate.allowed ? gate.reason : 'missing_context' };
@@ -878,9 +859,10 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     let modelCompleted = false;
     if (modelCfg?.url && !isModelExtractionCircuitOpen(modelCfg)) {
         try {
-            const extracted = await extractMemoryCandidatesWithModel(messages, { sessionId, user, modelCfg });
+            const extracted = await extractMemoryCandidatesWithModel(messages, { sessionId, projectId, user, modelCfg });
             candidates = extracted.candidates || [];
             modelCompleted = extracted.completed === true;
+            if (!modelCompleted) modelFallbackReason = extracted.reason || 'invalid_response';
             extractor = 'model';
             clearModelExtractionCooldown(modelCfg);
         } catch (err) {
@@ -904,7 +886,7 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
     // 模型合法返回空候选代表明确“不保存”；只有服务或熔断异常才允许使用
     // 受限的规则兜底。
     if (!modelCompleted && candidates.length === 0) {
-        candidates = extractMemoryCandidatesFromMessages(messages, { sessionId });
+        candidates = extractMemoryCandidatesFromMessages(messages, { sessionId, projectId });
         extractor = 'heuristic';
     }
     const startedAt = Date.now();
@@ -917,6 +899,7 @@ async function runMemoryExtraction({ userId, sessionId, messageIds = [], user = 
             origin: MEMORY_ORIGINS.automatic,
             assertedBy: MEMORY_ASSERTED_BY.user,
             stagePending: true,
+            skipEmbedding: true,
             requireActiveSources: true
         }));
     }

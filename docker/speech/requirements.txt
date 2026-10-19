@@ -1,0 +1,12 @@
+# 构建时固定版本；识别运行时不联网、不安装依赖。
+vosk==0.3.45
+cffi==2.1.1
+pycparser==3.11
+requests==2.34.2
+certifi==2026.10.18
+charset-normalizer==3.5.2
+idna==3.20
+urllib3==2.8.0
+srt==3.5.3
+tqdm==4.70.1
+websockets==17.2

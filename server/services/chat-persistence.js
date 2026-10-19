@@ -5,6 +5,7 @@ const { logger } = require('../logger');
 
 async function persistAssistantTurn({
     sessionId,
+    projectId = '',
     userId,
     userMessageId = null,
     user = null,
@@ -35,6 +36,7 @@ async function persistAssistantTurn({
         userId,
         sessionId,
         messageIds: [userMessageId, assistantMessageId].filter(Boolean),
+        projectId,
         user,
         modelCfg
     }).catch(error => logger.warn({ sessionId, userId, code: error.code }, '自动记忆调度暂不可用，回答已保留'));

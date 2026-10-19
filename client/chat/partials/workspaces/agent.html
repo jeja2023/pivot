@@ -738,12 +738,14 @@
                     <div class="agent-harness-panel-head">
                         <div>
                             <strong id="agent-memory-policy-title">记忆与隐私</strong>
-                            <span>控制智能助手自动保存和使用长期记忆的边界。</span>
+                            <span>正常聊天即可自动记住稳定偏好、更新旧信息并在相关任务中使用，无需手动维护。</span>
                         </div>
                         <div class="agent-harness-inline-actions">
                             <button id="agent-memory-policy-refresh" class="btn-secondary" type="button">刷新</button>
                         </div>
                     </div>
+                    <details class="agent-profile-card agent-profile-card--advanced">
+                        <summary>高级记忆设置</summary>
                     <div class="agent-governance-cards">
                         <div class="agent-governance-card agent-governance-card--capture">
                             <div class="agent-governance-card-header">
@@ -862,6 +864,10 @@
                             </div>
                         </div>
                     </div>
+                    <div class="agent-harness-form-actions agent-assistant-memory-actions">
+                        <button id="agent-memory-policy-save" class="btn-primary btn-xs" type="button">保存治理策略</button>
+                    </div>
+                    </details>
                     <section class="agent-memory-console-card" aria-labelledby="agent-memory-console-title">
                         <div class="agent-harness-panel-head">
                             <div>
@@ -876,10 +882,6 @@
                         <div id="agent-memory-console-summary" class="agent-memory-console-summary"></div>
                         <div id="agent-memory-console-list" class="agent-harness-list full-width"></div>
                     </section>
-                    <div class="agent-harness-form-actions agent-assistant-memory-actions">
-                        <button id="agent-memory-policy-save" class="btn-primary btn-xs" type="button">保存治理策略</button>
-                        <button class="btn-secondary btn-xs" type="button" data-memory-open>打开记忆清单</button>
-                    </div>
                 </section>
 
                 <!-- 3. 经验沉淀 -->

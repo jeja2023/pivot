@@ -7,6 +7,7 @@ const { getExecutionMetrics } = require('../../repositories/chat-conversation-tu
 const { isSuperAdmin } = require('../../permissions');
 
 function registerChatAuxiliaryRoutes(router, { authMiddleware, logAction }) {
+    require('./voice-recognition').registerVoiceRecognitionRoutes(router, { authMiddleware });
     router.get('/chat/execution-metrics', authMiddleware, asyncHandler(async (req, res) => {
         const rows = await getExecutionMetrics(req.user.id, { admin: req.query.scope === 'organization' && isSuperAdmin(req.user), days: req.query.days });
         res.json({ success: true, metrics: rows, verification: '独立核验与用户纠正分别统计，自动启动或沉默不作为成功。' });

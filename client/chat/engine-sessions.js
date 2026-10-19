@@ -110,6 +110,8 @@ async function createSession(title) {
 }
 
 function clearActiveChatSession() {
+    window.Pivot.moduleApi('chat.realtimeVoice')?.stopRealtimeVoice?.();
+    window.Pivot.moduleApi('chat.memoryActions')?.stopChatVoiceInput?.();
     sessionSelectionSequence += 1;
     currentSessionId = null;
     window.Pivot.legacy.persistActiveChatSession?.('');
@@ -130,6 +132,8 @@ async function selectSession(id, title, options = {}) {
     );
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('chat');
     if (String(currentSessionId || '') !== requestedSessionId) {
+        window.Pivot.moduleApi('chat.realtimeVoice')?.stopRealtimeVoice?.();
+        window.Pivot.moduleApi('chat.memoryActions')?.stopChatVoiceInput?.();
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
     }
     currentSessionId = id;

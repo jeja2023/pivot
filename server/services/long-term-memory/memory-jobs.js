@@ -13,6 +13,7 @@ const {
 } = require('./memory-utils');
 const { serializeMemoryJob, buildMemoryJobDedupeKey } = require('./memory-serialization');
 const { assertMemoryWriteGate } = require('./memory-gate');
+const { getMemoryPolicy } = require('../memory-governance');
 
 const extractionGuard = new KeyedConcurrencyGuard({
     maxConcurrent: Math.max(1, Number.parseInt(process.env.LONG_TERM_MEMORY_EXTRACTION_MAX_CONCURRENT, 10) || 2)
@@ -56,7 +57,7 @@ async function cancelMemoryExtractionJobs(userId, options = {}, deps = {}) {
     return { cancelled: changes };
 }
 
-async function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], modelId = null } = {}) {
+async function enqueueMemoryExtractionJob({ userId, sessionId, projectId = '', messageIds = [], modelId = null } = {}) {
     const normalizedUser = Number(userId);
     if (!Number.isSafeInteger(normalizedUser) || normalizedUser <= 0) {
         return { queued: false, reason: 'missing_context' };
@@ -70,7 +71,7 @@ async function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], 
     if (normalizedIds.length === 0) {
         return { queued: false, reason: 'missing_context' };
     }
-    const dedupeKey = buildMemoryJobDedupeKey(normalizedSessionId, normalizedIds);
+    const dedupeKey = buildMemoryJobDedupeKey(normalizedUser, normalizedSessionId, normalizedIds);
     const existing = await queryOne(`
         SELECT *
         FROM memory_extraction_jobs
@@ -92,12 +93,13 @@ async function enqueueMemoryExtractionJob({ userId, sessionId, messageIds = [], 
     const model = modelId ? String(modelId).slice(0, 80) : null;
     const inserted = await queryOne(`
         INSERT INTO memory_extraction_jobs (
-            user_id, session_id, message_ids, dedupe_key, model_id, memory_revision, status, attempts, max_attempts, next_run_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            user_id, session_id, project_id, message_ids, dedupe_key, model_id, memory_revision, status, attempts, max_attempts, next_run_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
         RETURNING *
     `, [
         normalizedUser,
         normalizedSessionId,
+        normalizeScopeReference(projectId),
         payload,
         dedupeKey,
         model,
@@ -136,12 +138,13 @@ function triggerMemoryExtractionWorker() {
     });
 }
 
-async function scheduleMemoryExtraction({ userId, sessionId, messageIds = [], user = null, modelCfg = null, triggerWorker = true } = {}) {
-    const learning = await require('../agent-learning').getAgentLearningSettings(user?.id || userId);
-    if (!learning.autoLearning) return { scheduled: false, queued: false, reason: 'learning_disabled' };
+async function scheduleMemoryExtraction({ userId, sessionId, projectId = '', messageIds = [], user = null, modelCfg = null, triggerWorker = true } = {}) {
+    const policy = await getMemoryPolicy(user?.id || userId);
+    if (!policy.autoCapture) return { scheduled: false, queued: false, reason: 'auto_capture_disabled' };
     const queued = await enqueueMemoryExtractionJob({
         userId: user?.id || userId,
         sessionId,
+        projectId,
         messageIds,
         modelId: modelCfg?.id || null
     });
@@ -210,6 +213,7 @@ async function finishMemoryExtractionJob(jobId, status, fields = {}) {
         UPDATE memory_extraction_jobs
         SET status = ?,
             locked_at = NULL,
+            attempts = GREATEST(0, attempts - ?),
             last_error = ?,
             result = ?,
             next_run_at = ?,
@@ -218,6 +222,7 @@ async function finishMemoryExtractionJob(jobId, status, fields = {}) {
         WHERE id = ?
     `, [
         status,
+        fields.releaseAttempt ? 1 : 0,
         fields.lastError ? String(fields.lastError).slice(0, 1000) : null,
         fields.result ? JSON.stringify(fields.result) : null,
         fields.nextRunAt || null,
@@ -228,8 +233,8 @@ async function finishMemoryExtractionJob(jobId, status, fields = {}) {
 }
 
 async function processMemoryExtractionJob(row, options = {}) {
-    if (!(await require('../agent-learning').getAgentLearningSettings(row.user_id)).autoLearning) {
-        const result = { skipped: true, reason: 'learning_disabled' };
+    if (!(await getMemoryPolicy(row.user_id)).autoCapture) {
+        const result = { skipped: true, reason: 'auto_capture_disabled' };
         await finishMemoryExtractionJob(row.id, MEMORY_JOB_STATUS.skipped, { result });
         return result;
     }
@@ -238,6 +243,7 @@ async function processMemoryExtractionJob(row, options = {}) {
     const user = await resolveMemoryJobUser(row);
     const modelCfg = await resolveMemoryJobModel(row, user);
     const result = await runExtraction({
+        projectId: row.project_id || '',
         userId: row.user_id,
         sessionId: row.session_id,
         messageIds: parseJsonArray(row.message_ids),
@@ -245,6 +251,16 @@ async function processMemoryExtractionJob(row, options = {}) {
         modelCfg,
         memoryRevision: Number(row.memory_revision || 0)
     });
+    const retryModel = ['timeout', 'error', 'cooldown', 'invalid_response'].includes(result.modelFallbackReason)
+        && Number(row.attempts || 1) < Number(row.max_attempts || DEFAULT_MEMORY_JOB_MAX_ATTEMPTS);
+    if (retryModel) {
+        // 兜底内容可立即使用；模型暂时不可用时在后台重新提炼，无需用户手动重试。
+        await finishMemoryExtractionJob(row.id, MEMORY_JOB_STATUS.queued, {
+            result, lastError: `MODEL_EXTRACTION_${result.modelFallbackReason.toUpperCase()}`,
+            nextRunAt: getBeijingTimestamp(new Date(Date.now() + 180000))
+        });
+        return { ...result, backgroundRetry: true };
+    }
     const finalStatus = result.skipped ? MEMORY_JOB_STATUS.skipped : MEMORY_JOB_STATUS.succeeded;
     await finishMemoryExtractionJob(row.id, finalStatus, { result });
     return result;
@@ -257,8 +273,13 @@ async function processMemoryExtractionJobs(options = {}) {
     for (const row of rows) {
         const key = `${row.user_id}:${row.session_id}:${row.id}`;
         try {
-            const result = await extractionGuard.run(key, () => processMemoryExtractionJob(row, options));
-            results.push({ id: row.id, ok: true, result });
+            const guarded = await extractionGuard.run(key, () => processMemoryExtractionJob(row, options));
+            if (guarded.skipped) {
+                await finishMemoryExtractionJob(row.id, MEMORY_JOB_STATUS.queued, {
+                    releaseAttempt: true, lastError: 'EXTRACTION_BUSY', nextRunAt: nextMemoryJobRunAt(1)
+                });
+                results.push({ id: row.id, ok: false, retry: true });
+            } else results.push({ id: row.id, ok: true, result: guarded.value });
         } catch (err) {
             const latest = (await queryOne('SELECT attempts, max_attempts FROM memory_extraction_jobs WHERE id = ?', [row.id])) || row;
             const attempts = Number(latest.attempts || row.attempts || 1);
@@ -273,9 +294,9 @@ async function processMemoryExtractionJobs(options = {}) {
     }
     return {
         claimed: rows.length,
-        succeeded: results.filter(item => item.ok).length,
+        succeeded: results.filter(item => item.ok && !item.result?.backgroundRetry).length,
         failed: results.filter(item => !item.ok && !item.retry).length,
-        retried: results.filter(item => item.retry).length,
+        retried: results.filter(item => item.retry || item.result?.backgroundRetry).length,
         results
     };
 }

@@ -15,6 +15,11 @@ const input = { prompt: '请分析附件并生成风险报告', user: { id: 9 },
 const modelDecision = { action: 'agent_run', intent: 'delegate', objective: '分析附件并生成风险报告', constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.2 };
 const deps = output => ({ config, callModelJson: async () => JSON.stringify(output), recordDecision() {} });
 
+test('同一句话中的长期偏好不能吞掉当前委托任务', () => {
+    assert.equal(classifyChatAutoExecution({ prompt: '以后回答先给结论' }).action, 'memory');
+    assert.equal(classifyChatAutoExecution({ prompt: '以后回答先给结论，帮我分析附件并生成报告' }).action, 'agent_run');
+});
+
 test('普通问答、创作、讨论和引用保持直答，不调用分类模型', async () => {
     for (const prompt of ['请解释向量检索','请写一份产品发布报告','请翻译这份报告并生成英文版','他让我完成报告的要求是什么？','停止当前任务的功能如何实现？']) {
         assert.equal(classifyChatAutoExecution({ prompt }).action, 'direct_answer', prompt);

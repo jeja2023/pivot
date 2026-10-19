@@ -96,7 +96,7 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
     }
     const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
         sessionId, userId, userMessageId, user, modelCfg, visibleContent, assistantContent: content, assistantTokens: estimateTokens(content),
-        skipMemoryExtraction: true,
+        skipMemoryExtraction: ['memory', 'control'].includes(decision.action),
         routeMetadata: { decisions: decision.decisionId ? [{ decisionId: decision.decisionId, scenario: 'chat.execution', selectedActionId: decision.action }] : [] }
     });
     if (decision.decisionId) recordDecisionOutcome({ decisionId: decision.decisionId, source: 'runtime', eventType: 'execution', status: 'partial', reasonCode: decision.reasonCode || decision.action, resultReference: String(assistantMessageId) });

@@ -153,7 +153,9 @@ const migrationModules = [
     require('./agent-domain-acceptance-committee-attestations'),
     require('./agent-domain-acceptance-committee-members'),
     require('./agent-task-drafts'),
-    require('./chat-conversation-turns')
+    require('./chat-conversation-turns'),
+    require('./automatic-memory-context'),
+    require('./chat-message-turn-link-repair')
 ];
 
 module.exports = migrationModules

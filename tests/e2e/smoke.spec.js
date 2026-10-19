@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const XLSX = require('@e965/xlsx');
 const Sqlite = require('better-sqlite3');
+const { spawnSync } = require('node:child_process');
 const { expect, test } = require('@playwright/test');
 
 if (process.env.PIVOT_E2E_DEBUG === 'true') {
@@ -57,6 +58,189 @@ async function expectDataAnalysisSidebarNavigationLayout(page) {
 }
 
 test.describe('Pivot browser smoke', () => {
+    for (const native of [false, true, 'server']) test(native === 'server' ? '浏览器无中文包时两个语音按钮经部署内服务器正常工作' : native ? '桌面语音绕过浏览器中文语音包并贯通连续对话' : '语音按钮贯通本地识别、两轮模型对话、朗读及停止', async ({ page }) => {
+        await page.addInitScript(useNative => {
+            window.__voiceTest = { spoken: [], stopped: 0, active: null };
+            class Recognition {
+                constructor() { this.processLocally = false; }
+                static available() { return Promise.resolve('available'); }
+                start() { window.__voiceTest.active = this; setTimeout(() => this.onstart?.(), 0); }
+                abort() {}
+            }
+            Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: Recognition });
+            if (useNative === true) {
+                Recognition.available = () => Promise.resolve('unavailable');
+                let listener;
+                window.pivotDesktop = {
+                    getVoiceRecognitionStatus: async () => ({ available: true, languages: ['zh-CN'] }),
+                    onVoiceRecognitionEvent(callback) { listener = callback; return () => { listener = null; }; },
+                    async startVoiceRecognition(input) {
+                        const active = { onresult(event) {
+                            listener?.({ id: input.id, type: 'result', text: event.results[0][0].transcript });
+                        } };
+                        window.__voiceTest.active = active;
+                        listener?.({ id: input.id, type: 'started' });
+                        return { success: true };
+                    },
+                    async stopVoiceRecognition() { window.__voiceTest.stopped++; }
+                };
+            }
+            if (useNative === 'server') {
+                Recognition.available = () => Promise.resolve('unavailable');
+                const node = () => ({ connect() {}, disconnect() {} });
+                Object.defineProperty(window, 'AudioContext', { configurable: true, value: class {
+                    constructor() { this.sampleRate = 16000; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; }
+                    createMediaStreamSource() { return node(); }
+                    createGain() { return { ...node(), gain: { value: 0 } }; }
+                    resume() { return Promise.resolve(); }
+                    close() { return Promise.resolve(); }
+                } });
+                Object.defineProperty(window, 'AudioWorkletNode', { configurable: true, value: class {
+                    constructor() {
+                        this.port = {};
+                        window.__voiceTest.active = { onresult: () => {
+                            this.port.onmessage({ data: new Float32Array(8000).fill(0.1) });
+                            this.port.onmessage({ data: new Float32Array(16000).fill(0) });
+                        } };
+                    }
+                    connect() {} disconnect() {}
+                } });
+            }
+            Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: {
+                getUserMedia: async () => ({ getTracks: () => [{ stop() { window.__voiceTest.stopped++; } }] })
+            } });
+            Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+                getVoices: () => [{ name: 'Test local', lang: 'zh-CN', localService: true }],
+                cancel() {}, speak(utterance) { window.__voiceTest.spoken.push(utterance.text); setTimeout(() => utterance.onend?.(), 0); }
+            } });
+            Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: class { constructor(text) { this.text = text; } } });
+        }, native);
+        let transcriptions = 0;
+        if (native === 'server') {
+            await page.route('**/api/chat/voice-recognition', route => route.fulfill({ contentType: 'application/json',
+                body: JSON.stringify({ available: true, languages: ['zh-CN'], thirdPartyForwarding: false, audioRetention: 'none' }) }));
+            await page.route('**/api/chat/voice-transcriptions', route => {
+                const input = route.request().postDataJSON();
+                expect(input.language).toBe('zh-CN');
+                expect(Buffer.from(input.audioBase64, 'base64').subarray(0, 4).toString()).toBe('RIFF');
+                const text = ['语音草稿测试', '解释一下四季形成的原因', '继续刚才的话题'][transcriptions++];
+                return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, text }) });
+            });
+        } else {
+            await page.route('**/api/chat/voice-recognition', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ available: false, reason: '测试浏览器本地路径' }) }));
+        }
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const name = `Voice e2e ${Date.now()}`;
+        expect((await page.request.post('/api/models', { headers: { 'x-csrf-token': csrf },
+            data: { name, url: process.env.E2E_MODEL_URL, model_name: 'voice-e2e' } })).ok()).toBeTruthy();
+        const models = await (await page.request.get('/api/models?limit=100')).json();
+        const model = models.data.find(item => item.name === name);
+        await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: model.id } });
+        await page.reload();
+        await ensureBrowserSession(page);
+        await expect(page.locator('#model-selector')).toHaveValue(String(model.id));
+        await page.locator('#chat-voice-input').click();
+        await page.waitForFunction(() => !!window.__voiceTest.active?.onresult);
+        await page.evaluate(() => window.__voiceTest.active.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '语音草稿测试' } }] }));
+        await expect(page.locator('#user-input')).toHaveValue('语音草稿测试');
+        if (native !== 'server') await page.locator('#chat-voice-input').click();
+        await page.locator('#user-input').fill('');
+        const requests = [];
+        page.on('request', request => { if (new URL(request.url()).pathname === '/api/chat') requests.push(request.postDataJSON()); });
+        await page.locator('#chat-realtime-voice').click();
+        await expect(page.locator('#chat-realtime-voice')).toHaveAttribute('aria-pressed', 'true');
+        const say = async text => {
+            await page.evaluate(value => window.__voiceTest.active.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: value } }] }), text);
+            await expect(page.locator('#send-btn')).toBeVisible();
+        };
+        await say('解释一下四季形成的原因');
+        await expect.poll(() => page.evaluate(() => window.__voiceTest.spoken.length)).toBeGreaterThan(0);
+        await page.waitForTimeout(120);
+        await say('继续刚才的话题');
+        await expect.poll(() => requests.length).toBe(2);
+        expect(requests[0].content).toBe('解释一下四季形成的原因');
+        expect(requests[1].voiceHistory.some(item => item.content === requests[0].content)).toBe(true);
+        await expect.poll(() => page.evaluate(() => window.__voiceTest.spoken.length)).toBeGreaterThan(1);
+        await page.locator('#chat-realtime-voice').click();
+        await expect(page.locator('#chat-realtime-voice')).toHaveAttribute('aria-pressed', 'false');
+        expect(await page.evaluate(() => window.__voiceTest.stopped)).toBeGreaterThanOrEqual(2);
+        const detail = await (await page.request.get(`/api/sessions/${requests[0].sessionId}`)).json();
+        expect(detail.messages || []).toHaveLength(0);
+        if (native === 'server') expect(transcriptions).toBe(3);
+    });
+
+    test('浏览器真实音频工作线程经 HTTP 和服务器实际引擎识别合成中文音频', async ({ page }) => {
+        test.skip(process.platform !== 'win32', '本用例验证 Windows 本地语音引擎');
+        const source = [
+            "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Add-Type -AssemblyName System.Speech",
+            '$voiceSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+            "$voiceName = $voiceSynth.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.Name -eq 'zh-CN' } | Select-Object -First 1",
+            '$voiceSynth.SelectVoice($voiceName.VoiceInfo.Name)',
+            '$voiceBytes = New-Object System.IO.MemoryStream',
+            '$voiceSynth.SetOutputToWaveStream($voiceBytes)',
+            "$voiceSynth.Speak('你好，这是一个本地语音测试。')",
+            '$voiceSynth.SetOutputToNull(); $voiceSynth.Dispose()',
+            '[Console]::Out.WriteLine([Convert]::ToBase64String($voiceBytes.ToArray())); $voiceBytes.Dispose()'
+        ].join('\n');
+        const generated = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')],
+            { windowsHide: true, encoding: 'utf8', timeout: 15000 });
+        expect(generated.status).toBe(0);
+        await page.addInitScript(base64 => {
+            Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: undefined });
+            Object.defineProperty(window, 'webkitSpeechRecognition', { configurable: true, value: undefined });
+            Object.defineProperty(window.navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
+                const context = new window.AudioContext();
+                const bytes = Uint8Array.from(window.atob(base64), value => value.charCodeAt(0));
+                const buffer = await context.decodeAudioData(bytes.buffer);
+                const sound = context.createBufferSource(); sound.buffer = buffer;
+                const output = context.createMediaStreamDestination(); sound.connect(output);
+                await context.resume();
+                setTimeout(() => sound.start(), 500);
+                const stop = output.stream.getTracks()[0].stop.bind(output.stream.getTracks()[0]);
+                output.stream.getTracks()[0].stop = () => { stop(); void context.close(); };
+                return output.stream;
+            } });
+        }, generated.stdout.trim());
+        await ensureBrowserSession(page);
+        const status = await (await page.request.get('/api/chat/voice-recognition')).json();
+        expect(status.available).toBe(true);
+        expect(status.thirdPartyForwarding).toBe(false);
+        const request = page.waitForResponse(response => response.url().endsWith('/api/chat/voice-transcriptions'));
+        await page.locator('#chat-voice-input').click();
+        const recognized = await request;
+        expect(recognized.ok()).toBe(true);
+        const data = await recognized.json();
+        expect(data.provider).toBe('server_windows_speech');
+        expect(data.audioRetention).toBe('none');
+        expect(data.text).toContain('你好');
+        await expect(page.locator('#user-input')).toHaveValue(data.text);
+        await expect(page.locator('#chat-voice-input')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('自动记忆融入聊天并保留可用的个人设置开关', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', error => errors.push(error.message));
+        await ensureBrowserSession(page);
+        await expect(page.locator('#chat-memory-menu')).toHaveCount(0);
+        await expect(page.locator('#chat-memory-intent-modal')).toHaveCount(0);
+        await page.evaluate(() => window.Pivot.moduleApi('chat.memoryActions').openChatMemoryManagement());
+        const toggle = page.locator('#long-term-memory-toggle');
+        await expect(toggle).toBeVisible();
+        await expect(page.locator('#tab-content-memories')).toContainText('无需手动保存或逐条确认');
+        await expect(toggle).toBeChecked();
+        const save = page.waitForResponse(response => response.url().endsWith('/api/memories/settings') && response.request().method() === 'PUT');
+        await toggle.uncheck();
+        expect((await (await save).json()).enabled).toBe(false);
+        const restore = page.waitForResponse(response => response.url().endsWith('/api/memories/settings') && response.request().method() === 'PUT');
+        await toggle.check();
+        expect((await (await restore).json()).enabled).toBe(true);
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await expect(page.locator('#user-input')).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+
     test('login form establishes a browser session and reveals the authenticated workspace', async ({ page }) => {
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await expect(page.locator('#auth-container')).toBeVisible();

@@ -128,6 +128,8 @@ async function assembleChatContext({
 }) {
     const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
+    // 临时语音的本轮文本未落库，必须显式加入请求；也不能进入持久任务上下文和路由审计正文。
+    if (state.ephemeralVoice) return require('./chat-voice-context').buildEphemeralVoiceContext(state, history, modelCfg);
     try {
         const { getAgentProfile, buildAgentProfileContext } = require('./agent-profile');
         const profile = await getAgentProfile(userId);

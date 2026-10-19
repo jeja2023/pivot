@@ -7,8 +7,9 @@ const test = require('node:test');
 
 test('realtime voice client fails closed without device-local browser speech, serializes startup, and releases media resources', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'realtime-voice.js'), 'utf8');
-    assert.match(source, /SpeechRecognition \|\| globalThis\.webkitSpeechRecognition/);
-    assert.match(source, /processLocally/);
+    const platform = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'voice-platform.js'), 'utf8');
+    assert.match(platform, /SpeechRecognition \|\| globalThis\.webkitSpeechRecognition/);
+    assert.match(platform, /processLocally/);
     assert.match(source, /localService === true/);
     assert.match(source, /voiceStart\?\.promise/);
     assert.match(source, /VOICE_HEARTBEAT_MS/);

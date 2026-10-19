@@ -45,6 +45,7 @@ function buildChatRequestState(req) {
         chatMode: String(body.chatMode || body.mode || '').trim().toLowerCase() === 'agent' ? 'agent' : 'normal',
         ephemeralVoice: body.ephemeralVoice === true,
         voiceSessionId: String(body.voiceSessionId || body.voice_session_id || '').trim().slice(0, 128),
+        voiceHistory: body.ephemeralVoice === true ? require('./chat-voice-context').normalizeVoiceHistory(body.voiceHistory) : [],
         autoRouteEnabled,
         routeOverrides: normalizeRouteOverrides(body.routeOverrides),
         ragPreference,

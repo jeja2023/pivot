@@ -9,7 +9,10 @@
 | KaTeX | 公式排版 | MIT |
 | ECharts | 图表渲染 | Apache-2.0 |
 | veraPDF Greenfield CLI | PDF/A 与 PDF/UA 合规验证 | GPL-3.0-or-later 或 MPL-2.0 |
+| Vosk API 与 vosk-model-small-cn-0.22 | Docker 部署内离线中文语音识别 | Apache-2.0 |
 
 libvips 以动态链接库形式与应用分发；用户可以替换该动态库。项目未修改 libvips 本身。有关源代码和许可信息，请访问组件各自的上游发布页或本发行包内的相关许可文件。
 
 Docker 发行镜像中的 veraPDF CLI 来自 veraPDF 官方固定版本安装包，构建时校验 SHA-256 后以 CLI-only 模式安装。veraPDF 仅用于验证，不执行 PDF/A 转换；其完整许可与源代码获取方式见 [veraPDF 官方项目](https://github.com/veraPDF/veraPDF-apps)。
+
+Vosk 运行库由固定版本 Python 依赖安装，其第三方依赖许可随各包的 dist-info 一同保留。中文模型来自 [Vosk 官方模型列表](https://alphacephei.com/vosk/models)，构建时校验 SHA-256；运行时无需联网下载。完整 Apache-2.0 文本随包提供在 `APACHE-2.0.txt`，模型内容未被修改。

@@ -5,6 +5,7 @@ const path = require('path');
 const vm = require('vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'engine-personal-actions.js'), 'utf8');
+const platform = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'voice-platform.js'), 'utf8');
 
 function createElement(initial = {}) {
     const attributes = new Map();
@@ -58,8 +59,10 @@ function loadVoiceActions({ Recognition, getUserMedia }) {
     context.window = context;
     context.Pivot = {
         exposeModule(name, api) { modules.set(name, api); },
-        moduleApi() { return {}; }
+        moduleApi(name) { return modules.get(name); }
     };
+    if (Recognition) Recognition.prototype.processLocally = false;
+    vm.runInNewContext(platform, context, { filename: 'voice-platform.js' });
     vm.runInNewContext(source, context, { filename: 'engine-personal-actions.js' });
     return {
         api: modules.get('chat.memoryActions'),
@@ -95,9 +98,9 @@ test('Voice input requests microphone access and releases it when stopped or unl
 
     await voice.api.startChatVoiceInput();
     assert.equal(microphoneRequests, 1);
-    assert.equal(recognitions[0].started, true);
+    assert.equal(recognitions.at(-1).started, true);
     voice.api.stopChatVoiceInput();
-    assert.equal(recognitions[0].aborted, true);
+    assert.equal(recognitions.at(-1).aborted, true);
     assert.equal(track.stopped, true);
 
     await voice.api.startChatVoiceInput();
@@ -107,9 +110,9 @@ test('Voice input requests microphone access and releases it when stopped or unl
 
 test('Voice input gives actionable microphone errors and handles unsupported browsers', async () => {
     const rejected = [
-        ['NotAllowedError', '请在系统或浏览器设置中允许本应用访问麦克风后重试'],
-        ['NotFoundError', '未检测到可用的麦克风设备，请连接或启用麦克风后重试。'],
-        ['NotReadableError', '麦克风正在被其他应用占用，请关闭占用程序后重试。']
+        ['NotAllowedError', '请在系统或浏览器设置中允许 Pivot 访问麦克风后重试。'],
+        ['NotFoundError', '未检测到可用的麦克风，请连接或启用输入设备后重试。'],
+        ['NotReadableError', '麦克风不可用或被其他程序占用，请检查输入设备后重试。']
     ];
 
     for (const [name, message] of rejected) {
@@ -133,13 +136,30 @@ test('Voice input gives actionable microphone errors and handles unsupported bro
     assert.equal(granted.track.stopped, true);
     assert.deepEqual(deniedByRecognition.toasts.at(-1), {
         level: 'error',
-        message: '请在系统或浏览器设置中允许本应用访问麦克风后重试'
+        message: '请在系统或浏览器设置中允许 Pivot 访问麦克风后重试。'
     });
 
     const unsupported = loadVoiceActions({ Recognition: undefined, getUserMedia: undefined });
     await unsupported.api.startChatVoiceInput();
     assert.deepEqual(unsupported.toasts.at(-1), {
         level: 'warning',
-        message: '当前浏览器不支持语音输入，请使用支持麦克风访问和语音识别的浏览器。'
+        message: '当前浏览器无法访问麦克风，请使用支持音频输入的浏览器。'
     });
+});
+
+test('语音输入保留已完成文本与最新中间结果，强制使用设备端识别', async () => {
+    let recognition;
+    class Recognition {
+        constructor() { recognition = this; }
+        start() {}
+    }
+    const voice = loadVoiceActions({ Recognition, getUserMedia: async () => createStream().stream });
+    voice.elements['user-input'].value = '已有草稿';
+    await voice.api.startChatVoiceInput();
+    assert.equal(recognition.processLocally, true);
+    recognition.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '第一句。' } }, { isFinal: false, 0: { transcript: '第二' } }] });
+    assert.equal(voice.elements['user-input'].value, '已有草稿 第一句。第二');
+    recognition.onresult({ resultIndex: 1, results: [{ isFinal: true, 0: { transcript: '第一句。' } }, { isFinal: true, 0: { transcript: '第二句。' } }] });
+    assert.equal(voice.elements['user-input'].value, '已有草稿 第一句。第二句。');
+    voice.api.stopChatVoiceInput();
 });

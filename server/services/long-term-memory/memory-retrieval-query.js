@@ -16,6 +16,7 @@ const {
     rankIndependentMemoryCandidates
 } = require('./memory-retrieval');
 const { isLongTermMemoryEnabled } = require('./memory-gate');
+const { isGeneralResponsePreference, responsePreferenceKey } = require('./memory-candidate-policy');
 
 const MEMORY_RETRIEVAL_MIN_RELEVANCE = readTypedEnv('LONG_TERM_MEMORY_MIN_RELEVANCE');
 
@@ -151,18 +152,31 @@ async function retrieveLongTermMemories(userId, queryText, options = {}) {
         }
     }
 
-    const [lexicalRows, denseRows] = await Promise.all([
+    const [lexicalRows, denseRows, defaultRows] = await Promise.all([
         selectLexicalMemoryCandidates(userId, normalizedQuery, now, scopeFilter, candidateLimit),
-        queryVector ? selectDenseMemoryCandidates(userId, queryVector, now, scopeFilter, candidateLimit) : Promise.resolve([])
+        queryVector ? selectDenseMemoryCandidates(userId, queryVector, now, scopeFilter, candidateLimit) : Promise.resolve([]),
+        // 回答语言、篇幅和格式适用于普通问题，无需用户每次在问题中重复偏好关键词。
+        selectLexicalMemoryCandidates(userId, '回答 回复 输出 中文 英文 语言 简洁 简短 详细 要点 列表 表格 结论 response answer concise verbose', now, scopeFilter, 24)
+            .then(rows => rows.filter(isGeneralResponsePreference)
+                .map(row => ({ ...row, __lexical: keywordScore(row, normalizedQuery), __defaultPreference: true })))
     ]);
     const merged = new Map();
-    for (const row of [...lexicalRows, ...denseRows]) {
+    for (const row of [...defaultRows, ...lexicalRows, ...denseRows]) {
         const id = Number(row?.id);
         if (!Number.isSafeInteger(id) || id <= 0) continue;
         merged.set(id, { ...(merged.get(id) || {}), ...row, id });
     }
-    const rows = await filterMemoriesForRetrieval(userId, [...merged.values()]);
-    if (!rows.length) return [];
+    const preferenceKeys = new Set();
+    const unique = [...merged.values()].sort((left, right) => Number(right.id) - Number(left.id)).filter(row => {
+        const dimension = row.type === 'preference' && responsePreferenceKey(row.content);
+        if (!dimension) return true;
+        const key = `${row.scope}:${row.scope_reference || ''}:${row.project_id || ''}:${dimension}`;
+        if (preferenceKeys.has(key)) return false;
+        preferenceKeys.add(key);
+        return true;
+    });
+    const rows = await filterMemoriesForRetrieval(userId, unique);
+    if (!rows.length || !(await isLongTermMemoryEnabled(userId))) return [];
     const ranked = rankIndependentMemoryCandidates(rows, normalizedQuery, queryVector, {
         limit,
         candidateLimit,

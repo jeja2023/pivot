@@ -119,10 +119,10 @@ test('自然偏好有来源和项目作用域，同类纠正替换旧值，遗�
     assert.equal(denied.skipped, true, '遗忘来源不能被后台抽取重新建立');
 });
 
-test('关闭学习时自然偏好只作用于当前回复，不能写入长期记录', async () => {
+test('关闭记忆时自然偏好只作用于当前回复，不能写入长期记录', async () => {
     let writes = 0;
     const result = await handleChatMemoryRequest({ prompt: '以后报告先列异常', user: { id: 1 }, sessionId: 's', userMessageId: 1 }, {
-        getAgentLearningSettings: async () => ({ autoLearning: false }), getMemoryPolicy: async () => ({ autoCapture: true }),
+        isLongTermMemoryEnabled: async () => false, getMemoryPolicy: async () => ({ autoCapture: true }),
         applyMemoryIntent: async () => { writes++; }
     });
     assert.equal(result.stored, false);

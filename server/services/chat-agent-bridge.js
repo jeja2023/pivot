@@ -269,6 +269,7 @@ async function persistAgentRunChatResult(runId) {
             await scheduleMemoryExtraction({
                 userId,
                 sessionId,
+                projectId: metadata.projectId || '',
                 messageIds: [userMessageId, messageId].filter(Boolean),
                 user,
                 modelCfg

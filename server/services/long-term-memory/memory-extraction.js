@@ -21,6 +21,7 @@ const {
     contentText
 } = require('./memory-utils');
 const { classifyMemory } = require('../memory-governance');
+const { memoryUserText, isTemporaryInstruction, responsePreferenceKey, applyAutomaticCandidatePolicy, splitResponsePreference, dedupeAutomaticCandidates } = require('./memory-candidate-policy');
 
 const MODEL_EXTRACTION_FAILURE_COOLDOWN_MS = Math.max(
     10000,
@@ -52,7 +53,7 @@ function clearModelExtractionCooldown(modelCfg = {}) {
 }
 
 function buildEvidenceExcerpt(sourceText, requestedExcerpt, candidateContent) {
-    const source = contentText(sourceText).replace(/\s+/g, ' ').trim();
+    const source = memoryUserText(sourceText).replace(/\s+/g, ' ').trim();
     const requested = String(requestedExcerpt || '').replace(/\s+/g, ' ').trim();
     const candidate = String(candidateContent || '').replace(/\s+/g, ' ').trim();
     if (requested && source.includes(requested)) return requested.slice(0, 400);
@@ -60,12 +61,12 @@ function buildEvidenceExcerpt(sourceText, requestedExcerpt, candidateContent) {
         const position = source.indexOf(candidate);
         if (position >= 0) return source.slice(position, position + 400);
     }
-    return source.slice(0, 400);
+    return '';
 }
 
 function resolveCandidateEvidence(raw = {}, content = '', context = {}) {
     const sourceMessages = Array.isArray(context.sourceMessages) ? context.sourceMessages : [];
-    const byId = new Map(sourceMessages.map(message => [Number(message?.id), message]));
+    const byId = new Map(sourceMessages.filter(message => message?.role === 'user').map(message => [Number(message?.id), message]));
     const requested = normalizeSourceMessageIds(
         raw.sourceMessageIds || raw.source_message_ids || raw.evidenceMessageIds || raw.evidence_message_ids
             || raw.sourceMessageId || raw.source_message_id || raw.evidenceMessageId || raw.evidence_message_id
@@ -87,24 +88,31 @@ function normalizeExtractorCandidates(rawCandidates = [], context = {}) {
         // 没有明确用户消息引用的模型事实只是断言，不具备可追溯来源，不能自动入库。
         if (sourceEvidence.length === 0) return;
         const requestedType = normalizeMemoryType(raw.type || raw.category);
-        const candidate = buildCandidate({
+        const candidate = applyAutomaticCandidatePolicy(buildCandidate({
             type: requestedType,
             governanceClass: classifyMemory({ type: requestedType, category: raw.category, content }),
             content,
             salience: clamp(raw.salience ?? raw.importance, 0, 1, 0.55),
-            confidence: clamp(raw.confidence, 0, 1, 0.62),
-            sourceSessionId: raw.sourceSessionId || sourceSessionId,
+            confidence: clamp(raw.confidence, 0, 1, 0.7),
+            sourceSessionId,
             sourceMessageIds: sourceEvidence.map(item => item.messageId),
             sourceEvidence,
             origin: MEMORY_ORIGINS.automatic,
             assertedBy: MEMORY_ASSERTED_BY.user,
             factKey: raw.factKey || raw.fact_key || ''
-        });
+        }), sourceEvidence.map(item => item.excerpt).join('\n'), { ...context,
+            scopeEvidence: (context.sourceMessages || []).filter(message => sourceEvidence.some(item => item.messageId === Number(message.id)))
+                .map(message => memoryUserText(message.content)).join('\n') });
+        if (!candidate) return;
         const key = fingerprintMemory(candidate.type, candidate.content);
         const existing = byKey.get(key);
         if (!existing || candidate.salience > existing.salience) byKey.set(key, candidate);
     });
-    return Array.from(byKey.values()).slice(0, MODEL_EXTRACTION_MAX_CANDIDATES);
+    const candidates = Array.from(byKey.values()).flatMap(candidate => {
+        const parts = candidate.type === MEMORY_TYPES.preference ? splitResponsePreference(candidate.content) : [candidate.content];
+        return parts.map(content => ({ ...candidate, content, factKey: candidate.type === MEMORY_TYPES.preference ? responsePreferenceKey(content) || candidate.factKey : candidate.factKey }));
+    });
+    return dedupeAutomaticCandidates(candidates).slice(0, MODEL_EXTRACTION_MAX_CANDIDATES);
 }
 
 function parseExtractorJsonResult(text) {
@@ -174,7 +182,7 @@ function buildExtractorMessages(messages = []) {
         // 助手回答可能包含推测；自动提取的稳定事实必须以用户实际声明为依据。
         .filter(message => message?.role === 'user')
         .map(message => {
-            const text = contentText(message.content).slice(0, 4000);
+            const text = memoryUserText(message.content).slice(0, 4000);
             return `[message_id:${message.id} role:${message.role}]\n${text}`;
         })
         .join('\n\n');
@@ -185,6 +193,8 @@ function buildExtractorMessages(messages = []) {
                 'Extract durable long-term memory candidates from the conversation.',
                 'Return only JSON with this shape: {"memories":[{"type":"preference|fact|decision|episode","category":"preference|fact|temporary","factKey":"stable-subject:attribute","content":"...","sourceMessageIds":[123],"evidenceSnippet":"exact quote from that message","salience":0.0,"confidence":0.0}]}',
                 'Keep only stable user preferences, project/task facts, long-term decisions, or useful historical episodes.',
+                'Do not turn one-off requests, questions, hypothetical examples, quoted material or attachment contents into personal facts. A correction replaces the same stable attribute; use a consistent factKey.',
+                'Each preference candidate captures exactly one attribute. Split language, order, verbosity and format preferences into separate candidates.',
                 'Do not include secrets, tokens, passwords, private keys, payment card numbers, phone numbers, government IDs, or transient chit-chat.',
                 'Every candidate must cite one or more message_id values shown below and an exact supporting quote. Use concise standalone content. Return at most 8 memories.'
             ].join('\n')
@@ -197,6 +207,8 @@ function buildExtractorMessages(messages = []) {
 }
 
 async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
+    const sourceMessages = messages.filter(message => message?.role === 'user' && memoryUserText(message.content));
+    if (!sourceMessages.length) return { candidates: [], completed: true, reason: 'no_user_evidence' };
     if (MODEL_EXTRACTION_DISABLED || !context.modelCfg?.url) return { candidates: [], completed: false, reason: 'disabled_or_unavailable' };
     const modelCfg = context.modelCfg;
     const url = buildChatCompletionsUrl(modelCfg.url);
@@ -209,7 +221,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
         signal: context.signal || null,
         data: {
             model: modelCfg.model_name || modelCfg.name || modelCfg.model || 'memory-extractor',
-            messages: buildExtractorMessages(messages),
+            messages: buildExtractorMessages(sourceMessages),
             temperature: 0,
             stream: false,
             max_tokens: MODEL_EXTRACTION_MAX_OUTPUT_TOKENS,
@@ -223,6 +235,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
     return {
         candidates: normalizeExtractorCandidates(parsed.candidates, {
             sessionId: context.sessionId,
+            projectId: context.projectId,
             sourceMessages: messages.filter(message => message?.role === 'user')
         }),
         completed: parsed.valid,
@@ -265,6 +278,11 @@ function splitMeaningfulLines(text) {
 function classifyLine(line) {
     const text = String(line || '').trim();
     if (!text || hasSensitiveContent(text) || hasUnsafeMemoryInstruction(text)) return null;
+    if (/[？?]|(?:是不是|是否|如何|怎么|例如|假设|比如)|\b(?:what if|for example|how do)\b/i.test(text)) return null;
+    if (isTemporaryInstruction(text)) return { type: MEMORY_TYPES.episode, salience: 0.4, confidence: 0.65 };
+    if (responsePreferenceKey(text) && /以后|今后|每次|默认|习惯|偏好|喜欢|prefer|always|from now on/i.test(text)) {
+        return { type: MEMORY_TYPES.preference, salience: 0.8, confidence: 0.8 };
+    }
     if (/(我|本人|用户).{0,8}(喜欢|偏好|习惯|希望|倾向|不喜欢|不要|默认|优先|更喜欢)/.test(text)
         || /(prefer|preference|like|dislike|default|always|never)/i.test(text)) {
         return { type: MEMORY_TYPES.preference, salience: 0.78, confidence: 0.72 };
@@ -275,7 +293,7 @@ function classifyLine(line) {
     }
     if (/(项目|任务|系统|模块|接口|数据库|表|字段|版本|部署|环境|模型|用户|团队|客户|需求).{0,80}(是|为|叫|使用|采用|位于|属于|负责|需要|已经|正在)/.test(text)
         || /(project|task|module|database|api|service|version|uses|requires|located)/i.test(text)) {
-        return { type: MEMORY_TYPES.fact, salience: 0.68, confidence: 0.64 };
+        return { type: MEMORY_TYPES.fact, salience: 0.68, confidence: 0.68 };
     }
     if (text.length >= 24 && /(今天|刚才|上次|这轮|之前|已经|完成|修复|新增|讨论|提到)/.test(text)) {
         return { type: MEMORY_TYPES.episode, salience: 0.48, confidence: 0.52 };
@@ -289,10 +307,10 @@ function extractMemoryCandidatesFromMessages(messages = [], context = {}) {
     messages
         .filter(message => message?.role === 'user')
         .forEach(message => {
-            splitMeaningfulLines(contentText(message.content)).forEach(line => {
+            splitMeaningfulLines(memoryUserText(message.content)).forEach(line => {
                 const classification = classifyLine(line);
                 if (!classification) return;
-                candidates.push(buildCandidate({
+                const candidate = applyAutomaticCandidatePolicy(buildCandidate({
                     ...classification,
                     content: line,
                     sourceSessionId,
@@ -300,17 +318,15 @@ function extractMemoryCandidatesFromMessages(messages = [], context = {}) {
                     sourceEvidence: [{ messageId: message.id, excerpt: line }],
                     origin: MEMORY_ORIGINS.automatic,
                     assertedBy: MEMORY_ASSERTED_BY.user
-                }));
+                }), line, { ...context, sessionId: sourceSessionId });
+                if (!candidate) return;
+                const parts = candidate.type === MEMORY_TYPES.preference ? splitResponsePreference(candidate.content) : [candidate.content];
+                parts.forEach(content => candidates.push({ ...candidate, content,
+                    factKey: candidate.type === MEMORY_TYPES.preference ? responsePreferenceKey(content) || candidate.factKey : candidate.factKey }));
             });
         });
 
-    const byKey = new Map();
-    candidates.forEach(candidate => {
-        const key = fingerprintMemory(candidate.type, candidate.content);
-        const existing = byKey.get(key);
-        if (!existing || candidate.salience > existing.salience) byKey.set(key, candidate);
-    });
-    return Array.from(byKey.values()).slice(0, 8);
+    return dedupeAutomaticCandidates(candidates);
 }
 
 module.exports = {

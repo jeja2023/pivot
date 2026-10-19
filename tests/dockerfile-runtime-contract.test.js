@@ -9,6 +9,20 @@ const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml')
 const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
 const veraPdfInstall = fs.readFileSync(path.join(__dirname, '..', 'docker', 'verapdf-auto-install.xml'), 'utf8');
 
+test('Docker 镜像构建时安装固定版本离线中文识别，运行时无需下载模型', () => {
+    assert.match(dockerfile, /AS speech-recognition/);
+    assert.match(dockerfile, /COPY --from=speech-recognition --chown=node:node \/opt\/pivot-speech \/opt\/pivot-speech/);
+    assert.match(dockerfile, /PIVOT_SERVER_VOICE_PYTHON=\/opt\/pivot-speech\/venv\/bin\/python/);
+    assert.match(dockerfile, /PIVOT_SERVER_VOICE_MODEL_PATH=\/opt\/pivot-speech\/model/);
+    const installer = fs.readFileSync(path.join(__dirname, '../docker/speech/install_model.py'), 'utf8');
+    assert.match(installer, /3af8b0e7e0f835ae9d414ce5df580237a3cfb08d586c9fbbb0f7ff29ad5b14ba/);
+    assert.match(installer, /digest\.hexdigest\(\) != MODEL_SHA256/);
+    const worker = fs.readFileSync(path.join(__dirname, '../server/services/speech-recognition/vosk-worker.py'), 'utf8');
+    assert.doesNotMatch(worker, /urllib|requests|download|open\(.+['"]w/);
+    assert.match(worker, /io\.BytesIO/);
+    assert.match(worker, /KaldiRecognizer/);
+});
+
 test('Dockerfile relies on lockfile-provided DuckDB native binding and fails closed when absent', () => {
     assert.match(dockerfile, /ARG TARGETARCH/);
     assert.match(dockerfile, /npm ci --omit=dev/);

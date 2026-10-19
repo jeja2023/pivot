@@ -25,6 +25,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && /opt/verapdf/verapdf --version | grep -F "veraPDF ${VERAPDF_VERSION}" \
   && rm -rf /opt/verapdf/Uninstaller /tmp/verapdf /tmp/verapdf-installer /tmp/verapdf-installer.zip /var/lib/apt/lists/*
 
+FROM ${NODE_IMAGE} AS speech-recognition
+USER root
+WORKDIR /tmp/speech
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+  && python3 -m venv /opt/pivot-speech/venv \
+  && rm -rf /var/lib/apt/lists/*
+COPY docker/speech/requirements.txt docker/speech/install_model.py ./
+RUN /opt/pivot-speech/venv/bin/pip install --no-cache-dir -r requirements.txt \
+  && python3 install_model.py
+COPY server/services/speech-recognition/vosk-worker.py /opt/pivot-speech/vosk-worker.py
+RUN PIVOT_SERVER_SPEECH_MODE=probe /opt/pivot-speech/venv/bin/python /opt/pivot-speech/vosk-worker.py
+
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
 ARG TARGETARCH
@@ -71,16 +83,20 @@ ENV NODE_ENV=production \
   PIVOT_CHROMIUM_PATH=/usr/bin/chromium \
   DOCUMENT_QPDF_PATH=/usr/bin/qpdf \
   DOCUMENT_VERAPDF_PATH=/opt/verapdf/verapdf \
+  PIVOT_SERVER_VOICE_PYTHON=/opt/pivot-speech/venv/bin/python \
+  PIVOT_SERVER_VOICE_MODEL_PATH=/opt/pivot-speech/model \
   PYTHON=python3
 
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=verapdf --chown=node:node /opt/verapdf /opt/verapdf
+COPY --from=speech-recognition --chown=node:node /opt/pivot-speech /opt/pivot-speech
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
 COPY --chown=node:node assets ./assets
 COPY --chown=node:node docs/licenses ./licenses
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
+COPY --chown=node:node scripts/repair_chat_schema.js ./scripts/repair_chat_schema.js
 COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.md ./
 
 # 在最终运行阶段重新加载原生模块和系统工具，避免只验证构建阶段而漏掉 runtime 层缺失。

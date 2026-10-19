@@ -1,0 +1,324 @@
+{
+  "version": "automatic-memory-v1",
+  "generatedAt": "2026-10-19T05:41:06.370Z",
+  "modelId": 18,
+  "fixtureDigest": "cc5fd92a28c11f06d5bd4c446c30b735916310835329596c338801548e44b362",
+  "cases": [
+    {
+      "id": "stable-style",
+      "text": "我更喜欢回答简洁一些，使用清晰的要点。",
+      "expected": {
+        "type": "preference",
+        "scope": "user"
+      }
+    },
+    {
+      "id": "one-off-request",
+      "text": "这次回答请详细一些，只用于本次任务。",
+      "forbidPersistent": true
+    },
+    {
+      "id": "quoted-material",
+      "text": "> 我喜欢所有回答都使用英文输出。",
+      "empty": true
+    },
+    {
+      "id": "project-fact",
+      "text": "项目 Alpha 的数据库使用 PostgreSQL。",
+      "projectId": "synthetic:alpha",
+      "expected": {
+        "type": "fact",
+        "scope": "project"
+      }
+    },
+    {
+      "id": "unknown-project",
+      "text": "项目 Beta 的数据库使用 PostgreSQL。",
+      "expected": {
+        "type": "fact",
+        "scope": "session"
+      }
+    },
+    {
+      "id": "personal-role",
+      "text": "我是制造行业的项目经理，主要负责供应链项目。",
+      "expected": {
+        "type": "fact",
+        "scope": "user"
+      }
+    },
+    {
+      "id": "assistant-assertion",
+      "text": "你好，介绍一下你能做什么。",
+      "assistant": "用户是一个偏好英文回答的财务经理。",
+      "empty": true
+    },
+    {
+      "id": "do-not-store",
+      "text": "不要保存这个信息，我更喜欢回答使用英文输出。",
+      "empty": true
+    }
+  ],
+  "kind": "synthetic_model_evaluation",
+  "memoriesPersisted": false,
+  "businessToolsExecuted": false,
+  "results": [
+    {
+      "id": "stable-style",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 13201
+        }
+      ],
+      "durationMs": 13201,
+      "candidates": [
+        {
+          "type": "preference",
+          "governanceClass": "preference",
+          "retentionMode": "",
+          "factKey": "preference:answer:verbosity",
+          "scope": "user",
+          "scopeReference": "",
+          "projectId": "",
+          "expiresAt": null,
+          "content": "偏好简洁的回答。",
+          "salience": 0.8,
+          "confidence": 0.99,
+          "sourceSessionId": "synthetic-memory",
+          "sourceMessageIds": [
+            1
+          ],
+          "sourceEvidence": [
+            {
+              "messageId": 1,
+              "excerpt": "我更喜欢回答简洁一些，使用清晰的要点。"
+            }
+          ],
+          "origin": "automatic",
+          "assertedBy": "user"
+        },
+        {
+          "type": "preference",
+          "governanceClass": "preference",
+          "retentionMode": "",
+          "factKey": "preference:answer:format",
+          "scope": "user",
+          "scopeReference": "",
+          "projectId": "",
+          "expiresAt": null,
+          "content": "偏好使用清晰的要点组织回答。",
+          "salience": 0.8,
+          "confidence": 0.99,
+          "sourceSessionId": "synthetic-memory",
+          "sourceMessageIds": [
+            1
+          ],
+          "sourceEvidence": [
+            {
+              "messageId": 1,
+              "excerpt": "我更喜欢回答简洁一些，使用清晰的要点。"
+            }
+          ],
+          "origin": "automatic",
+          "assertedBy": "user"
+        }
+      ]
+    },
+    {
+      "id": "one-off-request",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 2331
+        }
+      ],
+      "durationMs": 2331,
+      "candidates": []
+    },
+    {
+      "id": "quoted-material",
+      "passed": true,
+      "completed": true,
+      "reason": "no_user_evidence",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "no_user_evidence",
+          "durationMs": 0
+        }
+      ],
+      "durationMs": 0,
+      "candidates": []
+    },
+    {
+      "id": "project-fact",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 11650
+        }
+      ],
+      "durationMs": 11651,
+      "candidates": [
+        {
+          "type": "fact",
+          "governanceClass": "fact",
+          "retentionMode": "",
+          "factKey": "project-alpha:database",
+          "scope": "project",
+          "scopeReference": "synthetic:alpha",
+          "projectId": "synthetic:alpha",
+          "expiresAt": null,
+          "content": "项目 Alpha 的数据库使用 PostgreSQL。",
+          "salience": 0.8,
+          "confidence": 1,
+          "sourceSessionId": "synthetic-memory",
+          "sourceMessageIds": [
+            1
+          ],
+          "sourceEvidence": [
+            {
+              "messageId": 1,
+              "excerpt": "项目 Alpha 的数据库使用 PostgreSQL。"
+            }
+          ],
+          "origin": "automatic",
+          "assertedBy": "user"
+        }
+      ]
+    },
+    {
+      "id": "unknown-project",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 8087
+        }
+      ],
+      "durationMs": 8087,
+      "candidates": [
+        {
+          "type": "fact",
+          "governanceClass": "fact",
+          "retentionMode": "",
+          "factKey": "project-beta:database",
+          "scope": "session",
+          "scopeReference": "synthetic-memory",
+          "projectId": "",
+          "expiresAt": null,
+          "content": "项目 Beta 使用 PostgreSQL 数据库。",
+          "salience": 0.7,
+          "confidence": 0.99,
+          "sourceSessionId": "synthetic-memory",
+          "sourceMessageIds": [
+            1
+          ],
+          "sourceEvidence": [
+            {
+              "messageId": 1,
+              "excerpt": "项目 Beta 的数据库使用 PostgreSQL。"
+            }
+          ],
+          "origin": "automatic",
+          "assertedBy": "user"
+        }
+      ]
+    },
+    {
+      "id": "personal-role",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 12598
+        }
+      ],
+      "durationMs": 12598,
+      "candidates": [
+        {
+          "type": "fact",
+          "governanceClass": "fact",
+          "retentionMode": "",
+          "factKey": "user:occupation",
+          "scope": "user",
+          "scopeReference": "",
+          "projectId": "",
+          "expiresAt": null,
+          "content": "用户是制造行业的项目经理，主要负责供应链项目。",
+          "salience": 0.9,
+          "confidence": 0.99,
+          "sourceSessionId": "synthetic-memory",
+          "sourceMessageIds": [
+            1
+          ],
+          "sourceEvidence": [
+            {
+              "messageId": 1,
+              "excerpt": "我是制造行业的项目经理，主要负责供应链项目。"
+            }
+          ],
+          "origin": "automatic",
+          "assertedBy": "user"
+        }
+      ]
+    },
+    {
+      "id": "assistant-assertion",
+      "passed": true,
+      "completed": true,
+      "reason": "",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "",
+          "durationMs": 2380
+        }
+      ],
+      "durationMs": 2380,
+      "candidates": []
+    },
+    {
+      "id": "do-not-store",
+      "passed": true,
+      "completed": true,
+      "reason": "no_user_evidence",
+      "attempts": [
+        {
+          "completed": true,
+          "reason": "no_user_evidence",
+          "durationMs": 0
+        }
+      ],
+      "durationMs": 0,
+      "candidates": []
+    }
+  ],
+  "maxAttempts": 3,
+  "retryDelayOmitted": true,
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "firstAttemptPassed": 8,
+    "retries": 0
+  }
+}

@@ -312,8 +312,12 @@ async function processAgentLearningJob(row, options = {}) {
     if (candidate.kind === 'memory') {
         const content = String(candidate.summary || '').trim();
         if (!content || content.length < 8) return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'memory_empty' } });
+        const projectId = String(parseJsonObject(run.metadata).projectId || '');
         const memory = await upsertMemory(row.user_id, {
             type: 'fact', category: 'fact', content: content.slice(0, 1000),
+            scope: projectId || !run.session_id ? 'project' : 'session',
+            projectId: projectId || (!run.session_id ? `run:${run.id}` : ''),
+            scopeReference: projectId || run.session_id || `run:${run.id}`,
             salience: candidate.confidence, confidence: candidate.confidence,
             sourceRunId: run.id, sourceSessionId: run.session_id,
             origin: 'learning', assertedBy: 'system'

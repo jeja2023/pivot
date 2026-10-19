@@ -191,13 +191,6 @@ bind('new-chat-btn', async () => {
     if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
 bind('send-btn', () => window.Pivot.legacy.sendMessage());
-bind('chat-memory-menu-btn', () => {
-    const panel = document.getElementById('chat-memory-menu-panel');
-    window.Pivot?.moduleApi?.('chat.memoryActions')?.setChatMemoryMenuOpen?.(panel?.hidden === true);
-});
-bind('chat-remember-input', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.rememberCurrentChatInput?.().catch(error => showToast(error.message || '保存长期记忆失败', 'error')));
-bind('chat-memory-intent', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.openMemoryIntentModal?.());
-bind('chat-open-memories', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.openChatMemoryManagement?.().catch(error => showToast(error.message || '打开记忆管理失败', 'error')));
 bind('chat-voice-input', () => window.Pivot?.moduleApi?.('chat.memoryActions')?.startChatVoiceInput?.());
 bind('chat-realtime-voice', () => window.Pivot?.moduleApi?.('chat.realtimeVoice')?.startRealtimeVoice?.());
 bind('stop-btn', () => window.Pivot.legacy.cancelCurrentChatAgent?.() || currentAbortController?.abort());

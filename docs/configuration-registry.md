@@ -2,6 +2,14 @@
 
 > 此文档由 `server/config/env-registry.js` 生成；请修改注册表，而不是手工编辑本文档。
 
+## 语音识别
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `PIVOT_SERVER_VOICE_ENABLED` | boolean | `true` | true / false | 允许浏览器将短录音发送到当前 Pivot 服务器离线识别。仅内存处理、不落盘、不转发第三方；Docker 内置 Vosk 中文模型，Windows 使用系统语音引擎。 |
+| `PIVOT_SERVER_VOICE_PYTHON` | string | `/opt/pivot-speech/venv/bin/python` | 逗号分隔的语言标记 | Linux/Docker 离线语音工作进程使用的 Python 解释器绝对路径，标准镜像内置。 |
+| `PIVOT_SERVER_VOICE_MODEL_PATH` | string | `/opt/pivot-speech/model` | 逗号分隔的语言标记 | 离线 Vosk 中文模型目录；标准 Docker 镜像构建时安装并校验模型，运行时不下载。可通过只读挂载替换兼容模型。 |
+
 ## 基础运行
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |

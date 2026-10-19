@@ -1,0 +1,30 @@
+{
+  "version": "0.7.4",
+  "model": "vosk-model-small-cn-0.22",
+  "modelSha256": "3af8b0e7e0f835ae9d414ce5df580237a3cfb08d586c9fbbb0f7ff29ad5b14ba",
+  "expectedText": "你好这是一个本地语音测试",
+  "status": {
+    "success": true,
+    "audioRetention": "none",
+    "thirdPartyForwarding": false,
+    "maxSeconds": 20,
+    "available": true,
+    "languages": [
+      "zh-CN"
+    ],
+    "provider": "server_vosk",
+    "reason": ""
+  },
+  "result": {
+    "success": true,
+    "text": "你好这是一个本地语音测试",
+    "language": "zh-CN",
+    "provider": "server_vosk",
+    "audioRetention": "none"
+  },
+  "network": "none",
+  "readOnly": true,
+  "user": "1000",
+  "audioSource": "synthetic_wave",
+  "transport": "http"
+}

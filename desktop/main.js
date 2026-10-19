@@ -3,6 +3,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require('electron');
+const { installDesktopVoiceRecognition } = require('./voice-recognition');
 
 // 提前初始化桌面环境基础路径，避免引入 server 模块时因 asar 路径导致 ENOTDIR
 function initEarlyDesktopEnv() {
@@ -384,6 +385,17 @@ function assertTrustedIpcSender(event) {
     return true;
 }
 
+const desktopVoiceRecognition = installDesktopVoiceRecognition({
+    ipcMain,
+    authorize(event) {
+        assertTrustedIpcSender(event);
+        if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
+            throw new Error('语音识别仅允许来自客户端主页面的调用。');
+        }
+    },
+    send(sender, payload) { if (!sender.isDestroyed()) sender.send('pivot-voice:event', payload); }
+});
+
 function assertSecureWorkerIpcSender(event) {
     assertTrustedIpcSender(event);
     const senderUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || '';
@@ -542,11 +554,15 @@ function createMainWindow(config) {
         if (mainWindow) mainWindow.setTitle(title || 'Pivot');
     });
     mainWindow.on('closed', () => {
+        desktopVoiceRecognition.stop();
         if (showTimer) {
             clearTimeout(showTimer);
             showTimer = null;
         }
         mainWindow = null;
+    });
+    mainWindow.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+        if (mainFrame && !inPlace) desktopVoiceRecognition.stop();
     });
 }
 
@@ -916,6 +932,7 @@ if (!gotLock) {
     });
 
     app.on('before-quit', (event) => {
+        desktopVoiceRecognition.stop();
         try { updaterController?.destroy?.(); deliveryController?.stop?.(); } catch (_) {}
         try { getLocalMcpConnector().stop(); } catch (_) {}
         if (!pivotServer) return;

@@ -5,6 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'realtime-voice.js'), 'utf8');
+const platform = fs.readFileSync(path.join(__dirname, '..', 'client', 'chat', 'voice-platform.js'), 'utf8');
 
 function createElement() {
     const attributes = new Map();
@@ -21,14 +22,14 @@ function createStream() {
     return { stream: { getTracks: () => [track] }, track };
 }
 
-function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null }) {
+function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionStart = null, sendMessage = null, voices = null }) {
     const modules = new Map();
     const toasts = [];
     const requests = [];
     const elements = { 'chat-realtime-voice': createElement(), 'user-input': { value: '', dispatchEvent() {} } };
     class Recognition {
         constructor() { this.processLocally = true; }
-        start() { this.started = true; }
+        start() { this.started = true; if (recognitionStart) recognitionStart(this); else this.onstart?.(); }
         abort() { this.aborted = true; }
     }
     const context = {
@@ -53,7 +54,7 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null }) {
         clearInterval
     };
     context.speechSynthesis = {
-        getVoices: () => [{ lang: 'zh-CN', localService: true }],
+        getVoices: () => voices || [{ lang: 'zh-CN', localService: true }],
         cancel() {},
         speak() {}
     };
@@ -62,10 +63,11 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null }) {
     context.globalThis = context;
     context.window = context;
     context.Pivot = {
-        legacy: {},
+        legacy: { sendMessage },
         exposeModule(name, api) { modules.set(name, api); },
-        moduleApi() { return {}; }
+        moduleApi(name) { return modules.get(name); }
     };
+    vm.runInNewContext(platform, context, { filename: 'client/chat/voice-platform.js' });
     vm.runInNewContext(source, context, { filename: 'client/chat/realtime-voice.js' });
     return { api: modules.get('chat.realtimeVoice'), elements, requests, toasts };
 }
@@ -133,4 +135,52 @@ test('实时语音把明确任务控制口令送往绑定会话，而不提交�
     } finally {
         voice.api.stopRealtimeVoice();
     }
+});
+
+test('识别启动失败不能显示成功或继续占用麦克风', async () => {
+    const { stream, track } = createStream();
+    const voice = loadRealtimeVoice({ getUserMedia: async () => stream,
+        recognitionStart: () => { throw Object.assign(new Error(), { name: 'NotAllowedError' }); } });
+    assert.equal(await voice.api.startRealtimeVoice(), null);
+    assert.equal(track.stopped, true);
+    assert.equal(voice.elements['chat-realtime-voice'].getAttribute('aria-pressed'), 'false');
+    assert.ok(voice.toasts.every(item => item.level !== 'success'));
+    assert.match(voice.toasts.at(-1).message, /允许.*麦克风/);
+});
+
+test('只有识别器真正开始后才切换按钮，后续再次点击能结束', async () => {
+    let ready;
+    const { stream, track } = createStream();
+    const voice = loadRealtimeVoice({ getUserMedia: async () => stream, recognitionStart: recognition => { ready = () => recognition.onstart(); } });
+    const starting = voice.api.startRealtimeVoice();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(voice.elements['chat-realtime-voice'].getAttribute('aria-pressed'), 'false');
+    ready();
+    await starting;
+    assert.equal(voice.elements['chat-realtime-voice'].getAttribute('aria-pressed'), 'true');
+    await voice.api.startRealtimeVoice();
+    assert.equal(track.stopped, true);
+    assert.equal(voice.elements['chat-realtime-voice'].getAttribute('aria-pressed'), 'false');
+});
+
+test('连续语音第二轮携带仅在内存中的上下文，停止时清空', async () => {
+    const sends = [];
+    let voice;
+    voice = loadRealtimeVoice({ getUserMedia: async () => createStream().stream, sendMessage: async options => {
+        sends.push(options);
+        voice.api.flushAssistantSpeech(`回答${sends.length}`, 'voice-1');
+    } });
+    const session = await voice.api.startRealtimeVoice();
+    const say = async text => {
+        session.speaking = false;
+        session.recognition.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: text } }] });
+        await new Promise(resolve => setTimeout(resolve, 0));
+    };
+    await say('第一轮问题');
+    await say('继续解释刚才的回答');
+    assert.equal(sends.length, 2);
+    assert.equal(sends[0].voiceHistory.length, 0);
+    assert.deepEqual(Array.from(sends[1].voiceHistory, item => item.content), ['第一轮问题', '回答1']);
+    voice.api.stopRealtimeVoice();
+    assert.equal(session.history.length, 0);
 });

@@ -56,7 +56,7 @@ test('长期记忆表支持四类记忆并保留来源', async () => {
 test('长期记忆抽取会分类候选并拒绝敏感信息', () => {
     const user = createMemoryTestUser('memory_extract');
     const candidates = longTermMemory.extractMemoryCandidatesFromMessages([
-        { id: 1, session_id: user.sessionId, role: 'user', content: '我更喜欢回答简洁一点。项目 Alpha 的数据库使用 SQLite。已经决定以后默认使用中文输出。api_key: sk-1234567890abcdef1234567890' },
+        { id: 1, session_id: user.sessionId, role: 'user', content: '我更喜欢回答简洁一点。项目 Alpha 的数据库使用 SQLite。已经决定长期采用每月一次的项目复盘机制。api_key: sk-1234567890abcdef1234567890' },
         { id: 2, session_id: user.sessionId, role: 'assistant', content: '已经决定以后默认使用中文输出。今天完成了长期记忆治理接口。' }
     ], { sessionId: user.sessionId });
 

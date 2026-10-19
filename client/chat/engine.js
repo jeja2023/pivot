@@ -6,6 +6,7 @@ let activeSendTask = null;
 // 任务草案创建也必须串行化，避免快速双击在创建会话期间生成两个草案。
 let activeTaskDraftCreation = null;
 let latestSendEpoch = 0;
+let activeVoiceRequestId = '';
 const chatAgentStreamingTargets = new Map();
 
 function hasSendableChatPayload() {
@@ -253,7 +254,8 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
     if (sendEpoch !== latestSendEpoch) return;
 
-    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId, continuationKind, chatMode });
+    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId,
+        voiceHistory: ephemeralVoice ? sendOptions.voiceHistory : [], continuationKind, chatMode });
     activeSendTask = task;
     try {
         await task;
@@ -332,6 +334,10 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const requestedChatMode = options.chatMode === 'agent' ? 'agent' : 'normal';
     if (ephemeralVoice && (!voiceSessionId || shouldRegenerate)) {
         showToast('临时语音会话参数无效，已拒绝发送。', 'error');
+        return;
+    }
+    if (ephemeralVoice && window.Pivot.legacy.pendingAttachments.length) {
+        showToast('请先发送或移除待发送附件，再开始临时语音对话。', 'warning');
         return;
     }
     const userVisibleContent = document.getElementById('user-input').value.trim();
@@ -471,6 +477,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     document.getElementById('stop-btn').classList.remove('hidden');
     const myController = new AbortController();
     currentAbortController = myController;
+    activeVoiceRequestId = ephemeralVoice ? voiceSessionId : '';
 
     try {
         const response = await apiFetch(API_BASE + '/chat', {
@@ -485,6 +492,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 chatMode,
                 ephemeralVoice,
                 voiceSessionId: ephemeralVoice ? voiceSessionId : undefined,
+                voiceHistory: ephemeralVoice ? options.voiceHistory : undefined,
                 regenerate: shouldRegenerate,
                 regenerateMessageId,
                 continuationKind: continuationKind || undefined,
@@ -558,7 +566,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         const appendStreamContent = (content) => {
             if (!content) return;
             fullAiContent += content;
-            window.Pivot?.moduleApi?.('chat.realtimeVoice')?.handleAssistantDelta?.(content);
+            if (ephemeralVoice) window.Pivot?.moduleApi?.('chat.realtimeVoice')?.handleAssistantDelta?.(content, voiceSessionId);
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
@@ -618,7 +626,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             fullAiContent = content;
             tokenCount = estimateStreamingTokenCount(fullAiContent);
             hasRenderedPersistedAssistantContent = true;
-            window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(content);
+            if (ephemeralVoice) window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(content, voiceSessionId);
             if (textBody && isRequestMessageVisible()) {
                 // 替换 DOM 前释放节点下的 ECharts 实例和监听器。
                 window.Pivot.legacy.teardownPivotCharts?.(textBody);
@@ -833,7 +841,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         }
         if (awaitingMcpConsent) return;
         if (!hasRenderedPersistedAssistantContent) flushStreamRender();
-        window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(fullAiContent);
+        if (ephemeralVoice) window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(fullAiContent, voiceSessionId);
         if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
 
         const finalElapsed = getElapsedSeconds();
@@ -905,6 +913,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         document.getElementById('send-btn').classList.remove('hidden');
         window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
         currentAbortController = null;
+        activeVoiceRequestId = '';
     }
 }
 
@@ -917,6 +926,7 @@ async function continueMcpRouteMessage(messageId, routeOverrides = null, continu
 }
 
 window.Pivot.exposeModule('chat.execution', {
+    stopVoiceRequest(id) { if (activeVoiceRequestId === id) currentAbortController?.abort(); },
     continueMcpRouteMessage,
     createTaskDraft: createChatTaskDraft
 });

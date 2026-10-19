@@ -80,11 +80,12 @@ function rankIndependentMemoryCandidates(rows = [], query = '', queryVector = nu
     };
     lexicalRanked.forEach(merge);
     semanticRanked.forEach(merge);
+    source.filter(memory => memory.__defaultPreference === true).forEach(merge);
 
     return [...candidates.values()].map(memory => {
         const lexical = Number(memory.__lexical || 0);
         const semantic = Number(memory.__semantic || 0);
-        const relevance = queryVector?.length ? Math.max(semantic, lexical * 0.75) : lexical;
+        const relevance = Math.max(memory.__defaultPreference ? 0.55 : 0, queryVector?.length ? Math.max(semantic, lexical * 0.75) : lexical);
         const rrf = (memory.__semanticRank ? 1 / (60 + memory.__semanticRank) : 0)
             + (memory.__lexicalRank ? 0.7 / (60 + memory.__lexicalRank) : 0);
         const salience = clamp(memory.salience, 0, 1, 0.5);
@@ -98,7 +99,7 @@ function rankIndependentMemoryCandidates(rows = [], query = '', queryVector = nu
             recent,
             rrf,
             score: relevance * 0.58 + rrf * 0.18 + salience * 0.12 + confidence * 0.07 + recent * 0.05,
-            usageReason: semantic >= lexical && semantic >= 0.65
+            usageReason: memory.__defaultPreference ? '自动应用已保存的回答偏好' : semantic >= lexical && semantic >= 0.65
                 ? '与当前任务语义高度相关'
                 : lexical >= 0.5 ? '与当前任务关键词高度匹配' : '结合语义和关键词相关性排序'
         };

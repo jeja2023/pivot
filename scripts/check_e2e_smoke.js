@@ -39,7 +39,8 @@ function main() {
     assertIncludes('tests/e2e/smoke.spec.js', "真实 E2E 流式回答");
     assertIncludes('tests/e2e/smoke.spec.js', "e2e-knowledge.md");
     const smoke = read('tests/e2e/smoke.spec.js');
-    if (/page\.route\(['"]\*\*\/api\/(?:chat|rag\/upload)/.test(smoke)) {
+    // 音频硬件/识别可在语音专用用例中替换；聊天 SSE 与知识库上传本身仍必须走真实接口。
+    if (/page\.route\(['"]\*\*\/api\/(?:chat(?!\/voice-(?:recognition|transcriptions)['"])|rag\/upload)/.test(smoke)) {
         throw new Error('聊天 SSE 与知识库上传 E2E 不得使用 page.route 全量打桩');
     }
     assertIncludes('tests/e2e/smoke.spec.js', "page.waitForResponse(response => response.url().includes('/api/rag/upload')");

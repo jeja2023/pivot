@@ -53,6 +53,7 @@ function serializeMemoryJob(row) {
         id: row.id,
         userId: row.user_id,
         sessionId: row.session_id,
+        projectId: row.project_id || '',
         messageIds: parseJsonArray(row.message_ids),
         modelId: row.model_id || null,
         memoryRevision: Number(row.memory_revision || 0),

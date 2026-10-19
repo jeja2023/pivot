@@ -186,7 +186,7 @@ function createChatRouter({
             if (ephemeralVoice) return { assistantMessageResult: null, assistantMessageId: null };
             const intent = chatState.intentDecision;
             const routeMetadata = intent?.decisionId ? { ...(options.routeMetadata || {}), decisions: [...(options.routeMetadata?.decisions || []), { decisionId: intent.decisionId, scenario: 'chat.execution', selectedActionId: intent.action, allowedActionIds: ['direct_answer','plan_only','agent_run','continue_run','clarify'] }] } : options.routeMetadata;
-            const result = await persistAssistantTurn({ ...options, routeMetadata, conversationTurnId: conversationTurn?.id || null });
+            const result = await persistAssistantTurn({ ...options, projectId: chatState.projectId || '', routeMetadata, conversationTurnId: conversationTurn?.id || null });
             await conversationTurns.updateTurn(conversationTurn, { assistant_message_id: result.assistantMessageId, status: 'completed', outcome: { durationMs: Date.now() - chatState.timing.startedAt, firstContentMs: chatState.timing.firstContentMs, routerModelCalls: intent?.modelCalls || 0, totalTokens: options.providerUsage?.total_tokens || null } });
             return result;
         };
@@ -331,7 +331,10 @@ function createChatRouter({
                 userMessagePersisted = true;
             }
         } catch (error) {
-            writeSse(JSON.stringify({ error: error.message, code: error.code || 'CHAT_REQUEST_UNAVAILABLE' }));
+            const schemaUnavailable = ['42703', '42P01', '42P10'].includes(error.code);
+            if (schemaUnavailable) req.log.error({ code: error.code }, '聊天数据库结构不完整，需要执行版本化修复');
+            writeSse(JSON.stringify({ error: schemaUnavailable ? '聊天数据库升级尚未完成，请管理员更新服务并执行数据库修复后重试。' : error.message,
+                code: schemaUnavailable ? 'CHAT_SCHEMA_UNAVAILABLE' : error.code || 'CHAT_REQUEST_UNAVAILABLE' }));
             return res.end();
         }
         let automaticExecution = await decideAutomaticChatExecution({

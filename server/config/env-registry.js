@@ -8,6 +8,9 @@ const REGISTRY_END = '# <<< PIVOT_TYPED_CONFIG_REGISTRY <<<';
 const ROOT = path.resolve(__dirname, '../..');
 
 const ENV_CONFIG_REGISTRY = Object.freeze({
+    PIVOT_SERVER_VOICE_ENABLED: { group: '语音识别', type: 'boolean', defaultValue: true, description: '允许浏览器将短录音发送到当前 Pivot 服务器离线识别。仅内存处理、不落盘、不转发第三方；Docker 内置 Vosk 中文模型，Windows 使用系统语音引擎。' },
+    PIVOT_SERVER_VOICE_PYTHON: { group: '语音识别', type: 'string', defaultValue: '/opt/pivot-speech/venv/bin/python', description: 'Linux/Docker 离线语音工作进程使用的 Python 解释器绝对路径，标准镜像内置。' },
+    PIVOT_SERVER_VOICE_MODEL_PATH: { group: '语音识别', type: 'string', defaultValue: '/opt/pivot-speech/model', description: '离线 Vosk 中文模型目录；标准 Docker 镜像构建时安装并校验模型，运行时不下载。可通过只读挂载替换兼容模型。' },
     NODE_ENV: { group: '基础运行', type: 'enum', defaultValue: 'production', values: ['development', 'production', 'test'], description: '服务运行环境。' },
     PORT: { group: '基础运行', type: 'integer', defaultValue: 3000, min: 1, max: 65535, description: 'HTTP 服务监听端口。' },
     LOG_LEVEL: { group: '日志', type: 'enum', defaultValue: 'info', values: ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'], description: '结构化日志最低输出级别。' },

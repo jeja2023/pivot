@@ -2,6 +2,17 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pivotDesktop', {
+    getVoiceRecognitionStatus() { return ipcRenderer.invoke('pivot-voice:capabilities'); },
+    startVoiceRecognition(options = {}) {
+        return ipcRenderer.invoke('pivot-voice:start', { id: String(options.id || ''), language: String(options.language || '') });
+    },
+    stopVoiceRecognition(id) { return ipcRenderer.invoke('pivot-voice:stop', String(id || '')); },
+    onVoiceRecognitionEvent(callback) {
+        if (typeof callback !== 'function') return () => {};
+        const listener = (_event, payload) => callback(payload || {});
+        ipcRenderer.on('pivot-voice:event', listener);
+        return () => ipcRenderer.removeListener('pivot-voice:event', listener);
+    },
     retry() {
         return ipcRenderer.invoke('pivot-desktop:retry');
     },

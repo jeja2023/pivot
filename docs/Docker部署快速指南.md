@@ -15,6 +15,21 @@ docker-compose up -d
 
 ## 二、添加客户端下载功能
 
+### 浏览器中文语音（v0.7.4 起）
+
+标准镜像在构建阶段安装离线中文识别运行库和模型。浏览器无需中文本地包，短录音仅发送当前服务器在内存中识别，不保存录音、不转发第三方。镜像运行阶段不需要访问模型下载站点。
+
+升级时需重新构建镜像并重建容器：
+
+```bash
+docker compose build pivot
+docker compose up -d --no-deps --force-recreate pivot
+```
+
+浏览器需通过安全连接或可信本地地址访问，并允许麦克风。普通局域网 IP 的明文页面通常不具备录音权限，应通过受信的加密反向代理访问。
+
+`PIVOT_SERVER_VOICE_ENABLED=false` 可关闭部署内识别；标准镜像的 Python 和中文模型分别位于 `/opt/pivot-speech/venv/bin/python`、`/opt/pivot-speech/model`。可用 `PIVOT_SERVER_VOICE_MODEL_PATH` 指向管理员只读挂载的兼容中文模型目录；运行时不会自动下载替代模型。
+
 ### 方法 1：外部挂载（推荐）✅
 
 ```bash

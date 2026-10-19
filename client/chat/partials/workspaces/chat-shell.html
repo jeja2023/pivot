@@ -176,17 +176,7 @@
                             <button type="button" id="upload-folder-choice" class="btn-secondary chat-tool-subpanel-item" role="menuitem">选择文件夹</button>
                         </div>
                         </div>
-                        <div id="chat-memory-menu" class="chat-tools-menu">
-                            <button type="button" id="chat-memory-menu-btn" class="btn-secondary chat-tools-menu-trigger" aria-label="记忆操作" aria-expanded="false" aria-controls="chat-memory-menu-panel" title="记忆操作">
-                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5A5.5 5.5 0 0 0 4 9v1a3 3 0 0 0 0 6v1a3 3 0 0 0 3 3h2"></path><path d="M14.5 3.5A5.5 5.5 0 0 1 20 9v1a3 3 0 0 1 0 6v1a3 3 0 0 1-3 3h-2"></path><path d="M9 12h6M12 9v6"></path></svg>
-                            </button>
-                            <div id="chat-memory-menu-panel" class="chat-tools-menu-panel chat-memory-menu-panel" role="menu" aria-label="记忆操作" hidden>
-                                <button type="button" id="chat-remember-input" class="btn-secondary chat-tool-subpanel-item" role="menuitem">记住当前输入</button>
-                                <button type="button" id="chat-memory-intent" class="btn-secondary chat-tool-subpanel-item" role="menuitem">用自然语言更正或忘记</button>
-                                <button type="button" id="chat-open-memories" class="btn-secondary chat-tool-subpanel-item" role="menuitem">查看和管理记忆</button>
-                            </div>
-                        </div>
-                        <button type="button" id="chat-voice-input" class="btn-secondary chat-tools-menu-trigger" aria-label="语音输入" aria-pressed="false" title="语音输入（浏览器本地转写，不会上传录音）">
+                        <button type="button" id="chat-voice-input" class="btn-secondary chat-tools-menu-trigger" aria-label="语音输入" aria-pressed="false" title="语音输入（部署内识别，不保存录音、不转发第三方）">
                             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"></path></svg>
                         </button>
                         <button type="button" id="chat-realtime-voice" class="btn-secondary chat-tools-menu-trigger" aria-label="实时语音" aria-pressed="false" title="启动实时语音">
@@ -264,70 +254,4 @@
                 <button type="button" id="chat-task-draft-start" class="btn-primary">确认计划并开始执行</button>
             </footer>
         </section>
-    </div>
-    <div id="chat-memory-intent-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="chat-memory-intent-title">
-        <div class="modal chat-memory-intent-dialog">
-            <div class="chat-memory-intent-head">
-                <div class="chat-memory-intent-head-main">
-                    <div class="chat-memory-intent-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M9.5 3.5A5.5 5.5 0 0 0 4 9v1a3 3 0 0 0 0 6v1a3 3 0 0 0 3 3h2"></path>
-                            <path d="M14.5 3.5A5.5 5.5 0 0 1 20 9v1a3 3 0 0 1 0 6v1a3 3 0 0 1-3 3h-2"></path>
-                            <path d="M9 12h6M12 9v6"></path>
-                        </svg>
-                    </div>
-                    <div class="chat-memory-intent-head-text">
-                        <div class="chat-memory-intent-title-row">
-                            <h3 id="chat-memory-intent-title">管理个人记忆</h3>
-                            <span class="chat-memory-intent-badge">自然语言感知</span>
-                        </div>
-                        <p class="chat-memory-intent-desc">使用自然语言指令让 AI 记住新偏好、忘记指定信息或更正已有记忆。</p>
-                    </div>
-                </div>
-                <button type="button" id="chat-memory-intent-close" class="workspace-modal-close chat-memory-intent-close-btn" aria-label="关闭" title="关闭">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>
-            <div class="chat-memory-intent-body">
-                <div class="chat-memory-intent-chips-wrap">
-                    <span class="chat-memory-intent-chips-label">快捷示例：</span>
-                    <div class="chat-memory-intent-chips" role="group" aria-label="快捷指令示例">
-                        <button type="button" class="btn-secondary chat-memory-intent-chip" data-intent="记住我偏好简洁摘要与结构化输出">
-                            <span class="chip-dot chip-dot-remember"></span>记住新偏好
-                        </button>
-                        <button type="button" class="btn-secondary chat-memory-intent-chip" data-intent="忘记关于之前项目的临时代号与敏感信息">
-                            <span class="chip-dot chip-dot-forget"></span>忘记旧信息
-                        </button>
-                        <button type="button" class="btn-secondary chat-memory-intent-chip" data-intent="更正偏好：以后代码示例优先使用 TypeScript">
-                            <span class="chip-dot chip-dot-modify"></span>更正偏好
-                        </button>
-                    </div>
-                </div>
-                <label class="chat-memory-intent-field" for="chat-memory-intent-text">
-                    <div class="chat-memory-intent-field-header">
-                        <span class="chat-memory-intent-field-title">自然语言操作指令</span>
-                        <span class="chat-memory-intent-field-hint">支持按 Ctrl+Enter 快速预览</span>
-                    </div>
-                    <textarea id="chat-memory-intent-text" class="chat-memory-intent-textarea form-input" rows="3" maxlength="2400" placeholder="例如：“记住我的技术栈是 Node.js 与 Vue”、“忘记我的旧工号”、“将我的常用语言更正为中文”..."></textarea>
-                </label>
-                <div id="chat-memory-intent-preview" class="chat-memory-intent-preview hidden" aria-live="polite"></div>
-            </div>
-            <div class="chat-memory-intent-actions">
-                <div class="chat-memory-intent-footnote">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="16" x2="12" y2="12" />
-                        <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
-                    <span>修改前系统会先预览意图与目标，确认后才生效</span>
-                </div>
-                <div class="chat-memory-intent-buttons">
-                    <button type="button" id="chat-memory-intent-preview-btn" class="btn-secondary">预览操作</button>
-                    <button type="button" id="chat-memory-intent-apply" class="btn-primary" disabled>确认修改</button>
-                </div>
-            </div>
-        </div>
     </div>
