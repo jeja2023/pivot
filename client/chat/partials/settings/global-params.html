@@ -312,13 +312,27 @@
                                     <div class="global-params-agent-toggle-card">
                                         <div class="agent-toggle-info">
                                             <div class="agent-toggle-title-row">
-                                                <label for="runtime-setting-chat-auto-agent-enabled" class="agent-toggle-title">允许聊天使用 Agent 执行模式</label>
+                                                <label for="runtime-setting-chat-auto-agent-enabled" class="agent-toggle-title">允许聊天启动受控任务</label>
                                                 <small class="runtime-key-note">chat_auto_agent_enabled</small>
                                             </div>
-                                            <p class="agent-toggle-desc">开启后用户可在会话中直接触发智能体自动化多步推理与工具链调度。</p>
+                                            <p class="agent-toggle-desc">关闭后聊天不会创建受控任务；普通回答、手工 Agent 和工作流仍可使用。</p>
                                         </div>
                                         <label class="runtime-agent-toggle">
                                             <input id="runtime-setting-chat-auto-agent-enabled" type="checkbox" data-runtime-key="chat_auto_agent_enabled">
+                                            <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
+                                            <span class="runtime-agent-toggle-label">允许</span>
+                                        </label>
+                                    </div>
+                                    <div class="global-params-agent-toggle-card">
+                                        <div class="agent-toggle-info">
+                                            <div class="agent-toggle-title-row">
+                                                <label for="runtime-setting-chat-auto-execution-enabled" class="agent-toggle-title">自动处理明确委托</label>
+                                                <small class="runtime-key-note">chat_auto_execution_enabled</small>
+                                            </div>
+                                            <p class="agent-toggle-desc">开启后，明确委托且范围充分的多步骤请求会自动进入受控任务。工具、网络与外部操作仍按现有策略和审批处理。</p>
+                                        </div>
+                                        <label class="runtime-agent-toggle">
+                                            <input id="runtime-setting-chat-auto-execution-enabled" type="checkbox" data-runtime-key="chat_auto_execution_enabled">
                                             <span class="runtime-agent-toggle-track" aria-hidden="true"></span>
                                             <span class="runtime-agent-toggle-label">允许</span>
                                         </label>

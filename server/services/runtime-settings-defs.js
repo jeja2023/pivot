@@ -11,6 +11,7 @@ const RUNTIME_SETTING_KEYS = Object.freeze({
     // meaning is now a global execution permission, not automatic routing.
     chatAgentExecutionEnabled: 'chat_auto_agent_enabled',
     chatAutoAgentEnabled: 'chat_auto_agent_enabled',
+    chatAutoExecutionEnabled: 'chat_auto_execution_enabled',
     ragIndexMaxConcurrent: 'rag_index_max_concurrent',
     memoryCompressionMaxConcurrent: 'memory_compression_max_concurrent',
     modelContextWindowTokens: 'model_context_window_tokens',
@@ -120,10 +121,21 @@ const RUNTIME_SETTING_DEFINITIONS = Object.freeze([
     {
         key: RUNTIME_SETTING_KEYS.chatAutoAgentEnabled,
         prop: 'chatAgentExecutionEnabled',
-        label: '允许聊天使用 Agent 执行模式',
+        label: '允许聊天启动受控任务',
         env: ['CHAT_AGENT_EXECUTION_ENABLED', 'CHAT_AUTO_AGENT_ENABLED'],
-        // The chat mode itself defaults to ordinary answer. This flag only
-        // controls whether the explicit Agent mode is available at all.
+        // 这是所有来自聊天的 Agent Run 的全局硬权限。
+        // 自动路由在下方拥有独立的灰度开关。
+        defaultValue: 1,
+        min: 0,
+        max: 1,
+        group: 'agent',
+        valueType: 'boolean'
+    },
+    {
+        key: RUNTIME_SETTING_KEYS.chatAutoExecutionEnabled,
+        prop: 'chatAutoExecutionEnabled',
+        label: '聊天自动处理明确任务',
+        env: 'PIVOT_CHAT_AUTO_EXECUTION_ENABLED',
         defaultValue: 1,
         min: 0,
         max: 1,

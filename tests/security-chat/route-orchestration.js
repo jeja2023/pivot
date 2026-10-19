@@ -252,12 +252,12 @@ test('聊天会透出并持久化安全的自适应路由摘要，不保存 Quer
             ragPreference: 'auto'
         });
         const route = result.findByType('route');
-        assert.equal(route?.mode, 'auto');
+        assert.equal(route?.mode, 'direct');
         assert.equal(route?.rag?.reasonCode, 'conversation_only');
         assert.equal(JSON.stringify(route).includes('queryVector'), false);
         const assistant = readSessionMessages(fixture).find(message => message.role === 'assistant');
         const stored = JSON.parse(assistant.route_metadata || '{}');
-        assert.equal(stored.mode, 'auto');
+        assert.equal(stored.mode, 'direct');
         assert.equal(stored.rag.reasonCode, 'conversation_only');
         assert.equal(JSON.stringify(stored).includes('queryVector'), false);
     } finally {
@@ -297,16 +297,18 @@ test('管理员关闭聊天 Agent 执行许可时拒绝显式 Agent 模式', asy
     }
 });
 
-test('普通回答模式即使内容复杂也不会创建持久化 Agent', async () => {
+test('普通聊天中的明确委托会自动创建受控 Agent，探索性问题仍保持直答', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['普通回答模式正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_explicit_normal_mode', upstreamUrl: upstream.url });
     let agentCalled = false;
+    let capturedRun = null;
     const routeServer = await startChatRouteServer({
         fixture,
         agentExecutionEnabled: true,
-        agentRunFactory: async () => {
+        agentRunFactory: async options => {
             agentCalled = true;
-            throw new Error('普通回答模式不应创建 Agent');
+            capturedRun = options;
+            return { id: 'auto-delegated-agent-run', status: 'queued' };
         }
     });
     try {
@@ -316,8 +318,14 @@ test('普通回答模式即使内容复杂也不会创建持久化 Agent', async
             modelId: fixture.modelId,
             chatMode: 'normal'
         });
-        assert.equal(agentCalled, false);
-        assert.match(result.streamedContent, /普通回答模式正常/);
+        assert.equal(agentCalled, true);
+        const handoff = result.findByType('agent_handoff');
+        assert.equal(handoff?.runId, 'auto-delegated-agent-run');
+        assert.equal(handoff?.automatic, true);
+        assert.equal(handoff?.executionReason, 'explicit_delegated_task');
+        assert.equal(capturedRun?.chatAgent, true);
+        assert.equal(capturedRun?.metadata?.automaticExecution?.source, 'chat_auto_execution');
+        assert.equal(capturedRun?.toolPolicy, 'builtin_only');
     } finally {
         await routeServer.close();
         await upstream.close();

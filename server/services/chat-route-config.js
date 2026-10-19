@@ -10,6 +10,7 @@ function getChatAutoRouteConfig(env = process.env) {
         enabled: readTypedEnv('PIVOT_CHAT_AUTO_ROUTE_ENABLED', env),
         autoRagEnabled: readTypedEnv('PIVOT_CHAT_AUTO_RAG_ENABLED', env),
         autoToolDiscoveryEnabled: readTypedEnv('PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED', env),
+        autoExecutionEnabled: readTypedEnv('PIVOT_CHAT_AUTO_EXECUTION_ENABLED', env),
         directPathEnabled: readTypedEnv('PIVOT_CHAT_DIRECT_PATH_ENABLED', env),
         shadowMode: readTypedEnv('PIVOT_CHAT_ROUTE_SHADOW_MODE', env),
         maxToolCandidates: readTypedEnv('PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES', env),

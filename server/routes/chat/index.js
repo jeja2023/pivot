@@ -65,12 +65,8 @@ const { buildRouteMetadata } = require('../../services/semantic-router');
 const { persistFinalChatResponse } = require('../../services/chat-decision-outcomes');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
 const { runs: { createAgentRun } } = require('../../services/agent-runtime');
-const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('../../services/agent-runtime/runtime-env');
-const {
-    buildChatAgentMetadata,
-    normalizeChatHistory,
-    prepareChatAgentContext
-} = require('../../services/chat-agent-bridge');
+const { createChatAgentHandoff } = require('../../services/chat-agent-handoff');
+const { decideAutomaticChatExecution, handleAutomaticTaskControl } = require('../../services/chat-auto-execution-handler');
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
 const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
@@ -102,6 +98,7 @@ function createChatRouter({
     isRagEnabled,
     publicUrl = '',
     agentExecutionEnabled = undefined,
+    autoExecutionEnabled = undefined,
     autoAgent = undefined,
     agentRunFactory = createAgentRun
 }) {
@@ -111,6 +108,11 @@ function createChatRouter({
         if (typeof agentExecutionEnabled === 'function') return agentExecutionEnabled() === true;
         if (agentExecutionEnabled !== undefined && agentExecutionEnabled !== null) return agentExecutionEnabled === true;
         return typeof autoAgent === 'function' ? autoAgent() === true : autoAgent === true;
+    };
+    const readAutoExecutionEnabled = () => {
+        if (typeof autoExecutionEnabled === 'function') return autoExecutionEnabled() === true;
+        if (autoExecutionEnabled !== undefined && autoExecutionEnabled !== null) return autoExecutionEnabled === true;
+        return getChatAutoRouteConfig().autoExecutionEnabled === true;
     };
 
     router.get('/chat/capabilities', authMiddleware, (_req, res) => {
@@ -125,6 +127,7 @@ function createChatRouter({
                 enabled: autoRoute.enabled,
                 rag: autoRoute.autoRagEnabled,
                 toolDiscovery: autoRoute.autoToolDiscoveryEnabled,
+                execution: readAutoExecutionEnabled(),
                 shadow: autoRoute.shadowMode
             }
         });
@@ -356,7 +359,49 @@ function createChatRouter({
             }
         }
 
+        let automaticExecution = await decideAutomaticChatExecution({
+            regenerate,
+            ephemeralVoice,
+            chatMode,
+            agentExecutionAllowed,
+            autoExecutionEnabled: readAutoExecutionEnabled(),
+            modelContent,
+            maxGoalLength: MAX_CHAT_AGENT_GOAL_LENGTH,
+            sessionId,
+            userId,
+            user: req.user,
+            sessionsRepository,
+            log: req.log
+        });
+        if (automaticExecution.action === 'agent_run') {
+            writeSse(JSON.stringify({
+                type: 'route',
+                status: 'automatic_execution',
+                message: '已识别为明确任务，正在建立受控执行。',
+                execution: {
+                    mode: 'automatic',
+                    reasonCode: automaticExecution.reasonCode,
+                    confidence: automaticExecution.confidence
+                }
+            }));
+        }
+
         await touchSession(sessionId);
+        const controlResult = await handleAutomaticTaskControl({
+            decision: automaticExecution,
+            sessionId,
+            userId,
+            user: req.user,
+            userMessageId,
+            modelCfg,
+            visibleContent,
+            persistAssistantResponse,
+            writeSse,
+            finishChatTrace,
+            log: req.log
+        });
+        automaticExecution = controlResult.decision || automaticExecution;
+        if (controlResult.handled) return res.end();
         const audit = continuationKind === 'mcp_authorized'
             ? { action: '工具授权后继续处理', detail: `用户授权工具库后继续处理会话: ${sessionId}` }
             : continuationKind === 'mcp_skipped'
@@ -422,25 +467,32 @@ function createChatRouter({
             req.log.info({ capability: unsupportedCapability.code }, '已将明确本机浏览器访问请求交由工具库处理');
         }
 
-        // The user explicitly chooses Agent mode. Ordinary chat never creates
-        // a persistent run, regardless of message length or wording.
-        if (chatMode === 'agent' && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
+        // 显式 Agent 请求保持兼容。在普通对话中，
+        // 服务端高置信度决策可直接接入同一治理运行时，无需手动模式选择或指令。
+        const useChatAgent = chatMode === 'agent' || automaticExecution.action === 'agent_run';
+        if (useChatAgent && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
-                const chatHistory = normalizeChatHistory(sessionMessages.filter(message => (
-                    !userMessageId || Number(message?.id || 0) !== userMessageId
-                )));
-                const agentContext = await prepareChatAgentContext({
+                const handoff = await createChatAgentHandoff({
                     userId,
                     user: req.user,
                     sessionId,
+                    userMessageId,
                     modelCfg,
                     modelContent,
+                    visibleContent,
+                    sessionMessages,
+                    sessionSystemPrompt: preflight.session?.system_prompt || '',
+                    mcpEnabled,
+                    mcpToolAllowlist,
                     ragEnabled,
                     ragScope,
                     retrieveContext,
-                    isRagEnabled
+                    isRagEnabled,
+                    agentRunFactory,
+                    automaticExecution
                 });
+                const { run, agentContext } = handoff;
                 if (agentContext.memoryCount > 0) {
                     writeSse(JSON.stringify({
                         type: 'memory',
@@ -465,51 +517,17 @@ function createChatRouter({
                         citationKeys: agentContext.ragSummary?.citationKeys || []
                     }));
                 }
-                const run = await agentRunFactory({
-                    user: req.user,
-                    chatAgent: true,
-                    goal: modelContent,
-                    modelId: modelCfg.id,
-                    sessionId,
-                    title: visibleContent || modelContent,
-                    maxSteps: 30,
-                    runMode: 'standard',
-                    toolPolicy: mcpEnabled ? 'all' : 'builtin_only',
-                    // 普通聊天的 MCP 白名单只约束 MCP 工具，内置能力仍由 Agent 策略提供。
-                    toolAllowlist: [],
-                    approvalPolicy: 'safe_mcp_auto',
-                    timeoutMs: AGENT_DEFAULT_TIMEOUT_MS,
-                    toolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
-                    retryLimit: 1,
-                    contextConfig: {
-                        mode: 'recent',
-                        notes: mcpEnabled
-                            ? '这是用户主动选择的聊天 Agent 执行模式。遵守当前会话的 MCP 授权和工具白名单。'
-                            : '这是用户主动选择的聊天 Agent 执行模式。当前会话未授权外部 MCP，只能使用内置安全能力。'
-                    },
-                    networkPolicy: { enabled: true },
-                    metadata: buildChatAgentMetadata({
-                        sessionId,
-                        userMessageId,
-                        visibleContent,
-                        history: chatHistory,
-                        systemPrompt: preflight.session?.system_prompt || '',
-                        mcpEnabled,
-                        mcpToolAllowlist,
-                        ragEnabled,
-                        ragScope,
-                        currentContent: modelContent,
-                        memoryContext: agentContext.memoryContext,
-                        memoryUsageReasons: agentContext.memoryUsageReasons,
-                        ragContext: agentContext.ragContext
-                    })
-                });
-                finishChatTrace('completed', { mode: 'agent_handoff', runId: run.id, modelId: modelCfg.id });
+                const automatic = automaticExecution.action === 'agent_run';
+                finishChatTrace('completed', { mode: automatic ? 'automatic_agent_handoff' : 'agent_handoff', runId: run.id, modelId: modelCfg.id, reasonCode: automaticExecution.reasonCode });
                 writeSse(JSON.stringify({
                     type: 'agent_handoff',
                     runId: run.id,
                     status: run.status,
-                    message: '已切换为连续 Agent，任务会在后台继续执行。'
+                    automatic,
+                    executionReason: automatic ? automaticExecution.reasonCode : 'explicit_agent_mode',
+                    message: automatic
+                        ? '已理解为需要持续处理的任务，正在受控执行。'
+                        : '已切换为连续 Agent，任务会在后台继续执行。'
                 }));
                 writeSse('[DONE]');
                 return res.end();

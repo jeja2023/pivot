@@ -163,7 +163,8 @@ function runtimeItemsByKey(runtimeConfig = {}) {
 function getRuntimeItemHint(item) {
     const hintMap = {
         max_concurrent_ai_requests: '同时处理的聊天请求数，过大可能影响响应稳定性。', max_ai_queue_size: '请求排队上限，队列满后会拒绝新的请求。', ai_queue_timeout_ms: '请求在队列里等待多久后自动超时。', model_endpoint_default_concurrency: '单个模型端点默认并发量。', model_endpoint_queue_size: '单个模型端点的排队长度。', model_endpoint_queue_timeout_ms: '模型端点排队等待超时时间。', model_context_window_tokens: '没有单独配置上下文时使用的全局默认窗口。', context_reserved_output_tokens: '为输出预留的 token 数，避免把回答空间压得太小。', memory_threshold: '会话活跃 token 超过此值时触发自动压缩提炼。', sampling_temperature: '温度越高越发散，越低越稳定。', sampling_top_p: '采样概率上限，常和温度配合调节。', sampling_presence_penalty: '减少反复提同一内容的倾向。', sampling_frequency_penalty: '减少高频重复词的倾向。', upload_attachment_max_bytes: '聊天附件的总上传上限。', knowledge_upload_max_bytes: '知识库文件的总上传上限。', image_upload_max_bytes: '单张图片在上传阶段的大小上限。', image_context_max_bytes: '图片进入模型上下文前允许携带的大小上限。', max_attachments_per_message: '用户输入框中一条消息最多保留的待发送附件数量。', max_images_per_message: '一条消息允许注入的图片数量上限。', attachment_context_max_chars: '附件抽取文本写入上下文时的字符上限。', knowledge_extract_max_chars: '知识库文件抽取文本时的字符上限。', rag_top_k_max: '每次检索最多返回多少条结果。', rag_candidate_limit_max: '候选片段池的最大数量。', rag_chunk_size_max: '检索切片的最大字符数。', rag_context_budget_percent: 'RAG 在上下文中可占用的大致比例。', rag_index_max_concurrent: '同时执行多少个知识库索引任务。', agent_max_concurrent_runs: '同一时间允许多少个智能体任务运行。', agent_dag_node_concurrency: '工作流 DAG 节点的并发执行数。',
-        chat_auto_agent_enabled: '关闭后用户不能选择聊天 Agent 执行模式；普通回答、手工 Agent 和工作流仍可使用。',
+        chat_auto_agent_enabled: '关闭后聊天不会创建受控任务；普通回答、手工 Agent 和工作流仍可使用。',
+        chat_auto_execution_enabled: '关闭后明确委托不会自动进入受控任务；不改变资料检索、工具权限或审批策略。',
         memory_compression_max_concurrent: '后台同时压缩多少个记忆任务。'
     };
     return hintMap[item?.key] || '';

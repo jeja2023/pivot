@@ -138,8 +138,10 @@ function getAgentConcurrencyConfig() {
 
 function getChatAgentRuntimeConfig() {
     const enabled = getRuntimeSettingValue(RUNTIME_SETTING_KEYS.chatAgentExecutionEnabled) === 1;
+    const autoExecutionEnabled = getRuntimeSettingValue(RUNTIME_SETTING_KEYS.chatAutoExecutionEnabled) === 1;
     return {
         agentExecutionEnabled: enabled,
+        autoExecutionEnabled,
         // Compatibility alias for callers upgraded from the auto-routing API.
         autoAgentEnabled: enabled
     };

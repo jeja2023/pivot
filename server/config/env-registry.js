@@ -32,6 +32,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PIVOT_CHAT_AUTO_ROUTE_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否启用对话的统一自适应路由总开关。关闭后保留原有 RAG 与 MCP 流程。' },
     PIVOT_CHAT_AUTO_RAG_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否在问题明确要求或确实依赖受控资料时，自动检索并缩小知识库 Collection 范围；普通问答不会触发检索。' },
     PIVOT_CHAT_AUTO_TOOL_DISCOVERY_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否在用户明确需要实时数据、本机文件、指定网页或外部操作时，自动发现受治理的 MCP 工具；普通回答不会触发授权。' },
+    PIVOT_CHAT_AUTO_EXECUTION_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许服务端将明确委托、范围充分的多步骤对话自动进入受控 Agent Run。此开关不授予工具、网络或副作用权限；具体动作仍由运行时策略和审批决定。' },
     PIVOT_CHAT_DIRECT_PATH_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否启用普通对话直答快路径。无资料、工具或显式范围信号时跳过决策器、偏好读取与逐条决策审计，仅保留异步聚合指标。' },
     PIVOT_CHAT_ROUTE_SHADOW_MODE: { group: '对话自适应路由', type: 'boolean', defaultValue: false, description: '是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。' },
     PIVOT_CHAT_ROUTE_MAX_TOOL_CANDIDATES: { group: '对话自适应路由', type: 'integer', defaultValue: 4, min: 1, max: 12, description: '自动工具发现传给 MCP Planner 的最大候选工具数。' },

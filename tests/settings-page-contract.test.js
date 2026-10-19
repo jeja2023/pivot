@@ -28,7 +28,8 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(settings, /timeoutMs: 30000/);
     assert.match(settings, /settings-state-retry/);
     assert.match(settings, /chat_auto_agent_enabled/);
-    assert.match(settings, /关闭后用户不能选择聊天 Agent 执行模式/);
+    assert.match(settings, /关闭后聊天不会创建受控任务/);
+    assert.match(settings, /chat_auto_execution_enabled/);
     assert.match(settings, /input.type === 'checkbox'/);
     assert.match(shell, /tab-content-global-params/);
     assert.match(shell, /role="tablist"/);
