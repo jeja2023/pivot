@@ -254,12 +254,12 @@ test('知识库和工具库工作台入口保持可点击', () => {
     assert.doesNotMatch(ragCore, /localStorage\.setItem\('pivot_chat_rag_enabled'/);
     assert.match(ragCore, /queueRagRetrievalForNextMessage/);
     assert.doesNotMatch(chatShellPartial, /chat-tool-status/);
-    assert.match(chatShellPartial, /id="chat-agent-execute-btn"/);
-    assert.match(chatShellPartial, />以 Agent 执行<\/span>/);
+    assert.doesNotMatch(chatShellPartial, /id="chat-agent-execute-btn"/);
+    assert.doesNotMatch(chatShellPartial, /id="chat-task-suggestion"/);
+    assert.match(chatShellPartial, /id="chat-task-draft-modal"/);
     assert.doesNotMatch(chatShellPartial, /id="chat-mode-trigger"/);
     assert.doesNotMatch(chatShellPartial, /data-chat-mode-option=/);
-    assert.match(appWorkspaces, /function requestChatAgentExecution\(\)/);
-    assert.match(appWorkspaces, /sendAsAgent: requestChatAgentExecution/);
+    assert.match(appWorkspaces, /chat\.taskSuggestion'\)\.promoteFromInput/);
     assert.match(appWorkspaces, /CHAT_TOOL_STATUS_COPY/);
     assert.match(appWorkspaces, /updateChatToolReadiness/);
     assert.match(appWorkspaces, /fetchChatToolReadiness/);

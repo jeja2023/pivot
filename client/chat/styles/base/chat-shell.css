@@ -431,6 +431,35 @@ body.is-main-workspace-full .chat-container {
     font-size: 0.7rem;
     line-height: 1;
 }
+.chat-task-suggestion-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 10px 11px;
+    border: 1px solid var(--primary-border, rgba(16,185,129,.26));
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary-light, rgba(236,253,245,.88)), var(--surface, rgba(255,255,255,.78)));
+    box-shadow: 0 5px 14px var(--shadow-sm, rgba(15,23,42,.04));
+    animation: chat-task-suggestion-enter .22s ease-out;
+}
+.chat-task-suggestion-copy { display: flex; align-items: flex-start; min-width: 0; gap: 8px; }
+.chat-task-suggestion-icon { display: grid; width: 23px; height: 23px; flex: 0 0 23px; place-items: center; border-radius: 7px; background: var(--primary, #10a37f); color: #fff; font-size: .75rem; box-shadow: 0 3px 8px rgba(16,185,129,.22); }
+.chat-task-suggestion-copy strong { display: block; color: var(--text-main, #1e293b); font-size: .76rem; line-height: 1.35; }
+.chat-task-suggestion-copy p { margin: 2px 0 0; color: var(--text-muted, #64748b); font-size: .69rem; line-height: 1.4; }
+.chat-task-suggestion-card-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.chat-task-suggestion-plan { min-height: 27px; padding: 0 8px; border-color: var(--primary-border, rgba(16,185,129,.34)); background: #fff; color: var(--primary-dark, #047857); font-size: .7rem; font-weight: 720; white-space: nowrap; }
+.chat-task-suggestion-plan:hover:not(:disabled), .chat-task-suggestion-plan:focus-visible { border-color: var(--primary, #10a37f); background: var(--primary-light, #ecfdf5); outline: none; }
+.chat-task-suggestion-dismiss { min-height: 27px; padding: 0 4px; border: 0; background: transparent; color: var(--text-muted, #64748b); font-size: .7rem; cursor: pointer; white-space: nowrap; }
+.chat-task-suggestion-dismiss:hover,.chat-task-suggestion-dismiss:focus-visible { color: var(--text-main, #334155); text-decoration: underline; outline: none; }
+.chat-task-suggestion-card.is-busy { opacity: .62; pointer-events: none; }
+@keyframes chat-task-suggestion-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 620px) {
+    .chat-task-suggestion-card { align-items: flex-start; flex-direction: column; gap: 9px; }
+    .chat-task-suggestion-card-actions { width: 100%; }
+    .chat-task-suggestion-plan { flex: 1; }
+}
 
 .message-content img {
     max-width: 200px;

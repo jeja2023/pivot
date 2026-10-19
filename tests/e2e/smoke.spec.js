@@ -851,7 +851,8 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#chat-rag-enabled')).toHaveCount(0);
         await expect(page.locator('#chat-mcp-enabled')).toHaveCount(0);
         await expect(page.locator('#chat-mode-trigger')).toHaveCount(0);
-        await expect(page.locator('#chat-agent-execute-btn')).toBeVisible();
+        await expect(page.locator('#chat-agent-execute-btn')).toHaveCount(0);
+        await expect(page.locator('#chat-task-suggestion')).toHaveCount(0);
         await expect(page.locator('#user-input')).toHaveAttribute('placeholder', '输入消息… 需要指定资料或工具时可输入 @');
         await expect.poll(() => page.evaluate(() => (
             window.Pivot.moduleApi('chat.inputMenu').getAutoRouteEnabled()
@@ -900,11 +901,15 @@ test.describe('Pivot browser smoke', () => {
         ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'], wikiSpaces: [] });
    });
 
-    test('普通发送固定直答，只有主动入口才以 Agent 执行', async ({ page }) => {
+    test('普通发送固定直答，回答区任务建议只生成计划并等待用户确认', async ({ page }) => {
         const requests = [];
+        const taskDraftRequests = [];
         page.on('request', request => {
             if (new URL(request.url()).pathname === '/api/chat' && request.method() === 'POST') {
                 requests.push(request.postDataJSON());
+            }
+            if (new URL(request.url()).pathname === '/api/agents/task-drafts' && request.method() === 'POST') {
+                taskDraftRequests.push(request.postDataJSON());
             }
         });
         const login = await page.request.post('/api/auth/login', {
@@ -933,11 +938,21 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => requests.length).toBe(1);
         expect(requests[0].chatMode).toBe('normal');
         await expect(page.locator('#send-btn')).toBeVisible();
+        await expect(page.locator('.chat-task-suggestion-card')).toHaveCount(0);
 
         await page.locator('#user-input').fill('请规划一项可恢复的订单汇总任务。');
-        await page.locator('#chat-agent-execute-btn').click();
+        await page.locator('#send-btn').click();
         await expect.poll(() => requests.length).toBe(2);
-        expect(requests[1].chatMode).toBe('agent');
+        expect(requests[1].chatMode).toBe('normal');
+        await expect(page.locator('.chat-task-suggestion-card')).toBeVisible();
+        await expect(page.locator('.chat-task-suggestion-plan')).toHaveText('生成计划');
+        await expect(page.locator('.chat-task-suggestion-dismiss')).toHaveText('暂不需要');
+        await page.locator('.chat-task-suggestion-plan').click();
+        await expect(page.locator('#chat-task-draft-modal')).toBeVisible();
+        await expect(page.locator('#chat-task-draft-status')).toContainText('尚未调用模型、检索或工具');
+        await expect.poll(() => taskDraftRequests.length).toBe(1);
+        expect(taskDraftRequests[0].goal).toBe('请规划一项可恢复的订单汇总任务。');
+        expect(requests).toHaveLength(2);
     });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {

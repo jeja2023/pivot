@@ -3,6 +3,8 @@
 let currentAbortController = null;
 // 正在执行的发送任务；新消息发出时先中断它，再串行接管，避免两次发送并发
 let activeSendTask = null;
+// 任务草案创建也必须串行化，避免快速双击在创建会话期间生成两个草案。
+let activeTaskDraftCreation = null;
 let latestSendEpoch = 0;
 const chatAgentStreamingTargets = new Map();
 
@@ -260,6 +262,69 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     }
 };
 
+// “生成计划”入口与普通发送完全分离：它只创建可审阅的持久化草案，
+// 不发送聊天消息，不进行 RAG/记忆检索，也不启动任何工具或 Agent Run。
+async function createChatTaskDraft(options = {}) {
+    if (activeTaskDraftCreation) return await activeTaskDraftCreation;
+    const task = (async () => {
+    if (currentAbortController || activeSendTask) {
+        showToast('请等待当前回复结束后再规划新任务。', 'warning');
+        return false;
+    }
+    if (window.Pivot.legacy.pendingAttachments?.length) {
+        showToast('任务规划当前只接收文本目标；请先发送附件，或在目标中说明附件用途。', 'warning');
+        return false;
+    }
+    const rawGoal = String(options.goal ?? document.getElementById('user-input')?.value ?? '').trim();
+    const goal = rawGoal.replace(/^\/task\s+/i, '').trim();
+    if (!goal) {
+        showToast('请先输入任务目标，再规划执行。', 'warning');
+        document.getElementById('user-input')?.focus();
+        return false;
+    }
+    if (!currentSessionId) {
+        const data = await createSession(`${goal.slice(0, 15)}...`);
+        if (!data?.id) return false;
+        currentSessionId = data.id;
+        window.Pivot.legacy.loadSessions?.();
+        const titleNode = document.getElementById('current-title');
+        if (titleNode) titleNode.innerText = data.title;
+    }
+    const planner = window.Pivot.moduleApi('chat.taskDrafts');
+    if (typeof planner?.createAndOpen !== 'function') {
+        showToast('任务规划界面尚未准备好，请刷新后重试。', 'error');
+        return false;
+    }
+    try {
+        await planner.createAndOpen({
+            sessionId: String(currentSessionId),
+            goal,
+            modelId: document.getElementById('model-selector')?.value || ''
+        }, {
+            opener: options.opener || document.activeElement,
+            onRunCreated: () => {
+                if (options.clearInput === false) return;
+                const input = document.getElementById('user-input');
+                if (input) input.value = '';
+                window.Pivot.legacy.resizeUserInput?.();
+            }
+        });
+        return true;
+    } catch (error) {
+        showToast(error.message || '创建任务草案失败。', 'error');
+        return false;
+    }
+    })();
+    activeTaskDraftCreation = task;
+    window.Pivot.moduleApi('chat.taskSuggestion')?.setPlanningBusy?.(true);
+    try {
+        return await task;
+    } finally {
+        if (activeTaskDraftCreation === task) activeTaskDraftCreation = null;
+        window.Pivot.moduleApi('chat.taskSuggestion')?.setPlanningBusy?.(false);
+    }
+}
+
 async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null, options = {}) {
     const ephemeralVoice = options.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(options.voiceSessionId || '').trim() : '';
@@ -333,6 +398,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const ragEnabled = ragPreference === 'disabled' ? false : (ragPreference === 'enabled' || autoRouteEnabled || manualRagEnabled);
     const routeOverrides = ephemeralVoice ? {} : (resumeRouteOverrides || chatInputMenu?.getRouteOverrides?.(userVisibleContent) || {});
     const chatMode = ephemeralVoice ? 'normal' : requestedChatMode;
+    const shouldOfferTaskPromotion = !shouldRegenerate && !ephemeralVoice && chatMode === 'normal';
     // 旧版本保存的工具启用状态不应绕过本会话的明确授权。
     // 只有用户在路由提示中完成授权后，才将 MCP 候选交给执行链路。
     let mcpEnabled = !ephemeralVoice && window.Pivot.legacy.hasChatMcpConsent?.() === true
@@ -366,6 +432,14 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     }
     const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date(), modelName: assistantModelName });
     const textBody = aiMsgEl.querySelector('.text-body');
+    const showTaskPromotionForResponse = () => {
+        if (!shouldOfferTaskPromotion || !isRequestMessageVisible()) return;
+        window.Pivot.moduleApi('chat.taskSuggestion')?.showForResponse?.({
+            messageContent: aiMsgEl,
+            goal: userVisibleContent,
+            sessionId: requestSessionId
+        });
+    };
     const updateAssistantStatus = (message, type = 'queue') => {
         if (!textBody) return;
         const cls = type === 'error' ? 'error-detail' : 'queue-detail';
@@ -392,7 +466,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     };
 
     document.getElementById('send-btn').classList.add('hidden');
-    document.getElementById('chat-agent-execute-btn')?.classList.add('hidden');
+    window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(true);
     document.getElementById('stop-btn').classList.remove('hidden');
     const myController = new AbortController();
     currentAbortController = myController;
@@ -436,6 +510,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
             if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
             if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
+            window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
+            showTaskPromotionForResponse();
             return;
         }
 
@@ -778,6 +854,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         } else if (!isViewingRequestSession()) {
             showToast('原会话的回答已生成完成，可切回查看。', 'info');
         }
+        window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
+        showTaskPromotionForResponse();
         
         // 延迟刷新侧边栏，等待后台标题生成完成
         if (!ephemeralVoice) {
@@ -822,7 +900,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         }
         document.getElementById('stop-btn').classList.add('hidden');
         document.getElementById('send-btn').classList.remove('hidden');
-        document.getElementById('chat-agent-execute-btn')?.classList.remove('hidden');
+        window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
         currentAbortController = null;
     }
 }
@@ -836,5 +914,6 @@ async function continueMcpRouteMessage(messageId, routeOverrides = null, continu
 }
 
 window.Pivot.exposeModule('chat.execution', {
-    continueMcpRouteMessage
+    continueMcpRouteMessage,
+    createTaskDraft: createChatTaskDraft
 });

@@ -191,7 +191,6 @@ bind('new-chat-btn', async () => {
     if (s) selectSession(s.id, s.title, { refreshSidebar: true });
 });
 bind('send-btn', () => window.Pivot.legacy.sendMessage());
-bind('chat-agent-execute-btn', () => window.Pivot.moduleApi('chat.inputMenu').sendAsAgent?.());
 bind('chat-memory-menu-btn', () => {
     const panel = document.getElementById('chat-memory-menu-panel');
     window.Pivot?.moduleApi?.('chat.memoryActions')?.setChatMemoryMenuOpen?.(panel?.hidden === true);

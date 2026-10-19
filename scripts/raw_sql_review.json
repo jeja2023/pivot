@@ -19,6 +19,7 @@
     { "file": "server/services/agent-prompt-registry.js", "count": 10, "rationale": "Prompt Registry 版本、租户和激活状态查询是版本化治理边界，使用参数化 SQL。" },
     { "file": "server/services/agent-releases.js", "count": 64, "rationale": "技能与工作流发布事务包含版本冻结、ACL、签名和熔断状态，已由发布集成回归覆盖。" },
     { "file": "server/services/agent-task-effect-executor.js", "count": 2, "rationale": "外部效果执行认领与完成状态需要条件更新，防止跨进程重复副作用。" },
+    { "file": "server/services/agent-task-drafts.js", "count": 17, "rationale": "聊天任务草案的会话归属、可恢复草案列表、版本 CAS、确认/启动状态机和不可变审计事件必须在同一 PostgreSQL 行锁事务中完成；所有查询均参数化，草案阶段不调用模型、检索或工具。" },
     { "file": "server/services/agent-task-resource-leases.js", "count": 11, "rationale": "跨运行资源租约必须在 PostgreSQL 行锁和条件更新下取得、续期和释放。" },
     { "file": "server/services/agent-task-transactions.js", "count": 35, "rationale": "Task Transaction、效果、补偿和工作区快照共享事务边界；人工核对与跨 Run 业务幂等键需在同一行锁事务内按租户判定，拆出查询会破坏提交/回滚与去重原子性。" },
     { "file": "server/services/agent-working-memory-revisions.js", "count": 5, "rationale": "工作记忆修订使用 CAS 和引用状态条件更新，SQL 与修订回归一并审计。" },

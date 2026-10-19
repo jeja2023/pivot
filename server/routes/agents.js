@@ -43,6 +43,7 @@ const {
 const { getAgentRunResources } = require('../services/agent-run-resources');
 const { listAgentToolCalls } = require('../services/agent-tool-audit');
 const { listChatAgentRunsForSession } = require('../services/chat-agent-bridge');
+const { registerAgentTaskDraftRoutes } = require('./agent-task-drafts-routes');
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser } = require('../services/agent-skills');
 const { describeSkillForUser, searchSkillsForUser } = require('../services/agent-skill-discovery');
@@ -144,6 +145,8 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
 
     registerAgentApiOperationRoutes(router, { authMiddleware, automationGuard, logAction });
     registerAgentToolTestRoute({ router, authMiddleware, logAction });
+
+    registerAgentTaskDraftRoutes(router, { authMiddleware, automationGuard, logAction, createAgentRun });
 
     router.get('/agents/skills', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ data: await listAgentSkillsForUser(req.user, { includeDisabled: req.query.includeDisabled === 'true' }) });

@@ -221,10 +221,6 @@
                                 <rect x="5" y="5" width="14" height="14" rx="2" />
                             </svg>
                         </button>
-                        <button id="chat-agent-execute-btn" type="button" class="btn-secondary chat-agent-execute-btn" title="以 Agent 执行：连续规划、受控工具调用、审批与后台恢复" aria-label="以 Agent 执行当前任务">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.5 5.5L5 10l5.5 1.5L12 17l1.5-5.5L19 10l-5.5-1.5L12 3Z"></path><path d="m19 16-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7L19 16Z"></path></svg>
-                            <span>以 Agent 执行</span>
-                        </button>
                         <button id="send-btn" class="btn-primary" title="发送 (Enter)">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
                                 xmlns="http://www.w3.org/2000/svg">
@@ -237,6 +233,37 @@
             </div>
             </section>
         </main>
+    </div>
+    <div id="chat-task-draft-modal" class="modal-overlay hidden" hidden role="dialog" aria-modal="true" aria-labelledby="chat-task-draft-heading" aria-describedby="chat-task-draft-status">
+        <section class="modal chat-task-draft-dialog">
+            <header class="chat-task-draft-head">
+                <div>
+                    <p class="chat-task-draft-kicker">Agent 任务草案</p>
+                    <h3 id="chat-task-draft-heading">先审阅计划，再开始执行</h3>
+                    <p>生成草案不会调用模型、检索知识库、发现工具或产生外部副作用。</p>
+                </div>
+                <button type="button" id="chat-task-draft-close" class="workspace-modal-close" aria-label="关闭任务草案" title="关闭任务草案">×</button>
+            </header>
+            <div class="chat-task-draft-body">
+                <p id="chat-task-draft-status" class="chat-task-draft-status" aria-live="polite"></p>
+                <label class="chat-task-draft-field" for="chat-task-draft-title">
+                    <span>任务标题</span>
+                    <input id="chat-task-draft-title" class="form-input" maxlength="160" autocomplete="off">
+                </label>
+                <label class="chat-task-draft-field" for="chat-task-draft-goal">
+                    <span>任务目标</span>
+                    <textarea id="chat-task-draft-goal" class="form-input" rows="4" maxlength="12000"></textarea>
+                </label>
+                <div id="chat-task-draft-plan" class="chat-task-draft-plan" aria-live="polite"></div>
+            </div>
+            <footer class="chat-task-draft-actions">
+                <button type="button" id="chat-task-draft-dismiss" class="btn-secondary">关闭</button>
+                <span class="chat-task-draft-action-spacer"></span>
+                <button type="button" id="chat-task-draft-open-run" class="btn-secondary" hidden>查看运行</button>
+                <button type="button" id="chat-task-draft-save" class="btn-secondary">重新生成计划</button>
+                <button type="button" id="chat-task-draft-start" class="btn-primary">确认计划并开始执行</button>
+            </footer>
+        </section>
     </div>
     <div id="chat-memory-intent-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="chat-memory-intent-title">
         <div class="modal chat-memory-intent-dialog">

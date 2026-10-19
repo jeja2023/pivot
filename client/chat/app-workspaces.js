@@ -11,22 +11,10 @@ function getChatMode() {
 }
 
 function applyChatAgentExecutionState() {
-    const button = document.getElementById('chat-agent-execute-btn');
-    if (!button) return chatAgentExecutionEnabled;
-    button.disabled = !chatAgentExecutionEnabled;
-    button.setAttribute('aria-disabled', chatAgentExecutionEnabled ? 'false' : 'true');
-    button.title = chatAgentExecutionEnabled
-        ? '以 Agent 执行：连续规划、受控工具调用、审批与后台恢复'
-        : '管理员已暂时关闭 Agent 执行';
+    document.dispatchEvent(new window.CustomEvent('pivot:chat-agent-execution-state', {
+        detail: { enabled: chatAgentExecutionEnabled }
+    }));
     return chatAgentExecutionEnabled;
-}
-
-function requestChatAgentExecution() {
-    if (!chatAgentExecutionEnabled) {
-        showToast('管理员已暂时关闭 Agent 执行，请直接发送普通消息。', 'warning');
-        return false;
-    }
-    return window.Pivot.legacy.sendMessage?.({ chatMode: 'agent' }) || false;
 }
 
 async function loadChatModeCapabilities() {
@@ -342,7 +330,6 @@ window.Pivot.exposeModule('chat.inputMenu', {
     enableMcpFromRouteTrace: () => window.Pivot.moduleApi('chat.autoRoute').enableMcpFromRouteTrace?.(),
     getMcpToolAllowlist: getChatMcpToolAllowlist,
     getChatMode,
-    sendAsAgent: requestChatAgentExecution,
     isAgentExecutionEnabled: () => chatAgentExecutionEnabled,
     setOpen: setChatToolsMenuOpen
 });
@@ -361,6 +348,10 @@ userInput && (userInput.onkeydown = (e) => {
     if (e.defaultPrevented) return;
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        if (/^\/task\s+.+/i.test(String(userInput.value || '').trim())) {
+            window.Pivot.moduleApi('chat.taskSuggestion').promoteFromInput?.();
+            return;
+        }
         window.Pivot.legacy.sendMessage();
     }
 });

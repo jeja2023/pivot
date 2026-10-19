@@ -151,7 +151,8 @@ const migrationModules = [
     require('./agent-domain-acceptance-evidence'),
     require('./agent-domain-acceptance-evidence-manifest'),
     require('./agent-domain-acceptance-committee-attestations'),
-    require('./agent-domain-acceptance-committee-members')
+    require('./agent-domain-acceptance-committee-members'),
+    require('./agent-task-drafts')
 ];
 
 module.exports = migrationModules
