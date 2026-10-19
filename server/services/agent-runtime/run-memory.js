@@ -7,8 +7,10 @@ const {
 const { getModelContextBudget } = require('../context-budget');
 const { readTypedEnv } = require('../../config/env-registry');
 const { getBeijingTimestamp } = require('../../time');
-const { setRunMetadata } = require('./metadata');
+const { patchAgentRunMetadata: setRunMetadata } = require('../agent-run-metadata-patch');
 const { parseJsonObject } = require('../agent-validators');
+const { getAgentProfile, buildAgentProfileContext } = require('../agent-profile');
+const { resolveResponsePreferences } = require('../agent-response-preferences');
 
 async function resolveRunLongTermMemory({
     run,
@@ -27,6 +29,16 @@ async function resolveRunLongTermMemory({
             sessionId: run?.session_id || '',
             projectId: contextConfig?.projectId || parseJsonObject(run?.metadata)?.projectId || ''
         });
+        const profile = await getAgentProfile(user?.id);
+        const effective = resolveResponsePreferences(profile, longTermMemoryMatches, { prompt: run?.goal || '' });
+        longTermMemoryMatches = effective.memories;
+        const profileContext = buildAgentProfileContext(effective.profile);
+        // 对话与持久任务采用相同偏好优先级，后续规划不能继续使用旧档案快照。
+        const metadata = parseJsonObject(run?.metadata) || {};
+        metadata.agentProfileContext = profileContext;
+        metadata.agentProfileVersion = profile.version;
+        run.metadata = metadata;
+        await setRunMetadata(runId, { agentProfileContext: profileContext, agentProfileVersion: profile.version });
         const message = buildLongTermMemoryContextMessage(longTermMemoryMatches, {
             // 模型路由/故障降级阶段可能尚未取得完整配置；预算模块支持空配置的
             // 无界安全回退，不能因读取 null 字段把正常记忆检索误记为失败。

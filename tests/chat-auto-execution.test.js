@@ -20,12 +20,14 @@ test('同一句话中的长期偏好不能吞掉当前委托任务', () => {
     assert.equal(classifyChatAutoExecution({ prompt: '以后回答先给结论，帮我分析附件并生成报告' }).action, 'agent_run');
 });
 
-test('普通问答、创作、讨论和引用保持直答，不调用分类模型', async () => {
+test('明确短对话保留快速路径，业务问答、讨论和引用可由语义判断后直答', async () => {
     for (const prompt of ['请解释向量检索','请写一份产品发布报告','请翻译这份报告并生成英文版','他让我完成报告的要求是什么？','停止当前任务的功能如何实现？']) {
         assert.equal(classifyChatAutoExecution({ prompt }).action, 'direct_answer', prompt);
-        const result = await resolveChatIntent({ ...input, prompt }, { ...deps(null), callModelJson: async () => { throw new Error('普通对话不能调用分类模型'); } });
+        const result = await resolveChatIntent({ ...input, prompt }, deps({ ...modelDecision, objective: prompt, action: 'direct_answer', requiredCapabilities: [], routing: { knowledge: 'none', tools: 'none' } }));
         assert.equal(result.action, 'direct_answer');
     }
+    const greeting = await resolveChatIntent({ ...input, prompt: '你好' }, { ...deps(null), callModelJson: async () => { throw new Error('明确短对话不需要分类模型'); } });
+    assert.equal(greeting.action, 'direct_answer');
 });
 
 test('候选任务以结构化语义结果选择运行，模型自报置信不授予权限', async () => {

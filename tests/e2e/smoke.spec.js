@@ -133,9 +133,10 @@ test.describe('Pivot browser smoke', () => {
         const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
         const name = `Voice e2e ${Date.now()}`;
         expect((await page.request.post('/api/models', { headers: { 'x-csrf-token': csrf },
-            data: { name, url: process.env.E2E_MODEL_URL, model_name: 'voice-e2e' } })).ok()).toBeTruthy();
+            data: { name, url: process.env.E2E_MODEL_URL, model_name: 'voice-e2e', supports_vision: 1 } })).ok()).toBeTruthy();
         const models = await (await page.request.get('/api/models?limit=100')).json();
         const model = models.data.find(item => item.name === name);
+        const originalDefault = models.data.find(item => Number(item.is_default) === 1);
         await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: model.id } });
         await page.reload();
         await ensureBrowserSession(page);
@@ -167,6 +168,9 @@ test.describe('Pivot browser smoke', () => {
         expect(await page.evaluate(() => window.__voiceTest.stopped)).toBeGreaterThanOrEqual(2);
         const detail = await (await page.request.get(`/api/sessions/${requests[0].sessionId}`)).json();
         expect(detail.messages || []).toHaveLength(0);
+        if (originalDefault?.id) {
+            await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: originalDefault.id } }).catch(() => {});
+        }
         if (native === 'server') expect(transcriptions).toBe(3);
     });
 
@@ -289,6 +293,35 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('对话列表可被真实鼠标滚轮滚动，触底后自动继续加载下一页', async ({ page }) => {
+        await page.route('**/api/sessions?*', async route => {
+            const url = new URL(route.request().url());
+            const isAppend = Boolean(url.searchParams.get('cursor') || url.searchParams.get('page') === '2');
+            if (isAppend) {
+                return route.fulfill({
+                    contentType: 'application/json',
+                    body: JSON.stringify({
+                        data: Array.from({ length: 5 }, (_, i) => ({
+                            id: 9900 + i,
+                            title: `滚动加载会话 ${i + 1}`,
+                            updated_at: new Date().toISOString()
+                        })),
+                        hasMore: false
+                    })
+                });
+            }
+            return route.fulfill({
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    data: Array.from({ length: 25 }, (_, i) => ({
+                        id: 9800 + i,
+                        title: `初始会话 ${i + 1}`,
+                        updated_at: new Date().toISOString()
+                    })),
+                    hasMore: true,
+                    cursor: 'mock-cursor-page-2'
+                })
+            });
+        });
         await ensureBrowserSession(page);
         const list = page.locator('#session-list');
         await expect(list).toBeVisible();
@@ -726,6 +759,24 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('系统监控固定在工作区视口内，仅慢查询与异常告警列表支持内部滚动', async ({ page }) => {
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.route('**/api/monitor/stats*', async route => {
+            const response = await route.fetch().catch(() => null);
+            const json = response?.ok() ? await response.json().catch(() => ({})) : {};
+            json.observability = json.observability || {};
+            json.observability.events = Array.from({ length: 24 }, (_, index) => ({
+                id: index + 1,
+                type: 'sql_slow',
+                severity: index % 2 ? 'warning' : 'critical',
+                message: `慢查询与异常告警验收记录 ${index + 1}`,
+                duration_ms: 1200,
+                created_at: new Date().toISOString()
+            }));
+            return route.fulfill({
+                contentType: 'application/json',
+                body: JSON.stringify(json)
+            });
+        });
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
         await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
@@ -1030,6 +1081,24 @@ test.describe('Pivot browser smoke', () => {
             })
         }));
        await ensureBrowserSession(page);
+        await page.evaluate(() => {
+            const models = window.Pivot.legacy._cachedModels || [];
+            const visionModel = models.find(m => Number(m.supports_vision || 0) === 1);
+            if (visionModel) {
+                window.Pivot.legacy.selectDropdownModel(visionModel.id, true);
+            } else {
+                const currentId = document.getElementById('model-selector')?.value;
+                const current = models.find(m => String(m.id) === String(currentId));
+                if (current) current.supports_vision = 1;
+                const uploadBtn = document.getElementById('chat-tools-menu-btn');
+                if (uploadBtn) {
+                    uploadBtn.disabled = false;
+                    uploadBtn.style.opacity = '1';
+                    uploadBtn.style.cursor = 'pointer';
+                    uploadBtn.title = '添加文件或文件夹';
+                }
+            }
+        });
 
         await expect(page.locator('#chat-auto-route-enabled')).toHaveCount(0);
         await expect(page.locator('#chat-rag-enabled')).toHaveCount(0);
@@ -1134,6 +1203,110 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => agentRunRequests.length).toBeGreaterThan(0);
         await expect(page.locator('.chat-task-suggestion-card')).toHaveCount(0);
         expect(requests).toHaveLength(2);
+
+        await expect(page.locator('#send-btn')).toBeVisible();
+        const correctionResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/chat' && response.request().method() === 'POST');
+        await page.locator('#user-input').fill('我只是问一下，不需要执行');
+        await page.locator('#send-btn').click();
+        const correctionStream = await (await correctionResponse).text();
+        expect(correctionStream).toContain('"status":"corrected"');
+        expect(correctionStream).not.toContain('"status":"automatic_execution"');
+        await expect(page.locator('.chat-route-feedback-form')).toHaveCount(0);
+        expect(requests).toHaveLength(3);
+
+        await expect(page.locator('#send-btn')).toBeVisible();
+        const knowledgeResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/chat' && response.request().method() === 'POST');
+        await page.locator('#user-input').fill('我们公司婚假有几天？');
+        await page.locator('#send-btn').click();
+        const knowledgeStream = await (await knowledgeResponse).text();
+        expect(knowledgeStream).toContain('"type":"rag"');
+        expect(knowledgeStream).not.toContain('"status":"automatic_execution"');
+        expect(requests).toHaveLength(4);
+    });
+
+    test('个人助手无需首次配置，工作台按需管理偏好且刷新后不弹向导', async ({ page }) => {
+        await ensureBrowserSession(page);
+        for (const width of [1280, 390]) {
+            await page.setViewportSize({ width, height: 844 });
+            await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('personal'));
+            await expect(page.locator('#personal-assistant-list')).toContainText('无需预先配置即可使用');
+            await expect(page.locator('#personal-agent-onboarding')).toHaveCount(0);
+            await expect(page.locator('#personal-assistant-list')).not.toContainText('待设置');
+        }
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#personal-agent-onboarding')).toHaveCount(0);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await expect(page.locator('#user-input')).toBeVisible();
+    });
+
+    test('自然纠正替代路由表单，管理员区分异常复核和自动归档', async ({ page }) => {
+        await page.route('**/api/stats/observability/decision-feedback?*', route => {
+            const archived = new URL(route.request().url()).searchParams.get('reviewStatus') === 'not_required';
+            return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{
+                feedback_id: archived ? 'archived' : 'incident', decision_id: 'decision-correction', scenario: 'chat.execution',
+                selected_action_id: 'agent_run', corrected_action_id: 'direct_answer', review_status: archived ? 'not_required' : 'pending',
+                username: 'admin', session_title: '纠正回归', query_preview: '请分析订单',
+                metadata: { note: '我只是问一下，不需要执行', reviewReasons: archived ? [] : ['execution_scope'],
+                    naturalCorrection: { sourceMessageId: 12, priorMessageId: 10, applied: { pausedRunIds: ['r'] } }, executionEvidence: [] }
+            }] }) });
+        });
+        await ensureBrowserSession(page);
+        const replay = await page.evaluate(() => {
+            const holder = document.createElement('div');
+            document.body.appendChild(holder);
+            const streaming = window.Pivot.moduleApi('chat.streaming');
+            streaming.renderAssistantRouteMetadata(holder, { decisions: [{ decisionId: 'd', scenario: 'chat.execution', selectedActionId: 'agent_run', allowedActionIds: ['agent_run','direct_answer'] }] });
+            const retiredControls = holder.querySelectorAll('[data-chat-trace-action="decision-feedback"], .chat-route-feedback-form').length;
+            streaming.renderAssistantTraceEvent(holder, { type: 'route', status: 'corrected', message: '已暂停当前任务，并按本次要求调整处理方式' });
+            const visibleText = holder.textContent;
+            holder.remove();
+            return { retiredControls, visibleText };
+        });
+        expect(replay.retiredControls).toBe(0);
+        expect(replay.visibleText).toContain('已暂停当前任务');
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await expect(page.locator('#tab-decision-review')).toHaveCount(0);
+        await page.locator('#tab-monitor').click();
+        await page.locator('#monitor-quality-tab').click();
+        await expect(page.locator('#route-feedback-review-list')).toContainText('任务执行与续接');
+        await expect(page.locator('#route-feedback-review-list')).toContainText('任务执行范围纠正');
+        const tableScroll = await page.locator('.route-feedback-table-wrap').evaluate(element => {
+            element.scrollLeft = element.scrollWidth;
+            const reached = element.scrollLeft > 0;
+            element.scrollLeft = 0;
+            return reached;
+        });
+        expect(tableScroll).toBeTruthy();
+        await page.screenshot({ path: path.resolve(__dirname, '../../output/quality-navigation-desktop.png') });
+        await page.locator('#route-feedback-review-list [data-route-feedback-detail]').first().click();
+        await expect(page.locator('#route-feedback-detail-modal')).toBeVisible();
+        await expect(page.locator('#route-feedback-detail-content')).toContainText('sourceMessageId');
+        for (const width of [1280, 390]) {
+            await page.setViewportSize({ width, height: 844 });
+            const box = await page.locator('.route-feedback-detail-dialog').boundingBox();
+            expect(box.x).toBeGreaterThanOrEqual(0);
+            expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
+            const overflow = await page.locator('#route-feedback-detail-content').evaluate(element => element.scrollWidth - element.clientWidth);
+            expect(overflow).toBeLessThanOrEqual(1);
+            if (width === 390) await page.screenshot({ path: path.resolve(__dirname, '../../output/quality-navigation-mobile.png') });
+        }
+        await page.setViewportSize({ width: 1280, height: 844 });
+        await page.locator('#route-feedback-detail-footer').getByRole('button', { name: '关闭', exact: true }).click();
+        await page.locator('#route-feedback-status-filter').selectOption('not_required');
+        await expect(page.locator('#route-feedback-review-list')).toContainText('无需逐条复核');
+        await expect(page.locator('#route-feedback-review-list [data-route-feedback-review]')).toHaveCount(0);
+        await page.evaluate(() => window.Pivot.legacy.switchTab('route-feedback'));
+        await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#monitor-overview-panel')).toBeHidden();
+        await page.locator('#monitor-quality-tab').focus();
+        await page.keyboard.press('ArrowLeft');
+        await expect(page.locator('#monitor-overview-tab')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#monitor-overview-panel')).toBeVisible();
+        await page.locator('#monitor-quality-tab').click();
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#decision-review-feedback-panel')).toBeVisible();
     });
 
     test('chat Agent detail button lazy-loads the task detail and shows safe reasoning summary', async ({ page }) => {
@@ -1271,8 +1444,9 @@ test.describe('Pivot browser smoke', () => {
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
         await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
-        await page.locator('#tab-decision-review').click();
-        await page.locator('#decision-review-gold-tab').click();
+        await expect(page.locator('#tab-decision-review')).toHaveCount(0);
+        await page.locator('#tab-models').click();
+        await page.locator('#models-evaluation-tab').click();
         const panel = page.locator('#decision-review-gold-panel');
         await expect(panel).toBeVisible();
         await expect(panel).toContainText('用户请求调用外部工具');
@@ -1281,6 +1455,46 @@ test.describe('Pivot browser smoke', () => {
         await panel.locator('[data-decision-gold-review="tools-consent-001"]').click();
         await expect.poll(() => submitted).toEqual({ expectedActionId: 'candidate_only', reviewNote: '独立确认需要先授权。' });
         await expect(panel).toContainText('待第二审核');
+        await page.evaluate(() => window.Pivot.legacy.switchTab('decision-gold-review'));
+        await expect(page.locator('#models-evaluation-tab')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#models-configuration-panel')).toBeHidden();
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(page.locator('#models-evaluation-tab')).toBeVisible();
+        await expect(panel).toBeVisible();
+        await page.locator('#models-configuration-tab').click();
+        await expect(page.locator('#models-configuration-panel')).toBeVisible();
+        await expect(panel).toBeHidden();
+    });
+
+    test('普通用户无法通过旧审核入口或保存状态打开管理员质量与评测数据', async ({ page, browser }) => {
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const username = `quality_user_${Date.now()}`;
+        const password = 'QualityUser123!';
+        const created = await page.request.post('/api/admin/users', { headers: { 'x-csrf-token': csrf }, data: { username, password, nickname: '质量权限回归', unit: 'QA', role: 'user' } });
+        expect(created.ok()).toBeTruthy();
+        const context = await browser.newContext();
+        try {
+            const login = await context.request.post(`${process.env.PIVOT_E2E_BASE_URL}/api/auth/login`, { data: { username, password } });
+            expect(login.ok()).toBeTruthy();
+            const regular = await context.newPage();
+            await regular.goto(`${process.env.PIVOT_E2E_BASE_URL}/chat`, { waitUntil: 'domcontentloaded' });
+            await regular.evaluate(() => {
+                sessionStorage.setItem('pivot_settings_tab', 'decision-review');
+                sessionStorage.setItem('pivot_settings_decision_review_subtab', 'gold');
+                sessionStorage.setItem('pivot_settings_models_section', 'evaluation');
+            });
+            await regular.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+            await expect(regular.locator('#models-configuration-panel')).toBeVisible();
+            await expect(regular.locator('#models-evaluation-tab')).toBeHidden();
+            await expect(regular.locator('#tab-monitor')).toBeHidden();
+            await regular.evaluate(() => window.Pivot.legacy.switchTab('route-feedback'));
+            await expect(regular.locator('#decision-review-feedback-panel')).toBeHidden();
+            const feedback = await context.request.get(`${process.env.PIVOT_E2E_BASE_URL}/api/stats/observability/decision-feedback`);
+            const evaluation = await context.request.get(`${process.env.PIVOT_E2E_BASE_URL}/api/stats/observability/decision-evaluation-sets/v2/cases`);
+            expect(feedback.status()).toBe(403);
+            expect(evaluation.status()).toBe(403);
+        } finally { await context.close(); }
     });
 
     test('usage audit workspace switches between statistics, details and report', async ({ page }) => {

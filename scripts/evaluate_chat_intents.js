@@ -23,11 +23,14 @@ async function main() {
     for (const item of fixtures.cases) {
         const start = Date.now();
         const baseline = classifyChatAutoExecution({ prompt: item.prompt, history: item.history || [] });
-        const decision = await resolveChatIntent({ prompt: item.prompt, history: item.history || [], tasks: item.tasks || [], providedSources: item.providedSources || [], user, userMessageId: 1, sessionId: 'engineering-benchmark', modelCfg: model }, {
+        const decision = await resolveChatIntent({ prompt: item.prompt, history: item.history || [], tasks: item.tasks || [], providedSources: item.providedSources || [], availability: item.availability || {}, user, userMessageId: 1, sessionId: 'engineering-benchmark', modelCfg: model }, {
             config: { mode: 'active', timeoutMs: 30000, rolloutPercent: 100 }, recordDecision() {}
         });
-        results.push({ id: item.id, expected: item.expected, actual: decision.action, passed: item.expected.includes(decision.action), critical: Boolean(item.critical), baseline: baseline.action, baselinePassed: item.expected.includes(baseline.action), durationMs: Date.now() - start, reason: decision.reasonCode });
-        process.stdout.write(`${item.id}: ${decision.action} ${item.expected.includes(decision.action) ? '通过' : '未通过'}\n`);
+        const routingPassed = Object.entries(item.expectedRouting || {}).every(([key, value]) => decision.routing?.[key] === value);
+        const passed = item.expected.includes(decision.action) && routingPassed;
+        results.push({ id: item.id, expected: item.expected, expectedRouting: item.expectedRouting || null, actual: decision.action, routing: decision.routing || null, passed, routingPassed,
+            critical: Boolean(item.critical), baseline: baseline.action, baselinePassed: item.expected.includes(baseline.action), durationMs: Date.now() - start, reason: decision.reasonCode });
+        process.stdout.write(`${item.id}: ${decision.action} ${passed ? '通过' : '未通过'}\n`);
     }
     const report = { fixtureVersion: fixtures.version, fixtureDigest: crypto.createHash('sha256').update(JSON.stringify(fixtures)).digest('hex'), modelId, generatedAt: new Date().toISOString(), kind: 'synthetic_model_evaluation', businessToolsExecuted: false, results,
         summary: { total: results.length, passed: results.filter(item => item.passed).length, baselinePassed: results.filter(item => item.baselinePassed).length, criticalFailures: results.filter(item => item.critical && !item.passed).length } };

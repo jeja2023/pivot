@@ -96,6 +96,7 @@ async function hasApprovedFrozenEvaluation(artifact = {}, deps = {}) {
     try {
         const governance = await (deps.getDecisionEvaluationSetGovernance || getDecisionEvaluationSetGovernance)(evidence.version, deps);
         return Boolean(governance
+            && (deps.requiredScenario !== 'chat.execution' || ['direct_answer', 'plan_only', 'agent_run', 'continue_run', 'clarify'].every(action => (governance.executionActions || []).includes(action)))
             && Number(governance.total || 0) > 0
             && Number(governance.pending || 0) === 0
             && Number(governance.verified || 0) === Number(governance.total || 0)

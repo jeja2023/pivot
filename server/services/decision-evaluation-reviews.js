@@ -41,6 +41,7 @@ const REVIEW_STATUS_SQL = [
     'SELECT set_version, COUNT(*) AS total,',
     "COUNT(*) FILTER (WHERE review_status = 'verified') AS verified,",
     "COUNT(*) FILTER (WHERE review_status <> 'verified') AS pending,",
+    "ARRAY_AGG(DISTINCT expected_action_id) FILTER (WHERE scenario = 'chat.execution' AND review_status = 'verified') AS execution_actions,",
     'MAX(updated_at) AS updated_at FROM decision_evaluation_cases WHERE set_version = ? GROUP BY set_version'
 ].join(' ');
 
@@ -146,7 +147,8 @@ async function getDecisionEvaluationReviewStatus(version, deps = {}) {
     const rows = await (deps.query || query)(REVIEW_STATUS_SQL, [setVersion]);
     const row = rows?.[0];
     if (!row) return null;
-    return { version: row.set_version, total: Number(row.total || 0), verified: Number(row.verified || 0), pending: Number(row.pending || 0), updatedAt: row.updated_at || null };
+    return { version: row.set_version, total: Number(row.total || 0), verified: Number(row.verified || 0), pending: Number(row.pending || 0), updatedAt: row.updated_at || null,
+        executionActions: Array.isArray(row.execution_actions) ? row.execution_actions : [] };
 }
 
 async function getDecisionEvaluationSetGovernance(version, deps = {}) {

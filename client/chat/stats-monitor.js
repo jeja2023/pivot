@@ -89,6 +89,7 @@ function cancelOpsSummaryLoad() {
 
 const loadMonitorSummary = async function(options = {}) {
     if (!isAdminUser()) return;
+    if (window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') === 'quality') return;
     if (monitorSummaryLoadPromise && !options.force && !options.refresh) return monitorSummaryLoadPromise;
     monitorSummaryLoadController?.abort();
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -680,12 +681,12 @@ function scheduleMonitorRefresh() {
     clearMonitorRefreshTimer();
     const isSettingsActive = document.body?.dataset?.activeWorkspace === 'settings';
     const monitorTab = document.getElementById('tab-content-monitor');
-    const visible = isSettingsActive && monitorTab && !monitorTab.classList.contains('hidden');
+    const visible = isSettingsActive && monitorTab && !monitorTab.classList.contains('hidden') && window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') !== 'quality';
     const enabled = document.getElementById('monitor-auto-refresh')?.checked;
     if (visible && enabled) {
         monitorTimer = setTimeout(() => {
             const stillActive = document.body?.dataset?.activeWorkspace === 'settings';
-            const stillVisible = stillActive && !document.getElementById('tab-content-monitor')?.classList.contains('hidden');
+            const stillVisible = stillActive && !document.getElementById('tab-content-monitor')?.classList.contains('hidden') && window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') !== 'quality';
             if (stillVisible) {
                 loadMonitorSummary();
             }

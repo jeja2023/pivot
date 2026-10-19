@@ -491,6 +491,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
             history: [{ role: 'user', content: '查询 widgets 表前两条数据' }],
             userPrompt: '查询 widgets 表前两条数据',
             tools,
+            taskState: { toolIntent: { requiresTool: true, requestedCapabilities: ['data.query'], automaticReadScope: { capabilities: ['data.query'], toolNames: [toolName], sourceMessageId: 123 } } },
             user: adminUser,
             writeSse(payload) {
                 sseEvents.push(JSON.parse(payload));
@@ -538,6 +539,7 @@ test('聊天 MCP 上下文会调用选中的 MCP 工具并注入结果供用户�
             },
             history: [{ role: 'user', content: '查询hcdb数据库中数据表的数量。' }],
             userPrompt: '查询hcdb数据库中数据表的数量。',
+            taskState: { toolIntent: { requiresTool: true, requestedCapabilities: ['data.query'], automaticReadScope: { capabilities: ['data.query'], toolNames: [toolName, listTablesToolName, countTablesToolName], sourceMessageId: 124 } } },
             tools,
             user: adminUser,
             writeSse(payload) {

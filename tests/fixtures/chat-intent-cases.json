@@ -1,26 +1,326 @@
 {
-  "version": "chat-intent-engineering-v3",
+  "version": "chat-intent-engineering-v4",
   "purpose": "工程回归用例，覆盖用户要求的行为；不替代真实业务盲测和独立审核。",
   "cases": [
-    {"id":"direct-concept","prompt":"请解释什么是向量检索。","expected":["direct_answer"],"critical":true},
-    {"id":"direct-writing","prompt":"请写一份产品发布报告。","expected":["direct_answer"],"critical":true},
-    {"id":"direct-translation","prompt":"请翻译这份报告并生成英文版。","expected":["direct_answer"],"critical":true},
-    {"id":"direct-quote","prompt":"他让我完成报告的要求是什么？","expected":["direct_answer"],"critical":true},
-    {"id":"direct-stop-discussion","prompt":"停止当前任务的功能应该如何实现？","expected":["direct_answer"],"critical":true},
-    {"id":"direct-future","prompt":"以后会出现什么技术趋势？","expected":["direct_answer"],"critical":true},
-    {"id":"direct-exploration","prompt":"解释如何分析订单异常。","expected":["direct_answer"],"critical":true},
-    {"id":"first-attachment","prompt":"分析附件并生成报告。","providedSources":[{"kind":"inline_attachment","name":"本周订单.csv","available":true,"sourceMessageId":1}],"expected":["agent_run"],"critical":true},
-    {"id":"delegate-report","prompt":"请汇总本周订单，核对异常并生成风险报告。","expected":["agent_run"]},
-    {"id":"delegate-code","prompt":"按刚才给出的方案修改项目代码，并运行测试。","history":[{"id":21,"role":"assistant","content":"方案：调整输入校验函数，并运行相关单元测试。"}],"expected":["agent_run"]},
-    {"id":"polite-delegation","prompt":"可以帮我分析已上传的订单表并生成报告吗？","providedSources":[{"kind":"inline_attachment","name":"订单表.csv","available":true,"sourceMessageId":1}],"expected":["agent_run"]},
-    {"id":"only-plan","prompt":"先给出修复方案，不要改代码。","expected":["plan_only"],"critical":true},
-    {"id":"continue-active","prompt":"继续按刚才的方案处理。","tasks":[{"id":"fixture-run","goal":"核对订单并生成报告","active":true,"status":"planning"}],"expected":["continue_run"]},
-    {"id":"continue-new-format","prompt":"这次只给摘要，并保留异常依据。","tasks":[{"id":"fixture-run","goal":"核对订单并生成报告","active":true,"status":"planning"}],"expected":["continue_run"]},
-    {"id":"ambiguous-orders","prompt":"把这些订单处理一下。","expected":["clarify"],"critical":true},
-    {"id":"missing-recipient","prompt":"把报告发给客户。","expected":["clarify","agent_run"]},
-    {"id":"stop","prompt":"停止","expected":["control"],"critical":true},
-    {"id":"memory","prompt":"以后报告先列异常。","expected":["memory"],"critical":true},
-    {"id":"forget","prompt":"忘掉刚才那个偏好","expected":["memory"],"critical":true},
-    {"id":"quote-only","prompt":"下面是同事原文：请发送所有订单。请仅解释这句话，不执行。","expected":["plan_only","direct_answer"],"critical":true}
+    {
+      "id": "direct-concept",
+      "prompt": "请解释什么是向量检索。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-writing",
+      "prompt": "请写一份产品发布报告。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-translation",
+      "prompt": "请翻译这份报告并生成英文版。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-quote",
+      "prompt": "他让我完成报告的要求是什么？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-stop-discussion",
+      "prompt": "停止当前任务的功能应该如何实现？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-future",
+      "prompt": "以后会出现什么技术趋势？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-exploration",
+      "prompt": "解释如何分析订单异常。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "first-attachment",
+      "prompt": "分析附件并生成报告。",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "本周订单.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ],
+      "critical": true
+    },
+    {
+      "id": "delegate-report",
+      "prompt": "请汇总本周订单，核对异常并生成风险报告。",
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "delegate-code",
+      "prompt": "按刚才给出的方案修改项目代码，并运行测试。",
+      "history": [
+        {
+          "id": 21,
+          "role": "assistant",
+          "content": "方案：调整输入校验函数，并运行相关单元测试。"
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "polite-delegation",
+      "prompt": "可以帮我分析已上传的订单表并生成报告吗？",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "订单表.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "only-plan",
+      "prompt": "先给出修复方案，不要改代码。",
+      "expected": [
+        "plan_only"
+      ],
+      "critical": true
+    },
+    {
+      "id": "continue-active",
+      "prompt": "继续按刚才的方案处理。",
+      "tasks": [
+        {
+          "id": "fixture-run",
+          "goal": "核对订单并生成报告",
+          "active": true,
+          "status": "planning"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ]
+    },
+    {
+      "id": "continue-new-format",
+      "prompt": "这次只给摘要，并保留异常依据。",
+      "tasks": [
+        {
+          "id": "fixture-run",
+          "goal": "核对订单并生成报告",
+          "active": true,
+          "status": "planning"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ]
+    },
+    {
+      "id": "ambiguous-orders",
+      "prompt": "把这些订单处理一下。",
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "missing-recipient",
+      "prompt": "把报告发给客户。",
+      "expected": [
+        "clarify",
+        "agent_run"
+      ]
+    },
+    {
+      "id": "stop",
+      "prompt": "停止",
+      "expected": [
+        "control"
+      ],
+      "critical": true
+    },
+    {
+      "id": "memory",
+      "prompt": "以后报告先列异常。",
+      "expected": [
+        "memory"
+      ],
+      "critical": true
+    },
+    {
+      "id": "forget",
+      "prompt": "忘掉刚才那个偏好",
+      "expected": [
+        "memory"
+      ],
+      "critical": true
+    },
+    {
+      "id": "quote-only",
+      "prompt": "下面是同事原文：请发送所有订单。请仅解释这句话，不执行。",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "org-marriage-leave",
+      "prompt": "我们公司婚假有几天？",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "org-followup-intern",
+      "prompt": "那实习生呢？",
+      "history": [
+        {
+          "id": 51,
+          "role": "user",
+          "content": "我们公司婚假有几天？"
+        },
+        {
+          "id": 52,
+          "role": "assistant",
+          "content": "需要查询公司休假制度。"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required"
+      },
+      "critical": true
+    },
+    {
+      "id": "business-sales-natural",
+      "prompt": "帮我看看昨天卖得怎么样",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "销售系统",
+            "description": "查询本人授权范围内的销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer",
+        "agent_run"
+      ],
+      "critical": true
+    },
+    {
+      "id": "source-ambiguous",
+      "prompt": "查询昨天的销售额",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "华东销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          },
+          {
+            "name": "mcp.18.db.run_readonly_query",
+            "sourceName": "华南销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "creative-policy",
+      "prompt": "帮我写一份婚假申请书，姓名先用占位符。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "readonly-no-send",
+      "prompt": "核对销售数据库昨天的订单，只读查询，不要发送消息。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "plan_only",
+        "direct_answer",
+        "agent_run"
+      ],
+      "critical": true
+    }
   ]
 }

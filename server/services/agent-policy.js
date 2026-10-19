@@ -209,6 +209,12 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     // 任务级 allowlist 保持「未设置表示不额外收窄」语义，与 Skill 级默认拒绝语义相互独立。
     if (allowlist.length && !allowlist.includes(tool.name)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
     const conversationScope = parseRunMetadata(run.metadata).capabilityConstraints;
+    if (conversationScope?.excludeKnowledge === true && tool.capabilities.some(cap => /^knowledge\./.test(cap))) {
+        deny('conversation_knowledge_excluded', '本轮已按用户要求排除知识库检索。');
+    }
+    if (conversationScope?.readOnly === true && (tool.side_effect || tool.approval_required || tool.risk_level >= 4 || !tool.idempotent)) {
+        deny('conversation_readonly_scope', '本轮只读查询不允许写入、非幂等操作或需要审批的工具。');
+    }
     if (conversationScope?.present === true && (!(tool.capabilities || []).length || !tool.capabilities.every(cap => capabilitiesCoverTool(conversationScope.capabilities || [], [cap])))) {
         deny('conversation_capability_scope', '工具超出本次用户委托的能力范围，请补充具体处理要求后再尝试。');
     }

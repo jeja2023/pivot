@@ -19,8 +19,9 @@ const { saveUserMessage } = require('./chat-messages');
 const { buildVisionHistory, limitVisionImages } = require('./chat-vision');
 const { listCachedMcpTools } = require('./mcp-client');
 const { filterMcpToolsByCapability } = require('./capability-market');
-const { capabilitiesCoverTool } = require('./agent-capability-registry');
-const { normalizeToolContract } = require('./agent-contracts');
+const { getCapabilityDecision } = require('./chat-capability-decision');
+const { isAutomaticReadTool } = require('./chat-capability-scope');
+const { resolveResponsePreferences } = require('./agent-response-preferences');
 const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
 const { retrieveWikiContext } = require('./knowledge-wiki');
@@ -130,9 +131,11 @@ async function assembleChatContext({
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
     // 临时语音的本轮文本未落库，必须显式加入请求；也不能进入持久任务上下文和路由审计正文。
     if (state.ephemeralVoice) return require('./chat-voice-context').buildEphemeralVoiceContext(state, history, modelCfg);
+    let agentProfile = null;
     try {
         const { getAgentProfile, buildAgentProfileContext } = require('./agent-profile');
         const profile = await getAgentProfile(userId);
+        agentProfile = profile;
         history = [{ role: 'system', content: buildAgentProfileContext(profile) }, ...history];
     } catch (_) {
         // 档案不可用时继续当前请求；不会把默认偏好写成用户已选择的偏好。
@@ -140,11 +143,16 @@ async function assembleChatContext({
     if (state.intentDecision?.action === 'plan_only') {
         history = [{ role: 'system', content: '本轮用户只要求计划。请交付目标、步骤、依赖、验收方法和阻断信息，不调用工具、不宣称已经执行；不要要求用户选择普通或智能体模式。' }, ...history];
     }
+    if (state.intentDecision?.correction) {
+        history = [{ role: 'system', content: `${state.intentDecision.correction.constraint} 这是本轮用户的明确限制，优先于历史委托与偏好。已有操作无法自动撤销；缺少依据时说明限制，不能虚构执行或检索结果。` }, ...history];
+    }
+    if (state.intentDecision?.capabilityDecisionUnavailable) history = [{ role: 'system', content: '本轮依据与能力判断暂不可用。不得把组织内部事实或当前业务数据当作常识补答；需要这些依据时说明暂不可核实，并保留用户问题。' }, ...history];
+    const capabilityDecision = getCapabilityDecision(state);
     let pendingMemoryUsage = null;
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     // 检索只使用本轮结构化任务状态中的 currentQuestion/retrievalQuery，
     // 不把完整聊天记录直接作为知识库或工具路由查询。完整 history 仅用于最终回答上下文。
-    const effectiveUserPrompt = resolveRagQueryContent(modelContent, history);
+    const effectiveUserPrompt = resolveRagQueryContent(state.intentDecision?.correction?.retrievalQuery || capabilityDecision?.retrievalQuery || modelContent, history);
     const taskState = buildStructuredTaskState({
         prompt: effectiveUserPrompt || modelContent,
         previousState: state.taskState || null,
@@ -152,6 +160,11 @@ async function assembleChatContext({
         routeOverrides: state.routeOverrides || {}
     });
     const baseRetrievalQuery = taskState.retrievalQuery || effectiveUserPrompt || modelContent;
+    if (capabilityDecision) {
+        taskState.toolIntent = { ...taskState.toolIntent, requiresTool: capabilityDecision.tools !== 'none', requestedCapabilities: capabilityDecision.requestedCapabilities,
+            ...(Array.isArray(state.automaticReadCapabilities) ? { automaticReadScope: { capabilities: state.automaticReadCapabilities, sourceMessageId: state.intentDecision?.sourceMessageId || null } } : {}) };
+        if (capabilityDecision.knowledge === 'required') taskState.evidenceNeeds = [...new Set([...taskState.evidenceNeeds, 'knowledge_base'])];
+    }
     const retrievalPlan = buildKnowledgeRetrievalPlan({ question: baseRetrievalQuery, history });
     const retrievalQuery = retrievalPlan.rewrittenQuery || baseRetrievalQuery;
     const memoryQuery = retrievalQuery;
@@ -160,7 +173,7 @@ async function assembleChatContext({
     // 工具目录的可见性、治理与白名单在路由前完成；路由器只能缩小该集合，
     // 永远不能重新引入无权或用户未允许的工具。
     const requestedToolOverrides = Array.isArray(state.routeOverrides?.tools) && state.routeOverrides.tools.length > 0;
-    const toolRoutingRequested = requestedToolOverrides || detectExplicitMcpCapabilityIntent(retrievalQuery);
+    const toolRoutingRequested = state.routeOverrides?.excludeTools !== true && (requestedToolOverrides || (capabilityDecision ? capabilityDecision.tools !== 'none' : detectExplicitMcpCapabilityIntent(retrievalQuery)));
     const explicitRagScope = Boolean(
         state.ragScope?.collectionId
         || (Array.isArray(state.ragScope?.collectionIds) && state.ragScope.collectionIds.length)
@@ -168,17 +181,17 @@ async function assembleChatContext({
         || (Array.isArray(state.ragScope?.tagNames) && state.ragScope.tagNames.length)
         || (Array.isArray(state.routeOverrides?.collections) && state.routeOverrides.collections.length)
     );
-    const ragRoutingRequested = explicitRagScope || requiresKnowledgeRetrieval(retrievalQuery);
+    const ragRoutingRequested = state.routeOverrides?.excludeRag !== true && (explicitRagScope || state.routeOverrides?.forceRag === true
+        || (capabilityDecision && capabilityDecision.knowledge !== 'auto' ? capabilityDecision.knowledge === 'required' : requiresKnowledgeRetrieval(retrievalQuery)));
     let accessibleMcpTools = [];
     if (toolRoutingRequested) {
         try {
             const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
             accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist);
+            if (capabilityDecision?.toolNames?.length) accessibleMcpTools = accessibleMcpTools.filter(tool => capabilityDecision.toolNames.includes(tool.fullName || tool.name));
             if (Array.isArray(state.automaticReadCapabilities)) {
                 accessibleMcpTools = accessibleMcpTools.filter(raw => {
-                    const tool = normalizeToolContract(raw);
-                    return !tool.side_effect && !tool.approval_required && tool.capabilities.length
-                        && tool.capabilities.every(cap => capabilitiesCoverTool(state.automaticReadCapabilities, [cap]));
+                    return isAutomaticReadTool(raw, state.automaticReadCapabilities);
                 });
             }
         } catch (error) {
@@ -238,6 +251,9 @@ async function assembleChatContext({
     }
 
     const shouldClarify = routePlan.execution?.nextStep?.action === 'clarify';
+    if (capabilityDecision?.tools === 'read_only' && !routePlan.execution?.tools?.shouldPlan) {
+        history = [{ role: 'system', content: '本轮需要业务数据，但在当前权限、只读范围和工具状态下未取得可执行的数据来源。不得虚构查询结果；说明需要连接、授权或补充业务来源，保留本轮问题。' }, ...history];
+    }
     if (shouldClarify) {
         try {
             const nextStepDecision = routePlan.decisions?.nextStep;
@@ -304,7 +320,13 @@ async function assembleChatContext({
     if (memoryQuery) {
         try {
             if (memoryResult.status === 'rejected') throw memoryResult.reason;
-            const memoryMatches = memoryResult.value || [];
+            const preferences = resolveResponsePreferences(agentProfile || {}, memoryResult.value || [], { prompt: modelContent });
+            const memoryMatches = preferences.memories;
+            if (agentProfile) {
+                const { buildAgentProfileContext } = require('./agent-profile');
+                history = history.map(message => message.role === 'system' && String(message.content).startsWith('PIVOT_AGENT_PROFILE_BEGIN')
+                    ? { ...message, content: buildAgentProfileContext(preferences.profile) } : message);
+            }
             const memoryMessage = buildLongTermMemoryContextMessage(memoryMatches, {
                 inputBudget: getModelContextBudget(modelCfg).inputBudget
             });
@@ -439,6 +461,7 @@ async function assembleChatContext({
             ? routePlan.execution.tools.candidates
             : accessibleMcpTools;
         chatMcpTools = mcpTools;
+        if (taskState.toolIntent.automaticReadScope) taskState.toolIntent.automaticReadScope.toolNames = mcpTools.map(tool => tool.fullName || tool.name);
         mcpContext = await maybeBuildMcpChatContext({
             modelCfg,
             history: visionHistory,

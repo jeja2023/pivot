@@ -106,13 +106,11 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'decision-review', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const DECISION_REVIEW_LEGACY_TAB_ALIASES = Object.freeze({ 'route-feedback': 'feedback', 'decision-gold-review': 'gold' });
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'decision-review', 'announcements']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
-const SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY = 'pivot_settings_decision_review_subtab';
 
 function normalizeUsageSubtab(subtab) {
     const target = String(subtab || '').trim();
@@ -186,97 +184,18 @@ window.Pivot?.exposeModule?.('settings.usage', {
     getSubtab: getActiveUsageSubtab
 });
 
-function normalizeDecisionReviewSubtab(subtab) {
-    return String(subtab || '').trim() === 'gold' ? 'gold' : 'feedback';
-}
-
-function getDecisionReviewSubtab() {
-    try {
-        return normalizeDecisionReviewSubtab(sessionStorage.getItem(SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY));
-    } catch (_error) {
-        return 'feedback';
-    }
-}
-
-function getActiveDecisionReviewSubtab() {
-    const active = document.querySelector('[data-decision-review-subtab].active');
-    return normalizeDecisionReviewSubtab(active?.dataset.decisionReviewSubtab || getDecisionReviewSubtab());
-}
-
-function persistDecisionReviewSubtab(subtab) {
-    try {
-        sessionStorage.setItem(SETTINGS_DECISION_REVIEW_SUBTAB_STORAGE_KEY, normalizeDecisionReviewSubtab(subtab));
-    } catch (_error) {
-        // 浏览器禁用 sessionStorage 时仅回退到路由复核。
-    }
-}
-
-async function loadDecisionReviewSubtab(subtab, page = 1) {
-    const target = normalizeDecisionReviewSubtab(subtab);
-    if (target === 'gold') return window.Pivot?.moduleApi?.('decision.goldReview')?.loadDecisionGoldReviewQueue?.();
-    return window.Pivot?.moduleApi?.('decision.feedbackReview')?.loadRouteFeedbackReviewQueue?.(page);
-}
-
-const DECISION_REVIEW_SUBTAB_METAS = {
-    feedback: {
-        title: '路由复核',
-        desc: '复核用户对检索、工具和回复方式的路由建议；只有采纳后的建议才会成为训练样本。'
-    },
-    gold: {
-        title: '冻结金标审核',
-        desc: '每个案例必须由两名不同管理员独立选择同一允许动作，才能解除发布阻断并成为可用于训练与发布的金标。系统严格执行双盲机制，不代填结论、不展示前序审核人动作，防止锚定偏差。'
-    }
-};
-
-function switchDecisionReviewSubtab(subtab, options = {}) {
-    const target = normalizeDecisionReviewSubtab(subtab);
-    document.querySelectorAll('[data-decision-review-subtab]').forEach(button => {
-        const active = button.dataset.decisionReviewSubtab === target;
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-selected', active ? 'true' : 'false');
-        button.tabIndex = active ? 0 : -1;
-    });
-    document.querySelectorAll('[data-decision-review-panel]').forEach(panel => {
-        const active = panel.dataset.decisionReviewPanel === target;
-        panel.classList.toggle('hidden', !active);
-        panel.setAttribute('aria-hidden', active ? 'false' : 'true');
-    });
-    const meta = DECISION_REVIEW_SUBTAB_METAS[target];
-    const titleEl = document.getElementById('decision-review-title');
-    const descEl = document.getElementById('decision-review-desc');
-    const badgeEl = document.getElementById('decision-gold-active-version-badge');
-    if (titleEl && meta) titleEl.textContent = meta.title;
-    if (descEl && meta) descEl.textContent = meta.desc;
-    if (badgeEl) badgeEl.classList.toggle('hidden', target !== 'gold');
-    if (!options.skipPersist) persistDecisionReviewSubtab(target);
-    if (!options.skipLoad) {
-        loadDecisionReviewSubtab(target, options.page || 1).catch(error => {
-            showToast(error.message || '决策审核数据加载失败', 'error');
-        });
-    }
-    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
-    setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
-    return target;
-}
-
-window.Pivot?.exposeModule?.('settings.decisionReview', {
-    switchSubtab: switchDecisionReviewSubtab,
-    getSubtab: getActiveDecisionReviewSubtab
-});
-
 function getDefaultSettingsTab() {
     return isAdminUser() ? 'ops' : 'models';
 }
 
 function normalizeSettingsTab(tab) {
     const requested = String(tab || '').trim();
-    const legacyDecisionReviewSubtab = DECISION_REVIEW_LEGACY_TAB_ALIASES[requested];
-    let target = legacyDecisionReviewSubtab ? 'decision-review' : (SETTINGS_TABS.includes(requested) ? requested : getDefaultSettingsTab());
+    const resolved = window.Pivot.moduleApi('settings.quality').resolveTab(requested);
+    let target = SETTINGS_TABS.includes(resolved) ? resolved : getDefaultSettingsTab();
     if (LEGACY_SETTINGS_TAB_ALIASES.has(requested)) {
         target = 'usage';
         persistUsageSubtab(requested);
     }
-    if (legacyDecisionReviewSubtab) persistDecisionReviewSubtab(legacyDecisionReviewSubtab);
     if (SUPER_ADMIN_ONLY_SETTINGS_TABS.has(target) && !isSuperAdminUser()) {
         target = getDefaultSettingsTab();
     }
@@ -291,6 +210,7 @@ const adminFeatureScripts = [
     '/chat/stats.js',
     '/chat/stats-monitor-utils.js',
     '/chat/stats-monitor.js',
+    '/chat/settings-quality.js',
     '/chat/decision-feedback-review.js',
     '/chat/decision-gold-review.js',
     '/chat/admin-settings.js',
@@ -420,7 +340,7 @@ async function openAdminPanel(options = {}) {
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (content) content.scrollTop = 0;
 
-    await window.Pivot.legacy.switchTab(targetTab, { skipDirtyCheck: true });
+    await window.Pivot.legacy.switchTab(targetTab, { skipDirtyCheck: true, subtab: options.subtab });
     if (openSequence !== settingsPanelOpenSequence) return;
 
     if (targetTab !== 'global-params' && window.Pivot.legacy.loadSettings) {
@@ -502,12 +422,7 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         });
         if (options.page) pageState[usageSubtab] = Math.max(parseInt(options.page, 10) || 1, 1);
     }
-    if (tab === 'decision-review') {
-        switchDecisionReviewSubtab(options.subtab || DECISION_REVIEW_LEGACY_TAB_ALIASES[requestedTab] || getDecisionReviewSubtab(), {
-            skipPersist: false,
-            skipLoad: true
-        });
-    }
+    window.Pivot.moduleApi('settings.quality').prepare(tab, options.subtab);
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (content) content.scrollTop = 0;
     window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
@@ -543,14 +458,13 @@ async function loadTabDataInternal(tab, page = 1) {
             if (usageSubtab === 'report' && window.Pivot.legacy.loadReport) await window.Pivot.legacy.loadReport();
         } else {
             pageState[tab] = page;
-            if (tab === 'models' && window.Pivot.legacy.loadModels) await window.Pivot.legacy.loadModels(page);
+            if (tab === 'models') await window.Pivot.moduleApi('settings.quality').load(tab, page);
             if (tab === 'users' && window.Pivot.legacy.loadUsers) {
                 await window.Pivot.legacy.loadUsers(page);
                 setTimeout(() => window.Pivot.legacy.ensureUserRecordButtons?.(), 0);
             }
             if (tab === 'logs' && window.Pivot.legacy.loadLogs) await window.Pivot.legacy.loadLogs(page);
-            if (tab === 'monitor' && window.Pivot.legacy.loadMonitorSummary) await loadMonitorSummary({ propagateErrors: true });
-            if (tab === 'decision-review') await loadDecisionReviewSubtab(getActiveDecisionReviewSubtab(), page);
+            if (tab === 'monitor') await window.Pivot.moduleApi('settings.quality').load(tab, page);
             if (tab === 'usage') {
                 const usageSubtab = getActiveUsageSubtab();
                 if (usageSubtab === 'stats' && window.Pivot.legacy.loadStats) await window.Pivot.legacy.loadStats(pageState.stats || page);

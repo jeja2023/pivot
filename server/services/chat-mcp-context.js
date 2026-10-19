@@ -169,11 +169,15 @@ async function executeChatMcpTool(tool, input, user, options = {}) {
     const executableTool = isLocalBrowserMcpTool(tool) ? { ...tool, source: 'mcp' } : tool;
     const allowLocalBrowser = options.allowLocalBrowser === true && isLocalBrowserMcpTool(executableTool);
     const run = {
-            id: `chat:${user?.id || 'anonymous'}`,
+            // 普通只读请求没有持久运行 ID；真实任务仍按运行账本复核最新约束。
+            id: options.executionScope ? '' : `chat:${user?.id || 'anonymous'}`,
             user_id: user?.id || null,
             goal: '聊天工具调用',
-            tool_policy: 'all',
+            tool_policy: options.executionScope ? 'allowlist' : 'all',
+            ...(options.executionScope ? { tool_allowlist: options.executionScope.toolNames || [] } : {}),
             approval_policy: 'safe_mcp_auto',
+            ...(options.executionScope ? { metadata: { capabilityConstraints: { present: true, readOnly: true, capabilities: options.executionScope.capabilities || [],
+                sourceMessageId: options.executionScope.sourceMessageId, authorizationRef: `user_message:${options.executionScope.sourceMessageId || ''}` } } } : {}),
             network_policy: options.networkPolicy || {}
         };
     let detailed;
@@ -304,7 +308,7 @@ function extractMcpResultText(result, writeSse) {
     return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
 }
 
-async function maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse }) {
+async function maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse, executionScope = null }) {
     const intent = getMcpToolIntent(userPrompt);
     if (!intent.wantsChart || String(selected?.name || '').startsWith('viz.')) return null;
     const rows = extractRowsFromMcpResult(result);
@@ -321,7 +325,7 @@ async function maybeBuildChartAfterDataTool({ selected, result, intentTools, use
         serverName: chartTrace.serverName || '图表生成',
         message: buildMcpTraceMessage(chartTrace.actionName, chartTrace.serverName || '图表生成')
     }));
-    const chartExecution = await executeChatMcpTool(chartTool, chartInput, user, { source: 'chat_auto_chart' });
+    const chartExecution = await executeChatMcpTool(chartTool, chartInput, user, { source: 'chat_auto_chart', executionScope });
     const chartResult = chartExecution.result;
     return compactText(extractMcpResultText(chartResult, writeSse), 12000);
 }
@@ -457,7 +461,7 @@ function buildMcpToolResultContext(lines = []) {
         'PIVOT_MCP_TOOL_RESULT_END'
     ].join('\n');
 }
-async function executeDeterministicMcpFallback({ fallback, intentTools, userPrompt, user, writeSse, log, logLabel = '回退工具调用失败', requireResult = false }) {
+async function executeDeterministicMcpFallback({ fallback, intentTools, userPrompt, user, writeSse, log, logLabel = '回退工具调用失败', requireResult = false, executionScope = null }) {
     if (!fallback?.tool) return null;
     const selectedTool = fallback.tool;
     const fallbackInput = fallback.input || {};
@@ -469,10 +473,10 @@ async function executeDeterministicMcpFallback({ fallback, intentTools, userProm
         message: buildMcpTraceMessage(trace.actionName, trace.serverName, '工具服务', '已自动选择工具库工具')
     }));
     try {
-        const execution = await executeChatMcpTool(selectedTool, fallbackInput, user, { source: 'chat_fallback', allowLocalBrowser: isLocalBrowserMcpTool(selectedTool) && detectBrowserVisitIntent(userPrompt) });
+        const execution = await executeChatMcpTool(selectedTool, fallbackInput, user, { source: 'chat_fallback', executionScope, allowLocalBrowser: isLocalBrowserMcpTool(selectedTool) && detectBrowserVisitIntent(userPrompt) });
         const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
-        const chartText = await maybeBuildChartAfterDataTool({ selected: selectedTool, result, intentTools, userPrompt, user, writeSse });
+        const chartText = await maybeBuildChartAfterDataTool({ selected: selectedTool, result, intentTools, userPrompt, user, writeSse, executionScope });
         if (chartText) {
             resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
         }
@@ -514,7 +518,8 @@ function buildMcpFailureHint(error, stage = 'planning') {
 }
 
 async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, user, writeSse, log, localMcpBridgeDebug = null, signal = null, taskState = null }) {
-    const explicitToolIntent = detectExplicitMcpCapabilityIntent(userPrompt);
+    const executionScope = taskState?.toolIntent?.automaticReadScope || null;
+    const explicitToolIntent = taskState?.toolIntent?.requiresTool === true || detectExplicitMcpCapabilityIntent(userPrompt);
     if (!tools.length) {
         const reason = explicitToolIntent && detectReportFileInventoryIntent(userPrompt)
             ? localBridgeReportMissingReason(tools, user, userPrompt, localMcpBridgeDebug)
@@ -571,7 +576,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             mcpStage = 'execution';
             const context = await executeDeterministicMcpFallback({
                 fallback: earlyBrowserFallback,
-                intentTools,
+                executionScope,
+                    intentTools,
                 userPrompt,
                 user,
                 writeSse,
@@ -587,7 +593,8 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             mcpStage = 'execution';
             const context = await executeDeterministicMcpFallback({
                 fallback: earlyReportFallback,
-                intentTools,
+                executionScope,
+                    intentTools,
                 userPrompt,
                 user,
                 writeSse,
@@ -608,6 +615,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                 mcpStage = 'execution';
                 const context = await executeDeterministicMcpFallback({
                     fallback: reportFallback,
+                    executionScope,
                     intentTools,
                     userPrompt,
                     user,
@@ -623,6 +631,7 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
                     mcpStage = 'execution';
                     const context = await executeDeterministicMcpFallback({
                         fallback: dataFallback,
+                        executionScope,
                         intentTools,
                         userPrompt,
                         user,
@@ -649,10 +658,10 @@ async function maybeBuildMcpChatContext({ modelCfg, history, userPrompt, tools, 
             message: buildMcpTraceMessage(trace.actionName, trace.serverName)
         }));
         mcpStage = 'execution';
-        const execution = await executeChatMcpTool(selected, plan.input || {}, user, { source: 'chat', allowLocalBrowser: isLocalBrowserMcpTool(selected) && detectBrowserVisitIntent(userPrompt) });
+        const execution = await executeChatMcpTool(selected, plan.input || {}, user, { source: 'chat', executionScope, allowLocalBrowser: isLocalBrowserMcpTool(selected) && detectBrowserVisitIntent(userPrompt) });
         const result = execution.result;
         let resultText = compactText(extractMcpResultText(result, writeSse), 18000);
-        const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse });
+        const chartText = await maybeBuildChartAfterDataTool({ selected, result, intentTools, userPrompt, user, writeSse, executionScope });
         if (chartText) {
             resultText = `${resultText}\n\n附加图表结果：\n${chartText}`;
         }

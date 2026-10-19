@@ -226,7 +226,7 @@ const {
             }
         }
 
-        const runtimeMetadata = getRunMetadata(run);
+        let runtimeMetadata = getRunMetadata(run);
         const {
             longTermMemoryContext,
             recordActualMemoryUsage,
@@ -238,6 +238,7 @@ const {
             contextConfig: parseJsonObject(run.context_config) || {},
             logger
         });
+        runtimeMetadata = getRunMetadata(run);
         let plannerChatHistory = Array.isArray(runtimeMetadata.chatHistory) ? runtimeMetadata.chatHistory : [];
         let plannerCurrentMessage = runtimeMetadata.chatBridge?.currentMessage || null;
         if (runtimeMetadata.chatBridge && run.session_id && user?.id) {

@@ -7,28 +7,21 @@ const test = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../client/chat/engine-streaming.js'), 'utf8');
 const settingsShell = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/shell-start.html'), 'utf8');
-const decisionReviewHtml = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/decision-review.html'), 'utf8');
+const monitorHtml = fs.readFileSync(path.join(__dirname, '../client/chat/partials/settings/monitor.html'), 'utf8');
 const reviewQueueSource = fs.readFileSync(path.join(__dirname, '../client/chat/decision-feedback-review.js'), 'utf8');
 
-test('路由建议以对话内选择面板提交，需显式选择替代路径，且不依赖原生 prompt 或用户输入内部动作 ID', () => {
-    assert.match(source, /function showRouteFeedbackForm\(/);
-    assert.match(source, /chat-route-feedback-form/);
-    assert.match(source, /routeFeedbackActionLabel/);
-    assert.match(source, /请选择建议路由/);
-    assert.match(source, /ROUTE_FEEDBACK_REASON_LABELS/);
-    assert.match(source, /不会重跑或改变本次对话/);
-    assert.match(source, /decision-feedback/);
-    assert.doesNotMatch(source, /window\.prompt\(`请输入“序号:动作ID”提交路由修正/);
+test('普通用户通过对话纠正，不再渲染路由建议表单或提交内部动作 ID', () => {
+    assert.doesNotMatch(source, /showRouteFeedbackForm|chat-route-feedback-form|提交路由建议|decision_feedback/);
+    assert.doesNotMatch(source, /\/decision-feedback/);
+    assert.match(source, /function renderAssistantRouteMetadata/);
+    assert.match(reviewQueueSource, /'chat.execution': '任务执行与续接'/);
 });
 
-test('路由复核归入单一决策审核入口，仍保留独立的子页签与侧边栏标签样式', () => {
-    assert.match(settingsShell, /id="tab-decision-review"[^>]*class="admin-tab admin-only hidden"/);
-    assert.match(settingsShell, /id="tab-decision-review"[^>]*>决策审核<\/button>/);
-    assert.doesNotMatch(settingsShell, /id="tab-decision-review"[^>]*btn-secondary/);
+test('异常复核并入系统监控的对话质量，不再设置独立侧边栏入口', () => {
+    assert.doesNotMatch(settingsShell, /id="tab-decision-review"/);
     assert.doesNotMatch(settingsShell, /id="tab-route-feedback"/);
-    assert.match(decisionReviewHtml, /data-decision-review-subtab="feedback"/);
-    assert.match(decisionReviewHtml, />路由复核<\/button>/);
-    assert.match(decisionReviewHtml, /data-decision-review-subtab="gold"/);
+    assert.match(monitorHtml, /data-quality-section="quality">对话质量<\/button>/);
+    assert.match(monitorHtml, /partials\/settings\/route-feedback.html/);
     assert.match(reviewQueueSource, /decision-review-feedback-panel/);
 });
 

@@ -10,6 +10,7 @@ function createRunPreparation(deps = {}) {
         if (runtimeMetadata.capabilityConstraints?.present === true) {
             toolList = toolList.filter(tool => (tool.capabilities || []).length && tool.capabilities.every(cap => capabilitiesCoverTool(runtimeMetadata.capabilityConstraints.capabilities || [], [cap])));
         }
+        if (runtimeMetadata.capabilityConstraints?.excludeKnowledge === true) toolList = toolList.filter(tool => !(tool.capabilities || []).some(cap => /^knowledge\./.test(cap)));
         try {
             const reliability = await listToolReliability(user, { days: 30, persist: false });
             toolList = selectToolOrder(toolList, reliability.signals);

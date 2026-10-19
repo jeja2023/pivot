@@ -67,7 +67,7 @@ const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { createChatAgentHandoff } = require('../../services/chat-agent-handoff');
 const { beginChatTurn } = require('../../services/chat-turn-ledger');
 const conversationTurns = require('../../repositories/chat-conversation-turns');
-const { decideAutomaticChatExecution, handleAutomaticTaskControl } = require('../../services/chat-auto-execution-handler');
+const { decideAutomaticChatExecution, handleAutomaticTaskControl, applyAutomaticExecutionDecision } = require('../../services/chat-auto-execution-handler');
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
 const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
@@ -359,7 +359,7 @@ function createChatRouter({
         automaticExecution.projectId = chatState.projectId;
         automaticExecution.modelId = modelCfg.id;
         await conversationTurns.updateTurn(conversationTurn, { decision: automaticExecution });
-        chatState.intentDecision = automaticExecution;
+        ({ mcpEnabled, ragEnabled } = applyAutomaticExecutionDecision(chatState, automaticExecution));
         if (automaticExecution.action === 'agent_run') {
             writeSse(JSON.stringify({
                 type: 'route',
@@ -398,9 +398,6 @@ function createChatRouter({
             chatState.mcpEnabled = mcpEnabled = false;
             chatState.ragEnabled = ragEnabled = false;
             chatState.routeOverrides = { ...chatState.routeOverrides, excludeTools: true, excludeRag: true };
-        } else if (automaticExecution.action === 'direct_answer' && automaticExecution.reasonCode === 'semantic_intent' && automaticExecution.requiredCapabilities?.some(cap => /^(?:data\.|network\.)/.test(cap))) {
-            chatState.mcpEnabled = mcpEnabled = true;
-            chatState.automaticReadCapabilities = automaticExecution.requiredCapabilities;
         }
         const audit = continuationKind === 'mcp_authorized'
             ? { action: '工具授权后继续处理', detail: `用户授权工具库后继续处理会话: ${sessionId}` }

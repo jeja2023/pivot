@@ -98,7 +98,7 @@ function serializeOutcome(value = {}) {
         : 'runtime';
     const verifiedActionId = normalizeActionId(value.verifiedActionId);
     const isVerified = eventType === 'verification'
-        && ['user', 'admin', 'system'].includes(source)
+        && ['admin', 'system'].includes(source)
         && Boolean(verifiedActionId);
     return {
         id: safeText(value.id, 128) || 'outcome_' + crypto.randomUUID(),
@@ -157,7 +157,14 @@ function candidateAllowsVerifiedAction(candidateActions, actionId) {
     return Array.isArray(candidates) && candidates.some(candidate => candidate?.allowed !== false && normalizeActionId(candidate?.id) === actionId);
 }
 
-const OWNED_DECISION_SQL = 'SELECT decision_id, user_id, session_id, candidate_actions, selected_action_id FROM decision_records WHERE decision_id = ?';
+const OWNED_DECISION_SQL = 'SELECT decision_id, scenario, user_id, session_id, candidate_actions, selected_action_id FROM decision_records WHERE decision_id = ?';
+
+const CORRECTION_CONTEXT_SQL = [
+    'SELECT o.decision_id, o.event_type, o.status, o.verified_action_id, o.is_verified, o.metadata, o.result_reference, o.reason_code, o.occurred_at',
+    'FROM decision_outcomes o JOIN decision_records d ON d.decision_id = o.decision_id',
+    'WHERE d.user_id = ? AND d.session_id = ? AND d.scenario = ? AND o.occurred_at >= CURRENT_TIMESTAMP - INTERVAL \'7 days\'',
+    'ORDER BY o.occurred_at DESC LIMIT 200'
+].join(' ');
 
 const USER_FEEDBACK_REASON_CODES = new Set([
     'intent_mismatch',
@@ -243,6 +250,21 @@ async function recordUserDecisionFeedback(value = {}, deps = {}) {
     if (!row || Number(row.user_id) !== userId || String(row.session_id || '') !== sessionId
         || normalizeActionId(row.selected_action_id) === correctedActionId
         || !candidateAllowsVerifiedAction(row.candidate_actions, correctedActionId)) return null;
+    let reviewStatus = 'pending';
+    let naturalMetadata = {};
+    if (value.naturalCorrection) {
+        const recent = await (deps.query || query)(CORRECTION_CONTEXT_SQL, [userId, sessionId, row.scenario]);
+        const current = (recent || []).filter(item => item.decision_id === decisionId && item.event_type !== 'feedback');
+        const conflict = current.some(item => item.is_verified && item.verified_action_id !== correctedActionId);
+        const repeated = new Set((recent || []).filter(item => item.event_type === 'feedback').map(item => item.decision_id)).size >= 2;
+        const reasons = [
+            ...(['agent_run', 'continue_run'].includes(row.selected_action_id) ? ['execution_scope'] : []),
+            ...(conflict ? ['evidence_conflict'] : []), ...(repeated ? ['repeated_correction'] : [])
+        ];
+        reviewStatus = reasons.length ? 'pending' : 'not_required';
+        naturalMetadata = { naturalCorrection: safeJson(value.naturalCorrection), reviewReasons: reasons,
+            executionEvidence: current.slice(0, 8).map(item => ({ type: item.event_type, status: item.status, reference: item.result_reference, reason: item.reason_code, occurredAt: item.occurred_at })) };
+    }
     const outcome = serializeOutcome({
         decisionId,
         eventType: 'feedback',
@@ -255,23 +277,32 @@ async function recordUserDecisionFeedback(value = {}, deps = {}) {
         resultReference: sessionId,
         metadata: {
             feedbackReason: normalizeFeedbackReason(value.reason),
-            note: safeText(value.note, 500)
+            note: redactRoutingText(safeText(value.note, 500)),
+            ...naturalMetadata
         }
     });
     if (!outcome) return null;
-    if (deps.persist === false) return { ...outcome, reviewStatus: 'pending' };
+    if (deps.persist === false) return { ...outcome, reviewStatus };
 
     // 用户提交属于可审核操作，需同步落库；同一决策只保留一条待核验建议，避免重试产生矛盾标签。
-    const persisted = await (deps.queryOne || queryOne)(UPSERT_USER_FEEDBACK_SQL, outcomeSqlParams(outcome, 'pending'));
+    // 保留每次纠正的不可变事件；同一决策的待复核项呈现最新建议。
+    if (value.naturalCorrection) {
+        outcome.id = `correction_${crypto.createHash('sha256').update(`${decisionId}:${userId}:${value.naturalCorrection.sourceMessageId}`).digest('hex').slice(0, 48)}`;
+        recordDecisionOutcome({ ...outcome, id: `evidence_${outcome.id}`, eventType: 'execution', source: 'user', verifiedActionId: '',
+            reasonCode: 'natural_user_correction', resultReference: `message:${value.naturalCorrection.sourceMessageId}` });
+    }
+    const persisted = await (deps.queryOne || queryOne)(value.naturalCorrection && reviewStatus === 'not_required'
+        ? INSERT_OUTCOME_SQL.replace('ON CONFLICT (id) DO NOTHING', 'ON CONFLICT DO NOTHING RETURNING id, review_status')
+        : UPSERT_USER_FEEDBACK_SQL, outcomeSqlParams(outcome, reviewStatus));
     return {
         ...outcome,
         id: safeText(persisted?.id, 128) || outcome.id,
-        reviewStatus: safeText(persisted?.review_status, 24) || 'pending'
+        reviewStatus: safeText(persisted?.review_status, 24) || reviewStatus
     };
 }
 
 async function listUserDecisionFeedback({ reviewStatus = 'pending', limit = 50 } = {}, deps = {}) {
-    const status = ['pending', 'accepted', 'rejected', 'superseded'].includes(String(reviewStatus || '').trim().toLowerCase())
+    const status = ['pending', 'accepted', 'rejected', 'superseded', 'not_required'].includes(String(reviewStatus || '').trim().toLowerCase())
         ? String(reviewStatus).trim().toLowerCase()
         : 'pending';
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 50, 200));
@@ -393,7 +424,7 @@ async function listVerifiedDecisionSamples({ scenario = '', tenantId = null, lim
     const queryFn = deps.query || query;
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 1000, 10000));
     const params = [];
-    const filters = ['o.is_verified = TRUE'];
+    const filters = ['o.is_verified = TRUE', "o.source IN ('admin', 'system')"];
     if (safeText(scenario, 80)) {
         filters.push('d.scenario = ?');
         params.push(safeText(scenario, 80));

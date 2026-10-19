@@ -1906,48 +1906,6 @@ body.dark-mode .settings-workspace-view .memories-table td,
 }
 
 /* 决策审核：共用入口，子页保留各自独立的审核语义与数据状态。 */
-.decision-review-tab {
-    min-height: 0;
-}
-.decision-review-page-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding-bottom: 14px;
-    margin-bottom: 18px !important;
-    border-bottom: 1px solid var(--border);
-}
-.decision-review-head-actions {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
-    flex-wrap: wrap;
-    flex: 0 0 auto;
-}
-.decision-review-title-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-}
-.decision-review-title-wrap h3 {
-    margin: 0 !important;
-    font-size: 1.08rem;
-    font-weight: 700;
-    line-height: 1.25;
-}
-#decision-review-desc {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 0.76rem;
-    line-height: 1.45;
-}
-.decision-review-pane > .settings-page-head {
-    margin-bottom: 8px !important;
-}
-
 /* 路由反馈核验：保持审核上下文可扫读，操作不依赖颜色。 */
 .route-feedback-filter-bar {
     flex: 0 0 auto;
@@ -2423,10 +2381,6 @@ body.dark-mode .route-feedback-query-card,
     border-color: color-mix(in srgb, var(--primary, #2563eb) 28%, transparent);
 }
 @media (max-width: 760px) {
-    .settings-workspace-view .decision-review-page-head { align-items: stretch; flex-direction: column; }
-    .decision-review-head-actions { width: 100%; }
-    .decision-review-subtabs { align-self: stretch; width: 100%; }
-    .decision-review-subtab { flex: 1 1 0; }
     .route-feedback-filter-bar { flex-direction: column; align-items: stretch; }
     .route-feedback-filter-bar .filter-actions { justify-content: flex-end; }
     .route-feedback-filter { flex: 1 1 auto; }

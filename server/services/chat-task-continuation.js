@@ -11,7 +11,7 @@ const parseConversationRunMetadata = value => typeof value === 'string' ? JSON.p
 async function getConversationTasks(sessionId, userId) {
     return (await turns.listSessionTasks(sessionId, userId)).map(run => {
         const metadata = parseConversationRunMetadata(run.metadata);
-        return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE.has(run.status), constraints: metadata.taskContract?.constraints || [] };
+        return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE.has(run.status), constraints: metadata.taskContract?.constraints || [], decisionId: metadata.automaticExecution?.decisionId || null };
     });
 }
 

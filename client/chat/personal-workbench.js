@@ -211,9 +211,6 @@
         const open = window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'workbench', subview: 'governance' });
         return Promise.resolve(open).then(() => {
             document.querySelector(`[data-agent-harness-nav="${CSS.escape(section)}"]`)?.click();
-            if (section === 'profile' && state.dashboard?.assistant?.profileReady !== true) {
-                document.getElementById('agent-profile-wizard')?.click();
-            }
         });
     }
 
@@ -224,11 +221,11 @@
         const items = [
             {
                 action: 'open-assistant-profile',
-                title: assistant.profileReady ? (assistant.displayName ? `助手档案：${assistant.displayName}` : '助手档案已配置') : '完成 3 分钟助手设置',
-                meta: assistant.profileReady ? `档案版本 ${Number(assistant.profileVersion || 1)} · 可随时修改表达偏好和常见任务` : '设置称呼、表达偏好和常见工作，让助手更贴合你',
+                title: assistant.displayName ? `个人偏好：${assistant.displayName}` : '个人偏好',
+                meta: '无需预先配置即可使用；可随时修改称呼、表达偏好和常见任务',
                 icon: ICONS.sparkle,
-                status: assistant.profileReady ? '已配置' : '待设置',
-                statusClass: assistant.profileReady ? 'status-active' : 'status-warning'
+                status: '按需管理',
+                statusClass: 'status-active'
             },
             {
                 action: 'open-assistant-memory',
@@ -404,7 +401,6 @@
         renderAssistant(dashboard.assistant);
         renderRecentWork(dashboard.recentWork);
         renderShortcuts(dashboard.shortcuts);
-        window.Pivot?.moduleApi?.('personal.agentOnboarding')?.maybeShow?.(dashboard.assistant).catch?.(() => {});
     }
 
     async function loadPersonalWorkbench({ silent = false } = {}) {
@@ -669,7 +665,6 @@
                 return openShortcut('chat');
             }
             if (action === 'quick-chat') return openQuickTask('chat');
-            if (action === 'resume-onboarding') return window.Pivot.moduleApi?.('personal.agentOnboarding')?.open?.();
             if (action === 'open-knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');

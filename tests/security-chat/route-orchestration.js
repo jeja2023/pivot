@@ -342,7 +342,9 @@ test('普通聊天中的明确委托会自动创建受控 Agent，探索性问�
         assert.equal(handoff?.executionReason, 'semantic_intent');
         assert.equal(capturedRun?.chatAgent, true);
         assert.equal(capturedRun?.metadata?.automaticExecution?.source, 'chat_auto_execution');
-        assert.equal(capturedRun?.toolPolicy, 'builtin_only');
+        assert.equal(capturedRun?.toolPolicy, 'all');
+        assert.ok(capturedRun?.metadata?.capabilityConstraints?.capabilities.includes('data.query'));
+        assert.equal(capturedRun?.metadata?.capabilityConstraints?.capabilities.includes('filesystem.write_workspace'), false);
     } finally {
         await routeServer.close();
         await upstream.close();

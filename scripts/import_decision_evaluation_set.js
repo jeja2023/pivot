@@ -2,15 +2,16 @@
 
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
-const { importFrozenDecisionEvaluationSet } = require('../server/services/decision-evaluation-reviews');
+const { importFrozenDecisionEvaluationSet, loadFrozenDecisionEvaluationSet } = require('../server/services/decision-evaluation-reviews');
 
 const userId = Number.parseInt(process.argv[2], 10);
 if (!Number.isSafeInteger(userId) || userId <= 0) {
-    console.error('用法：node scripts/import_decision_evaluation_set.js <管理员用户ID>');
+    console.error('用法：node scripts/import_decision_evaluation_set.js <管理员用户ID> [评测集 JSON 文件路径]');
     process.exit(1);
 }
 
-importFrozenDecisionEvaluationSet({ userId })
+const source = process.argv[3] ? loadFrozenDecisionEvaluationSet({ path: path.resolve(process.argv[3]) }) : null;
+importFrozenDecisionEvaluationSet({ userId, source })
     .then(result => {
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
         process.exit(0);

@@ -1,7 +1,16 @@
 <section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
+    <div class="settings-page-head">
+        <div><h3>系统监控</h3><p>查看运行状态与对话质量，按需处理异常。</p></div>
+        <div class="settings-subnav" role="tablist" aria-label="系统监控分区">
+            <button id="monitor-overview-tab" type="button" class="settings-subtab active" role="tab" aria-controls="monitor-overview-panel" aria-selected="true" tabindex="0" data-quality-tab="monitor" data-quality-section="overview">运行概览</button>
+            <button id="monitor-quality-tab" type="button" class="settings-subtab" role="tab" aria-controls="decision-review-feedback-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="quality">对话质量</button>
+        </div>
+    </div>
+<section id="monitor-overview-panel" role="tabpanel" aria-labelledby="monitor-overview-tab" data-quality-panels="monitor" data-quality-panel="overview">
+
                         <div class="settings-page-head">
                             <div>
-                                <h3>系统监控</h3>
+                                <h4>运行概览</h4>
                                 <p>实时查看服务健康、资源占用、并发保护与模型消耗。</p>
                             </div>
                             <div class="monitor-toolbar">
@@ -63,3 +72,10 @@
                             </div>
                         </div>
                     </section>
+<section id="decision-review-feedback-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-quality-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="quality">
+    <div class="settings-page-head">
+        <div><h3>对话质量异常处理</h3><p>集中处理执行范围、反复误判及证据冲突；常规纠正自动归档。复核不改变当前任务，不直接发布全局策略。</p></div>
+    </div>
+<!-- @include partials/settings/route-feedback.html -->
+</section>
+</section>

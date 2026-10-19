@@ -6,16 +6,16 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 
-test('personal Agent first-use journey is backed by an editable profile and privacy-bounded events', () => {
-    const client = read('client/chat/personal-agent-onboarding.js');
+test('个人助手直接可用，档案可选管理，不自动弹出首次设置', () => {
+    const client = read('client/chat/personal-workbench.js');
     const partial = read('client/chat/partials/workspaces/personal.html');
     const routes = read('server/routes/agent-control-plane.js');
     const service = read('server/services/agent-experience-events.js');
-    assert.match(partial, /id="personal-agent-onboarding"/);
+    assert.doesNotMatch(partial, /id="personal-agent-onboarding"/);
     assert.match(partial, /id="personal-quick-task-form"/);
     assert.match(partial, /type="submit">交给 Agent/);
-    assert.match(client, /\/agents\/profile/);
-    assert.match(client, /onboarding_completed/);
+    assert.doesNotMatch(client, /agentOnboarding|resume-onboarding|完成 3 分钟/);
+    assert.match(client, /无需预先配置即可使用/);
     assert.match(routes, /\/agents\/experience\/events/);
     assert.match(service, /SAFE_METADATA_KEYS/);
     assert.doesNotMatch(service, /metadata\.(prompt|content|attachment)/i);

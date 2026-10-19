@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { readTypedEnv } = require('../config/env-registry');
 const { createDecisionId, createHttpDecisionProvider, createLinearDecisionProvider, createScoreDecisionProvider, createStructuredModelDecisionProvider, evaluateDecisionProviders, sanitizeDecisionContext } = require('./decision-provider');
 const { computeDecisionModelHash, loadLocalLinearDecisionModel } = require('./decision-light-model');
-const { artifactScopeAllowsTenant, getActiveDecisionModelArtifact, isDecisionModelArtifactActive } = require('./decision-model-registry');
+const { artifactScopeAllowsTenant, getActiveDecisionModelArtifact, isDecisionModelArtifactActive, hasApprovedFrozenEvaluation } = require('./decision-model-registry');
 const { getDecisionPreference } = require('./decision-preferences');
 const { getActiveDecisionPolicyArtifact } = require('./decision-policy-registry');
 const { callModelText } = require('./agent-model');
@@ -105,7 +105,7 @@ async function withDecisionTimeout(work, timeoutMs) {
     }
 }
 
-async function resolvePolicyArtifactConfiguration(config = {}, deps = {}) {
+async function resolvePolicyArtifactConfiguration(config = {}, deps = {}, scenario = '') {
     const fallback = {
         version: config.version,
         autoThreshold: config.autoThreshold,
@@ -119,12 +119,14 @@ async function resolvePolicyArtifactConfiguration(config = {}, deps = {}) {
         // 下一轮决策就生效，而不是等 30 秒 TTL。
         const artifact = await withDecisionTimeout((deps.getActiveDecisionPolicyArtifact || getActiveDecisionPolicyArtifact)({ ...deps, fresh: config.mode === 'active' }), config.artifactTimeoutMs);
         if (!artifact?.policyConfig) return { ...fallback, artifactId: '', artifactStatus: 'unavailable', activeEligible: false };
+        const scenarioApproved = config.mode !== 'active' || scenario !== 'chat.execution'
+            || await withDecisionTimeout((deps.hasApprovedFrozenEvaluation || hasApprovedFrozenEvaluation)(artifact, { ...deps, requiredScenario: scenario }), config.artifactTimeoutMs);
         return {
             ...fallback,
             ...artifact.policyConfig,
             artifactId: String(artifact.id || ''),
-            artifactStatus: 'active',
-            activeEligible: true
+            artifactStatus: scenarioApproved ? 'active' : 'execution_evaluation_required',
+            activeEligible: scenarioApproved
         };
     } catch (_) {
         return { ...fallback, artifactId: '', artifactStatus: 'unavailable', activeEligible: false };
@@ -335,7 +337,7 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
             weight: config.laya.weight
         });
     }
-    const policyParameters = await resolvePolicyArtifactConfiguration(config, deps);
+    const policyParameters = await resolvePolicyArtifactConfiguration(config, deps, scenario);
     const requestedActive = isDecisionActiveForScope({ config, scenario, tenantId, sessionId, userId, decisionId });
     const policyMode = config.mode === 'disabled'
         ? 'disabled'

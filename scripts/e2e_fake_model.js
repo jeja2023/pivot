@@ -25,7 +25,11 @@ const server = http.createServer((req, res) => {
             let content = '真实 E2E 回答';
             if (payload.messages?.some(message => String(message.content || '').includes('你是对话下一步决策器'))) {
                 const request = JSON.parse(payload.messages.find(message => message.role === 'user').content);
-                content = JSON.stringify({ action: 'agent_run', intent: 'delegate', objective: request.prompt, constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.9 });
+                const delegated = /汇总.*订单|分析.*附件|修改.*代码|生成.*风险报告/.test(request.prompt);
+                content = JSON.stringify({ action: delegated ? 'agent_run' : 'direct_answer', intent: delegated ? 'delegate' : 'answer', objective: request.prompt,
+                    constraints: [], deliverables: delegated ? ['风险报告'] : [], requiredCapabilities: delegated ? ['data.query','document.render'] : [],
+                    routing: { knowledge: /公司.*婚假|知识库/.test(request.prompt) ? 'required' : 'none', tools: delegated ? 'task' : 'none', retrievalQuery: request.prompt },
+                    missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.9 });
             }
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({

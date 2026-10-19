@@ -351,14 +351,7 @@
 .personal-hero-actions, .personal-hero-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .personal-hero-actions .btn-primary { background: var(--surface); color: var(--primary); border-color: var(--surface); }
 .personal-hero-examples button { border: 0; border-radius: 999px; padding: 3px 8px; color: inherit; background: var(--hero-chip-bg, rgba(255, 255, 255, 0.16)); cursor: pointer; font-size: .68rem; }
-.personal-onboarding-modal { z-index: 2150; }
-.personal-onboarding-dialog { width: min(560px, calc(100vw - 28px)); }
-.personal-onboarding-head { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
-.personal-onboarding-head h3 { margin: 0; }.personal-onboarding-head p { margin: 6px 0 0; color: var(--text-muted); font-size: .85rem; }
-.personal-onboarding-progress { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 20px 0; }
-.personal-onboarding-progress span { display:grid; place-items:center; height:24px; border-radius:999px; background:var(--bg-hover); color:var(--text-muted); font-size:.75rem; }.personal-onboarding-progress span.active { background:var(--primary); color:#fff; }
-.personal-onboarding-step { min-height: 160px; }.personal-onboarding-step h4 { margin: 0 0 14px; }.personal-onboarding-step label { display:block; margin: 12px 0; color:var(--text-muted); font-size:.82rem; }.personal-onboarding-step .form-input { display:block; width:100%; box-sizing:border-box; margin-top:5px; }.personal-onboarding-step p { color:var(--text-muted); font-size:.8rem; }.personal-onboarding-check { color:var(--text-main)!important; }.personal-onboarding-check input { margin-right:8px; }
-.personal-onboarding-actions { display:flex; justify-content:space-between; gap:8px; margin-top:16px; }
+
 
 /* 2 列工作台卡片栅格 */
 .personal-workbench-grid {

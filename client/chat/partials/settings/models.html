@@ -1,5 +1,15 @@
 <!-- 模型管理 -->
-                    <div id="tab-content-models" class="admin-tab-content hidden">
+
+
+<div id="tab-content-models" class="admin-tab-content hidden">
+    <div class="settings-page-head">
+        <div><h3>模型与评测</h3><p>管理模型服务，并以独立评测约束模型与策略发布。</p></div>
+        <div class="settings-subnav" role="tablist" aria-label="模型管理分区">
+            <button id="models-configuration-tab" type="button" class="settings-subtab active" role="tab" aria-controls="models-configuration-panel" aria-selected="true" tabindex="0" data-quality-tab="models" data-quality-section="configuration">模型配置</button>
+            <button id="models-evaluation-tab" type="button" class="settings-subtab admin-only hidden" role="tab" aria-controls="decision-review-gold-panel" aria-selected="false" tabindex="-1" data-quality-tab="models" data-quality-section="evaluation">评测管理</button>
+        </div>
+    </div>
+<section id="models-configuration-panel" role="tabpanel" aria-labelledby="models-configuration-tab" data-quality-panels="models" data-quality-panel="configuration">
                         <div class="settings-page-head">
                             <div>
                                 <h3>模型配置</h3>
@@ -52,4 +62,14 @@
                             </table>
                         </div>
                         <div id="pagination-models" class="pagination"></div>
-                    </div>
+                    </section>
+<section id="decision-review-gold-panel" class="decision-gold-review-tab hidden" role="tabpanel" aria-labelledby="models-evaluation-tab" aria-hidden="true" data-quality-panels="models" data-quality-panel="evaluation">
+    <div class="settings-page-head">
+        <div>
+            <h3>冻结评测与金标审核 <span class="decision-gold-version-pill" id="decision-gold-active-version-badge" title="当前冻结评测集版本">v2</span></h3>
+            <p>每个案例须由两名不同管理员独立得出一致结论。未经审核或存在分歧的案例继续阻断发布；本页不会自动激活模型或策略。</p>
+        </div>
+    </div>
+<!-- @include partials/settings/decision-gold-review.html -->
+</section>
+</div>

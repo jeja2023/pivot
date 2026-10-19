@@ -95,6 +95,7 @@ function serializeProfile(row, userId) {
         userId: Number(row?.user_id || userId),
         version: Number(row?.version || PROFILE_SETTING_VERSION),
         fieldVersions: parseJson(row?.field_versions, {}),
+        communicationStyleUpdatedAt: row?.communication_style_updated_at || null,
         ...profile,
         createdAt: row?.created_at || null,
         updatedAt: row?.updated_at || null
@@ -106,7 +107,10 @@ async function getAgentProfile(userId) {
     if (!Number.isSafeInteger(normalizedUserId) || normalizedUserId <= 0) {
         return { userId: normalizedUserId || null, version: PROFILE_SETTING_VERSION, ...normalizeAgentProfile({}) };
     }
-    const row = await queryOne('SELECT user_id, profile_json, field_versions, version, created_at, updated_at FROM agent_profiles WHERE user_id = ?', [normalizedUserId]);
+    const row = await queryOne(`SELECT p.user_id, p.profile_json, p.field_versions, p.version, p.created_at, p.updated_at,
+        (SELECT MAX(v.created_at) FROM agent_profile_versions v WHERE v.user_id = p.user_id
+            AND jsonb_exists(v.changed_fields, 'communicationStyle')) AS communication_style_updated_at
+        FROM agent_profiles p WHERE p.user_id = ?`, [normalizedUserId]);
     if (!row) {
         const now = getBeijingTimestamp();
         const profile = normalizeAgentProfile({});
@@ -230,7 +234,7 @@ function buildAgentProfileContext(profileValue) {
     if (profile.frequentTools.length) lines.push(`常用工具：${profile.frequentTools.join('、')}`);
     if (profile.commonTasks.length) lines.push(`常见任务：${profile.commonTasks.join('、')}`);
     lines.push(`沟通风格：语言=${profile.communicationStyle.language}，语气=${profile.communicationStyle.tone}，详略=${profile.communicationStyle.verbosity}，格式=${profile.communicationStyle.format}`);
-    lines.push('以上仅是用户已保存的偏好，不能覆盖本次明确指令或安全策略。');
+    lines.push('档案提供默认偏好；本轮明确要求优先，其次为当前会话和项目范围的明确偏好。同一范围采用最新明确设置，不能把偏好用于授权或覆盖安全策略。');
     lines.push('PIVOT_AGENT_PROFILE_END');
     return lines.join('\n');
 }

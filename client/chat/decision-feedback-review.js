@@ -3,7 +3,8 @@
     const SCENARIO_LABELS = {
         'chat.rag': '知识库检索',
         'chat.tools': '工具调用',
-        'chat.next_step': '回复方式'
+        'chat.next_step': '回复方式',
+        'chat.execution': '任务执行与续接'
     };
     const ACTION_LABELS = {
         retrieve: '检索知识库',
@@ -11,20 +12,27 @@
         propose: '规划工具调用',
         candidate_only: '等待工具授权',
         direct_answer: '直接回答',
-        clarify: '请求补充信息'
+        clarify: '请求补充信息',
+        plan_only: '只提供方案',
+        agent_run: '启动任务',
+        continue_run: '续接当前任务'
     };
     const REASON_LABELS = {
         intent_mismatch: '误判任务意图',
         missing_evidence: '缺少必要依据',
         tool_not_suitable: '工具或检索不适用',
         preference_mismatch: '不符合使用偏好',
-        other: '其他原因'
+        other: '其他原因',
+        execution_scope: '任务执行范围纠正',
+        evidence_conflict: '纠正与已有核验证据冲突',
+        repeated_correction: '同类路由反复纠正'
     };
     const REVIEW_STATUS_LABELS = {
         pending: '待复核',
         accepted: '已采纳',
         rejected: '未采纳',
-        superseded: '已替换'
+        superseded: '已替换',
+        not_required: '自动归档'
     };
 
     const feedbackState = {
@@ -76,7 +84,7 @@
             const cell = document.createElement('td');
             cell.colSpan = 10;
             cell.className = 'text-center route-feedback-empty';
-            cell.textContent = reviewStatus === 'pending' ? '暂无待复核的路由建议。' : '暂无符合筛选条件的路由建议。';
+            cell.textContent = reviewStatus === 'pending' ? '暂无待复核的路由异常。' : '暂无符合筛选条件的路由记录。';
             row.appendChild(cell);
             fragment.appendChild(row);
         } else {
@@ -153,7 +161,7 @@
 
                 const reasonCell = document.createElement('td');
                 reasonCell.className = 'route-feedback-reason';
-                const reasonText = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
+                const reasonText = (metadata.reviewReasons || []).map(reason => label(REASON_LABELS, reason)).join('、') || label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
                 const note = String(metadata.note || '').trim();
                 const reasonStrong = document.createElement('strong');
                 reasonStrong.textContent = reasonText;
@@ -206,7 +214,7 @@
                     } else {
                         const reviewedSpan = document.createElement('span');
                         reviewedSpan.className = 'route-feedback-reviewed-time';
-                        reviewedSpan.textContent = '已复核';
+                        reviewedSpan.textContent = normalizedStatus === 'not_required' ? '无需逐条复核' : '已复核';
                         actionCell.appendChild(reviewedSpan);
                     }
                 }
@@ -290,6 +298,9 @@
         const correctedActionText = label(ACTION_LABELS, item.corrected_action_id, '未命名动作');
         const reasonText = label(REASON_LABELS, metadata.feedbackReason, '未填写原因');
         const noteText = String(metadata.note || '').trim();
+        const correction = metadata.naturalCorrection;
+        const evidenceText = correction ? JSON.stringify({ sourceMessageId: correction.sourceMessageId, priorMessageId: correction.priorMessageId,
+            applied: correction.applied, runId: correction.runId, reviewReasons: metadata.reviewReasons, executionEvidence: metadata.executionEvidence }, null, 2) : '';
         const statusText = label(REVIEW_STATUS_LABELS, item.review_status, '待复核');
         const userDisplay = [
             item.nickname || '',
@@ -302,7 +313,7 @@
             <div class="route-feedback-detail-section">
                 <div class="route-feedback-detail-label">
                     <span>当轮提问（用户提问）</span>
-                    <span class="route-feedback-privacy-badge">已规则脱敏·不含隐私</span>
+                    <span class="route-feedback-privacy-badge">已规则脱敏</span>
                 </div>
                 <div class="route-feedback-query-card ${queryText ? '' : 'text-muted'}">${escapeHtml(queryText || '（未记录提问原文或由早期历史生成）')}</div>
             </div>
@@ -325,7 +336,7 @@
                     <span class="route-feedback-item-value is-origin">${escapeHtml(originActionText)}</span>
                 </div>
                 <div class="route-feedback-detail-item">
-                    <span class="route-feedback-item-label">用户建议修正</span>
+                    <span class="route-feedback-item-label">对话纠正后的处理方式</span>
                     <span class="route-feedback-item-value is-corrected">${escapeHtml(correctedActionText)}</span>
                 </div>
                 <div class="route-feedback-detail-item">
@@ -363,11 +374,12 @@
                 <div class="route-feedback-detail-section">
                     <div class="route-feedback-detail-label">复核记录</div>
                     <div class="route-feedback-note-card">
-                        ${item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成复核` : '已复核'}
+                        ${item.review_status === 'not_required' ? '常规纠正已自动归档，尚未转为训练标签' : item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成复核` : '已复核'}
                         ${item.review_note ? ` · 备注：${escapeHtml(item.review_note)}` : ''}
                     </div>
                 </div>
             `}
+            ${evidenceText ? `<div class="route-feedback-detail-section"><div class="route-feedback-detail-label">纠正来源、即时约束及执行证据</div><pre class="route-feedback-note-card">${escapeHtml(evidenceText)}</pre></div>` : ''}
         `);
 
         footer.replaceChildren();

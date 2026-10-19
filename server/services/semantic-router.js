@@ -15,6 +15,7 @@ const { logger } = require('../logger');
 const { resolveBusinessDecision } = require('./decision-runtime');
 const { buildDecisionActionCandidate } = require('./decision-action-catalog');
 const { getPrimaryTenantId } = require('./enterprise-access');
+const { getCapabilityDecision } = require('./chat-capability-decision');
 
 const MAX_ROUTE_OVERRIDE_COLLECTIONS = 50;
 const MAX_ROUTE_OVERRIDE_TOOLS = 100;
@@ -217,10 +218,11 @@ function classifyChatRouteAdmission({ prompt, state = {}, config = {} } = {}) {
         ...(overrides.tagNames.length ? { tagNames: overrides.tagNames } : {})
     });
     const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
-    const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag;
+    const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag || getCapabilityDecision(state)?.knowledge === 'required';
     const explicitToolIntent = cleanPrompt ? detectExplicitMcpCapabilityIntent(cleanPrompt) : false;
-    const toolRequested = explicitToolIntent || overrides.tools.length > 0;
-    const knowledgeRequested = requiresKnowledgeRetrieval(cleanPrompt);
+    const semantic = getCapabilityDecision(state);
+    const toolRequested = overrides.tools.length > 0 || (semantic ? semantic.tools === 'read_only' || semantic.tools === 'task' : explicitToolIntent);
+    const knowledgeRequested = semantic && semantic.knowledge !== 'auto' ? semantic.knowledge === 'required' : requiresKnowledgeRetrieval(cleanPrompt);
     const routeEnabled = config.enabled !== false && state.autoRouteEnabled !== false;
 
     if (hasExplicitRagRequest || overrides.tools.length) {
@@ -368,7 +370,7 @@ function createSemanticRouter(deps = {}) {
         const ragFallback = rag.action === 'retrieve' ? 'retrieve' : 'skip';
         // 影子模式只禁止改变执行路径，不能缩窄可比较候选；否则学习型提供器
         // 永远只能复述现有路由，无法产生可用于评估的替代建议。
-        const ragFixed = !routeEnabled || hasExplicitRagRequest || overrides.excludeRag || !state.ragEnabled;
+        const ragFixed = !routeEnabled || hasExplicitRagRequest || overrides.excludeRag || !state.ragEnabled || Boolean(getCapabilityDecision(state));
         const ragCandidates = [
             buildDecisionActionCandidate('chat.rag', 'retrieve', { allowed: ragFixed ? ragFallback === 'retrieve' : true }),
             buildDecisionActionCandidate('chat.rag', 'skip', { allowed: ragFixed ? ragFallback === 'skip' : true })
@@ -376,7 +378,7 @@ function createSemanticRouter(deps = {}) {
         const toolFallback = tools.action === 'propose' ? 'propose' : tools.action === 'candidate_only' ? 'candidate_only' : 'skip';
         // `@工具` 是用户给出的明确范围：智能路由只能在该范围内规划，不能
         // 改判为 skip。权限、白名单、授权与审批仍在此前的候选治理链路生效。
-        const toolFixed = !routeEnabled || overrides.excludeTools || overrides.tools.length > 0;
+        const toolFixed = !routeEnabled || overrides.excludeTools || overrides.tools.length > 0 || Boolean(getCapabilityDecision(state));
         const toolCandidates = [
             buildDecisionActionCandidate('chat.tools', 'propose', { allowed: toolFixed ? toolFallback === 'propose' : Boolean(state.mcpEnabled && tools.candidateTools.length) }),
             buildDecisionActionCandidate('chat.tools', 'candidate_only', { allowed: toolFixed ? toolFallback === 'candidate_only' : Boolean(!state.mcpEnabled && tools.candidates.length) }),
@@ -384,7 +386,7 @@ function createSemanticRouter(deps = {}) {
         ];
         // 用户显式选择知识库或 @工具 时，系统必须尊重该执行意图。决策器仍可
         // 参与工具/资料的候选排序，但不得以“先澄清”把明确请求变成不执行。
-        const nextStepFixed = !routeEnabled || hasExplicitRagRequest || overrides.tools.length > 0;
+        const nextStepFixed = !routeEnabled || hasExplicitRagRequest || overrides.tools.length > 0 || Boolean(getCapabilityDecision(state));
         const nextStepCandidates = [
             buildDecisionActionCandidate('chat.next_step', 'direct_answer', { allowed: true }),
             buildDecisionActionCandidate('chat.next_step', 'clarify', { allowed: !nextStepFixed })
@@ -444,7 +446,7 @@ function createSemanticRouter(deps = {}) {
         const hasExplicitScope = Boolean(explicitScope.collectionIds.length || explicitScope.tagNames.length);
         // “带着问题去聊天”和手动开启知识库都代表用户的明确检索意图。
         // 此时智能路由只能优化排序与范围，不能把该轮请求误判为无需检索。
-        const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag;
+        const hasExplicitRagRequest = hasExplicitScope || state.ragPreference === 'enabled' || overrides.forceRag || getCapabilityDecision(state)?.knowledge === 'required';
         const legacyRagRequested = Boolean(state.ragEnabled) && (
             hasExplicitRagRequest
             // 没有 ragPreference 是旧客户端的请求；保留它的显式 ragEnabled
@@ -604,7 +606,7 @@ function createSemanticRouter(deps = {}) {
                         .sort((left, right) => right.score - left.score || right.rule - left.rule)
                         .slice(0, config.maxToolCandidates);
                     const best = scored[0];
-                    const forced = overrides.tools.length > 0 || (explicitToolIntent && (best?.score >= 0.2 || best?.rule > 0));
+                    const forced = overrides.tools.length > 0 || getCapabilityDecision(state)?.tools === 'read_only' || (explicitToolIntent && (best?.score >= 0.2 || best?.rule > 0));
                     // 未授权时，只有可操作的外部能力请求才值得中断对话要求确认。
                     // 泛泛提及“数据库表”“工具库”可能只是概念问答；若先弹授权、
                     // 授权后规划器又返回 none，会形成误导性的两阶段矛盾。
