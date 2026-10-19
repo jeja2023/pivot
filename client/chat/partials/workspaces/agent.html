@@ -236,11 +236,11 @@
                                 <label class="agent-token-budget-field">
                                     <span>单次任务 Token 上限</span>
                                     <input id="agent-token-budget" class="form-input" type="number" min="0" step="1000"
-                                        placeholder="留空表示不限" aria-describedby="agent-token-budget-help"
-                                        title="累计计算输入和输出 Token；达到上限后任务将停止，留空或填写 0 表示不限。">
+                                        placeholder="留空自动分配" aria-describedby="agent-token-budget-help"
+                                        title="累计计算各轮输入和输出 Token；达到上限后任务将停止。留空或填写 0 使用模型与部署配置分配的预算。">
                                 </label>
                                 <p id="agent-token-budget-help" class="agent-token-budget-help hidden">累计计算输入和输出
-                                    Token；达到上限后任务将停止，留空或填写 0 表示不限。</p>
+                                    Token；达到上限后任务将停止，留空或填写 0 使用自动分配预算。</p>
                                 <label class="agent-context-notes-field">
                                     <span>补充说明</span>
                                     <textarea id="agent-context-notes" class="form-input" rows="2"

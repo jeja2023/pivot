@@ -42,7 +42,6 @@ function minifyCss(css) {
         .replace(/\s*([{};,])\s*/g, '$1')
         .replace(/;\}/g, '}')
         .replace(/:\s+/g, ':')
-        .replace(/calc\([^)]+\)/g, match => match.replace(/\s*([+-])\s*/g, ' $1 '))
         .trim();
 }
 

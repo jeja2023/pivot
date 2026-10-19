@@ -58,7 +58,11 @@
     }
     async function prepare(language) {
         if (!supported()) return null;
-        const status = await window.pivotDesktop.getVoiceRecognitionStatus();
+        let status;
+        try { status = await window.pivotDesktop.getVoiceRecognitionStatus(); }
+        catch (_) {
+            throw Object.assign(new Error(), { voiceMessage: '桌面原生语音通道未就绪，请更新并重启 Pivot 客户端；仅刷新服务器页面无法修复客户端组件。' });
+        }
         if (status.supported === false) return null;
         if (!status.languages?.some(item => item.toLowerCase() === language.toLowerCase())) {
             throw Object.assign(new Error(), { voiceMessage: status.reason || `Windows 尚未安装 ${language} 的本地语音识别组件，请在系统语言设置中安装语音功能。` });

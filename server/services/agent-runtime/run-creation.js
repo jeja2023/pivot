@@ -50,7 +50,7 @@ const SKILL_METADATA_KEYS = Object.freeze([
     'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto',
     'skillMatchReason', 'skillMatchScore', 'skillMatchTerms'
 ]);
-const { normalizeTaskBudget } = require('../agent-budget');
+const { normalizeModelTaskBudget } = require('../agent-token-policy');
 const {
     buildForkHistory,
     cancelChildRunReservation,
@@ -313,7 +313,7 @@ function createAgentRunFactory(deps = {}) {
                 normalizePositiveInt(resumeFromStep, 0, 0, 999),
                 JSON.stringify(runMetadata),
                 normalizedRouter,
-                JSON.stringify(normalizeTaskBudget(budgetConfig)),
+                JSON.stringify(normalizeModelTaskBudget(budgetConfig, modelCfg || {})),
                 JSON.stringify({}),
                 JSON.stringify(networkPolicy || {}),
                 user.tenant_id || user.tenantId || null,

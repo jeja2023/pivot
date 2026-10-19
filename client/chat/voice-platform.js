@@ -5,6 +5,9 @@
     function desktopRecognition() { return window.Pivot?.moduleApi?.('chat.desktopVoiceRecognition'); }
     function serverRecognition() { return window.Pivot?.moduleApi?.('chat.serverVoiceRecognition'); }
     function browserAvailability() {
+        if (window.pivotDesktop && !desktopRecognition()?.supported?.() && globalThis.isSecureContext === false) {
+            return '当前桌面客户端缺少原生语音通道，请更新并重启 Pivot 客户端；仅更新服务器页面无法启用 HTTP 地址下的麦克风。';
+        }
         if (globalThis.isSecureContext === false) return '语音需要 HTTPS 或受信任的本地地址，当前页面无法访问麦克风。';
         if (!navigator.mediaDevices?.getUserMedia) return '当前浏览器无法访问麦克风，请使用支持音频输入的浏览器。';
         const Recognition = recognitionClass();

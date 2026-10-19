@@ -81,6 +81,7 @@ test('task draft planner is deterministic, bounded, and declares no planning-tim
     assert.equal(plan.resources.discovery.includes('本次规划未调用任何工具'), true);
     assert.equal(plan.budget.toolPolicy, 'builtin_only');
     assert.equal(plan.steps.length, 4);
+    assert.ok(plan.budget.maxTokenBudget >= 500000);
     assert.equal(plan.clarification.required, false);
 
     const unclear = buildTaskDraftPlan({ goal: '看看', title: '看看', modelId: 'model-1' });
@@ -117,6 +118,7 @@ test('task draft requires explicit review confirmation before it creates exactly
     assert.equal(started.runId, 'task-draft-run-1');
     assert.equal(createdRuns.length, 1);
     assert.equal(createdRuns[0].toolPolicy, 'builtin_only');
+    assert.equal(createdRuns[0].maxTokenBudget, approved.policySnapshot.maxTokenBudget);
     assert.equal(createdRuns[0].metadata.taskDraft.planDigest, approved.planDigest);
     assert.equal(createdRuns[0].metadata.chatBridge.source, 'chat_task_draft');
     assert.equal(createdRuns[0].metadata.chatBridge.mcpEnabled, false);

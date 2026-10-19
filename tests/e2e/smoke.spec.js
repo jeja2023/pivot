@@ -109,6 +109,10 @@ test.describe('Pivot browser smoke', () => {
             Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: {
                 getUserMedia: async () => ({ getTracks: () => [{ stop() { window.__voiceTest.stopped++; } }] })
             } });
+            if (useNative === true) {
+                Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+                Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: undefined });
+            }
             Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
                 getVoices: () => [{ name: 'Test local', lang: 'zh-CN', localService: true }],
                 cancel() {}, speak(utterance) { window.__voiceTest.spoken.push(utterance.text); setTimeout(() => utterance.onend?.(), 0); }
@@ -151,6 +155,20 @@ test.describe('Pivot browser smoke', () => {
         page.on('request', request => { if (new URL(request.url()).pathname === '/api/chat') requests.push(request.postDataJSON()); });
         await page.locator('#chat-realtime-voice').click();
         await expect(page.locator('#chat-realtime-voice')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('#chat-voice-status')).toContainText('正在聆听');
+        if (native === true) {
+            for (const width of [1280, 390]) {
+                await page.setViewportSize({ width, height: 844 });
+                if (width === 390 && !await page.locator('.sidebar').evaluate(element => element.classList.contains('collapsed'))) await page.locator('#sidebar-mobile-close-btn').click();
+                await expect(page.locator('#chat-voice-status')).toBeVisible();
+                await expect.poll(async () => (await page.locator('#chat-voice-status').boundingBox())?.width || 0).toBeGreaterThan(200);
+                const statusBounds = await page.locator('#chat-voice-status').boundingBox();
+                expect(statusBounds.x).toBeGreaterThanOrEqual(0);
+                expect(statusBounds.x + statusBounds.width).toBeLessThanOrEqual(width + 1);
+                await page.screenshot({ path: path.resolve(__dirname, '../../output/voice-status-' + width + '.png') });
+            }
+            await page.setViewportSize({ width: 1280, height: 844 });
+        }
         const say = async text => {
             await page.evaluate(value => window.__voiceTest.active.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: value } }] }), text);
             await expect(page.locator('#send-btn')).toBeVisible();
@@ -165,6 +183,7 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => page.evaluate(() => window.__voiceTest.spoken.length)).toBeGreaterThan(1);
         await page.locator('#chat-realtime-voice').click();
         await expect(page.locator('#chat-realtime-voice')).toHaveAttribute('aria-pressed', 'false');
+        await expect(page.locator('#chat-voice-status')).toBeHidden();
         expect(await page.evaluate(() => window.__voiceTest.stopped)).toBeGreaterThanOrEqual(2);
         const detail = await (await page.request.get(`/api/sessions/${requests[0].sessionId}`)).json();
         expect(detail.messages || []).toHaveLength(0);

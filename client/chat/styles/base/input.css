@@ -314,6 +314,22 @@
     animation: chat-voice-recording-pulse 1.25s ease-in-out infinite;
 }
 
+.chat-voice-status {
+    box-sizing: border-box;
+    max-width: min(880px, calc(100% - 32px));
+    margin: 0 auto 8px;
+    padding: 8px 12px;
+    color: var(--text-muted);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.chat-voice-status[hidden] { display: none; }
+.chat-voice-status[data-state="speaking"] { color: var(--primary); }
+
 #chat-realtime-voice.is-recording .wave-bar {
     animation: realtime-wave-bounce 0.8s ease-in-out infinite alternate;
     transform-origin: 12px 12px;

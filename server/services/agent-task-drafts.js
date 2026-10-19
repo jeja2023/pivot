@@ -12,6 +12,7 @@ const { query, queryOne, transaction } = require('../db/client');
 const { canonicalJson } = require('./canonical-json');
 const { buildChatAgentMetadata, normalizeChatHistory } = require('./chat-agent-bridge');
 const { resolveAccessibleAnswerModelAsync } = require('./models');
+const { resolveModelTaskTokenBudget } = require('./agent-token-policy');
 
 const ACTIONABLE_STATUSES = new Set(['needs_clarification', 'ready_for_review', 'approved']);
 const RISKY_INTENT = /(删除|清空|覆盖|发布|部署|上线|发送|通知|付款|支付|转账|购买|下单|授权|分享|导出|上传|写入|修改生产|delete|remove|deploy|publish|send|payment|transfer|purchase|authorize|share|export|upload)/i;
@@ -81,7 +82,7 @@ function classifyRisk(goal) {
  * 为用户提供真实、可审阅的执行契约。后续规划模型可丰富此对象，
  * 但必须保留下方服务端策略快照。
  */
-function buildTaskDraftPlan({ goal, title, modelId }) {
+function buildTaskDraftPlan({ goal, title, modelId, modelCfg = {}, maxTokenBudget }) {
     const risk = classifyRisk(goal);
     const clarificationItems = [];
     if (goal.length < 16) clarificationItems.push('请补充期望交付物、范围或完成标准。');
@@ -118,7 +119,7 @@ function buildTaskDraftPlan({ goal, title, modelId }) {
         budget: {
             modelId: String(modelId || ''),
             maxSteps: 20,
-            maxTokenBudget: 60000,
+            maxTokenBudget: maxTokenBudget ?? resolveModelTaskTokenBudget(modelCfg),
             timeoutMs: 600000,
             retryLimit: 1,
             toolPolicy: 'builtin_only',
@@ -210,7 +211,7 @@ async function createTaskDraft(user, input = {}, overrides = {}) {
     const title = normalizeTitle(input.title, goal);
     const sessionId = await assertSessionAccess(user, input.sessionId, db);
     const model = await resolveModel(user, input.modelId, db.resolveModel);
-    const plan = buildTaskDraftPlan({ goal, title, modelId: model.id });
+    const plan = buildTaskDraftPlan({ goal, title, modelId: model.id, modelCfg: model });
     const policySnapshot = buildPolicySnapshot(plan);
     const draft = await db.transaction(async trx => {
         const id = crypto.randomUUID();
@@ -275,7 +276,7 @@ async function reviseTaskDraft(user, draftId, input = {}, overrides = {}) {
         const title = normalizeTitle(input.title ?? current.title, goal);
         const previousPlan = jsonObject(current.plan_json);
         const modelId = previousPlan?.budget?.modelId;
-        const plan = buildTaskDraftPlan({ goal, title, modelId });
+        const plan = buildTaskDraftPlan({ goal, title, modelId, maxTokenBudget: previousPlan?.budget?.maxTokenBudget });
         const policySnapshot = buildPolicySnapshot(plan);
         const revision = Number(current.revision) + 1;
         const status = plan.clarification.required ? 'needs_clarification' : 'ready_for_review';
@@ -368,7 +369,8 @@ async function startTaskDraft(user, draftId, input = {}, { createAgentRun, ...ov
             goal: starting.goal,
             modelId: plan?.budget?.modelId || '',
             maxSteps: Number(policy.maxSteps || 20),
-            maxTokenBudget: Number(policy.maxTokenBudget || 60000),
+            maxTokenBudget: Number(policy.maxTokenBudget ?? plan?.budget?.maxTokenBudget ?? 60000),
+            budgetConfig: { max_tokens_total: Number(policy.maxTokenBudget ?? plan?.budget?.maxTokenBudget ?? 60000) },
             timeoutMs: Number(policy.timeoutMs || 600000),
             retryLimit: Number(policy.retryLimit || 1),
             toolPolicy: policy.toolPolicy || 'builtin_only',

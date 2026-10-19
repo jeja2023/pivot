@@ -6,6 +6,23 @@
 
     const VOICE_HEARTBEAT_MS = 30000;
 
+    function setStatus(message = '', state = '') {
+        const element = document.getElementById('chat-voice-status');
+        if (!element) return;
+        element.hidden = !message;
+        element.textContent = message;
+        element.setAttribute('data-state', state);
+    }
+
+    function listeningStatus(session) {
+        if (voice !== session || !session.active || session.speaking) return;
+        if (session.submitting) {
+            setStatus('正在等待模型继续回答…', 'thinking');
+            return;
+        }
+        setStatus('正在聆听，请说话；停顿后完成识别，回答会自动朗读。', 'listening');
+    }
+
     function button() { return document.getElementById('chat-realtime-voice'); }
     function setButtonState(active, { starting = false } = {}) {
         const element = button();
@@ -80,27 +97,42 @@
         if (!voice?.active || !text || !globalThis.speechSynthesis) return;
         const session = voice;
         const utterance = new globalThis.SpeechSynthesisUtterance(text);
-        utterance.lang = navigator.language || 'zh-CN';
+        utterance.lang = session.localVoice?.lang || window.Pivot.moduleApi('chat.voicePlatform')?.language?.() || 'zh-CN';
         utterance.rate = 1;
         utterance.voice = session.localVoice || selectVoice();
         if (!utterance.voice) return;
         session.speaking = true;
+        session.utterance = utterance;
+        setStatus('正在准备朗读…', 'speaking');
         // 浏览器识别器不使用上面 getUserMedia 的回声消除轨道，朗读时暂停识别以防自问自答。
         try { session.recognition?.abort?.(); } catch (_) {}
         session.spokenAny = true;
+        const failPlayback = () => {
+            if (voice !== session || session.utterance !== utterance) return;
+            showToast('本地朗读未能播放，实时语音已停止。请检查系统音量、默认输出设备和中文语音组件；仍可使用语音输入。', 'error');
+            release({ event: 'failed' });
+        };
+        session.playbackTimer = setTimeout(failPlayback, 8000);
+        utterance.onstart = () => {
+            if (voice !== session || session.utterance !== utterance) return;
+            clearTimeout(session.playbackTimer);
+            session.playbackTimer = null;
+            setStatus('正在朗读，结束后继续聆听。', 'speaking');
+        };
         utterance.onend = () => {
-            if (voice !== session) return;
+            if (voice !== session || session.utterance !== utterance) return;
+            clearTimeout(session.playbackTimer);
+            session.playbackTimer = null;
+            session.utterance = null;
             session.speaking = false;
             speakNext();
-            if (!session.speaking) startRecognition(session);
+            if (!session.speaking) { startRecognition(session); listeningStatus(session); }
         };
-        utterance.onerror = () => {
-            if (voice !== session) return;
-            session.speaking = false;
-            speakNext();
-            if (!session.speaking) startRecognition(session);
-        };
-        globalThis.speechSynthesis.speak(utterance);
+        utterance.onerror = failPlayback;
+        try {
+            globalThis.speechSynthesis.resume?.();
+            globalThis.speechSynthesis.speak(utterance);
+        } catch (_) { failPlayback(); }
     }
 
     function speakNext() {
@@ -119,17 +151,25 @@
         if (!voice?.active || voiceSessionId && voice.id !== voiceSessionId) return;
         voice.answerText += String(delta || '');
         voice.speechBuffer += String(delta || '');
-        const fragments = voice.speechBuffer.split(/(?<=[。！？!?；;]\s*)/u);
-        voice.speechBuffer = fragments.pop() || '';
-        fragments.forEach(queueSpeech);
+        const buffer = voice.speechBuffer;
+        const sentenceEnd = /[。！？!?；;]\s*/gu;
+        let boundary = 0;
+        const session = voice;
+        while (sentenceEnd.exec(buffer)) {
+            queueSpeech(buffer.slice(boundary, sentenceEnd.lastIndex));
+            if (voice !== session) return;
+            boundary = sentenceEnd.lastIndex;
+        }
+        session.speechBuffer = buffer.slice(boundary);
     }
 
     function flushAssistantSpeech(content = '', voiceSessionId) {
         if (!voice?.active || voiceSessionId && voice.id !== voiceSessionId) return;
+        const session = voice;
         if (content) voice.answerText = content;
         if (content && !voice.spokenAny && !voice.speechBuffer) queueSpeech(content);
         else if (voice.speechBuffer.trim()) queueSpeech(voice.speechBuffer);
-        voice.speechBuffer = '';
+        session.speechBuffer = '';
     }
 
     function voiceTaskControlAction(transcript) {
@@ -165,7 +205,11 @@
         }
         if (session.submitting) { session.pendingTranscript = `${session.pendingTranscript || ''} ${text}`.trim().slice(0, 4000); return; }
         session.submitting = true;
+        setStatus('已完成识别，正在等待模型回答…', 'thinking');
         if (session.speaking) {
+            clearTimeout(session.playbackTimer);
+            session.playbackTimer = null;
+            session.utterance = null;
             globalThis.speechSynthesis?.cancel?.();
             session.speaking = false;
             session.speechQueue = [];
@@ -198,6 +242,7 @@
                 const pending = session.pendingTranscript;
                 session.pendingTranscript = '';
                 if (pending) void submitTranscript(pending);
+                else listeningStatus(session);
             }
         }
     }
@@ -228,6 +273,8 @@
         if (current) {
             current.active = false;
             current.history = [];
+            clearTimeout(current.playbackTimer);
+            current.utterance = null;
             current.cancelStart?.();
             window.Pivot.moduleApi('chat.execution')?.stopVoiceRequest?.(current.id);
         }
@@ -242,6 +289,7 @@
         }
         stopTracks(current?.stream);
         setButtonState(false);
+        setStatus();
         if (current?.id) void recordEvent(current.id, event, { keepalive: true }).catch(() => {});
     }
 
@@ -265,6 +313,7 @@
         const start = { id: '', cancelled: false, terminalEventSent: false, promise: null };
         voiceStart = start;
         setButtonState(false, { starting: true });
+        setStatus('正在检查麦克风、识别与本地朗读…', 'starting');
         start.promise = (async () => {
             let stream;
             try {
@@ -312,10 +361,13 @@
             voice = session;
             recognition.onresult = event => {
                 let finalText = '';
+                let interimText = '';
                 for (let index = event.resultIndex; index < event.results.length; index += 1) {
                     if (event.results[index].isFinal) finalText += String(event.results[index]?.[0]?.transcript || '');
+                    else interimText += String(event.results[index]?.[0]?.transcript || '');
                 }
                 const text = finalText.trim();
+                if (interimText && !session.speaking && !session.submitting) setStatus('正在识别，请在一句话说完后稍作停顿…', 'recognizing');
                 if (text && !session.speaking) void submitTranscript(text);
             };
             recognition.onerror = event => {
@@ -340,7 +392,9 @@
             });
             if (start.cancelled || voice !== session) return null;
             setButtonState(true);
-            showToast('实时语音已启动：识别并朗读回答，临时上下文仅保留到结束。可在聆听时说“暂停任务”“继续任务”或“停止任务”。', 'success');
+            recognition.onstart = () => listeningStatus(session);
+            listeningStatus(session);
+            showToast('实时语音已启动，请说话并在句末稍作停顿；模型回答后自动朗读。临时上下文仅保留到结束。', 'success');
             return session;
         } catch (error) {
             const cancelled = start.cancelled;
@@ -351,7 +405,7 @@
             return null;
         } finally {
             if (voiceStart === start) voiceStart = null;
-            if (!voice?.active) setButtonState(false);
+            if (!voice?.active) { setButtonState(false); setStatus(); }
         }
         })();
         return start.promise;

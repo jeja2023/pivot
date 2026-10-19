@@ -116,3 +116,28 @@ test('非 Windows 客户端没有原生引擎时继续检查浏览器能力，�
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/voice-platform.js'), 'utf8'), context);
     await assert.rejects(api.prepareRecognition(), error => /HTTPS/.test(error.voiceMessage));
 });
+
+test('旧桌面客户端访问 HTTP 时提示更新原生组件，浏览器安全限制保持有效', async () => {
+    let api;
+    const context = { isSecureContext: false, pivotDesktop: { getStatus() {} }, navigator: {},
+        document: { documentElement: { lang: 'zh-CN' }, readyState: 'complete', getElementById: () => null },
+        Pivot: { exposeModule: (_name, value) => { api = value; }, moduleApi: () => null } };
+    context.window = context;
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/voice-platform.js'), 'utf8'), context);
+    assert.match(api.availability(), /更新并重启 Pivot 客户端/);
+    await assert.rejects(api.prepareRecognition(), error => /仅更新服务器页面/.test(error.voiceMessage));
+    delete context.pivotDesktop;
+    assert.match(api.availability(), /HTTPS/);
+});
+
+test('桌面桥存在但安装包未注册语音 IPC 时提示更新，不误报网页证书问题', async () => {
+    const modules = new Map();
+    const context = { isSecureContext: false, navigator: {},
+        document: { documentElement: { lang: 'zh-CN' }, readyState: 'complete', getElementById: () => null },
+        pivotDesktop: { getVoiceRecognitionStatus: async () => { throw Error('No handler registered'); },
+            startVoiceRecognition() {}, stopVoiceRecognition() {}, onVoiceRecognitionEvent() {} },
+        Pivot: { exposeModule: (name, api) => modules.set(name, api), moduleApi: name => modules.get(name) } };
+    context.window = context;
+    for (const name of ['desktop-voice-recognition.js', 'voice-platform.js']) vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat', name), 'utf8'), context);
+    await assert.rejects(modules.get('chat.voicePlatform').prepareRecognition(), error => /原生语音通道未就绪/.test(error.voiceMessage));
+});

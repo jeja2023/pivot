@@ -22,11 +22,12 @@ function createStream() {
     return { stream: { getTracks: () => [track] }, track };
 }
 
-function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionStart = null, sendMessage = null, voices = null }) {
+function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionStart = null, sendMessage = null, voices = null, navigatorLanguage = 'zh-CN' }) {
     const modules = new Map();
     const toasts = [];
     const requests = [];
-    const elements = { 'chat-realtime-voice': createElement(), 'user-input': { value: '', dispatchEvent() {} } };
+    const elements = { 'chat-realtime-voice': createElement(), 'chat-voice-status': createElement(), 'user-input': { value: '', dispatchEvent() {} } };
+    const spoken = [];
     class Recognition {
         constructor() { this.processLocally = true; }
         start() { this.started = true; if (recognitionStart) recognitionStart(this); else this.onstart?.(); }
@@ -38,7 +39,7 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionSt
         SpeechRecognition: Recognition,
         currentSessionId: 'session-1',
         document: { getElementById: id => elements[id] || null },
-        navigator: { language: 'zh-CN', mediaDevices: { getUserMedia } },
+        navigator: { language: navigatorLanguage, mediaDevices: { getUserMedia } },
         showToast: (message, level) => toasts.push({ message, level }),
         apiFetch: async (url, options = {}) => {
             requests.push({ url, options });
@@ -56,7 +57,7 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionSt
     context.speechSynthesis = {
         getVoices: () => voices || [{ lang: 'zh-CN', localService: true }],
         cancel() {},
-        speak() {}
+        speak(utterance) { spoken.push(utterance); }
     };
     context.SpeechSynthesisUtterance = class SpeechSynthesisUtterance {};
     context.addEventListener = () => {};
@@ -69,7 +70,7 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionSt
     };
     vm.runInNewContext(platform, context, { filename: 'client/chat/voice-platform.js' });
     vm.runInNewContext(source, context, { filename: 'client/chat/realtime-voice.js' });
-    return { api: modules.get('chat.realtimeVoice'), elements, requests, toasts };
+    return { api: modules.get('chat.realtimeVoice'), elements, requests, toasts, spoken };
 }
 
 test('实时语音使用默认麦克风，并在采集成功后才创建服务端语音会话', async () => {
@@ -183,4 +184,46 @@ test('连续语音第二轮携带仅在内存中的上下文，停止时清空',
     assert.deepEqual(Array.from(sends[1].voiceHistory, item => item.content), ['第一轮问题', '回答1']);
     voice.api.stopRealtimeVoice();
     assert.equal(session.history.length, 0);
+});
+
+test('实时语音逐阶段显示聆听、识别、等待与朗读，朗读语言跟随实际声音', async () => {
+    let complete;
+    const voice = loadRealtimeVoice({ navigatorLanguage: 'en-US', getUserMedia: async () => createStream().stream,
+        sendMessage: () => new Promise(resolve => { complete = resolve; }), voices: [{ lang: 'zh-CN', localService: true }] });
+    const session = await voice.api.startRealtimeVoice();
+    try {
+        const status = voice.elements['chat-voice-status'];
+        assert.equal(status.hidden, false);
+        assert.equal(status.getAttribute('data-state'), 'listening');
+        session.recognition.onresult({ resultIndex: 0, results: [{ isFinal: false, 0: { transcript: '请解释' } }] });
+        assert.equal(status.getAttribute('data-state'), 'recognizing');
+        session.recognition.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '请解释四季的原因' } }] });
+        assert.equal(status.getAttribute('data-state'), 'thinking');
+        voice.api.handleAssistantDelta('这是语音回答。', 'voice-1');
+        const utterance = voice.spoken[0];
+        assert.equal(utterance.lang, 'zh-CN');
+        assert.equal(session.utterance, utterance);
+        utterance.onstart();
+        assert.equal(status.getAttribute('data-state'), 'speaking');
+        utterance.onend();
+        assert.equal(session.utterance, null);
+        assert.equal(status.getAttribute('data-state'), 'thinking');
+        complete();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal(status.getAttribute('data-state'), 'listening');
+    } finally { complete?.(); voice.api.stopRealtimeVoice(); }
+    assert.equal(voice.elements['chat-voice-status'].hidden, true);
+});
+
+test('朗读播放错误给出声音和设备排查提示，并清理麦克风及状态', async () => {
+    const { stream, track } = createStream();
+    const voice = loadRealtimeVoice({ getUserMedia: async () => stream });
+    const session = await voice.api.startRealtimeVoice();
+    voice.api.flushAssistantSpeech('这段文字需要朗读。', 'voice-1');
+    voice.spoken[0].onerror({ error: 'audio-busy' });
+    assert.equal(session.active, false);
+    assert.equal(session.utterance, null);
+    assert.equal(track.stopped, true);
+    assert.equal(voice.elements['chat-voice-status'].hidden, true);
+    assert.match(voice.toasts.at(-1).message, /系统音量、默认输出设备和中文语音组件/);
 });
