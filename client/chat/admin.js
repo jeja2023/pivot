@@ -106,9 +106,9 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'evaluation-review', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'announcements']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'evaluation-review', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
 
@@ -188,9 +188,9 @@ function getDefaultSettingsTab() {
     return isAdminUser() ? 'ops' : 'models';
 }
 
-function normalizeSettingsTab(tab) {
+function normalizeSettingsTab(tab, subtab) {
     const requested = String(tab || '').trim();
-    const resolved = window.Pivot.moduleApi('settings.quality').resolveTab(requested);
+    const resolved = window.Pivot.moduleApi('settings.quality').resolveTab(requested, subtab);
     let target = SETTINGS_TABS.includes(resolved) ? resolved : getDefaultSettingsTab();
     if (LEGACY_SETTINGS_TAB_ALIASES.has(requested)) {
         target = 'usage';
@@ -209,6 +209,7 @@ const adminFeatureScripts = [
     '/chat/users.js',
     '/chat/stats.js',
     '/chat/stats-monitor-utils.js',
+    '/chat/monitor-dashboard.js',
     '/chat/stats-monitor.js',
     '/chat/settings-quality.js',
     '/chat/decision-feedback-review.js',
@@ -323,7 +324,7 @@ async function openAdminPanel(options = {}) {
         el.classList.toggle('hidden', !isSuperAdmin);
     });
 
-    const targetTab = options.tab ? normalizeSettingsTab(options.tab) : (options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab());
+    const targetTab = options.tab ? normalizeSettingsTab(options.tab, options.subtab) : (options.restore ? normalizeSettingsTab(window.Pivot.legacy.getStoredSettingsTab?.()) : getDefaultSettingsTab());
     // 展示前预先收拢非目标标签并激活目标标签，杜绝其它标签在初始帧撑大画布触发不必要的纵向滚动条
     SETTINGS_TABS.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.getElementById(`tab-content-${targetTab}`)?.classList.remove('hidden');
@@ -371,7 +372,7 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         return false;
     }
     const requestedTab = String(tab || '').trim();
-    tab = normalizeSettingsTab(requestedTab);
+    tab = normalizeSettingsTab(requestedTab, options.subtab);
     if (tab === 'monitor') {
         // 用户可能在设置工作区首进尚未完成时立即点击“系统监控”。
         // 先等待同一份样式包完成，再切换 Tab 和测量画布，避免只应用到部分规则。
@@ -410,7 +411,7 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         panel.classList.toggle('hidden', !isActive);
         panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
     });
-    document.querySelector('.settings-workspace-view .admin-content')?.classList.toggle('is-monitor-tab-active', tab === 'monitor');
+    document.querySelector('.settings-workspace-view .admin-content')?.classList.remove('is-monitor-tab-active');
 
     document.getElementById(`tab-${tab}`)?.classList.add('active');
     document.getElementById(`tab-content-${tab}`)?.classList.remove('hidden');
@@ -459,6 +460,7 @@ async function loadTabDataInternal(tab, page = 1) {
         } else {
             pageState[tab] = page;
             if (tab === 'models') await window.Pivot.moduleApi('settings.quality').load(tab, page);
+            if (tab === 'evaluation-review') await window.Pivot.moduleApi('settings.quality').load(tab, page);
             if (tab === 'users' && window.Pivot.legacy.loadUsers) {
                 await window.Pivot.legacy.loadUsers(page);
                 setTimeout(() => window.Pivot.legacy.ensureUserRecordButtons?.(), 0);

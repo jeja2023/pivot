@@ -234,7 +234,7 @@ bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
 bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
 
 // 管理面板切换
-['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
+['ops', 'models', 'evaluation-review', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
     bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
 });
 document.querySelectorAll('[data-usage-subtab]').forEach(button => {
@@ -287,7 +287,7 @@ function bindMountedWorkspaceControls(name) {
     bind('api-call-logs-open-btn', () => window.Pivot.legacy.openApiCallLogsModal?.());
     bind('create-key-btn', () => window.Pivot.legacy.createApiKey());
     bind('pw-update-btn', () => window.Pivot.legacy.updatePassword());
-    ['ops', 'models', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
+    ['ops', 'models', 'evaluation-review', 'global-params', 'tool-policy', 'memories', 'attachments', 'announcements', 'users', 'logs', 'monitor', 'usage', 'keys', 'account'].forEach(tab => {
         bind(`tab-${tab}`, () => window.Pivot.legacy.switchTab(tab));
     });
     document.querySelectorAll('[data-usage-subtab]').forEach(button => {
@@ -295,7 +295,7 @@ function bindMountedWorkspaceControls(name) {
     });
     bind('admin-modal-close', (e) => { e?.currentTarget?.blur?.(); window.Pivot.legacy.closeModal(); });
     bind('ops-refresh-btn', () => window.Pivot.legacy.loadOpsSummary());
-    bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
+    bind('monitor-refresh-btn', () => window.Pivot.legacy.refreshMonitorSummary());
     bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');
     bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
     bind('rag-system-reindex-btn', () => (window.Pivot.getModule?.('knowledge.retrievalSummary')?.reindexAllKnowledgeDocs || window.Pivot.legacy.reindexAllKnowledgeDocs)?.());
@@ -355,7 +355,7 @@ document.addEventListener('click', async (event) => {
 
 // 管理操作
 bind('ops-refresh-btn', () => window.Pivot.legacy.loadOpsSummary());
-bind('monitor-refresh-btn', () => window.Pivot.legacy.loadMonitorSummary());
+bind('monitor-refresh-btn', () => window.Pivot.legacy.refreshMonitorSummary());
 bind('monitor-auto-refresh', () => window.Pivot.legacy.loadMonitorSummary(), 'change');
 bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
 bind('rag-system-reindex-btn', () => (window.Pivot.getModule?.('knowledge.retrievalSummary')?.reindexAllKnowledgeDocs || window.Pivot.legacy.reindexAllKnowledgeDocs)?.());

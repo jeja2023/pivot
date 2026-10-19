@@ -1,81 +1,93 @@
 <section id="tab-content-monitor" class="admin-tab-content admin-only hidden">
     <div class="settings-page-head">
-        <div><h3>系统监控</h3><p>查看运行状态与对话质量，按需处理异常。</p></div>
+        <div><h3>系统监控</h3><p>先看运行异常，再按需查看资源与对话质量。</p></div>
         <div class="settings-subnav" role="tablist" aria-label="系统监控分区">
             <button id="monitor-overview-tab" type="button" class="settings-subtab active" role="tab" aria-controls="monitor-overview-panel" aria-selected="true" tabindex="0" data-quality-tab="monitor" data-quality-section="overview">运行概览</button>
+            <button id="monitor-services-tab" type="button" class="settings-subtab" role="tab" aria-controls="monitor-services-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="services">服务与资源</button>
             <button id="monitor-quality-tab" type="button" class="settings-subtab" role="tab" aria-controls="decision-review-feedback-panel" aria-selected="false" tabindex="-1" data-quality-tab="monitor" data-quality-section="quality">对话质量</button>
         </div>
     </div>
-<section id="monitor-overview-panel" role="tabpanel" aria-labelledby="monitor-overview-tab" data-quality-panels="monitor" data-quality-panel="overview">
-
-                        <div class="settings-page-head">
-                            <div>
-                                <h4>运行概览</h4>
-                                <p>实时查看服务健康、资源占用、并发保护与模型消耗。</p>
-                            </div>
-                            <div class="monitor-toolbar">
-                                <p id="monitor-updated-at" class="monitor-updated-at">等待刷新</p>
-                                <label class="monitor-auto-refresh">
-                                    <input type="checkbox" id="monitor-auto-refresh" checked>
-                                    <span>自动刷新</span>
-                                </label>
-                                <button type="button" class="btn-secondary monitor-routes-btn"
-                                    data-static-action="open-monitor-routes">接口详情</button>
-                                <button id="monitor-refresh-btn" type="button" class="btn-secondary">刷新</button>
-                            </div>
-                        </div>
-                        <div id="monitor-summary-grid" class="monitor-grid"></div>
-                        <div class="monitor-panels">
-                            <div class="stat-card monitor-panel-card">
-                                <h4>自然对话与自动任务（30 天）</h4>
-                                <div id="monitor-chat-execution" class="monitor-list">等待加载</div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-gpu">
-                                <h4>GPU 与并发保护</h4>
-                                <div id="monitor-gpu-list" class="monitor-list"></div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-resource">
-                                <h4>系统资源</h4>
-                                <div id="monitor-resource-list" class="monitor-list"></div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-health">
-                                <h4>健康与维护</h4>
-                                <div id="monitor-health-maintenance-list" class="monitor-list"></div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-models">
-                                <h4>今日模型 Token</h4>
-                                <div id="monitor-model-list" class="monitor-list"></div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-rag">
-                                <h4>知识库、检索与向量服务</h4>
-                                <div id="monitor-rag-storage-list" class="monitor-list"></div>
-                                <div id="monitor-rag-latency-trend" class="monitor-rag-latency-trend"></div>
-                            </div>
-                            <div class="stat-card monitor-panel-card monitor-panel-observability">
-                                <div class="monitor-panel-head">
-                                    <h4>慢查询与异常告警</h4>
-                                    <div class="observability-head-actions">
-                                        <span id="observability-webhook-status-badge" class="observability-status-badge is-empty" title="未配置 Webhook 告警">未配置推送</span>
-                                        <button type="button" class="btn-secondary btn-xs observability-toggle-btn" id="observability-toggle-btn" data-static-action="toggle-observability-webhook" title="配置 Webhook 推送地址">配置推送</button>
-                                    </div>
-                                </div>
-                                <div id="observability-webhook-panel" class="observability-webhook-drawer hidden">
-                                    <div class="observability-webhook-tip">
-                                        <span>慢 SQL、模型超时、RAG 延迟及熔断异常将自动推送至该地址（支持企业微信、飞书、钉钉机器人等）。留空保存可停用。</span>
-                                    </div>
-                                    <div class="observability-webhook-inline">
-                                        <input id="observability-webhook-url" class="form-input" placeholder="Webhook URL (如 https://qyapi.weixin.qq.com/...)" title="Webhook URL">
-                                        <button id="observability-webhook-save" class="btn-secondary" type="button">保存</button>
-                                    </div>
-                                </div>
-                                <div id="monitor-observability-list" class="monitor-list"></div>
-                            </div>
-                        </div>
-                    </section>
-<section id="decision-review-feedback-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-quality-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="quality">
-    <div class="settings-page-head">
-        <div><h3>对话质量异常处理</h3><p>集中处理执行范围、反复误判及证据冲突；常规纠正自动归档。复核不改变当前任务，不直接发布全局策略。</p></div>
+    <div class="monitor-toolbar">
+        <p id="monitor-updated-at" class="monitor-updated-at" role="status">等待刷新</p>
+        <label class="monitor-auto-refresh"><input type="checkbox" id="monitor-auto-refresh" checked><span>每 10 秒刷新</span></label>
+        <button type="button" class="btn-secondary monitor-routes-btn" data-static-action="open-monitor-routes">接口详情</button>
+        <button id="monitor-refresh-btn" type="button" class="btn-secondary">刷新指标</button>
     </div>
-<!-- @include partials/settings/route-feedback.html -->
-</section>
+    <section id="monitor-overview-panel" role="tabpanel" aria-labelledby="monitor-overview-tab" data-quality-panels="monitor" data-quality-panel="overview">
+        <div id="monitor-summary-grid" class="monitor-grid"></div>
+        <div class="monitor-panels">
+            <div class="stat-card monitor-panel-card monitor-panel-health">
+                <h4>健康与维护</h4><p class="monitor-panel-description">全部健康检查与最近一次维护结果</p>
+                <div id="monitor-health-maintenance-list" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card">
+                <h4>任务队列</h4><p class="monitor-panel-description">全局当前状态；失败按最近 24 小时完成时间统计</p>
+                <div id="monitor-task-queue" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card">
+                <h4>运行压力</h4><p class="monitor-panel-description">本实例的事件循环、数据库连接池与写入队列</p>
+                <div id="monitor-runtime-pressure" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card monitor-panel-observability">
+                <div class="monitor-panel-head">
+                    <h4>慢查询与异常告警</h4>
+                    <div class="observability-head-actions">
+                        <span id="observability-webhook-status-badge" class="observability-status-badge is-empty" title="未配置 Webhook 告警">未配置推送</span>
+                        <button type="button" class="btn-secondary btn-xs observability-toggle-btn" id="observability-toggle-btn" data-static-action="toggle-observability-webhook" title="配置 Webhook 推送地址">配置推送</button>
+                    </div>
+                </div>
+                <div id="observability-webhook-panel" class="observability-webhook-drawer hidden">
+                    <div class="observability-webhook-tip">
+                        <span>慢 SQL、模型超时、RAG 延迟及熔断异常将自动推送至该地址（支持企业微信、飞书、钉钉机器人等）。留空保存可停用。</span>
+                    </div>
+                    <div class="observability-webhook-inline">
+                        <input id="observability-webhook-url" class="form-input" placeholder="Webhook 推送地址 (如 https://qyapi.weixin.qq.com/...)" title="Webhook 推送地址">
+                        <button id="observability-webhook-save" class="btn-secondary" type="button">保存</button>
+                    </div>
+                </div>
+                <p class="monitor-panel-description">最近 12 条事件，包含已恢复记录；模型探针详情见“服务与资源”。</p>
+                <div id="monitor-observability-list" class="monitor-list"></div>
+            </div>
+
+        </div>
+    </section>
+    <section id="monitor-services-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-services-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="services">
+        <p class="monitor-empty">资源为本实例可见范围；GPU 仅代表本机探针，远端模型状态见端点列表。用量按北京时间统计。</p>
+        <div class="monitor-panels">
+            <div class="stat-card monitor-panel-card monitor-panel-gpu">
+                <h4>GPU 与并发保护</h4><div id="monitor-gpu-list" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card monitor-panel-resource">
+                <h4>系统资源</h4><div id="monitor-resource-list" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card monitor-panel-rag">
+                <h4>知识库、检索与向量服务</h4><p class="monitor-panel-description">检索计数为本实例启动以来；Embedding 趋势与诊断按各自时间窗口统计</p>
+                <div id="monitor-rag-storage-list" class="monitor-list"></div>
+                <div id="monitor-rag-latency-trend" class="monitor-rag-latency-trend"></div>
+            </div>
+            <div class="stat-card monitor-panel-card monitor-panel-models">
+                <h4>消息与模型用量</h4><div id="monitor-usage-summary" class="monitor-list"></div>
+                <h5>今日模型 Token 分布（前 8 项）</h5><div id="monitor-model-list" class="monitor-list"></div>
+            </div>
+            <div class="stat-card monitor-panel-card monitor-panel-endpoints">
+                <h4>模型端点状态</h4><div id="monitor-service-endpoint-list" class="monitor-list js-monitor-endpoint-list"></div>
+            </div>
+        </div>
+    </section>
+    <section id="decision-review-feedback-panel" class="hidden" role="tabpanel" aria-labelledby="monitor-quality-tab" aria-hidden="true" data-quality-panels="monitor" data-quality-panel="quality">
+        <div class="monitor-panels">
+            <div class="stat-card monitor-panel-card">
+                <h4>自然对话与自动任务</h4><p class="monitor-panel-description">全局 · 最近 30 天</p>
+                <div id="monitor-chat-execution" class="monitor-list">等待加载</div>
+            </div>
+            <div class="stat-card monitor-panel-card">
+                <h4>检索与工具路由</h4><p class="monitor-panel-description">全局 · 最近 24 小时；P95 为各决策服务中的最高值</p>
+                <div id="monitor-routing-quality" class="monitor-list"></div>
+            </div>
+        </div>
+        <div class="settings-page-head">
+            <div><h4>对话质量异常处理</h4><p>集中处理执行范围、反复误判及证据冲突；常规纠正自动归档。复核不改变当前任务，不直接发布全局策略。</p></div>
+        </div>
+        <!-- @include partials/settings/route-feedback.html -->
+    </section>
 </section>

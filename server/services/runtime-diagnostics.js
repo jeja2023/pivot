@@ -17,6 +17,7 @@ const NS_PER_MS = 1e6;
 const SAMPLE_RESOLUTION_MS = 20;
 
 let loopDelayHistogram = null;
+let loopSampleStartedAt = Date.now();
 try {
     loopDelayHistogram = monitorEventLoopDelay({ resolution: SAMPLE_RESOLUTION_MS });
     loopDelayHistogram.enable();
@@ -59,9 +60,11 @@ function inFlightRequestMiddleware(req, res, next) {
 }
 
 function getEventLoopDelay() {
-    if (!loopDelayHistogram) return { supported: false, meanMs: 0, p99Ms: 0, maxMs: 0 };
+    if (!loopDelayHistogram) return { supported: false, sampled: false, meanMs: 0, p99Ms: 0, maxMs: 0 };
     return {
         supported: true,
+        sampled: Number.isFinite(loopDelayHistogram.mean),
+        windowMs: Math.max(0, Date.now() - loopSampleStartedAt),
         meanMs: Number((loopDelayHistogram.mean / NS_PER_MS).toFixed(2)) || 0,
         p99Ms: Number((loopDelayHistogram.percentile(99) / NS_PER_MS).toFixed(2)) || 0,
         maxMs: Number((loopDelayHistogram.max / NS_PER_MS).toFixed(2)) || 0
@@ -71,6 +74,7 @@ function getEventLoopDelay() {
 /** 重置直方图，使采样窗口反映「最近一段时间」而非进程全生命周期。 */
 function resetEventLoopDelay() {
     loopDelayHistogram?.reset();
+    loopSampleStartedAt = Date.now();
 }
 
 function getPgPoolSnapshot() {

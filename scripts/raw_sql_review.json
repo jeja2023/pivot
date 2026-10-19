@@ -33,6 +33,7 @@
     { "file": "server/services/long-term-memory/index.js", "count": 32, "rationale": "长期记忆来源、状态和导出查询受用户 scope、来源复核和事务门禁约束。" },
     { "file": "server/services/long-term-memory/memory-source-fingerprints.js", "count": 13, "rationale": "来源 HMAC、复核和撤销必须在同一事务更新证据与记忆状态。" },
     { "file": "server/services/long-term-memory/memory-sources.js", "count": 11, "rationale": "来源撤回与用户隔离查询需要条件更新和审计关联，已由长期记忆来源回归覆盖。" },
-    { "file": "server/services/long-term-memory/memory-export-snapshot.js", "count": 3, "rationale": "一致性导出必须在同一 PostgreSQL 重复读只读事务中固定总数、正文及来源证据，查询均参数化并由快照、HTTP 与前端导出回归覆盖。" }
+    { "file": "server/services/long-term-memory/memory-export-snapshot.js", "count": 3, "rationale": "一致性导出必须在同一 PostgreSQL 重复读只读事务中固定总数、正文及来源证据，查询均参数化并由快照、HTTP 与前端导出回归覆盖。" },
+    { "file": "server/repositories/system-monitor.js", "count": 1, "rationale": "只读监控聚合放在仓储层，过滤未删除的活跃任务与最近24小时结束的失败任务；仅返回计数和最早排队时长，不读取任务正文或执行任务。", "verification": "node scripts/run_node_tests.js tests/system-monitor-runtime.test.js" }
   ]
 }

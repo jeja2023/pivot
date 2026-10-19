@@ -27,6 +27,7 @@ const {
     updateObservabilityEventStatus
 } = require('../services/observability');
 const { getSystemHealthSnapshot } = require('../services/system-health');
+const { getSystemMonitorRuntime } = require('../services/system-monitor-runtime');
 const { normalizePriceCurrency } = require('../services/model-costs');
 const {
     getCachedDatabaseSize,
@@ -118,7 +119,7 @@ function createAdminStatsRouter({
         const observabilityOpen = await query(`
             SELECT type, COUNT(*) AS count
             FROM observability_events
-            WHERE status IN ('open', 'alerted')
+            WHERE status IN ('open', 'ack', 'alerted')
             GROUP BY type
         `);
 
@@ -181,6 +182,7 @@ function createAdminStatsRouter({
         const localNames = await getResolvedLocalHostnames({ requestHosts, publicUrl });
         const health = await getSystemHealthSnapshot();
         const maintenance = getMaintenanceStatus();
+        const runtime = await getSystemMonitorRuntime();
         const diskHealth = (health.checks || []).find(item => item.name === 'disk') || {};
 
         // 标记运行时的模型端点是否为本地
@@ -235,6 +237,7 @@ function createAdminStatsRouter({
                 uptime: os.uptime()
             },
             concurrency,
+            runtime,
             gpu,
             modelEndpoints,
             rag: ragMetrics,

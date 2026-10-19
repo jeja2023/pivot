@@ -293,26 +293,29 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('对话列表可被真实鼠标滚轮滚动，触底后自动继续加载下一页', async ({ page }) => {
+        let appendCount = 0;
         await page.route('**/api/sessions?*', async route => {
             const url = new URL(route.request().url());
             const isAppend = Boolean(url.searchParams.get('cursor') || url.searchParams.get('page') === '2');
             if (isAppend) {
+                appendCount++;
                 return route.fulfill({
                     contentType: 'application/json',
                     body: JSON.stringify({
                         data: Array.from({ length: 5 }, (_, i) => ({
-                            id: 9900 + i,
-                            title: `滚动加载会话 ${i + 1}`,
+                            id: 9900 + (appendCount * 10) + i,
+                            title: `滚动加载会话 ${appendCount}-${i + 1}`,
                             updated_at: new Date().toISOString()
                         })),
-                        hasMore: false
+                        hasMore: appendCount < 5,
+                        cursor: `mock-cursor-page-${appendCount + 1}`
                     })
                 });
             }
             return route.fulfill({
                 contentType: 'application/json',
                 body: JSON.stringify({
-                    data: Array.from({ length: 25 }, (_, i) => ({
+                    data: Array.from({ length: 35 }, (_, i) => ({
                         id: 9800 + i,
                         title: `初始会话 ${i + 1}`,
                         updated_at: new Date().toISOString()
@@ -341,7 +344,7 @@ test.describe('Pivot browser smoke', () => {
         }));
         if (initialMetrics.scrollHeight > initialMetrics.clientHeight) {
             await list.hover();
-            await page.mouse.wheel(0, 640);
+            await page.mouse.wheel(0, 80);
             await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
         }
         if (await list.locator('.session-item').count() > 0) {
@@ -758,62 +761,61 @@ test.describe('Pivot browser smoke', () => {
         await expect(state.getByRole('button', { name: '重试' })).toBeVisible();
     });
 
-    test('系统监控固定在工作区视口内，仅慢查询与异常告警列表支持内部滚动', async ({ page }) => {
+    test('系统监控按概览、服务和质量分区，桌面与移动端内容可完整访问', async ({ page }) => {
+        test.setTimeout(90_000);
+        let executionCalls = 0;
+        page.on('request', request => {
+            if (request.url().includes('/api/chat/execution-metrics')) executionCalls++;
+        });
         await page.setViewportSize({ width: 1280, height: 800 });
-        await page.route('**/api/monitor/stats*', async route => {
-            const response = await route.fetch().catch(() => null);
-            const json = response?.ok() ? await response.json().catch(() => ({})) : {};
-            json.observability = json.observability || {};
-            json.observability.events = Array.from({ length: 24 }, (_, index) => ({
-                id: index + 1,
-                type: 'sql_slow',
-                severity: index % 2 ? 'warning' : 'critical',
-                message: `慢查询与异常告警验收记录 ${index + 1}`,
-                duration_ms: 1200,
-                created_at: new Date().toISOString()
-            }));
-            return route.fulfill({
-                contentType: 'application/json',
-                body: JSON.stringify(json)
-            });
-        });
         await ensureBrowserSession(page);
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
-        await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
         await page.locator('#tab-monitor').click();
-        await expect(page.locator('#tab-content-monitor')).toBeVisible({ timeout: 15_000 });
-        await expect(page.locator('#monitor-summary-grid .monitor-card')).toHaveCount(8, { timeout: 15_000 });
+        await page.locator('#monitor-overview-tab').click();
+        await expect(page.locator('#monitor-summary-grid .monitor-card')).toHaveCount(6, { timeout: 15_000 });
+        await expect(page.locator('#monitor-task-queue')).toContainText('待人工确认');
+        await expect(page.locator('#monitor-runtime-pressure')).toContainText('事件循环 P99');
+        await expect(page.locator('#monitor-health-maintenance-list')).toContainText('浏览器运行时');
+        expect(executionCalls).toBe(0);
         await page.locator('#monitor-auto-refresh').uncheck();
+        const response = await page.request.get('/api/stats/monitor-summary');
+        expect(response.ok()).toBeTruthy();
+        const snapshot = await response.json();
+        expect(snapshot.runtime.taskQueue.available).toBe(true);
+        expect(snapshot.runtime.pgPool.available).toBe(true);
+        expect(typeof snapshot.runtime.heap.heapLimit).toBe('number');
 
-        await page.evaluate(() => {
-            const list = document.getElementById('monitor-observability-list');
-            list.replaceChildren(...Array.from({ length: 24 }, (_, index) => {
-                const row = document.createElement('div');
-                row.className = `monitor-observability-row ${index % 2 ? 'is-warning' : 'is-critical'}`;
-                row.textContent = `慢查询与异常告警验收记录 ${index + 1}`;
-                return row;
-            }));
-        });
-
-        await expect.poll(() => page.evaluate(() => {
-            const content = document.querySelector('.settings-workspace-view .admin-content');
-            const list = document.getElementById('monitor-observability-list');
-            return {
-                outerHasHorizontalOverflow: content.scrollWidth > content.clientWidth + 1,
-                outerHasVerticalOverflow: content.scrollHeight > content.clientHeight + 1,
-                documentHasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
-                documentHasVerticalOverflow: document.documentElement.scrollHeight > window.innerHeight + 1,
-                alertCanScroll: list.scrollHeight > list.clientHeight,
-                alertOverflowY: window.getComputedStyle(list).overflowY
-            };
-        })).toEqual({
-            outerHasHorizontalOverflow: false,
-            outerHasVerticalOverflow: false,
-            documentHasHorizontalOverflow: false,
-            documentHasVerticalOverflow: false,
-            alertCanScroll: true,
-            alertOverflowY: 'auto'
-        });
+        for (const width of [1280, 390]) {
+            await page.setViewportSize({ width, height: 844 });
+            for (const section of ['overview', 'services', 'quality']) {
+                await page.locator('#monitor-' + section + '-tab').click();
+                const panel = page.locator('[data-quality-panels="monitor"][data-quality-panel="' + section + '"]');
+                await expect(panel).toBeVisible();
+                await expect.poll(() => page.evaluate(() => {
+                    const content = document.querySelector('.settings-workspace-view .admin-content');
+                    return content.scrollWidth <= content.clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1;
+                })).toBe(true);
+                const lastCard = panel.locator('.monitor-panel-card').last();
+                await lastCard.scrollIntoViewIfNeeded();
+                const clipped = await panel.locator('.monitor-panel-card').evaluateAll(cards =>
+                    cards.some(card => card.scrollHeight > card.clientHeight + 2));
+                expect(clipped).toBe(false);
+                await page.evaluate(() => { document.querySelector('.settings-workspace-view .admin-content').scrollTop = 0; });
+                await page.screenshot({ path: path.resolve(__dirname, '../../output/monitor-' + section + '-' + width + '.png') });
+            }
+        }
+        expect(executionCalls).toBeGreaterThan(0);
+        await expect(page.locator('#monitor-auto-refresh')).toBeDisabled();
+        const refreshed = page.waitForResponse(response => response.url().includes('/api/chat/execution-metrics') && response.request().method() === 'GET');
+        await page.locator('#monitor-refresh-btn').click();
+        expect((await refreshed).ok()).toBeTruthy();
+        await expect(page.locator('#monitor-chat-execution')).toContainText('交付核验通过');
+        await page.locator('#monitor-services-tab').focus();
+        await page.keyboard.press('ArrowRight');
+        await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
     });
 
     test('工具库的动态操作在重绘后仍可刷新、自检并打开本机授权中心', async ({ page }) => {
@@ -1299,7 +1301,7 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('#monitor-overview-panel')).toBeHidden();
         await page.locator('#monitor-quality-tab').focus();
-        await page.keyboard.press('ArrowLeft');
+        await page.keyboard.press('Home');
         await expect(page.locator('#monitor-overview-tab')).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('#monitor-overview-panel')).toBeVisible();
         await page.locator('#monitor-quality-tab').click();
@@ -1425,7 +1427,7 @@ test.describe('Pivot browser smoke', () => {
         expect(browserHeartbeats).toBe(0);
     });
 
-    test('管理员可在设置工作台提交冻结金标的独立审核', async ({ page }) => {
+    test('管理员可通过独立评测审核菜单提交审核并恢复页面', async ({ page }) => {
         let submitted = null;
         await page.route(/\/api\/stats\/observability\/decision-evaluation-sets\/v2\/cases\?limit=500$/, async route => {
             await route.fulfill({
@@ -1445,8 +1447,7 @@ test.describe('Pivot browser smoke', () => {
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
         await expect(page.locator('#admin-container')).toBeVisible({ timeout: 15_000 });
         await expect(page.locator('#tab-decision-review')).toHaveCount(0);
-        await page.locator('#tab-models').click();
-        await page.locator('#models-evaluation-tab').click();
+        await page.locator('#tab-evaluation-review').click();
         const panel = page.locator('#decision-review-gold-panel');
         await expect(panel).toBeVisible();
         await expect(panel).toContainText('用户请求调用外部工具');
@@ -1456,14 +1457,22 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => submitted).toEqual({ expectedActionId: 'candidate_only', reviewNote: '独立确认需要先授权。' });
         await expect(panel).toContainText('待第二审核');
         await page.evaluate(() => window.Pivot.legacy.switchTab('decision-gold-review'));
-        await expect(page.locator('#models-evaluation-tab')).toHaveAttribute('aria-selected', 'true');
-        await expect(page.locator('#models-configuration-panel')).toBeHidden();
+        await expect(page.locator('#tab-evaluation-review')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#tab-content-models')).toBeHidden();
+        await page.evaluate(() => window.Pivot.legacy.switchTab('models', { subtab: 'evaluation' }));
+        await expect(page.locator('#tab-evaluation-review')).toHaveAttribute('aria-selected', 'true');
         await page.setViewportSize({ width: 390, height: 844 });
-        await expect(page.locator('#models-evaluation-tab')).toBeVisible();
+        await expect(page.locator('#tab-evaluation-review')).toBeVisible();
         await expect(panel).toBeVisible();
-        await page.locator('#models-configuration-tab').click();
-        await expect(page.locator('#models-configuration-panel')).toBeVisible();
+        await page.screenshot({ path: path.resolve(__dirname, '../../output/evaluation-review-mobile.png') });
+        await page.locator('#tab-models').click();
+        await expect(page.locator('#tab-content-models')).toBeVisible();
         await expect(panel).toBeHidden();
+        await expect(page.locator('#models-evaluation-tab')).toHaveCount(0);
+        await page.locator('#tab-evaluation-review').click();
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
+        await expect(page.locator('#tab-evaluation-review')).toHaveAttribute('aria-selected', 'true');
     });
 
     test('普通用户无法通过旧审核入口或保存状态打开管理员质量与评测数据', async ({ page, browser }) => {
@@ -1485,8 +1494,10 @@ test.describe('Pivot browser smoke', () => {
                 sessionStorage.setItem('pivot_settings_models_section', 'evaluation');
             });
             await regular.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
-            await expect(regular.locator('#models-configuration-panel')).toBeVisible();
-            await expect(regular.locator('#models-evaluation-tab')).toBeHidden();
+            await expect(regular.locator('#tab-content-models')).toBeVisible();
+            await expect(regular.locator('#tab-evaluation-review')).toBeHidden();
+            await regular.evaluate(() => window.Pivot.legacy.switchTab('evaluation-review'));
+            await expect(regular.locator('#tab-content-evaluation-review')).toBeHidden();
             await expect(regular.locator('#tab-monitor')).toBeHidden();
             await regular.evaluate(() => window.Pivot.legacy.switchTab('route-feedback'));
             await expect(regular.locator('#decision-review-feedback-panel')).toBeHidden();
@@ -1682,7 +1693,9 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#tab-monitor').click();
 
         await expect(page.locator('#tab-content-monitor')).toBeVisible();
-        await expect(page.locator('#monitor-summary-grid')).toContainText('平均延迟');
+        await page.locator('#monitor-overview-tab').click();
+        await expect(page.locator('#monitor-summary-grid')).toContainText('HTTP P95');
+        await page.locator('#monitor-services-tab').click();
         await expect(page.locator('#monitor-rag-storage-list')).toContainText('检索诊断（24h）');
         await expect(page.locator('#monitor-rag-latency-trend')).toContainText(/Embedding|暂无/);
     });

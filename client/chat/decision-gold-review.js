@@ -267,8 +267,8 @@
             cell.colSpan = 7;
             cell.className = 'text-center route-feedback-empty';
             cell.textContent = allItems.length
-                ? '当前筛选条件下没有匹配的冻结金标案例。'
-                : '当前版本没有可审核的冻结金标案例。可先导入冻结集。';
+                ? '当前筛选条件下没有匹配的评测案例。'
+                : '当前版本没有可审核的评测案例。可先导入冻结集。';
             row.appendChild(cell);
             body.appendChild(row);
             renderPaginationControls(0, state.pageSize, 1);
@@ -405,7 +405,7 @@
         try {
             const response = await apiFetch(`${API_BASE}/stats/observability/decision-evaluation-sets/${encodeURIComponent(nextVersion)}/cases?limit=500`);
             const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload.error) throw new Error(payload.error || '加载冻结金标审核队列失败');
+            if (!response.ok || payload.error) throw new Error(payload.error || '加载评测审核队列失败');
             state.version = nextVersion;
             state.items = Array.isArray(payload.data) ? payload.data : [];
             state.page = 1;
@@ -465,7 +465,7 @@
                 body: JSON.stringify({ expectedActionId: action, reviewNote: note })
             });
             const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload.error) throw new Error(payload.error || '提交金标审核失败');
+            if (!response.ok || payload.error) throw new Error(payload.error || '提交评测审核失败');
             const review = payload.review || {};
             const isVerified = review.reviewStatus === 'verified';
             const message = isVerified
@@ -495,7 +495,7 @@
 
         // 刷新与导入按钮
         document.getElementById('decision-gold-review-refresh')?.addEventListener('click', () => {
-            loadDecisionGoldReviewQueue().catch(error => notify(error.message || '加载冻结金标审核队列失败', 'error'));
+            loadDecisionGoldReviewQueue().catch(error => notify(error.message || '加载评测审核队列失败', 'error'));
         });
         document.getElementById('decision-gold-review-import')?.addEventListener('click', () => {
             importFrozenSet().catch(error => notify(error.message || '导入冻结评测集失败', 'error'));
@@ -523,7 +523,7 @@
         document.getElementById('decision-gold-review-version')?.addEventListener('keydown', event => {
             if (event.key === 'Enter') {
                 event.preventDefault();
-                loadDecisionGoldReviewQueue().catch(error => notify(error.message || '加载冻结金标审核队列失败', 'error'));
+                loadDecisionGoldReviewQueue().catch(error => notify(error.message || '加载评测审核队列失败', 'error'));
             }
         });
 
@@ -531,7 +531,7 @@
         section.addEventListener('click', event => {
             const button = event.target.closest?.('[data-decision-gold-review]');
             if (button && !button.disabled) {
-                submitReview(button.dataset.decisionGoldReview).catch(error => notify(error.message || '提交金标审核失败', 'error'));
+                submitReview(button.dataset.decisionGoldReview).catch(error => notify(error.message || '提交评测审核失败', 'error'));
             }
         });
 

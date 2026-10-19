@@ -89,7 +89,6 @@ function cancelOpsSummaryLoad() {
 
 const loadMonitorSummary = async function(options = {}) {
     if (!isAdminUser()) return;
-    if (window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') === 'quality') return;
     if (monitorSummaryLoadPromise && !options.force && !options.refresh) return monitorSummaryLoadPromise;
     monitorSummaryLoadController?.abort();
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -101,33 +100,16 @@ const loadMonitorSummary = async function(options = {}) {
         const res = await apiFetch(`${API_BASE}/stats/monitor-summary${suffix}`, signalOptions);
         if (!res.ok) throw new Error(`系统监控加载失败（HTTP ${res.status}）`);
         const data = await res.json();
-        const executionPanel = document.getElementById('monitor-chat-execution');
-        if (executionPanel) {
-            try {
-                const response = await apiFetch(`${API_BASE}/chat/execution-metrics?scope=organization`, signalOptions);
-                if (!response.ok) throw new Error('任务指标暂时不可用');
-                const body = await response.json();
-                const rows = Array.isArray(body.metrics) ? body.metrics : [];
-                const sum = key => rows.reduce((total, item) => total + Number(item[key] || 0), 0);
-                const tasks = rows.filter(row => ['agent_run','continue_run'].includes(row.action)).reduce((total, row) => total + Number(row.count || 0), 0);
-                const metrics = [['请求数', sum('count')], ['任务与续接', tasks], ['交付核验通过', sum('verified')], ['执行失败或部分完成', sum('failures')], ['用户纠正', sum('corrections')], ['个人经验复用', sum('experience_reuse')], ['已复核路由', sum('reviewed_routes')], ['已核实误路由', sum('verified_route_mismatches')]];
-                const rowsHtml = metrics.map(([label, value]) => `<div class="monitor-row"><span>${escapeHtml(label)}</span><strong>${formatMetricNumber(value)}</strong></div>`).join('');
-                const noteHtml = '<p class="text-muted">核验通过表示交付检查结果；用户纠正独立统计。没有核验样本时不计算成功率。</p>';
-                PivotSafeHtml.setHtml(executionPanel, `${rowsHtml}${noteHtml}`);
-            } catch (error) {
-                executionPanel.textContent = error.name === 'AbortError' ? '刷新已取消' : '任务指标暂时不可用，请稍后刷新。';
-            }
-        }
+        if (controller?.signal.aborted) return false;
+        window.Pivot.moduleApi('settings.monitorDashboard').render(data);
         const system = data.system || {};
         const processInfo = data.process || {};
         const tokens = data.tokens || {};
-        const httpInfo = data.http || {};
         const memoryUsed = system.memory?.used || 0;
         const memoryTotal = system.memory?.total || 1;
         const memoryUsedRate = memoryTotal > 0 ? memoryUsed / memoryTotal : 0;
         const disk = system.disk || {};
         const diskUsedRate = Number(disk.usedRatio ?? (disk.total > 0 ? disk.used / disk.total : 0)) || 0;
-        const errorRate = (httpInfo.errorRate || 0) * 100;
         const concurrency = data.concurrency || {};
         const gpu = data.gpu || {};
         const endpoints = data.modelEndpoints || {};
@@ -135,55 +117,21 @@ const loadMonitorSummary = async function(options = {}) {
         const maintenance = data.maintenance || {};
         const concurrencyEffectiveMax = Number(concurrency.effectiveMax ?? concurrency.max ?? 0) || 0;
         const concurrencyConfiguredMax = Number(concurrency.configuredMax ?? gpu.configuredMaxConcurrent ?? concurrencyEffectiveMax) || concurrencyEffectiveMax;
-        const concurrencyIsThrottled = Boolean(gpu.throttled) || concurrencyConfiguredMax > concurrencyEffectiveMax;
-        const concurrencyHintParts = [`排队 ${formatMetricNumber(concurrency.queued)}/${formatMetricNumber(concurrency.maxQueue)}`];
-        if (concurrencyIsThrottled) {
-            if (concurrencyConfiguredMax > concurrencyEffectiveMax) concurrencyHintParts.push(`配置 ${formatMetricNumber(concurrencyConfiguredMax)}`);
-            concurrencyHintParts.push('GPU 临时保护');
-        }
         const gpuProtectionStatus = gpu.overloaded ? '保护中' : (gpu.throttled ? '降档中' : '正常');
-        const loadAvgStr = Array.isArray(system.loadAverage) ? system.loadAverage.map(v => Number(v || 0).toFixed(2)).join(' / ') : '0.00 / 0.00 / 0.00';
-        const cards = [
-            ['AI 并发', `${formatMetricNumber(concurrency.active)}/${formatMetricNumber(concurrencyEffectiveMax)}`, concurrencyHintParts.join(' · ')],
-            ['今日 Token', formatTokenCount(tokens.today), '累计 ' + formatTokenCount(tokens.total)],
-            ['今日消息', formatMetricNumber(tokens.todayMessages), `15min 活跃用户: ${data.activeUsers || 0}`],
-            ['请求总数', formatMetricNumber(httpInfo.requests), `错误率 ${errorRate.toFixed(2)}%`],
-            ['平均延迟', `${formatMetricNumber(httpInfo.avgLatencyMs, 1)} ms`, `P95 ${formatMetricNumber(httpInfo.p95LatencyMs, 1)} ms`],
-            ['进程内存', formatBytes(processInfo.memory?.rss), `堆 ${formatBytes(processInfo.memory?.heapUsed)}`],
-            ['系统负载', loadAvgStr, `${system.cpuCount || 1} 核 CPU`],
-            ['维护任务', maintenance.running ? '运行中' : '未启动', `审计保留 ${maintenance.retentionDays || '-'} 天`]
-        ];
-        const cardIcons = {
-            'AI 并发': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-            '今日 Token': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
-            '今日消息': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
-            '请求总数': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
-            '平均延迟': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-            '进程内存': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
-            '系统负载': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
-            '维护任务': '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.1-3.1a6 6 0 0 1-7.9 7.9l-6.8 6.8a2.1 2.1 0 0 1-3-3l6.8-6.8a6 6 0 0 1 7.9-7.9l-3.1 3.1z"/></svg>'
-        };
-
-        PivotSafeHtml.setHtml(document.getElementById('monitor-summary-grid'), cards.map(([label, value, hint]) => `
-            <div class="monitor-card">
-                <div class="monitor-card-head">
-                    <span>${escapeHtml(label)}</span>
-                    <span class="monitor-card-icon">${cardIcons[label] || ''}</span>
-                </div>
-                <strong title="${escapeHtml(value)}">${escapeHtml(value)}</strong>
-                <small title="${escapeHtml(hint)}">${escapeHtml(hint)}</small>
-            </div>
-        `).join(''));
+        const loadAvgStr = system.platform === 'win32' ? '当前平台不支持' : (Array.isArray(system.loadAverage) ? system.loadAverage.map(v => Number(v || 0).toFixed(2)).join(' / ') : '暂无数据');
 
         const memBarWidth = Math.min(100, Math.round(memoryUsedRate * 100));
-        const memBarColor = memBarWidth > 90 ? '#ef4444' : (memBarWidth > 75 ? '#f59e0b' : '#10b981');
+        const memBarColor = memBarWidth > 90 ? 'var(--danger)' : (memBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
         const diskBarWidth = Math.min(100, Math.round(diskUsedRate * 100));
-        const diskBarColor = diskBarWidth > 90 ? '#ef4444' : (diskBarWidth > 75 ? '#f59e0b' : '#10b981');
+        const diskAvailable = Number(disk.total) > 0;
+        const diskBarColor = diskBarWidth > 90 ? 'var(--danger)' : (diskBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
+
+        const diskStatusClass = diskBarWidth > 90 ? 'is-danger' : (diskBarWidth > 75 ? 'is-warning' : '');
 
         const heapUsed = processInfo.memory?.heapUsed || 0;
-        const heapTotal = processInfo.memory?.heapTotal || 1;
-        const heapBarWidth = Math.min(100, Math.round((heapUsed / heapTotal) * 100));
-        const heapBarColor = heapBarWidth > 90 ? '#ef4444' : (heapBarWidth > 75 ? '#f59e0b' : '#10b981');
+        const heapTotal = data.runtime?.heap?.heapLimit || 0;
+        const heapBarWidth = Math.min(100, Math.round((heapTotal > 0 ? heapUsed / heapTotal : 0) * 100));
+        const heapBarColor = heapBarWidth > 90 ? 'var(--danger)' : (heapBarWidth > 75 ? 'var(--warning)' : 'var(--success)');
 
         const osType = String(system.type || '').replace(/^Windows_NT$/i, 'Windows');
         const osDisplay = `${osType} ${system.release || ''}`.trim() || '-';
@@ -214,7 +162,7 @@ const loadMonitorSummary = async function(options = {}) {
             </div>`,
             `<div class="monitor-row monitor-split-row">
                 <div>
-                    <span>物理内存</span>
+                    <span>主机内存</span>
                     <div class="monitor-meter-cell" title="${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)">
                         <strong>${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal)} (${memBarWidth}%)</strong>
                         <div class="monitor-meter-track">
@@ -223,9 +171,9 @@ const loadMonitorSummary = async function(options = {}) {
                     </div>
                 </div>
                 <div>
-                    <span title="Node.js V8 引擎对象堆内存：已用堆 / 分配堆总额 (反映应用对象及闭包占用，用于排查内存泄漏)">Node 堆</span>
+                    <span title="V8 对象堆：已使用 / 堆上限，用于判断内存压力">Node 堆 / 上限</span>
                     <div class="monitor-meter-cell" title="V8 对象堆：${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)">
-                        <strong>${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)</strong>
+                        <strong>${heapTotal > 0 ? `${formatBytes(heapUsed)} / ${formatBytes(heapTotal)} (${heapBarWidth}%)` : '暂无数据'}</strong>
                         <div class="monitor-meter-track">
                             <div class="monitor-meter-fill" style="width: ${heapBarWidth}%; background: ${heapBarColor};"></div>
                         </div>
@@ -235,25 +183,34 @@ const loadMonitorSummary = async function(options = {}) {
             `<div class="monitor-row monitor-split-row">
                 <div>
                     <span>硬盘空间</span>
-                    <div class="monitor-meter-cell" title="${escapeHtml(disk.path || '')} ${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)">
-                        <strong>${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)</strong>
+                    <div class="monitor-meter-cell" title="磁盘路径：${escapeHtml(disk.path || '默认')} ${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)">
+                        <strong>${diskAvailable ? `${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)` : '暂无数据'}</strong>
                         <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill" style="width: ${diskBarWidth}%; background: ${diskBarColor};"></div>
+                            <div class="monitor-meter-fill ${diskStatusClass}" data-meter-rate="${diskAvailable ? diskBarWidth : 0}"></div>
                         </div>
                     </div>
                 </div>
                 <div>
                     <span>剩余容量</span>
-                    <strong title="${escapeHtml(disk.path || '')}">${formatBytes(disk.free || 0)}</strong>
+                    <strong title="磁盘路径：${escapeHtml(disk.path || '默认')}">${diskAvailable ? formatBytes(disk.free) : '暂无数据'}</strong>
                 </div>
             </div>`,
             `<div class="monitor-row monitor-split-row monitor-single-row">
                 <div>
-                    <span>进程 CPU 耗时</span>
+                    <span>CPU 累计耗时</span>
                     <strong title="用户态 ${Number(processInfo.cpuSeconds?.user || 0).toFixed(2)}s · 系统态 ${Number(processInfo.cpuSeconds?.system || 0).toFixed(2)}s">${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s 用户 / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s 系统</strong>
                 </div>
+                <div><span>进程常驻内存</span><strong>${formatBytes(processInfo.memory?.rss)}</strong></div>
             </div>`
         ].join(''));
+
+        const resourceEl = document.getElementById('monitor-resource-list');
+        if (resourceEl) {
+            resourceEl.querySelectorAll('.monitor-meter-fill[data-meter-rate]').forEach(bar => {
+                const rate = Number(bar.dataset.meterRate) || 0;
+                bar.style.width = `${Math.min(100, Math.max(0, rate))}%`;
+            });
+        }
 
         const healthEl = document.getElementById('monitor-health-maintenance-list');
         if (healthEl) {
@@ -272,9 +229,7 @@ const loadMonitorSummary = async function(options = {}) {
                 'cache': '缓存服务'
             };
             const allHealthChecks = Array.isArray(health.checks) ? health.checks : [];
-            // 普通健康卡片不滚动，最多呈现八个最重要的检查项；其余仍会由接口详情和
-            // 服务端日志完整保留，避免偶发检查项激增把整个监控画布挤出视口。
-            const healthChecks = allHealthChecks.slice(0, 8);
+            const healthChecks = allHealthChecks;
             const pairedHealthRows = [];
             for (let i = 0; i < healthChecks.length; i += 2) {
                 const item1 = healthChecks[i];
@@ -353,10 +308,10 @@ const loadMonitorSummary = async function(options = {}) {
         const gpuActiveStatus = gpu.status === 'error' ? '过载熔断' : (concurrencyActive >= concurrencyEffectiveMax && concurrencyEffectiveMax > 0 ? '峰值排队' : gpuProtectionStatus);
 
         const aiMeterWidth = concurrencyEffectiveMax > 0 ? Math.min(100, Math.round((concurrencyActive / concurrencyEffectiveMax) * 100)) : 0;
-        const aiMeterColor = aiMeterWidth > 85 ? '#ef4444' : (aiMeterWidth > 65 ? '#f59e0b' : '#10b981');
+        const aiMeterColor = aiMeterWidth > 85 ? 'var(--danger)' : (aiMeterWidth > 65 ? 'var(--warning)' : 'var(--success)');
 
         const queueMeterWidth = concurrencyMaxQueue > 0 ? Math.min(100, Math.round((concurrencyQueued / concurrencyMaxQueue) * 100)) : 0;
-        const queueMeterColor = queueMeterWidth > 80 ? '#ef4444' : (queueMeterWidth > 50 ? '#f59e0b' : '#10b981');
+        const queueMeterColor = queueMeterWidth > 80 ? 'var(--danger)' : (queueMeterWidth > 50 ? 'var(--warning)' : 'var(--success)');
 
         const gpuRejectThreshold = ((gpu.thresholds?.reject || 0.98) * 100).toFixed(0);
         const gpuSafeThreshold = ((gpu.thresholds?.safe || 0.85) * 100).toFixed(0);
@@ -392,9 +347,9 @@ const loadMonitorSummary = async function(options = {}) {
             const rawName = item.name || 'GPU';
             const shortName = formatGpuDisplayName(rawName);
             const vramText = formatCompactVram(item.usedBytes, item.totalBytes);
-            const utilization = Number(item.utilization);
+            const utilization = item.utilization == null ? NaN : Number(item.utilization);
             const utilRate = Number.isFinite(utilization) ? (utilization > 1 ? utilization : utilization * 100) : null;
-            const temp = Number.isFinite(Number(item.temperature)) ? `${Number(item.temperature).toFixed(0)}°C` : null;
+            const temp = item.temperature != null && Number.isFinite(Number(item.temperature)) ? `${Number(item.temperature).toFixed(0)}°C` : null;
             const statusClass = usedRate > 90 ? 'is-danger' : (usedRate > 75 ? 'is-warning' : 'is-healthy');
 
             return `<div class="monitor-gpu-card-item">
@@ -406,7 +361,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <div class="monitor-meter-fill ${statusClass}" data-meter-rate="${Math.min(100, Math.round(usedRate))}"></div>
                 </div>
                 <div class="monitor-gpu-item-foot">
-                    <span class="monitor-gpu-metric-util">${utilRate !== null ? `利用率 <strong>${utilRate.toFixed(0)}%</strong>` : '利用率 <strong>0%</strong>'}</span>
+                    <span class="monitor-gpu-metric-util">${utilRate !== null ? `利用率 <strong>${utilRate.toFixed(0)}%</strong>` : '利用率 <strong>暂无数据</strong>'}</span>
                     <span class="monitor-gpu-metric-extra">${temp ? `${temp} · ` : ''}${usedRate.toFixed(0)}%</span>
                 </div>
             </div>`;
@@ -419,9 +374,9 @@ const loadMonitorSummary = async function(options = {}) {
             : `<div class="monitor-hardware-banner">
                 <div class="monitor-hardware-banner-head">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                    <strong>当前算力形态：CPU / 混合集群调度</strong>
+                    <strong>本机 GPU 数据暂不可用</strong>
                 </div>
-                <p>未检测到本地显卡资源。系统已启用自适应动态削峰保护，多模型请求由分布式端点承载。</p>
+                <p>请检查 GPU 探针或查看模型端点状态；远端算力不在本机探针范围内。</p>
             </div>`;
 
         PivotSafeHtml.setHtml(document.getElementById('monitor-gpu-list'), [
@@ -491,7 +446,7 @@ const loadMonitorSummary = async function(options = {}) {
         }
 
         const models = Array.isArray(tokens.byModel) ? tokens.byModel : [];
-        const visibleModels = models.slice(0, 6);
+        const visibleModels = models.slice(0, 8);
         PivotSafeHtml.setHtml(document.getElementById('monitor-model-list'), visibleModels.length
             ? [visibleModels.map(item => {
                 const modelName = item.model_name || '未知模型';
@@ -512,45 +467,22 @@ const loadMonitorSummary = async function(options = {}) {
             const embedding = ragOperations.embedding || {};
             const embeddingSummary = embedding.summary || {};
             const diagnostics = ragOperations.diagnostics || {};
-            const routingRows = Array.isArray(data.chatRouting?.rows) ? data.chatRouting.rows : [];
-            const routing = routingRows.reduce((summary, row) => ({
-                requests: summary.requests + Number(row.request_count || 0),
-                errors: summary.errors + Number(row.error_count || 0),
-                durationMs: summary.durationMs + Number(row.total_route_duration_ms || 0),
-                embeddingMs: summary.embeddingMs + Number(row.total_embedding_duration_ms || 0),
-                ragCandidates: summary.ragCandidates + Number(row.total_rag_candidates || 0),
-                toolCandidates: summary.toolCandidates + Number(row.total_tool_candidates || 0)
-            }), { requests: 0, errors: 0, durationMs: 0, embeddingMs: 0, ragCandidates: 0, toolCandidates: 0 });
-            const decisionRouting = data.decisionRouting || {};
-            const decisionProviders = Array.isArray(decisionRouting.providers) ? decisionRouting.providers : [];
-            const decisionSummary = decisionProviders.reduce((summary, provider) => ({
-                calls: summary.calls + Number(provider.calls || 0),
-                errors: summary.errors + Number(provider.errors || 0),
-                p95DurationMs: Math.max(summary.p95DurationMs, Number(provider.p95_duration_ms || 0))
-            }), { calls: 0, errors: 0, p95DurationMs: 0 });
-            const decisionTitle = decisionRouting.unavailable
-                ? '迁移未应用或指标暂不可用'
-                : `调用 ${formatMetricNumber(decisionSummary.calls)} 次，错误 ${formatMetricNumber(decisionSummary.errors)} 次`;
-            const decisionStatusText = decisionRouting.unavailable
-                ? '待迁移'
-                : `${formatMetricNumber(decisionSummary.calls)} 次 / ${formatMetricNumber(decisionSummary.errors)} 错误`;
-            const decisionP95Text = decisionRouting.unavailable
-                ? '—'
-                : `${formatMetricNumber(decisionSummary.p95DurationMs, 1)} 毫秒`;
             const storageData = data.storage || {};
-            const avgRetrieval = Number(ragData.avgRetrievalMs || 0).toFixed(1);
+            const hasRetrievals = Number(ragData.retrievals) > 0;
+            const hasEmbedding = Number(embeddingSummary.requestCount) > 0;
+            const avgRetrieval = hasRetrievals ? `${Number(ragData.avgRetrievalMs || 0).toFixed(1)} ms` : '暂无数据';
             PivotSafeHtml.setHtml(ragStorageEl, [
                 `<div class="monitor-row monitor-split-row">
                     <div><span>检索总数</span><strong>${formatMetricNumber(ragData.retrievals)} 次</strong></div>
-                    <div><span>平均耗时</span><strong>${avgRetrieval} ms</strong></div>
+                    <div><span>平均耗时</span><strong>${avgRetrieval}</strong></div>
                 </div>`,
                 `<div class="monitor-row monitor-split-row">
-                    <div><span>命中率</span><strong>${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%</strong></div>
-                    <div><span>缓存命中</span><strong>${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%</strong></div>
+                    <div><span>命中率</span><strong>${hasRetrievals ? `${(Number(ragData.hitRate || 0) * 100).toFixed(1)}%` : '暂无数据'}</strong></div>
+                    <div><span>缓存命中</span><strong>${hasRetrievals ? `${(Number(ragData.cacheHitRate || 0) * 100).toFixed(1)}%` : '暂无数据'}</strong></div>
                 </div>`,
                 `<div class="monitor-row monitor-split-row">
-                    <div><span>Embedding</span><strong>${formatMetricNumber(embeddingSummary.averageDurationMs, 1)} ms</strong></div>
-                    <div><span>失败率</span><strong>${(Number(embeddingSummary.errorRate || 0) * 100).toFixed(1)}%</strong></div>
+                    <div><span>向量计算 (Embedding)</span><strong>${hasEmbedding ? `${formatMetricNumber(embeddingSummary.averageDurationMs, 1)} ms` : '暂无数据'}</strong></div>
+                    <div><span>失败率</span><strong>${hasEmbedding ? `${(Number(embeddingSummary.errorRate || 0) * 100).toFixed(1)}%` : '暂无数据'}</strong></div>
                 </div>`,
                 `<div class="monitor-row monitor-split-row">
                     <div><span>索引分片</span><strong>${formatMetricNumber(ragData.chunksIndexed)}</strong></div>
@@ -560,14 +492,6 @@ const loadMonitorSummary = async function(options = {}) {
                     <div><span>数据库</span><strong>${formatBytes(storageData.db)}</strong></div>
                     <div><span>附件存储</span><strong>${formatBytes(storageData.uploads)}</strong></div>
                 </div>`,
-                `<div class="monitor-row monitor-split-row">
-                    <div><span>智能路由（24h）</span><strong title="请求 ${formatMetricNumber(routing.requests)} 次，错误 ${formatMetricNumber(routing.errors)} 次">${formatMetricNumber(routing.requests)} 次 / ${routing.requests ? formatMetricNumber(routing.durationMs / routing.requests, 1) : '0.0'} ms</strong></div>
-                    <div><span>平均候选</span><strong title="知识库 ${formatMetricNumber(routing.ragCandidates)}，工具 ${formatMetricNumber(routing.toolCandidates)}">知识 ${routing.requests ? formatMetricNumber(routing.ragCandidates / routing.requests, 1) : '0'} / 工具 ${routing.requests ? formatMetricNumber(routing.toolCandidates / routing.requests, 1) : '0'}</strong></div>
-                </div>`,
-                `<div class="monitor-row monitor-split-row">
-                    <div><span>决策器（24h）</span><strong title="${decisionTitle}">${decisionStatusText}</strong></div>
-                    <div><span>决策器 P95</span><strong>${decisionP95Text}</strong></div>
-                </div>`
             ].join(''));
             renderRagEmbeddingLatencyTrend(document.getElementById('monitor-rag-latency-trend'), embedding);
         }
@@ -601,6 +525,7 @@ const loadMonitorSummary = async function(options = {}) {
                         <span class="monitor-observability-badges">
                             <span class="badge-type">${escapeHtml(typeLabel)}</span>
                             <span class="badge-severity">${escapeHtml(severityLabel)}</span>
+                            <span>${escapeHtml(({ open: '未处理', ack: '已确认', resolved: '已恢复', alerted: '已推送' })[item.status] || '状态未知')}</span>
                         </span>
                         ${source && source !== title ? `<span class="monitor-observability-item-source" title="${escapeHtml(source)}">${escapeHtml(source)}</span>` : ''}
                     </div>
@@ -669,12 +594,14 @@ function clearMonitorRefreshTimer() {
 function cancelMonitorSummaryLoad() {
     const controller = monitorSummaryLoadController;
     controller?.abort();
+    window.Pivot.moduleApi('settings.monitorDashboard')?.cancelQualityLoad?.();
     monitorSummaryLoadController = null;
     monitorSummaryLoadPromise = null;
 }
 
 const refreshMonitorSummary = function(options = {}) {
-    return loadMonitorSummary({ ...options, force: true });
+    const quality = window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') === 'quality';
+    return Promise.all([loadMonitorSummary({ ...options, force: true }), quality ? window.Pivot.moduleApi('settings.monitorDashboard').loadQuality() : null]);
 };
 
 function scheduleMonitorRefresh() {

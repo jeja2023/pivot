@@ -56,22 +56,19 @@ test('设置页具备加载失败恢复、请求竞态和键盘导航契约', ()
     assert.match(statsRoute, /getCachedDatabaseSize\(\)/);
     assert.match(read('server/services/admin-stats-cache.js'), /DATABASE_SIZE_TTL_MS/);
 });
-test('系统监控固定在设置画布内，只有慢查询与异常告警列表允许内部滚动', () => {
+test('系统监控分区使用自然高度，全部健康检查可见', () => {
     const monitorCss = read('client/chat/styles/stats-monitor/stats-system-monitor.css');
     const scale = read('client/chat/workspace-settings-scale.js');
     const monitor = read('client/chat/stats-monitor.js');
-
-    assert.match(monitorCss, /\.admin-content\.is-monitor-tab-active\s*\{[^}]*overflow:\s*hidden !important/);
-    assert.match(monitorCss, /\.monitor-panel-observability \.monitor-list\s*\{[^}]*overflow-y:\s*auto/);
-    assert.doesNotMatch(monitorCss, /\.monitor-panel-gpu \.monitor-list,\s*\.settings-workspace-view #tab-content-monitor \.monitor-panel-observability/);
-    assert.match(monitorCss, /grid-template-rows:\s*minmax\(250px, 1fr\) minmax\(0, 1fr\)/);
-    assert.match(scale, /const MONITOR_MIN_CANVAS_HEIGHT = 780/);
-    assert.match(scale, /availableHeight \/ MONITOR_MIN_CANVAS_HEIGHT/);
-    assert.match(monitor, /const visibleModels = models\.slice\(0, 6\)/);
-    assert.match(monitor, /const healthChecks = allHealthChecks\.slice\(0, 8\)/);
+    const html = read('client/chat/partials/settings/monitor.html');
+    assert.match(html, /id="monitor-services-panel"/);
+    assert.match(html, /id="monitor-routing-quality"/);
+    assert.match(monitorCss, /height: auto/);
+    assert.doesNotMatch(monitorCss, /grid-template-areas|grid-template-rows|contain: layout paint/);
+    assert.doesNotMatch(scale, /MONITOR_MIN_CANVAS_HEIGHT/);
+    assert.match(monitor, /const healthChecks = allHealthChecks;/);
     assert.match(monitor, /'decisionProviders':\s*'决策服务提供方'/);
-    assert.match(monitor, /const displayTime = match \? `\$\{match\[2\]\} \$\{match\[3\]\}` : fullStr/);
-    assert.doesNotMatch(monitor, /const isToday = fullStr\.startsWith/);
+    assert.doesNotMatch(monitor, /allHealthChecks\.slice/);
 });
 
 test('热点接口详情始终显示中文接口名称，原始路由仅用于排障定位', () => {

@@ -15,11 +15,11 @@ function fixture({ admin = true, storageDisabled = false } = {}) {
     const cancelled = [];
     function element(dataset, classes = '') {
         const values = new Set(classes.split(' ').filter(Boolean));
-        return { dataset, attributes: {}, classList: { contains: name => values.has(name),
+        return { dataset, attributes: {}, classList: { contains: name => values.has(name), remove: name => values.delete(name),
             toggle(name, active) { if (active) values.add(name); else values.delete(name); } },
         setAttribute(key, value) { this.attributes[key] = value; } };
     }
-    const buttons = ['overview', 'quality', 'configuration', 'evaluation'].map(section => element({ qualityTab: ['overview','quality'].includes(section) ? 'monitor' : 'models', qualitySection: section }, section === 'evaluation' ? 'hidden' : ''));
+    const buttons = ['overview', 'services', 'quality', 'configuration', 'evaluation'].map(section => element({ qualityTab: ['overview','services','quality'].includes(section) ? 'monitor' : 'models', qualitySection: section }, section === 'evaluation' ? 'hidden' : ''));
     const panels = buttons.map(button => element({ qualityPanels: button.dataset.qualityTab, qualityPanel: button.dataset.qualitySection }));
     const content = element({});
     const monitor = element({});
@@ -49,46 +49,47 @@ test('旧路由入口和已保存金标页签迁移到正确分区', () => {
     env.api.prepare('monitor');
     assert.equal(env.api.getSection('monitor'), 'quality');
     env.storage.set('pivot_settings_decision_review_subtab', 'gold');
-    assert.equal(env.api.resolveTab('decision-review'), 'models');
-    env.api.prepare('models');
-    assert.equal(env.api.getSection('models'), 'evaluation');
-    assert.equal(env.api.resolveTab('decision-gold-review'), 'models');
+    assert.equal(env.api.resolveTab('decision-review'), 'evaluation-review');
+    assert.equal(env.api.resolveTab('decision-gold-review'), 'evaluation-review');
+    env.storage.set('pivot_settings_models_section', 'evaluation');
+    assert.equal(env.api.resolveTab('models'), 'evaluation-review');
+    assert.equal(env.api.resolveTab('models'), 'models', '旧模型子页签状态只迁移一次');
+    assert.equal(env.api.resolveTab('models', 'evaluation'), 'evaluation-review');
 });
 
-test('切换质量列表取消概览刷新，并且只加载目标页的数据', async () => {
+test('对话质量停止自动刷新，并加载路由指标与审核队列', async () => {
     const env = fixture();
     env.api.prepare('monitor', 'quality');
     assert.deepEqual(env.cancelled, ['cancel','timer']);
     assert.equal(env.content.classList.contains('is-monitor-tab-active'), false);
     assert.equal(env.monitor.classList.contains('is-quality-view'), true);
     await env.api.load('monitor');
-    assert.deepEqual(env.loads, ['quality']);
-    env.api.prepare('models', 'evaluation');
-    await env.api.load('models');
-    assert.deepEqual(env.loads, ['quality','evaluation']);
+    assert.deepEqual(env.loads, ['quality','overview']);
+    await env.api.load('evaluation-review');
+    assert.deepEqual(env.loads, ['quality','overview','evaluation']);
     env.api.prepare('monitor', 'overview');
     await env.api.load('monitor');
-    assert.equal(env.content.classList.contains('is-monitor-tab-active'), true);
-    assert.deepEqual(env.loads, ['quality','evaluation','overview']);
+    assert.equal(env.content.classList.contains('is-monitor-tab-active'), false);
+    assert.deepEqual(env.loads, ['quality','overview','evaluation','overview']);
 });
 
 test('普通用户不能通过保存状态或直接方法进入管理员评测', async () => {
     const env = fixture({ admin: false });
     env.storage.set('pivot_settings_models_section', 'evaluation');
-    env.api.prepare('models', 'evaluation');
+    assert.equal(env.api.resolveTab('models', 'evaluation'), 'models');
+    assert.equal(env.api.resolveTab('decision-gold-review'), 'models');
+    await env.api.load('evaluation-review');
     await env.api.load('models');
-    assert.equal(env.api.getSection('models'), 'configuration');
-    assert.equal(env.buttons.find(item => item.dataset.qualitySection === 'evaluation').classList.contains('hidden'), true);
     assert.deepEqual(env.loads, ['configuration']);
 });
 
 test('无存储环境仍能切换，页签 ARIA 与可见内容一致', async () => {
     const env = fixture({ storageDisabled: true });
-    env.api.prepare('models', 'evaluation');
-    await env.api.load('models');
-    assert.deepEqual(env.loads, ['evaluation']);
-    const button = env.buttons.find(item => item.dataset.qualitySection === 'evaluation');
-    const panel = env.panels.find(item => item.dataset.qualityPanel === 'evaluation');
+    env.api.prepare('monitor', 'quality');
+    await env.api.load('monitor');
+    assert.deepEqual(env.loads, ['quality','overview']);
+    const button = env.buttons.find(item => item.dataset.qualitySection === 'quality');
+    const panel = env.panels.find(item => item.dataset.qualityPanel === 'quality');
     assert.equal(button.attributes['aria-selected'], 'true');
     assert.equal(button.tabIndex, 0);
     assert.equal(panel.attributes['aria-hidden'], 'false');
