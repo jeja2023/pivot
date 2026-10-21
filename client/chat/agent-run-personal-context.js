@@ -19,7 +19,7 @@
         if (!value.learnedSkillAuto || !value.skillReleaseId || !value.skillTitle) return '';
         const reason = value.skillMatchReason && typeof value.skillMatchReason === 'object' ? value.skillMatchReason : {};
         const terms = Array.isArray(reason.matchedTerms) ? reason.matchedTerms.filter(Boolean).slice(0, 6) : [];
-        return `<div class="agent-context-card"><h5>已使用的个人经验</h5><div class="agent-context-row"><span>${escape(String(value.skillTitle).slice(0, 120))}</span><strong>${escape(String(reason.summary || '与当前任务匹配。').slice(0, 180))}</strong></div>${terms.length ? `<div class="agent-context-row"><span>匹配词</span><strong>${escape(terms.join('、'))}</strong></div>` : ''}<div class="agent-context-actions"><button type="button" class="btn-secondary btn-xs" data-agent-skill-match-pause="${escape(String(run.id || ''))}">这条经验不相关，暂停使用</button></div></div>`;
+        return `<div class="agent-context-card agent-context-skill-card"><h5>已使用的个人经验</h5><div class="agent-skill-item"><div class="agent-skill-title">${escape(String(value.skillTitle).slice(0, 120))}</div><div class="agent-skill-summary">${escape(String(reason.summary || '与当前任务匹配。').slice(0, 180))}</div>${terms.length ? `<div class="agent-skill-terms"><span class="agent-skill-terms-label">匹配词：</span><div class="agent-skill-term-tags">${terms.map(t => `<span class="agent-skill-term-pill">${escape(t)}</span>`).join('')}</div></div>` : ''}<div class="agent-skill-actions"><button type="button" class="btn-secondary btn-xs agent-skill-pause-btn" data-agent-skill-match-pause="${escape(String(run.id || ''))}">这条经验不相关，暂停使用</button></div></div></div>`;
     }
 
     function personalContextMarkup(run = {}, escape = value => String(value || '')) {
@@ -51,7 +51,7 @@
     function projectContextMarkup(run = {}, escape = value => String(value || '')) {
         const collections = Array.isArray(metadata(run).projectContextPack?.collections) ? metadata(run).projectContextPack.collections : [];
         const names = collections.map(item => String(item?.name || item?.id || '').trim()).filter(Boolean).slice(0, 8);
-        return names.length ? `<div class="agent-context-card"><h5>项目资料包</h5><div class="agent-context-row"><span>检索范围</span><strong>${escape(names.join('、'))}</strong></div><div class="agent-context-row"><span>权限校验</span><strong>每次检索按当前授权重新校验</strong></div></div>` : '';
+        return names.length ? `<div class="agent-context-card agent-context-project-card"><h5>项目资料包</h5><div class="agent-context-row"><span>检索范围</span><strong>${escape(names.join('、'))}</strong></div><div class="agent-context-row"><span>权限校验</span><strong>按当前授权实时校验</strong></div></div>` : '';
     }
 
     function memoryContextMarkup(run = {}, escape = value => String(value || '')) {
@@ -63,10 +63,10 @@
         const items = reasons.slice(0, 6).map(item => {
             const id = String(item?.memoryId || item?.id || '').trim();
             const reason = String(item?.reason || item?.usageReason || '与当前任务相关。').slice(0, 180);
-            const actions = id ? `<span class="agent-context-actions"><button type="button" class="btn-secondary btn-xs" data-agent-memory-disable="${escape(id)}">不相关，暂停</button><button type="button" class="btn-danger-outline btn-xs" data-agent-memory-forget="${escape(id)}">忘记</button></span>` : '';
-            return `<div class="agent-context-row agent-memory-context-row"><span>${escape(id ? `记忆 #${id}` : '个人记忆')}</span><strong>${escape(reason)}</strong>${actions}</div>`;
+            const actions = id ? `<div class="agent-memory-actions"><button type="button" class="btn-secondary btn-xs agent-memory-disable-btn" data-agent-memory-disable="${escape(id)}" title="不相关，暂停使用此记忆">不相关，暂停</button><button type="button" class="btn-danger-outline btn-xs agent-memory-forget-btn" data-agent-memory-forget="${escape(id)}" title="彻底从记忆库遗忘此条记忆">忘记</button></div>` : '';
+            return `<div class="agent-memory-card-item"><div class="agent-memory-item-header"><span class="agent-memory-item-tag">${escape(id ? `记忆 #${id}` : '个人记忆')}</span>${actions}</div><div class="agent-memory-item-body">${escape(reason)}</div></div>`;
         }).join('');
-        return `<div class="agent-context-card"><h5>已使用的个人记忆</h5>${items}</div>`;
+        return `<div class="agent-context-card agent-context-memory-card"><h5>已使用的个人记忆</h5><div class="agent-memory-items-list">${items}</div></div>`;
     }
 
     function bindMemoryActions(container, run = {}) {
@@ -133,13 +133,13 @@
     async function createSkillDraftFromRun(runId) {
         const response = await fetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/skill-draft`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || '生成 Skill 草稿失败');
+        if (!response.ok) throw new Error(data.error || '生成技能草稿失败');
         const draft = data.draft || {}; const tools = (draft.provenance?.tools || []).join('、') || '无'; const caps = (draft.provenance?.capabilities || []).join('、') || '无';
-        if (!window.confirm(`将创建个人 Skill 草稿（尚未发布）。\n工具：${tools}\n能力：${caps}\n\n确认后仍需在 Skill 管理中校验、编辑并发布。`)) return null;
+        if (!window.confirm(`将创建个人技能草稿（尚未发布）。\n工具：${tools}\n能力：${caps}\n\n确认后仍需在技能管理中校验、编辑并发布。`)) return null;
         const created = await fetch(`${API_BASE}/agents/skills/source`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: draft.markdown, sourceRunId: runId }) });
         const createdData = await created.json().catch(() => ({}));
-        if (!created.ok) throw new Error(createdData.error || '创建 Skill 草稿失败');
-        window.Pivot?.legacy?.showToast?.('个人 Skill 草稿已创建；请先校验并发布。', 'success');
+        if (!created.ok) throw new Error(createdData.error || '创建技能草稿失败');
+        window.Pivot?.legacy?.showToast?.('个人技能草稿已创建；请先校验并发布。', 'success');
         window.Pivot?.moduleApi?.('agent.harness')?.loadAgentHarnessSkills?.();
         return createdData.version || null;
     }

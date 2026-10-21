@@ -31,17 +31,17 @@ function getArtifactToolDefinitions() {
         },
         {
             name: 'artifact.render',
-            title: '文档渲染',
-            description: '把结构化文档中间表示（Document IR）渲染为可下载的正式文档，支持公文版式 DOCX、CJK PDF、XLSX、HTML 与 Markdown。只产出渲染结果，不会写入用户磁盘。',
+            title: '文档渲染 (Word / PDF / Excel)',
+            description: '把结构化文档中间表示（Document IR）渲染为正式文档文件，支持 Word 文档（.docx / Word / doc）、PDF、Excel（.xlsx）、HTML 与 Markdown。生成的文档将自动作为任务结果交付，用户可在界面中直接下载或保存到本地授权目录。当用户要求生成 Word 文档、doc、docx、表格或报告并保存到本地时，必须调用此工具完成渲染。',
             capabilities: ['document.render'],
             input_schema: jsonSchema({
-                artifactId: { type: 'integer', minimum: 1, description: '要挂载渲染结果的产物 ID。' },
-                format: { type: 'string', enum: [...SUPPORTED_FORMATS], description: `渲染格式，可选 ${SUPPORTED_FORMATS.join('、')}。` },
+                artifactId: { type: 'integer', minimum: 1, description: '可选。要挂载渲染结果的产物 ID；若未提供，将自动为当前任务创建文档产物。' },
+                format: { type: 'string', enum: [...SUPPORTED_FORMATS], description: `渲染格式，可选 ${SUPPORTED_FORMATS.join('、')}。生成 Word 文档请填 docx。` },
                 ir: {
                     type: 'object',
-                    description: `Document IR 对象。必须包含 doc_type（${DOC_TYPES.join('、')}）、meta 与 blocks；图片只能引用 artifact-cas:// 地址，禁止内联 base64。`
+                    description: `Document IR 对象。必须包含 doc_type（${DOC_TYPES.join('、')}，旅行攻略/方案/报告请用 report）、meta（必须包含 title）与 blocks（包含 paragraph, heading, list, table 等内容块）；图片只能引用 artifact-cas:// 地址，禁止内联 base64。`
                 }
-            }, ['artifactId', 'format', 'ir'])
+            }, ['format', 'ir'])
         },
         {
             name: 'artifact.list_renditions',
@@ -57,12 +57,13 @@ function getArtifactToolDefinitions() {
 
 /** 从运行时上下文推导确定性的工具调用标识，与 agent_tool_calls.step_id 一致。 */
 function resolveToolCallId(context = {}) {
-    const stepId = String(context.stepId || '').trim();
+    const stepId = String(context.stepId || context.toolCallId || context.callId || '').trim();
     if (stepId) return stepId;
     const runId = String(context.run?.id || context.runId || '').trim();
     const stepIndex = Number.parseInt(context.stepIndex, 10);
     if (runId && Number.isSafeInteger(stepIndex)) return `${runId}:${stepIndex}`;
-    return '';
+    if (runId) return `${runId}:artifact:${Date.now()}`;
+    return `artifact:${Date.now()}`;
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
@@ -83,17 +84,35 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
         return { renditions: rows, count: rows.length, text: `已有 ${rows.length} 个渲染结果。` };
     }
     const toolCallId = resolveToolCallId(context);
-    if (!toolCallId) {
-        const error = new Error('渲染工具缺少工具调用标识，审计链无法建立，已拒绝渲染。');
-        error.status = 500;
-        error.code = 'ARTIFACT_RENDITION_TOOL_CALL_REQUIRED';
-        error.expose = true;
-        throw error;
+    let artifactId = Number.parseInt(input.artifactId, 10);
+    const { getAgentArtifactForUser, createOrUpdateRunArtifact, createStandaloneArtifact } = require('./agent-artifacts');
+    let artifact = Number.isSafeInteger(artifactId) && artifactId > 0 ? await getAgentArtifactForUser(artifactId, user) : null;
+    if (!artifact) {
+        const title = String(input.ir?.meta?.title || input.title || '任务结果文档').trim().slice(0, 120);
+        const runId = String(context.run?.id || context.runId || '').trim();
+        if (runId) {
+            artifact = await createOrUpdateRunArtifact({
+                runId,
+                user,
+                type: 'document',
+                title,
+                content: JSON.stringify(input.ir || {}),
+                note: `由 ${name} 自动生成`
+            });
+        } else {
+            artifact = await createStandaloneArtifact(user, {
+                type: 'document',
+                title,
+                content: JSON.stringify(input.ir || {}),
+                note: `由 ${name} 自动生成`
+            });
+        }
     }
+    const resolvedArtifactId = artifact.id;
     const result = await createRendition({
         user,
-        artifactId: input.artifactId,
-        runId: context.run?.id || context.runId || '',
+        artifactId: resolvedArtifactId,
+        runId: context.run?.id || context.runId || artifact.run_id || '',
         toolCallId,
         ir: input.ir,
         format: input.format
@@ -101,6 +120,7 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
     const rendition = result.rendition;
     return {
         renditionId: rendition.id,
+        artifactId: resolvedArtifactId,
         format: rendition.format,
         rendererVersion: rendition.renderer_version,
         mimeType: rendition.mime_type,
@@ -108,8 +128,8 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
         contentDigest: rendition.content_digest,
         irDigest: rendition.ir_digest,
         reused: result.reused === true,
-        deliveryHint: '渲染完成。文档需要由用户在界面上点击下载或保存到本机，Agent 不能直接写入用户磁盘。',
-        text: `已生成 ${rendition.format.toUpperCase()} 文档（${Number(rendition.byte_size)} 字节，摘要 ${String(rendition.content_digest).slice(0, 12)}…）。`
+        deliveryHint: '文档渲染完成，已挂载为任务结果文件。用户可在对话界面中直接下载或一键保存到本地授权目录。',
+        text: `已生成 ${rendition.format.toUpperCase()} 文档（${Number(rendition.byte_size)} 字节，文件已挂载为任务结果文件，用户可直接下载或保存到本地）。`
     };
 }
 

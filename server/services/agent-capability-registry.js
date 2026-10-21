@@ -71,7 +71,7 @@ const AGENT_CAPABILITY_DEFINITIONS = Object.freeze([
     { id: 'model.invoke', title: '模型调用', parent: null, risk: 'medium' },
 
     // ── 文档生成与交付域（落地方案 §7）──
-    { id: 'document.render', title: '文档渲染', parent: null, risk: 'medium' },
+    { id: 'document.render', title: '文档渲染与导出 (Word / PDF / Excel)', parent: null, risk: 'medium' },
     { id: 'artifact.read', title: '产物读取', parent: null, risk: 'low' },
     { id: 'artifact.deliver', title: '产物交付写入', parent: null, risk: 'critical' }
 ]);

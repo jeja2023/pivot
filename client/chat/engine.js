@@ -109,7 +109,7 @@ function chatAgentProgressText(detail = {}, status = '') {
     if (String(latest.type || '').toLowerCase() === 'plan') {
         const payload = parseChatAgentStepPayload(latest.output);
         const thought = String(payload.thought || latest.title || '').trim();
-        if (thought && thought !== 'Agent plan') {
+        if (thought && !['Agent plan', '智能体规划', '任务规划'].includes(thought)) {
             return `${base} · 当前判断：${thought.slice(0, 120)}${thought.length > 120 ? '…' : ''}`;
         }
     }
@@ -338,11 +338,39 @@ async function createChatTaskDraft(options = {}) {
             modelId: document.getElementById('model-selector')?.value || ''
         }, {
             opener: options.opener || document.activeElement,
-            onRunCreated: () => {
-                if (options.clearInput === false) return;
-                const input = document.getElementById('user-input');
-                if (input) input.value = '';
-                window.Pivot.legacy.resizeUserInput?.();
+            onRunCreated: (draft) => {
+                if (options.clearInput !== false) {
+                    const input = document.getElementById('user-input');
+                    if (input) input.value = '';
+                    window.Pivot.legacy.resizeUserInput?.();
+                }
+                const runId = String(draft?.runId || draft?.run?.id || '').trim();
+                if (!runId) return;
+
+                // 关闭任务建议卡片（如果在会话中存在）
+                window.Pivot.moduleApi('chat.taskSuggestion')?.dismiss?.();
+
+                // 避免重复挂载相同 runId 的消息卡片
+                const existing = document.querySelector(`[data-chat-agent-run-id="${runId}"]`);
+                if (existing) return;
+
+                // 立即在当前对话界面创建并挂载助手侧 Agent 任务卡片，避免用户漫长等待
+                const targetSessionId = String(currentSessionId || draft.sessionId || '');
+                const modelName = draft.modelId || draft.plan?.budget?.modelId || document.getElementById('selected-model-name')?.innerText || '';
+                const aiMsgEl = appendMessage('assistant', '', null, {
+                    agentRunId: runId,
+                    modelName,
+                    createdAt: new Date().toISOString()
+                });
+                const tasks = window.Pivot.moduleApi('chat.tasks');
+                if (tasks?.attach && aiMsgEl) {
+                    tasks.attach(aiMsgEl, runId, {
+                        sessionId: targetSessionId,
+                        status: draft.run?.status || 'queued',
+                        title: draft.title || draft.goal
+                    });
+                }
+                window.Pivot.legacy.scrollMessagesToBottom?.();
             }
         });
         return true;

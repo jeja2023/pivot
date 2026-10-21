@@ -243,7 +243,7 @@ function agentReadableCell(value) {
     if (typeof value === 'object') {
         if (typeof agentResultObjectSummary === 'function') return agentResultObjectSummary(value, 2);
         if (Array.isArray(value)) return agentShortText(value.map(item => String(item ?? '')).join('、'), 80);
-        return Object.entries(value).slice(0, 2).map(([key, item]) => `${key}：${String(item ?? '-')}`).join(' · ') || '-';
+        return Object.entries(value).slice(0, 2).map(([key, item]) => `${typeof agentResultFieldLabel === 'function' ? agentResultFieldLabel(key) : key}：${String(item ?? '-')}`).join(' · ') || '-';
     }
     return agentShortText(value, 80);
 }

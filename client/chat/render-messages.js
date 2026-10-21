@@ -118,6 +118,7 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
     div.className = `message ${role}`;
     if (id) div.dataset.messageId = String(id);
     const displayContent = getDisplayContent(role, content);
+    div._rawMessageContent = displayContent;
     const displayHtml = role === 'assistant' ? renderAiMessage(displayContent, false) : buildUserMessageHtml(displayContent, stats);
     const createdAt = stats?.createdAt || stats?.created_at || stats?.created_at_text;
     const messageTime = window.Pivot.legacy.formatChatDateTime(createdAt);
@@ -173,6 +174,7 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
         window.Pivot.legacy.scrollMessagesToBottom?.();
     }
     const messageContent = div.querySelector('.message-content');
+    if (messageContent) messageContent._rawMessageContent = displayContent;
     if (role === 'assistant' && stats?.agentRunId) {
         messageContent.dataset.chatAgentRunId = String(stats.agentRunId);
         window.Pivot.moduleApi('chat.tasks').attachHistorical?.(messageContent, stats.agentRunId);
@@ -498,20 +500,35 @@ document.addEventListener('click', async (e) => {
     if (!code) return;
 
     try {
-        if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(code);
-        } else {
-            // 回退方案：使用隐藏 textarea
+        let copied = false;
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            try {
+                await navigator.clipboard.writeText(code);
+                copied = true;
+            } catch (_) {}
+        }
+        if (!copied) {
+            // 回退方案：使用隐藏 textarea 降级复制
             const textArea = document.createElement("textarea");
             textArea.value = code;
+            textArea.setAttribute('readonly', '');
             textArea.style.position = "fixed";
-            textArea.style.left = "-999999px";
-            textArea.style.top = "-999999px";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            textArea.style.opacity = "0";
+            textArea.style.pointerEvents = "none";
+            const selection = document.getSelection();
+            const originalRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
             document.body.appendChild(textArea);
             textArea.focus();
             textArea.select();
+            textArea.setSelectionRange(0, textArea.value.length);
             const success = document.execCommand('copy');
-            textArea.remove();
+            document.body.removeChild(textArea);
+            if (originalRange && selection) {
+                selection.removeAllRanges();
+                selection.addRange(originalRange);
+            }
             if (!success) throw new Error('执行命令复制失败');
         }
 

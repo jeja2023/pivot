@@ -103,13 +103,17 @@
         const statusLabel = connectionProblem ? '读取异常' : state.run.statusText || model().labels[state.run.status] || '正在确认';
         const emptyText = connectionProblem ? '执行记录暂时无法读取。可以重新连接，或直接停止此任务。'
             : terminal ? '当前任务暂无执行记录。' : state.run.status === 'queued' ? '任务正在排队，开始后将显示操作记录。' : '正在等待第一条执行记录…';
+        const countText = !rows.length ? '暂无记录'
+            : tools > 0 && tools !== rows.length ? `${rows.length} 步记录（含 ${tools} 项操作）`
+            : tools > 0 ? `${tools} 项操作`
+            : `${rows.length} 步记录`;
         const html = `<header class="chat-task-status" role="status" aria-live="polite" aria-atomic="true">
                 <div class="chat-task-heading"><strong>${escape(state.run.title || '对话任务')}</strong><span class="chat-task-status-summary chat-task-status-badge">${escape(statusLabel)}</span></div>
                 ${summary !== statusLabel ? `<span class="chat-task-current-action">${escape(summary)}</span>` : ''}
                 ${connectionProblem && state.highWater >= 0 ? `<small>最后确认：${escape(state.run.statusText || model().labels[state.run.status] || '')}</small>` : ''}
             </header>
             ${state.actionFeedback ? `<p class="chat-task-feedback" role="status">${escape(state.actionFeedback)}</p>` : ''}
-            <details class="chat-task-process"${expanded ? ' open' : ''}><summary tabindex="0"><span>执行过程</span><span>${tools ? `${tools} 项操作` : rows.length ? `${rows.length} 条记录` : '暂无记录'}</span></summary>
+            <details class="chat-task-process"${expanded ? ' open' : ''}><summary tabindex="0"><span>执行过程</span><span>${escape(countText)}</span></summary>
                 ${rows.length ? `<ol class="chat-task-records">${rows.map(row => recordMarkup(row, state)).join('')}</ol>` : `<p class="chat-task-empty">${escape(emptyText)}</p>`}
                 ${state.older?.hasMore ? button('older', '加载更早记录', '加载更早的执行记录') : ''}
             </details>

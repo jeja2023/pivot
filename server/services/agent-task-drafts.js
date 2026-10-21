@@ -354,7 +354,12 @@ async function startTaskDraft(user, draftId, input = {}, { createAgentRun, ...ov
         await writeEvent(trx, { draftId: current.id, revision: current.revision, userId: user.id, eventType: 'starting', eventData: { planDigest: current.plan_digest } });
         return row;
     });
-    if (starting.status === 'run_created') return serializeDraft(starting);
+    if (starting.status === 'run_created') {
+        return {
+            ...serializeDraft(starting),
+            run: { id: String(starting.run_id), status: 'running', title: String(starting.title) }
+        };
+    }
 
     const plan = jsonObject(starting.plan_json);
     const policy = jsonObject(starting.policy_snapshot);

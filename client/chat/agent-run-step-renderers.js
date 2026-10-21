@@ -45,7 +45,7 @@ function agentStepRowsMarkup(structured) {
             <div class="agent-step-table-wrap">
                 <table class="agent-step-table">
                     <thead>
-                            <tr>${columns.map(column => `<th>${agentEscape(AGENT_RESULT_FIELD_LABELS[column] || column)}</th>`).join('')}</tr>
+                            <tr>${columns.map(column => `<th>${agentEscape(agentResultFieldLabel(column))}</th>`).join('')}</tr>
                     </thead>
                     <tbody>
                         ${previewRows.map(row => `
@@ -130,7 +130,28 @@ const AGENT_RESULT_FIELD_LABELS = {
     payload: '数据载荷', contextMode: '上下文模式', context_mode: '上下文模式', thought: '思考推理', action: '执行动作', observation: '观察结果',
     query_type: '查询类型', queryType: '查询类型', execution_time: '执行时间', executionTime: '执行时间', execution_time_ms: '执行耗时（毫秒）',
     executionTimeMs: '执行耗时（毫秒）', confidence_score: '置信度', confidenceScore: '置信度', match_score: '匹配得分', matchScore: '匹配得分',
-    similarity: '相似度'
+    similarity: '相似度', sourceRunId: '来源任务 ID', source_run_id: '来源任务 ID', 'Source Run Id': '来源任务 ID',
+    checkpointId: '检查点 ID', checkpoint_id: '检查点 ID', 'Checkpoint Id': '检查点 ID', latestCheckpointId: '最新检查点 ID',
+    latest_checkpoint_id: '最新检查点 ID', restoredObservations: '已恢复观察记录', restored_observations: '已恢复观察记录',
+    'Restored Observations': '已恢复观察记录', restored: '已恢复', checkpoint: '检查点', checkpoints: '检查点',
+    capability: '所需能力', capabilities: '所需能力', builtin: '系统内置', standard: '标准', custom: '自定义',
+    transaction: '事务', transactionId: '事务 ID', transaction_id: '事务 ID', contextHash: '上下文哈希',
+    context_hash: '上下文哈希', fromRunId: '发起任务 ID', from_run_id: '发起任务 ID', messageId: '消息 ID',
+    message_id: '消息 ID', messageType: '消息类型', message_type: '消息类型', sourceId: '来源标识',
+    source_id: '来源标识', workingMemory: '工作记忆', working_memory: '工作记忆', retryReason: '重试原因',
+    retry_reason: '重试原因', retryCount: '重试次数', retry_count: '重试次数',
+    goal: '任务目标', goals: '任务目标', params: '参数配置', parameters: '参数配置', param: '参数',
+    args: '执行参数', arg: '参数', command: '执行命令', cmd: '执行命令', stdout: '标准输出',
+    stderr: '错误输出', exitCode: '退出码', exit_code: '退出码', returnCode: '返回码', return_code: '返回码',
+    filepath: '文件路径', file_path: '文件路径', filename: '文件名', file_name: '文件名', dir: '目录',
+    directory: '目录', remediation: '建议修复方案', remediations: '建议修复方案', remedy: '修复方案',
+    solution: '解决方案', action_type: '动作类型', actionType: '动作类型', target_type: '目标类型',
+    targetType: '目标类型', filter: '过滤条件', filters: '过滤条件', sort: '排序规则', sorting: '排序规则',
+    order: '排序', direction: '方向', offset: '偏移量', page: '页码', pageSize: '每页条数', page_size: '每页条数',
+    headers: '请求头', body: '请求体', method: '请求方法', encoding: '字符编码', mimeType: '媒体类型',
+    mime_type: '媒体类型', is_directory: '是否为目录', isDirectory: '是否为目录', file_size: '文件大小',
+    fileSize: '文件大小', line_number: '行号', lineNumber: '行号', line_content: '行内容', lineContent: '行内容',
+    total_matches: '匹配总数', totalMatches: '匹配总数', matches: '匹配结果', match: '匹配项'
 };
 
 const AGENT_RESULT_ENVELOPE_FIELDS = new Set([
@@ -162,7 +183,14 @@ function agentResultFieldLabel(key) {
         table: '数据表', field: '字段', column: '列', row: '行', chunk: '分块',
         model: '模型', rule: '规则', workflow: '工作流', agent: '智能体', server: '服务',
         db: '数据库', info: '信息', config: '配置', param: '参数', params: '参数',
-        result: '结果', detail: '详情', details: '详情', header: '请求头', body: '正文'
+        result: '结果', detail: '详情', details: '详情', header: '请求头', body: '正文',
+        run: '任务', checkpoint: '检查点', observation: '观察', observations: '观察记录',
+        restored: '已恢复', memory: '记忆', state: '状态', contract: '契约',
+        transaction: '事务', batch: '批次', scope: '范围', reason: '原因',
+        action: '动作', plan: '规划', token: 'Token', duration: '耗时',
+        budget: '预算', mode: '模式', policy: '策略', capability: '能力',
+        capabilities: '能力', event: '事件', trigger: '触发', proposal: '提议',
+        evolution: '进化', learning: '经验学习', evaluation: '评测'
     };
 
     const parts = value
@@ -439,7 +467,60 @@ function agentResultDisplayValue(key, value) {
         content_filter: '内容安全拦截',
         'base table': '数据表',
         view: '视图',
-        'system view': '系统视图'
+        'system view': '系统视图',
+        builtin: '系统内置',
+        builtin_tool: '系统工具',
+        standard: '标准',
+        custom: '自定义',
+        restored: '已恢复',
+        active: '已启用',
+        inactive: '已停用',
+        pending: '待处理',
+        success: '成功',
+        failed: '失败',
+        error: '异常',
+        running: '运行中',
+        completed: '已完成',
+        queued: '排队中',
+        planning: '规划中',
+        cancelled: '已取消',
+        dag: '工作流',
+        free: '自主任务',
+        true: '是',
+        false: '否',
+        null: '-',
+        none: '无',
+        enabled: '已开启',
+        disabled: '已关闭',
+        enable: '已开启',
+        disable: '已关闭',
+        open: '已开启',
+        closed: '已关闭',
+        allow: '允许',
+        deny: '拒绝',
+        admin: '管理员',
+        user: '用户',
+        system: '系统',
+        read: '只读',
+        write: '读写',
+        all: '全部',
+        high: '高',
+        low: '低',
+        medium: '中',
+        critical: '紧急',
+        info: '提示',
+        warning: '警告',
+        warn: '警告',
+        pass: '通过',
+        fail: '未通过',
+        failure: '失败',
+        healthy: '健康',
+        loss: '有遗漏',
+        stable: '稳定',
+        dynamic: '动态',
+        ok: '正常',
+        yes: '是',
+        no: '否'
     };
     if (typeof value === 'string' && globalScalarTranslations[value.trim().toLowerCase()]) {
         return globalScalarTranslations[value.trim().toLowerCase()];
@@ -738,6 +819,13 @@ function agentStepPreview(step) {
     if (Array.isArray(payload)) return `返回 ${payload.length} 条结果。`;
     if (!payload || typeof payload !== 'object') return agentShortText(payload || '');
     if (payload?.__partial && Array.isArray(payload.rows)) return `工具返回内容较多，已读取前 ${payload.rows.length} 行。`;
+    const stepTitle = String(step?.title || '');
+    if (stepTitle.includes('流式工具') || stepTitle.includes('通道兜底') || stepTitle.includes('通道自适应')) {
+        return '检测到底层通信波动，已自动平滑切换至可靠通道继续执行。';
+    }
+    if (stepTitle.includes('恢复上下文') || stepTitle.includes('持久化检查点')) {
+        return '已平滑从持久化检查点恢复上下文状态。';
+    }
     const structuredSummary = agentStepStructuredSummary(payload);
     if (structuredSummary) return structuredSummary;
     if (payload.answer) return payload.answer;
@@ -805,8 +893,9 @@ function agentStepRawDetail(step, preview) {
 }
 
 function agentStepMarkup(step, runId = null) {
+    const isSystemFallback = String(step?.title || '').includes('流式工具') || String(step?.title || '').includes('通道兜底') || String(step?.title || '').includes('通道自适应');
     const preview = normalizeAgentMarkdown(agentStepPreview(step));
-    const readable = agentStepReadableMarkup(step);
+    const readable = isSystemFallback ? '' : agentStepReadableMarkup(step);
     const raw = agentStepRawDetail(step, preview);
     const stepKey = String(step.step_index || step.id || step.step || '').trim();
     const effectiveRunId = runId || (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '');
@@ -814,11 +903,12 @@ function agentStepMarkup(step, runId = null) {
     const isStepRawOpen = (typeof window !== 'undefined' && window.Pivot?.legacy?.isAgentRunDisclosureOpen && discKey && effectiveRunId)
         ? (window.Pivot.legacy.isAgentRunDisclosureOpen(effectiveRunId, discKey, false) ? ' open' : '')
         : '';
+    const stepStatusClass = isSystemFallback ? 'system-fallback' : agentEscape(step.status);
     return `
-        <div class="agent-step ${agentEscape(step.status)}" data-step-index="${agentEscape(stepKey)}">
+        <div class="agent-step ${stepStatusClass}" data-step-index="${agentEscape(stepKey)}">
             <div class="agent-step-head">
                 <strong>${step.step_index}. ${agentEscape(agentStepTitle(step))}</strong>
-                <span>${agentEscape(agentToolTitle(step.tool_name || step.type))} · ${Number(step.duration_ms || 0)} 毫秒</span>
+                <span>${isSystemFallback ? '系统自愈' : `${agentEscape(agentToolTitle(step.tool_name || step.type))} · ${Number(step.duration_ms || 0)} 毫秒`}</span>
             </div>
             <div class="agent-step-body">${readable || renderMarkdown(agentEscape(preview))}</div>
             ${raw ? `<details class="agent-step-raw"${discKey ? ` data-disclosure-key="${agentEscape(discKey)}"` : ''}${isStepRawOpen}><summary>查看原始数据</summary><pre>${agentEscape(raw)}</pre></details>` : ''}

@@ -151,9 +151,18 @@ const GENERIC_TOOL_TITLES = {
     'agent.delegate': '委派智能体', handoff: '智能体交接', 'agent.handoff': '智能体交接',
     'agent.code': '代码执行', 'agent.http': 'HTTP 请求', 'agent.browser': '浏览器自动化',
     'agent.merge': '变量聚合', 'agent.content_review': '富文本校对',
+    'agent.plan': '任务规划', 'agent_plan': '任务规划', 'agent plan': '任务规划',
     dag_node: '工作流节点', control: '任务控制', note: '执行记录',
+    checkpoint: '检查点状态恢复', recovery: '通道平滑切换', heal: '系统自愈',
     error: '执行异常', completed: '执行完成', pending: '等待执行',
-    running: '正在运行', skipped: '已跳过', failed: '执行失败'
+    running: '正在运行', skipped: '已跳过', failed: '执行失败',
+    web_search: '网络搜索', search: '搜索', browser: '网页浏览',
+    python: 'Python 脚本', terminal: '命令行终端', bash: '命令行终端',
+    shell: 'Shell 终端', read_file: '读取文件', write_file: '保存文件',
+    edit_file: '编辑文件', replace_file_content: '修改文件内容',
+    run_command: '运行命令', view_file: '查看文件', grep_search: '代码搜索',
+    list_dir: '查看目录', duckduckgo: '网络检索', browse: '访问网页',
+    execute: '执行操作', eval: '评测分析', download: '下载文件', upload: '上传文件'
 };
 
 function agentToolShortName(toolOrName) {
@@ -253,7 +262,8 @@ function isAdminOnlyAgentTool(tool) {
 function agentStepTitle(step) {
     const raw = String(step?.title || step?.type || '').trim();
     if (!raw) return '执行步骤';
-    if (raw === 'plan') return '任务规划';
+    if (raw === 'plan' || /^agent[\s._-]?plan$/i.test(raw)) return '任务规划';
+    if (raw.toLowerCase() === 'agent plan' || raw.toLowerCase() === 'agent.plan' || raw.toLowerCase() === 'agent_plan') return '任务规划';
     if (raw === 'flow_rule') return '流程规则';
     if (raw === 'tool') return `调用工具：${agentToolTitle(step?.tool_name)}`;
     if (raw === 'dag_node') return `工作流节点：${agentToolTitle(step?.tool_name)}`;
@@ -268,6 +278,11 @@ function agentStepTitle(step) {
     if (raw === 'note') return '执行记录';
     if (raw === 'Planning' || raw === 'planning') return '规划下一步';
     if (raw === 'Finished' || raw === 'completed') return '执行完成';
+    if (raw.toLowerCase() === 'user input' || raw.toLowerCase() === 'user_input' || raw.toLowerCase() === 'user') return '用户输入';
+    if (raw.toLowerCase() === 'assistant' || raw.toLowerCase() === 'model') return '模型回复';
+    if (raw.toLowerCase() === 'system' || raw.toLowerCase() === 'system prompt') return '系统指令';
+    if (raw.includes('流式工具') || raw.includes('通道兜底') || raw.includes('通道自适应')) return '通道自适应平滑切换';
+    if (raw.includes('恢复上下文') || raw.includes('持久化检查点') || /checkpoint/i.test(raw)) return '检查点状态恢复';
     if (raw.startsWith('Tool failed: ')) return `工具调用失败：${agentToolTitle(raw.replace('Tool failed: ', ''))}`;
     if (raw.startsWith('Tool: ')) return `调用工具：${agentToolTitle(raw.replace('Tool: ', ''))}`;
     if (raw.startsWith('调用工具：')) return `调用工具：${agentToolTitle(raw.replace('调用工具：', ''))}`;

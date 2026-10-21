@@ -293,11 +293,9 @@ function getAgentQueue() {
 
 async function insertStep(runId, stepIndex, data = {}) {
     const now = getBeijingTimestamp();
-    let safeStepIndex = Number.isInteger(stepIndex) && stepIndex > 0 ? stepIndex : null;
-    if (safeStepIndex === null) {
-        const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
-        safeStepIndex = row?.next_index || 1;
-    }
+    const maxRow = await queryOne('SELECT COALESCE(MAX(step_index), 0) AS max_index FROM agent_steps WHERE run_id = ?', [runId]);
+    const maxIndex = Number(maxRow?.max_index || 0);
+    let safeStepIndex = Number.isInteger(stepIndex) && stepIndex > maxIndex ? stepIndex : maxIndex + 1;
     const insertStepSql = `
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
@@ -321,15 +319,20 @@ async function insertStep(runId, stepIndex, data = {}) {
         now,
         String(data.contextHash || '').slice(0, 64)
     ];
-    let changes;
-    try {
-        changes = await execute(insertStepSql, insertStepParams);
-    } catch (error) {
-        if (!/unique|duplicate/i.test(String(error?.message || '')) || !/agent_steps|run_step|step_index/i.test(String(error?.constraint || error?.message || ''))) throw error;
-        const next = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
-        insertStepParams[1] = Number(next?.next_index || 1);
-        safeStepIndex = insertStepParams[1];
-        changes = await execute(insertStepSql, insertStepParams);
+    let changes = 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            changes = await execute(insertStepSql, insertStepParams);
+            break;
+        } catch (error) {
+            const isDuplicateStep = String(error?.code || '') === '23505'
+                || /unique|duplicate|重复键|唯一约束/i.test(String(error?.message || ''))
+                || /agent_steps|run_step|step_index|idx_agent_steps/i.test(String(error?.constraint || error?.message || ''));
+            if (!isDuplicateStep || attempt >= 2) throw error;
+            const next = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
+            insertStepParams[1] = Number(next?.next_index || 1);
+            safeStepIndex = insertStepParams[1];
+        }
     }
     if (changes > 0) {
         await recordAgentCheckpoint(runId, {

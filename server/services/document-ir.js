@@ -153,6 +153,9 @@ function validateBlock(block, index, docType, errors) {
         return;
     }
     if (type === 'heading') {
+        if (!block.text && Array.isArray(block.runs)) {
+            block.text = block.runs.map(r => (typeof r === 'object' && r ? r.text : String(r || ''))).join('');
+        }
         const level = Number.parseInt(block.level, 10);
         if (!Number.isSafeInteger(level) || level < 1 || level > 4) errors.push(`${location}.level 必须是 1-4。`);
         if (!normalizeText(block.text).trim()) errors.push(`${location}.text 不能为空。`);
@@ -161,6 +164,9 @@ function validateBlock(block, index, docType, errors) {
         return;
     }
     if (type === 'paragraph') {
+        if (!Array.isArray(block.runs) && typeof block.text === 'string') {
+            block.runs = [{ text: block.text }];
+        }
         if (!Array.isArray(block.runs)) {
             errors.push(`${location}.runs 必须是数组。`);
         } else {
@@ -279,9 +285,10 @@ function canonicalizeBlock(block) {
         return result;
     }
     if (type === 'paragraph') {
+        const rawRuns = Array.isArray(block.runs) ? block.runs : typeof block.text === 'string' ? [{ text: block.text }] : [];
         const result = {
             type,
-            runs: block.runs.map(run => {
+            runs: rawRuns.map(run => {
                 const item = { text: normalizeText(run.text) };
                 if (run.bold !== undefined) item.bold = Boolean(run.bold);
                 if (run.italic !== undefined) item.italic = Boolean(run.italic);

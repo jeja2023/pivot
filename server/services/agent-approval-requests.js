@@ -208,25 +208,20 @@ async function enqueueRun(runId) {
 }
 
 async function insertStep(runId, data = {}) {
-    let stepIndex = 1;
-    if (typeof callbacks.listSteps === 'function') {
-        const steps = await callbacks.listSteps(runId);
-        stepIndex = (Array.isArray(steps) ? steps.length : 0) + 1;
-    } else {
-        const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) AS "maxStep" FROM agent_steps WHERE run_id = ?', [runId]);
-        stepIndex = Number(row?.maxStep || row?.maxstep || 0) + 1;
-    }
+    const row = await queryOne('SELECT COALESCE(MAX(step_index), 0) AS "maxStep" FROM agent_steps WHERE run_id = ?', [runId]);
+    let stepIndex = Number(row?.maxStep || row?.maxstep || 0) + 1;
     if (typeof callbacks.insertStep === 'function') {
         await callbacks.insertStep(runId, stepIndex, data);
         return;
     }
     const now = getBeijingTimestamp();
-    await execute(`
+    const insertSql = `
         INSERT INTO agent_steps (
             run_id, step_index, type, title, tool_name, input, output, error_message,
             status, duration_ms, started_at, completed_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
+    `;
+    const params = [
         runId,
         stepIndex,
         data.type || 'note',
@@ -240,7 +235,20 @@ async function insertStep(runId, data = {}) {
         data.startedAt || now,
         data.completedAt || now,
         now
-    ]);
+    ];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            await execute(insertSql, params);
+            break;
+        } catch (error) {
+            const isDuplicateStep = String(error?.code || '') === '23505'
+                || /unique|duplicate|重复键|唯一约束/i.test(String(error?.message || ''))
+                || /agent_steps|run_step|step_index|idx_agent_steps/i.test(String(error?.constraint || error?.message || ''));
+            if (!isDuplicateStep || attempt >= 2) throw error;
+            const next = await queryOne('SELECT COALESCE(MAX(step_index), 0) + 1 AS next_index FROM agent_steps WHERE run_id = ?', [runId]);
+            params[1] = Number(next?.next_index || 1);
+        }
+    }
 }
 
 function throwAwaiting(message, requestId) {

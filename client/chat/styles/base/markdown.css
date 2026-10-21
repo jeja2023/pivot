@@ -313,8 +313,15 @@
     line-height: 1.6;
 }
 .message-content li::marker {
+    color: inherit;
+    font-weight: 600;
+}
+.message-content ul > li::marker {
     color: var(--primary);
-    font-weight: 700;
+}
+.message-content ol > li::marker {
+    color: inherit;
+    font-weight: 600;
 }
 .message.user .message-content li::marker {
     color: inherit;

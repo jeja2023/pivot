@@ -226,33 +226,48 @@
         </main>
     </div>
     <div id="chat-task-draft-modal" class="modal-overlay hidden" hidden role="dialog" aria-modal="true" aria-labelledby="chat-task-draft-heading" aria-describedby="chat-task-draft-status">
-        <section class="modal chat-task-draft-dialog">
+        <section class="modal chat-task-draft-dialog" role="document">
             <header class="chat-task-draft-head">
-                <div>
-                    <p class="chat-task-draft-kicker">Agent 任务草案</p>
+                <div class="chat-task-draft-head-info">
+                    <div class="chat-task-draft-kicker-row">
+                        <span class="chat-task-draft-kicker">Agent 任务草案</span>
+                        <span class="chat-task-draft-sub-tag">审阅后执行</span>
+                    </div>
                     <h3 id="chat-task-draft-heading">先审阅计划，再开始执行</h3>
                     <p>生成草案不会调用模型、检索知识库、发现工具或产生外部副作用。</p>
                 </div>
-                <button type="button" id="chat-task-draft-close" class="workspace-modal-close" aria-label="关闭任务草案" title="关闭任务草案">×</button>
+                <button type="button" id="chat-task-draft-close" class="btn-secondary chat-task-draft-close-btn" aria-label="关闭任务草案" title="关闭任务草案">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
             </header>
             <div class="chat-task-draft-body">
                 <p id="chat-task-draft-status" class="chat-task-draft-status" aria-live="polite"></p>
-                <label class="chat-task-draft-field" for="chat-task-draft-title">
-                    <span>任务标题</span>
-                    <input id="chat-task-draft-title" class="form-input" maxlength="160" autocomplete="off">
-                </label>
-                <label class="chat-task-draft-field" for="chat-task-draft-goal">
-                    <span>任务目标</span>
-                    <textarea id="chat-task-draft-goal" class="form-input" rows="4" maxlength="12000"></textarea>
-                </label>
+                <div class="chat-task-draft-fields-card">
+                    <label class="chat-task-draft-field" for="chat-task-draft-title">
+                        <span class="chat-task-draft-label-text">任务标题</span>
+                        <input id="chat-task-draft-title" class="form-input" maxlength="160" autocomplete="off" placeholder="请输入任务简短标题">
+                    </label>
+                    <label class="chat-task-draft-field" for="chat-task-draft-goal">
+                        <span class="chat-task-draft-label-text">任务目标与具体要求</span>
+                        <textarea id="chat-task-draft-goal" class="form-input" rows="3" maxlength="12000" placeholder="详细描述任务的具体目标、边界约束与期望交付物"></textarea>
+                    </label>
+                </div>
                 <div id="chat-task-draft-plan" class="chat-task-draft-plan" aria-live="polite"></div>
             </div>
             <footer class="chat-task-draft-actions">
-                <button type="button" id="chat-task-draft-dismiss" class="btn-secondary">关闭</button>
+                <button type="button" id="chat-task-draft-dismiss" class="btn-secondary chat-task-draft-dismiss">关闭</button>
                 <span class="chat-task-draft-action-spacer"></span>
                 <button type="button" id="chat-task-draft-open-run" class="btn-secondary" hidden>查看运行</button>
-                <button type="button" id="chat-task-draft-save" class="btn-secondary">重新生成计划</button>
-                <button type="button" id="chat-task-draft-start" class="btn-primary">确认计划并开始执行</button>
+                <button type="button" id="chat-task-draft-save" class="btn-secondary chat-task-draft-save">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                    </svg>
+                    重新生成计划
+                </button>
+                <button type="button" id="chat-task-draft-start" class="btn-primary chat-task-draft-start">确认计划并开始执行</button>
             </footer>
         </section>
     </div>

@@ -20,6 +20,7 @@ async function getTaskSnapshot(runId, userId) {
                v.outcome_status AS verification_status,
                jsonb_build_object('outcomeStatus', v.outcome_status, 'verifiedAt', v.report->>'verifiedAt',
                    'semanticVerification', v.report->'semanticVerification') AS verification_report,
+               EXISTS (SELECT 1 FROM agent_events e WHERE e.run_id = r.id) AS has_events,
                EXISTS (SELECT 1 FROM agent_events e WHERE e.run_id = r.id
                    AND e.event_type IN ('tool.requested', 'tool.started', 'tool.completed', 'tool.failed',
                        'tool.denied', 'tool.replayed', 'sandbox.denied', 'transaction.denied', 'transaction.effect_staged')) AS has_tool_events

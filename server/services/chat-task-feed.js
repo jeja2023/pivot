@@ -58,7 +58,7 @@ async function getChatTaskFeed(runId, user, options = {}, dependencies = {}) {
     let artifactReadFailed = false;
     const [eventRows, legacyRows, artifactRows] = await Promise.all([
         store.listTaskEvents(runId, user.id, { ...normalized, highWater, types: EVENT_TYPES }),
-        row.has_tool_events ? [] : store.listLegacySteps(runId, normalized),
+        (row.has_events || row.has_tool_events || Number(row.event_seq || 0) > 0) ? [] : store.listLegacySteps(runId, normalized),
         tenant.resolvable ? store.listTaskArtifacts(runId, user.id, tenant.tenantId).catch(error => {
             artifactReadFailed = true;
             logger.warn({ runId, code: error.code || 'ARTIFACT_READ_FAILED' }, '对话任务文件列表暂不可用，保留执行进度与控制能力');

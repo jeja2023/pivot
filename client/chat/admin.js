@@ -427,9 +427,11 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
     window.Pivot.moduleApi('settings.quality').prepare(tab, options.subtab);
     const content = document.querySelector('.settings-workspace-view .admin-content');
     if (content) content.scrollTop = 0;
-    window.Pivot.legacy.scheduleSettingsWorkspaceScale?.();
+    const scaleApi = window.Pivot?.moduleApi?.('settings.scale');
+    (scaleApi?.updateSettingsWorkspaceScale || window.Pivot?.legacy?.updateSettingsWorkspaceScale)?.();
+    (scaleApi?.scheduleSettingsWorkspaceScale || window.Pivot?.legacy?.scheduleSettingsWorkspaceScale)?.();
     await loadTabData(tab);
-    setTimeout(() => window.Pivot.legacy.scheduleSettingsWorkspaceScale?.(), 0);
+    setTimeout(() => (scaleApi?.scheduleSettingsWorkspaceScale || window.Pivot?.legacy?.scheduleSettingsWorkspaceScale)?.(), 0);
 };
 
 async function loadTabData(tab, page = 1) {

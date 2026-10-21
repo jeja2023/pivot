@@ -1,14 +1,235 @@
-const { writeTextToClipboard } = window.Pivot.legacy.chatDialogHelpers || {};
+const copyTextToClipboard = async (text) => {
+    if (!text && text !== '') return;
+    const dialogHelpers = window.Pivot?.legacy?.chatDialogHelpers;
+    if (typeof dialogHelpers?.writeTextToClipboard === 'function') {
+        try {
+            await dialogHelpers.writeTextToClipboard(text);
+            return;
+        } catch (_) {}
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (_) {}
+    }
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '0';
+    textArea.style.left = '-9999px';
+    textArea.style.opacity = '0';
+    textArea.style.pointerEvents = 'none';
+    textArea.style.fontSize = '12pt';
+    const selection = document.getSelection();
+    const originalRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, textArea.value.length);
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+    } catch (_) {
+        success = false;
+    }
+    document.body.removeChild(textArea);
+    if (originalRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(originalRange);
+    }
+    if (!success) throw new Error('执行命令复制失败');
+};
+
+const normalizeClipboardText = (text) => {
+    if (!text) return '';
+    const normalized = String(text)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/[ \t]+$/gm, '');
+
+    // 区分代码块与正文：代码块内部保留合理空行（至多保留单空行），正文段落间消除多余空行，避免粘贴时产生意外空行
+    const parts = normalized.split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$))/g);
+    return parts.map(part => {
+        if (/^(```|~~~)/.test(part)) {
+            return part.replace(/\n{3,}/g, '\n\n').trim();
+        }
+        return part
+            .replace(/^[ \t]*(?:>[ \t]*)+$/gm, '')
+            .replace(/^([ \t]*(?:\d+\.|-|\*|\+|\b\[[ xX]\]\b))[ \t]*\n+([^\n])/gm, '$1 $2')
+            .replace(/\n{2,}/g, '\n')
+            .trim();
+    }).filter(Boolean).join('\n');
+};
+
+const cleanRawMarkdownForClipboard = (content) => {
+    if (!content) return '';
+    return normalizeClipboardText(
+        String(content)
+            .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END/gi, '')
+            .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
+            .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
+            .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+            .replace(/<thought>[\s\S]*$/gi, '')
+    );
+};
+
+const formatListsInElement = (root) => {
+    const lists = Array.from(root.querySelectorAll('ol, ul'));
+    lists.forEach(list => {
+        const isOrdered = list.tagName.toLowerCase() === 'ol';
+        const start = isOrdered ? (parseInt(list.getAttribute('start') || '1', 10) || 1) : 1;
+        let index = start;
+
+        let depth = 0;
+        let p = list.parentElement;
+        while (p && p !== root) {
+            if (p.tagName && (p.tagName.toLowerCase() === 'ol' || p.tagName.toLowerCase() === 'ul')) {
+                depth++;
+            }
+            p = p.parentElement;
+        }
+        const indent = '  '.repeat(depth);
+
+        Array.from(list.children).forEach(child => {
+            if (!child.tagName || child.tagName.toLowerCase() !== 'li') return;
+            if (child.dataset.clipboardListMarked === 'true') return;
+            child.dataset.clipboardListMarked = 'true';
+
+            const checkbox = child.querySelector('input[type="checkbox"]');
+            let prefix = '';
+            if (checkbox) {
+                prefix = indent + (checkbox.checked ? '[x] ' : '[ ] ');
+                checkbox.remove();
+            } else if (isOrdered) {
+                prefix = indent + `${index}. `;
+                index++;
+            } else {
+                prefix = indent + '- ';
+            }
+
+            const firstP = child.firstElementChild;
+            if (firstP && firstP.tagName.toLowerCase() === 'p') {
+                firstP.insertBefore(document.createTextNode(prefix), firstP.firstChild);
+            } else {
+                child.insertBefore(document.createTextNode(prefix), child.firstChild);
+            }
+        });
+    });
+};
+
+const extractMessageTextForClipboard = (messageContent) => {
+    if (!messageContent) return '';
+
+    // 1. 优先使用原始 Markdown 文本（最保真，保留序号、代码块、公式与格式）
+    const rawContent = messageContent._rawMessageContent || messageContent.closest?.('.message')?._rawMessageContent;
+    if (typeof rawContent === 'string' && rawContent.trim()) {
+        const cleaned = cleanRawMarkdownForClipboard(rawContent);
+        if (cleaned) return cleaned;
+    }
+
+    // 2. 从 DOM 树结构化提取
+    const body = messageContent.querySelector('.text-body') || messageContent;
+    const temp = body.cloneNode(true);
+
+    temp.querySelectorAll('.code-toolbar, .thought-summary, .action-btn, [data-copy-ignore]').forEach(el => el.remove());
+
+    const thoughtBlocks = temp.querySelectorAll('.thought-block');
+    if (thoughtBlocks.length > 0) {
+        const cloneWithoutThoughts = temp.cloneNode(true);
+        cloneWithoutThoughts.querySelectorAll('.thought-block').forEach(el => el.remove());
+        if (cloneWithoutThoughts.innerText.trim()) {
+            thoughtBlocks.forEach(el => el.remove());
+        } else {
+            thoughtBlocks.forEach(block => {
+                const inner = block.querySelector('.thought-content');
+                if (inner) block.replaceWith(inner);
+            });
+        }
+    }
+
+    // 处理代码块：转换为标准 ```lang 语法
+    temp.querySelectorAll('.code-block').forEach(block => {
+        const codeEl = block.querySelector('code');
+        const code = codeEl ? codeEl.innerText : block.innerText;
+        const lang = block.dataset.codeLanguage || block.querySelector('.code-language')?.innerText?.trim() || '';
+        const cleanLang = lang.toLowerCase() === 'code' ? '' : lang.toLowerCase();
+        const pre = document.createElement('pre');
+        pre.textContent = `\`\`\`${cleanLang}\n${(code || '').replace(/\r\n/g, '\n').trimEnd()}\n\`\`\``;
+        block.replaceWith(pre);
+    });
+
+    // 处理数学公式
+    temp.querySelectorAll('.math-block').forEach(block => {
+        const tex = block.querySelector('annotation')?.textContent?.trim();
+        if (tex) {
+            const pre = document.createElement('pre');
+            pre.textContent = `$$\n${tex}\n$$`;
+            block.replaceWith(pre);
+        }
+    });
+    temp.querySelectorAll('.katex').forEach(katexEl => {
+        if (!katexEl.isConnected) return;
+        const tex = katexEl.querySelector('annotation')?.textContent?.trim();
+        if (tex) {
+            katexEl.replaceWith(document.createTextNode(`$${tex}$`));
+        }
+    });
+
+    // 处理表格：转换为整洁的 Markdown 表格
+    temp.querySelectorAll('table').forEach(table => {
+        const rows = Array.from(table.querySelectorAll('tr'));
+        if (!rows.length) return;
+        const mdRows = [];
+        let hasHeader = false;
+        rows.forEach((tr, rowIndex) => {
+            const cells = Array.from(tr.querySelectorAll('th, td'));
+            if (!cells.length) return;
+            if (rowIndex === 0 && tr.querySelector('th')) hasHeader = true;
+            const rowText = cells.map(c => (c.innerText || '').replace(/\r?\n/g, ' ').trim()).join(' | ');
+            mdRows.push(`| ${rowText} |`);
+            if (rowIndex === 0 && hasHeader) {
+                const sep = cells.map(() => '---').join(' | ');
+                mdRows.push(`| ${sep} |`);
+            }
+        });
+        if (mdRows.length > 0) {
+            if (!hasHeader && rows.length > 1) {
+                const sep = Array.from(rows[0].querySelectorAll('td')).map(() => '---').join(' | ');
+                mdRows.splice(1, 0, `| ${sep} |`);
+            }
+            const pre = document.createElement('pre');
+            pre.textContent = mdRows.join('\n');
+            const wrapper = table.closest('.table-wrapper') || table;
+            wrapper.replaceWith(pre);
+        }
+    });
+
+    // 处理有序列表和无序列表（补充缺失的数字序号和符号）
+    formatListsInElement(temp);
+
+    let text = temp.innerText || '';
+
+    // 3. 回退：任务状态摘要卡片
+    if (!text.trim() && messageContent) {
+        const heading = messageContent.querySelector('.chat-task-heading')?.innerText?.trim() || '';
+        const statusSummary = messageContent.querySelector('.chat-task-status-summary')?.innerText?.trim() || '';
+        const goalBody = messageContent.querySelector('.chat-task-goal-body')?.innerText?.trim() || '';
+        const resultNote = messageContent.querySelector('.chat-task-result-note')?.innerText?.trim() || '';
+        text = [heading, statusSummary, goalBody, resultNote].filter(Boolean).join('\n\n');
+    }
+
+    return normalizeClipboardText(text);
+};
 
 const copyMsg = async (btn) => {
     try {
-        const body = btn.closest('.message-content')?.querySelector('.text-body');
-        if (!body) throw new Error('未找到消息正文');
-        const temp = body.cloneNode(true);
-        temp.querySelectorAll('.code-toolbar, .thought-summary').forEach(el => el.remove());
-        const text = temp.innerText.trim();
+        const messageContent = btn.closest('.message-content') || btn.closest('.message');
+        const text = extractMessageTextForClipboard(messageContent);
         if (!text) return showToast('没有可复制的内容', 'warning');
-        await writeTextToClipboard(text);
+        await copyTextToClipboard(text);
         showToast('内容已复制');
     } catch (e) {
         console.error('复制消息失败:', e);
@@ -135,6 +356,9 @@ const saveSessionTags = async () => {
 
 window.Pivot?.exposeModule?.('chat.sessionActions', {
     copyMsg,
+    extractMessageTextForClipboard,
+    cleanRawMarkdownForClipboard,
+    normalizeClipboardText,
     deleteMsg,
     deleteSession,
     regenerateMsg,
@@ -149,6 +373,9 @@ window.Pivot?.exposeModule?.('chat.sessionActions', {
     saveSessionTags
 }, [
     'copyMsg',
+    'extractMessageTextForClipboard',
+    'cleanRawMarkdownForClipboard',
+    'normalizeClipboardText',
     'deleteMsg',
     'deleteSession',
     'regenerateMsg',

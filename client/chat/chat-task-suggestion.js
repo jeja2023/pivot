@@ -82,6 +82,7 @@
             planningBusy = true;
             card.classList.add('is-busy');
             planButton.disabled = true;
+            planButton.textContent = '正在规划...';
             try {
                 await window.Pivot.moduleApi('chat.execution').createTaskDraft({
                     goal,
@@ -92,6 +93,7 @@
                 planningBusy = false;
                 card.classList.remove('is-busy');
                 planButton.disabled = false;
+                planButton.textContent = '生成计划';
             }
         }, '生成并审阅执行计划；不会立即执行');
         const dismissButton = button('暂不需要', 'chat-task-suggestion-dismiss', () => dismiss({ sessionId, category: candidate.category }), '关闭当前任务建议，本会话不再显示同类建议');

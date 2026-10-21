@@ -225,38 +225,11 @@ const loadMonitorSummary = async function(options = {}) {
                 'api': '接口可用性',
                 'cache': '缓存服务'
             };
-            const allHealthChecks = Array.isArray(health.checks) ? health.checks : [];
-            const healthChecks = allHealthChecks;
-            const pairedHealthRows = [];
-            for (let i = 0; i < healthChecks.length; i += 2) {
-                const item1 = healthChecks[i];
-                const item2 = healthChecks[i + 1];
-                const cls1 = item1.status === 'ok' ? '' : ' is-warning';
-                const name1 = HEALTH_NAME_MAP[item1.name] || item1.name;
-                const cell1 = `<div class="${cls1}">
-                    <span title="${escapeHtml(item1.message || '')}">${escapeHtml(name1)}</span>
-                    <strong>${escapeHtml(formatHealthStatus(item1.status))}</strong>
-                </div>`;
-                let cell2 = '';
-                if (item2) {
-                    const cls2 = item2.status === 'ok' ? '' : ' is-warning';
-                    const name2 = HEALTH_NAME_MAP[item2.name] || item2.name;
-                    cell2 = `<div class="${cls2}">
-                        <span title="${escapeHtml(item2.message || '')}">${escapeHtml(name2)}</span>
-                        <strong>${escapeHtml(formatHealthStatus(item2.status))}</strong>
-                    </div>`;
-                }
-                pairedHealthRows.push(`<div class="monitor-row monitor-split-row">${cell1}${cell2}</div>`);
-            }
-
             const formatMaintenanceItem = (timeVal, extra) => {
                 if (!timeVal) return { label: '尚未成功', title: '尚未成功执行' };
                 const fullStr = formatDateToCN(timeVal);
-                // 维护任务不是实时指标；即使执行发生在今天，也要保留日期，避免用户把
-                // 昨天或更早的一次成功记录误当成刚刚完成。界面使用紧凑的月日 + 分钟，
-                // 完整秒级时间仍通过 title 提供。
-                const match = fullStr.match(/^(\d{4}-)(\d{2}-\d{2})\s+(\d{2}:\d{2})/);
-                const displayTime = match ? `${match[2]} ${match[3]}` : fullStr;
+                const match = fullStr.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+                const displayTime = match ? `${match[1]} ${match[2]}` : fullStr;
                 const label = extra ? `${displayTime} · ${extra}` : displayTime;
                 const title = extra ? `${fullStr} (${extra})` : fullStr;
                 return { label, title };
@@ -275,27 +248,43 @@ const loadMonitorSummary = async function(options = {}) {
                 ['数据库备份', mBackup.label, mBackup.title],
                 ['PostgreSQL 统计', mOptimize.label, mOptimize.title]
             ];
-            const pairedMaintenanceRows = [];
-            for (let i = 0; i < maintenanceTasks.length; i += 2) {
-                const t1 = maintenanceTasks[i];
-                const t2 = maintenanceTasks[i + 1];
-                const cell1 = `<div>
-                    <span>${escapeHtml(t1[0])}</span>
-                    <strong title="${escapeHtml(t1[2])}">${escapeHtml(t1[1])}</strong>
-                </div>`;
-                let cell2 = '';
-                if (t2) {
-                    cell2 = `<div>
-                        <span>${escapeHtml(t2[0])}</span>
-                        <strong title="${escapeHtml(t2[2])}">${escapeHtml(t2[1])}</strong>
-                    </div>`;
+
+            const allHealthChecks = Array.isArray(health.checks) ? health.checks : [];
+            const healthChecks = allHealthChecks;
+
+            const allCells = [];
+            healthChecks.forEach(item => {
+                const cls = item.status === 'ok' ? '' : ' is-warning';
+                const name = HEALTH_NAME_MAP[item.name] || item.name;
+                const messageTitle = escapeHtml(item.message || '');
+                allCells.push(`<div class="${cls}">
+                    <span title="${messageTitle}">${escapeHtml(name)}</span>
+                    <strong>${escapeHtml(formatHealthStatus(item.status))}</strong>
+                </div>`);
+            });
+            maintenanceTasks.forEach(task => {
+                const taskTitle = escapeHtml(task[2]);
+                allCells.push(`<div>
+                    <span>${escapeHtml(task[0])}</span>
+                    <strong title="${taskTitle}">${escapeHtml(task[1])}</strong>
+                </div>`);
+            });
+
+            const pairedRows = [];
+            for (let i = 0; i < allCells.length; i += 2) {
+                const cell1 = allCells[i];
+                const cell2 = allCells[i + 1];
+                if (cell2) {
+                    pairedRows.push(`<div class="monitor-row monitor-split-row">${cell1}${cell2}</div>`);
+                } else {
+                    pairedRows.push(`<div class="monitor-row monitor-split-row monitor-single-row is-single">${cell1}</div>`);
                 }
-                pairedMaintenanceRows.push(`<div class="monitor-row monitor-split-row">${cell1}${cell2}</div>`);
             }
+
             const hiddenHealthHint = allHealthChecks.length > healthChecks.length
                 ? `<div class="monitor-empty compact">另有 ${formatMetricNumber(allHealthChecks.length - healthChecks.length)} 项健康检查，请在接口详情中查看。</div>`
                 : '';
-            PivotSafeHtml.setHtml(healthEl, [...pairedHealthRows, ...pairedMaintenanceRows, hiddenHealthHint].join(''));
+            PivotSafeHtml.setHtml(healthEl, [...pairedRows, hiddenHealthHint].join(''));
         }
 
         const concurrencyActive = Number(concurrency.active || 0);

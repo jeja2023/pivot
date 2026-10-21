@@ -172,21 +172,47 @@ document.getElementById('alert-container')?.addEventListener('keydown', event =>
     }
 });
 
-async function writeTextToClipboard(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
+function copyWithExecCommand(text) {
     const textArea = document.createElement('textarea');
     textArea.value = text;
+    textArea.setAttribute('readonly', '');
     textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
+    textArea.style.top = '0';
+    textArea.style.left = '-9999px';
+    textArea.style.opacity = '0';
+    textArea.style.pointerEvents = 'none';
+    textArea.style.fontSize = '12pt';
+    const selection = document.getSelection();
+    const originalRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
     document.body.appendChild(textArea);
     textArea.focus();
     textArea.select();
-    const success = document.execCommand('copy');
-    textArea.remove();
+    textArea.setSelectionRange(0, textArea.value.length);
+    let success = false;
+    try {
+        success = document.execCommand('copy');
+    } catch (_) {
+        success = false;
+    }
+    document.body.removeChild(textArea);
+    if (originalRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(originalRange);
+    }
+    return success;
+}
+
+async function writeTextToClipboard(text) {
+    if (!text && text !== '') return;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (_) {
+            // Electron 客户端或浏览器权限受限时静默进入降级兜底方案
+        }
+    }
+    const success = copyWithExecCommand(text);
     if (!success) throw new Error('执行命令复制失败');
 }
     window.Pivot.legacy.chatDialogHelpers = { writeTextToClipboard };

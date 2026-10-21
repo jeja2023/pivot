@@ -613,7 +613,7 @@ const {
             const plan = parseJsonObject(plannedText) || {};
             await insertStep(runId, step, {
                 type: 'plan',
-                title: plan.thought || 'Agent plan',
+                title: plan.thought || '智能体规划',
                 input: { goal: run.goal },
                 output: plan,
                 durationMs: Date.now() - plannerStartedAt,

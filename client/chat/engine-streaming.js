@@ -446,6 +446,8 @@ function createBrowserSseParser({ onData, onDone } = {}) {
 
 function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount, startTime) {
     if (!textBody) return;
+    const messageContent = textBody.closest('.message-content') || textBody.parentElement;
+    if (messageContent) messageContent._rawMessageContent = content;
     const hasOpenThought = content.includes('<thought>') && !content.includes('</thought>');
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
 

@@ -172,10 +172,8 @@
                 const select = panel?.querySelector('[data-result-history]');
                 if (select) {
                     const activeVal = select.value || currentKey;
-                    const safeHtml = window.Pivot?.legacy?.PivotSafeHtml;
                     const newHtml = buildHistoryOptions(activeVal);
-                    if (safeHtml?.setHtml) safeHtml.setHtml(select, newHtml);
-                    else select.innerHTML = newHtml;
+                    PivotSafeHtml.setHtml(select, newHtml);
                     select.value = activeVal;
                 }
             }
@@ -237,11 +235,9 @@
             : '';
         const traceTitle = hasInputs ? `输入与执行过程 (${nodes.length} 个步骤)` : `执行过程 (${nodes.length} 个步骤)`;
 
-        const safeHtml = window.Pivot?.legacy?.PivotSafeHtml;
         const contentHtml = `<div class="workflow-product-results-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-results-title"><header class="workflow-product-results-header"><div class="workflow-product-results-title-group"><span class="workflow-product-results-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span><h3 id="workflow-results-title">${escape(title)}</h3><span class="workflow-product-results-source-pill status-${escape(statusClass)}"><span class="workflow-product-pill-icon" aria-hidden="true">${getStatusSvg(statusClass, 12)}</span>${escape(pillSource)} · ${escape(statusText)}</span>${formattedTime ? `<span class="workflow-product-results-time">${escape(formattedTime)}</span>` : ''}</div><div class="workflow-product-results-header-actions"><div class="workflow-product-history-wrap"><label class="workflow-product-history-label" for="workflow-results-history-select"><span class="workflow-product-history-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span><span class="workflow-product-history-text">历史运行</span></label><div class="workflow-product-history-select-box"><select id="workflow-results-history-select" class="form-input workflow-product-history-select" data-result-history title="切换历史运行记录">${historyOptionsHtml}</select></div></div><button type="button" class="btn-secondary workspace-modal-close workflow-product-results-close" aria-label="关闭结果面板" title="关闭 (Esc)">关闭</button></div></header><div class="workflow-product-results-body">${error ? `<p role="alert" class="workflow-product-results-error">${escape(error)}</p>` : ''}<div class="text-body message-content workflow-product-output">${output !== undefined ? valueHtml(output) : '<p>正在等待结果，已完成的步骤会保留。</p>'}</div><details class="workflow-product-results-trace"><summary>${traceTitle}</summary>${inputsHtml}<ol class="workflow-product-steps-list">${nodes.map(node => `<li class="workflow-product-step-item"><button type="button" class="btn-secondary btn-xs workflow-product-step-node-btn" data-result-node="${escape(node.node_key || node.id)}" title="点击在画布中定位此节点">${escape(node.title || node.node_key || node.id)}</button> <span class="workflow-product-node-status status-${escape(node.status || '')}"><span class="workflow-product-node-status-icon" aria-hidden="true">${getStatusSvg(node.status || 'default', 11)}</span>${escape(statusNames[node.status] || node.status || '')}</span>${node.error_message ? `<span class="workflow-product-step-error">：${escape(node.error_message)}</span>` : ''}</li>`).join('')}</ol></details></div><footer class="workflow-product-results-footer workflow-product-row"><div class="workflow-product-results-footer-actions">${run ? '<button type="button" class="btn-secondary" data-result-details>完整记录 / 审批 / 产物</button><button type="button" class="btn-secondary" data-result-refresh>刷新运行状态</button>' + (!bridge().readOnly?.() ? '<button type="button" class="btn-secondary" data-result-reuse>将已完成节点结果用于调试</button>' : '') + (['error', 'partial', 'completed_with_errors'].includes(run.status) ? '<button type="button" class="btn-secondary" data-result-retry>从失败处继续</button>' : '') : ''}</div></footer></div>`;
 
-        if (safeHtml?.setHtml) safeHtml.setHtml(panel, contentHtml);
-        else panel.innerHTML = contentHtml;
+        PivotSafeHtml.setHtml(panel, contentHtml);
 
         [...panel.querySelectorAll('details')].forEach((item, index) => { item.open = disclosure[index] || false; });
         panel.querySelector('[data-result-history]')?.addEventListener('change', async event => {

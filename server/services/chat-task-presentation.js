@@ -28,6 +28,15 @@ const TOOL_LABELS = Object.freeze({
     'document.render': '生成结果文档', 'artifact.render': '生成结果文件', 'artifact.deliver': '交付结果文件'
 });
 
+const PHASE_TITLES = Object.freeze({
+    queued: '任务排队等待', planning: '安排执行步骤', running: '处理任务', executing: '执行操作',
+    observing: '检查操作结果', diagnosing: '排查异常原因', replanning: '调整处理方案',
+    resuming: '恢复任务执行', verifying: '核验执行结果', needs_input: '等待补充要求',
+    approval_required: '等待操作授权', waiting_approval: '提交审批决定', awaiting_approval: '提交审批决定',
+    awaiting_commit: '等待确认外部操作', completed: '任务已完成', completed_with_errors: '任务完成（部分步骤异常）',
+    partial: '任务部分完成', error: '任务执行失败', failed: '任务执行失败', cancelled: '任务已停止', deleted: '任务不可用'
+});
+
 function parseObject(value) {
     if (value && typeof value === 'object' && !Array.isArray(value)) return value;
     try { const parsed = JSON.parse(String(value || '{}')); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch (_) { return {}; }
@@ -104,8 +113,9 @@ function presentTaskEvent(row) {
         status: type === 'approval.requested' ? 'waiting' : type === 'approval.rejected' ? 'rejected' : 'completed' };
     if (type.startsWith('control.')) return { ...base, kind: 'control',
         title: type === 'control.message_sent' ? (payload.messageType === 'steer' ? '已收到补充要求，将在下一次规划前处理' : '已收到任务控制指令') : '任务补充或控制指令已处理' };
+    if (type === 'run.status_changed' && payload.from && payload.to === payload.from) return null;
     const status = String(payload.to || '');
-    return { ...base, kind: 'phase', title: STATUS_LABELS[status] || '任务状态已更新',
+    return { ...base, kind: 'phase', title: PHASE_TITLES[status] || STATUS_LABELS[status] || '任务状态已更新',
         status: ['error', 'failed'].includes(status) ? 'failed' : status === 'cancelled' ? 'cancelled' : 'completed' };
 }
 
@@ -119,4 +129,4 @@ function presentLegacyStep(step) {
         location: type === 'tool' ? executionLocation(step.tool_name) : '', detail: '' };
 }
 
-module.exports = { EVENT_TYPES, STATUS_LABELS, parseObject, safeTaskText, toolLabel, executionLocation, approvalSummary, presentTaskEvent, presentLegacyStep };
+module.exports = { EVENT_TYPES, STATUS_LABELS, PHASE_TITLES, parseObject, safeTaskText, toolLabel, executionLocation, approvalSummary, presentTaskEvent, presentLegacyStep };

@@ -26,6 +26,16 @@ test('设置画布缩放完成会通知依赖实际尺寸的图表', () => {
     assert.match(source, /notifySettingsWorkspaceScaleApplied\(\{ layoutWidth, scale, stageWidth, stageHeight: scaledHeight \}\)/);
 });
 
+test('设置工作区缩放模块同时导出 moduleApi 与 legacy 别名以支持分区切换即时重算', () => {
+    const source = read('client/chat/workspace-settings-scale.js');
+    const admin = read('client/chat/admin.js');
+
+    assert.ok(source.includes("exposeModule?.('settings.scale'"));
+    assert.ok(source.includes("'scheduleSettingsWorkspaceScale', 'updateSettingsWorkspaceScale'"));
+    assert.ok(source.includes('window.Pivot.legacy.scheduleSettingsWorkspaceScale = scheduleSettingsWorkspaceScale'));
+    assert.ok(admin.includes('scaleApi?.updateSettingsWorkspaceScale'));
+});
+
 test('趋势图首帧宽度为零时会在容器完成布局后重绘', () => {
     const frames = new Map();
     const parent = { clientWidth: 0 };

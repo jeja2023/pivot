@@ -148,21 +148,23 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                 await publishAgentRunEvent(runId, 'updated');
             }
             if (statusEntry) {
-                try {
-                    await recordAgentEvent({
-                        runId,
-                        type: ['approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit'].includes(targetStatus)
-                            ? 'run.paused'
-                            : ['resuming'].includes(targetStatus)
-                                ? 'run.resumed'
-                                : ['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled'].includes(targetStatus)
-                                    ? 'run.completed'
-                                    : 'run.status_changed',
-                        payload: { from: currentStatus, to: targetStatus },
-                        eventKey: `status:${currentStatus}->${targetStatus}:${crypto.randomUUID()}`
-                    });
-                } catch (eventError) {
-                    logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
+                if (currentStatus !== targetStatus) {
+                    try {
+                        await recordAgentEvent({
+                            runId,
+                            type: ['approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit'].includes(targetStatus)
+                                ? 'run.paused'
+                                : ['resuming'].includes(targetStatus)
+                                    ? 'run.resumed'
+                                    : ['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled'].includes(targetStatus)
+                                        ? 'run.completed'
+                                        : 'run.status_changed',
+                            payload: { from: currentStatus, to: targetStatus },
+                            eventKey: `status:${currentStatus}->${targetStatus}:${crypto.randomUUID()}`
+                        });
+                    } catch (eventError) {
+                        logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
+                    }
                 }
                 if (targetStatus === 'planning' && ['queued', 'resuming'].includes(currentStatus)) {
                     try {

@@ -87,4 +87,9 @@ window.addEventListener('pivot:workspace-style-loaded', () => {
 window.Pivot?.exposeModule?.('settings.scale', {
     scheduleSettingsWorkspaceScale,
     updateSettingsWorkspaceScale
-});
+}, ['scheduleSettingsWorkspaceScale', 'updateSettingsWorkspaceScale']);
+
+if (window.Pivot && window.Pivot.legacy) {
+    window.Pivot.legacy.scheduleSettingsWorkspaceScale = scheduleSettingsWorkspaceScale;
+    window.Pivot.legacy.updateSettingsWorkspaceScale = updateSettingsWorkspaceScale;
+}

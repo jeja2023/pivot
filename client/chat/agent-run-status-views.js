@@ -19,7 +19,7 @@ function agentRunFriendlySummary(run = {}, progress = {}) {
     if (status === 'needs_input') return '任务结果还缺少必要信息或交付物，请补充要求后继续。';
     if (status === 'completed_with_errors' && /最大执行轮次/.test(limitMessage)) return limitMessage;
     if (status === 'completed_with_errors') return `${records} 条执行记录已完成，但有部分结果需要留意。`;
-    if (status === 'error') return '任务未能完成，请查看失败步骤并重试。';
+    if (status === 'error') return '任务未能顺利完成，可直接重试或修改目标后重新执行。';
     if (status === 'cancelled') return '任务已停止，当前没有新的结果。';
     return agentStatusLabel(status) || '任务状态已更新。';
 }
@@ -64,6 +64,11 @@ function renderAgentTaskTransaction(transaction = null, runStatus = '') {
     const conflicts = Array.isArray(transaction.resourceConflicts) ? transaction.resourceConflicts.filter(item => item && item.status === 'open') : [];
     const snapshot = transaction.workspaceSnapshot && typeof transaction.workspaceSnapshot === 'object' ? transaction.workspaceSnapshot : {};
     const shadowWorktrees = Array.isArray(snapshot.shadowWorktrees) ? snapshot.shadowWorktrees.slice(-6) : [];
+
+    // 普通用户视角下，无副作用、无补偿项、无租约与冲突的零价值技术事务不单独渲染卡片
+    if (effectCount === 0 && compensationCount === 0 && activeLeases === 0 && conflicts.length === 0 && !shadowWorktrees.length && status !== 'awaiting_commit' && !unresolvedEffects.length) {
+        return '';
+    }
     const runCanCommit = !runStatus || runStatus === 'awaiting_commit';
     const summary = status === 'awaiting_commit'
         ? unresolvedEffects.length
@@ -111,7 +116,8 @@ function renderAgentPromptProvenance(invocations = []) {
     const sections = Array.isArray(manifest.sections) ? manifest.sections : [];
     const stable = sections.filter(item => item.stability === 'stable');
     const dynamic = sections.filter(item => item.stability !== 'stable');
-    return `<section class="agent-prompt-provenance"><div><strong>提示词版本证据</strong><span>${agentEscape(latest.source || 'agent')} · ${Number(manifest.sectionCount || sections.length)} 段</span></div><dl><div><dt>稳定段</dt><dd>${stable.length}</dd></div><div><dt>动态段</dt><dd>${dynamic.length}</dd></div><div><dt>调用记录</dt><dd>${list.length}</dd></div></dl><p>稳定摘要 ${agentEscape(String(manifest.stableDigest || latest.stableDigest || '').slice(0, 12) || '—')} · 动态摘要 ${agentEscape(String(manifest.dynamicDigest || latest.dynamicDigest || '').slice(0, 12) || '—')}</p><details><summary>查看 Section 清单</summary><ul>${sections.map(item => `<li><strong>${agentEscape(item.key || '')}</strong> · ${agentEscape(item.version || '')} · ${agentEscape(item.owner || '')} · ${item.stability === 'stable' ? '稳定段' : '动态段'}</li>`).join('')}</ul></details></section>`;
+    const sourceLabel = latest.source === 'agent' ? '智能体' : (latest.source || '智能体');
+    return `<section class="agent-prompt-provenance"><div><strong>提示词版本证据</strong><span>${agentEscape(sourceLabel)} · ${Number(manifest.sectionCount || sections.length)} 段</span></div><dl><div><dt>稳定段</dt><dd>${stable.length}</dd></div><div><dt>动态段</dt><dd>${dynamic.length}</dd></div><div><dt>调用记录</dt><dd>${list.length}</dd></div></dl><p>稳定摘要 ${agentEscape(String(manifest.stableDigest || latest.stableDigest || '').slice(0, 12) || '—')} · 动态摘要 ${agentEscape(String(manifest.dynamicDigest || latest.dynamicDigest || '').slice(0, 12) || '—')}</p><details><summary>查看章节段落清单</summary><ul>${sections.map(item => `<li><strong>${agentEscape(item.key || '')}</strong> · ${agentEscape(item.version || '')} · ${agentEscape(item.owner || '')} · ${item.stability === 'stable' ? '稳定段' : '动态段'}</li>`).join('')}</ul></details></section>`;
 }
 
 function renderAgentBrowserActionEvidence(items = [], sessions = []) {
