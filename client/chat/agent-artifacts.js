@@ -111,6 +111,10 @@ function downloadAgentArtifactBlob(filename, blob) {
 }
 
 async function downloadAgentArtifactRendition(rendition) {
+    const shared = window.Pivot.moduleApi('chat.codeDelivery').downloadRendition;
+    if (typeof shared === 'function') {
+        try { return await shared(rendition); } catch (error) { return showToast(error.message || '下载结果文件失败', 'error'); }
+    }
     const tokenRes = await apiFetch(`${API_BASE}/agents/renditions/${encodeURIComponent(rendition.id)}/download-token`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
     });

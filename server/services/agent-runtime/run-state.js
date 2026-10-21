@@ -103,7 +103,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
         'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
-        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
+        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count', 'retry_after',
         'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
         'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
@@ -159,7 +159,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
                                     ? 'run.completed'
                                     : 'run.status_changed',
                         payload: { from: currentStatus, to: targetStatus },
-                        eventKey: `status:${currentStatus}->${targetStatus}`
+                        eventKey: `status:${currentStatus}->${targetStatus}:${crypto.randomUUID()}`
                     });
                 } catch (eventError) {
                     logger.warn({ runId, err: eventError.message }, 'Agent 状态事件写入失败');
@@ -199,7 +199,7 @@ async function updateRun(runId, fields = {}, maxRetries = 3) {
     return 0;
 }
 
-async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
+async function updateRunCas(runId, expectedStatuses = [], fields = {}, options = {}) {
     const allowedStatuses = [...new Set((Array.isArray(expectedStatuses) ? expectedStatuses : [expectedStatuses])
         .map(value => String(value || '').trim())
         .filter(Boolean))];
@@ -213,7 +213,7 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
         'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
-        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count',
+        'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count', 'retry_after',
         'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
         'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
@@ -221,9 +221,16 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
     const entries = Object.entries(fields).filter(([key]) => allowed.includes(key));
     if (!entries.length) return 0;
     const placeholders = allowedStatuses.map(() => '?').join(', ');
-    const set = entries.map(([key]) => `${key} = ?`).join(', ');
-    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})`,
-        [...entries.map(([, value]) => value), runId, ...allowedStatuses]);
+    const set = entries.map(([key]) => key === 'metadata' && options.mergeMetadata
+        ? "metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb" : `${key} = ?`).join(', ');
+    const binding = options.approvalBinding;
+    const approvalWhere = binding ? ` AND metadata->'pendingApproval'->>'tool' = ?
+        AND COALESCE(metadata->'pendingApproval'->>'inputHash', '') = ?
+        AND COALESCE(metadata->'pendingApproval'->>'key', '') = ?
+        AND COALESCE(metadata->'pendingApproval'->>'requestedAt', '') = ?` : '';
+    const parameters = [...entries.map(([, value]) => value), runId, ...allowedStatuses];
+    if (binding) parameters.push(binding.tool || '', binding.inputHash || '', binding.key || '', binding.requestedAt || '');
+    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})${approvalWhere}`, parameters);
     if (changes) {
         await publishAgentRunEvent(runId, 'updated');
         if (fields.status) {
@@ -232,7 +239,7 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}) {
                     runId,
                     type: TERMINAL_STATUSES.has(fields.status) ? 'run.completed' : 'run.status_changed',
                     payload: { from: currentStatus, to: fields.status },
-                    eventKey: `status:${currentStatus}->${fields.status}`
+                    eventKey: `status:${currentStatus}->${fields.status}:${crypto.randomUUID()}`
                 });
             } catch (eventError) {
                 logger.warn({ runId, err: eventError.message }, 'Agent CAS 状态事件写入失败');

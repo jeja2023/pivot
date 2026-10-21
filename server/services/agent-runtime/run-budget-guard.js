@@ -7,7 +7,7 @@ function createRunBudgetGuard({ deadline, taskBudget }) {
             err.code = 'AGENT_TIMEOUT';
             throw err;
         }
-        taskBudget.assertWithin();
+        taskBudget.assertCanRequestModel();
     };
 }
 

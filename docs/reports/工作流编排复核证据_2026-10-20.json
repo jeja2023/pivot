@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-20",
+  "checks": [
+    {
+      "id": "published-current-mismatch",
+      "publishedVersion": 1,
+      "currentVersion": 2,
+      "publishedRequiredInput": "oldParameter",
+      "submittedInputs": {
+        "newParameter": "填写当前版本的参数"
+      },
+      "publishedError": "缺少必填工作流输入：oldParameter"
+    },
+    {
+      "id": "late-node-test",
+      "currentInput": {
+        "template": "新值"
+      },
+      "acceptedInput": {
+        "template": "旧值"
+      },
+      "assignedCurrentContext": true
+    },
+    {
+      "id": "false-dirty-when",
+      "sameNormalizedGraph": true,
+      "dirty": true
+    },
+    {
+      "id": "layout-clears-tests",
+      "onlyChange": "layout.source.x + 10",
+      "remainingSnapshots": 0
+    },
+    {
+      "id": "unresolved-reference",
+      "topologyBlockers": [],
+      "lintErrors": [],
+      "inputContractIssues": [],
+      "resolved": {
+        "model": "demo-model",
+        "prompt": "{{nodes.a.output.typo}}"
+      }
+    },
+    {
+      "id": "double-create",
+      "requests": [
+        {
+          "url": "/api/agents/workflows",
+          "method": "POST"
+        },
+        {
+          "url": "/api/agents/workflows",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "id": "multi-align",
+      "selected": 2,
+      "notice": "请至少选择 2 个节点进行对齐",
+      "xPositions": [
+        0,
+        300
+      ]
+    },
+    {
+      "id": "copied-subgraph-reference",
+      "copiedId": "b_4",
+      "copiedDependency": "a_3",
+      "copiedInput": {
+        "template": "{{nodes.a.output.text}}"
+      },
+      "copiedCondition": {
+        "source": "nodes.a.output.text",
+        "operator": "not_empty"
+      }
+    },
+    {
+      "id": "hidden-editor-keyboard",
+      "editorHidden": true,
+      "deleteSelectionCalled": 1,
+      "defaultPrevented": true
+    },
+    {
+      "id": "batch-barrier",
+      "concurrency": 2,
+      "childDependsOnlyOn": "fast",
+      "childStartedBeforeSlowCompletion": false,
+      "events": [
+        "slow:start",
+        "fast:start",
+        "fast:end",
+        "slow:end",
+        "child:start",
+        "child:end"
+      ]
+    }
+  ],
+  "baseline": "v0.7.14",
+  "scope": "当前工作区的控制器、原函数与注入式运行时验证；不代表生产事故或修复完成。",
+  "regression": {
+    "files": 15,
+    "tests": 91,
+    "passed": 91,
+    "failed": 0,
+    "skipped": 0
+  }
+}

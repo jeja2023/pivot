@@ -41,6 +41,8 @@ function createAgentRunErrorHandler(deps = {}) {
             }
             return;
         }
+        // 暂停、审批、提交和终态已经接管控制权，旧执行器的迟到异常不能重新排队。
+        if (TERMINAL_STATUSES.has(currentStatus) || ['needs_input', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit'].includes(currentStatus)) return;
         if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
             if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, error: e, reason: 'timeout' })) {
                 return;
@@ -52,7 +54,8 @@ function createAgentRunErrorHandler(deps = {}) {
                     : '任务已达到运行时间上限，以下为已完成的部分结果。')
                 : '任务已达到预算上限，以下为已完成的部分结果。';
             let answer = '';
-            if (modelCfgForSummary && runForSummary) {
+            const tokenBudgetExhausted = taskBudget && taskBudget.counts.tokens_total >= taskBudget.limits.max_tokens_total;
+            if (modelCfgForSummary && runForSummary && !tokenBudgetExhausted) {
                 try {
                     answer = await withTimeout(
                         () => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {

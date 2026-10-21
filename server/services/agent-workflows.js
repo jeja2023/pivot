@@ -353,6 +353,11 @@ async function createAgentWorkflow(user, body = {}) {
     const data = await normalizeWorkflowPayload(body, {}, user);
     const now = getBeijingTimestamp();
     const workflowId = await transaction(async trx => {
+        const draftKey = /^[A-Za-z0-9_-]{1,120}$/.test(body.editorDraftKey || '') ? body.editorDraftKey : '';
+        if (draftKey) {
+            const draft = await require('../repositories/workflow-editor-drafts').claimedCreation(trx, user.id, draftKey, { name: data.name, description: data.description, specText: JSON.stringify(data.dagSpec) });
+            if (draft?.workflow_id) return draft.workflow_id;
+        }
         const workflowInfo = await trx.queryOne(`
             INSERT INTO agent_workflows (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -364,9 +369,12 @@ async function createAgentWorkflow(user, body = {}) {
             RETURNING id
         `, [workflowInfo.id, 1, JSON.stringify(data.dagSpec), data.note, user.id, now]);
         await trx.execute('UPDATE agent_workflows SET current_version_id = ? WHERE id = ?', [versionInfo.id, workflowInfo.id]);
+        if (draftKey) await require('../repositories/workflow-editor-drafts').linkCreation(trx, user.id, draftKey, workflowInfo.id);
         return workflowInfo.id;
     });
-    return await getAgentWorkflowForUser(workflowId, user);
+    const created = await getAgentWorkflowForUser(workflowId, user);
+    if (!created) throw Object.assign(new Error('原草稿关联的工作流已删除或不可访问，请恢复原流程或另存新草稿。'), { status: 409, code: 'WORKFLOW_DRAFT_TARGET_UNAVAILABLE' });
+    return created;
 }
 
 async function updateAgentWorkflow(workflowId, user, body = {}) {
@@ -712,6 +720,7 @@ async function restoreAgentWorkflow(workflowId, user) {
 }
 
 module.exports = {
+    sanitizeSharedDagSpec,
     assertWorkflowAccess,
     assertWorkflowLlmNodesConfigured,
     buildWorkflowVersionDiff,

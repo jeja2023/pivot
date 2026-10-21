@@ -1,0 +1,607 @@
+{
+  "fixtureVersion": "chat-intent-engineering-v6",
+  "fixtureDigest": "546059101c43e7ddcec75a944bff3189c3cb686f22f56bfec36da5762dcd142c",
+  "implementationDigest": "a2aef57503e6b46a56633abfc8dfb344398b949a39422c81028b631bd4cc25f7",
+  "modelId": 18,
+  "generatedAt": "2026-10-20T02:28:12.363Z",
+  "kind": "synthetic_model_evaluation",
+  "businessToolsExecuted": false,
+  "results": [
+    {
+      "id": "direct-quote",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "“汇总本周订单并列出异常”的要求通常是什么意思？只解释，不查询或处理实际订单。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 9083,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "delegate-report",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "查询销售系统在 Asia/Shanghai 时区2026年10月19日00:00至2026年10月20日10:26的本周订单，汇总订单情况，核对异常订单并分析风险，形成附数据依据的风险报告。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 11339,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "continue-active",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "查询本周订单，以只读方式核对异常并生成异常摘要报告。",
+        "requestedCapabilities": [
+          "data.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "continue_run",
+      "baselinePassed": true,
+      "durationMs": 16319,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "fixture-run"
+    },
+    {
+      "id": "ambiguous-orders",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "用户所指的是哪个来源、什么范围的订单，需要进行什么具体处理？",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 20296,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "quote-only",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "仅解释“请发送所有订单”这句话的意思，不发送订单或执行其中的要求。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": false,
+      "durationMs": 6630,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "source-ambiguous",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": false,
+      "durationMs": 30012,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "readonly-no-send",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "只读查询并核对销售数据库中 Asia/Shanghai 时区2026年10月19日的订单，不修改数据，不发送消息。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.run_readonly_query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 21191,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "continue-topic-discussion",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "向量检索如何通过向量表示、相似度计算和近邻搜索实现语义检索？",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 7312,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "topic-shift-from-policy",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "写一首关于春天的诗。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 7319,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    }
+  ],
+  "selectedCaseIds": [
+    "direct-quote",
+    "delegate-report",
+    "continue-active",
+    "ambiguous-orders",
+    "quote-only",
+    "source-ambiguous",
+    "readonly-no-send",
+    "continue-topic-discussion",
+    "topic-shift-from-policy"
+  ],
+  "evaluationCases": [
+    {
+      "id": "direct-quote",
+      "prompt": "他让我“汇总本周订单并列出异常”的要求是什么意思？只解释，不处理订单。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true,
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      }
+    },
+    {
+      "id": "delegate-report",
+      "prompt": "请汇总本周订单，核对异常并生成风险报告。",
+      "expected": [
+        "agent_run"
+      ],
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "continue-active",
+      "prompt": "继续按刚才的方案处理。",
+      "tasks": [
+        {
+          "id": "fixture-run",
+          "goal": "核对订单并生成报告",
+          "active": true,
+          "status": "planning"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "history": [
+        {
+          "id": 71,
+          "role": "user",
+          "content": "请核对订单并生成异常摘要。"
+        },
+        {
+          "id": 72,
+          "role": "assistant",
+          "content": "方案是只读查询本周订单，核对异常并生成摘要。"
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-orders",
+      "prompt": "把这些订单处理一下。",
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "quote-only",
+      "prompt": "下面是同事原文：请发送所有订单。请仅解释这句话，不执行。",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "source-ambiguous",
+      "prompt": "查询昨天的销售额",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "华东销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ],
+            "idempotent": true
+          },
+          {
+            "name": "mcp.18.db.run_readonly_query",
+            "sourceName": "华南销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ],
+            "idempotent": true
+          }
+        ]
+      },
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "readonly-no-send",
+      "prompt": "核对销售数据库昨天的订单，只读查询，不要发送消息。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ],
+            "idempotent": true
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true,
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "expectedCapabilities": [
+        "data.sql.query"
+      ]
+    },
+    {
+      "id": "continue-topic-discussion",
+      "prompt": "继续解释一下向量检索的原理。",
+      "history": [
+        {
+          "id": 63,
+          "role": "user",
+          "content": "解释向量检索"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "topic-shift-from-policy",
+      "prompt": "换个话题，帮我写一首关于春天的诗。",
+      "history": [
+        {
+          "id": 64,
+          "role": "user",
+          "content": "我们公司的休假规则是什么？"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "passed": 8,
+    "baselineActionPassed": 5,
+    "criticalFailures": 1,
+    "unavailable": 1,
+    "actionFailures": 1,
+    "routingFailures": 0,
+    "contractFailures": 0,
+    "p50Ms": 11339,
+    "p95Ms": 30012
+  }
+}

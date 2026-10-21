@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { resolveChatProject } = require('./chat-preference-context');
-const { resolveModelTaskTokenBudget } = require('./agent-token-policy');
+const { resolveChatAgentBudget } = require('./agent-token-policy');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('./agent-runtime/runtime-env');
 const {
     buildChatAgentMetadata,
@@ -59,7 +59,9 @@ async function createChatAgentHandoff({
     // Agent 运行时在执行前仍会依据策略和审批要求对每个候选工具进行评估。
     const effectiveMcpEnabled = Boolean(mcpEnabled || (automatic && automaticExecution.allowMcp === true));
     const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source'])] : [];
-    const budget = { max_steps: 30, max_tokens_total: resolveModelTaskTokenBudget(modelCfg), max_runtime_seconds: 600 };
+    const taskBudget = resolveChatAgentBudget({ modelCfg, decision: automaticExecution || {}, ragEnabled, mcpEnabled: effectiveMcpEnabled,
+        content: modelContent, history: chatHistory, systemPrompt: sessionSystemPrompt, context: agentContext });
+    const budget = taskBudget.budget;
     const authorizationRef = `user_message:${userMessageId}`;
     const budgetRef = `sha256:${crypto.createHash('sha256').update(JSON.stringify(budget)).digest('hex')}`;
     const conversationTaskId = automaticExecution?.conversationTaskId || turn?.id || `chat:${sessionId}:${userMessageId}`;
@@ -92,7 +94,7 @@ async function createChatAgentHandoff({
             sessionId,
             userMessageId,
             visibleContent,
-            history: chatHistory,
+            history: taskBudget.history,
             source: automatic ? 'chat_auto' : 'chat_explicit',
             systemPrompt: sessionSystemPrompt,
             mcpEnabled: effectiveMcpEnabled,
@@ -131,6 +133,7 @@ async function createChatAgentHandoff({
             }
         } : {})
     };
+    metadata.chatBridge.executionProfile = taskBudget.profile;
     if (automaticExecution?.completedWork) metadata.chatHistory.push({ role: 'assistant', content: `上一任务已结束。本次仅处理用户新要求，已完成操作不重放。\n${JSON.stringify(automaticExecution.completedWork).slice(0, 10000)}` });
     if (automatic && modelContent.length > 12000) metadata.chatHistory.push({ role: 'assistant', content: '本轮原始资料超过内联上限。必须通过 chat.read_source 从 offset=0 开始分页读取完整来源，不得把截断片段当作完整附件。' });
     const run = await agentRunFactory({
@@ -140,9 +143,9 @@ async function createChatAgentHandoff({
         modelId: modelCfg.id,
         sessionId,
         title: visibleContent || modelContent,
-        maxSteps: 30,
+        maxSteps: budget.max_steps,
         dedupeKey: regenerate ? (requestKey ? `chat-regenerate:${sessionId}:${requestKey}` : null) : userMessageId ? `chat:${sessionId}:${userMessageId}` : null,
-        ...(automatic ? { maxTokenBudget: budget.max_tokens_total, budgetConfig: budget } : {}),
+        ...((automatic || taskBudget.profile === 'knowledge_qa') ? { maxTokenBudget: budget.max_tokens_total, budgetConfig: budget } : {}),
         runMode: 'standard',
         toolPolicy: effectiveMcpEnabled ? 'all' : 'builtin_only',
         toolAllowlist: [],

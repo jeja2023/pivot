@@ -33,6 +33,7 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
         created_at: new Date().toISOString(),
         started_at: null
     };
+    run.total_tokens = 120;
     const timeout = Object.assign(new Error('流式工具规划执行超时'), { code: 'AGENT_TIMEOUT' });
     const { runAgent } = createAgentRunner({
         activeRunControllers,
@@ -55,7 +56,7 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
         findAgentToolByName: () => null,
         runAgentDag: async () => {},
         isStreamingToolsEnabled: () => true,
-        tryRunAgentStreaming: async () => { throw timeout; },
+        tryRunAgentStreaming: async (_options, deps) => { assert.equal(deps.taskBudget.counts.tokens_total, 120); throw timeout; },
         callModelText: async () => '',
         resolveAgentRequestTimeoutMs: () => 60_000,
         recordAgentModelUsage: async () => ({}),
@@ -65,7 +66,7 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
         assessConfidence: () => ({ confident: true }),
         pickEscalationModel: async () => null,
         getModelEndpointRuntimeStatus: () => ({}),
-        getAgentRuntimeDeps: () => ({}),
+        getAgentRuntimeDeps: (_signal, taskBudget) => ({ taskBudget }),
         execute: async () => 1,
         queryOne: async sql => /checkpoint_type = 'tool'/.test(sql) ? null : null,
         updateRun: async (_id, fields) => { updates.push(fields); Object.assign(run, fields); return 1; },
@@ -125,6 +126,16 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
     assert.equal(metadata.autoContinuation.count, 1);
     assert.equal(controls.some(step => /自动续跑/.test(step.title)), true);
     assert.equal(updates.some(fields => fields.status === 'completed_with_errors'), false);
+});
+
+test('知识问答的六轮上限不会通过自动续跑再次扩展', async () => {
+    const { continueRunFromCheckpoint } = require('../server/services/agent-runtime/run-continuation');
+    const continued = await continueRunFromCheckpoint({ run: {}, runId: 'knowledge-run', user: { id: 7 }, reason: 'step_limit' }, {
+        AGENT_AUTO_CONTINUE_ON_STEP_LIMIT: true, AGENT_MAX_AUTO_CONTINUATIONS: 6,
+        getRunMetadata: () => ({ chatBridge: { executionProfile: 'knowledge_qa' } }),
+        getRunStatus: async () => { throw new Error('知识问答不得扩展执行轮数'); }
+    });
+    assert.equal(continued, false);
 });
 
 test('轮次时间片耗尽会复用安全检查点续跑，而不是直接生成不完整终态', () => {

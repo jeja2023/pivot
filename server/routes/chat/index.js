@@ -206,7 +206,7 @@ function createChatRouter({
         req.log.info({ sessionId, userId, modelId, regenerate, continuationKind, contentLength: modelContent.length }, '处理对话请求');
 
         // --- 立即建立 SSE 连接 ---
-        const sse = createSseResponseWriter(res);
+        const sse = createSseResponseWriter(res, { contentType: 'text/event-stream; charset=utf-8' });
 
         const chartSseCapture = createChartSseCapture((payload) => {
             sse.writeData(payload);
@@ -788,13 +788,6 @@ function createChatRouter({
                             }, '上游未按 SSE 流式返回，已按完整 JSON 内容回放');
                         }
                     }
-                    if (disableChatThinking) {
-                        const filteredContent = visibleReasoningFilter.finish(assistantContent);
-                        if (filteredContent) {
-                            writeContentSse(filteredContent);
-                        }
-                        assistantContent = stripVisibleReasoningScaffold(assistantContent);
-                    }
                     // internalScaffoldFilter 已经消费过整个流，只需把最后暂存的尾片段补发，
                     // 不能再次把完整 assistantContent 作为 fallback，否则会重复正文。
                     const internalTail = internalScaffoldFilter.finish();
@@ -803,6 +796,14 @@ function createChatRouter({
                             ? visibleReasoningFilter.push(internalTail)
                             : internalTail;
                         if (visibleTail) writeContentSse(visibleTail);
+                    }
+                    // 先排空上游过滤器，再结束可见文本过滤器；短回复可能整个仍在上游缓冲中。
+                    if (disableChatThinking) {
+                        const filteredContent = visibleReasoningFilter.finish(sawSsePayload ? '' : assistantContent);
+                        if (filteredContent) {
+                            writeContentSse(filteredContent);
+                        }
+                        assistantContent = stripVisibleReasoningScaffold(assistantContent);
                     }
                     assistantContent = sanitizeUserVisibleText(assistantContent);
                     const groundedRagAnswer = await ragResponse.ground(assistantContent);

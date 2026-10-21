@@ -85,7 +85,7 @@
                     current.finishing = true;
                     current.recognition.stop();
                     // 允许识别器送回句尾结果，超时仍释放设备；页面退出走立即取消。
-                    if (!current.released) current.finishTimer = setTimeout(() => releaseVoiceSession(current, { abortRecognition: true }), 35000);
+                    if (!current.released) current.finishTimer = setTimeout(() => releaseVoiceSession(current, { abortRecognition: true }), Math.min(130000, Math.max(35000, Number(current.recognition.finishTimeoutMs) || 35000)));
                 }
                 return null;
             }
@@ -110,6 +110,7 @@
             if (pendingVoiceRequest !== requestId) return null;
             // Keep the user activation from the button click while explicitly requesting microphone access.
             stream = recognition.usesDesktopInput ? null : await getUserMedia({ audio: true });
+            await platform.enhanceStream?.(stream);
             if (pendingVoiceRequest !== requestId) {
                 stopMediaStream(stream);
                 return null;

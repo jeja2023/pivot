@@ -12,13 +12,34 @@ const server = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
-        if (!String(req.url || '').includes('/chat/completions')) {
+        const isResponses = String(req.url || '').includes('/responses');
+        if (!String(req.url || '').includes('/chat/completions') && !isResponses) {
             res.writeHead(404, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ error: { message: 'not found' } }));
             return;
         }
         let payload = {};
         try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (_) {}
+        if (isResponses) {
+            if (payload.model !== 'gpt-5.6-e2e-stream-snapshot') {
+                res.writeHead(404, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ error: { message: '未配置此模型的 Responses 测试场景' } }));
+                return;
+            }
+            const text = 'Responses 流式回复只显示一次。';
+            const response = { id: 'e2e-response-snapshot', output: [{ type: 'message', content: [{ type: 'output_text', text }] }], usage: { input_tokens: 6, output_tokens: 9, total_tokens: 15 } };
+            if (payload.stream === false) {
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify(response));
+                return;
+            }
+            res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8' });
+            res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: 'Responses 流式回复' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: '只显示一次。' })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'response.completed', response })}\n\n`);
+            res.end('data: [DONE]\n\n');
+            return;
+        }
         const semanticDelayMs = JSON.stringify(payload).includes('E2E_SEMANTIC_DELAY') ? 1_500 : 0;
         const respond = () => {
         if (payload.stream === false) {

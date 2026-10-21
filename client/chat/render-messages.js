@@ -8,7 +8,9 @@ function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) 
     // 使用全局变量传递状态给 marked 渲染器
     window.Pivot.legacy._tempThoughtCounter = 0;
     window.Pivot.legacy._tempThoughtStates = thoughtOpenStates;
-    return renderMarkdown(content, { deferPivotCharts: Boolean(_isStreaming) });
+    return renderMarkdown(content, {
+        deferPivotCharts: Boolean(_isStreaming), streaming: Boolean(_isStreaming), recoverEmphasis: true
+    });
 }
 
 function hasAttachmentUrl(value = '') {
@@ -92,7 +94,7 @@ function buildAssistantStatsHtml(stats = {}) {
     const modelName = getMessageModelName(stats);
     const items = [];
     if (modelName) {
-        items.push(`<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeCodeHtml(modelName)}</span>`);
+        items.push(`<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}<span>${escapeCodeHtml(modelName)}</span></span>`);
     }
     if (stats && stats.costTime !== undefined) {
         items.push(`<span class="stat-item">${ICONS.time}${Number(stats.costTime).toFixed(1)}s</span>`);
@@ -170,7 +172,12 @@ function appendMessage(role, content, id = null, stats = null, mountOptions = nu
         if (role === 'assistant') window.Pivot.legacy.renderPivotCharts(div);
         window.Pivot.legacy.scrollMessagesToBottom?.();
     }
-    return div.querySelector('.message-content');
+    const messageContent = div.querySelector('.message-content');
+    if (role === 'assistant' && stats?.agentRunId) {
+        messageContent.dataset.chatAgentRunId = String(stats.agentRunId);
+        window.Pivot.moduleApi('chat.tasks').attachHistorical?.(messageContent, stats.agentRunId);
+    }
+    return messageContent;
 }
 
 function setMessageModelName(messageContent, modelName) {
@@ -191,7 +198,7 @@ function setMessageModelName(messageContent, modelName) {
     const modelItem = document.createElement('span');
     modelItem.className = 'stat-item stat-model';
     modelItem.title = `模型：${name}`;
-    PivotSafeHtml.setHtml(modelItem, `${ICONS.model}${escapeCodeHtml(name)}`);
+    PivotSafeHtml.setHtml(modelItem, `${ICONS.model}<span>${escapeCodeHtml(name)}</span>`);
     statsEl.insertAdjacentElement('afterbegin', modelItem);
 }
 

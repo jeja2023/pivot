@@ -1,0 +1,10 @@
+# 联网准备机解析依赖后导出完整 wheelhouse，离线镜像使用 --no-index 安装。
+fastapi==0.150.0
+uvicorn==0.54.0
+websockets==17.2
+numpy==2.2.6
+torch==2.8.0
+torchaudio==2.8.0
+silero-vad==6.2.3
+funasr==1.4.16
+transformers==4.57.6

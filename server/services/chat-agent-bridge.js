@@ -21,7 +21,7 @@ const CHAT_AGENT_HISTORY_ITEM_CHARS = 8000;
 const CHAT_AGENT_CONTEXT_CHARS = 24000;
 const CHAT_AGENT_ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
-    'running', 'approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit', 'resuming'
+    'running', 'verifying', 'approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit', 'resuming'
 ]);
 const CHAT_AGENT_CONTROLLABLE_STATUSES = new Set([...CHAT_AGENT_ACTIVE_STATUSES, 'needs_input']);
 const CHAT_AGENT_TERMINAL_STATUSES = new Set([
@@ -293,11 +293,19 @@ async function listChatAgentRunsForSession(sessionId, userId, { limit = 20 } = {
     const safeUserId = Number(userId || 0);
     if (!safeSessionId || !Number.isSafeInteger(safeUserId) || safeUserId <= 0) return [];
     const rows = await query(`
-        SELECT r.*, COALESCE(cm.name, m.name) AS model_name
+        SELECT r.id, r.user_id, r.session_id, r.title, r.status, r.created_at, r.updated_at,
+               r.started_at, r.completed_at, r.input_tokens, r.output_tokens, r.total_tokens,
+               jsonb_build_object('chatBridge', jsonb_build_object(
+                   'version', r.metadata->'chatBridge'->'version',
+                   'messageId', r.metadata->'chatBridge'->'messageId',
+                   'sessionId', r.session_id)) AS metadata,
+               COALESCE(cm.name, m.name) AS model_name
         FROM agent_runs r
         LEFT JOIN models m ON m.id = r.model_id
         LEFT JOIN models cm ON cm.id = r.chosen_model_id
         WHERE r.user_id = ? AND r.session_id = ? AND r.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = r.session_id AND s.user_id = r.user_id AND s.deleted_at IS NULL)
+          AND NOT EXISTS (SELECT 1 FROM agent_runs c WHERE c.parent_run_id = r.id AND c.user_id = r.user_id AND c.deleted_at IS NULL AND c.metadata->>'resumedFromRunId' = r.id)
         ORDER BY r.created_at DESC
         LIMIT ?
     `, [safeUserId, safeSessionId, Math.min(Math.max(Number(limit) || 20, 1), 50)]);

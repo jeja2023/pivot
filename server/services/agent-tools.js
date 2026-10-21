@@ -322,7 +322,7 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({
                 name: { type: 'string', description: '参数名，只允许字母、数字、下划线和短横线。' },
                 label: { type: 'string', description: '运行表单中展示的名称。' },
-                type: { type: 'string', enum: ['text', 'number', 'boolean', 'object', 'array'], default: 'text' },
+                type: { type: 'string', enum: ['text', 'number', 'boolean', 'object', 'array', 'date', 'file'], default: 'text' },
                 required: { type: 'boolean', default: false },
                 defaultValue: { description: '未提供参数时使用的默认值。' },
                 description: { type: 'string' }

@@ -9,6 +9,7 @@
     user-select: none;
     -webkit-user-select: none;
     cursor: grab;
+    font-family: var(--font-sans);
 }
 
 .pivot-dag-svg.is-pan-ready {
@@ -24,29 +25,34 @@
 }
 
 .pivot-dag-node-body {
-    fill: #fff;
-    stroke: rgba(148, 163, 184, 0.6);
+    fill: var(--surface, #ffffff);
+    stroke: var(--border, #e5e7eb);
     stroke-width: 1.5;
-    transition: fill 0.15s ease, stroke 0.15s ease;
+    transition: fill 0.18s ease, stroke 0.18s ease, stroke-width 0.18s ease, filter 0.18s ease;
+}
+
+.pivot-dag-node:hover .pivot-dag-node-body {
+    stroke: color-mix(in srgb, var(--primary, #10a37f) 45%, var(--border, #e5e7eb));
 }
 
 .pivot-dag-node.is-llm .pivot-dag-node-body {
     fill: #f0fdfa;
-    stroke: rgba(13, 148, 136, 0.7);
+    stroke: rgba(16, 163, 127, 0.65);
 }
 
 .pivot-dag-node.is-selected .pivot-dag-node-body {
-    fill: rgba(59, 130, 246, 0.08);
-    stroke: #3b82f6;
+    fill: color-mix(in srgb, var(--primary, #10a37f) 8%, var(--surface, #ffffff));
+    stroke: var(--primary, #10a37f);
+    stroke-width: 2;
 }
 
 .pivot-dag-node.has-warning .pivot-dag-node-body {
     fill: #fffbeb;
-    stroke: rgba(245, 158, 11, 0.72);
+    stroke: rgba(245, 158, 11, 0.75);
 }
 
 .pivot-dag-node.has-config-error .pivot-dag-node-body {
-    stroke: var(--danger);
+    stroke: var(--danger, #ef4444);
     stroke-width: 2;
 }
 
@@ -57,8 +63,8 @@
 
 .pivot-dag-config-badge {
     display: flex;
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
     align-items: center;
     justify-content: center;
     border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
@@ -66,14 +72,16 @@
     background: color-mix(in srgb, var(--danger) 10%, var(--surface));
     color: var(--danger);
     font-size: 11px;
-    font-weight: 900;
+    font-weight: 800;
     line-height: 1;
 }
 
 .pivot-dag-node-title {
-    fill: #0f172a;
+    fill: var(--text-main, #1e293b);
+    font-family: var(--font-sans);
     font-size: 12px;
-    font-weight: 800;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     pointer-events: none;
 }
 
@@ -91,10 +99,10 @@
     height: 30px;
     min-width: 0;
     overflow: hidden;
-    color: #64748b;
-    font-family: inherit;
+    color: var(--text-muted, #64748b);
+    font-family: var(--font-sans);
     font-size: 9px;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.15;
     pointer-events: none;
 }
@@ -103,7 +111,7 @@
     grid-row: 1 / 3;
     align-self: start;
     padding-top: 1px;
-    color: #64748b;
+    color: var(--text-muted, #64748b);
     font-size: 10px;
     font-weight: 800;
     line-height: 13px;
@@ -113,9 +121,9 @@
     align-self: center;
     min-width: 0;
     overflow: hidden;
-    color: #334155;
+    color: var(--text-main, #334155);
     font-size: 10px;
-    font-weight: 800;
+    font-weight: 600;
     line-height: 13px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -129,54 +137,65 @@
     width: fit-content;
     max-width: 100%;
     height: 14px;
-    padding: 0 6px;
+    padding: 0 5px;
     overflow: hidden;
-    border: 1px solid rgba(37, 99, 235, 0.14);
-    border-radius: 5px;
-    background: rgba(59, 130, 246, 0.07);
-    color: #475569;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-side, #f8fafc);
+    color: var(--text-muted, #475569);
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 8.5px;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 14px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .pivot-dag-node-tool.is-empty {
-    color: #b45309;
+    color: var(--warning, #b45309);
 }
 
 .pivot-dag-node-tool.is-empty .pivot-dag-node-tool-name {
-    color: #b45309;
+    color: var(--warning, #b45309);
 }
 
 .pivot-dag-node.is-selected .pivot-dag-node-tool-id {
-    border-color: rgba(37, 99, 235, 0.26);
-    background: rgba(59, 130, 246, 0.12);
-    color: #1d4ed8;
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    color: var(--primary);
 }
 
+/* ── 连接桩 (Ports) ─────────────────────────── */
 .pivot-dag-port {
-    fill: #fff;
-    stroke: #94a3b8;
+    fill: var(--surface, #ffffff);
+    stroke: var(--border, #94a3b8);
     stroke-width: 1.5;
     cursor: crosshair;
-    transition: fill 0.15s ease;
+    transition: fill 0.15s ease, stroke 0.15s ease, transform 0.15s ease;
 }
 
 .pivot-dag-port:hover {
-    fill: #3b82f6;
-    stroke: #2563eb;
+    fill: var(--primary, #10a37f);
+    stroke: var(--primary-hover, #0e8c6d);
 }
-.pivot-dag-port-out[data-pivot-dag-route="true"] { fill: var(--primary-light); stroke: var(--success); }
-.pivot-dag-port-out[data-pivot-dag-route="false"] { fill: var(--bg-secondary); stroke: var(--text-muted); }
 
+.pivot-dag-port-out[data-pivot-dag-route="true"] {
+    fill: color-mix(in srgb, var(--success, #10b981) 15%, var(--surface));
+    stroke: var(--success, #10b981);
+}
+
+.pivot-dag-port-out[data-pivot-dag-route="false"] {
+    fill: var(--bg-side);
+    stroke: var(--text-muted);
+}
+
+/* ── 连线 (Edges) ────────────────────────────── */
 .pivot-dag-edge {
     fill: none;
-    stroke: #94a3b8;
-    stroke-width: 1.5;
+    stroke: color-mix(in srgb, var(--border) 60%, var(--text-muted));
+    stroke-width: 1.6;
     pointer-events: none;
+    transition: stroke 0.15s ease, stroke-width 0.15s ease;
 }
 
 .pivot-dag-svg.is-panning,
@@ -193,25 +212,33 @@
 }
 
 .pivot-dag-edge-group.is-selected .pivot-dag-edge {
-    stroke: #2563eb;
+    stroke: var(--primary, #10a37f);
     stroke-width: 2.5;
 }
-.pivot-dag-edge-group.is-route-true .pivot-dag-edge { stroke: var(--success); }
-.pivot-dag-edge-group.is-route-false .pivot-dag-edge { stroke: var(--text-muted); stroke-dasharray: 5 3; }
+
+.pivot-dag-edge-group.is-route-true .pivot-dag-edge {
+    stroke: var(--success, #10b981);
+}
+
+.pivot-dag-edge-group.is-route-false .pivot-dag-edge {
+    stroke: var(--text-muted);
+    stroke-dasharray: 5 3;
+}
 
 .pivot-dag-edge-label {
-    fill: #64748b;
+    fill: var(--text-muted, #64748b);
+    font-family: var(--font-sans);
     font-size: 10px;
     font-weight: 700;
     paint-order: stroke;
     pointer-events: none;
-    stroke: #fff;
+    stroke: var(--surface, #ffffff);
     stroke-width: 4px;
 }
 
 .pivot-dag-selection-box {
-    fill: rgba(37, 99, 235, 0.08);
-    stroke: #2563eb;
+    fill: color-mix(in srgb, var(--primary, #10a37f) 8%, transparent);
+    stroke: var(--primary, #10a37f);
     stroke-dasharray: 5 3;
     stroke-width: 1.5;
     pointer-events: none;
@@ -222,42 +249,46 @@
     opacity: 0.7;
 }
 
-body.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body {
-    fill: #102f2b;
-    stroke: rgba(45, 212, 191, 0.72);
-}
-
-/* ── 节点类型主题色 ───────────────────────────── */
-.pivot-dag-node.is-code .pivot-dag-node-body   { fill: #fff7ed; stroke: rgba(234, 88, 12, 0.55); }
-.pivot-dag-node.is-http .pivot-dag-node-body   { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.55); }
-.pivot-dag-node.is-merge .pivot-dag-node-body  { fill: #f0fdf4; stroke: rgba(22, 163, 74, 0.55); }
-.pivot-dag-node.is-delegate .pivot-dag-node-body{ fill: #faf5ff; stroke: rgba(124, 58, 237, 0.55); }
-.pivot-dag-node.is-handoff .pivot-dag-node-body { fill: #fdf4ff; stroke: rgba(168, 85, 247, 0.55); }
-.pivot-dag-node.is-rag .pivot-dag-node-body    { fill: #f0f9ff; stroke: rgba(2, 132, 199, 0.55); }
-.pivot-dag-node.is-db .pivot-dag-node-body     { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
-.pivot-dag-node.is-viz .pivot-dag-node-body    { fill: #fefce8; stroke: rgba(161, 98, 7, 0.55); }
-.pivot-dag-node.is-report .pivot-dag-node-body { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.45); }
-.pivot-dag-node.is-mcp .pivot-dag-node-body    { fill: #f5f3ff; stroke: rgba(109, 40, 217, 0.45); }
-.pivot-dag-node.is-input .pivot-dag-node-body  { fill: #ecfdf5; stroke: rgba(5, 150, 105, 0.55); }
-.pivot-dag-node.is-output .pivot-dag-node-body { fill: #f0fdfa; stroke: rgba(13, 148, 136, 0.55); }
-.pivot-dag-node.is-condition .pivot-dag-node-body { fill: #fff7ed; stroke: rgba(217, 119, 6, 0.58); }
+/* ── 节点类型主题色 (规范调色板) ─────────────── */
+.pivot-dag-node.is-code .pivot-dag-node-body     { fill: #fff7ed; stroke: rgba(234, 88, 12, 0.55); }
+.pivot-dag-node.is-http .pivot-dag-node-body     { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.55); }
+.pivot-dag-node.is-merge .pivot-dag-node-body    { fill: #f0fdf4; stroke: rgba(22, 163, 74, 0.55); }
+.pivot-dag-node.is-delegate .pivot-dag-node-body { fill: #faf5ff; stroke: rgba(124, 58, 237, 0.55); }
+.pivot-dag-node.is-handoff .pivot-dag-node-body  { fill: #fdf4ff; stroke: rgba(168, 85, 247, 0.55); }
+.pivot-dag-node.is-rag .pivot-dag-node-body      { fill: #f0f9ff; stroke: rgba(2, 132, 199, 0.55); }
+.pivot-dag-node.is-db .pivot-dag-node-body       { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
+.pivot-dag-node.is-viz .pivot-dag-node-body      { fill: #fefce8; stroke: rgba(161, 98, 7, 0.55); }
+.pivot-dag-node.is-report .pivot-dag-node-body   { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.45); }
+.pivot-dag-node.is-mcp .pivot-dag-node-body      { fill: #f5f3ff; stroke: rgba(109, 40, 217, 0.45); }
+.pivot-dag-node.is-input .pivot-dag-node-body    { fill: #ecfdf5; stroke: rgba(5, 150, 105, 0.55); }
+.pivot-dag-node.is-output .pivot-dag-node-body   { fill: #f0fdfa; stroke: rgba(13, 148, 136, 0.55); }
+.pivot-dag-node.is-condition .pivot-dag-node-body{ fill: #fff7ed; stroke: rgba(217, 119, 6, 0.58); }
 .pivot-dag-node.is-approval .pivot-dag-node-body { fill: #fff1f2; stroke: rgba(225, 29, 72, 0.52); }
-.pivot-dag-node.is-loop .pivot-dag-node-body { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.5); }
-.pivot-dag-node.is-subflow .pivot-dag-node-body { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
-.pivot-dag-node.is-delay .pivot-dag-node-body { fill: #fefce8; stroke: rgba(161, 98, 7, 0.5); }
+.pivot-dag-node.is-loop .pivot-dag-node-body     { fill: #eff6ff; stroke: rgba(37, 99, 235, 0.5); }
+.pivot-dag-node.is-subflow .pivot-dag-node-body  { fill: #f8fafc; stroke: rgba(71, 85, 105, 0.55); }
+.pivot-dag-node.is-delay .pivot-dag-node-body    { fill: #fefce8; stroke: rgba(161, 98, 7, 0.5); }
 
-/* 深色模式 */
+/* ── 深色模式节点样式 ────────────────────────── */
+body.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-llm .pivot-dag-node-body         { fill: #0f2c25; stroke: rgba(16, 185, 129, 0.65); }
 body.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body    { fill: #1c0f00; stroke: rgba(251, 146, 60, 0.6); }
+.dark-mode .pivot-dag-node.is-code .pivot-dag-node-body        { fill: #261608; stroke: rgba(251, 146, 60, 0.6); }
 body.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body    { fill: #0c1a36; stroke: rgba(96, 165, 250, 0.6); }
+.dark-mode .pivot-dag-node.is-http .pivot-dag-node-body        { fill: #0c1a36; stroke: rgba(96, 165, 250, 0.6); }
 body.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body   { fill: #052e16; stroke: rgba(74, 222, 128, 0.6); }
+.dark-mode .pivot-dag-node.is-merge .pivot-dag-node-body       { fill: #082917; stroke: rgba(74, 222, 128, 0.6); }
 body.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body{ fill: #1e1030; stroke: rgba(167, 139, 250, 0.6); }
+.dark-mode .pivot-dag-node.is-delegate .pivot-dag-node-body    { fill: #1e1030; stroke: rgba(167, 139, 250, 0.6); }
 body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
-.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body     { fill: #082030; stroke: rgba(56, 189, 248, 0.6); }
+.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body         { fill: #082030; stroke: rgba(56, 189, 248, 0.6); }
+body.dark-mode .pivot-dag-node.is-mcp .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-mcp .pivot-dag-node-body         { fill: #1d1238; stroke: rgba(168, 85, 247, 0.6); }
+body.dark-mode .pivot-dag-node.is-db .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-db .pivot-dag-node-body          { fill: #1e2430; stroke: rgba(148, 163, 184, 0.5); }
+body.dark-mode .pivot-dag-node.is-input .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-input .pivot-dag-node-body       { fill: #082820; stroke: rgba(52, 211, 153, 0.6); }
+body.dark-mode .pivot-dag-node.is-output .pivot-dag-node-body,
+.dark-mode .pivot-dag-node.is-output .pivot-dag-node-body      { fill: #0c2b29; stroke: rgba(45, 212, 191, 0.6); }
 
 /* ── 节点图标 ───────────────────────────────── */
 .pivot-dag-node-icon-foreign { pointer-events: none; overflow: visible; }
@@ -265,19 +296,23 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-sm, 6px);
     font-size: 11px;
     line-height: 1;
     pointer-events: none;
     user-select: none;
-    background: rgba(0,0,0,0.04);
+    background: rgba(0, 0, 0, 0.04);
+}
+
+body.dark-mode .pivot-dag-node-icon {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .pivot-dag-node-icon svg {
-    width: 12px;
-    height: 12px;
+    width: 13px;
+    height: 13px;
 }
 
 /* ── 运行状态徽章 ──────────────────────────── */
@@ -288,78 +323,81 @@ body.dark-mode .pivot-dag-node.is-rag .pivot-dag-node-body,
     justify-content: center;
     min-width: 20px;
     height: 18px;
-    padding: 0 4px;
-    border-radius: 10px;
+    padding: 0 5px;
+    border-radius: 999px;
     font-size: 10px;
-    font-weight: 800;
+    font-weight: 700;
     line-height: 1;
     pointer-events: none;
 }
 
-.pivot-dag-run-badge.is-running  { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
-.pivot-dag-run-badge.is-completed{ background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
-.pivot-dag-run-badge.is-error    { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
+.pivot-dag-run-badge.is-running         { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+.pivot-dag-run-badge.is-completed       { background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
+.pivot-dag-run-badge.is-error           { background: #fee2e2; color: #dc2626; border: 1.5px solid #fca5a5; }
 .pivot-dag-run-badge.is-continued_error { background: #ffedd5; color: #c2410c; border: 1.5px solid #fdba74; }
-.pivot-dag-run-badge.is-skipped  { background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; }
+.pivot-dag-run-badge.is-skipped         { background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; }
 
 /* 节点边框光晕动画（运行中）*/
 .pivot-dag-node-pulse {
     fill: none;
-    stroke: #3b82f6;
+    stroke: var(--primary, #10a37f);
     stroke-width: 2.5;
     opacity: 0;
     animation: pivot-dag-pulse 1.4s ease-in-out infinite;
 }
+
 @keyframes pivot-dag-pulse {
     0%, 100% { opacity: 0; stroke-width: 2.5; }
     50%       { opacity: 0.6; stroke-width: 4; }
 }
 
-/* 运行中 spinner（纯 CSS） */
+/* 运行中 spinner */
 .pivot-dag-run-spinner {
     display: inline-block;
-    width: 9px;
-    height: 9px;
-    border: 1.5px solid #93c5fd;
-    border-top-color: #1d4ed8;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid rgba(16, 163, 127, 0.25);
+    border-top-color: var(--primary, #10a37f);
     border-radius: 50%;
     animation: pivot-dag-spin 0.7s linear infinite;
 }
+
 @keyframes pivot-dag-spin {
     to { transform: rotate(360deg); }
 }
 
 /* 节点边框：各运行状态 */
-.pivot-dag-node.run-running .pivot-dag-node-body  { stroke: #3b82f6; stroke-width: 2; }
-.pivot-dag-node.run-completed .pivot-dag-node-body{ stroke: #22c55e; stroke-width: 2; }
-.pivot-dag-node.run-error .pivot-dag-node-body    { stroke: #ef4444; stroke-width: 2; }
-.pivot-dag-node.run-continued_error .pivot-dag-node-body { stroke: #f97316; stroke-width: 2; }
-.pivot-dag-node.run-skipped .pivot-dag-node-body  { opacity: 0.55; }
+.pivot-dag-node.run-running .pivot-dag-node-body          { stroke: var(--primary, #10a37f); stroke-width: 2; }
+.pivot-dag-node.run-completed .pivot-dag-node-body        { stroke: var(--success, #10b981); stroke-width: 2; }
+.pivot-dag-node.run-error .pivot-dag-node-body            { stroke: var(--danger, #ef4444); stroke-width: 2; }
+.pivot-dag-node.run-continued_error .pivot-dag-node-body { stroke: var(--warning, #f59e0b); stroke-width: 2; }
+.pivot-dag-node.run-skipped .pivot-dag-node-body          { opacity: 0.55; }
 
 /* ── 缓存命中徽章与节点高光 ──────────────────── */
 .pivot-dag-run-badge.is-cached {
-    background: var(--dag-cache-gradient, linear-gradient(135deg, #059669, #0891b2));
-    color: var(--text-inverse, #ffffff);
-    border: 1.5px solid var(--dag-cache-border, #34d399);
-    box-shadow: 0 0 6px var(--dag-cache-glow, rgba(16, 185, 129, 0.4));
+    background: linear-gradient(135deg, #059669, #0891b2);
+    color: #ffffff;
+    border: 1.5px solid #34d399;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
     font-size: 10px;
 }
+
 .pivot-dag-node.run-cached .pivot-dag-node-body {
     stroke: var(--success, #10b981);
     stroke-width: 2;
     stroke-dasharray: 6 2;
 }
 
-/* ── 连线流光粒子动效（执行态数据流通道） ───── */
+/* ── 连线流光动效（数据流通道） ──────────────── */
 .pivot-dag-edge-group.is-streaming .pivot-dag-edge {
-    stroke: var(--primary, #0284c7);
+    stroke: var(--primary, #10a37f);
     stroke-width: 2.4;
-    filter: drop-shadow(0 0 4px var(--primary-glow, rgba(56, 189, 248, 0.7)));
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--primary) 70%, transparent));
 }
 
 .pivot-dag-edge-stream {
     fill: none;
-    stroke: var(--primary-stream, #38bdf8);
+    stroke: var(--primary, #10a37f);
     stroke-width: 3;
     stroke-linecap: round;
     stroke-dasharray: 8 14;

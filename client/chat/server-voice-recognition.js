@@ -1,4 +1,4 @@
-/* 仅将短录音发送到当前部署；服务端本地识别，不保留录音、不调用第三方。 */
+/* 短录音只提交当前部署，实际识别提供方和外发范围由服务端策略公开声明。 */
 /* global API_BASE, apiFetch, showToast */
 (function () {
     let statusPromise = null;
@@ -11,13 +11,15 @@
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), 10000);
             statusPromise = apiFetch(`${API_BASE}/chat/voice-recognition`, { cache: 'no-store', signal: controller.signal })
-            .then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || '无法检查服务器语音能力。'); return data; })
+            .then(async response => { const data = await response.json(); if (!response.ok) throw Error(data.error || '无法检查服务器语音能力。');
+                if (data.readiness === 'starting' || data.available === false) statusExpiry = Date.now() + 1000;
+                return data; })
             .catch(() => { statusPromise = null; throw Object.assign(new Error(), { voiceMessage: '服务器语音能力检查失败，请稍后重试或联系管理员。' }); })
             .finally(() => clearTimeout(timer));
         }
         return statusPromise;
     }
-    function createRecognition(language) {
+    function createRecognition(language, policy = {}) {
         let generation = 0;
         let active = false;
         let stopping = false;
@@ -36,8 +38,9 @@
         let results = [];
         let chain = Promise.resolve();
         let queued = 0;
+        let speechGate = null;
         const requests = new Set();
-        const recognition = { lang: language, continuous: false, usesServerInput: true, processLocally: false,
+        const recognition = { lang: language, continuous: false, usesServerInput: true, processLocally: false, finishTimeoutMs: 125000,
             attachStream(value) { stream = value; },
             start() {
                 if (active) throw Object.assign(new Error('识别已开始。'), { name: 'InvalidStateError' });
@@ -46,8 +49,10 @@
                 stopping = false;
                 const current = ++generation;
                 chunks = []; size = 0; voiced = 0; silence = 0; idle = 0; noiseFloor = 0.0008; results = [];
+                queued = 0; chain = Promise.resolve();
                 const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
-                const nextContext = new AudioContext();
+                const nextContext = window.Pivot.moduleApi('chat.voiceAudio')?.createContext?.() || new AudioContext();
+                speechGate = window.Pivot.moduleApi('chat.voiceSpeechGate')?.create(nextContext.sampleRate);
                 context = nextContext;
                 void (async () => {
                     try {
@@ -68,13 +73,15 @@
                             chunks.push(samples); size += samples.length;
                             // 低音量语音仍能起录，保留句首预录；短停顿不立即截断上下文。
                             const threshold = Math.max(0.0025, Math.min(0.012, noiseFloor * 2.5));
-                            if (energy > threshold) { voiced += samples.length; silence = 0; idle = 0; }
+                            const isSpeech = speechGate ? speechGate.analyze(samples).speech : energy > threshold;
+                            if (isSpeech) { voiced += samples.length; silence = 0; idle = 0; }
                             else {
                                 silence += samples.length;
                                 if (!voiced) noiseFloor = noiseFloor * 0.95 + energy * 0.05;
                             }
                             while (!voiced && size > nextContext.sampleRate * 0.4) { const old = chunks.shift(); size -= old.length; old.fill(0); }
-                            if (voiced > nextContext.sampleRate * 0.15 && (silence > nextContext.sampleRate * 0.95 || size >= nextContext.sampleRate * 19)) flush(current);
+                            const endSilence = Math.max(500, Math.min(2000, Number(policy.capture?.endSilenceMs) || 1000)) / 1000;
+                            if (voiced > nextContext.sampleRate * 0.08 && (silence >= nextContext.sampleRate * endSilence || size >= nextContext.sampleRate * 19)) flush(current);
                             if (!recognition.continuous && !voiced && idle > nextContext.sampleRate * 15) recognition.abort();
                         };
                         await nextContext.resume();
@@ -129,9 +136,9 @@
             clearAudio();
             queued++;
             chain = chain.then(async () => {
-                if (!active || current !== generation) { queued--; return; }
+                if (!active || current !== generation) return;
                 const controller = new AbortController(); requests.add(controller);
-                const timer = setTimeout(() => controller.abort(), 35000);
+                const timer = setTimeout(() => controller.abort(), 65000);
                 try {
                     const response = await apiFetch(`${API_BASE}/chat/voice-transcriptions`, { method: 'POST',
                         headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
@@ -140,13 +147,14 @@
                     if (!response.ok) throw Error(data.error || '服务器语音识别失败。');
                     if (!active || current !== generation) return;
                     if (data.text) {
-                        results.push({ isFinal: true, 0: { transcript: data.text } });
+                        results.push({ isFinal: true, requiresReview: data.requiresReview === true, 0: { transcript: data.text, confidence: data.confidence ?? undefined } });
                         recognition.onresult?.({ resultIndex: results.length - 1, results: results.slice() });
                     }
+                    if (data.noSpeech && recognition.continuous) return;
                     if (!recognition.continuous && !stopping) recognition.abort();
                 } catch (error) {
                     if (active && current === generation) fail(error.name === 'AbortError' ? '语音识别超时，请稍后重试。' : error.message);
-                } finally { clearTimeout(timer); requests.delete(controller); queued--; }
+                } finally { clearTimeout(timer); requests.delete(controller); if (current === generation) queued--; }
             });
         }
         return recognition;
@@ -157,8 +165,13 @@
         if (!available.available || !available.languages?.some(value => value.toLowerCase() === language.toLowerCase())) {
             throw Object.assign(new Error(), { voiceMessage: available.reason || '服务器尚未安装当前语言的本地识别组件，请联系管理员。' });
         }
-        showToast('语音由当前 Pivot 服务器本地识别，不保存录音、不转发第三方。', 'info');
-        return createRecognition(language);
+        showToast(available.thirdPartyForwarding ? '语音将交给管理员配置的外部识别服务处理。' : '语音由当前部署或内网识别服务处理，不保存录音。', 'info');
+        const recognition = available.streaming && window.Pivot.moduleApi('chat.voiceStreamingRecognition')
+            ? window.Pivot.moduleApi('chat.voiceStreamingRecognition').create(language, available) : createRecognition(language, available);
+        recognition.inputProvider = available.provider === 'embedded' ? 'server_embedded_speech'
+            : available.provider === 'gateway' ? 'server_speech_gateway'
+            : ['openai', 'qwen'].includes(available.provider) ? 'server_speech_api' : 'server_local_speech';
+        return recognition;
     }
-    window.Pivot?.exposeModule?.('chat.serverVoiceRecognition', { supported, prepare });
+    window.Pivot?.exposeModule?.('chat.serverVoiceRecognition', { supported, prepare, status, invalidate() { statusPromise = null; statusExpiry = 0; } });
 }());

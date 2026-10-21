@@ -4,33 +4,13 @@ const fs = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 const { readTypedEnv } = require('../../config/env-registry');
+const { readSpeechSetting } = require('./settings');
 
-const MAX_AUDIO_BYTES = 640044;
-function speechError(message, code, statusCode = 400) { return Object.assign(new Error(message), { code, statusCode }); }
-
-function validateAudio(input = {}) {
-    const language = String(input.language || 'zh-CN').trim();
-    if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(language)) throw speechError('语音语言标识无效。', 'VOICE_LANGUAGE_INVALID');
-    const encoded = input.audioBase64;
-    if (typeof encoded !== 'string' || encoded.length > Math.ceil(MAX_AUDIO_BYTES / 3) * 4 || encoded.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
-        throw speechError('录音格式或大小不符合要求，请分段重试。', 'VOICE_AUDIO_INVALID');
-    }
-    const audio = Buffer.from(encoded, 'base64');
-    // 只接受页面生成的标准单声道 16kHz PCM16 WAV，禁止容器解码器或任意媒体文件。
-    if (audio.length < 3244 || audio.length > MAX_AUDIO_BYTES || audio.toString('ascii', 0, 4) !== 'RIFF'
-        || audio.readUInt32LE(4) !== audio.length - 8 || audio.toString('ascii', 8, 12) !== 'WAVE'
-        || audio.toString('ascii', 12, 16) !== 'fmt ' || audio.readUInt32LE(16) !== 16 || audio.readUInt16LE(20) !== 1
-        || audio.readUInt16LE(22) !== 1 || audio.readUInt32LE(24) !== 16000 || audio.readUInt32LE(28) !== 32000
-        || audio.readUInt16LE(32) !== 2 || audio.readUInt16LE(34) !== 16 || audio.toString('ascii', 36, 40) !== 'data'
-        || audio.readUInt32LE(40) !== audio.length - 44 || (audio.length - 44) % 2) {
-        audio.fill(0);
-        throw speechError('仅支持最长 20 秒的标准单声道录音，请重新录制。', 'VOICE_WAVE_INVALID');
-    }
-    return { audio, language };
-}
+const { validateAudio, speechError } = require('./audio');
+const { createSpeechService } = require('./service');
 
 function createLocalSpeechService({ spawnProcess = spawn, platform = process.platform,
-    enabled = () => readTypedEnv('PIVOT_SERVER_VOICE_ENABLED'), maxConcurrent = 2,
+    enabled = () => readSpeechSetting('PIVOT_SERVER_VOICE_ENABLED'), maxConcurrent = 2,
     pythonExecutable = () => readTypedEnv('PIVOT_SERVER_VOICE_PYTHON'),
     loadScript = () => fs.readFile(path.join(__dirname, 'windows-worker.ps1'), 'utf8') } = {}) {
     const activeUsers = new Set();
@@ -117,4 +97,5 @@ function createLocalSpeechService({ spawnProcess = spawn, platform = process.pla
 }
 
 const localSpeechService = createLocalSpeechService();
-module.exports = { createLocalSpeechService, localSpeechService, validateAudio };
+const speechService = createSpeechService({ localService: localSpeechService });
+module.exports = { createLocalSpeechService, speechService, validateAudio };

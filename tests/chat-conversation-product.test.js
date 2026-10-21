@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { query, queryOne, execute } = require('../server/db/client');
 const ledger = require('../server/repositories/chat-conversation-turns');
-const { continueConversationTask } = require('../server/services/chat-task-continuation');
+const { continueConversationTask, getConversationTasks } = require('../server/services/chat-task-continuation');
+const { listChatAgentRunsForSession } = require('../server/services/chat-agent-bridge');
 const { sendAgentControlMessage, claimAgentControlMessages } = require('../server/services/agent-control');
 const { handleChatMemoryRequest } = require('../server/services/chat-memory-actions');
 const { retrieveLongTermMemories, listMemories, upsertMemory } = require('../server/services/long-term-memory');
@@ -25,6 +26,19 @@ async function fixture(prefix) {
     await execute('INSERT INTO sessions (id,user_id,title,created_at) VALUES (?,?,?,NOW())', [suffix, user.id, '对话产品回归']);
     return { user, sessionId: suffix, suffix };
 }
+
+test('旧版多层续跑链只展示最新任务，验收状态也可恢复显示且保持用户隔离', async () => {
+    const { user, sessionId, suffix } = await fixture('continuation-cards');
+    const ids = [0, 1, 2].map(index => `resume-${index}-${suffix}`);
+    for (let index = 0; index < ids.length; index += 1) {
+        const metadata = { chatBridge: { version: 1, sessionId }, ...(index ? { resumedFromRunId: ids[index - 1] } : {}) };
+        await execute("INSERT INTO agent_runs (id,user_id,session_id,parent_run_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,?,?,'知识问答','检索资料',?,?::jsonb,NOW(),NOW())", [ids[index], user.id, sessionId, ids[index - 1] || null, index === 2 ? 'verifying' : 'needs_input', JSON.stringify(metadata)]);
+    }
+    assert.deepEqual((await getConversationTasks(sessionId, user.id)).map(run => run.id), [ids[2]]);
+    assert.deepEqual((await listChatAgentRunsForSession(sessionId, user.id)).map(run => run.id), [ids[2]]);
+    assert.equal((await listChatAgentRunsForSession(sessionId, user.id + 99999)).length, 0);
+    assert.equal(await ledger.findTaskContinuation(ids[0], user.id + 99999), null);
+});
 
 test('并发请求、租约失效和内容冲突均保持用户消息幂等', async () => {
     const { user, sessionId } = await fixture('turn-idempotency');

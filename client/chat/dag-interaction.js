@@ -285,6 +285,11 @@ function createDagInteractionController(ctx) {
     };
 
     const onKeyDown = event => {
+        if (!ctx.root.isConnected || !ctx.root.getClientRects?.().length || ctx.root.closest?.('[hidden], .hidden, [aria-hidden="true"]')) return;
+        if (document.querySelector('.modal-overlay:not(.hidden)[aria-modal="true"]') && !ctx.root.closest?.('.modal-overlay:not(.hidden)[aria-modal="true"]')) return;
+        if (document.activeElement?.isContentEditable) return;
+        const active = document.activeElement;
+        if (active && active !== document.body && !ctx.root.contains(active) && !ctx.toolbar?.contains(active)) return;
         const tag = (document.activeElement?.tagName || '').toLowerCase();
         if (['input', 'textarea', 'select'].includes(tag)) return;
         if (event.code === 'Space') {

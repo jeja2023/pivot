@@ -25,7 +25,7 @@ async function getChatCapabilityAvailability(user, deps = {}) {
         return { status: tools.length > 24 ? 'partial' : 'available', totalTools: tools.length, tools: tools.slice(0, 24).map(raw => {
             const tool = visibleToolContract(raw);
             return { name: raw.fullName || tool.name, sourceName: redactRoutingText(String(raw.serverName || '')).slice(0, 80), description: redactRoutingText(String(tool.description || '')).slice(0, 240), capabilities: tool.capabilities,
-                readOnly: !tool.side_effect, requiresApproval: tool.approval_required || tool.risk_level >= 4 };
+                readOnly: !tool.side_effect, idempotent: tool.idempotent === true, requiresApproval: tool.approval_required || tool.risk_level >= 4 };
         }) };
     } catch (_) { return { status: 'unavailable', tools: [] }; }
 }

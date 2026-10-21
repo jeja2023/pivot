@@ -328,8 +328,12 @@ customRenderer.code = (code, infostring, _escaped) => {
     `;
 };
 
-customRenderer.link = (href, title, text) => {
-    if (typeof href === 'object' && href !== null) { text = href.text; title = href.title; href = href.href; }
+customRenderer.link = function(href, title, text) {
+    let labelHtml;
+    if (typeof href === 'object' && href !== null) {
+        labelHtml = this.parser.parseInline(href.tokens || []);
+        text = href.text; title = href.title; href = href.href;
+    }
     const safeText = text || ''; const safeHref = escapeAttrValue(href || '#'); const safeTitle = escapeAttrValue(title || '');
     const isDoc = safeText.includes('附件:') || safeText.includes('文件:') || /\.(pdf|doc|docx|xls|xlsx|txt|zip|rar)$/i.test(safeText);
     if (isDoc) {
@@ -343,7 +347,7 @@ customRenderer.link = (href, title, text) => {
             </a>
         `;
     }
-    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" title="${safeTitle}">${escapeCodeHtml(safeText)}</a>`;
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" title="${safeTitle}">${labelHtml ?? escapeCodeHtml(safeText)}</a>`;
 };
 
 customRenderer.image = (href, title, text) => {
@@ -404,15 +408,9 @@ function normalizeIndentedOfficialSignoff(content) {
 }
 
 function normalizeMarkdown(content) {
-    const normalizeText = (text) => text
-        .replace(/\*\*[ \t]+([^*\n][^*\n]*?)[ \t]+\*\*/g, (_, inner) => `**${inner.trim()}**`)
-        .replace(/__[ \t]+([^_\n][^_\n]*?)[ \t]+__/g, (_, inner) => `__${inner.trim()}__`);
     return String(content).split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map((block) => {
         if (/^(```|~~~)/.test(block)) return block;
-        return normalizeIndentedOfficialSignoff(block).split(/(`[^`\n]*`)/g).map((part) => {
-            if (/^`[^`\n]*`$/.test(part)) return part;
-            return normalizeText(part);
-        }).join('');
+        return normalizeIndentedOfficialSignoff(block);
     }).join('');
 }
 
@@ -495,7 +493,11 @@ if (typeof marked !== 'undefined') {
             const isOpen = window.Pivot.legacy._tempThoughtStates && window.Pivot.legacy._tempThoughtStates[window.Pivot.legacy._tempThoughtCounter++];
             const thinkingClass = token.isClosed ? '' : ' thinking';
             const summary = token.isClosed ? '模型思考内容' : '模型正在思考';
-            return `<div class="thought-block${thinkingClass}${isOpen ? ' is-open' : ''}"><div class="thought-summary">${summary}</div><div class="thought-content-wrapper"><div class="thought-content-inner"><div class="thought-content">${renderMarkdown(token.text)}</div></div></div></div>`;
+            const thoughtHtml = renderMarkdown(token.text, {
+                streaming: Boolean(this.parser.options.pivotStreamingTail),
+                recoverEmphasis: Boolean(this.parser.options.pivotRecoverEmphasis)
+            });
+            return `<div class="thought-block${thinkingClass}${isOpen ? ' is-open' : ''}"><div class="thought-summary">${summary}</div><div class="thought-content-wrapper"><div class="thought-content-inner"><div class="thought-content">${thoughtHtml}</div></div></div></div>`;
         }
     };
 
@@ -514,7 +516,11 @@ function renderMarkdown(content, options = {}) {
         .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
         .replace(/\n{3,}/g, '\n\n');
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(safeContent));
-    let rawHtml = marked.parse(normalizedContent, { renderer: customRenderer, breaks: true, gfm: true });
+    let rawHtml = marked.parse(normalizedContent, {
+        renderer: customRenderer, breaks: true, gfm: true,
+        pivotStreamingTail: options.streaming ? normalizedContent.trimEnd() : null,
+        pivotRecoverEmphasis: Boolean(options.recoverEmphasis)
+    });
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');

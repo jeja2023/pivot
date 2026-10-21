@@ -13,6 +13,7 @@ const { registerExecutionGrant } = require('./agent-execution-grant-ledger');
 const { beginPreviewTaskEffect, recordPreviewTaskEffect, stageDeferredToolEffect } = require('./agent-task-effect-executor');
 const { invokeAgentLifecycleHooks } = require('./agent-lifecycle-hooks');
 const { assertPreviewToolAllowed } = require('./agent-dag-execution-guard');
+const { summarizeToolOutcome } = require('./agent-tool-progress');
 
 function operationKeyFor({ run, tool, input, context = {} }) {
     const runId = run?.id || context.runId;
@@ -64,11 +65,14 @@ function createToolOrchestrator(overrides = {}) {
                 turnId: request.context?.stepContext?.turnId || request.context?.turnId || '',
                 stepIndex: request.context?.stepContext?.stepIndex || request.context?.stepIndex || 0,
                 type,
-                eventKey: request.operationKey || '',
+                eventKey: request.operationKey ? `operation:${checkpointInputHash(request.operationKey)}:attempt:${Number(request.attempt || 1)}` : '',
                 payload: {
                     ...buildAgentAuditFields(stepContext, { purpose: type }),
                     tool: request.tool.name,
+                    toolTitle: request.tool.title || '',
+                    action: String(request.input?.action || '').slice(0, 32),
                     operationKey: request.operationKey || '',
+                    attempt: Number(request.attempt || 1),
                     ...payload
                 }
             });
@@ -205,6 +209,7 @@ function createToolOrchestrator(overrides = {}) {
             });
             throw error;
         }
+        requestWithKey.attempt = Math.max(1, Number(checkpoint?.attempt || 1));
         if (checkpoint?.replay) {
             try { await onComplete?.({ output: checkpoint.output, policy, operationKey, effectiveInput, executionPlan, replayed: true }); } catch (_) {}
             await event('tool.replayed', requestWithKey, { checkpointId: checkpoint.checkpointId || '' });
@@ -229,7 +234,7 @@ function createToolOrchestrator(overrides = {}) {
         const executionContext = executionGrant
             ? { ...context, executionGrant: executionGrant.token, executionGrantSummary: executionGrant.summary }
             : context;
-        const executionRequest = { ...request, context: executionContext, operationKey };
+        const executionRequest = { ...requestWithKey, context: executionContext };
         if (executionGrant) {
             await event('sandbox.granted', executionRequest, { executionGrant: executionGrant.summary });
         }
@@ -276,11 +281,15 @@ function createToolOrchestrator(overrides = {}) {
         }
 
         let executionStarted = false;
+        const executionStartedAt = Date.now();
         try {
             if (deferredEffect?.effect && deferredEffect.plan?.commitMode === 'preview') {
                 await beginPreviewEffect(deferredEffect.effect.id, user);
             }
             executionStarted = true;
+            await event('tool.started', executionRequest, {
+                executionPlan: summarizeToolExecutionPlan(executionPlan || {})
+            });
             const output = await execute({
                 ...executionRequest,
                 operationKey,
@@ -318,7 +327,12 @@ function createToolOrchestrator(overrides = {}) {
                 });
             }
             try { await onComplete?.({ output, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
-            await event('tool.completed', requestWithKey, { output: output && typeof output === 'object' ? { completed: true } : undefined });
+            await event('tool.completed', requestWithKey, {
+                durationMs: Math.max(0, Date.now() - executionStartedAt),
+                resultSummary: summarizeToolOutcome(output),
+                executionPlan: summarizeToolExecutionPlan(executionPlan || {}),
+                output: output && typeof output === 'object' ? { completed: true } : undefined
+            });
             return output;
         } catch (error) {
             await recordCheckpointFailure(operationKey, error, requestWithKey, { executionMayHaveOccurred: executionStarted });
@@ -331,6 +345,7 @@ function createToolOrchestrator(overrides = {}) {
                 errorCode: String(error?.code || ''),
                 errorCategory: String(error?.category || ''),
                 errorMessage: String(error?.message || '').slice(0, 500),
+                durationMs: Math.max(0, Date.now() - executionStartedAt),
                 outcomeMayBeUncertain: executionStarted && tool.idempotent !== true
             });
             throw error;

@@ -6,6 +6,7 @@ const rootDir = path.resolve(__dirname, '..');
 const ignoredDirs = new Set([
     '.git',
     'node_modules',
+    '.venv-speech',
     'data',
     'logs',
     'uploads',

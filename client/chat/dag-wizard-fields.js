@@ -291,6 +291,8 @@ const resolveToolShortName = tool => {
                     <div class="pivot-dag-workflow-input-default" data-pivot-dag-wizard-field="${dagEscapeAttr(name)}" data-pivot-dag-workflow-input-default="${dagEscapeAttr(name)}">
                         <input class="form-input" type="text" data-pivot-dag-input-default-editor="text" placeholder="不填则由运行时输入决定">
                         <input class="form-input" type="number" step="any" data-pivot-dag-input-default-editor="number" placeholder="例如 100">
+                        <input class="form-input" type="date" data-pivot-dag-input-default-editor="date">
+                        <input class="form-input" type="text" data-pivot-dag-input-default-editor="file" disabled placeholder="文件在运行时上传，不设置默认附件">
                         <select class="form-input" data-pivot-dag-input-default-editor="boolean"><option value="">不设置默认值</option><option value="true">是</option><option value="false">否</option></select>
                         <textarea class="form-input" rows="4" spellcheck="false" data-pivot-dag-input-default-editor="json" placeholder="填写合法 JSON，例如 {&quot;department&quot;:&quot;财务部&quot;}"></textarea>
                         <span class="pivot-dag-structured-ref-help" data-pivot-dag-workflow-input-default-hint>默认值会跟随参数类型显示对应控件。</span>

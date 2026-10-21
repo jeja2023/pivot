@@ -10,8 +10,10 @@ function mountAgentDagEditor() {
     const toolbar = document.getElementById('agent-dag-editor-toolbar');
     const inspector = document.getElementById('agent-dag-editor-inspector');
     if (!canvas || !textarea || !window.Pivot.legacy.PivotDagEditor) return;
-    if (!canvas.offsetParent && activeAgentConfigSection !== 'advanced') return;
+    if (!canvas.offsetParent && !document.getElementById('automation-editor-view')?.offsetParent && activeAgentConfigSection !== 'advanced') return;
     if (dagEditorInstance) dagEditorInstance.destroy();
+    const inputList = document.getElementById('agent-dag-inputs-list');
+    if (inputList) { delete inputList.dataset.definitionKey; inputList.replaceChildren(); }
     dagEditorInstance = window.Pivot.legacy.PivotDagEditor.mount({
         canvas,
         textarea,
@@ -28,6 +30,7 @@ function mountAgentDagEditor() {
                 updateAgentWorkflowRunUi();
                 // 同步刷新运行时输入面板
                 refreshAgentDagInputsPanel();
+                window.Pivot.moduleApi('agent.workflowExperience')?.changed?.();
             }
         }
     });
@@ -84,7 +87,7 @@ function refreshAgentDagInputsPanel() {
         definitions.set(key, {
             key,
             label: String(input.label || key),
-            type: ['text', 'number', 'boolean', 'object', 'array'].includes(input.type) ? input.type : 'text',
+            type: ['text', 'number', 'boolean', 'object', 'array', 'date', 'file'].includes(input.type) ? input.type : 'text',
             required: Boolean(input.required),
             defaultValue: input.defaultValue,
             description: String(input.description || '')
@@ -93,6 +96,9 @@ function refreshAgentDagInputsPanel() {
     scanRefs(dagText).forEach(key => {
         if (!definitions.has(key)) definitions.set(key, { key, label: key, type: 'text', required: false, defaultValue: '', description: '' });
     });
+    const definitionKey = JSON.stringify([...definitions.values()]);
+    if (list.dataset.definitionKey === definitionKey) { panel.classList.toggle('hidden', !definitions.size); return; }
+    list.dataset.definitionKey = definitionKey;
     if (!definitions.size) {
         panel.classList.add('hidden');
         return;
@@ -108,11 +114,13 @@ function refreshAgentDagInputsPanel() {
             ? ''
             : (typeof definition.defaultValue === 'string' ? definition.defaultValue : JSON.stringify(definition.defaultValue, null, 2));
         const value = existing[key] ?? fallback;
-        const control = definition.type === 'boolean'
+        const control = definition.type === 'file'
+            ? `<input class="form-input" type="file" data-workflow-upload="${agentEscape(key)}"><input type="hidden" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="file" value="${agentEscape(value)}"><span data-workflow-upload-status="${agentEscape(key)}"></span>`
+            : definition.type === 'boolean'
             ? `<input type="checkbox" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="boolean" ${value === true || String(value).toLowerCase() === 'true' ? 'checked' : ''}>`
             : ['object', 'array'].includes(definition.type)
                 ? `<textarea class="form-input" rows="2" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="${definition.type}" placeholder="${definition.type === 'array' ? '[]' : '{}'}">${agentEscape(value)}</textarea>`
-                : `<input class="form-input" type="${definition.type === 'number' ? 'number' : 'text'}" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="${definition.type}" value="${agentEscape(value)}" placeholder="输入 ${agentEscape(definition.label)}">`;
+                : `<input class="form-input" type="${definition.type === 'number' ? 'number' : definition.type === 'date' ? 'date' : 'text'}" data-dag-input-key="${agentEscape(key)}" data-dag-input-type="${definition.type}" value="${agentEscape(value)}" placeholder="输入 ${agentEscape(definition.label)}">`;
         return `
         <label class="agent-dag-input-item">
             <span>${agentEscape(definition.label)}${definition.required ? '<em>必填</em>' : ''}</span>
@@ -120,6 +128,8 @@ function refreshAgentDagInputsPanel() {
             ${definition.description ? `<small>${agentEscape(definition.description)}</small>` : ''}
         </label>
     `; }).join(''));
+    window.Pivot.moduleApi('agent.workflowAuthoring')?.bindUploads?.(list);
+    window.Pivot.moduleApi('agent.workflowDataFields')?.enhance(list, '[data-dag-input-key]');
 }
 
 function collectAgentDagInputs() {
@@ -129,7 +139,7 @@ function collectAgentDagInputs() {
         const type = input.dataset.dagInputType || 'text';
         let value = input.type === 'checkbox' ? input.checked : String(input.value || '').trim();
         if (type === 'number' && value !== '') value = Number(value);
-        if (['object', 'array'].includes(type) && value) {
+        if (['object', 'array', 'file'].includes(type) && value) {
             try { value = JSON.parse(value); } catch (e) { /* 服务端会返回明确的字段校验错误 */ }
         }
         if (key) result[key] = value;

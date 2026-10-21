@@ -105,6 +105,18 @@ function handleAgentRealtimeEvent(event) {
 
 window.Pivot.legacy.initAgentRealtime = function() {
     if (agentRealtimeSource || !window.EventSource || !currentUser) return;
+    const shared = window.Pivot.moduleApi('chat.tasks');
+    if (typeof shared.subscribe === 'function') {
+        const unsubscribe = shared.subscribe((type, event) => {
+            if (type === 'connected') { agentRealtimeConnected = true; updateAgentAutoRefresh(); }
+            else if (type === 'error') { agentRealtimeConnected = false; updateAgentAutoRefresh(); }
+            else if (type === 'agent.streaming') handleAgentStreamingEvent(event);
+            else if (type === 'agent.run' || type === 'agent.notification') handleAgentRealtimeEvent(event);
+        });
+        agentRealtimeSource = { close: unsubscribe };
+        updateAgentAutoRefresh();
+        return;
+    }
     agentRealtimeSource = new EventSource(`${API_BASE}/events`, { withCredentials: true });
     agentRealtimeSource.addEventListener('connected', () => {
         agentRealtimeConnected = true;

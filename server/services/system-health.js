@@ -174,15 +174,6 @@ function checkDeployment() {
     }
 }
 
-async function checkDecisionProviders() {
-    try {
-        const { checkLayaDecisionHealth } = require('./decision-provider-health');
-        return await checkLayaDecisionHealth();
-    } catch (error) {
-        return { status: 'error', message: error.message };
-    }
-}
-
 async function checkDecisionDeploymentReadiness() {
     try {
         const { getDecisionDeploymentReadiness } = require('./decision-deployment-readiness');
@@ -260,7 +251,6 @@ async function getDetailedSystemHealthSnapshot(options = {}) {
             { name: 'disk', ...diskCheck },
             { name: 'writeQueue', ...checkWriteQueue() },
             { name: 'deployment', ...checkDeployment() },
-            { name: 'decisionProviders', ...(await checkDecisionProviders()) },
             { name: 'decisionDeployment', ...(await checkDecisionDeploymentReadiness()) },
             { name: 'agentBrowser', ...checkAgentBrowser() }
         ];

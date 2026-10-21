@@ -2,14 +2,20 @@
 
 const rateLimit = require('express-rate-limit');
 const { asyncHandler } = require('../../http');
-const { localSpeechService } = require('../../services/speech-recognition');
+const { speechService } = require('../../services/speech-recognition');
+const { voiceStreaming } = require('../../services/speech-recognition/streaming');
 
-function registerVoiceRecognitionRoutes(router, { authMiddleware, service = localSpeechService }) {
+function registerVoiceRecognitionRoutes(router, { authMiddleware, service = speechService }) {
     const limiter = rateLimit({ windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id),
         standardHeaders: true, legacyHeaders: false, message: { error: '语音请求过于频繁，请稍后重试。', code: 'VOICE_RATE_LIMIT' } });
     router.get('/chat/voice-recognition', authMiddleware, asyncHandler(async (_req, res) => {
         res.set('Cache-Control', 'no-store');
-        res.json({ success: true, ...(await service.capabilities()) });
+        const status = await service.capabilities();
+        res.json({ success: true, ...status, streaming: status.streaming === true && voiceStreaming.enabled() });
+    }));
+    router.post('/chat/voice-stream-tickets', authMiddleware, limiter, asyncHandler(async (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        res.json(voiceStreaming.issueTicket(req.user));
     }));
     router.post('/chat/voice-transcriptions', authMiddleware, limiter, asyncHandler(async (req, res) => {
         const controller = new AbortController();

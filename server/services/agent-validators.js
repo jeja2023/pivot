@@ -399,6 +399,11 @@ function normalizeDagSpec(value) {
     const result = {
         nodes: cleanNodes,
         layout,
+        ...(Array.isArray(parsed?.groups) ? { groups: parsed.groups.slice(0, 50).map(group => ({
+            id: String(group.id || '').slice(0, 80), title: String(group.title || '步骤分组').slice(0, 100),
+            nodeIds: (Array.isArray(group.nodeIds) ? group.nodeIds : []).filter(id => cleanNodes.some(node => node.id === id)).slice(0, 100),
+            collapsed: Boolean(group.collapsed)
+        })) } : {}),
         cacheEnabled: parsed?.cacheEnabled !== false && parsed?.cache_enabled !== false
     };
     if (hasEdgeModel) {

@@ -15,8 +15,9 @@ const {
     recordNativeToolCallCapability,
     shouldUseNativeToolCalls
 } = require('./model-tool-call-capabilities');
-const { verifyTaskOutcome } = require('./agent-verification');
+const { verifyTaskOutcome, taskVerificationFailureMessage } = require('./agent-verification');
 const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle');
+const { observationMessages } = require('./agent-runtime/planner');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -102,6 +103,7 @@ function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
 async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {} }, deps) {
     let roundsUsed = 0;
+    let finalizingAnswer = false;
     try {
         const callStreamingModel = deps.callModelStreamingWithTools || callModelStreamingWithTools;
         const executeTool = deps.executeToolByName || executeToolByName;
@@ -112,7 +114,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const taskBudget = deps.taskBudget || null;
         const verifyOutcome = async (answer, partial = false, reason = '') => {
             const verify = deps.verifyAgentOutcome || (options => verifyTaskOutcome(options));
-            return await verify({ runId, run, user, answer, observations, partial, reason });
+            return await verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget });
         };
         const tools = buildAgentToolSchemas(plannerToolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
@@ -120,6 +122,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
 需要时使用 tool_calls 调用工具；否则提供最终答案。返回结构化的工具输入 JSON。
 
 工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。
+
+本轮若已提供知识库检索结果，先判断现有证据是否足够；足够时直接回答，仅在缺少依据时补充检索。资料未覆盖的部分明确说明缺少依据，不得反复规划或重复检索同一问题来填补缺口。
 
 【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。
 不得声称已经把文件写入用户电脑；只有用户明确点击保存并收到交付结果后，才能说明文件已保存。生成代码时请输出代码，并提示用户使用代码块中的“保存到本机”。`;
@@ -139,6 +143,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             !chatContext?.longTermMemoryContext && chatAgent?.memoryContext ? { role: 'user', content: typeof chatAgent.memoryContext === 'object' ? String(chatAgent.memoryContext.content || '') : String(chatAgent.memoryContext) } : null,
             chatAgent?.ragContext ? { role: 'user', content: typeof chatAgent.ragContext === 'object' ? String(chatAgent.ragContext.content || '') : String(chatAgent.ragContext) } : null
         ].filter(Boolean);
+        const resumeContext = deps.getRunMetadata?.(run)?.resumeContext;
+        if (resumeContext?.previousError || resumeContext?.previousAnswer) {
+            contextMessages.push({ role: 'user', content: `PIVOT_PREVIOUS_RESULT_BEGIN\n以下为上次执行结果和验收反馈，仅作续跑参考。结合本轮新指令修复缺口，不要重复已经完成的工作。\n${JSON.stringify({ answer: resumeContext.previousAnswer || '', error: resumeContext.previousError || '' })}\nPIVOT_PREVIOUS_RESULT_END` });
+        }
         const currentMessageParts = Array.isArray(chatAgent?.currentMessage?.content)
             ? chatAgent.currentMessage.content.filter(part => part && typeof part === 'object')
             : [];
@@ -153,6 +161,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             { role: 'system', content: effectiveSystemPrompt },
             ...history,
             ...contextMessages,
+            // 流式续跑也必须看到检查点中的既有结果和控制要求，避免恢复后重新从头检索。
+            ...observationMessages(observations),
             { role: 'user', content: currentContent }
         ];
         // step_index also belongs to tool/control records; use the explicit
@@ -497,13 +507,16 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             });
 
             if (!result?.hasToolCalls) {
-                const answer = sanitizeUserVisibleText(result?.content || '') || await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                finalizingAnswer = true;
+                const answer = sanitizeUserVisibleText(result?.content || '') || (usageResult?.budgetExceeded ? '当前额度已用完，本次尚未生成可用答案。' : await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     budget: deps.taskBudget,
                     allowBudgetExceeded: true
-                });
+                }));
                 const budgetWarning = usageResult?.budgetExceeded ? '已达到总 Token 预算，以下为当前已生成结果。' : '';
+                await assertRunNotCancelled(runId);
                 await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning);
+                await assertRunNotCancelled(runId);
                 const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
                 const finalStatus = awaitingCommit
                     ? 'awaiting_commit'
@@ -515,7 +528,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     ? ''
                     : awaitingCommit
                         ? '任务结果已验证，仍有外部副作用等待提交。'
-                    : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
+                    : taskVerificationFailureMessage(verification);
                 await deps.updateRun(runId, {
                     status: finalStatus,
                     final_answer: budgetWarning ? `注意：${budgetWarning}\n\n${answer}` : answer,
@@ -531,10 +544,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             // The model response is already paid for. Do not execute another
             // tool after the response itself crossed the token ceiling.
             if (usageResult?.budgetExceeded) {
-                const answer = await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
-                    budget: deps.taskBudget,
-                    allowBudgetExceeded: true
-                });
+                const answer = observations.length
+                    ? `已保留 ${observations.length} 项工具执行记录，可在任务详情查看；当前额度不足以继续生成总结。`
+                    : '当前额度已用完，本次尚未生成可用答案。';
                 await deps.updateRun(runId, {
                     status: 'completed_with_errors',
                     final_answer: `注意：已达到总 Token 预算，任务已停止继续调用工具。\n\n${answer}`,
@@ -727,7 +739,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
         return { completed: false, roundsUsed, stepLimitReached: roundsUsed >= sliceEndStep };
     } catch (streamErr) {
-        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
+        // 答案生成后的验收或落库失败属于收尾故障，不能误判为原生工具不兼容再规划一遍。
+        if (finalizingAnswer) throw streamErr;
+        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);
         try {
             await (deps.recordNativeToolCallCapability || recordNativeToolCallCapability)(modelCfg, fallback);

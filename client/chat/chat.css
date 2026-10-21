@@ -10,3 +10,4 @@
 @import url("./styles/workspaces/responsive.css");
 @import url("./styles/artifact-renderer.css");
 @import url("./styles/artifact-viewer.css");
+@import url("./styles/base/chat-task-execution.css");

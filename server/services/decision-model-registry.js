@@ -133,18 +133,6 @@ function artifactPassedReleaseGate(row) {
     return report?.releaseGate?.passed === true || report?.passed === true;
 }
 
-const SHA256_DIGEST_RE = /^sha256:[a-f0-9]{64}$/i;
-
-function hasLayaDeploymentEvidence(row) {
-    if (String(row?.provider_id || '') !== 'laya') return true;
-    const report = parseJson(row?.evaluation_report, {});
-    let evidence = report?.deploymentEvidence;
-    if (!evidence || typeof evidence !== 'object') evidence = report?.deployment;
-    if (!evidence || typeof evidence !== 'object') return false;
-    return [evidence.imageDigest, evidence.modelSha256, evidence.dependencyLockSha256, evidence.launchCommandDigest]
-        .every(value => SHA256_DIGEST_RE.test(String(value || '')));
-}
-
 async function activateDecisionModelArtifact(id, deps = {}) {
     const artifactId = String(id || '').trim().slice(0, 128);
     if (!artifactId) return null;
@@ -154,7 +142,6 @@ async function activateDecisionModelArtifact(id, deps = {}) {
         if (!artifact
             || artifact.status === 'retired'
             || !artifactPassedReleaseGate(artifact)
-            || !hasLayaDeploymentEvidence(artifact)
             || !hasArtifactTrainingScope(artifact)) return null;
         const approvedFrozenEvaluation = await (deps.hasApprovedFrozenEvaluation || hasApprovedFrozenEvaluation)(artifact, deps);
         if (!approvedFrozenEvaluation) return null;

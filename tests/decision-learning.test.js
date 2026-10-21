@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
-    createHttpDecisionProvider,
     createScoreDecisionProvider,
     evaluateDecisionProviders,
     sanitizeDecisionContext
@@ -62,7 +61,7 @@ test('策略层默认影子模式且高风险、需审批动作不会自动采�
         { id: 'safe', description: '安全动作' },
         { id: 'approve', description: '需审批动作', risk: 'high', requiresApproval: true }
     ];
-    const outputs = [{ providerId: 'laya', weight: 1, selectedActionId: 'approve', scores: { safe: 0.1, approve: 0.99 } }];
+    const outputs = [{ providerId: 'qwen', weight: 1, selectedActionId: 'approve', scores: { safe: 0.1, approve: 0.99 } }];
     const shadow = applyDecisionPolicy({ candidates, providerOutputs: outputs, fallbackActionId: 'safe' });
     assert.equal(shadow.mode, 'shadow');
     assert.equal(shadow.selectedActionId, 'safe');
@@ -87,22 +86,6 @@ test('active 模式中经评测的学习型提供器可覆盖既有路由基线�
     assert.equal(policy.confidence > 0.99, true);
 });
 
-test('内网 Laya 超时不会影响已有决策基线', async () => {
-    const provider = createHttpDecisionProvider({
-        url: 'http://laya.intranet/decision',
-        timeoutMs: 20,
-        fetchFn: async (_url, { signal }) => await new Promise((_resolve, reject) => {
-            signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-        })
-    });
-    const [result] = await evaluateDecisionProviders({
-        context: { candidates: [{ id: 'retrieve', description: '检索' }, { id: 'skip', description: '跳过' }] },
-        providers: [provider]
-    });
-    assert.equal(result.error, 'provider_timeout');
-    assert.equal(result.selectedActionId, 'retrieve');
-});
-
 test('统一运行时默认影子模式，记录建议但保持既有选择', async () => {
     const decisions = [];
     const result = await resolveBusinessDecision({
@@ -115,8 +98,7 @@ test('统一运行时默认影子模式，记录建议但保持既有选择', as
     }, {
         getDecisionRuntimeConfig: () => ({
             mode: 'shadow', version: 'policy-test', autoThreshold: 0.5, highRiskThreshold: 0.8,
-            calibrationScale: 1, calibrationIntercept: 0,
-            laya: { enabled: false, url: '', version: '', timeoutMs: 100, weight: 1 }
+            calibrationScale: 1, calibrationIntercept: 0
         }),
         recordDecision: value => decisions.push(value)
     });
@@ -347,7 +329,7 @@ test('运行时可读取显式偏好并将其作为可审计策略结果', async
         getDecisionRuntimeConfig: () => ({
             mode: 'shadow', version: 'policy-pref', autoThreshold: 0.5, highRiskThreshold: 0.8,
             calibrationScale: 1, calibrationIntercept: 0, preferencesEnabled: true,
-            light: { enabled: false }, qwen: { enabled: false }, laya: { enabled: false }
+            light: { enabled: false }, qwen: { enabled: false }
         }),
         getDecisionPreference: async () => ({ id: 'pref-8', actionId: 'skip' }),
         recordDecision() {}
@@ -389,7 +371,7 @@ test('训练样本查询只选择有效账号的已核验结果，并可按租�
     assert.deepEqual(calls[0].params, ['chat.rag', 12, 20]);
 });
 
-test('disabled 模式不调用 Qwen、Laya 或轻量学习型决策器', async () => {
+test('disabled 模式不调用 Qwen 或轻量学习型决策器', async () => {
     let qwenCalls = 0;
     const result = await resolveBusinessDecision({
         scenario: 'chat.rag', taskState: { hash: 'disabled' }, modelCfg: { model_name: 'Qwen3.6-35B' },
@@ -398,8 +380,7 @@ test('disabled 模式不调用 Qwen、Laya 或轻量学习型决策器', async (
         getDecisionRuntimeConfig: () => ({
             mode: 'disabled', version: 'disabled', autoThreshold: 0.5, highRiskThreshold: 0.8,
             calibrationScale: 1, calibrationIntercept: 0, preferencesEnabled: false,
-            light: { enabled: true }, qwen: { enabled: true, maxTokens: 64, weight: 1 },
-            laya: { enabled: true, url: 'http://laya/decision', maxConcurrent: 1, weight: 1 }
+            light: { enabled: true }, qwen: { enabled: true, maxTokens: 64, weight: 1 }
         }),
         callModelText: async () => { qwenCalls += 1; return '{}'; },
         loadLocalLinearDecisionModel: async () => { throw new Error('禁用模式不应加载本地线性模型'); },
@@ -435,7 +416,7 @@ test('active 灰度只使用已激活策略制品，缺失制品时安全回退�
         mode: 'active', version: 'policy-v2', autoThreshold: 0.8, highRiskThreshold: 0.9,
         calibrationScale: 1, calibrationIntercept: 0, rolloutPercent: 100, rolloutTenants: [], rolloutScenarios: [],
         requireActiveArtifact: false, useActivePolicyArtifact: true, artifactTimeoutMs: 50, preferencesEnabled: false,
-        light: { enabled: false }, qwen: { enabled: false }, laya: { enabled: false }
+        light: { enabled: false }, qwen: { enabled: false }
     };
     const active = await resolveBusinessDecision(common, {
         getDecisionRuntimeConfig: () => config,
@@ -456,79 +437,4 @@ test('active 灰度只使用已激活策略制品，缺失制品时安全回退�
     assert.equal(fallback.policy.mode, 'shadow');
     assert.equal(fallback.selectedActionId, 'skip');
     assert.equal(fallback.policy.policyArtifactStatus, 'unavailable');
-});
-
-test('Laya 返回权重版本漂移时结果不参与策略融合', async () => {
-    const provider = createHttpDecisionProvider({
-        url: 'http://laya.intranet/decision',
-        version: 'approved-v1',
-        fetchFn: async () => ({ ok: true, json: async () => ({ modelVersion: 'unapproved-v2', selectedActionId: 'skip', scores: { retrieve: 0.1, skip: 0.9 } }) })
-    });
-    const [result] = await evaluateDecisionProviders({
-        context: { candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] },
-        providers: [provider]
-    });
-    assert.equal(result.error, 'provider_version_mismatch');
-    assert.equal(result.selectedActionId, 'retrieve');
-});
-
-test('内网 Laya HTTP 500 被记录为提供器错误且不改变既有决策', async () => {
-    const provider = createHttpDecisionProvider({
-        url: 'http://laya.intranet/decision',
-        version: 'approved-v1',
-        fetchFn: async () => ({ ok: false, status: 500, json: async () => ({}) })
-    });
-    const [result] = await evaluateDecisionProviders({
-        context: { candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }] },
-        providers: [provider]
-    });
-    assert.equal(result.error, 'provider_http_500');
-    assert.equal(result.selectedActionId, 'retrieve');
-});
-
-test('内网 Laya 达到并发上限时保持既有决策并记录限流原因', async () => {
-    let resolveFetchStarted;
-    let releaseFetch;
-    const fetchStarted = new Promise(resolve => { resolveFetchStarted = resolve; });
-    const fetchRelease = new Promise(resolve => { releaseFetch = resolve; });
-    const config = {
-        mode: 'shadow', version: 'policy-v1', autoThreshold: 0.58, highRiskThreshold: 0.85, calibrationScale: 1, calibrationIntercept: 0,
-        preferencesEnabled: false, light: { enabled: false }, qwen: { enabled: false },
-        laya: { enabled: true, url: 'http://laya.intranet/decision', version: 'approved-v1', timeoutMs: 1000, maxConcurrent: 1, weight: 1 }
-    };
-    const request = {
-        scenario: 'chat.rag', taskState: { hash: 'laya-limit' },
-        candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }], fallbackActionId: 'retrieve', actionScores: { retrieve: 0.9, skip: 0.1 }
-    };
-    const deps = {
-        getDecisionRuntimeConfig: () => config,
-        fetchFn: async () => { resolveFetchStarted(); await fetchRelease; return { ok: true, json: async () => ({ modelVersion: 'approved-v1', selectedActionId: 'skip', scores: { retrieve: 0.1, skip: 0.9 } }) }; },
-        recordDecision() {}
-    };
-    const first = resolveBusinessDecision(request, deps);
-    await fetchStarted;
-    const second = await resolveBusinessDecision({ ...request, taskState: { hash: 'laya-limit-second' } }, deps);
-    assert.equal(second.selectedActionId, 'retrieve');
-    assert.equal(second.providerOutputs.find(item => item.providerId === 'laya').error, 'provider_concurrency_limited');
-    releaseFetch();
-    await first;
-});
-
-test('Laya 未配置审核版本时不会发起网络调用', async () => {
-    let calls = 0;
-    const result = await resolveBusinessDecision({
-        scenario: 'chat.rag', taskState: { hash: 'laya-version-required' },
-        candidates: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }], fallbackActionId: 'retrieve', actionScores: { retrieve: 0.9, skip: 0.1 }
-    }, {
-        getDecisionRuntimeConfig: () => ({
-            mode: 'shadow', version: 'policy-v1', autoThreshold: 0.58, highRiskThreshold: 0.85, calibrationScale: 1, calibrationIntercept: 0, preferencesEnabled: false,
-            light: { enabled: false }, qwen: { enabled: false },
-            laya: { enabled: true, url: 'http://laya.intranet/decision', version: '', timeoutMs: 100, maxConcurrent: 1, weight: 1 }
-        }),
-        fetchFn: async () => { calls += 1; throw new Error('should_not_call_laya'); },
-        recordDecision() {}
-    });
-    assert.equal(calls, 0);
-    assert.equal(result.selectedActionId, 'retrieve');
-    assert.equal(result.providerOutputs.find(item => item.providerId === 'laya').error, 'provider_version_not_configured');
 });

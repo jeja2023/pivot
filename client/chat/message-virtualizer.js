@@ -67,6 +67,7 @@
             tps: record.tokens_per_sec,
             tokenCount: record.token_count,
             modelName: record.model_name || record.model_api_name || '',
+            agentRunId: record.agent_run_id || '',
             routeMetadata: record.route_metadata || null
         };
     }

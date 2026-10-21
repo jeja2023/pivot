@@ -33,8 +33,7 @@ function agentWorkflowRunSourceLabel(source) {
 }
 
 function setAgentWorkflowRunConsoleStatus(message, type = '') {
-    void message;
-    void type;
+    window.Pivot.moduleApi('agent.workflowExperience')?.status?.(message, type);
 }
 
 function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
@@ -50,7 +49,7 @@ function getAgentWorkflowRunSettings(raw = getAgentWorkflowText()) {
         valid: true,
         llmNodes,
         modelId: '',
-        maxSteps: 20,
+        maxSteps: Math.max(20, nodes.length),
         toolPolicy: 'all',
         approvalPolicy: 'safe_mcp_auto',
         modelRouter: 'fixed',
@@ -77,13 +76,14 @@ function workflowReadinessError(spec) {
     return inspector(spec?.nodes || [], tools, spec?.edges || [])?.issues?.[0]?.message || '';
 }
 
-function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverride = null) {
+function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverride = null, options = {}) {
     const workflow = workflowOverride || selectedAgentWorkflow();
     const sourceMode = ['draft', 'current', 'published'].includes(source) ? source : 'draft';
+    if (sourceMode === 'draft' && document.querySelector('#agent-dag-inputs-list [data-upload-pending="1"]')) { showToast('资料仍在上传，请完成后再测试。', 'warning'); return { _invalid: true }; }
     const summaryForSettings = sourceMode === 'draft'
-        ? summarizeAgentDagSpec()
-        : summarizeAgentDagSpec(workflow?.dag_spec || { nodes: [] });
-    const runSettings = getAgentWorkflowRunSettings(sourceMode === 'draft' ? getAgentWorkflowText() : (workflow?.dag_spec || { nodes: [] }));
+        ? summarizeAgentDagSpec(options.specOverride || getAgentWorkflowText())
+        : summarizeAgentDagSpec(options.runContext?.dagSpec || workflow?.dag_spec || { nodes: [] });
+    const runSettings = getAgentWorkflowRunSettings(summaryForSettings.spec);
     const goal = inferAgentWorkflowRunGoal();
     const payload = {
         goal,
@@ -107,6 +107,7 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
     }
     const readinessError = workflowReadinessError(summaryForSettings.spec);
     if (readinessError) {
+        setAgentWorkflowRunConsoleStatus(`请完善配置：${readinessError}`, 'error');
         showToast(`请先完善节点配置：${readinessError}`, 'error');
         payload._invalid = true;
         return payload;
@@ -164,7 +165,8 @@ function buildAgentWorkflowWorkbenchRunPayload(source = 'draft', workflowOverrid
             workflowName: workflow.name || currentAgentWorkflowName()
         };
     }
-    const visualInputs = window.Pivot.legacy.collectAgentDagInputs();
+    if (options.runContext) payload.metadata.workflowExpectedVersionId = options.runContext.versionId;
+    const visualInputs = options.dagInputs || window.Pivot.legacy.collectAgentDagInputs();
     if (Object.keys(visualInputs).length) payload.dagInputs = visualInputs;
     return payload;
 }
@@ -173,13 +175,16 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
     const sourceMode = ['draft', 'current', 'published'].includes(source) ? source : 'draft';
     const workflowId = String(options.workflow?.id || selectedAgentWorkflow()?.id || 'draft');
     return runAgentWorkflowOnce(`${sourceMode}:${workflowId}`, sourceMode, async () => {
-        const payload = buildAgentWorkflowWorkbenchRunPayload(sourceMode, options.workflow || null);
+        if (sourceMode === 'published' && !options.runContext && window.Pivot.moduleApi('agent.workflowRunForm')?.open) {
+            await window.Pivot.moduleApi('agent.workflowRunForm').open(options.workflow || selectedAgentWorkflow()); return null;
+        }
+        const payload = buildAgentWorkflowWorkbenchRunPayload(sourceMode, options.workflow || null, options);
         if (payload._invalid) return null;
         try {
             setAgentWorkflowRunConsoleStatus(`正在预检：${agentWorkflowRunSourceLabel(sourceMode)}...`, 'running');
             const preflight = await preflightAgentPayload(payload);
             if (preflight.status === 'blocked') {
-                setAgentWorkflowRunConsoleStatus('预检未通过，请先处理阻断项。', 'error');
+                setAgentWorkflowRunConsoleStatus(`预检未通过：${preflight.blockers?.[0] || '请处理阻断项。'}`, 'error');
                 const isSharedRecipientWorkflow = Boolean(
                     payload.workflowId &&
                     preflight.dependencies?.binding?.required &&
@@ -208,6 +213,12 @@ async function runAgentWorkflowFromWorkbench(source = 'draft', options = {}) {
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || '工作流运行失败');
+            if (sourceMode === 'published') void window.Pivot.moduleApi('agent.workflowBridge')?.request?.(`/agents/workflows/${workflowId}/preference`, { method: 'PATCH', body: JSON.stringify({ used: true }) });
+            if (options.inline) {
+                setAgentWorkflowRunConsoleStatus('已入队，正在当前页面读取执行结果。', 'ready');
+                await window.Pivot.moduleApi('agent.workflowResults').watch(data.run, sourceMode === 'published' ? `发布版 V${options.runContext.version}` : '试运行草稿');
+                return data.run;
+            }
             window.Pivot.moduleApi('agent.dagTimelineSource')?.rememberRun?.(data.run, {
                 spec: payload.dagSpec || options.workflow?.dag_spec || selectedAgentWorkflow()?.dag_spec,
                 workflowId: workflowId === 'draft' ? '' : workflowId

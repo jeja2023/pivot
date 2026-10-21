@@ -13,6 +13,7 @@ function startHttpServer({
     closeRealtimeClients,
     terminateSandboxProcesses,
     terminateCapabilityWorkers,
+    stopSpeechService,
     processRef = process
 }) {
     let shuttingDown = false;
@@ -40,6 +41,11 @@ function startHttpServer({
             if (exitStarted) return;
             exitStarted = true;
             if (forceCloseTimer) clearTimeout(forceCloseTimer);
+            try {
+                if (typeof stopSpeechService === 'function') await stopSpeechService();
+            } catch (err) {
+                logger.warn({ err }, '关闭内置语音进程失败');
+            }
             try {
                 if (typeof flushAllWrites === 'function') await flushAllWrites();
             } catch (err) {

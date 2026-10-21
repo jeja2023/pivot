@@ -220,7 +220,6 @@ const loadMonitorSummary = async function(options = {}) {
                 'disk': '磁盘空间',
                 'writeQueue': '数据库写入队列',
                 'deployment': '部署就绪状态',
-                'decisionProviders': '决策服务提供方',
                 'decisionDeployment': '决策部署就绪',
                 'agentBrowser': '浏览器运行时',
                 'api': '接口可用性',

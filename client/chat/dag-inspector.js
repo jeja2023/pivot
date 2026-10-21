@@ -1,5 +1,4 @@
-/* DAG 检查器与 JSON 输入编辑器（拆自 agents-dag-editor.js） */
-/* global renderDagInspectorChannelBindingField */
+/* global renderDagInspectorChannelBindingField -- DAG 检查器与 JSON 输入编辑器 */
 function createDagInspectorController(ctx) {
     const inspector = ctx.inspector;
     const onNodeSelectionChange = ctx.onNodeSelectionChange;

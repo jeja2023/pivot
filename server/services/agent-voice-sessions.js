@@ -52,7 +52,7 @@ async function startAgentVoiceSession(user, input = {}) {
     const id = `voice_${crypto.randomUUID()}`;
     await execute(`UPDATE agent_voice_sessions SET status = 'ended', ended_at = COALESCE(ended_at, ?), updated_at = ? WHERE user_id = ? AND status IN ('active', 'paused')`, [now, now, user.id]);
     const metadata = {
-        input: ['server_local_speech', 'desktop_local_speech'].includes(input.inputProvider) ? input.inputProvider : 'browser_speech_recognition',
+        input: ['server_local_speech', 'server_embedded_speech', 'server_speech_gateway', 'server_speech_api', 'desktop_local_speech'].includes(input.inputProvider) ? input.inputProvider : 'browser_speech_recognition',
         output: transport === 'browser_native' ? 'browser_speech_synthesis' : 'provider',
         audioRetention: 'none',
         transcriptRetention: 'none'

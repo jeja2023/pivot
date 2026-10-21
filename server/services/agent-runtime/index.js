@@ -666,93 +666,11 @@ function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
     agentRecoveryTimer = timer;
     return agentRecoveryTimer;
 }
-async function approveAgentTool(runId, user, approve = true) {
-    const run = await getRunForUser(runId, user);
-    if (!run) return null;
-    if (run.status !== 'approval_required') return run;
-    const metadata = getRunMetadata(run);
-    const pending = metadata.pendingApproval || {};
-    const now = getBeijingTimestamp();
-    if (!approve) {
-        await updateRun(runId, {
-            status: 'cancelled',
-            error_message: `用户拒绝工具审批：${pending.tool || '-'}`,
-            cancelled_at: now,
-            completed_at: now,
-            updated_at: now
-        });
-        await setRunMetadata(runId, { pendingApproval: null });
-        await insertStep(runId, (await listSteps(runId)).length + 1, {
-            type: 'approval',
-            title: 'User rejected tool approval',
-            toolName: pending.tool || '',
-            output: { status: 'rejected' }
-        });
-        try {
-            await recordAgentEvent({
-                runId,
-                userId: user.id,
-                type: 'approval.rejected',
-                payload: { tool: pending.tool || '', key: pending.key || '' },
-                eventKey: `approval:${pending.key || pending.tool || 'unknown'}:rejected`
-            });
-        } catch (_) {}
-        await createAgentNotification(user.id, runId, 'cancelled', '审批未通过', pending.tool || getAgentRunTitle(run));
-        return await getRunForUser(runId, user);
-    }
-    const approvedTools = new Set(Array.isArray(metadata.approvedTools) ? metadata.approvedTools : []);
-    const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
-    if (pending.key) approvedApprovalKeys.add(pending.key);
-    else if (pending.tool) approvedTools.add(pending.tool);
-    const approvalGrant = {
-        tool: pending.tool || '',
-        key: pending.key || '',
-        inputHash: pending.inputHash || approvalInputHash(pending.input || {}),
-        grantedAt: now,
-        expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000))
-    };
-    const approvalGrants = Array.isArray(metadata.approvalGrants)
-        ? metadata.approvalGrants.filter(item => item && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()))
-        : [];
-    approvalGrants.push(approvalGrant);
-    const resumeContext = await buildAgentResumeContext(runId);
-    await setRunMetadata(runId, {
-        pendingApproval: null,
-        approvalGrants,
-        approvedTools: [...approvedTools],
-        approvedApprovalKeys: [...approvedApprovalKeys],
-        resumeContext: {
-            ...resumeContext,
-            previousStatus: run.status,
-            approvedTool: pending.tool || '',
-            approvedInputHash: approvalGrant.inputHash
-        }
-    });
-    await updateRun(runId, {
-        status: 'queued',
-        error_message: '',
-        resume_from_step: Number(resumeContext.latestStepIndex || run.resume_from_step || 0) || 0,
-        updated_at: now
-    });
-    await insertStep(runId, (await listSteps(runId)).length + 1, {
-        type: 'approval',
-        title: 'User approved tool call',
-        toolName: pending.tool || '',
-        output: { status: 'approved', tool: pending.tool || '' }
-    });
-    try {
-        await recordAgentEvent({
-            runId,
-            userId: user.id,
-            type: 'approval.granted',
-            payload: { tool: pending.tool || '', key: pending.key || '', inputHash: approvalGrant.inputHash },
-            eventKey: `approval:${pending.key || pending.tool || 'unknown'}:granted:${approvalGrant.inputHash}`
-        });
-    } catch (_) {}
-    enqueueAgentRun(runId, user);
-    return await getRunForUser(runId, user);
-}
-
+const approveAgentTool = require('./approval-decisions').createApprovalDecision({
+    getRunForUser, getRunMetadata, getBeijingTimestamp, updateRunCas, insertStep, listSteps,
+    recordAgentEvent, createAgentNotification, getAgentRunTitle, approvalInputHash,
+    buildAgentResumeContext, enqueueAgentRun
+});
 const { revokeApprovedAgentTool } = createApprovalRevocation({
     getRunForUser,
     getRunMetadata,
@@ -954,8 +872,11 @@ configureAgentArtifacts({
 
 // 新调用方按领域获取能力，避免继续把运行、工作流、产物和调度当作一个无边界平铺 API。
 // 保留下面的平铺导出，确保历史扩展和桌面兼容层不发生破坏性变更。
+const refreshAgentToolApproval = require('./approval-refresh').createApprovalRefresh({
+    getRunForUser, getRunMetadata, updateRunCas, getTimestamp: getBeijingTimestamp, recordAgentEvent
+});
 const runs = {
-    approveAgentTool, revokeApprovedAgentTool, cancelAgentRun, createAgentRun, pauseAgentRun, rerunAgentDagFromNode,
+    approveAgentTool, refreshAgentToolApproval, revokeApprovedAgentTool, cancelAgentRun, createAgentRun, pauseAgentRun, rerunAgentDagFromNode,
     rerunAgentRun, resumeAgentRun, runAgent, shouldPauseForApproval, softDeleteAgentRun,
     recoverAgentRuns, startAgentRecoveryRunner, finalizeCommittedTaskTransactionRun, finalizeRolledBackTaskTransactionRun
 };

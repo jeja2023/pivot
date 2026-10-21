@@ -40,6 +40,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         if (canvas._pivotDagDestroy) canvas._pivotDagDestroy();
 
         const initialParsedSpec = readJson(textarea ? textarea.value : '');
+        window.Pivot?.moduleApi?.('agent.dagCore')?.resetDagNodeTestSession?.();
         let spec = ensureDefaults(initialParsedSpec);
         const shouldFlushInitialDefaults = !Array.isArray(initialParsedSpec?.nodes) || initialParsedSpec.nodes.length === 0;
         let selectedId = null;
@@ -47,21 +48,12 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         let selectedEdge = null;
         let clipboardNodes = [];
         let clipboardEdges = [];
-        const undoStack = [];
-        const redoStack = [];
         let pendingFlush = null;
         let suppressTextareaSync = false;
         let toolbarStatus = null;
-        // v0.0.51 缩放与平移状态：内容坐标原点固定，通过 viewBox 偏移 + 缩放呈现
         const viewState = { x: 0, y: 0, scale: DEFAULT_VIEW_SCALE };
         let refreshDagViewport = null;
         const snapshot = () => JSON.stringify(serialize(spec));
-        const recordHistory = () => {
-            const current = snapshot();
-            if (undoStack[undoStack.length - 1] !== current) undoStack.push(current);
-            if (undoStack.length > 100) undoStack.shift();
-            redoStack.length = 0;
-        };
         const restoreSnapshot = (value) => {
             spec = ensureDefaults(JSON.parse(value));
             selectedId = null;
@@ -70,18 +62,10 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             render();
             flushOut();
         };
-        const undo = () => {
-            const previous = undoStack.pop();
-            if (!previous) return window.Pivot.legacy.showToast?.('没有可撤销的修改', 'info');
-            redoStack.push(snapshot());
-            restoreSnapshot(previous);
-        };
-        const redo = () => {
-            const next = redoStack.pop();
-            if (!next) return window.Pivot.legacy.showToast?.('没有可重做的修改', 'info');
-            undoStack.push(snapshot());
-            restoreSnapshot(next);
-        };
+        const history = window.Pivot.moduleApi('agent.dagHistory').createHistory({ snapshot, restore: restoreSnapshot, notify: window.Pivot.legacy.showToast });
+        const recordHistory = history.record;
+        const undo = history.undo;
+        const redo = history.redo;
         const setSelection = (ids = [], primaryId = '') => {
             selectedIds = new Set(ids.filter(id => spec.nodes.some(node => node.id === id)));
             selectedId = primaryId && selectedIds.has(primaryId) ? primaryId : ([...selectedIds][0] || null);
@@ -109,7 +93,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const root = makeSvgEl('svg', {
             class: 'pivot-dag-svg',
             xmlns: SVG_NS,
-            preserveAspectRatio: 'xMinYMin meet'
+            preserveAspectRatio: 'xMinYMin meet', tabindex: '0', role: 'group', 'aria-label': '工作流画布，支持选择、复制和撤销'
         });
         canvas.classList.toggle('is-readonly', Boolean(readOnly));
         const defs = makeSvgEl('defs');
@@ -188,14 +172,14 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
         minimap.svg.addEventListener('click', minimapClickHandler);
 
-        const flushOut = () => {
+        const flushOut = (notify = true) => {
             if (pendingFlush) caf(pendingFlush);
             pendingFlush = raf(() => {
                 pendingFlush = null;
                 suppressTextareaSync = true;
                 writeJson(textarea, spec);
                 suppressTextareaSync = false;
-                if (typeof onChange === 'function') onChange(serialize(spec));
+                if (notify && typeof onChange === 'function') onChange(serialize(spec));
             });
         };
 
@@ -411,6 +395,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             const toolNames = new Set(tools.map(toolValue).filter(Boolean));
             const errors = [];
             const warnings = [];
+            (window.Pivot.moduleApi('agent.dagDefinition')?.inspectReferences?.(spec, tools) || []).forEach(issue => errors.push(issue.message));
             const readiness = window.Pivot?.moduleApi?.('agent.dagReadiness')?.inspectDagReadiness?.(spec.nodes, tools, spec.edges || []) || { issues: [] };
             const byId = new Map(spec.nodes.map(node => [node.id, node]));
             const edgeCount = spec.nodes.reduce((sum, node) => sum + (node.dependsOn || []).length, 0);
@@ -510,7 +495,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             flushOut: () => flushOut(),
             recordHistory
         });
-        const deleteNode = (id) => {
+        const deleteNode = (id, confirmed = false) => {
+            if (!confirmed && window.Pivot.moduleApi('agent.workflowAuthoring')?.confirmDelete) return window.Pivot.moduleApi('agent.workflowAuthoring').confirmDelete(spec, [id], () => deleteNode(id, true));
             const node = spec.nodes.find(n => n.id === id);
             if (!node) return false;
             recordHistory();
@@ -524,7 +510,8 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             return true;
         };
 
-        const deleteSelection = () => {
+        const deleteSelection = (confirmed = false) => {
+            if (!selectedEdge && !confirmed && window.Pivot.moduleApi('agent.workflowAuthoring')?.confirmDelete) return window.Pivot.moduleApi('agent.workflowAuthoring').confirmDelete(spec, [...selectedIds], () => deleteSelection(true));
             if (selectedEdge) {
                 const target = spec.nodes.find(node => node.id === selectedEdge.toId);
                 if (!target) return;
@@ -574,14 +561,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
                 existing.push(nextId);
                 idMap.set(node.id, nextId);
             });
-            const pasted = clipboardNodes.map(node => ({
-                ...JSON.parse(JSON.stringify(node)),
-                id: idMap.get(node.id),
-                title: `${node.title || node.id} 副本`.slice(0, 120),
-                dependsOn: (node.dependsOn || []).map(dep => idMap.get(dep) || dep),
-                _x: Number(node._x || 0) + 40,
-                _y: Number(node._y || 0) + 40
-            }));
+            const pasted = window.Pivot.moduleApi('agent.dagDefinition').cloneSelection(clipboardNodes, idMap);
             spec.nodes.push(...pasted);
             if (Array.isArray(spec.edges)) {
                 clipboardEdges.forEach(edge => {
@@ -606,7 +586,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         const duplicateSelection = () => { copySelection(); if (clipboardNodes.length) pasteSelection(); };
 
         const alignSelection = (alignment = 'horizontal_center') => {
-            const ids = selectedIds.length ? selectedIds : (selectedId ? [selectedId] : []);
+            const ids = selectedIds.size ? [...selectedIds] : (selectedId ? [selectedId] : []);
             if (ids.length < 2) {
                 window.Pivot?.legacy?.showToast?.('请至少选择 2 个节点进行对齐', 'warning');
                 return;
@@ -825,7 +805,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         };
 
         const render = () => {
-            dagCoreApi.setDagNodeTestContext?.(spec);
+            dagCoreApi.setDagNodeTestContext?.(spec, collectAgentDagInputs());
             updateViewBox();
             renderEdges();
             renderNodes();
@@ -941,6 +921,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         if (shouldFlushInitialDefaults && spec.nodes.length) flushOut();
 
         const destroy = () => {
+            if (pendingFlush) { caf(pendingFlush); pendingFlush = null; }
             document.removeEventListener('keydown', onKeyDown);
             document.removeEventListener('keyup', onKeyUp);
             document.removeEventListener('pointerdown', closeToolbarDropdowns);
@@ -970,14 +951,22 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
         canvas._pivotDagDestroy = destroy;
 
         return {
+            edit: mutate => { if (readOnly) return; recordHistory(); mutate(spec, selectedIds); render(); flushOut(); },
+            applySpec: value => { if (readOnly) return; recordHistory(); spec = ensureDefaults(value); clearSelection(); render(); flushOut(); },
+            duplicateSelected: () => duplicateSelection(),
+            selectNodes: ids => { setSelection(ids, ids.at(-1) || ''); render(); },
+            undo, redo,
+            deleteSelection: () => deleteSelection(),
+            getSelection: () => [...selectedIds],
+            testNode: nodeId => { selectNode(nodeId); render(); inspector?.querySelector('[data-pivot-dag-test-node]')?.click(); },
             destroy,
             getValue: () => serialize(spec),
-            setValue: (value) => {
+            setValue: (value, options = {}) => {
                 spec = ensureDefaults(value || { nodes: [] });
                 clearSelection();
                 render();
                 fitToContent();
-                flushOut();
+                flushOut(options.notify !== false);
             },
             clearSelection: () => {
                 clearSelection();
@@ -1011,8 +1000,7 @@ function mount({ canvas, textarea, toolbar, inspector, getTools, onChange, onOpe
             },
             fitToContent: () => fitToContent(),
             resetView: () => resetView(),
-            zoomIn: () => zoomAt(null, 1.18),
-            zoomOut: () => zoomAt(null, 0.85),
+            zoomIn: () => zoomAt(null, 1.18), zoomOut: () => zoomAt(null, 0.85),
             // 暴露校验方法用于保存/发布前门禁
             validate: () => validateWorkflow()
         };

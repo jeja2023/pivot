@@ -30,6 +30,7 @@ downloads/
 .codex-sidebar-data/
 .vscode/
 .idea/
+.venv-speech/
 
 # 环境变量与本机配置
 .env
@@ -46,7 +47,12 @@ config.example.json
 
 # 临时、缓存与报告
 scratch/
+.tmp/
 artifacts/
+!artifacts/
+artifacts/*
+!artifacts/speech-wheelhouse/
+!artifacts/speech-wheelhouse/**
 coverage/
 .nyc_output/
 .cache/

@@ -22,7 +22,6 @@ const {
     parseJsonObject,
     publishAgentRunEvent,
     query,
-    updateRun,
     updateRunCas
 } = deps;
 const runTransaction = deps.transaction || dbTransaction;
@@ -79,7 +78,7 @@ async function cancelAgentRun(runId, user) {
         FROM agent_runs
         WHERE parent_run_id = ?
           AND user_id = ?
-          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit')
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'resuming', 'needs_input', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit')
           AND deleted_at IS NULL
     `, [runId, user.id]);
     const pendingCommitChildren = [];
@@ -108,23 +107,24 @@ async function pauseAgentRun(runId, user) {
     if (!run) return null;
     // `needs_input` 是既有的、可从检查点续跑的非终态。只暂停真正还在执行
     // 的阶段；审批和提交边界本来就在等待用户，不能被伪装成另一种暂停。
-    const pausableStatuses = new Set(['queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'running', 'resuming']);
+    const pausableStatuses = new Set(['queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'running', 'resuming']);
     if (!pausableStatuses.has(String(run.status || ''))) return run;
     const pauseError = new Error('智能体运行已由用户暂停，可从安全检查点续跑。');
     pauseError.code = 'AGENT_RUN_PAUSED';
-    activeRunControllers.get(runId)?.abort(pauseError);
     const now = getBeijingTimestamp();
-    await updateRun(runId, {
+    const changed = await updateRunCas(runId, [...pausableStatuses], {
         status: 'needs_input',
         error_message: '智能体运行已由用户暂停，可从安全检查点续跑。',
         updated_at: now,
         last_heartbeat_at: now
     });
+    if (!changed) return await getRunForUser(runId, user);
+    activeRunControllers.get(runId)?.abort(pauseError);
     const childRuns = await query(`
         SELECT id
         FROM agent_runs
         WHERE parent_run_id = ? AND user_id = ?
-          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming')
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'resuming')
           AND deleted_at IS NULL
     `, [runId, user.id]);
     for (const child of childRuns) await pauseAgentRun(child.id, user);
@@ -325,8 +325,24 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
 }
 
 async function resumeAgentRun(runId, user) {
-    const run = await getRunForUser(runId, user);
+    let run = await getRunForUser(runId, user);
     if (!run) return null;
+    if (isChatAgentRun(run) && run.run_mode !== 'dag') {
+        // 兼容旧版本创建的续跑链：旧卡片跳到最新运行，不重复分配父任务余额。
+        const turns = require('../../repositories/chat-conversation-turns');
+        const seen = new Set([run.id]);
+        for (let depth = 0; depth < 64; depth += 1) {
+            const child = await (deps.findTaskContinuation || turns.findTaskContinuation)(run.id, user.id);
+            if (!child || seen.has(child.id)) break;
+            seen.add(child.id);
+            run = child;
+        }
+        if (run.status === 'needs_input') {
+            await (deps.resumeWaitingConversationTask || require('../chat-task-continuation').resumeWaitingConversationTask)(run, user);
+            return await getRunForUser(run.id, user);
+        }
+        if (seen.size > 1 || ['queued', 'planning', 'running', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'resuming'].includes(run.status)) return run;
+    }
     if ((ACTIVE_STATUSES.has(run.status) && run.status !== 'needs_input') || run.status === 'approval_required') {
         const err = new Error('当前任务仍在执行中，无需断点续跑。');
         err.status = 400;

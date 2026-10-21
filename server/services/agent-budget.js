@@ -114,6 +114,14 @@ class TaskBudget {
         return this.snapshot(now);
     }
 
+    assertCanRequestModel() {
+        this.assertWithin();
+        const limit = this.limits.max_tokens_total;
+        if (this.enabled && Number.isFinite(limit) && this.counts.tokens_total >= limit) {
+            this._trip('max_tokens_total', this.counts.tokens_total, limit, '任务 Token 预算已用完，不能继续调用模型。');
+        }
+    }
+
     consumeStep() {
         if (!this.enabled) return this.snapshot();
         this.counts.steps += 1;

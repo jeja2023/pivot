@@ -71,7 +71,7 @@ test('系统监控分区使用自然高度，全部健康检查可见', () => {
     assert.doesNotMatch(monitorCss, /grid-template-areas|grid-template-rows|contain: layout paint/);
     assert.doesNotMatch(scale, /MONITOR_MIN_CANVAS_HEIGHT/);
     assert.match(monitor, /const healthChecks = allHealthChecks;/);
-    assert.match(monitor, /'decisionProviders':\s*'决策服务提供方'/);
+    assert.match(monitor, /'decisionDeployment':\s*'决策部署就绪'/);
     assert.doesNotMatch(monitor, /allHealthChecks\.slice/);
 });
 

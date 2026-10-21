@@ -44,6 +44,8 @@ const { getAgentRunResources } = require('../services/agent-run-resources');
 const { listAgentToolCalls } = require('../services/agent-tool-audit');
 const { listChatAgentRunsForSession } = require('../services/chat-agent-bridge');
 const { registerAgentTaskDraftRoutes } = require('./agent-task-drafts-routes');
+const { registerChatTaskFeedRoutes } = require('./chat-task-feed');
+const { registerAgentRunControlRoutes } = require('./agent-run-controls');
 const { compileTraceToWorkflow } = require('../services/agent-trace-compiler');
 const { disableAgentSkill, listAgentSkillsForUser } = require('../services/agent-skills');
 const { describeSkillForUser, searchSkillsForUser } = require('../services/agent-skill-discovery');
@@ -53,6 +55,7 @@ const { createAgentResidencyStore } = require('../services/agent-residency');
 const { registerAgentEvaluationRoutes } = require('./agent-evaluation-routes');
 const { registerAgentApiOperationRoutes } = require('./agent-api-operations');
 const { registerAgentToolTestRoute } = require('./agent-tool-test');
+const { registerWorkflowEditorRoutes } = require('./workflow-editor-experience');
 const { registerAgentRunEvidenceRoutes } = require('./agent-run-evidence-routes');
 const { recordAgentFeedback } = require('../services/agent-feedback');
 const { createSkillVersion } = require('../services/agent-releases');
@@ -87,8 +90,10 @@ const {
     notifications: { listAgentNotifications, markAgentNotificationRead },
     runs: {
         approveAgentTool,
+        refreshAgentToolApproval,
         revokeApprovedAgentTool,
         cancelAgentRun,
+        pauseAgentRun,
         createAgentRun,
         finalizeCommittedTaskTransactionRun,
         finalizeRolledBackTaskTransactionRun,
@@ -133,7 +138,6 @@ function allowedSkillPermissions() {
     const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
     return values.length ? values : undefined;
 }
-
 function createAgentsRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
@@ -366,7 +370,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         res.json({ success: true });
     }));
 
-    router.get('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
+    registerWorkflowEditorRoutes(router, authMiddleware); router.get('/agents/workflows', authMiddleware, asyncHandler(async (req, res) => {
         const data = await listAgentWorkflows(req.user, { query: req.query.query });
         res.json({ data, total: data.length });
     }));
@@ -752,6 +756,10 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         res.status(202).json({ success: true, run });
     }));
 
+    registerChatTaskFeedRoutes(router, { authMiddleware, pauseAgentRun, refreshAgentToolApproval, logAction });
+    registerAgentRunControlRoutes(router, { authMiddleware, automationGuard, logAction,
+        cancelAgentRun, approveAgentTool, revokeApprovedAgentTool, resumeAgentRun, listSteps });
+
     router.get('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {
         const detail = await getRunDetailForUser(req.params.id, req.user);
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
@@ -919,27 +927,6 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         res.json({ success: true, draft });
     }));
 
-    router.post('/agents/runs/:id/cancel', authMiddleware, asyncHandler(async (req, res) => {
-        const run = await cancelAgentRun(req.params.id, req.user);
-        if (!run) return res.status(404).json({ error: '智能体任务不存在或不可取消。' });
-        logAction(req, '取消智能体任务', `任务ID: ${run.id}`);
-        res.json({ success: true, run });
-    }));
-
-    router.post('/agents/runs/:id/approval', authMiddleware, asyncHandler(async (req, res) => {
-        const run = await approveAgentTool(req.params.id, req.user, req.body?.approve !== false);
-        if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
-        logAction(req, req.body?.approve === false ? '拒绝智能体工具审批' : '批准智能体工具审批', `任务ID: ${run.id}`);
-        res.json({ success: true, run, steps: await listSteps(run.id) });
-    }));
-
-    router.post('/agents/runs/:id/approval/revoke', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
-        const run = await revokeApprovedAgentTool(req.params.id, req.user, req.body?.approvalKey || req.body?.approval_key);
-        if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
-        logAction(req, '撤销尚未执行的智能体工具审批', `任务ID: ${run.id}`);
-        res.json({ success: true, run, steps: await listSteps(run.id) });
-    }));
-
     router.get('/agents/runs/:id/export', authMiddleware, asyncHandler(async (req, res) => {
         const exported = await exportAgentRun(req.params.id, req.user, req.query.format === 'markdown' ? 'markdown' : 'json');
         if (!exported) return res.status(404).json({ error: '智能体任务不存在。' });
@@ -952,13 +939,6 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         const run = await rerunAgentRun(req.params.id, req.user);
         if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
         logAction(req, '重新运行智能体任务', `任务ID: ${run.id}，来源任务ID: ${req.params.id}`);
-        res.status(202).json({ success: true, run });
-    }));
-
-    router.post('/agents/runs/:id/resume', authMiddleware, asyncHandler(async (req, res) => {
-        const run = await resumeAgentRun(req.params.id, req.user);
-        if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
-        logAction(req, '断点续跑智能体任务', `任务ID: ${run.id}，来源任务ID: ${req.params.id}`);
         res.status(202).json({ success: true, run });
     }));
 

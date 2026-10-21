@@ -121,7 +121,7 @@ function updateAgentDagNodeDrawer(node) {
     drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
     if (title) title.textContent = node?.title || node?.id || '节点配置';
     if (subtitle) subtitle.textContent = node
-        ? `${node.id}${node.tool ? ` · ${node.tool}` : ''}`
+        ? (agentToolsCache.find(tool => (tool.fullName || tool.name) === node.tool)?.title || '配置业务参数，测试结果在当前页面查看')
         : '';
 }
 

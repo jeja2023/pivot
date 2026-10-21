@@ -1,8 +1,23 @@
-ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22
+ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22-bookworm
+ARG PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim-bookworm
 ARG VERAPDF_VERSION=1.30.3
 ARG VERAPDF_RELEASE_SERIES=1.30
 # 官方 Greenfield CLI-only 安装包的 SHA-256；更新版本必须同时更新 URL、摘要和回归契约。
 ARG VERAPDF_INSTALLER_SHA256=b512bf24945503a33fc10738ecffc1f2dccaaf8593a448e94ee9ac86a9559a59
+
+FROM ${PYTHON_IMAGE} AS python-runtime
+
+# Node 与 CPython 使用相同的 Debian 基线。项目 Python 位于 /usr/local，
+# 不替换发行版 /usr/bin/python3，避免影响系统工具。
+FROM ${NODE_IMAGE} AS python-base
+USER root
+COPY --from=python-runtime /usr/local/ /usr/local/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates libbz2-1.0 libexpat1 libffi8 libgdbm6 libgdbm-compat4 liblzma5 \
+  libncursesw6 libreadline8 libsqlite3-0 libssl3 libuuid1 zlib1g \
+  && ldconfig \
+  && python3 -c "import sys, ssl, sqlite3, ctypes, bz2, lzma, readline, dbm.gnu, uuid; assert sys.version_info[:2] == (3, 12), sys.version" \
+  && rm -rf /var/lib/apt/lists/*
 
 FROM ${NODE_IMAGE} AS verapdf
 WORKDIR /tmp/verapdf
@@ -25,17 +40,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && /opt/verapdf/verapdf --version | grep -F "veraPDF ${VERAPDF_VERSION}" \
   && rm -rf /opt/verapdf/Uninstaller /tmp/verapdf /tmp/verapdf-installer /tmp/verapdf-installer.zip /var/lib/apt/lists/*
 
-FROM ${NODE_IMAGE} AS speech-recognition
+FROM python-base AS speech-recognition
 USER root
 WORKDIR /tmp/speech
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
-  && python3 -m venv /opt/pivot-speech/venv \
-  && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/pivot-speech/venv
 COPY docker/speech/requirements.txt docker/speech/install_model.py ./
 RUN /opt/pivot-speech/venv/bin/pip install --no-cache-dir -r requirements.txt \
   && python3 install_model.py
 COPY server/services/speech-recognition/vosk-worker.py /opt/pivot-speech/vosk-worker.py
 RUN PIVOT_SERVER_SPEECH_MODE=probe /opt/pivot-speech/venv/bin/python /opt/pivot-speech/vosk-worker.py
+
+FROM python-base AS speech-engine
+WORKDIR /tmp/speech-engine
+RUN python3 -m venv /opt/pivot-speech/engine-venv
+COPY docker/speech-service/requirements.txt docker/speech-service/requirements-cpu.txt ./
+COPY artifacts/speech-wheelhouse/ /wheels/
+RUN /opt/pivot-speech/engine-venv/bin/pip install --no-index --find-links=/wheels -r requirements.txt -c requirements-cpu.txt \
+  && /opt/pivot-speech/engine-venv/bin/pip check \
+  && /opt/pivot-speech/engine-venv/bin/python -c "import torch, torchaudio, funasr, silero_vad, uvicorn; assert torch.version.cuda is None; print('embedded speech CPU runtime ready')" \
+  && rm -rf /wheels
+COPY docker/speech-service/app.py docker/speech-service/engine.py docker/speech-service/embedded_worker.py /opt/pivot-speech/engine/
 
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
@@ -61,13 +85,13 @@ RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
   node scripts/prune_optional_database_connectors.js --node-modules /app/node_modules --connectors "$PIVOT_DB_CONNECTORS" && \
   rm .npmrc && npm cache clean --force
 
-FROM ${NODE_IMAGE} AS runtime
+FROM python-base AS runtime
 WORKDIR /app
 
 # 运行镜像只安装运行期组件、qpdf、veraPDF JRE、pg_dump 和 Agent Browser 所需 Chromium，
 # 不携带编译器及开发头文件。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  tzdata postgresql-common ca-certificates default-jre-headless python3 chromium qpdf \
+  tzdata postgresql-common ca-certificates default-jre-headless chromium qpdf \
   && yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh \
   && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
   && rm -rf /var/lib/apt/lists/*
@@ -85,11 +109,17 @@ ENV NODE_ENV=production \
   DOCUMENT_VERAPDF_PATH=/opt/verapdf/verapdf \
   PIVOT_SERVER_VOICE_PYTHON=/opt/pivot-speech/venv/bin/python \
   PIVOT_SERVER_VOICE_MODEL_PATH=/opt/pivot-speech/model \
+  PIVOT_AGENT_PYTHON=/usr/local/bin/python3.12 \
+  PIVOT_VOICE_PROVIDER=embedded \
+  PIVOT_EMBEDDED_VOICE_PYTHON=/opt/pivot-speech/engine-venv/bin/python \
+  PIVOT_EMBEDDED_VOICE_WORKER=/opt/pivot-speech/engine/embedded_worker.py \
+  PIVOT_EMBEDDED_VOICE_MODEL_ROOT=/models \
   PYTHON=python3
 
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=verapdf --chown=node:node /opt/verapdf /opt/verapdf
 COPY --from=speech-recognition --chown=node:node /opt/pivot-speech /opt/pivot-speech
+COPY --from=speech-engine --chown=node:node /opt/pivot-speech /opt/pivot-speech
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
@@ -103,6 +133,9 @@ COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.
 RUN node scripts/build_chat_css.js && \
   node -e "require('@duckdb/node-api'); require('sharp'); require('unzipper'); require('better-sqlite3'); require('docx'); require('@pdf-lib/fontkit'); console.log('[runtime] 原生模块加载通过')" && \
   python3 --version && \
+  python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version" && \
+  /opt/pivot-speech/venv/bin/python -c "import sys, vosk; assert sys.version_info[:2] == (3, 12), sys.version" && \
+  /opt/pivot-speech/engine-venv/bin/python -c "import torch, torchaudio, funasr, silero_vad; assert torch.version.cuda is None" && \
   qpdf --version && \
   java -version && \
   /opt/verapdf/verapdf --version && \

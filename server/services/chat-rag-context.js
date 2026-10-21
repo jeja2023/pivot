@@ -64,6 +64,23 @@ function summarizeRagContextSources(ragContext, limit = 3) {
     };
 }
 
+function buildChatRagEvidenceObservation(chatBridge = {}) {
+    if (chatBridge?.ragEnabled !== true) return null;
+    const context = typeof chatBridge.ragContext === 'object'
+        ? String(chatBridge.ragContext?.content || '') : String(chatBridge.ragContext || '');
+    const sources = require('./knowledge-grounding').extractKnowledgeSources(context)
+        .filter(source => source.source && source.excerpts.some(excerpt => excerpt.trim()));
+    if (!sources.length) return null;
+    return {
+        tool: 'rag.search',
+        output: {
+            sources: sources.map(source => ({ index: source.index, citationKey: source.citationKey, source: source.source })),
+            // 验收复用本轮实际检索的资料快照，不为补齐工具观察而再次检索。
+            content: context
+        }
+    };
+}
+
 // 多查询召回时合并上下文并重新编号，避免不同查询各自从“引用 1”开始造成引用歧义。
 function mergeRagContexts(contexts = [], { maxCitations = 12 } = {}) {
     const blocks = [];
@@ -95,6 +112,7 @@ function mergeRagContexts(contexts = [], { maxCitations = 12 } = {}) {
 module.exports = {
     buildRagInsufficientContextMessage,
     buildRagContextMessage,
+    buildChatRagEvidenceObservation,
     injectRagContextBeforeLatestUser,
     mergeRagContexts,
     summarizeRagContextSources

@@ -1,5 +1,10 @@
 /* 内存 PCM 编码；录音不写浏览器存储。 */
 (function () {
+    function createContext() {
+        const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+        try { return new AudioContext({ sampleRate: 16000 }); }
+        catch (_) { return new AudioContext(); }
+    }
     function encodeWave(chunks, sampleRate) {
         const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
         const input = new Float32Array(length);
@@ -28,5 +33,5 @@
         data.fill(0);
         return globalThis.btoa(binary);
     }
-    window.Pivot?.exposeModule?.('chat.voiceAudio', { encodeWave });
+    window.Pivot?.exposeModule?.('chat.voiceAudio', { encodeWave, createContext });
 }());

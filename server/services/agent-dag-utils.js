@@ -37,6 +37,11 @@ function parseStructuredNodeOutput(output) {
 function resolveDagTemplateReference(expression, context) {
     const expr = String(expression || '').trim();
     if (!expr) return undefined;
+    if (expr.startsWith('?') || expr.includes('??')) {
+        const parsed = require('./dag-reference-validation').parseReference(expr);
+        const actual = resolveDagTemplateReference(parsed.source, context);
+        return actual === undefined ? (parsed.hasDefault ? parsed.defaultValue : null) : actual;
+    }
     if (expr === 'goal' || expr === 'run.goal') return context.goal;
     const parts = expr.split('.').map(part => part.trim()).filter(Boolean);
     if (!parts.length) return undefined;
@@ -82,10 +87,10 @@ function resolveDagInputValue(value, context) {
             const resolved = resolveDagTemplateReference(exact[1], context);
             return resolved === undefined ? value : resolved;
         }
-        return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
+        return value.replace(/(?<!\\)\{\{\s*([^{}]+?)\s*\}\}/g, (match, expression) => {
             const resolved = resolveDagTemplateReference(expression, context);
             return resolved === undefined ? match : stringifyDagTemplateValue(resolved);
-        });
+        }).replace(/\\(\{\{[^{}]*\}\})/g, '$1');
     }
     if (Array.isArray(value)) {
         return value.map(item => resolveDagInputValue(item, context));
@@ -97,6 +102,7 @@ function resolveDagInputValue(value, context) {
 }
 
 function resolveDagNodeInput(node, context) {
+    if (context.strictReferences) require('./dag-reference-validation').assertReferences(node, context, resolveDagTemplateReference);
     const resolved = resolveDagInputValue(node.input || {}, context);
     return resolved && typeof resolved === 'object' && !Array.isArray(resolved) ? resolved : {};
 }

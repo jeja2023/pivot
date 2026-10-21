@@ -1,4 +1,5 @@
 const { StringDecoder } = require('string_decoder');
+const { createStreamTextReconciler } = require('./streaming-text');
 
 function extractStreamPayload(json) {
     let delta = '';
@@ -31,17 +32,17 @@ function extractStreamPayload(json) {
                 .join('\n');
         }
     } else if (json.type === 'response.completed' && json.response?.output) {
-        const out = json.response.output.find(o => o.type === 'message');
-        if (out) {
-            const content = out.content.find(c => c.type === 'output_text' || c.type === 'text');
-            delta = content?.text || '';
-        }
+        delta = json.response.output.filter(item => item?.type === 'message')
+            .flatMap(item => Array.isArray(item.content) ? item.content : [])
+            .filter(part => part?.type === 'output_text' || part?.type === 'text')
+            .map(part => typeof part.text === 'string' ? part.text : '')
+            .join('');
     }
 
     return {
         delta,
         isThought,
-        usage: json.usage || null
+        usage: json.usage || json.response?.usage || null
     };
 }
 
@@ -75,6 +76,7 @@ function classifyProviderStreamEvent(json = {}) {
 }
 
 function createProviderEventStateMachine({ onEvent, maxRecentEvents = 256 } = {}) {
+    const textReconciler = createStreamTextReconciler();
     const state = {
         status: 'idle',
         protocol: 'unknown',
@@ -106,7 +108,7 @@ function createProviderEventStateMachine({ onEvent, maxRecentEvents = 256 } = {}
         const response = frame.response || frame;
         if (response.id && !state.responseId) state.responseId = String(response.id);
         if (frame.id && !state.responseId) state.responseId = String(frame.id);
-        const extracted = extractStreamPayload(frame);
+        const extracted = textReconciler.ingest(frame, extractStreamPayload(frame));
         if (extracted.delta) {
             if (extracted.isThought) state.reasoningText += String(extracted.delta);
             else state.outputText += String(extracted.delta);
@@ -262,13 +264,14 @@ function createSseEventParser({ onData, onDone } = {}) {
 }
 
 function createStreamAccumulator({ includeThoughtTags = false, includeThoughtContent = true, onContent } = {}) {
+    const textReconciler = createStreamTextReconciler();
     let content = '';
     let usage = null;
     let lastWasThought = false;
 
     const pushJson = (json) => {
         if (json.usage) usage = json.usage;
-        const { delta, isThought, usage: extractedUsage } = extractStreamPayload(json);
+        const { delta, isThought, usage: extractedUsage } = textReconciler.ingest(json, extractStreamPayload(json));
         if (extractedUsage) usage = extractedUsage;
         if (!delta) return '';
         if (isThought && !includeThoughtContent) return '';

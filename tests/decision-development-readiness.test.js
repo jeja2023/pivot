@@ -6,7 +6,7 @@ const { getDecisionDeploymentReadiness } = require('../server/services/decision-
 function safeConfig() {
     return {
         mode: 'shadow', rolloutPercent: 0, evaluationSetVersion: 'v2',
-        laya: { enabled: false }, qwen: { enabled: false }, light: { enabled: false }
+        qwen: { enabled: false }, light: { enabled: false }
     };
 }
 
@@ -32,7 +32,7 @@ test('开发环境验收允许待人工审核但要求迁移、导入冻结集�
 
 test('开发验收拒绝 active 灰度、真实学习型提供器或缺失迁移', async () => {
     const report = await getDecisionDevelopmentReadiness({}, {
-        getDecisionRuntimeConfig: () => ({ ...safeConfig(), mode: 'active', rolloutPercent: 10, laya: { enabled: true } }),
+        getDecisionRuntimeConfig: () => ({ ...safeConfig(), mode: 'active', rolloutPercent: 10, qwen: { enabled: true } }),
         getDecisionDeploymentReadiness: async () => ({
             status: 'error',
             checks: [{ name: 'decisionMigrations', status: 'error', message: 'missing governance migration' }]

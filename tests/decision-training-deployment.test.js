@@ -3,10 +3,8 @@ const test = require('node:test');
 const { buildDecisionProviderContext, createLinearDecisionProvider, createStructuredModelDecisionProvider, decisionFeatureMap, linearScores, sanitizeDecisionContext } = require('../server/services/decision-provider');
 const { trainAndEvaluateLinearDecisionModel, trainLinearDecisionModel } = require('../server/services/decision-training');
 const { activateDecisionModelArtifact, getActiveDecisionModelArtifact } = require('../server/services/decision-model-registry');
-const { checkLayaDecisionHealth } = require('../server/services/decision-provider-health');
 const { benchmarkDecisionProviders } = require('../server/services/decision-benchmark');
 const { createScoreDecisionProvider } = require('../server/services/decision-provider');
-const { buildLayaDecisionDataset } = require('../server/services/decision-dataset-exporter');
 const { computeDecisionModelHash } = require('../server/services/decision-light-model');
 const { isLocalLightArtifactEligible } = require('../server/services/decision-runtime');
 const { publishedWorkflowCandidates, recommendPublishedWorkflow } = require('../server/services/decision-workflow-recommender');
@@ -143,19 +141,6 @@ test('模型制品必须绑定单租户或经批准的全局训练范围，并�
     assert.equal(pending, false);
 });
 
-test('Laya 健康检查在禁用和版本不一致时保持明确状态', async () => {
-    assert.equal((await checkLayaDecisionHealth({ env: { PIVOT_LAYA_DECISION_ENABLED: 'false' } })).status, 'ok');
-    const mismatch = await checkLayaDecisionHealth({
-        env: { PIVOT_LAYA_DECISION_ENABLED: 'true', PIVOT_LAYA_DECISION_URL: 'http://laya/decision', PIVOT_LAYA_DECISION_HEALTH_URL: 'http://laya/healthz', PIVOT_LAYA_DECISION_VERSION: 'approved' },
-        fetchFn: async () => ({ ok: true, json: async () => ({ modelVersion: 'other' }) })
-    });
-    assert.equal(mismatch.status, 'degraded');
-    const missingVersion = await checkLayaDecisionHealth({
-        env: { PIVOT_LAYA_DECISION_ENABLED: 'true', PIVOT_LAYA_DECISION_URL: 'http://laya/decision', PIVOT_LAYA_DECISION_HEALTH_URL: 'http://laya/healthz', PIVOT_LAYA_DECISION_VERSION: '' }
-    });
-    assert.equal(missingVersion.status, 'error');
-});
-
 test('冻结核验集对所有决策器输入相同脱敏候选并产出可比较指标', async () => {
     const report = await benchmarkDecisionProviders({
         cases: [{
@@ -168,22 +153,6 @@ test('冻结核验集对所有决策器输入相同脱敏候选并产出可比�
     assert.equal(report.evaluationCaseCount, 1);
     assert.equal(report.providers[0].providerId, 'baseline');
     assert.equal(report.providers[0].metrics.accuracy, 1);
-});
-
-test('Laya 训练数据导出仅含脱敏状态、允许候选和已核验标签', () => {
-    const rows = [
-        { decision_id: 'e1', scenario: 'chat.rag', request_state: { taskHash: 'h1', evidenceNeeds: ['knowledge_base'] }, candidate_actions: [{ id: 'retrieve', description: '检索', allowed: true }, { id: 'skip', allowed: true }], verified_action_id: 'retrieve', verified_at: '2026-01-01T00:00:00Z' },
-        { decision_id: 'e2', scenario: 'chat.rag', request_state: { taskHash: 'h2', evidenceNeeds: [] }, candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }], verified_action_id: 'skip', verified_at: '2026-01-02T00:00:00Z' },
-        { decision_id: 'e3', scenario: 'chat.rag', request_state: { taskHash: 'h3', evidenceNeeds: [] }, candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }], verified_action_id: 'skip', verified_at: '2026-01-03T00:00:00Z' },
-        { decision_id: 'e4', scenario: 'chat.rag', request_state: { taskHash: 'h4', evidenceNeeds: ['knowledge_base'] }, candidate_actions: [{ id: 'retrieve', allowed: true }, { id: 'skip', allowed: true }], verified_action_id: 'retrieve', verified_at: '2026-01-04T00:00:00Z' }
-    ];
-    const dataset = buildLayaDecisionDataset(rows, { split: { trainRatio: 0.5, calibrationRatio: 0.25 } });
-    assert.equal(dataset.manifest.rawUserTextIncluded, false);
-    assert.equal(dataset.manifest.splits.train, 2);
-    assert.equal(dataset.manifest.splits.calibration, 1);
-    assert.equal(dataset.manifest.splits.test, 1);
-    assert.equal(dataset.files.train.includes('用户原文'), false);
-    assert.equal(dataset.files.train.includes('"selectedActionId"'), true);
 });
 
 test('相同任务哈希不会跨训练、校准和测试分区泄漏', () => {
@@ -260,7 +229,7 @@ test('工作流决策只缩减已发布且可访问的候选，建议不会自�
 test('决策学习维护报告只读汇总样本、故障与提供器运行状态', async () => {
     const report = await getDecisionMaintenanceReport({ lookbackDays: 14, minimumVerifiedSamples: 5 }, {
         query: async sql => sql.includes('FROM decision_outcomes o JOIN decision_records') ? [{ tenant_id: 3, scenario: 'chat.rag', status: 'failure', reason_code: 'retrieval_failed', count: 2 }] : [{ tenant_id: 3, scenario: 'chat.rag', verified_samples: 6, user_feedback_events: 2, execution_failures: 1, last_outcome_at: '2026-01-01' }],
-        getDecisionOperationalMetrics: async () => ({ providers: [{ providerId: 'laya' }], unavailable: false })
+        getDecisionOperationalMetrics: async () => ({ providers: [{ providerId: 'qwen' }], unavailable: false })
     });
     assert.equal(report.unavailable, false);
     assert.equal(report.readiness[0].readyForTraining, true);
@@ -282,7 +251,7 @@ test('决策制品熔断在冻结阈值超标时退役制品，样本不足时�
     const result = await sweepDecisionArtifactBreakers({ windowMinutes: 30 }, {
         query: async (sql) => {
             if (sql.includes('FROM decision_model_artifacts')) return [{
-                id: 'laya-release-1', provider_id: 'laya', model_version: 'approved-v1',
+                id: 'qwen-release-1', provider_id: 'qwen', model_version: 'approved-v1',
                 evaluation_report: { breakerThresholds: thresholds }
             }];
             return [{ samples: 10, provider_errors: 0, execution_failures: 3 }];
@@ -290,7 +259,7 @@ test('决策制品熔断在冻结阈值超标时退役制品，样本不足时�
         rollbackDecisionModelArtifact: async id => { actions.push(id); return { id, status: 'retired' }; }
     });
     assert.equal(result.tripped, 1);
-    assert.deepEqual(actions, ['laya-release-1']);
+    assert.deepEqual(actions, ['qwen-release-1']);
 });
 
 test('策略制品熔断从决策审计的 policyArtifactId 汇总失败率', async () => {
@@ -360,8 +329,7 @@ test('持久化冻结集只在所有案例审核完成后才能进入正式基�
 
 test('部署就绪度统一暴露迁移、审核、策略制品与灰度阻塞项', async () => {
     const activeConfig = {
-        mode: 'active', rolloutPercent: 10, version: 'policy-v1', evaluationSetVersion: 'v1',
-        laya: { enabled: false }
+        mode: 'active', rolloutPercent: 10, version: 'policy-v1', evaluationSetVersion: 'v1'
     };
     const blocked = await getDecisionDeploymentReadiness({}, {
         getDecisionRuntimeConfig: () => activeConfig,
@@ -384,7 +352,7 @@ test('active 灰度就绪度按租户范围拒绝缺失冻结评测证据的学�
     const report = await getDecisionDeploymentReadiness({}, {
         getDecisionRuntimeConfig: () => ({
             mode: 'active', rolloutPercent: 10, version: 'policy-v1', evaluationSetVersion: 'v1', rolloutTenants: ['7'],
-            laya: { enabled: false }, light: { enabled: false }, qwen: { enabled: true, version: 'qwen-v1' }
+            light: { enabled: false }, qwen: { enabled: true, version: 'qwen-v1' }
         }),
         queryOne: async () => ({ applied: true }),
         getDecisionEvaluationReviewStatus: async () => ({ total: 2, verified: 2, pending: 0 }),
@@ -450,21 +418,4 @@ test('决策审计保留期清理只删除到期记录并保留模型与评测�
     assert.equal(calls[0].sql.includes('decision_model_artifacts'), false);
     assert.equal(calls[0].sql.includes('decision_evaluation'), false);
     assert.deepEqual(calls[0].params, [180]);
-});
-
-test('Laya 制品只有登记完整部署证据后才能激活', async () => {
-    const base = { id: 'laya-artifact', provider_id: 'laya', status: 'candidate', training_tenant_id: 7, evaluation_report: { releaseGate: { passed: true } } };
-    const denied = await activateDecisionModelArtifact('laya-artifact', {
-        transaction: async fn => await fn({ queryOne: async () => base, execute: async () => 0 })
-    });
-    assert.equal(denied, null);
-    const digest = 'sha256:' + 'a'.repeat(64);
-    const complete = { ...base, evaluation_report: { releaseGate: { passed: true }, deploymentEvidence: { imageDigest: digest, modelSha256: digest, dependencyLockSha256: digest, launchCommandDigest: digest } } };
-    const calls = [];
-    const activated = await activateDecisionModelArtifact('laya-artifact', {
-        transaction: async fn => await fn({ queryOne: async () => complete, execute: async (sql, params) => calls.push({ sql, params }) }),
-        hasApprovedFrozenEvaluation: async () => true
-    });
-    assert.equal(activated.id, 'laya-artifact');
-    assert.equal(calls.length, 2);
 });

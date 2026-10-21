@@ -81,6 +81,7 @@ async function preflightAgentRun(user, body = {}) {
             try {
                 const resolved = await resolveAgentWorkflowVersion(workflowId, user, body.workflowVersion || body.workflow_version || 'current');
                 if (resolved) {
+                    if (body.metadata?.workflowExpectedVersionId && Number(resolved.version_id) !== Number(body.metadata.workflowExpectedVersionId)) throw new Error('发布版本已变化，请重新载入参数并预检。');
                     const bound = await resolveAgentWorkflowDependencyBindings(resolved, user, { enforce: false });
                     dag = bound.dagSpec;
                     dependencyBinding = bound.dependency_binding;

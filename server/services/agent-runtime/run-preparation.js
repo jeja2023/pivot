@@ -46,10 +46,10 @@ function createRunPreparation(deps = {}) {
             ? { chatHistory: plannerChatHistory, chatAgent: { ...chatBridge, memoryContext: longTermMemoryContext, currentMessage: plannerCurrentMessage }, longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState }
             : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState };
     }
-    function createOutcomeVerifier({ runId, run, user, getTaskContract, getObservations }) {
+    function createOutcomeVerifier({ runId, run, user, getTaskContract, getObservations, signal, budget }) {
         return async (answer, partial = false, reason = '') => await verifyAgentOutcome({
             runId, run, user, taskContract: getTaskContract(), answer,
-            observations: getObservations(), partial, reason
+            observations: getObservations(), partial, reason, signal, budget
         });
     }
     return { prepareTools, buildPlannerContext, createOutcomeVerifier };

@@ -131,7 +131,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
         const workerCount = config.onItemError === 'stop' ? 1 : Math.min(config.concurrency, config.items.length || 1);
         const executeItem = async index => {
             const item = config.items[index];
-            const variableContext = { goal: run.goal, inputs: parentContext.dagInputs || {}, states: parentContext.states || new Map(), nodeMap: parentContext.nodeMap || new Map(), item, itemIndex: index };
+            const variableContext = { strictReferences: true, goal: run.goal, inputs: parentContext.dagInputs || {}, states: parentContext.states || new Map(), nodeMap: parentContext.nodeMap || new Map(), item, itemIndex: index };
             const childInputs = resolveDagNodeInput({ input: config.inputs }, variableContext);
             const childGoal = typeof config.goal === 'string' ? resolveDagInputValue(config.goal, variableContext) : (run.goal || '');
             const identity = iterationItemIdentity({ item, childInputs, childGoal, workflowId: config.workflowId, version: config.version });
@@ -252,7 +252,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                     const selectedTool = findAgentToolByName(node.tool, toolList);
                     if (!selectedTool) throw new Error(`子工作流节点工具不可用：${node.tool || '-'}`);
                     assertPreviewToolAllowed(run, selectedTool);
-                    const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { goal: childRun.goal, inputs: dagInputs, states, nodeMap }), { ...childRun, model_id: childRun.model_id ?? modelCfg?.id, chosen_model_id: childRun.chosen_model_id ?? modelCfg?.id });
+                    const resolvedInput = normalizeToolInput(node.tool, resolveDagNodeInput(node, { strictReferences: true, goal: childRun.goal, inputs: dagInputs, states, nodeMap }), { ...childRun, model_id: childRun.model_id ?? modelCfg?.id, chosen_model_id: childRun.chosen_model_id ?? modelCfg?.id });
                     const approvalKey = invocationNodeKey(node);
                     const policy = normalizeDagNodePolicy(node, childRun, deps.agentToolTimeoutMs, selectedTool);
                     const explicitInputSchema = normalizeJsonSchema(node.inputSchema || node.input_schema || {});

@@ -8,7 +8,6 @@ const { getActiveDecisionModelArtifact, hasApprovedFrozenEvaluation } = require(
 const { getActiveDecisionPolicyArtifact } = require('../server/services/decision-policy-registry');
 const { getDecisionEvaluationReviewStatus } = require('../server/services/decision-evaluation-reviews');
 const { computeDecisionModelHash, loadLocalLinearDecisionModel } = require('../server/services/decision-light-model');
-const { checkLayaDecisionHealth } = require('../server/services/decision-provider-health');
 
 function withTimeout(promise, timeoutMs) {
     let timer = null;
@@ -56,7 +55,6 @@ async function main() {
             checks.push({ name: 'persistedEvaluationReviews', status: 'error', message: String(error.message || '冻结评测集复核状态不可用').slice(0, 240) });
         }
     }
-    if (config.laya.enabled) checks.push({ name: 'layaHealth', ...(await checkLayaDecisionHealth()) });
     if (activeRollout) {
         if (config.requireActiveArtifact !== true) checks.push({ name: 'activeArtifactGate', status: 'error', message: 'active 灰度必须启用 PIVOT_DECISION_REQUIRE_ACTIVE_ARTIFACT' });
         if (config.useActivePolicyArtifact !== true) {
@@ -90,10 +88,6 @@ async function main() {
         if (config.qwen.enabled) {
             if (!config.qwen.version) checks.push({ name: 'activeArtifact:qwen', status: 'error', message: 'active 灰度必须配置 PIVOT_QWEN_DECISION_VERSION' });
             else providers.push({ providerId: 'qwen', modelVersion: config.qwen.version, weightsHash: '' });
-        }
-        if (config.laya.enabled) {
-            if (!config.laya.version) checks.push({ name: 'activeArtifact:laya', status: 'error', message: 'active 灰度必须配置 PIVOT_LAYA_DECISION_VERSION' });
-            else providers.push({ providerId: 'laya', modelVersion: config.laya.version, weightsHash: '' });
         }
         for (const provider of providers) {
             for (const tenantId of artifactScopes) {

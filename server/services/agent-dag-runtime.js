@@ -394,20 +394,25 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     const rootWorkflowId = Number.parseInt(metadata.workflowId || metadata.workflow_id, 10);
     const subworkflowStack = rootWorkflowId ? [rootWorkflowId] : [];
 
-    while ([...states.values()].some(state => state.status === 'pending')) {
+    const activeNodes = new Map();
+    const stopErrors = [];
+    const batchController = new AbortController();
+    const batchSignal = (deps.signal && typeof AbortSignal.any === 'function')
+        ? AbortSignal.any([deps.signal, batchController.signal]) : batchController.signal;
+    try {
+    while ([...states.values()].some(state => state.status === 'pending') || activeNodes.size) {
         assertRunWithinBudget();
         await deps.assertRunNotCancelled(run.id);
         const readyNodes = dagSpec.nodes.filter(node => {
             const state = states.get(node.id);
-            if (state?.status !== 'pending') return false;
+            if (state?.status !== 'pending' || activeNodes.has(node.id)) return false;
             return node.dependsOn.every(dep => ['completed', 'continued_error', 'error', 'skipped'].includes(states.get(dep)?.status));
         });
-        if (!readyNodes.length) {
+        if (!readyNodes.length && !activeNodes.size) {
             throw new Error('DAG 执行已停滞：当前没有可运行的节点。');
         }
 
         const runnable = [];
-        const stopErrors = [];
         for (const node of readyNodes) {
             const depStates = node.dependsOn.map(dep => states.get(dep)?.status);
             const routeState = getDagNodeRouteState(node, dagSpec, states);
@@ -503,11 +508,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             runnable.push(node);
         }
 
-        const batchController = new AbortController();
-        const batchSignal = (deps.signal && typeof AbortSignal.any === 'function')
-            ? AbortSignal.any([deps.signal, batchController.signal])
-            : batchController.signal;
-        const batchResults = await Promise.allSettled(runnable.slice(0, deps.dagNodeConcurrency).map(async node => {
+        for (const node of runnable.slice(0, Math.max(0, (deps.dagNodeConcurrency || 4) - activeNodes.size))) {
+            const execution = (async () => {
             batchSignal.throwIfAborted();
             deps.taskBudget?.consumeStep();
             const nodeStepIndex = stepIndex;
@@ -589,6 +591,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 }
             });
             try {
+                require('./dag-reference-validation').assertReferences(node, { goal: run.goal, inputs: dagInputs, states, nodeMap }, require('./agent-dag-utils').resolveDagTemplateReference);
                 if (inputContractIssues.length || outputDefinitionIssues.length) {
                     const issues = [...inputContractIssues, ...outputDefinitionIssues];
                     const contractError = new Error(`节点契约校验失败：${issues[0]}`);
@@ -886,10 +889,27 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
             } finally {
                 await deps.updateRun(run.id, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             }
-        }));
-        const rejected = batchResults.find(result => result.status === 'rejected');
-        if (rejected) throw rejected.reason;
-        if (stopErrors.length) throw stopErrors[0];
+            })();
+            activeNodes.set(node.id, execution.then(
+                () => ({ id: node.id }), error => ({ id: node.id, error })
+            ));
+        }
+        if (activeNodes.size) {
+            const settled = await Promise.race(activeNodes.values());
+            activeNodes.delete(settled.id);
+            const failure = settled.error || stopErrors[0];
+            if (failure) {
+                if (!batchSignal.aborted) batchController.abort(failure);
+                await Promise.allSettled(activeNodes.values());
+                throw failure;
+            }
+        }
+    }
+    } finally {
+        if (activeNodes.size) {
+            if (!batchController.signal.aborted) batchController.abort(new Error('工作流调度已停止。'));
+            await Promise.allSettled(activeNodes.values());
+        }
     }
 
     const failedNodes = dagSpec.nodes.filter(node => ['error', 'continued_error'].includes(states.get(node.id)?.status));

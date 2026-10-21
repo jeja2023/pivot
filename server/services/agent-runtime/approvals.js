@@ -4,6 +4,20 @@ function approvalInputHash(input) {
     return crypto.createHash('sha256').update(JSON.stringify(input ?? {})).digest('hex');
 }
 
+function assertApprovalBinding(pending = {}, expected = null, approve = true) {
+    if (!pending.tool) throw Object.assign(new Error('授权请求已变化，请刷新任务后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_STALE' });
+    if (expected && (typeof expected.inputHash !== 'string' || expected.inputHash !== (pending.inputHash || approvalInputHash(pending.input || {}))
+        || String(expected.key || '') !== String(pending.key || '')
+        || String(expected.requestedAt || '') !== String(pending.requestedAt || ''))) {
+        throw Object.assign(new Error('操作目标或参数已经变化，请查看最新请求后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_STALE' });
+    }
+    const expiry = String(pending.expiresAt || '');
+    const expiresAt = Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(expiry) ? expiry : `${expiry.replace(' ', 'T')}+08:00`);
+    if (approve && expiry && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
+        throw Object.assign(new Error('本次授权请求已过期，请刷新任务后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_EXPIRED' });
+    }
+}
+
 function createApprovalHelpers({
     getRunMetadata,
     normalizeApprovalPolicy,
@@ -99,4 +113,4 @@ function createApprovalHelpers({
     return { approvalInputHash, isApprovalGranted, shouldPauseForApproval, maybePauseForApproval };
 }
 
-module.exports = { approvalInputHash, createApprovalHelpers };
+module.exports = { approvalInputHash, assertApprovalBinding, createApprovalHelpers };

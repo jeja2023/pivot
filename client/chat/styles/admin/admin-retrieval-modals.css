@@ -1,5 +1,44 @@
 /* 检索模型服务配置弹窗规范化样式 (向量服务、重排序服务、检索策略) */
 
+.speech-setting-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-main);
+    font-size: 0.85rem;
+}
+
+.speech-remote-fields {
+    display: grid;
+    gap: 12px;
+}
+
+#speech-service-modal .retrieval-callout-card p {
+    margin: 6px 0 10px;
+    line-height: 1.6;
+}
+
+#speech-embedded-fields.retrieval-callout-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+}
+
+#speech-embedded-fields .retrieval-field-label {
+    margin: 0;
+}
+
+#speech-embedded-fields #speech-cpu-threads {
+    max-width: 180px;
+}
+
+#speech-service-modal .model-modal-header [data-speech-close] {
+    flex: 0 0 auto;
+    min-width: 58px;
+    white-space: nowrap;
+}
+
 .retrieval-config-modal {
     z-index: 5500;
     backdrop-filter: blur(8px);

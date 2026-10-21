@@ -17,7 +17,7 @@ test('pause moves a running Agent to resumable needs_input and aborts the active
         ACTIVE_STATUSES: new Set(['executing']),
         getRunForUser: async () => run,
         getBeijingTimestamp: () => '2026-10-18 10:00:00',
-        updateRun: async (_id, fields) => { updates.push(fields); Object.assign(run, fields); },
+        updateRunCas: async (_id, expected, fields) => { assert.ok(expected.includes(run.status)); updates.push(fields); Object.assign(run, fields); return 1; },
         query: async () => [],
         listSteps: async () => steps,
         insertStep: async (_id, _index, step) => steps.push(step),
@@ -34,6 +34,43 @@ test('pause moves a running Agent to resumable needs_input and aborts the active
     assert.equal(Object.hasOwn(updates[0], 'completed_at'), false);
     assert.equal(steps.at(-1).title, '用户暂停运行');
     assert.equal(steps.at(-1).output.resumable, true);
+});
+
+test('暂停与验收完成并发时保留最新终态，不能中断已完成任务或覆盖提交边界', async () => {
+    for (const target of ['completed', 'awaiting_commit']) {
+        const controller = new AbortController();
+        let status = 'verifying';
+        const lifecycle = createRunLifecycle({
+            activeRunControllers: new Map([['run-pause-race', controller]]),
+            getRunForUser: async () => ({ id: 'run-pause-race', status }),
+            getBeijingTimestamp: () => '2026-10-20 09:00:00',
+            updateRunCas: async () => { status = target; return 0; }
+        });
+        const result = await lifecycle.pauseAgentRun('run-pause-race', { id: 7 });
+        assert.equal(result.status, target);
+        assert.equal(controller.signal.aborted, false);
+    }
+});
+
+test('停止父任务同时停止等待输入和验收中的子任务', async () => {
+    const parent = { id: 'parent-stop', status: 'running' };
+    const child = { id: 'child-stop', status: 'needs_input' };
+    const runs = new Map([[parent.id, parent], [child.id, child]]);
+    const lifecycle = createRunLifecycle({
+        activeRunControllers: new Map(), ACTIVE_STATUSES: new Set(['running', 'needs_input']),
+        getRunForUser: async id => runs.get(id),
+        getBeijingTimestamp: () => '2026-10-20 09:00:00',
+        updateRunCas: async (id, _expected, fields) => { Object.assign(runs.get(id), fields); return 1; },
+        query: async (sql, args) => {
+            assert.match(sql, /'verifying'/);
+            assert.match(sql, /'needs_input'/);
+            return args[0] === parent.id ? [{ id: child.id }] : [];
+        },
+        listSteps: async () => [], insertStep: async () => {}, createAgentNotification: async () => {}, getAgentRunTitle: run => run.id
+    });
+    await lifecycle.cancelAgentRun(parent.id, { id: 7 });
+    assert.equal(parent.status, 'cancelled');
+    assert.equal(child.status, 'cancelled');
 });
 
 test('pause leaves approval and commit boundaries unchanged', async () => {

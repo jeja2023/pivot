@@ -50,7 +50,7 @@ test('关闭自动任务仍理解业务问题，但不能因模型建议自动�
 
 test('短只读查询可自动规划已有权限的能力，不能自动纳入写入、审批和非幂等工具', async () => {
     const raw = { ...decision, objective: '核对昨天的销售数据', requiredCapabilities: ['data.query'], routing: { knowledge: 'none', tools: 'read_only' } };
-    const resolved = await resolveChatIntent({ ...input, prompt: '帮我看看昨天卖得怎么样' }, modelDeps(raw));
+    const resolved = await resolveChatIntent({ ...input, prompt: '帮我看看昨天卖得怎么样', availability: { tools: [{ name: 'db.query', capabilities: ['data.query'], readOnly: true, idempotent: true }] } }, modelDeps(raw));
     const state = { mcpEnabled: false, ragEnabled: true };
     applyAutomaticExecutionDecision(state, resolved);
     assert.equal(state.mcpEnabled, true);

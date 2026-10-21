@@ -32,7 +32,7 @@ async function getDecisionDevelopmentReadiness({ env = process.env } = {}, deps 
         evaluationError = String(error?.message || '冻结评测集状态不可用').slice(0, 240);
     }
     const migration = (production.checks || []).find(check => check.name === 'decisionMigrations');
-    const providersEnabled = Boolean(config.laya?.enabled || config.qwen?.enabled || config.light?.enabled);
+    const providersEnabled = Boolean(config.qwen?.enabled || config.light?.enabled);
     const safeMode = config.mode !== 'active' && Number(config.rolloutPercent || 0) === 0;
     const evaluationSetImported = Number(reviewStatus?.total || 0) > 0;
     const evaluationSourceMatches = evaluationSetImported
@@ -70,7 +70,7 @@ async function getDecisionDevelopmentReadiness({ env = process.env } = {}, deps 
         {
             name: 'externalDecisionProvidersDisabled',
             status: providersEnabled ? 'error' : 'ok',
-            providers: { laya: Boolean(config.laya?.enabled), qwen: Boolean(config.qwen?.enabled), light: Boolean(config.light?.enabled) },
+            providers: { qwen: Boolean(config.qwen?.enabled), light: Boolean(config.light?.enabled) },
             message: providersEnabled ? '开发环境不应连接真实学习型决策器' : '真实学习型决策器未连接'
         },
         {

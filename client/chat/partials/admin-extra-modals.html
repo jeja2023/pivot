@@ -1,3 +1,88 @@
+    <!-- 全站统一语音识别服务 -->
+    <div id="speech-service-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
+        <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="speech-service-title">
+            <div class="model-modal-header">
+                <div class="retrieval-header-content">
+                    <h3 id="speech-service-title">配置语音识别服务</h3>
+                    <p class="model-modal-desc">语音输入与实时语音共用，网页和 Windows 客户端统一生效。</p>
+                </div>
+                <button type="button" class="btn-secondary" data-speech-close aria-label="关闭语音配置">关闭</button>
+            </div>
+            <form id="speech-service-form" class="model-form retrieval-model-config-form" autocomplete="off">
+                <label class="speech-setting-check"><input id="speech-enabled" type="checkbox">启用统一语音识别</label>
+                <div class="retrieval-field-item">
+                    <label class="retrieval-field-label" for="speech-provider">识别方式</label>
+                    <select id="speech-provider" class="form-input">
+                        <option value="embedded">内置中文识别（CPU）</option>
+                        <option value="gateway">内网语音网关（支持双遍流式）</option>
+                        <option value="openai">音频转写兼容 API</option>
+                        <option value="qwen">Qwen 音频接口</option>
+                        <option value="local">系统或 Vosk 识别（兼容）</option>
+                    </select>
+                </div>
+                <div id="speech-embedded-fields" class="retrieval-callout-card retrieval-callout-info">
+                    <strong>使用当前 Pivot 的 CPU，无需额外容器或 GPU</strong>
+                    <p>SeACo Paraformer、流式 Paraformer 和标点模型由系统统一加载，首次加载可能需要约 1–3 分钟。</p>
+                    <label class="retrieval-field-label" for="speech-cpu-threads">CPU 推理线程数（1–16）</label>
+                    <input id="speech-cpu-threads" type="number" class="form-input" min="1" max="16" step="1" value="4">
+                </div>
+                <div id="speech-remote-fields" class="speech-remote-fields hidden">
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-endpoint">完整转写接口地址</label>
+                        <input id="speech-endpoint" type="url" class="form-input" maxlength="2048" placeholder="http://语音服务器:8000/transcribe" spellcheck="false">
+                    </div>
+                    <div id="speech-stream-field" class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-stream-endpoint">流式接口地址（可选）</label>
+                        <input id="speech-stream-endpoint" type="text" class="form-input" maxlength="2048" placeholder="ws://同一语音服务器:8000/stream" spellcheck="false">
+                        <small class="model-modal-desc">网关支持时填写；留空使用句级转写。两种接口须使用同一主机和端口。</small>
+                    </div>
+                    <div id="speech-model-field" class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-model">语音模型名称</label>
+                        <input id="speech-model" class="form-input" maxlength="200" placeholder="填写 API 实际部署的模型名称" spellcheck="false">
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-api-key">服务密钥</label>
+                        <input id="speech-api-key" type="password" class="form-input" maxlength="4096" autocomplete="new-password" placeholder="留空保留原密钥">
+                        <label class="speech-setting-check"><input id="speech-clear-key" type="checkbox">清除原密钥</label>
+                        <small class="model-modal-desc">密钥加密保存且不回显；更换地址或接口协议时，请填写新密钥或明确清除。</small>
+                    </div>
+                    <label class="speech-setting-check"><input id="speech-allow-external" type="checkbox">允许外部语音 API</label>
+                    <small class="model-modal-desc">默认仅允许内网。勾选后，录音可能发送到组织外部服务。</small>
+                </div>
+                <div class="retrieval-config-grid">
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-timeout">单次识别超时（毫秒）</label>
+                        <input id="speech-timeout" type="number" class="form-input" min="3000" max="60000" step="1000" value="30000">
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-end-silence">句末静音等待（毫秒）</label>
+                        <input id="speech-end-silence" type="number" class="form-input" min="500" max="2000" step="100" value="1000">
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-max-concurrent">服务请求并发上限</label>
+                        <input id="speech-max-concurrent" type="number" class="form-input" min="1" max="32" step="1" value="2">
+                    </div>
+                    <div class="retrieval-field-item">
+                        <label class="retrieval-field-label" for="speech-min-confidence">复核阈值（模型提供置信度时）</label>
+                        <input id="speech-min-confidence" type="number" class="form-input" min="0" max="1" step="0.05" value="0.65">
+                    </div>
+                </div>
+                <div class="retrieval-field-item">
+                    <label class="retrieval-field-label" for="speech-hotwords">业务热词（可选）</label>
+                    <textarea id="speech-hotwords" class="form-input" rows="2" maxlength="4100" placeholder="用逗号或换行分隔，例如：智枢,业务名称"></textarea>
+                </div>
+                <p id="speech-config-source" class="model-modal-desc"></p>
+                <p id="speech-config-status" class="model-modal-desc retrieval-config-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="model-modal-actions">
+                <button type="button" class="btn-secondary" data-speech-close>取消</button>
+                <div class="retrieval-actions-right">
+                    <button id="speech-config-test" type="button" class="btn-secondary">测试连接</button>
+                    <button id="speech-config-save" type="button" class="btn-primary">保存并应用</button>
+                </div>
+            </div>
+        </div>
+    </div>
     <!-- 公告编辑弹窗 -->
     <div id="announcement-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="announcement-modal-title" style="z-index: 5400;">
         <div class="modal announcement-modal-panel">

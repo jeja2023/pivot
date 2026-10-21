@@ -16,6 +16,7 @@ const targets = [
     { table: 'workflow_credentials', column: 'secret_value', context: 'workflow_credentials.secret_value', keyColumns: ['id'] },
     { table: 'workflow_credentials', column: 'previous_value', context: 'workflow_credentials.secret_value', keyColumns: ['id'] },
     { table: 'app_settings', column: 'value', context: 'rag.embedding_api_key', keyColumns: ['key'], where: "key = 'rag_embedding_api_key'" },
+    { table: 'app_settings', column: 'value', context: 'speech.recognition_configuration', keyColumns: ['key'], where: "key = 'speech_recognition_secret_config'" },
     { table: 'user_settings', column: 'value', context: 'rag.embedding_api_key', keyColumns: ['user_id', 'key'], where: "key = 'rag_embedding_api_key'" }
 ];
 

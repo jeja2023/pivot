@@ -104,7 +104,9 @@
     "document_reviews": "文档结构化内容人工校对与审核修正表",
     "analysis_datasets": "数据分析看板导入的数据集主表",
     "analysis_artifacts": "数据分析生成的图表视图与统计分析结果表",
-    "analysis_cleaning_runs": "数据清洗规则、影响统计和派生数据集的可追溯记录表"
+    "analysis_cleaning_runs": "数据清洗规则、影响统计和派生数据集的可追溯记录表",
+    "workflow_editor_drafts": "与发布版本隔离的工作流编辑草稿",
+    "workflow_user_preferences": "个人工作流收藏与最近使用记录"
   },
   "COLUMN_COMMENTS": {
     "app_meta": {
@@ -1395,6 +1397,23 @@
       "last_checked_at": "最后一次健康巡检时间",
       "created_at": "记录创建时间（东八区）",
       "updated_at": "最后更新时间（东八区）"
+    },
+    "workflow_editor_drafts": {
+      "user_id": "所属用户",
+      "draft_key": "用户范围内的草稿标识",
+      "workflow_id": "关联的工作流，可为空",
+      "name": "草稿名称",
+      "description": "草稿用途说明",
+      "spec_text": "未完成也可保存的编辑原文",
+      "revision": "并发修改比较修订号",
+      "base_version": "编辑基于的工作流版本",
+      "updated_at": "最后保存时间"
+    },
+    "workflow_user_preferences": {
+      "user_id": "所属用户",
+      "workflow_id": "收藏或使用的工作流",
+      "favorite": "是否收藏",
+      "last_used_at": "最近一次本人使用时间"
     }
   }
 }

@@ -30,13 +30,23 @@ function createDagNodeTestController(options = {}) {
         setDagNodeTestOutput, setDagNodeTestOverride, resetDagNodeTestOverride,
         snapshotValue, currentTools, resolveToolForNode, showDagToast, apiBase
     } = options;
+    const controllers = new Map();
 
     const renderMarkup = snapshot => `
+        <div class="workflow-product-row"><span>测试数据：${snapshot ? snapshot.pinned ? '固定样本（仅用于调试）' : snapshot.source === 'mock' ? '模拟结果' : snapshot.source === 'history' ? '历史运行复用' : '实际节点测试' : '尚无结果'}</span>${snapshot ? `<button type="button" class="btn-secondary btn-xs" data-pivot-dag-pin>${snapshot.pinned ? '取消固定' : '固定当前样本'}</button>` : ''}</div>
+        <details class="pivot-dag-test-override"><summary>独立测试输入（高级）</summary><p>未接好上游时可填写当前节点的模拟入参，仅本次测试使用，不保存到正式定义。</p><textarea class="form-input" rows="4" data-pivot-dag-test-input placeholder="{}"></textarea></details>
         <details class="pivot-dag-test-override"><summary>模拟结果${snapshot?.source === 'mock' ? ' · 已启用' : ''}</summary><p>不会调用工具；模拟结果仅供当前编辑会话的下游节点测试使用，不会保存到工作流或正式运行。</p><textarea class="form-input" rows="6" data-pivot-dag-test-mock>${dagEscapeHtml(JSON.stringify(snapshot?.output ?? {}, null, 2))}</textarea><div><button type="button" class="btn-secondary" data-pivot-dag-test-mock-save>应用模拟结果</button></div></details>
         ${snapshot ? `<details class="pivot-dag-test-override"><summary>测试变量${snapshot.overridden ? ' · 已覆盖' : ''}</summary><p>只影响当前编辑会话的后续节点测试，不会保存到工作流或正式运行。</p><textarea class="form-input" rows="6" data-pivot-dag-test-override>${dagEscapeHtml(JSON.stringify(snapshot.output, null, 2))}</textarea><div><button type="button" class="btn-secondary" data-pivot-dag-test-override-save>应用测试变量</button>${snapshot.overridden ? '<button type="button" class="btn-secondary" data-pivot-dag-test-override-reset>恢复节点测试输出</button>' : ''}</div></details>` : ''}
     `;
 
     const testNode = async node => {
+        const core = window.Pivot.moduleApi?.('agent.dagCore');
+        controllers.get(node?.id)?.abort();
+        const controller = new AbortController();
+        controllers.set(node?.id, controller);
+        const inputs = ctx.getDagInputs?.() || {};
+        const ticket = core?.beginDagNodeTest?.(node?.id, ctx.spec, inputs);
+        const isCurrent = () => !controller.signal.aborted && (!ticket || core.isDagNodeTestCurrent(node.id, ticket, ctx.spec, ctx.getDagInputs?.() || {}));
         const button = inspector.querySelector('[data-pivot-dag-test-node]');
         const result = inspector.querySelector('[data-pivot-dag-test-result]');
         if (!node?.tool || !button || !result) return;
@@ -54,7 +64,7 @@ function createDagNodeTestController(options = {}) {
             const snapshot = testSnapshots.get(String(up.id));
             if (snapshot && snapshot.output !== undefined) {
                 upstreamStates.push([up.id, { output: snapshot.output, status: 'completed' }]);
-            } else if (state && state.output !== undefined) {
+            } else if (state && state.output !== undefined && state.executionDigest && state.executionDigest === ticket?.digest) {
                 upstreamStates.push([up.id, { output: state.output, status: state.status || 'completed' }]);
             }
         });
@@ -64,11 +74,16 @@ function createDagNodeTestController(options = {}) {
             states: upstreamStates
         };
         try {
+            const overrideText = inspector.querySelector('[data-pivot-dag-test-input]')?.value?.trim();
+            const testInput = overrideText ? JSON.parse(overrideText) : node.input || {};
+            if (!testInput || typeof testInput !== 'object' || Array.isArray(testInput)) throw new Error('独立测试输入必须是参数对象。');
             const response = await apiFetch(`${apiBase}/agents/tools/test`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tool: node.tool, input: node.input || {}, dagInputs: ctx.getDagInputs?.() || {}, upstreamContext })
+                signal: controller.signal,
+                body: JSON.stringify({ tool: node.tool, input: testInput, dagInputs: ctx.getDagInputs?.() || {}, upstreamContext })
             });
             const data = await response.json().catch(() => ({}));
+            if (!isCurrent()) { if (result.isConnected !== false && controllers.get(node.id) === controller) result.textContent = '配置或测试输入已修改，旧结果未应用，请重新测试。'; return; }
             if (!response.ok) throw new Error(data.error || '节点测试失败');
             result.className = 'pivot-dag-test-result is-success';
             setDagNodeTestOutput(String(node.id), {
@@ -79,16 +94,25 @@ function createDagNodeTestController(options = {}) {
             const resolvedInfo = data.resolvedInput && JSON.stringify(data.resolvedInput) !== JSON.stringify(node.input || {})
                 ? `\n[解析后入参]:\n${JSON.stringify(data.resolvedInput, null, 2)}\n\n[输出结果]:\n` : '\n';
             result.textContent = `节点执行完成 · 耗时 ${data.durationMs || 0} 毫秒${snapshotNotice}${resolvedInfo}${JSON.stringify(data.output, null, 2)}`;
+            window.Pivot.moduleApi?.('agent.workflowExperience')?.showNodeResult?.(node, data, upstreamStates);
         } catch (error) {
+            if (!isCurrent()) return;
             result.className = 'pivot-dag-test-result is-error';
             result.textContent = error.message || '节点测试失败';
         } finally {
-            button.disabled = false;
-            button.textContent = '测试节点';
+            if (controllers.get(node.id) === controller && button.isConnected !== false) { button.disabled = false; button.textContent = '测试当前步骤'; }
+            if (controllers.get(node.id) === controller) controllers.delete(node.id);
         }
     };
 
     const bind = node => {
+        inspector.querySelector('[data-pivot-dag-pin]')?.addEventListener('click', () => {
+            const snapshot = getNodeTestOutputSnapshots().get(node.id);
+            if (!snapshot) return;
+            setDagNodeTestOutput(node.id, { ...snapshot, pinned: !snapshot.pinned, expiresAt: snapshot.pinned ? Date.now() + 900000 : null });
+            ctx.render?.();
+        });
+        inspector.querySelector('[data-pivot-dag-test-node]')?.setAttribute('title', '执行当前步骤；模型调用可能消耗用量，副作用工具仍受预览限制。');
         inspector.querySelector('[data-pivot-dag-test-node]')?.addEventListener('click', () => testNode(node));
         inspector.querySelector('[data-pivot-dag-test-mock-save]')?.addEventListener('click', () => {
             const input = inspector.querySelector('[data-pivot-dag-test-mock]');

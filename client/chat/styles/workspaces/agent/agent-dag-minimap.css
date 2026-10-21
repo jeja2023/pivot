@@ -6,11 +6,11 @@
     bottom: 8px;
     width: 140px;
     height: 90px;
-    background: rgba(255, 255, 255, 0.92);
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius-sm, 6px);
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(15, 23, 42, 0.08));
     z-index: 2;
     pointer-events: auto;
     transition: width 0.16s ease, height 0.16s ease, box-shadow 0.16s ease;
@@ -41,12 +41,12 @@
     z-index: 3;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
-    border: 1px solid rgba(148, 163, 184, 0.26);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 5px 14px rgba(15, 23, 42, 0.1);
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
 }
 
 .pivot-dag-viewport-btn {
@@ -54,19 +54,20 @@
     height: 28px;
     padding: 0 7px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: 4px;
     background: transparent;
-    color: #334155;
+    color: var(--text-main);
     font-size: 0.72rem;
-    font-weight: 800;
+    font-weight: 700;
     cursor: pointer;
+    transition: all 0.15s ease;
 }
 
 .pivot-dag-viewport-btn:hover,
 .pivot-dag-viewport-btn:focus-visible {
-    border-color: rgba(16, 163, 127, 0.28);
-    background: rgba(236, 253, 245, 0.9);
-    color: #047857;
+    border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+    color: var(--primary);
     outline: none;
 }
 
@@ -83,12 +84,12 @@
     z-index: 2;
     max-width: min(420px, calc(100% - 180px));
     padding: 5px 8px;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.84);
-    color: #64748b;
-    font-size: 0.66rem;
-    font-weight: 650;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
     line-height: 1.35;
     pointer-events: none;
     user-select: none;
@@ -96,35 +97,35 @@
 
 body.dark-mode .pivot-dag-minimap,
 .dark-mode .pivot-dag-minimap {
-    background: rgba(15, 23, 42, 0.88);
-    border-color: rgba(148, 163, 184, 0.4);
+    background: var(--surface);
+    border-color: var(--border);
 }
 
 body.dark-mode .pivot-dag-viewport-controls,
 .dark-mode .pivot-dag-viewport-controls {
-    border-color: rgba(148, 163, 184, 0.34);
-    background: rgba(15, 23, 42, 0.94);
+    border-color: var(--border);
+    background: var(--surface);
 }
 
 body.dark-mode .pivot-dag-viewport-btn,
 .dark-mode .pivot-dag-viewport-btn {
-    color: #cbd5e1;
+    color: var(--text-main);
 }
 
 body.dark-mode .pivot-dag-viewport-btn:hover,
 body.dark-mode .pivot-dag-viewport-btn:focus-visible,
 .dark-mode .pivot-dag-viewport-btn:hover,
 .dark-mode .pivot-dag-viewport-btn:focus-visible {
-    border-color: rgba(45, 212, 191, 0.34);
-    background: rgba(20, 184, 166, 0.16);
-    color: #99f6e4;
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 16%, var(--surface));
+    color: var(--primary);
 }
 
 body.dark-mode .pivot-dag-viewport-hint,
 .dark-mode .pivot-dag-viewport-hint {
-    border-color: rgba(148, 163, 184, 0.28);
-    background: rgba(15, 23, 42, 0.84);
-    color: #94a3b8;
+    border-color: var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
 }
 
 @media (max-width: 760px) {

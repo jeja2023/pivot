@@ -584,6 +584,9 @@ function createChatRenderSandbox() {
     vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'common', 'vendor', 'marked.min.js'), 'utf8'), context, {
         filename: 'client/common/vendor/marked.min.js'
     });
+    vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'chat', 'render-markdown-emphasis.js'), 'utf8'), context, {
+        filename: 'client/chat/render-markdown-emphasis.js'
+    });
     vm.runInContext(fs.readFileSync(path.join(rootDir, 'client', 'chat', 'render.js'), 'utf8'), context, {
         filename: 'client/chat/render.js'
     });

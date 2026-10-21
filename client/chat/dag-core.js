@@ -25,6 +25,11 @@ const MIN_CONTENT_WIDTH = 960;
 const MIN_CONTENT_HEIGHT = 360;
 const dagNodeTestOutputs = new Map();
 let dagNodeTestContextKey = '';
+let dagNodeTestSession = 0;
+let dagNodeTestInputsKey = '';
+const dagNodeTestDigests = new Map();
+const dagNodeTestRequests = new Map();
+const dagNodeExpiredTests = new Map();
 
 // 工作流是无限画布：允许节点越过默认原点向左、向上布局，同时保留足够大的
 // 安全边界，避免异常数据把 SVG / 小地图扩展到不可渲染的尺寸。
@@ -205,6 +210,7 @@ function ensureDefaults(spec) {
         }));
         return {
             ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
+            ...(Array.isArray(spec?.groups) ? { groups: spec.groups } : {}),
             nodes,
             cacheEnabled: spec?.cacheEnabled !== false && spec?.cache_enabled !== false
         };
@@ -253,6 +259,7 @@ function serialize(spec) {
             ...(hasEdgeModel ? { schemaVersion: 'pivot.dag.v2', edges } : {}),
             nodes,
             layout,
+            ...(Array.isArray(spec.groups) ? { groups: spec.groups.map(group => ({ ...group, nodeIds: (group.nodeIds || []).filter(id => nodes.some(node => node.id === id)) })).filter(group => group.nodeIds.length) } : {}),
             cacheEnabled: spec?.cacheEnabled !== false
         };
 }
@@ -436,7 +443,7 @@ function flattenVariableProperties(properties, prefix = '', max = 24) {
 function getNodeTestOutputSnapshots() {
     const now = Date.now();
     [...dagNodeTestOutputs.entries()].forEach(([nodeId, snapshot]) => {
-        if (snapshot?.expiresAt && Number(snapshot.expiresAt) <= now) dagNodeTestOutputs.delete(nodeId);
+        if (snapshot?.expiresAt && Number(snapshot.expiresAt) <= now) { dagNodeExpiredTests.set(nodeId, { ...snapshot, source: 'expired' }); dagNodeTestOutputs.delete(nodeId); invalidateDagTestDownstream(nodeId); }
     });
     return new Map(dagNodeTestOutputs);
 }
@@ -452,18 +459,66 @@ function stableDagTestValue(value) {
  * 节点测试数据只对同一份草稿有效。定义变化时清除旧快照，避免把过期字段
  * 误带到后续测试；正式定义、运行历史和发布版本均不受影响。
  */
-function setDagNodeTestContext(spec = {}) {
-    const nextKey = stableDagTestValue(serialize(ensureDefaults(spec)));
-    if (dagNodeTestContextKey && dagNodeTestContextKey !== nextKey) dagNodeTestOutputs.clear();
+function setDagNodeTestContext(spec = {}, inputs = {}) {
+    const normalized = serialize(ensureDefaults(spec));
+    delete normalized.layout;
+    normalized.nodes.forEach(node => { delete node.title; delete node.ui; });
+    dagTestDependencyNodes = normalized.nodes;
+    const inputsKey = stableDagTestValue(inputs);
+    const changed = new Set();
+    normalized.nodes.forEach(node => {
+        const digest = stableDagTestValue({ node, edges: (normalized.edges || []).filter(edge => edge.to === node.id) });
+        if (dagNodeTestDigests.get(node.id) !== digest || dagNodeTestInputsKey !== inputsKey) changed.add(node.id);
+        dagNodeTestDigests.set(node.id, digest);
+    });
+    dagNodeTestDigests.forEach((_value, id) => { if (!normalized.nodes.some(node => node.id === id)) changed.add(id); });
+    let size;
+    do { size = changed.size; normalized.nodes.forEach(node => { if ((node.dependsOn || []).some(id => changed.has(id))) changed.add(node.id); }); } while (size !== changed.size);
+    changed.forEach(id => {
+        const snapshot = dagNodeTestOutputs.get(id);
+        if (snapshot) dagNodeExpiredTests.set(id, { ...snapshot, source: 'expired' });
+        dagNodeTestOutputs.delete(id);
+        dagNodeTestRequests.delete(id);
+    });
+    const nextKey = stableDagTestValue(normalized);
+    dagNodeTestInputsKey = inputsKey;
     dagNodeTestContextKey = nextKey;
     return dagNodeTestContextKey;
+}
+
+function resetDagNodeTestSession() {
+    dagNodeTestSession += 1;
+    dagNodeTestOutputs.clear(); dagNodeExpiredTests.clear(); dagNodeTestRequests.clear(); dagNodeTestDigests.clear();
+    dagTestDependencyNodes = [];
+}
+
+let dagTestDependencyNodes = [];
+function invalidateDagTestDownstream(nodeId) {
+    const affected = new Set([nodeId]); let count;
+    do { count = affected.size; dagTestDependencyNodes.forEach(node => { if ((node.dependsOn || []).some(id => affected.has(id))) affected.add(node.id); }); } while (affected.size !== count);
+    affected.delete(nodeId);
+    affected.forEach(id => { const previous = dagNodeTestOutputs.get(id); if (previous) dagNodeExpiredTests.set(id, { ...previous, source: 'expired' }); dagNodeTestOutputs.delete(id); dagNodeTestRequests.delete(id); });
+}
+
+function beginDagNodeTest(nodeId, spec, inputs = {}) {
+    setDagNodeTestContext(spec, inputs);
+    const ticket = { session: dagNodeTestSession, digest: dagNodeTestDigests.get(nodeId), inputs: dagNodeTestInputsKey, requestId: `${Date.now()}:${Math.random()}` };
+    dagNodeTestRequests.set(nodeId, ticket);
+    return ticket;
+}
+
+function isDagNodeTestCurrent(nodeId, ticket, spec, inputs = {}) {
+    setDagNodeTestContext(spec, inputs);
+    return ticket?.session === dagNodeTestSession && dagNodeTestRequests.get(nodeId) === ticket
+        && dagNodeTestDigests.get(nodeId) === ticket.digest && dagNodeTestInputsKey === ticket.inputs;
 }
 
 function setDagNodeTestOutput(nodeId, snapshot = {}) {
     const key = String(nodeId || '').trim();
     if (!key || !snapshot || typeof snapshot !== 'object') return false;
     const output = snapshot.output;
-    const source = snapshot.source === 'mock' ? 'mock' : 'test';
+    const source = ['mock', 'history', 'override'].includes(snapshot.source) ? snapshot.source : 'test';
+    if (stableDagTestValue(dagNodeTestOutputs.get(key)?.output) !== stableDagTestValue(output)) invalidateDagTestDownstream(key);
     dagNodeTestOutputs.set(key, {
         ...snapshot,
         output,
@@ -471,8 +526,9 @@ function setDagNodeTestOutput(nodeId, snapshot = {}) {
         originalSource: snapshot.originalSource ?? source,
         contextKey: dagNodeTestContextKey,
         source,
-        overridden: false
+        overridden: snapshot.overridden === true
     });
+    dagNodeExpiredTests.delete(key);
     return true;
 }
 
@@ -480,6 +536,7 @@ function setDagNodeTestOverride(nodeId, output) {
     const key = String(nodeId || '').trim();
     const snapshot = getNodeTestOutputSnapshots().get(key);
     if (!key || !snapshot) return false;
+    invalidateDagTestDownstream(key);
     dagNodeTestOutputs.set(key, {
         ...snapshot,
         output,
@@ -494,10 +551,11 @@ function resetDagNodeTestOverride(nodeId) {
     const key = String(nodeId || '').trim();
     const snapshot = getNodeTestOutputSnapshots().get(key);
     if (!key || !snapshot || snapshot.overridden !== true) return false;
+    invalidateDagTestDownstream(key);
     dagNodeTestOutputs.set(key, {
         ...snapshot,
         output: snapshot.originalOutput,
-        source: snapshot.originalSource === 'mock' ? 'mock' : 'test',
+        source: ['mock', 'history'].includes(snapshot.originalSource) ? snapshot.originalSource : 'test',
         overridden: false,
         overriddenAt: null
     });
@@ -527,7 +585,8 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
                     expression: name ? `{{inputs.${name}}}` : '{{inputs}}',
                     label: `${label}${name ? ` (${name})` : ''}`,
                     description: `${input.type || 'text'}${input.required ? ' · 必填' : ''}${input.description ? ` · ${input.description}` : ''}`,
-                    type: input.type || 'text',
+                    type: input.type === 'text' ? 'string' : input.type || 'string',
+                    sample: input.defaultValue,
                     source: 'workflow_input'
                 };
             }).filter(item => item.expression !== '{{inputs}}')
@@ -543,7 +602,8 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
                 { expression: `{{nodes.${nodeId}.status}}`, label: `${nodeTitle} · 运行状态`, description: 'completed / error / skipped' }
             ];
 
-            const schema = upNode.outputSchema && typeof upNode.outputSchema === 'object' ? upNode.outputSchema : {};
+            const toolMeta = _tools.find(tool => (tool.fullName || tool.name) === upNode.tool);
+            const schema = upNode.outputSchema && Object.keys(upNode.outputSchema).length ? upNode.outputSchema : toolMeta?.output_schema || toolMeta?.outputSchema || {};
             const props = schema.properties && typeof schema.properties === 'object' ? schema.properties : null;
             if (props && Object.keys(props).length > 0) {
                 flattenVariableProperties(props).forEach(({ path, meta: propMeta }) => {
@@ -599,14 +659,16 @@ function getAvailableVariableOptions(nodes = [], targetNodeId = '', _tools = [])
                 ? (sampleObject.properties || sampleObject.structuredContent || sampleObject)
                 : null;
             if (sampleProps && typeof sampleProps === 'object' && !Array.isArray(sampleProps)) {
-                flattenVariableProperties(Object.fromEntries(Object.entries(sampleProps).map(([key, value]) => [key, { type: typeof value, sample: value }])) , '', 12).forEach(({ path, meta }) => {
-                    if (items.some(item => item.expression === `{{nodes.${nodeId}.output.${path}}}`)) return;
+                flattenVariableProperties(Object.fromEntries(Object.entries(sampleProps).map(([key, value]) => [key, { type: value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value, sample: value }])) , '', 12).forEach(({ path, meta }) => {
+                    const existing = items.find(item => item.expression === `{{nodes.${nodeId}.output.${path}}}`);
+                    if (existing) { existing.sample = meta.sample; existing.type = existing.type || meta.type; existing.source = snapshot.source === 'mock' ? 'mock' : snapshot.source === 'history' ? 'history' : 'sample'; return; }
                     items.push({
                         expression: `{{nodes.${nodeId}.output.${path}}}`,
                         label: `${nodeTitle} · ${path}（${snapshot?.overridden ? '测试覆盖' : (snapshot?.source === 'mock' ? '模拟结果' : '测试样本')}）`,
                         description: snapshot?.overridden ? '来自当前编辑会话的测试变量覆盖，不会保存到工作流或正式运行。' : (snapshot?.source === 'mock' ? '来自当前编辑会话的模拟结果，不会调用工具、保存到工作流或进入正式运行。' : '来自最近一次节点测试的采样字段，不替代输出契约'),
                         type: meta.type || 'any',
-                        source: snapshot?.overridden ? 'override' : 'sample'
+                        sample: meta.sample,
+                        source: snapshot?.overridden ? 'override' : snapshot?.source === 'mock' ? 'mock' : snapshot?.source === 'history' ? 'history' : 'sample'
                     });
                 });
             }
@@ -702,9 +764,12 @@ function alignNodes(nodes = [], selectedIds = [], alignment = 'horizontal_center
 
 if (typeof window !== 'undefined' && window.Pivot?.registerModule) {
     window.Pivot.registerModule('agent.dagCore', {
+        ensureDefaults, serialize,
         getUpstreamNodes,
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
+        beginDagNodeTest, isDagNodeTestCurrent, resetDagNodeTestSession,
+        getExpiredTests: () => new Map(dagNodeExpiredTests),
         setDagNodeTestContext,
         setDagNodeTestOutput,
         setDagNodeTestOverride,
@@ -736,6 +801,7 @@ if (typeof module !== 'undefined' && module.exports) {
         getUpstreamNodes,
         getAvailableVariableOptions,
         getNodeTestOutputSnapshots,
+        beginDagNodeTest, isDagNodeTestCurrent, resetDagNodeTestSession,
         setDagNodeTestContext,
         setDagNodeTestOutput,
         setDagNodeTestOverride,

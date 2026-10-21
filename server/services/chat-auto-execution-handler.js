@@ -71,13 +71,13 @@ async function decideAutomaticChatExecution({
     }
     // 停止与遗忘属于用户控制权，关闭自动执行开关也不能使其失效。
     if (['control', 'memory'].includes(initial.action)) return initial;
-    if (intentPrompt.length > maxGoalLength || isDirectConversation(intentPrompt)) return { ...initial, action: 'direct_answer' };
+    if (isDirectConversation(intentPrompt)) return { ...initial, action: 'direct_answer' };
     writeSse?.(JSON.stringify({ type: 'route', status: 'understanding', message: '正在理解任务并安排处理' }));
     try {
         const history = (await sessionsRepository.listMessages(sessionId, userId)).filter(item => Number(item.id) !== Number(userMessageId));
         const [tasks, memories, availability] = await Promise.all([
             (deps.getConversationTasks || getConversationTasks)(sessionId, userId),
-            (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt, { user, sessionId, projectId, limit: 4 }).catch(() => []),
+            (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4 }).catch(() => []),
             (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user)
         ]);
         if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));

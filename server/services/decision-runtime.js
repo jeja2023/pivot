@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { readTypedEnv } = require('../config/env-registry');
-const { createDecisionId, createHttpDecisionProvider, createLinearDecisionProvider, createScoreDecisionProvider, createStructuredModelDecisionProvider, evaluateDecisionProviders, sanitizeDecisionContext } = require('./decision-provider');
+const { createDecisionId, createLinearDecisionProvider, createScoreDecisionProvider, createStructuredModelDecisionProvider, evaluateDecisionProviders, sanitizeDecisionContext } = require('./decision-provider');
 const { computeDecisionModelHash, loadLocalLinearDecisionModel } = require('./decision-light-model');
 const { artifactScopeAllowsTenant, getActiveDecisionModelArtifact, isDecisionModelArtifactActive, hasApprovedFrozenEvaluation } = require('./decision-model-registry');
 const { getDecisionPreference } = require('./decision-preferences');
@@ -11,7 +11,6 @@ const { callModelText } = require('./agent-model');
 const { applyDecisionPolicy } = require('./decision-policy');
 const { recordDecision } = require('./decision-observability');
 
-const layaConcurrency = new Map();
 const qwenConcurrency = new Map();
 
 function stableRolloutBucket(value) {
@@ -41,14 +40,6 @@ function releaseProviderSlot(slots, limit) {
     const current = slots.get(key) || 0;
     if (current <= 1) slots.delete(key);
     else slots.set(key, current - 1);
-}
-
-function acquireLayaSlot(limit) {
-    return acquireProviderSlot(layaConcurrency, limit);
-}
-
-function releaseLayaSlot(limit) {
-    releaseProviderSlot(layaConcurrency, limit);
 }
 
 function acquireQwenSlot(limit) {
@@ -176,14 +167,6 @@ function getDecisionRuntimeConfig(env = process.env) {
             timeoutMs: readTypedEnv('PIVOT_QWEN_DECISION_TIMEOUT_MS', env),
             maxConcurrent: readTypedEnv('PIVOT_QWEN_DECISION_MAX_CONCURRENT', env),
             weight: readTypedEnv('PIVOT_QWEN_DECISION_WEIGHT', env)
-        },
-        laya: {
-            enabled: readTypedEnv('PIVOT_LAYA_DECISION_ENABLED', env),
-            url: readTypedEnv('PIVOT_LAYA_DECISION_URL', env),
-            version: readTypedEnv('PIVOT_LAYA_DECISION_VERSION', env),
-            timeoutMs: readTypedEnv('PIVOT_LAYA_DECISION_TIMEOUT_MS', env),
-            maxConcurrent: readTypedEnv('PIVOT_LAYA_DECISION_MAX_CONCURRENT', env),
-            weight: readTypedEnv('PIVOT_LAYA_DECISION_WEIGHT', env)
         }
     };
 }
@@ -285,32 +268,10 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
         }
     }
 
-    let layaSlotAcquired = false;
-    let layaConcurrencyLimited = false;
-    if (config.mode !== 'disabled' && config.laya?.enabled && config.laya.url) {
-        if (!String(config.laya.version || '').trim()) {
-            preparationOutputs.push({ providerId: 'laya', providerVersion: '', selectedActionId: '', scores: {}, durationMs: 0, error: 'provider_version_not_configured', metadata: {}, weight: config.laya.weight });
-        } else if (!await isLearningProviderEligible('laya', config.laya.version, config, tenantId, deps)) {
-            preparationOutputs.push({ providerId: 'laya', providerVersion: config.laya.version, selectedActionId: '', scores: {}, durationMs: 0, error: 'artifact_not_active', metadata: {}, weight: config.laya.weight });
-        } else if (acquireLayaSlot(config.laya.maxConcurrent)) {
-            layaSlotAcquired = true;
-            providers.push(createHttpDecisionProvider({
-                id: 'laya',
-                version: config.laya.version,
-                url: config.laya.url,
-                timeoutMs: config.laya.timeoutMs,
-                weight: config.laya.weight,
-                fetchFn: deps.fetchFn || globalThis.fetch
-            }));
-        } else {
-            layaConcurrencyLimited = true;
-        }
-    }
     let providerOutputs;
     try {
         providerOutputs = [...preparationOutputs, ...await evaluateDecisionProviders({ providers, context, signal })];
     } finally {
-        if (layaSlotAcquired) releaseLayaSlot(config.laya.maxConcurrent);
         if (qwenSlotAcquired) releaseQwenSlot(config.qwen.maxConcurrent);
     }
     if (qwenConcurrencyLimited) {
@@ -323,18 +284,6 @@ async function resolveBusinessDecision({ scenario, taskState, tenantId = null, u
             error: 'provider_concurrency_limited',
             metadata: { model: 'qwen', configurationVersion: config.qwen.version },
             weight: config.qwen.weight
-        });
-    }
-    if (layaConcurrencyLimited) {
-        providerOutputs.push({
-            providerId: 'laya',
-            providerVersion: config.laya.version,
-            selectedActionId: '',
-            scores: {},
-            durationMs: 0,
-            error: 'provider_concurrency_limited',
-            metadata: { model: 'laya', configurationVersion: config.laya.version },
-            weight: config.laya.weight
         });
     }
     const policyParameters = await resolvePolicyArtifactConfiguration(config, deps, scenario);

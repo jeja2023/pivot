@@ -7,22 +7,45 @@ function ensureAgentWorkflowVersionsModal() {
     if (modal) return modal;
     modal = document.createElement('div');
     modal.id = 'agent-workflow-versions-modal';
-    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay agent-workflow-versions-modal-overlay';
     PivotSafeHtml.setHtml(modal, `
-        <div class="modal rag-detail-modal agent-workflow-versions-modal">
-            <div class="rag-detail-header">
-                <div>
-                    <h3>工作流版本</h3>
-                    <p class="model-modal-desc">查看历史版本，加载到画布预览，或回滚为新的当前版本。</p>
+        <div class="modal rag-detail-modal agent-workflow-versions-modal" role="dialog" aria-modal="true" aria-labelledby="agent-workflow-versions-title">
+            <div class="rag-detail-header agent-workflow-versions-header">
+                <div class="agent-workflow-versions-header-main">
+                    <span class="agent-workflow-versions-icon" aria-hidden="true">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <line x1="3" y1="12" x2="9" y2="12"></line>
+                            <line x1="15" y1="12" x2="21" y2="12"></line>
+                            <path d="M12 3a9 9 0 0 1 9 9"></path>
+                            <path d="M12 21a9 9 0 0 1-9-9"></path>
+                        </svg>
+                    </span>
+                    <div>
+                        <div class="agent-workflow-versions-title-row">
+                            <h3 id="agent-workflow-versions-title" class="agent-workflow-versions-title">工作流历史版本</h3>
+                            <span id="agent-workflow-versions-count" class="agent-workflow-versions-count" style="display:none;"></span>
+                        </div>
+                        <p class="model-modal-desc agent-workflow-versions-desc">查看历史版本，加载到画布预览，或回滚为新的当前版本。</p>
+                    </div>
                 </div>
-                <button type="button" id="agent-workflow-versions-close-btn" class="btn-secondary">关闭</button>
+                <button type="button" id="agent-workflow-versions-close-btn" class="btn-secondary workspace-modal-close" aria-label="关闭工作流版本弹窗" title="关闭 (Esc)">关闭</button>
             </div>
             <div id="agent-workflow-versions-body" class="agent-workflow-versions-body"></div>
         </div>
     `);
     document.body.appendChild(modal);
     modal.addEventListener('click', event => {
-        if (event.target.closest('#agent-workflow-versions-close-btn')) {
+        if (event.target.closest('#agent-workflow-versions-close-btn') || event.target === modal) {
+            modal.classList.add('hidden');
+        }
+        const diffClose = event.target.closest('.agent-workflow-diff-close');
+        if (diffClose) {
+            diffClose.closest('.agent-workflow-diff-panel')?.remove();
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
             modal.classList.add('hidden');
         }
     });
@@ -40,7 +63,8 @@ function currentWorkflowMatchesSelected(workflow) {
         const draftName = String(agentWorkflowDraftName || workflow.name || '').trim().slice(0, 100);
         const draftSpec = dagEditorInstance?.getValue?.() || parseAgentWorkflowText();
         return draftName === String(workflow.name || '').trim().slice(0, 100)
-            && JSON.stringify(draftSpec) === JSON.stringify(workflow.dag_spec || { nodes: [] });
+            && (window.Pivot.moduleApi?.('agent.dagDefinition')?.stable || JSON.stringify)(typeof ensureDefaults === 'function' ? serialize(ensureDefaults(draftSpec)) : draftSpec)
+                === (window.Pivot.moduleApi?.('agent.dagDefinition')?.stable || JSON.stringify)(typeof ensureDefaults === 'function' ? serialize(ensureDefaults(workflow.dag_spec || { nodes: [] })) : workflow.dag_spec || { nodes: [] });
     } catch (e) {
         return false;
     }
@@ -52,23 +76,80 @@ function agentWorkflowVersionMarkup(item, workflow, release = null) {
     const isCurrent = Number(item.version) === Number(workflow?.current_version);
     const isPublished = Number(item.version) === Number(workflow?.published_version);
     const canReview = Boolean(release?.id && release.review_status === 'pending' && typeof isAdminUser === 'function' && isAdminUser());
+    const createdAtFormatted = typeof formatDateToCN === 'function' ? formatDateToCN(item.created_at) : (item.created_at || '-');
     return `
         <div class="agent-workflow-version-item ${isCurrent ? 'current' : ''}">
-            <div>
-                <strong>版本 ${Number(item.version || 0)}${isCurrent ? ' · 当前' : ''}${isPublished ? ' · 已发布' : ''}</strong>
-                <span>${nodeCount} 节点 · ${agentEscape(item.created_at || '-')}</span>
-                ${item.note ? `<small>${agentEscape(agentShortText(item.note, 120))}</small>` : ''}
-                ${release?.release_note ? `<small>发布说明：${agentEscape(agentShortText(release.release_note, 120))}</small>` : ''}
-                ${release?.review_status && release.review_status !== 'not_required' ? `<small>审阅：${release.review_status === 'approved' ? '已通过' : release.review_status === 'changes_requested' ? '需修改' : '待审阅'}${release.review_note ? ` · ${agentEscape(agentShortText(release.review_note, 100))}` : ''}</small>` : ''}
+            <div class="agent-workflow-version-info">
+                <div class="agent-workflow-version-head">
+                    <span class="agent-workflow-version-badge">V${Number(item.version || 0)}</span>
+                    ${isCurrent ? '<span class="agent-workflow-version-pill current-pill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>当前画布</span>' : ''}
+                    ${isPublished ? '<span class="agent-workflow-version-pill published-pill"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>已发布</span>' : ''}
+                </div>
+                <div class="agent-workflow-version-meta">
+                    <span class="agent-workflow-meta-item">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        ${nodeCount} 个节点
+                    </span>
+                    <span class="agent-workflow-meta-dot">·</span>
+                    <span class="agent-workflow-meta-item" title="创建时间">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        创建于 ${agentEscape(createdAtFormatted)}
+                    </span>
+                </div>
+                ${item.note ? `
+                    <div class="agent-workflow-version-note" title="${agentEscape(item.note)}">
+                        <span class="agent-workflow-note-label">版本说明：</span>
+                        <span class="agent-workflow-note-text">${agentEscape(agentShortText(item.note, 120))}</span>
+                    </div>
+                ` : ''}
+                ${release?.release_note ? `
+                    <div class="agent-workflow-version-note release-note" title="${agentEscape(release.release_note)}">
+                        <span class="agent-workflow-note-label">发布说明：</span>
+                        <span class="agent-workflow-note-text">${agentEscape(agentShortText(release.release_note, 120))}</span>
+                    </div>
+                ` : ''}
+                ${release?.review_status && release.review_status !== 'not_required' ? `
+                    <div class="agent-workflow-version-review review-${agentEscape(release.review_status)}">
+                        <span class="agent-workflow-review-label">审阅状态：</span>
+                        <span class="agent-workflow-review-text">${release.review_status === 'approved' ? '已通过' : release.review_status === 'changes_requested' ? '需修改' : '待审阅'}${release.review_note ? ` · ${agentEscape(agentShortText(release.review_note, 100))}` : ''}</span>
+                    </div>
+                ` : ''}
             </div>
             <div class="agent-workflow-version-actions">
-                <button type="button" class="btn-secondary" data-agent-workflow-version-diff="${agentEscape(item.version)}">对比当前</button>
-                <button type="button" class="btn-secondary" data-agent-workflow-version-impact="${agentEscape(item.version)}">影响清单</button>
-                <button type="button" class="btn-secondary" data-agent-workflow-version-load="${agentEscape(item.version)}">加载旧版</button>
-                <button type="button" class="btn-secondary" data-agent-workflow-version-publish="${agentEscape(item.version)}" ${isPublished ? 'disabled' : ''}>发布</button>
-                <button type="button" class="btn-secondary" data-agent-workflow-version-publish-note="${agentEscape(item.version)}" ${isPublished ? 'disabled' : ''}>附说明发布</button>
-                ${canReview ? `<button type="button" class="btn-secondary" data-agent-workflow-release-review="${agentEscape(release.id)}" data-agent-workflow-review-status="approved">通过审阅</button><button type="button" class="btn-secondary" data-agent-workflow-release-review="${agentEscape(release.id)}" data-agent-workflow-review-status="changes_requested">要求修改</button>` : ''}
-                <button type="button" class="btn-primary" data-agent-workflow-version-restore="${agentEscape(item.version)}" ${isCurrent ? 'disabled' : ''}>回滚</button>
+                <div class="agent-workflow-action-row">
+                    <button type="button" class="btn-secondary agent-workflow-action-btn" data-agent-workflow-version-diff="${agentEscape(item.version)}" title="对比此版本与当前版本差异">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"></path><path d="M4 20L21 3"></path><path d="M21 16v5h-5"></path><path d="M15 15l6 6"></path><path d="M4 4l5 5"></path></svg>
+                        对比当前
+                    </button>
+                    <button type="button" class="btn-secondary agent-workflow-action-btn" data-agent-workflow-version-impact="${agentEscape(item.version)}" title="查看发布影响清单">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                        影响清单
+                    </button>
+                    <button type="button" class="btn-secondary agent-workflow-action-btn" data-agent-workflow-version-load="${agentEscape(item.version)}" title="加载此版本到画布预览">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        加载旧版
+                    </button>
+                </div>
+                <div class="agent-workflow-action-row">
+                    ${canReview ? `
+                        <button type="button" class="btn-secondary agent-workflow-action-btn btn-review-pass" data-agent-workflow-release-review="${agentEscape(release.id)}" data-agent-workflow-review-status="approved">通过审阅</button>
+                        <button type="button" class="btn-secondary agent-workflow-action-btn btn-review-changes" data-agent-workflow-release-review="${agentEscape(release.id)}" data-agent-workflow-review-status="changes_requested">要求修改</button>
+                    ` : ''}
+                    <button type="button" class="btn-secondary agent-workflow-action-btn" data-agent-workflow-version-publish="${agentEscape(item.version)}" ${isPublished ? 'disabled' : ''} title="${isPublished ? '当前已是发布版本' : '发布此版本'}">发布</button>
+                    <button type="button" class="btn-secondary agent-workflow-action-btn" data-agent-workflow-version-publish-note="${agentEscape(item.version)}" ${isPublished ? 'disabled' : ''} title="${isPublished ? '当前已是发布版本' : '附说明发布此版本'}">附说明发布</button>
+                    <button type="button" class="btn-primary agent-workflow-action-btn btn-workflow-restore" data-agent-workflow-version-restore="${agentEscape(item.version)}" ${isCurrent ? 'disabled' : ''} title="${isCurrent ? '当前画布已是此版本' : '回滚为此版本'}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                        回滚
+                    </button>
+                </div>
             </div>
         </div>
     `;
@@ -108,7 +189,7 @@ function agentWorkflowReleaseImpactMarkup(impact = {}) {
         return `<section><strong>${title}（${entries.length}）</strong><ul>${entries.slice(0, 20).map(item => `<li>${agentEscape(item.title || item.nodeId || '-')} · ${agentEscape(item.tool || '')}</li>`).join('')}</ul></section>`;
     };
     const unavailableTools = renderItems('当前不可用工具', impact.unavailableTools || []);
-    return `<section class="agent-workflow-diff-panel agent-workflow-release-impact"><header><strong>发布影响清单 · 版本 ${agentEscape(impact.version || '-')}</strong><span>${Number(summary.nodeCount || 0)} 节点 · 变更 ${Number(summary.changedCount || 0)} 项</span></header>${renderItems('副作用操作', impact.sideEffects)}${renderItems('需要审批', impact.approvals)}${renderItems('网络访问', impact.networks)}${renderItems('子工作流', impact.subworkflows)}${unavailableTools}<section><strong>依赖</strong><span>模型 ${Number(impact.dependencies?.summary?.modelCount || 0)} · 工具 ${Number(impact.dependencies?.summary?.toolCount || 0)} · 凭据 ${Number(impact.dependencies?.summary?.credentialCount || 0)}</span></section></section>`;
+    return `<section class="agent-workflow-diff-panel agent-workflow-release-impact"><header><strong>发布影响清单 · 版本 ${agentEscape(impact.version || '-')}</strong><div class="agent-workflow-diff-header-right"><span>${Number(summary.nodeCount || 0)} 节点 · 变更 ${Number(summary.changedCount || 0)} 项</span><button type="button" class="btn-secondary btn-xs agent-workflow-diff-close" title="收起清单">收起</button></div></header>${renderItems('副作用操作', impact.sideEffects)}${renderItems('需要审批', impact.approvals)}${renderItems('网络访问', impact.networks)}${renderItems('子工作流', impact.subworkflows)}${unavailableTools}<section><strong>依赖</strong><span>模型 ${Number(impact.dependencies?.summary?.modelCount || 0)} · 工具 ${Number(impact.dependencies?.summary?.toolCount || 0)} · 凭据 ${Number(impact.dependencies?.summary?.credentialCount || 0)}</span></section></section>`;
 }
 
 async function showAgentWorkflowReleaseImpact(workflow, version) {
@@ -156,7 +237,10 @@ function agentWorkflowDiffMarkup(diff) {
     if (!hasDiff) {
         return `
             <section class="agent-workflow-diff-panel">
-                <header>版本 ${agentEscape(diff.from?.version)} 与版本 ${agentEscape(diff.to?.version)} 没有节点差异</header>
+                <header>
+                    <span>版本 ${agentEscape(diff.from?.version)} 与版本 ${agentEscape(diff.to?.version)} 没有节点差异</span>
+                    <button type="button" class="btn-secondary btn-xs agent-workflow-diff-close" title="收起差异">收起</button>
+                </header>
             </section>
         `;
     }
@@ -164,7 +248,10 @@ function agentWorkflowDiffMarkup(diff) {
         <section class="agent-workflow-diff-panel">
             <header>
                 <strong>版本 ${agentEscape(diff.from?.version)} → 版本 ${agentEscape(diff.to?.version)}</strong>
-                <span>新增 ${Number(summary.added || 0)} · 删除 ${Number(summary.removed || 0)} · 修改 ${Number(summary.changed || 0)}</span>
+                <div class="agent-workflow-diff-header-right">
+                    <span>新增 ${Number(summary.added || 0)} · 删除 ${Number(summary.removed || 0)} · 修改 ${Number(summary.changed || 0)}</span>
+                    <button type="button" class="btn-secondary btn-xs agent-workflow-diff-close" title="收起差异">收起</button>
+                </div>
             </header>
             ${diff.added?.length ? `<h4>新增节点</h4>${renderSimple(diff.added, 'added')}` : ''}
             ${diff.removed?.length ? `<h4>删除节点</h4>${renderSimple(diff.removed, 'removed')}` : ''}
@@ -205,6 +292,15 @@ async function openAgentWorkflowVersions() {
         return;
     }
     const versions = data.data || [];
+    const countEl = modal.querySelector('#agent-workflow-versions-count');
+    if (countEl) {
+        countEl.textContent = `共 ${versions.length} 个版本`;
+        countEl.style.display = versions.length ? 'inline-flex' : 'none';
+    }
+    const titleEl = modal.querySelector('#agent-workflow-versions-title');
+    if (titleEl) {
+        titleEl.textContent = workflow.name ? `工作流历史版本 · ${workflow.name}` : '工作流历史版本';
+    }
     const releasesData = await releasesRes.json().catch(() => ({}));
     const releaseByVersion = new Map((releasesRes.ok ? releasesData.data || [] : []).map(item => [Number(item.version), item]));
     PivotSafeHtml.setHtml(body, versions.length

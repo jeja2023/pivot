@@ -108,8 +108,33 @@ async function saveCodeBlockToDesktop(button) {
     }
 }
 
+async function downloadRendition(rendition, filename = '') {
+    const response = await apiFetch(`${API_BASE}/agents/renditions/${encodeURIComponent(rendition.id)}/download-token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+    });
+    const issued = await response.json().catch(() => ({}));
+    if (!response.ok || !issued.token) throw new Error(issued.error || '获取下载许可失败，请重新查看文件状态。');
+    const file = await apiFetch(`${API_BASE}/agents/renditions/${encodeURIComponent(rendition.id)}/download?token=${encodeURIComponent(issued.token)}`);
+    if (!file.ok) throw new Error('读取结果文件失败，请重新查看文件状态。');
+    const blob = await file.blob();
+    let target = filename || `产物-${rendition.id}`;
+    const headerName = file.headers.get('Content-Disposition')?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    if (headerName) { try { target = decodeURIComponent(headerName); } catch (_) {} }
+    else if (rendition.format && !target.toLowerCase().endsWith(`.${rendition.format}`)) target += `.${rendition.format}`;
+    const link = document.createElement('a');
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = target.replace(/[\\/\r\n]/g, '_');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    return true;
+}
+
 window.Pivot.exposeModule('chat.codeDelivery', {
     CODE_LANGUAGE_TO_EXTENSION,
+    downloadRendition,
     queueRenditionToDesktop,
     saveCodeBlockToDesktop
 });

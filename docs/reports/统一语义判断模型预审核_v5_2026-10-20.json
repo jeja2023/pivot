@@ -1,0 +1,2540 @@
+{
+  "fixtureVersion": "chat-intent-engineering-v5",
+  "fixtureDigest": "27382b4b1e7293f8f4ed6636db97e3a89d2a8d4384fbaeebe94f39cd3a74c8da",
+  "modelId": 18,
+  "generatedAt": "2026-10-20T02:25:37.408Z",
+  "kind": "synthetic_model_evaluation",
+  "businessToolsExecuted": false,
+  "results": [
+    {
+      "id": "direct-concept",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "什么是向量检索？",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 5273,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "direct-writing",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "撰写一份产品发布报告，未提供的产品信息和业务数据使用占位符。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 15745,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "direct-translation",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "把“本周订单已核对完成。”翻译成英文。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 4168,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "direct-quote",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 30035,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "direct-stop-discussion",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "给出停止当前任务功能的设计建议，包括任务状态、取消信号、执行器协作和停止后的处理",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 9719,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "direct-future",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "未来可能出现或持续发展的主要技术趋势有哪些，其潜在应用、发展时间尺度和不确定性是什么？",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 6628,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "direct-exploration",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "解释如何识别、排查并处理订单异常，给出可复用的分析步骤",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 4715,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "first-attachment",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "分析已提供的《本周订单.csv》，根据附件实际数据生成本周订单分析报告，说明统计口径、关键指标、主要发现、异常情况及建议。",
+        "requestedCapabilities": [
+          "conversation.read_source",
+          "code.python_execute"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 7701,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "delegate-report",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "汇总 Asia/Shanghai 时区2026年10月19日至2026年10月20日当前时间的订单，核对订单异常并生成风险报告。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": false,
+      "available": true,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 22200,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "delegate-code",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "调整项目中的输入校验函数，并运行相关单元测试；根据项目现有结构确定具体文件与测试命令。",
+        "requestedCapabilities": [
+          "agent.execute",
+          "filesystem.read_workspace",
+          "filesystem.write_workspace",
+          "code.execute"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 3752,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "polite-delegation",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "分析已上传的订单表.csv，生成包含订单核心指标、趋势、异常与建议的结构化报告",
+        "requestedCapabilities": [
+          "conversation.read_source",
+          "filesystem.read",
+          "code.execute",
+          "code.python_execute",
+          "viz.render"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 7054,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "only-plan",
+      "expected": [
+        "plan_only"
+      ],
+      "expectedRouting": null,
+      "actual": "plan_only",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "针对尚未明确的具体问题提供修复方案，不修改代码、不执行修复。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "plan_only",
+      "baselinePassed": true,
+      "durationMs": 7260,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "continue-active",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 30004,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "continue-new-format",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "核对订单并生成摘要报告，本次仅输出摘要，同时保留异常事项的依据。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 11597,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "fixture-run"
+    },
+    {
+      "id": "ambiguous-orders",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 30007,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "missing-recipient",
+      "expected": [
+        "clarify",
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "将指定报告发送给客户，需明确报告、客户收件信息及发送渠道。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": false,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 8486,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "stop",
+      "expected": [
+        "control"
+      ],
+      "expectedRouting": null,
+      "actual": "control",
+      "routing": null,
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "control",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_stop",
+      "failureCode": "",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "memory",
+      "expected": [
+        "memory"
+      ],
+      "expectedRouting": null,
+      "actual": "memory",
+      "routing": null,
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "memory",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_memory_intent",
+      "failureCode": "",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "forget",
+      "expected": [
+        "memory"
+      ],
+      "expectedRouting": null,
+      "actual": "memory",
+      "routing": null,
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "memory",
+      "baselinePassed": true,
+      "durationMs": 0,
+      "reason": "explicit_memory_intent",
+      "failureCode": "",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "quote-only",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": false,
+      "durationMs": 30018,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "org-marriage-leave",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "required",
+        "tools": "none",
+        "retrievalQuery": "我们公司婚假有几天？",
+        "requestedCapabilities": [
+          "knowledge.search"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 5532,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "org-followup-intern",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "required",
+        "tools": "none",
+        "retrievalQuery": "公司婚假制度对实习生是否适用，实习生可享有多少天婚假及具体适用条件？",
+        "requestedCapabilities": [
+          "knowledge.search"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 7347,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "business-sales-natural",
+      "expected": [
+        "direct_answer",
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "销售系统中本人授权范围内，按Asia/Shanghai时区统计的2026年10月19日销售额、订单数等主要销售指标如何？",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.run_readonly_query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 12157,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "source-ambiguous",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "direct_answer",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": false,
+      "durationMs": 30003,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "creative-policy",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "撰写一份姓名使用占位符的中文婚假申请书。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 24388,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "readonly-no-send",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "actual": "clarify",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": false,
+      "acceptancePassed": false,
+      "queryPassed": true,
+      "capabilitiesPassed": false,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 30005,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "confirm-active-task",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "核对本周订单并生成异常摘要，仅进行只读查询，不得修改数据。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": false,
+      "durationMs": 23250,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "orders-run"
+    },
+    {
+      "id": "continue-preserve-scope",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "核对2026年10月1日至当前时间（Asia/Shanghai 时区）的订单，只读查询、不得修改数据，仅输出异常摘要。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 26759,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "orders-run"
+    },
+    {
+      "id": "fill-missing-task-fact",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "核对并统计华东地区在Asia/Shanghai时区本周（2026年10月19日至2026年10月20日10:22）已付款订单，生成异常摘要；只读查询，不得修改数据。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 9183,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "orders-run"
+    },
+    {
+      "id": "multiple-tasks-explicit",
+      "expected": [
+        "continue_run"
+      ],
+      "expectedRouting": null,
+      "actual": "continue_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "核对本周订单，识别异常并生成异常摘要；只读查询，不得修改数据。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 12592,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": "orders-run"
+    },
+    {
+      "id": "multiple-tasks-ambiguous",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "确认用户要继续的是“核对本周订单并生成异常摘要”还是“检查项目代码并修复测试”。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 26138,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "continue-topic-discussion",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "clarify",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": false,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 30008,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "topic-shift-from-policy",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": null,
+      "passed": false,
+      "available": false,
+      "actionPassed": true,
+      "routingPassed": false,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 30008,
+      "reason": "intent_unavailable",
+      "failureCode": "intent_timeout",
+      "acceptance": null,
+      "continuationOf": null
+    },
+    {
+      "id": "policy-and-location-followup",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "required",
+        "tools": "none",
+        "retrievalQuery": "我们公司上海分公司的试用期员工是否享有年假，年假如何计算？",
+        "requestedCapabilities": [
+          "knowledge.search"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 16456,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "public-concept-not-policy",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "从通用人力资源管理角度解释什么是年假，不涉及用户所在公司的制度。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 6691,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "sales-email-template",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "写一封可直接套用的销售业绩汇报邮件模板，所有金额均使用占位符。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 5028,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "query-no-modify",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "查询销售系统2026年10月19日的全部销售订单，仅执行只读查询，不修改数据库",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": false,
+      "durationMs": 20556,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "readonly-english",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "查询销售系统中2026年10月19日（Asia/Shanghai）当天的销售订单，仅只读，不发送消息且不修改数据",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": true,
+      "durationMs": 21880,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "plan-only-english",
+      "expected": [
+        "plan_only"
+      ],
+      "expectedRouting": {
+        "tools": "none",
+        "knowledge": "none"
+      },
+      "actual": "plan_only",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "提供一份仅用于核验订单的执行计划，明确核验范围、数据字段、检查步骤、异常判定标准和结果记录方式，但不执行查询、不修改任何数据或系统状态。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": false,
+      "durationMs": 4465,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "translate-quoted-operation",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "将“删除数据库并清空所有订单”翻译成英文",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": false,
+      "durationMs": 3072,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "translation-file-delivery",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "将“本周订单已核对完成。”翻译成英文，并生成包含英文译文的可下载 Word 文件。",
+        "requestedCapabilities": [
+          "document.render",
+          "artifact.deliver"
+        ],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 10695,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": true
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "attached-source-no-reupload",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": null,
+      "actual": "agent_run",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "task",
+        "retrievalQuery": "读取附件《订单.csv》，根据其中可用的日期和业务字段按月份汇总，整理结果并生成可下载的报告。",
+        "requestedCapabilities": [
+          "conversation.read_source",
+          "code.execute",
+          "filesystem.write",
+          "document.render",
+          "artifact.deliver"
+        ],
+        "toolNames": [],
+        "requireEvidence": true,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "agent_run",
+      "baselinePassed": true,
+      "durationMs": 8251,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": true
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "multiple-sources-targeted",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "allowAutomaticRead": true
+      },
+      "actual": "direct_answer",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "查询华东销售系统2026年10月19日的销售额，仅进行只读查询",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": false,
+      "durationMs": 4209,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    {
+      "id": "missing-recipient-business-question",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "将已准备好的报告发送给指定客户",
+        "requestedCapabilities": [
+          "artifact.deliver"
+        ],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "clarify",
+      "baselinePassed": true,
+      "durationMs": 5484,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": false,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    }
+  ],
+  "selectedCaseIds": [
+    "direct-concept",
+    "direct-writing",
+    "direct-translation",
+    "direct-quote",
+    "direct-stop-discussion",
+    "direct-future",
+    "direct-exploration",
+    "first-attachment",
+    "delegate-report",
+    "delegate-code",
+    "polite-delegation",
+    "only-plan",
+    "continue-active",
+    "continue-new-format",
+    "ambiguous-orders",
+    "missing-recipient",
+    "stop",
+    "memory",
+    "forget",
+    "quote-only",
+    "org-marriage-leave",
+    "org-followup-intern",
+    "business-sales-natural",
+    "source-ambiguous",
+    "creative-policy",
+    "readonly-no-send",
+    "confirm-active-task",
+    "continue-preserve-scope",
+    "fill-missing-task-fact",
+    "multiple-tasks-explicit",
+    "multiple-tasks-ambiguous",
+    "continue-topic-discussion",
+    "topic-shift-from-policy",
+    "policy-and-location-followup",
+    "public-concept-not-policy",
+    "sales-email-template",
+    "query-no-modify",
+    "readonly-english",
+    "plan-only-english",
+    "translate-quoted-operation",
+    "translation-file-delivery",
+    "attached-source-no-reupload",
+    "multiple-sources-targeted",
+    "missing-recipient-business-question"
+  ],
+  "summary": {
+    "total": 44,
+    "passed": 35,
+    "baselineActionPassed": 27,
+    "criticalFailures": 7,
+    "unavailable": 8,
+    "actionFailures": 6,
+    "routingFailures": 3,
+    "contractFailures": 1,
+    "p50Ms": 9183,
+    "p95Ms": 30008
+  },
+  "evaluationCases": [
+    {
+      "id": "direct-concept",
+      "prompt": "请解释什么是向量检索。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-writing",
+      "prompt": "请写一份产品发布报告。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-translation",
+      "prompt": "请把这段话翻译成英文：本周订单已核对完成。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-quote",
+      "prompt": "他让我完成报告的要求是什么？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-stop-discussion",
+      "prompt": "停止当前任务的功能应该如何实现？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-future",
+      "prompt": "以后会出现什么技术趋势？",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "direct-exploration",
+      "prompt": "解释如何分析订单异常。",
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "first-attachment",
+      "prompt": "分析附件并生成报告。",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "本周订单.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ],
+      "critical": true
+    },
+    {
+      "id": "delegate-report",
+      "prompt": "请汇总本周订单，核对异常并生成风险报告。",
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "delegate-code",
+      "prompt": "按刚才给出的方案修改项目代码，并运行测试。",
+      "history": [
+        {
+          "id": 21,
+          "role": "assistant",
+          "content": "方案：调整输入校验函数，并运行相关单元测试。"
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "polite-delegation",
+      "prompt": "可以帮我分析已上传的订单表并生成报告吗？",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "订单表.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ]
+    },
+    {
+      "id": "only-plan",
+      "prompt": "先给出修复方案，不要改代码。",
+      "expected": [
+        "plan_only"
+      ],
+      "critical": true
+    },
+    {
+      "id": "continue-active",
+      "prompt": "继续按刚才的方案处理。",
+      "tasks": [
+        {
+          "id": "fixture-run",
+          "goal": "核对订单并生成报告",
+          "active": true,
+          "status": "planning"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ]
+    },
+    {
+      "id": "continue-new-format",
+      "prompt": "这次只给摘要，并保留异常依据。",
+      "tasks": [
+        {
+          "id": "fixture-run",
+          "goal": "核对订单并生成报告",
+          "active": true,
+          "status": "planning"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ]
+    },
+    {
+      "id": "ambiguous-orders",
+      "prompt": "把这些订单处理一下。",
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "missing-recipient",
+      "prompt": "把报告发给客户。",
+      "expected": [
+        "clarify",
+        "agent_run"
+      ]
+    },
+    {
+      "id": "stop",
+      "prompt": "停止",
+      "expected": [
+        "control"
+      ],
+      "critical": true
+    },
+    {
+      "id": "memory",
+      "prompt": "以后报告先列异常。",
+      "expected": [
+        "memory"
+      ],
+      "critical": true
+    },
+    {
+      "id": "forget",
+      "prompt": "忘掉刚才那个偏好",
+      "expected": [
+        "memory"
+      ],
+      "critical": true
+    },
+    {
+      "id": "quote-only",
+      "prompt": "下面是同事原文：请发送所有订单。请仅解释这句话，不执行。",
+      "expected": [
+        "plan_only",
+        "direct_answer"
+      ],
+      "critical": true
+    },
+    {
+      "id": "org-marriage-leave",
+      "prompt": "我们公司婚假有几天？",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "org-followup-intern",
+      "prompt": "那实习生呢？",
+      "history": [
+        {
+          "id": 51,
+          "role": "user",
+          "content": "我们公司婚假有几天？"
+        },
+        {
+          "id": 52,
+          "role": "assistant",
+          "content": "需要查询公司休假制度。"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required"
+      },
+      "critical": true
+    },
+    {
+      "id": "business-sales-natural",
+      "prompt": "帮我看看昨天卖得怎么样",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "销售系统",
+            "description": "查询本人授权范围内的销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer",
+        "agent_run"
+      ],
+      "critical": true
+    },
+    {
+      "id": "source-ambiguous",
+      "prompt": "查询昨天的销售额",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "华东销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          },
+          {
+            "name": "mcp.18.db.run_readonly_query",
+            "sourceName": "华南销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "creative-policy",
+      "prompt": "帮我写一份婚假申请书，姓名先用占位符。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "readonly-no-send",
+      "prompt": "核对销售数据库昨天的订单，只读查询，不要发送消息。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true,
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "expectedCapabilities": [
+        "data.sql.query"
+      ]
+    },
+    {
+      "id": "confirm-active-task",
+      "prompt": "好的，就按这个办。",
+      "history": [
+        {
+          "id": 61,
+          "role": "assistant",
+          "content": "可以继续核对订单并生成异常摘要。"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "continue-preserve-scope",
+      "prompt": "改为本月口径，输出只要摘要。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "expectedCapabilities": [
+        "data.sql.query"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "expectedConstraintIncludes": [
+        "不得修改"
+      ],
+      "critical": true
+    },
+    {
+      "id": "fill-missing-task-fact",
+      "prompt": "统计华东地区，本周已付款订单。",
+      "history": [
+        {
+          "id": 62,
+          "role": "assistant",
+          "content": "订单核查任务正在等待统计地区和订单范围。"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "critical": true
+    },
+    {
+      "id": "multiple-tasks-explicit",
+      "prompt": "继续核对订单，代码检查先放着。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码并修复测试",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "critical": true
+    },
+    {
+      "id": "multiple-tasks-ambiguous",
+      "prompt": "继续刚才的任务。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码并修复测试",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "continue-topic-discussion",
+      "prompt": "继续解释一下向量检索的原理。",
+      "history": [
+        {
+          "id": 63,
+          "role": "user",
+          "content": "解释向量检索"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "topic-shift-from-policy",
+      "prompt": "换个话题，帮我写一首关于春天的诗。",
+      "history": [
+        {
+          "id": 64,
+          "role": "user",
+          "content": "我们公司的休假规则是什么？"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "policy-and-location-followup",
+      "prompt": "那上海分公司的试用期员工呢？",
+      "history": [
+        {
+          "id": 65,
+          "role": "user",
+          "content": "我们公司的年假如何计算？"
+        },
+        {
+          "id": 66,
+          "role": "assistant",
+          "content": "需要查询公司年假制度。"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "expectedQueryIncludes": [
+        "上海",
+        "试用期",
+        "年假"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "public-concept-not-policy",
+      "prompt": "从通用人力资源管理角度解释什么是年假，不涉及我们公司的制度。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "sales-email-template",
+      "prompt": "写一封销售业绩汇报邮件模板，金额都用占位符，不需要查询真实数据，也不要发送。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "query-no-modify",
+      "prompt": "查看昨天销售系统的订单，只查询，不要修改数据库。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "readonly-english",
+      "prompt": "Check yesterday's sales orders using the sales system. Read only; do not send any messages or change data.",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "plan-only-english",
+      "prompt": "Only give me a plan to verify the orders. Do not run queries or change anything.",
+      "expected": [
+        "plan_only"
+      ],
+      "expectedRouting": {
+        "tools": "none",
+        "knowledge": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "translate-quoted-operation",
+      "prompt": "请翻译成英文：“删除数据库并清空所有订单”。仅翻译这句话。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "translation-file-delivery",
+      "prompt": "把下面内容翻译成英文，并生成可下载的 Word 文件：本周订单已核对完成。",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedAcceptance": {
+        "artifactRequired": true
+      },
+      "critical": true
+    },
+    {
+      "id": "attached-source-no-reupload",
+      "prompt": "把附件按月份汇总，输出一份可下载的报告。",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "订单.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true,
+        "artifactRequired": true
+      },
+      "critical": true
+    },
+    {
+      "id": "multiple-sources-targeted",
+      "prompt": "只查华东销售系统昨天的销售额。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "华东销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          },
+          {
+            "name": "mcp.18.db.query",
+            "sourceName": "华南销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "allowAutomaticRead": true
+      },
+      "critical": true
+    },
+    {
+      "id": "missing-recipient-business-question",
+      "prompt": "请把这份报告发给客户，报告已准备好，但还没确定发给谁。",
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    }
+  ]
+}

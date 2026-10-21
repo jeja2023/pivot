@@ -204,6 +204,7 @@ function normalizeSettingsTab(tab, subtab) {
 }
 
 const adminFeatureScripts = [
+    '/chat/speech-settings.js',
     '/chat/models.js',
     '/chat/models-actions.js',
     '/chat/users.js',

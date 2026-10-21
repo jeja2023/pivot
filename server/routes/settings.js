@@ -45,6 +45,8 @@ const { syncMemoryCompressionConcurrency } = require('../llm');
 const { getDeploymentProfile } = require('../services/deployment-profile');
 const { getPermissionCapabilities, isAdmin, isSuperAdmin, requireCapability } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
+const { speechSettings } = require('../services/speech-recognition/settings');
+const { registerSpeechSettingsRoutes } = require('./speech-settings');
 const { invalidateMonitorSummaryCache } = require('./admin-stats');
 const { getStealthConfig, setStealthConfigAsync } = require('../services/stealth-service');
 const {
@@ -186,6 +188,7 @@ async function saveUserEmbeddingSettings(req, updates) {
 
 function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
+    registerSpeechSettingsRoutes(router, { authMiddleware, logAction });
 
     router.get('/settings', authMiddleware, (req, res) => {
         const settings = getSettings();
@@ -199,6 +202,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
             retrievalModelConfig: getPublicEmbeddingConfig(),
             rerankConfig: getPublicRerankConfig(),
+            speechConfig: speechSettings.publicConfig({ administrator: isSuperAdmin(req.user) }),
             ocrConfig: {
                 engine: ocrSettings.engine || 'http',
                 serviceUrl: ocrSettings.serviceUrl || ''

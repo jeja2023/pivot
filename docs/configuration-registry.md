@@ -6,7 +6,23 @@
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
 | --- | --- | --- | --- | --- |
-| `PIVOT_SERVER_VOICE_ENABLED` | boolean | `true` | true / false | 允许浏览器将短录音发送到当前 Pivot 服务器离线识别。仅内存处理、不落盘、不转发第三方；Docker 内置 Vosk 中文模型，Windows 使用系统语音引擎。 |
+| `PIVOT_SERVER_VOICE_ENABLED` | boolean | `true` | true / false | 允许登录用户通过统一语音识别服务处理短录音。默认仅本地或内网处理；禁用后不发起服务端识别。 |
+| `PIVOT_VOICE_PROVIDER` | enum | `local` | embedded、local、gateway、openai、qwen | 标准 Docker 默认 embedded 常驻 CPU 中文双遍识别；源码或桌面未显式配置时保留 local 系统/Vosk 兼容。gateway 连接其他内网服务器，openai/qwen 使用兼容 API；故障不静默切换。 |
+| `PIVOT_EMBEDDED_VOICE_MODEL_ROOT` | string | `data/speech-models` | 逗号分隔的语言标记 | 内置语音三个模型的根目录；标准 Docker 映射为 /models，子目录为 paraformer、paraformer-streaming、punctuation。 |
+| `PIVOT_EMBEDDED_VOICE_PYTHON` | string | `` | 逗号分隔的语言标记 | 内置语音 Python 解释器；标准镜像使用 /opt/pivot-speech/engine-venv/bin/python，源码开发留空优先选择项目 .venv-speech，其次系统 Python。 |
+| `PIVOT_EMBEDDED_VOICE_WORKER` | string | `` | 逗号分隔的语言标记 | 内置语音工作进程入口；标准镜像固定，源码开发留空使用项目内入口。 |
+| `PIVOT_EMBEDDED_VOICE_CPU_THREADS` | integer | `4` | 1–16 | 内置 CPU 语音推理线程数，避免与聊天、检索和文档处理争抢全部 CPU。 |
+| `PIVOT_EMBEDDED_VOICE_STARTUP_MS` | integer | `180000` | 1000–300000 | 内置模型首次加载超时；一个应用进程仅启动一个语音模型进程，失败进入短暂冷却。 |
+| `PIVOT_VOICE_ENDPOINT` | string | `` | 逗号分隔的语言标记 | 管理员配置的完整转写 Endpoint；仅服务端读取，禁止客户端指定目标。gateway 示例 http://speech:8000/transcribe。 |
+| `PIVOT_VOICE_STREAM_ENDPOINT` | string | `` | 逗号分隔的语言标记 | 可选 gateway 双遍流式服务地址，例如 ws://speech:8000/stream；浏览器通过 Pivot 的短期单次票据代理，不直接访问模型服务。未配置时使用句级转写。 |
+| `PIVOT_VOICE_API_KEY` | string | `` | 逗号分隔的语言标记 | 语音服务 Bearer 密钥，只保留在服务端。内网独立部署也应配置鉴权。 |
+| `PIVOT_VOICE_MODEL` | string | `` | 逗号分隔的语言标记 | 兼容 API 的语音模型名称；gateway 使用其部署时固定加载的模型。 |
+| `PIVOT_VOICE_ALLOW_EXTERNAL` | boolean | `false` | true / false | 显式允许向公网 HTTPS 语音 API 发送录音；默认拒绝公网目标，内网目标仍需通过敏感地址与 DNS 校验。 |
+| `PIVOT_VOICE_HOTWORDS` | string | `` | 逗号分隔的语言标记 | 中文业务热词，逗号或换行分隔，最多 100 个且每项最多 40 字；不从聊天正文自动提取，不用于改写识别结果。 |
+| `PIVOT_VOICE_MAX_CONCURRENT` | integer | `2` | 1–32 | 每实例最大在途语音识别数，每个用户同时仅一个；满载立即返回忙碌，避免排队录音堆积。 |
+| `PIVOT_VOICE_TIMEOUT_MS` | integer | `30000` | 3000–60000 | 语音转写请求超时毫秒数，断线或取消会中断上游 HTTP 请求。 |
+| `PIVOT_VOICE_MIN_CONFIDENCE` | number | `0.65` | 0–1 | 上游实际提供置信度时的复核阈值；缺少置信度保持未知，不能伪造分数。低置信度不自动发送实时语音问题。 |
+| `PIVOT_VOICE_END_SILENCE_MS` | integer | `1000` | 500–2000 | 中文连续语音句末静音等待毫秒数，兼顾短暂停顿与回复延迟。 |
 | `PIVOT_SERVER_VOICE_PYTHON` | string | `/opt/pivot-speech/venv/bin/python` | 逗号分隔的语言标记 | Linux/Docker 离线语音工作进程使用的 Python 解释器绝对路径，标准镜像内置。 |
 | `PIVOT_SERVER_VOICE_MODEL_PATH` | string | `/opt/pivot-speech/model` | 逗号分隔的语言标记 | 离线 Vosk 中文模型目录；标准 Docker 镜像构建时安装并校验模型，运行时不下载。可通过只读挂载替换兼容模型。 |
 
@@ -81,7 +97,7 @@
 | `PIVOT_CHAT_AUTO_EXECUTION_ENABLED` | boolean | `true` | true / false | 是否允许服务端将明确委托、范围充分的多步骤对话自动进入受控 Agent Run。此开关不授予工具、网络或副作用权限；具体动作仍由运行时策略和审批决定。 |
 | `PIVOT_CHAT_INTENT_MODE` | enum | `active` | active、shadow、disabled | 任务语义裁决模式。shadow 只记录建议；disabled 关闭语义调用和自动任务。 |
 | `PIVOT_CHAT_BACKGROUND_REVIEW_ENABLED` | boolean | `true` | true / false | 是否允许独立审查组件核对已知只读适配器的任务范围。不能放行策略拒绝、强制人工、写入、发送或权限变更；失败时回到原审批边界。 |
-| `PIVOT_CHAT_INTENT_TIMEOUT_MS` | integer | `30000` | 1000–120000 | 候选任务语义裁决超时，包含排队。失败时保留请求并说明阻断。普通问答不调用分类模型。 |
+| `PIVOT_CHAT_INTENT_TIMEOUT_MS` | integer | `30000` | 1000–120000 | 统一语义判断的总超时，包含排队；超时和无效契约保留请求并安全降级。明确问候保留快速路径，业务问答、上下文确认及复合请求使用同一次语义判断。 |
 | `PIVOT_CHAT_INTENT_ROLLOUT_PERCENT` | integer | `100` | 0–100 | 按用户和会话稳定分桶的任务自动处理比例。设为 0 立即回退影子模式。 |
 | `PIVOT_CHAT_DIRECT_PATH_ENABLED` | boolean | `true` | true / false | 是否启用普通对话直答快路径。无资料、工具或显式范围信号时跳过决策器、偏好读取与逐条决策审计，仅保留异步聚合指标。 |
 | `PIVOT_CHAT_ROUTE_SHADOW_MODE` | boolean | `false` | true / false | 是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。 |
@@ -174,7 +190,7 @@
 | `PIVOT_DECISION_ARTIFACT_TIMEOUT_MS` | integer | `100` | 25–5000 | active 灰度读取模型制品激活状态的最大等待时间；超时后学习型提供器安全不参与本轮决策。 |
 | `PIVOT_DECISION_GPU_SAMPLE_TIMEOUT_MS` | integer | `3000` | 100–30000 | 决策基准和发布证据采集等待单次 GPU 采样的最大时长；采样超时只记录不可用，不阻塞发布检查。 |
 | `PIVOT_DECISION_PREFERENCES_ENABLED` | boolean | `true` | true / false | 是否启用用户和租户级的显式默认路径偏好；偏好仍受当前允许候选与审批规则约束。 |
-| `PIVOT_DECISION_INCLUDE_REDACTED_ROUTING_TEXT` | boolean | `false` | true / false | 是否向 Laya/Qwen 决策器发送有限长度、规则脱敏后的路由文本；该文本不写入决策日志或训练导出，启用前需完成数据治理审批。 |
+| `PIVOT_DECISION_INCLUDE_REDACTED_ROUTING_TEXT` | boolean | `false` | true / false | 是否向 Qwen 决策器发送有限长度、规则脱敏后的路由文本；该文本不写入决策日志或训练导出，启用前需完成数据治理审批。 |
 | `PIVOT_DECISION_PREFERENCE_TIMEOUT_MS` | integer | `100` | 25–5000 | 读取可选用户或租户路由偏好的最大等待时间；超时后安全回退到无偏好策略。 |
 | `PIVOT_DECISION_MAINTENANCE_ENABLED` | boolean | `true` | true / false | 是否启用决策学习维护巡检；巡检汇总样本与错误、清理超过保留期的决策记录，但不会自动训练或发布。 |
 | `PIVOT_DECISION_BREAKER_ENABLED` | boolean | `true` | true / false | 是否启用决策模型制品熔断巡检；只有评测报告冻结了熔断阈值的 active 制品才会被自动退役。 |
@@ -195,14 +211,6 @@
 | `PIVOT_QWEN_DECISION_TIMEOUT_MS` | integer | `1200` | 100–30000 | Qwen 结构化决策的硬超时，包含模型排队；超时后仅保留既有路由。 |
 | `PIVOT_QWEN_DECISION_MAX_CONCURRENT` | integer | `1` | 1–100 | 单进程内 Qwen 决策调用最大并发数；默认保留生成容量，达到上限时直接保持既有路由。 |
 | `PIVOT_QWEN_DECISION_WEIGHT` | number | `1` | 0–10 | Qwen 结构化决策输出参与策略融合的相对权重。 |
-| `PIVOT_LAYA_DECISION_ENABLED` | boolean | `false` | true / false | 是否调用内网 Laya 业务决策服务；首次上线应配合 shadow 模式。 |
-| `PIVOT_LAYA_DECISION_URL` | string | `` | 逗号分隔的语言标记 | 内网 Laya 决策服务的 HTTP 地址。服务只接收脱敏后的任务状态和允许动作。 |
-| `PIVOT_LAYA_DECISION_VERSION` | string | `` | 逗号分隔的语言标记 | 已审核的 Laya 权重和校准版本（或权重哈希）标识。 |
-| `PIVOT_LAYA_DECISION_TIMEOUT_MS` | integer | `1200` | 100–30000 | 调用内网 Laya 决策服务的单次超时；超时不会中断原有聊天链路。 |
-| `PIVOT_LAYA_DECISION_HEALTH_URL` | string | `` | 逗号分隔的语言标记 | 内网 Laya 决策服务健康检查地址；留空时仅检查决策服务是否被配置。 |
-| `PIVOT_LAYA_DECISION_HEALTH_TIMEOUT_MS` | integer | `800` | 100–30000 | 内网 Laya 健康检查超时；健康检查失败不影响原有聊天回退。 |
-| `PIVOT_LAYA_DECISION_MAX_CONCURRENT` | integer | `4` | 1–100 | 单进程内 Laya 决策服务的最大并发调用数；达到上限时自动保持既有路由。 |
-| `PIVOT_LAYA_DECISION_WEIGHT` | number | `1` | 0–10 | Laya 输出参与策略融合的相对权重；应依据固定评测集调整。 |
 
 ## 长期记忆
 

@@ -101,6 +101,7 @@ function setAgentWorkflowPickerOpen(isOpen, options = {}) {
 }
 
 async function confirmAgentWorkflowDiscard(message) {
+    if (window.Pivot.moduleApi('agent.workflowDrafts')?.isSaved?.()) return true;
     const workflow = selectedAgentWorkflow();
     const draftSummary = summarizeAgentDagSpec();
     const hasUnsavedWork = workflow
@@ -229,6 +230,7 @@ async function loadAgentWorkflows() {
         if (requestId !== agentWorkflowsLoadSequence) return false;
         if (!res.ok) throw new Error(data.error || '已保存工作流加载失败');
         agentWorkflowsCache = data.data || [];
+        await window.Pivot.moduleApi('agent.workflowExperience')?.refreshPreferences?.();
         renderAgentWorkflowLibrary();
         window.Pivot.moduleApi('agent.automation').renderAssetCenter?.();
     } catch (e) {
@@ -783,14 +785,28 @@ function inferAgentWorkflowRunGoal() {
     return '';
 }
 
+let agentWorkflowSaveInFlight = null;
 async function saveAgentWorkflowToLibrary(options = {}) {
+    if (agentWorkflowSaveInFlight) return agentWorkflowSaveInFlight;
+    agentWorkflowSaveInFlight = saveAgentWorkflowRevision(options);
+    try { return await agentWorkflowSaveInFlight; } finally { agentWorkflowSaveInFlight = null; }
+}
+async function saveAgentWorkflowRevision(options = {}) {
     if (agentWorkflowReadOnly) {
         showToast('共享工作流为只读，只能运行已发布版本', 'warning');
         return null;
     }
     const showSuccess = options.showToast !== false;
+    const draftStore = window.Pivot.moduleApi('agent.workflowDrafts');
+    if (draftStore?.current?.()) {
+        draftStore.changed(); await draftStore.flush();
+        if (!draftStore.isSaved()) { showToast('请先解决草稿保存失败或冲突，再保存可执行版本。', 'error'); return null; }
+    }
+    const editorIdentity = dagEditorInstance;
+    const startingWorkflowId = String(activeAgentWorkflowId || '');
     let parsed;
     try {
+        parseAgentWorkflowText(getAgentWorkflowText());
         parsed = parseAgentWorkflowText(dagEditorInstance?.getValue?.() || getAgentWorkflowText());
     } catch (e) {
         showToast('工作流配置格式不正确', 'error');
@@ -804,6 +820,7 @@ async function saveAgentWorkflowToLibrary(options = {}) {
     }
     const workflowName = await ensureAgentWorkflowNameForSave();
     if (!workflowName) return null;
+    const workflowDescription = currentAgentWorkflowDescription();
     const workflowId = activeAgentWorkflowId || document.getElementById('agent-workflow-select')?.value || '';
     const method = workflowId ? 'PUT' : 'POST';
     const url = workflowId
@@ -814,9 +831,10 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             name: workflowName,
-            description: currentAgentWorkflowDescription(),
+            description: workflowDescription,
             dagSpec: parsed,
             note: method === 'POST' ? '创建工作流' : '保存新版本',
+            editorDraftKey: window.Pivot.moduleApi('agent.workflowDrafts')?.current?.()?.key || '',
             ...(method === 'PUT' ? { expectedVersion: Number(selectedAgentWorkflow()?.current_version || 0) } : {})
         })
     });
@@ -825,9 +843,10 @@ async function saveAgentWorkflowToLibrary(options = {}) {
         showToast(data.error || '保存已保存工作流失败', 'error');
         return null;
     }
+    if (editorIdentity !== dagEditorInstance || startingWorkflowId !== String(activeAgentWorkflowId || '')) return data.workflow;
     activeAgentWorkflowId = String(data.workflow.id);
-    agentWorkflowDraftName = data.workflow.name || workflowName;
-    agentWorkflowDraftDescription = data.workflow.description || currentAgentWorkflowDescription();
+    if (currentAgentWorkflowName() === workflowName) agentWorkflowDraftName = data.workflow.name || workflowName;
+    if (currentAgentWorkflowDescription() === workflowDescription) agentWorkflowDraftDescription = data.workflow.description || workflowDescription;
     await loadAgentWorkflows();
     if (showSuccess) showToast(`工作流已保存：版本 ${data.workflow.current_version || 1}`, 'success');
     return data.workflow;
@@ -893,7 +912,11 @@ async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
         if (!workflow) return;
     }
     if (!workflow) return showToast('请选择要发布的工作流', 'warning');
-    const reqBody = { version };
+    const publishingEditor = dagEditorInstance;
+    const publishingWorkflowId = String(workflow.id);
+    const publishingName = currentAgentWorkflowName();
+    const publishingDescription = currentAgentWorkflowDescription();
+    const reqBody = { version: String(version || 'current') === 'current' ? workflow.current_version : version };
     if (options.releaseNote !== undefined) reqBody.releaseNote = String(options.releaseNote || '').trim().slice(0, 2000);
     if (options.fixedEvaluationRequired === true) reqBody.fixedEvaluationRequired = true;
     const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/publish`, {
@@ -903,9 +926,10 @@ async function publishSelectedAgentWorkflow(version = 'current', options = {}) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return showToast(data.error || '发布工作流失败', 'error');
+    if (publishingEditor !== dagEditorInstance || String(activeAgentWorkflowId) !== publishingWorkflowId) { await loadAgentWorkflows(); return data.workflow; }
     activeAgentWorkflowId = String(data.workflow.id);
-    agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
-    agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;
+    if (currentAgentWorkflowName() === publishingName) agentWorkflowDraftName = data.workflow.name || agentWorkflowDraftName;
+    if (currentAgentWorkflowDescription() === publishingDescription) agentWorkflowDraftDescription = data.workflow.description || agentWorkflowDraftDescription;
     await loadAgentWorkflows();
     showToast(`工作流已发布：版本 ${data.workflow.published_version || data.workflow.current_version || ''}`, 'success');
     return data.workflow;
@@ -940,6 +964,9 @@ window.Pivot.legacy.saveAgentWorkflowDraft = function() {
 };
 
 window.Pivot.legacy.saveAgentWorkflow = async function() {
+    if (window.Pivot.moduleApi('agent.workflowDrafts')?.current?.()) {
+        await window.Pivot.moduleApi('agent.workflowDrafts').flush(); return;
+    }
     const saved = await saveAgentWorkflowToLibrary();
     if (!saved) return;
     persistAgentWorkflow(AGENT_WORKFLOW_SAVED_KEY, '保存工作流');

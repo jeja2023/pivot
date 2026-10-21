@@ -44,6 +44,7 @@ function createAgentDelegateExecutor(deps = {}) {
         let content = '';
         let nativeStructured = false;
         let validation = { value: null, issues: [] };
+        let initialUsageRecorded = false;
         if (responseFormat === 'json') {
             try {
                 const result = await requestStructuredOutput({ modelCfg, messages: fitted.messages, user, temperature, maxTokens, schema: outputSchema, schemaName: `${context.node?.id || 'delegate'}_result`, signal: context.signal || null, usageRef });
@@ -55,13 +56,17 @@ function createAgentDelegateExecutor(deps = {}) {
             }
             validation = validateStructuredOutput(content, outputSchema);
             if (validation.issues.length) {
+                // 修复前先记原始调用的实际输出；修复失败也不能丢失第一轮用量。
+                await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '', { usageRef, budget: context.budget });
+                initialUsageRecorded = true;
+                context.budget?.assertCanRequestModel();
                 const repairMessages = [
                     { role: 'system', content: `请修复下面的委派结果，只输出合法 JSON，不要输出解释或 Markdown。${schemaHasRules(outputSchema) ? `\n输出必须符合 JSON Schema：\n${JSON.stringify(outputSchema)}` : ''}` },
                     { role: 'user', content: `原始结果：\n${String(content || '').slice(0, 16000)}\n\n校验问题：\n${validation.issues.join('\n')}` }
                 ];
                 const repairUsageRef = {};
                 content = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null, usageRef: repairUsageRef });
-                await recordAgentModelUsage(user, modelCfg, repairMessages, content, 'agent_delegate_json_repair', context.run?.id || context.runId || '', { usageRef: repairUsageRef });
+                await recordAgentModelUsage(user, modelCfg, repairMessages, content, 'agent_delegate_json_repair', context.run?.id || context.runId || '', { usageRef: repairUsageRef, budget: context.budget });
                 validation = validateStructuredOutput(content, outputSchema);
                 if (validation.issues.length) {
                     const error = new Error(`委派智能体结构化输出校验失败：${validation.issues[0]}`);
@@ -73,7 +78,7 @@ function createAgentDelegateExecutor(deps = {}) {
         } else {
             content = await callModelText(modelCfg, fitted.messages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
         }
-        await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '', { usageRef });
+        if (!initialUsageRecorded) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_delegate', context.run?.id || context.runId || '', { usageRef, budget: context.budget });
         return {
             content, text: content,
             agent: { name: agentName, role, roleLabel, modelId: modelCfg.id, modelName: modelCfg.name },

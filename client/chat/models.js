@@ -155,7 +155,9 @@ function renderRetrievalModelServices(settings = {}) {
                 ${configButton('ocr', '配置')}
             </div>
         </article>
+        ${window.Pivot.moduleApi('settings.speech', {}).renderCard?.(settings.speechConfig) || ''}
     `);
+    window.Pivot.moduleApi('settings.speech', {}).refreshStatus?.();
 }
 
 window.Pivot?.exposeModule?.('models.retrieval', { renderRetrievalModelServices });

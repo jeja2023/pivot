@@ -132,6 +132,17 @@ function executeWorkflowEmbedCode(input = {}) {
 }
 
 function coerceWorkflowInput(value, type, name) {
+    if (type === 'date') {
+        const parsed = new Date(`${value}T00:00:00Z`);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value)) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error(`工作流输入“${name}”必须是有效日期。`);
+        return value;
+    }
+    if (type === 'file') {
+        let file = value;
+        if (typeof value === 'string') { try { file = JSON.parse(value); } catch (_) { throw new Error(`工作流输入“${name}”需要上传文件。`); } }
+        if (!file || typeof file !== 'object' || Array.isArray(file) || !/^\/uploads\//.test(String(file.url || '')) || !file.name) throw new Error(`工作流输入“${name}”需要有效的附件引用。`);
+        return file;
+    }
     if (type === 'text') return typeof value === 'string' ? value : renderWorkflowValue(value);
     if (type === 'number') {
         const parsed = Number(value);
@@ -166,7 +177,7 @@ function executeWorkflowInput(input = {}, context = {}) {
     if ((value === undefined || value === null || value === '') && input.required) {
         throw new Error(`缺少必填工作流输入：${input.label || name}`);
     }
-    const type = ['text', 'number', 'boolean', 'object', 'array'].includes(input.type) ? input.type : 'text';
+    const type = ['text', 'number', 'boolean', 'object', 'array', 'date', 'file'].includes(input.type) ? input.type : 'text';
     if (value !== undefined && value !== null && value !== '') value = coerceWorkflowInput(value, type, name);
     return { name, label: String(input.label || name), type, value: value ?? null, supplied, text: renderWorkflowValue(value) };
 }

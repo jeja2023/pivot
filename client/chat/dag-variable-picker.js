@@ -24,7 +24,7 @@ function insertTextIntoInput(targetInput, textToInsert) {
     targetInput.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], tools = [], onSelect }) {
+function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], tools = [], onSelect, expectedType }) {
     let popover = document.getElementById('pivot-dag-variable-popover');
     if (!popover) {
         popover = document.createElement('div');
@@ -38,6 +38,10 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
     const groups = typeof getOptions === 'function'
         ? getOptions(nodes || [], nodeId, tools || [])
         : [];
+    const normalizedType = type => type === 'text' ? 'string' : type;
+    const compatible = item => !expectedType || !item.type || item.type === 'any' || normalizedType(item.type) === normalizedType(expectedType) || (expectedType === 'number' && item.type === 'integer');
+    const typeNames = { string: '文字', text: '文字', object: '对象', array: '记录列表', number: '数字', integer: '整数', boolean: '是/否', null: '空值', any: '任意类型' };
+    groups.forEach(group => group.items.sort((a, b) => Number(compatible(b)) - Number(compatible(a))));
 
     const groupCount = groups.reduce((acc, g) => acc + (g.items?.length || 0), 0);
 
@@ -61,6 +65,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
         </div>
         <div class="pivot-dag-var-popover-search">
             <input type="text" class="form-input" placeholder="搜索变量名或字段…" data-pivot-dag-var-search="1">
+            <label><input type="checkbox" data-pivot-dag-show-expression> 显示原始表达式</label>
         </div>
         <div class="pivot-dag-var-popover-body">
             ${groups.map(grp => `
@@ -68,9 +73,12 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
                     <div class="pivot-dag-var-group-title">${escapeHtml(grp.group)}</div>
                     <div class="pivot-dag-var-items">
                         ${grp.items.map(item => `
-                            <button type="button" class="btn-secondary pivot-dag-var-item" data-pivot-dag-var-expr="${escapeAttr(item.expression)}" title="${escapeAttr(item.description || item.expression)}">
+                            <button type="button" class="btn-secondary pivot-dag-var-item" data-pivot-dag-var-expr="${escapeAttr(item.expression)}" ${compatible(item) ? '' : 'disabled'} title="${escapeAttr(compatible(item) ? item.description || item.expression : `此参数需要 ${expectedType}，当前为 ${item.type}，请重新选择来源。`)}">
                                 <span class="pivot-dag-var-item-label">${escapeHtml(item.label)}</span>
-                                <code class="pivot-dag-var-item-expr">${escapeHtml(item.expression)}</code>
+                                <span>${escapeHtml(typeNames[item.type] || '数据')} · ${escapeHtml(({ sample: '实际测试样例', override: '测试覆盖', mock: '模拟样本', history: '历史复用', workflow_input: '运行参数默认样例' })[item.source] || '输出契约')}</span>
+                                ${!compatible(item) ? `<span>需要${escapeHtml(typeNames[expectedType] || expectedType)}，此字段为${escapeHtml(typeNames[item.type] || item.type)}；请重新选择。</span>` : ''}
+                                ${item.sample !== undefined ? `<span>${escapeHtml(JSON.stringify(item.sample).slice(0, 120))}</span>` : ''}
+                                <code class="pivot-dag-var-item-expr hidden">${escapeHtml(item.expression)}</code>
                             </button>
                         `).join('')}
                     </div>
@@ -106,6 +114,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
     popover.classList.remove('hidden');
 
     const searchInput = popover.querySelector('[data-pivot-dag-var-search]');
+    popover.querySelector('[data-pivot-dag-show-expression]')?.addEventListener('change', event => popover.querySelectorAll('.pivot-dag-var-item-expr').forEach(code => code.classList.toggle('hidden', !event.target.checked)));
     requestAnimationFrame(() => searchInput?.focus());
 
     searchInput?.addEventListener('input', (e) => {
@@ -126,6 +135,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
     const closePopover = () => {
         popover.classList.add('hidden');
         document.removeEventListener('pointerdown', onDocPointerDown);
+        anchorEl?.focus();
     };
 
     const onDocPointerDown = (e) => {
@@ -135,6 +145,7 @@ function showVariablePickerPopover({ anchorEl, targetInput, nodeId, nodes = [], 
     };
     setTimeout(() => document.addEventListener('pointerdown', onDocPointerDown), 10);
     popover.querySelector('.pivot-dag-var-popover-close')?.addEventListener('click', closePopover);
+    popover.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); closePopover(); } };
 
     popover.querySelectorAll('[data-pivot-dag-var-expr]').forEach(itemBtn => {
         itemBtn.addEventListener('click', () => {

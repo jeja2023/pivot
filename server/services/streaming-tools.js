@@ -26,6 +26,7 @@
 const TOOL_CALL_LIMIT = 16; // 安全上限：超出认为是异常增量
 
 function createToolCallAccumulator() {
+    const textReconciler = require('../streaming-text').createStreamTextReconciler();
     const state = {
         content: '',
         toolCallsByIndex: new Map(),
@@ -62,7 +63,7 @@ function createToolCallAccumulator() {
         if (choice.finish_reason) state.finishReason = String(choice.finish_reason);
         const delta = choice.delta || choice.message || {};
         if (typeof delta.content === 'string' && delta.content.length > 0) {
-            state.content += delta.content;
+            state.content += textReconciler.ingest(frame, { delta: delta.content, isThought: false }).delta;
         }
         const toolCallsDelta = Array.isArray(delta.tool_calls) ? delta.tool_calls : null;
         if (toolCallsDelta) {

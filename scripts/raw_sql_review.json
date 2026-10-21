@@ -5,35 +5,170 @@
   "reviewer": "architecture-governance",
   "verification": "npm run test:all",
   "entries": [
-    { "file": "server/repositories/chat-conversation-turns.js", "count": 16, "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。", "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；security-chat HTTP 回归。" },
-    { "file": "server/repositories/agent-learning-evaluation.js", "count": 11, "rationale": "候选经验只用本人已获正面人工反馈的独立任务建立评测；发布证明绑定真实评测子运行的候选版本和内容摘要；来源撤销实时复校，个人灰度统计按 user_id 与 release_id 隔离；学习开关使用新鲜读取，关闭时与记忆修订栅栏同事务写入，并与自动发布共用设置行锁，固定为设置行先于记忆栅栏的加锁顺序；等待评测的学习作业以状态条件恢复。", "verification": "tests/chat-conversation-product.test.js 独立样本筛选、关闭学习栅栏与隔离；tests/agent-evaluation-gates.test.js 冻结目标与质量门禁；tests/long-term-memory-skill-source.test.js 来源撤销。" },
-    { "file": "server/services/agent-browser-action-evidence.js", "count": 3, "rationale": "浏览器动作证据的用户与运行归属查询，使用参数化 SQL 并由浏览器证据回归覆盖。" },
-    { "file": "server/services/agent-browser-session-leases.js", "count": 16, "rationale": "浏览器会话租约、令牌栅栏和恢复状态必须在同一 PostgreSQL 事务内锁定，不能替换为无锁查询。" },
-    { "file": "server/services/agent-browser-sessions.js", "count": 8, "rationale": "浏览器会话生命周期查询与 CAS 状态写入，参数化且由 Chromium/租约回归覆盖。" },
-    { "file": "server/services/agent-checkpoints.js", "count": 14, "rationale": "检查点所有权、输入摘要和非幂等恢复需要行锁与条件更新，保留在服务事务边界内。" },
-    { "file": "server/services/agent-domain-acceptance-evidence.js", "count": 15, "rationale": "十八领域五分认定证据需以参数化、可审计的提交、独立核验、委员会前置证据检查、系统管理员预先配置的四角色成员、活跃管理员候选查询、四角色独立登录态签署和汇总查询持久化；结构化清单及领域指标由服务端复核，服务只计算“可进入委员会评分”，绝不自动提升成熟度。" },
-    { "file": "server/services/agent-control.js", "count": 15, "rationale": "控制消息投递状态机使用条件更新和用户隔离查询，已由 AgentControl 并发回归覆盖。" },
-    { "file": "server/services/agent-execution-grant-ledger.js", "count": 6, "rationale": "一次性 ExecutionGrant 账本要求令牌摘要和消费状态在事务中原子校验。" },
-    { "file": "server/services/agent-judge-governance.js", "count": 11, "rationale": "Judge Profile、分歧与人工复核记录属于发布硬门，查询和状态变更均受用户边界与参数化约束。" },
-    { "file": "server/services/agent-lifecycle-hooks.js", "count": 4, "rationale": "生命周期 Hook 注册与审计写入需要不可变摘要和事件查询，已由 Hook 持久化回归覆盖。" },
-    { "file": "server/services/agent-lifecycle-hook-packages.js", "count": 5, "rationale": "受管 Hook 包导入、不可变版本登记、启停和运行时签名复验必须在同一参数化控制面事务内完成，已由包签名、停用和吊销回归覆盖。" },
-    { "file": "server/services/agent-monitoring.js", "count": 6, "rationale": "运行队列、工具使用、压缩审计及 p95 时延 SLO 聚合，以及系统管理员 SLO 告警接收人查询，均为只读参数化查询；低样本明确标记为证据不足，相关 SLO 回归覆盖阈值与告警去重键判定。" },
-    { "file": "server/services/agent-prompt-registry.js", "count": 10, "rationale": "Prompt Registry 版本、租户和激活状态查询是版本化治理边界，使用参数化 SQL。" },
-    { "file": "server/services/agent-releases.js", "count": 64, "rationale": "技能与工作流发布事务包含版本冻结、ACL、签名和熔断状态，已由发布集成回归覆盖。" },
-    { "file": "server/services/agent-task-effect-executor.js", "count": 2, "rationale": "外部效果执行认领与完成状态需要条件更新，防止跨进程重复副作用。" },
-    { "file": "server/services/agent-task-drafts.js", "count": 17, "rationale": "聊天任务草案的会话归属、可恢复草案列表、版本 CAS、确认/启动状态机和不可变审计事件必须在同一 PostgreSQL 行锁事务中完成；所有查询均参数化，草案阶段不调用模型、检索或工具。" },
-    { "file": "server/services/agent-task-resource-leases.js", "count": 11, "rationale": "跨运行资源租约必须在 PostgreSQL 行锁和条件更新下取得、续期和释放。" },
-    { "file": "server/services/agent-task-transactions.js", "count": 36, "rationale": "Task Transaction、效果、补偿和工作区快照共享事务边界；人工核对与跨 Run 业务幂等键需在同一行锁事务内按租户判定，拆出查询会破坏提交/回滚与去重原子性。" },
-    { "file": "server/services/agent-working-memory-revisions.js", "count": 5, "rationale": "工作记忆修订使用 CAS 和引用状态条件更新，SQL 与修订回归一并审计。" },
-    { "file": "server/services/models.js", "count": 10, "rationale": "模型配置和租户可见性查询使用参数化条件，受模型路由和配置注册门禁覆盖。" },
-    { "file": "server/services/workspace-memory-source-lifecycle.js", "count": 4, "rationale": "代码工作区来源生命周期状态需和授权快照在事务中一致更新。" },
-    { "file": "server/services/agent-runtime/run-creation.js", "count": 7, "rationale": "运行创建和租户/用户归属写入属于运行事务入口，已由运行生命周期回归覆盖。" },
-    { "file": "server/services/agent-runtime/run-execution.js", "count": 3, "rationale": "运行错误恢复重试读取必须与运行状态机保持同一持久化边界；模型切换状态更新已复用 updateRun 仓储接口，不再新增执行器 SQL。" },
-    { "file": "server/services/agent-runtime/run-lifecycle.js", "count": 5, "rationale": "运行状态和租约生命周期使用条件更新，已由运行恢复与取消回归覆盖。" },
-    { "file": "server/services/long-term-memory/index.js", "count": 32, "rationale": "长期记忆来源、状态和导出查询受用户 scope、来源复核和事务门禁约束。" },
-    { "file": "server/services/long-term-memory/memory-source-fingerprints.js", "count": 13, "rationale": "来源 HMAC、复核和撤销必须在同一事务更新证据与记忆状态。" },
-    { "file": "server/services/long-term-memory/memory-sources.js", "count": 11, "rationale": "来源撤回与用户隔离查询需要条件更新和审计关联，已由长期记忆来源回归覆盖。" },
-    { "file": "server/services/long-term-memory/memory-export-snapshot.js", "count": 3, "rationale": "一致性导出必须在同一 PostgreSQL 重复读只读事务中固定总数、正文及来源证据，查询均参数化并由快照、HTTP 与前端导出回归覆盖。" },
-    { "file": "server/repositories/system-monitor.js", "count": 1, "rationale": "只读监控聚合放在仓储层，过滤未删除的活跃任务与最近24小时结束的失败任务；仅返回计数和最早排队时长，不读取任务正文或执行任务。", "verification": "node scripts/run_node_tests.js tests/system-monitor-runtime.test.js" }
+    {
+      "file": "server/repositories/chat-conversation-turns.js",
+      "count": 17,
+      "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。续跑查询限定父运行、当前用户及未删除的真实续跑关联，等待输入的同一运行通过状态 CAS 只排队一次并保留检查点。",
+      "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；tests/agent-resume-budget.test.js 聊天并发继续、旧续跑链复用和额度耗尽；security-chat HTTP 回归。"
+    },
+    {
+      "file": "server/repositories/agent-learning-evaluation.js",
+      "count": 11,
+      "rationale": "候选经验只用本人已获正面人工反馈的独立任务建立评测；发布证明绑定真实评测子运行的候选版本和内容摘要；来源撤销实时复校，个人灰度统计按 user_id 与 release_id 隔离；学习开关使用新鲜读取，关闭时与记忆修订栅栏同事务写入，并与自动发布共用设置行锁，固定为设置行先于记忆栅栏的加锁顺序；等待评测的学习作业以状态条件恢复。",
+      "verification": "tests/chat-conversation-product.test.js 独立样本筛选、关闭学习栅栏与隔离；tests/agent-evaluation-gates.test.js 冻结目标与质量门禁；tests/long-term-memory-skill-source.test.js 来源撤销。"
+    },
+    {
+      "file": "server/services/agent-browser-action-evidence.js",
+      "count": 3,
+      "rationale": "浏览器动作证据的用户与运行归属查询，使用参数化 SQL 并由浏览器证据回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-browser-session-leases.js",
+      "count": 16,
+      "rationale": "浏览器会话租约、令牌栅栏和恢复状态必须在同一 PostgreSQL 事务内锁定，不能替换为无锁查询。"
+    },
+    {
+      "file": "server/services/agent-browser-sessions.js",
+      "count": 8,
+      "rationale": "浏览器会话生命周期查询与 CAS 状态写入，参数化且由 Chromium/租约回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-checkpoints.js",
+      "count": 14,
+      "rationale": "检查点所有权、输入摘要和非幂等恢复需要行锁与条件更新，保留在服务事务边界内。"
+    },
+    {
+      "file": "server/services/agent-domain-acceptance-evidence.js",
+      "count": 15,
+      "rationale": "十八领域五分认定证据需以参数化、可审计的提交、独立核验、委员会前置证据检查、系统管理员预先配置的四角色成员、活跃管理员候选查询、四角色独立登录态签署和汇总查询持久化；结构化清单及领域指标由服务端复核，服务只计算“可进入委员会评分”，绝不自动提升成熟度。"
+    },
+    {
+      "file": "server/services/agent-control.js",
+      "count": 15,
+      "rationale": "控制消息投递状态机使用条件更新和用户隔离查询，已由 AgentControl 并发回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-execution-grant-ledger.js",
+      "count": 6,
+      "rationale": "一次性 ExecutionGrant 账本要求令牌摘要和消费状态在事务中原子校验。"
+    },
+    {
+      "file": "server/services/agent-judge-governance.js",
+      "count": 11,
+      "rationale": "Judge Profile、分歧与人工复核记录属于发布硬门，查询和状态变更均受用户边界与参数化约束。"
+    },
+    {
+      "file": "server/services/agent-lifecycle-hooks.js",
+      "count": 4,
+      "rationale": "生命周期 Hook 注册与审计写入需要不可变摘要和事件查询，已由 Hook 持久化回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-lifecycle-hook-packages.js",
+      "count": 5,
+      "rationale": "受管 Hook 包导入、不可变版本登记、启停和运行时签名复验必须在同一参数化控制面事务内完成，已由包签名、停用和吊销回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-monitoring.js",
+      "count": 6,
+      "rationale": "运行队列、工具使用、压缩审计及 p95 时延 SLO 聚合，以及系统管理员 SLO 告警接收人查询，均为只读参数化查询；低样本明确标记为证据不足，相关 SLO 回归覆盖阈值与告警去重键判定。"
+    },
+    {
+      "file": "server/services/agent-prompt-registry.js",
+      "count": 10,
+      "rationale": "Prompt Registry 版本、租户和激活状态查询是版本化治理边界，使用参数化 SQL。"
+    },
+    {
+      "file": "server/services/agent-releases.js",
+      "count": 64,
+      "rationale": "技能与工作流发布事务包含版本冻结、ACL、签名和熔断状态，已由发布集成回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-task-effect-executor.js",
+      "count": 2,
+      "rationale": "外部效果执行认领与完成状态需要条件更新，防止跨进程重复副作用。"
+    },
+    {
+      "file": "server/services/agent-task-drafts.js",
+      "count": 17,
+      "rationale": "聊天任务草案的会话归属、可恢复草案列表、版本 CAS、确认/启动状态机和不可变审计事件必须在同一 PostgreSQL 行锁事务中完成；所有查询均参数化，草案阶段不调用模型、检索或工具。"
+    },
+    {
+      "file": "server/services/agent-task-resource-leases.js",
+      "count": 11,
+      "rationale": "跨运行资源租约必须在 PostgreSQL 行锁和条件更新下取得、续期和释放。"
+    },
+    {
+      "file": "server/services/agent-task-transactions.js",
+      "count": 36,
+      "rationale": "Task Transaction、效果、补偿和工作区快照共享事务边界；人工核对与跨 Run 业务幂等键需在同一行锁事务内按租户判定，拆出查询会破坏提交/回滚与去重原子性。"
+    },
+    {
+      "file": "server/services/agent-working-memory-revisions.js",
+      "count": 5,
+      "rationale": "工作记忆修订使用 CAS 和引用状态条件更新，SQL 与修订回归一并审计。"
+    },
+    {
+      "file": "server/services/models.js",
+      "count": 10,
+      "rationale": "模型配置和租户可见性查询使用参数化条件，受模型路由和配置注册门禁覆盖。"
+    },
+    {
+      "file": "server/services/workspace-memory-source-lifecycle.js",
+      "count": 4,
+      "rationale": "代码工作区来源生命周期状态需和授权快照在事务中一致更新。"
+    },
+    {
+      "file": "server/services/agent-runtime/run-creation.js",
+      "count": 7,
+      "rationale": "运行创建和租户/用户归属写入属于运行事务入口，已由运行生命周期回归覆盖。"
+    },
+    {
+      "file": "server/services/agent-runtime/run-execution.js",
+      "count": 3,
+      "rationale": "运行错误恢复重试读取必须与运行状态机保持同一持久化边界；模型切换状态更新已复用 updateRun 仓储接口，不再新增执行器 SQL。"
+    },
+    {
+      "file": "server/services/agent-runtime/run-lifecycle.js",
+      "count": 5,
+      "rationale": "运行状态和租约生命周期使用条件更新，已由运行恢复与取消回归覆盖。"
+    },
+    {
+      "file": "server/services/long-term-memory/index.js",
+      "count": 32,
+      "rationale": "长期记忆来源、状态和导出查询受用户 scope、来源复核和事务门禁约束。"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-source-fingerprints.js",
+      "count": 13,
+      "rationale": "来源 HMAC、复核和撤销必须在同一事务更新证据与记忆状态。"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-sources.js",
+      "count": 11,
+      "rationale": "来源撤回与用户隔离查询需要条件更新和审计关联，已由长期记忆来源回归覆盖。"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-export-snapshot.js",
+      "count": 3,
+      "rationale": "一致性导出必须在同一 PostgreSQL 重复读只读事务中固定总数、正文及来源证据，查询均参数化并由快照、HTTP 与前端导出回归覆盖。"
+    },
+    {
+      "file": "server/repositories/system-monitor.js",
+      "count": 1,
+      "rationale": "只读监控聚合放在仓储层，过滤未删除的活跃任务与最近24小时结束的失败任务；仅返回计数和最早排队时长，不读取任务正文或执行任务。",
+      "verification": "node scripts/run_node_tests.js tests/system-monitor-runtime.test.js"
+    },
+    {
+      "file": "server/repositories/workflow-editor-drafts.js",
+      "count": 13,
+      "rationale": "工作流草稿、修订冲突、创建去重和个人使用偏好集中在仓储层。全部查询参数化且按 user_id 隔离；同一草稿创建和保存使用相同事务咨询锁；工作流写入归属由服务端既有 ACL 复核，最近运行仅查询当前账号。",
+      "verification": "tests/workflow-product-persistence.test.js 覆盖不完整草稿、账号隔离、并发修订冲突、双击创建去重、发布版隔离及只读共享；tests/e2e/workflow-product.spec.js 覆盖真实 HTTP 与页面。"
+    },
+    {
+      "file": "server/repositories/chat-task-feed.js",
+      "count": 4,
+      "rationale": "对话任务的轻量只读模型集中在仓储层，查询均参数化。快照复核运行归属和有效会话，公开事件使用固定类型白名单与快照水位分页，历史步骤有界读取，实际产物及交付回执同时按用户和租户过滤。读取版本指针兼容历史缺列，产物标识和归属按文本等值兼容 UUID 与 BIGINT，不改变账号隔离，不读取全量追踪或完整上下文。",
+      "verification": "tests/chat-task-feed.test.js、tests/chat-task-controls-http.test.js 验证历史 UUID/缺列结构、归属、删除、游标、脱敏、审批绑定与文件字节；tests/e2e/chat-task-execution.spec.js 验证真实进度读取、历史回看、停止确认与定位。"
+    }
   ]
 }

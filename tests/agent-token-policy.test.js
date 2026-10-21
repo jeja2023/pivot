@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { resolveModelTaskTokenBudget, normalizeModelTaskBudget } = require('../server/services/agent-token-policy');
+const { resolveModelTaskTokenBudget, normalizeModelTaskBudget, resolveChatAgentBudget } = require('../server/services/agent-token-policy');
 const { TaskBudget } = require('../server/services/agent-budget');
 const { getModelContextBudget } = require('../server/services/context-budget');
 
@@ -50,7 +50,7 @@ test('聊天自动接管使用所选模型累计预算并继续保留步骤、�
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../server/services/chat-agent-handoff.js'), 'utf8'), {
         module, require(name) {
             if (name === './chat-preference-context') return { resolveChatProject: async () => ({ projectId: null }) };
-            if (name === './chat-agent-bridge') return { normalizeChatHistory: rows => rows, prepareChatAgentContext: async () => ({}), buildChatAgentMetadata: () => ({ chatHistory: [] }) };
+            if (name === './chat-agent-bridge') return { normalizeChatHistory: rows => rows, prepareChatAgentContext: async () => ({}), buildChatAgentMetadata: () => ({ chatHistory: [], chatBridge: {} }) };
             if (name.startsWith('./')) return require(path.join(__dirname, '../server/services', name));
             return require(name);
         }
@@ -69,6 +69,43 @@ test('聊天自动接管使用所选模型累计预算并继续保留步骤、�
         assert.equal(input.approvalPolicy, 'safe_mcp_auto');
         assert.equal(input.toolPolicy, 'builtin_only');
         assert.match(input.metadata.taskContract.budgetRef, /^sha256:/);
+    } finally {
+        if (original === undefined) delete process.env.AGENT_TASK_MAX_TOKENS_TOTAL;
+        else process.env.AGENT_TASK_MAX_TOKENS_TOTAL = original;
+    }
+});
+
+test('纯知识问答按资料量分配小预算，显式 Agent 与自动任务均适用', () => {
+    withAutomaticBudget(() => {
+        const options = { modelCfg: { context_window_tokens: 262144 }, ragEnabled: true,
+            content: '知识库中的请假规定是什么？', context: { ragContext: '已有相关资料' } };
+        for (const decision of [{}, { action: 'agent_run', requiredCapabilities: ['agent.execute', 'knowledge.search'] }]) {
+            const result = resolveChatAgentBudget({ ...options, decision });
+            assert.equal(result.profile, 'knowledge_qa');
+            assert.equal(result.budget.max_tokens_total, 32768);
+            assert.equal(result.budget.max_steps, 6);
+            assert.equal(result.budget.max_tool_calls, 6);
+        }
+        const history = Array.from({ length: 24 }, () => ({ role: 'assistant', content: '资料'.repeat(4000) }));
+        const larger = resolveChatAgentBudget({ ...options, history, context: { ragContext: '资料'.repeat(12000) } });
+        assert.equal(larger.history.length, 6);
+        assert.ok(larger.budget.max_tokens_total > 32768);
+        assert.ok(larger.budget.max_tokens_total <= 131072);
+    });
+});
+
+test('复杂任务保留通用预算，知识问答仍服从管理员更低的限额', () => {
+    withAutomaticBudget(() => {
+        const options = { modelCfg: { context_window_tokens: 262144 }, ragEnabled: true, content: '检索资料并交付文件',
+            decision: { action: 'agent_run', requiredCapabilities: ['knowledge.search', 'artifact.deliver'] } };
+        assert.equal(resolveChatAgentBudget(options).profile, 'standard');
+        assert.equal(resolveChatAgentBudget(options).budget.max_steps, 30);
+        assert.equal(resolveChatAgentBudget({ ...options, mcpEnabled: true }).profile, 'standard');
+    });
+    const original = process.env.AGENT_TASK_MAX_TOKENS_TOTAL;
+    process.env.AGENT_TASK_MAX_TOKENS_TOTAL = '10000';
+    try {
+        assert.equal(resolveChatAgentBudget({ ragEnabled: true, content: '制度规定是什么？' }).budget.max_tokens_total, 10000);
     } finally {
         if (original === undefined) delete process.env.AGENT_TASK_MAX_TOKENS_TOTAL;
         else process.env.AGENT_TASK_MAX_TOKENS_TOTAL = original;

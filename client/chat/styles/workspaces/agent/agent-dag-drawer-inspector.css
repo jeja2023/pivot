@@ -20,10 +20,10 @@
     flex-direction: column;
     overflow: hidden;
     pointer-events: auto;
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    border-radius: 8px;
-    background: #fff;
-    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 10px);
+    background: var(--surface);
+    box-shadow: var(--shadow-md, 0 16px 40px rgba(15, 23, 42, 0.14));
 }
 
 .agent-dag-drawer-head {
@@ -31,15 +31,16 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 12px 10px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border);
-    background: #f8fafc;
+    background: var(--bg-side);
 }
 
 .agent-dag-drawer-head h3 {
     margin: 0;
     color: var(--text-main);
-    font-size: 0.92rem;
+    font-size: 0.95rem;
+    font-weight: 700;
     line-height: 1.25;
 }
 
@@ -48,7 +49,7 @@
     max-width: 350px;
     margin-top: 3px;
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     overflow-wrap: anywhere;
     word-break: break-word;
 }
@@ -64,19 +65,21 @@
 .agent-dag-drawer-actions .btn-danger-outline {
     height: 28px;
     padding: 0 10px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm, 6px);
     font-size: 0.72rem;
+    font-weight: 600;
 }
 
 .pivot-dag-editor-inspector {
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding: 12px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    font-size: 0.78rem;
+    gap: 10px;
+    font-size: 0.8rem;
+    font-family: var(--font-sans);
 }
 
 .pivot-dag-editor-inspector > .pivot-dag-inspector-row-main { order: 1; }
@@ -90,9 +93,9 @@
 
 .pivot-dag-runtime-settings {
     order: 6;
-    border: 1px solid rgba(148, 163, 184, 0.24);
-    border-radius: 8px;
-    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-side);
 }
 
 .pivot-dag-runtime-settings > summary {
@@ -100,11 +103,13 @@
     align-items: center;
     justify-content: space-between;
     min-height: 34px;
-    padding: 0 10px;
+    padding: 0 12px;
     color: var(--text-main);
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: 0.74rem;
+    font-weight: 600;
     list-style: none;
+    user-select: none;
 }
 
 .pivot-dag-runtime-settings > summary::-webkit-details-marker {
@@ -113,12 +118,12 @@
 
 .pivot-dag-runtime-settings > summary span {
     color: var(--text-muted);
-    font-size: 0.64rem;
-    font-weight: 600;
+    font-size: 0.66rem;
+    font-weight: 500;
 }
 
 .pivot-dag-runtime-settings > .pivot-dag-inspector-row {
-    padding: 0 10px 10px;
+    padding: 0 12px 12px;
 }
 
 .pivot-dag-inspector-empty {
@@ -130,7 +135,7 @@
 .pivot-dag-inspector-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 8px;
+    gap: 10px;
 }
 
 .pivot-dag-inspector-row-main {
@@ -150,31 +155,43 @@
 .pivot-dag-inspector-input {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
 }
 
 .pivot-dag-inspector-row label > span,
 .pivot-dag-inspector-input > span {
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.72rem;
+    font-weight: 600;
 }
 
 .pivot-dag-inspector-row input,
 .pivot-dag-inspector-row select,
 .pivot-dag-inspector-input textarea {
     width: 100%;
-    height: 28px;
-    padding: 4px 8px;
+    height: 32px;
+    padding: 0 10px;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #fff;
-    color: #0f172a;
-    font-size: 0.78rem;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    color: var(--text-main);
+    font-size: 0.8rem;
+    font-family: inherit;
     min-width: 0;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.pivot-dag-inspector-row input:focus,
+.pivot-dag-inspector-row select:focus,
+.pivot-dag-inspector-input textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.12);
+    outline: none;
 }
 
 .pivot-dag-inspector-row select[data-pivot-dag-field="tool"] {
-    font-weight: 700;
+    font-weight: 600;
     text-overflow: clip;
 }
 
@@ -183,12 +200,13 @@
 }
 
 .pivot-dag-node-id-field input[readonly] {
-    border-color: rgba(148, 163, 184, 0.28);
-    background: #f8fafc;
-    color: #475569;
+    border-color: var(--border);
+    background: var(--bg-side);
+    color: var(--text-muted);
     cursor: text;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-weight: 700;
+    font-weight: 600;
+    font-size: 0.75rem;
 }
 
 .pivot-dag-node-id-field small {
@@ -200,62 +218,66 @@
 .pivot-dag-test-result {
     max-height: 220px;
     margin: 10px 0 0;
-    padding: 9px;
+    padding: 10px 12px;
     overflow: auto;
-    border: 1px solid rgba(148, 163, 184, 0.3);
-    border-radius: 6px;
+    border: 1px solid #334155;
+    border-radius: var(--radius-sm, 6px);
     background: #0f172a;
     color: #e2e8f0;
-    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11.5px;
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.pivot-dag-test-result.is-error { border-color: #f87171; color: #fecaca; }
-.pivot-dag-test-result.is-success { border-color: #34d399; }
+.pivot-dag-test-result.is-error { border-color: var(--danger); color: #fecaca; }
+.pivot-dag-test-result.is-success { border-color: var(--success); color: #a7f3d0; }
 
 .pivot-dag-inline-edit {
     display: flex;
     flex-direction: column;
     gap: 8px;
     margin: 8px 0 0;
-    padding: 10px;
+    padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg-secondary);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-side);
 }
 .pivot-dag-inline-edit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.pivot-dag-inline-edit-head strong { color: var(--text-main); font-size: 0.76rem; }
-.pivot-dag-inline-edit-head span { color: var(--text-muted); font-size: 0.66rem; }
+.pivot-dag-inline-edit-head strong { color: var(--text-main); font-size: 0.78rem; font-weight: 700; }
+.pivot-dag-inline-edit-head span { color: var(--text-muted); font-size: 0.68rem; }
 .pivot-dag-inline-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .pivot-dag-inline-field { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .pivot-dag-inline-field.is-wide { grid-column: 1 / -1; }
-.pivot-dag-inline-field > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
-.pivot-dag-inline-var { min-width: 32px; height: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-primary); color: var(--primary); font-size: 0.61rem; font-weight: 800; cursor: pointer; }
-.pivot-dag-inline-var:hover, .pivot-dag-inline-var:focus-visible { border-color: var(--primary); background: var(--bg-secondary); outline: none; }
+.pivot-dag-inline-field > span { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-muted); font-size: 0.7rem; font-weight: 600; }
+.pivot-dag-inline-var { min-width: 32px; height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--primary); font-size: 0.64rem; font-weight: 700; cursor: pointer; }
+.pivot-dag-inline-var:hover, .pivot-dag-inline-var:focus-visible { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); outline: none; }
 .pivot-dag-inline-field input, .pivot-dag-inline-field select, .pivot-dag-inline-field textarea {
-    width: 100%; min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--border);
-    border-radius: 6px; background: var(--bg-primary); color: var(--text-main); font-size: 0.75rem; line-height: 1.35;
+    width: 100%; min-width: 0; margin: 0; padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px); background: var(--surface); color: var(--text-main); font-size: 0.78rem; line-height: 1.35;
+    box-sizing: border-box; transition: all 0.15s ease;
+}
+.pivot-dag-inline-field input:focus, .pivot-dag-inline-field select:focus, .pivot-dag-inline-field textarea:focus {
+    border-color: var(--primary); box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.12); outline: none;
 }
 .pivot-dag-inline-field textarea { resize: vertical; min-height: 54px; }
 .pivot-dag-inline-channel-binding small { color: var(--text-muted); font-size: 0.64rem; line-height: 1.35; }
-.pivot-dag-inline-check { flex-direction: row; align-items: center; justify-content: space-between; padding-top: 20px; }
-.pivot-dag-inline-check input { width: 16px; height: 16px; }
-.pivot-dag-inline-field input.is-invalid, .pivot-dag-inline-field textarea.is-invalid { border-color: var(--danger); background: var(--bg-secondary); }
-.pivot-dag-inline-hint { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.68rem; line-height: 1.4; }
+.pivot-dag-inline-check { flex-direction: row; align-items: center; justify-content: space-between; padding-top: 18px; }
+.pivot-dag-inline-check input { width: 16px; height: 16px; accent-color: var(--primary); }
+.pivot-dag-inline-field input.is-invalid, .pivot-dag-inline-field textarea.is-invalid { border-color: var(--danger); background: var(--surface); }
+.pivot-dag-inline-hint { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.7rem; line-height: 1.4; }
 .pivot-dag-inline-hint.is-warning { color: var(--warning); }
-.pivot-dag-inline-help { display: block; color: var(--text-muted); font-size: 0.65rem; line-height: 1.35; }
-.pivot-dag-inline-edit > .pivot-dag-add-referenced-deps { align-self: flex-start; height: 28px; padding: 0 9px; font-size: 0.68rem; }
+.pivot-dag-inline-help { display: block; color: var(--text-muted); font-size: 0.66rem; line-height: 1.35; }
+.pivot-dag-inline-edit > .pivot-dag-add-referenced-deps { align-self: flex-start; height: 28px; padding: 0 10px; font-size: 0.72rem; }
 .pivot-dag-merge-rows { display: grid; gap: 6px; }
-.pivot-dag-merge-row { display: grid; grid-template-columns: minmax(86px, 0.42fr) minmax(0, 1fr) auto auto; gap: 5px; align-items: start; }
-.pivot-dag-merge-row input, .pivot-dag-merge-row textarea { width: 100%; min-width: 0; margin: 0; padding: 6px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); font-size: 0.72rem; line-height: 1.35; }
-.pivot-dag-merge-row textarea { resize: vertical; min-height: 42px; }
-.pivot-dag-merge-row .btn-secondary, .pivot-dag-merge-add { min-width: 28px; height: 29px; padding: 0 7px; font-size: 0.67rem; }
+.pivot-dag-merge-row { display: grid; grid-template-columns: minmax(86px, 0.42fr) minmax(0, 1fr) auto auto; gap: 6px; align-items: start; }
+.pivot-dag-merge-row input, .pivot-dag-merge-row textarea { width: 100%; min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--surface); font-size: 0.75rem; line-height: 1.35; }
+.pivot-dag-merge-row .btn-secondary, .pivot-dag-merge-add { min-width: 28px; height: 30px; padding: 0 8px; font-size: 0.7rem; }
 .pivot-dag-merge-add { align-self: flex-start; }
-.pivot-dag-when-routes { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
-.pivot-dag-when-routes > span { flex: 1 1 100%; color: var(--text-muted); font-size: 0.66rem; font-weight: 700; }
-.pivot-dag-when-routes .btn-secondary { height: 27px; padding: 0 8px; border-color: var(--border); color: var(--primary); font-size: 0.67rem; }
+.pivot-dag-when-routes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.pivot-dag-when-routes > span { flex: 1 1 100%; color: var(--text-muted); font-size: 0.68rem; font-weight: 700; }
+.pivot-dag-when-routes .btn-secondary { height: 28px; padding: 0 10px; border-color: var(--border); color: var(--primary); font-size: 0.7rem; }
 @media (max-width: 640px) {
     .pivot-dag-inline-edit-grid { grid-template-columns: 1fr; }
     .pivot-dag-inline-field.is-wide { grid-column: auto; }
@@ -268,18 +290,20 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px 12px;
-    border: 1px solid rgba(16, 185, 129, 0.18);
-    border-radius: 8px;
-    background: linear-gradient(180deg, rgba(240, 253, 250, 0.92), rgba(248, 250, 252, 0.98));
-    box-shadow: inset 3px 0 0 rgba(16, 185, 129, 0.45);
+    border: 1px solid color-mix(in srgb, var(--primary, #10a37f) 22%, var(--border));
+    border-left: 3px solid var(--primary, #10a37f);
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--primary, #10a37f) 4%, var(--surface));
+    box-shadow: var(--shadow-sm);
 }
 
 .pivot-dag-tool-meta.is-empty {
-    border-color: rgba(148, 163, 184, 0.22);
-    background: #f8fafc;
+    border-color: var(--border);
+    border-left: 3px solid var(--border);
+    background: var(--bg-side);
     box-shadow: none;
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     line-height: 1.35;
 }
 

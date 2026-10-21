@@ -28,6 +28,7 @@ async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'ti
         enqueueAgentRun
     } = deps;
 
+    if (getRunMetadata?.(run)?.chatBridge?.executionProfile === 'knowledge_qa') return false;
     const enabled = reason === 'step_limit' ? AGENT_AUTO_CONTINUE_ON_STEP_LIMIT : AGENT_AUTO_CONTINUE_ON_TIMEOUT;
     if (!enabled || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
     const prior = autoContinuationState(run, getRunMetadata);

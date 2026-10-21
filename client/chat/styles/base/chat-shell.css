@@ -535,10 +535,10 @@ body.is-main-workspace-full .chat-container {
     box-shadow: 0 4px 15px rgba(16, 185, 129, 0.15);
 }
 .message.assistant .message-content { 
-    background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%); 
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg-side) 100%);
     color: var(--text-main); 
     border-bottom-left-radius: 4px;
-    border: 1px solid rgba(148, 163, 184, 0.15);
+    border: 1px solid var(--border);
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
     animation: messageSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }

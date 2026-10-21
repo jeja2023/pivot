@@ -150,7 +150,7 @@ async function beginAgentToolCheckpoint(runId, data = {}) {
                 error.code = 'AGENT_OPERATION_INPUT_MISMATCH'; error.category = 'policy'; error.status = 409; throw error;
             }
             if (String(existing.status) === 'completed') {
-                return { created: false, replay: true, state, owner: { id: Number(run.user_id), tenant_id: run.tenant_id || null }, checkpointId: existing.checkpoint_id };
+                return { created: false, replay: true, state, owner: { id: Number(run.user_id), tenant_id: run.tenant_id || null }, checkpointId: existing.checkpoint_id, attempt: Number(existing.attempt || 1) };
             }
             if (String(existing.status) === 'uncertain') {
                 throw recoveryOutputError('工具调用结果不确定或完整输出不可用，必须人工核对外部状态后才能继续。');
@@ -163,7 +163,7 @@ async function beginAgentToolCheckpoint(runId, data = {}) {
             await trx.execute("UPDATE agent_run_checkpoints SET status = 'pending', attempt = COALESCE(attempt, 1) + 1, state = ? WHERE operation_key = ?", [
                 serializeCheckpointState({ toolName, input: data.input || {}, inputHash, recovery: true, approvalGranted: data.approvalGranted === true }), operationKey
             ]);
-            return { created: false, replay: false, checkpointId: existing.checkpoint_id, recovered: true };
+            return { created: false, replay: false, checkpointId: existing.checkpoint_id, recovered: true, attempt: Number(existing.attempt || 1) + 1 };
         }
         const checkpointId = randomUUID();
         await trx.execute(`
@@ -176,12 +176,12 @@ async function beginAgentToolCheckpoint(runId, data = {}) {
             serializeCheckpointState({ toolName, input: data.input || {}, inputHash }),
             data.createdAt || getBeijingTimestamp(), operationKey, toolName, inputHash, Boolean(data.idempotent)
         ]);
-        return { created: true, replay: false, checkpointId };
+        return { created: true, replay: false, checkpointId, attempt: 1 };
     });
     if (!result.replay) return result;
     const hydrated = await hydrateCheckpointState(result.state, result.owner, { strict: true });
     if (!Object.hasOwn(hydrated, 'output')) throw recoveryOutputError();
-    return { created: false, replay: true, output: hydrated.output, checkpointId: result.checkpointId };
+    return { created: false, replay: true, output: hydrated.output, checkpointId: result.checkpointId, attempt: result.attempt };
 }
 
 async function completeAgentToolCheckpoint(operationKey, output, options = {}) {

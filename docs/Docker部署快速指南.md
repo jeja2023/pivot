@@ -15,9 +15,9 @@ docker-compose up -d
 
 ## 二、添加客户端下载功能
 
-### 浏览器中文语音（v0.7.4 起）
+### 浏览器中文语音
 
-标准镜像在构建阶段安装离线中文识别运行库和模型。浏览器无需中文本地包，短录音仅发送当前服务器在内存中识别，不保存录音、不转发第三方。镜像运行阶段不需要访问模型下载站点。
+标准镜像在构建阶段安装 CPU 中文识别运行库；默认 `embedded` 模式的三个模型通过 `./data/speech-models:/models:ro` 导入，不写入镜像。浏览器无需中文本地包，短录音仅发送当前 Pivot，在容器内存中完成识别；镜像运行阶段无需访问模型下载站点。
 
 升级时需重新构建镜像并重建容器：
 
@@ -28,7 +28,9 @@ docker compose up -d --no-deps --force-recreate pivot
 
 浏览器需通过安全连接或可信本地地址访问，并允许麦克风。普通局域网 IP 的明文页面通常不具备录音权限，应通过受信的加密反向代理访问。
 
-`PIVOT_SERVER_VOICE_ENABLED=false` 可关闭部署内识别；标准镜像的 Python 和中文模型分别位于 `/opt/pivot-speech/venv/bin/python`、`/opt/pivot-speech/model`。可用 `PIVOT_SERVER_VOICE_MODEL_PATH` 指向管理员只读挂载的兼容中文模型目录；运行时不会自动下载替代模型。
+`PIVOT_SERVER_VOICE_ENABLED=false` 可关闭部署内识别。如显式选择旧 `local` 兼容模式，标准镜像保留的 Vosk Python 和模型分别位于 `/opt/pivot-speech/venv/bin/python`、`/opt/pivot-speech/model`；`PIVOT_SERVER_VOICE_MODEL_PATH` 只用于这条兼容链路，不配置新的三个模型。
+
+中文双遍识别默认集成在主容器中，`.env` 使用 `PIVOT_VOICE_PROVIDER=embedded`，无需额外容器或 GPU。SeACo Paraformer、流式 Paraformer 和标点模型放在部署目录的 `./data/speech-models/`，主 Compose 已配置 `./data/speech-models:/models:ro`。主镜像内置 CPU 推理依赖，动态内部端口与凭据由应用管理，无需填写语音 IP、HTTP/WS 端点或共享密钥。开发机的 `artifacts/speech-models/` 是下载准备目录；选择其他内网服务器提供 API 时才使用 `gateway`，可选独立部署文件为 `docker-compose.speech.yml`。详见 [中文语音服务离线部署与验收](deployment/中文语音服务离线部署与验收.md)。
 
 ### 方法 1：外部挂载（推荐）✅
 
@@ -92,6 +94,7 @@ services:
     
     volumes:
       - ./data:/app/data              # 数据库
+      - ./data/speech-models:/models:ro # 内置 CPU 语音模型
       - ./uploads:/app/uploads        # 上传文件
       - ./downloads:/app/downloads    # 客户端下载
       - ./logs:/app/logs              # 日志（可选）
@@ -113,10 +116,11 @@ services:
 ### 目录结构
 
 ```
-/data/pivot/
+<部署目录>/
 ├── docker-compose.yml
 ├── .env                    # 环境变量配置
-├── data/                   # 数据库（自动创建）
+├── data/                   # 主服务持久化文件
+│   └── speech-models/      # 主容器内置 CPU 语音读取的三个模型目录
 ├── uploads/                # 上传文件（自动创建）
 ├── downloads/              # 客户端下载
 │   ├── Pivot-Setup.exe     # 最新版本

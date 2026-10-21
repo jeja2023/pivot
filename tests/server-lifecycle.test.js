@@ -32,19 +32,21 @@ test('HTTP lifecycle starts the app and flushes writes on shutdown', async () =>
         closeRealtimeClients(payload) { calls.push(['close-realtime', payload.reason]); },
         terminateSandboxProcesses() { calls.push(['terminate-sandboxes']); },
         terminateCapabilityWorkers() { calls.push(['terminate-workers']); },
+        stopSpeechService() { calls.push(['stop-speech']); },
         processRef
     });
 
     assert.equal(lifecycle.server, fakeServer);
     assert.deepEqual(calls.slice(0, 3), [['listen', 3210], ['info', { port: 3210, url: 'http://localhost:3210', version: 'test' }], ['maintenance']]);
     events.get('SIGTERM')();
-    await Promise.resolve();
-    assert.deepEqual(calls.slice(-6), [
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls.slice(-7), [
         ['close-realtime', 'sigterm'],
         ['terminate-sandboxes'],
         ['terminate-workers'],
         ['close-idle'],
         ['close'],
+        ['stop-speech'],
         ['flush']
     ]);
     assert.equal(processRef.exitCode, 0);

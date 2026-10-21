@@ -23,6 +23,73 @@ test('streaming sampler merges UI updates and reserves one audit snapshot for co
     assert.equal(sampler.getAuditCount(), 4);
 });
 
+test('暂停和租约丢失不会触发原生工具降级，验收后的迟到结果不能覆盖暂停', async () => {
+    const run = { id: 'stop-stream', user_id: 7, goal: '查询知识库', max_steps: 3, run_mode: 'standard' };
+    const options = { run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] };
+    for (const code of ['AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST']) {
+        const steps = [];
+        const deps = streamingDeps({ run, steps, events: [], maybePauseForApproval: async () => false });
+        deps.callModelStreamingWithTools = async () => { throw Object.assign(new Error('执行已中断'), { code }); };
+        await assert.rejects(() => tryRunAgentStreaming(options, deps), error => error.code === code);
+        assert.equal(steps.length, 0);
+    }
+    let paused = false;
+    const updates = [];
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.callModelStreamingWithTools = async () => ({ content: '已有答案', hasToolCalls: false, toolCalls: [] });
+    deps.updateRun = async (_id, fields) => updates.push(fields);
+    deps.verifyAgentOutcome = async () => { paused = true; return { outcomeStatus: 'verified', hardFailures: [] }; };
+    await assert.rejects(() => tryRunAgentStreaming({ ...options, assertRunNotCancelled: async () => {
+        if (paused) throw Object.assign(new Error('用户已暂停'), { code: 'AGENT_RUN_PAUSED' });
+    } }, deps), error => error.code === 'AGENT_RUN_PAUSED');
+    assert.equal(updates.some(fields => fields.status === 'completed'), false);
+});
+
+test('Token 耗尽后不追加模型总结或调用工具，已有结果仍可结束', async () => {
+    const run = { id: 'budget-stream', user_id: 7, goal: '查询资料', max_steps: 3, run_mode: 'standard' };
+    const updates = [];
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.callModelStreamingWithTools = async () => ({ content: '', hasToolCalls: true, toolCalls: [{ id: 'call-1', name: 'rag.search', arguments: {} }] });
+    deps.recordAgentModelUsage = async () => ({ budgetExceeded: true });
+    deps.synthesizeFinalAnswer = async () => { throw new Error('额度耗尽后不应再调用模型'); };
+    deps.executeToolByName = async () => { throw new Error('额度耗尽后不应调用工具'); };
+    deps.updateRun = async (_id, fields) => updates.push(fields);
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] }, deps);
+    assert.equal(result.completed, true);
+    assert.equal(updates.at(-1).status, 'completed_with_errors');
+});
+
+test('最终答案验收持久化失败不会伪装成模型不支持工具再执行一轮', async () => {
+    const run = { id: 'verify-failure', user_id: 7, goal: '生成答案', max_steps: 3, run_mode: 'standard' };
+    const steps = [];
+    const deps = streamingDeps({ run, steps, events: [] });
+    deps.callModelStreamingWithTools = async () => ({ content: '已有答案', hasToolCalls: false, toolCalls: [] });
+    deps.verifyAgentOutcome = async () => { throw Object.assign(new Error('验收存储暂时不可用'), { code: 'VERIFY_STORE_UNAVAILABLE' }); };
+    await assert.rejects(() => tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] }, deps), error => error.code === 'VERIFY_STORE_UNAVAILABLE');
+    assert.equal(steps.length, 1);
+    assert.equal(steps[0].title, '流式最终答案');
+});
+
+test('流式检查点恢复携带已完成工具结果和已应用指令，避免丢失进度从头执行', async () => {
+    const run = { id: 'checkpoint-stream', user_id: 7, goal: '继续分析结果', max_steps: 3, run_mode: 'standard', resume_from_step: 4 };
+    let input;
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.callModelStreamingWithTools = async (_model, messages) => { input = messages; return { content: '基于已完成检索给出结果', hasToolCalls: false, toolCalls: [] }; };
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [
+            { step: 4, tool: 'rag.search', output: { content: '已检索到的真实资料', sources: ['制度'] } },
+            { type: 'agent_control', payload: { instruction: '仅汇总现有结果，不重复检索' }, restored: true }
+        ] }, deps);
+    assert.equal(result.roundsUsed, 5);
+    const context = input.map(message => message.content).join('\n');
+    assert.match(context, /已检索到的真实资料/);
+    assert.match(context, /仅汇总现有结果，不重复检索/);
+    assert.match(context, /PIVOT_MCP_TOOL_RESULT_BEGIN/);
+});
+
 function startMockProvider(received) {
     const server = http.createServer((req, res) => {
         const chunks = [];

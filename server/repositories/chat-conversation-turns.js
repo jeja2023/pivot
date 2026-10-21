@@ -61,12 +61,19 @@ async function replayTurn(turn) {
 }
 
 async function listSessionTasks(sessionId, userId) {
-    return query(`SELECT r.* FROM agent_runs r WHERE r.session_id = ? AND r.user_id = ? AND r.deleted_at IS NULL AND r.metadata->'chatBridge' IS NOT NULL ORDER BY r.created_at DESC LIMIT 12`, [sessionId, userId]);
+    return query(`SELECT r.* FROM agent_runs r WHERE r.session_id = ? AND r.user_id = ? AND r.deleted_at IS NULL AND r.metadata->'chatBridge' IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM agent_runs c WHERE c.parent_run_id = r.id AND c.user_id = r.user_id AND c.deleted_at IS NULL AND c.metadata->>'resumedFromRunId' = r.id)
+        ORDER BY r.created_at DESC LIMIT 12`, [sessionId, userId]);
 }
 
-async function requeueWaitingTask(runId, userId) {
+async function findTaskContinuation(runId, userId) {
+    return queryOne(`SELECT * FROM agent_runs WHERE parent_run_id = ? AND user_id = ? AND deleted_at IS NULL
+        AND metadata->>'resumedFromRunId' = ? ORDER BY created_at DESC, id DESC LIMIT 1`, [runId, userId, runId]);
+}
+
+async function requeueWaitingTask(runId, userId, resumeFromStep = 0) {
     // 只续接等待输入的同一运行；终态和审批边界不能被改写成新执行。
-    return execute(`UPDATE agent_runs SET status = 'queued', error_message = '', updated_at = NOW() WHERE id = ? AND user_id = ? AND status = 'needs_input' AND deleted_at IS NULL`, [runId, userId]);
+    return execute(`UPDATE agent_runs SET status = 'queued', error_message = '', resume_from_step = GREATEST(COALESCE(resume_from_step,0),?), updated_at = NOW() WHERE id = ? AND user_id = ? AND status = 'needs_input' AND deleted_at IS NULL`, [resumeFromStep, runId, userId]);
 }
 
 async function recordRunOutcome(runId, outcome) {
@@ -111,4 +118,4 @@ async function getExecutionMetrics(userId, { admin = false, days = 30 } = {}) {
         GROUP BY 1,2,3 ORDER BY 1,2,3`, [admin, userId, Math.max(1, Math.min(Number(days) || 30, 90))]);
 }
 
-module.exports = { claimTurn, updateTurn, releaseTurn, renewTurn, replayTurn, listSessionTasks, requeueWaitingTask, recordRunOutcome, readyRunArtifacts, currentExecutionScope, readTaskSource, getExecutionMetrics };
+module.exports = { claimTurn, updateTurn, releaseTurn, renewTurn, replayTurn, listSessionTasks, findTaskContinuation, requeueWaitingTask, recordRunOutcome, readyRunArtifacts, currentExecutionScope, readTaskSource, getExecutionMetrics };

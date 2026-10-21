@@ -26,12 +26,18 @@ services:
     environment:
       DOCUMENT_QPDF_PATH: ${DOCUMENT_QPDF_PATH:-/usr/bin/qpdf}
       DOCUMENT_VERAPDF_PATH: ${DOCUMENT_VERAPDF_PATH:-/opt/verapdf/verapdf}
+      PIVOT_VOICE_PROVIDER: ${PIVOT_VOICE_PROVIDER:-embedded}
+      PIVOT_EMBEDDED_VOICE_MODEL_ROOT: /models
+      PIVOT_EMBEDDED_VOICE_PYTHON: ${PIVOT_EMBEDDED_VOICE_PYTHON:-/opt/pivot-speech/engine-venv/bin/python}
+      PIVOT_EMBEDDED_VOICE_WORKER: ${PIVOT_EMBEDDED_VOICE_WORKER:-/opt/pivot-speech/engine/embedded_worker.py}
 
     # 默认 CPU-only，可在 GPU 主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控。
 
     # 数据持久化：保证数据库和上传文件在容器重建后仍然保留
     volumes:
       - ./data:/app/data
+      # 内置 CPU 中文识别；三个完整模型目录由部署方导入，容器只读加载。
+      - ./data/speech-models:/models:ro
       - ./uploads:/app/uploads
       # 客户端下载目录挂载（可选）：用于提供 Windows 客户端下载
       # 将 Pivot-Setup.exe 放在宿主机 ./downloads 目录中即可通过 Web 页面下载

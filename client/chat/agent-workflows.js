@@ -98,37 +98,123 @@ function renderAutomationAssetCenter() {
         item.description,
         agentWorkflowVersionText(item)
     ].filter(Boolean).join(' ').toLowerCase().includes(query));
+    const experience = window.Pivot.moduleApi('agent.workflowExperience');
+    const prefs = experience?.preferences?.() || [];
+    const preference = id => prefs.find(item => String(item.workflow_id) === String(id)) || {};
+    workflows.sort((a, b) => Number(Boolean(preference(b.id).favorite)) - Number(Boolean(preference(a.id).favorite)) || (Date.parse(preference(b.id).last_used_at) || 0) - (Date.parse(preference(a.id).last_used_at) || 0));
     PivotSafeHtml.setHtml(workflowList, workflows.length ? `
         <div class="automation-table-wrap">
             <table class="data-table automation-assets-table automation-workflows-table">
                 <thead><tr><th class="text-center">序号</th><th>工作流</th><th>简介</th><th>状态</th><th>可见范围</th><th>版本</th><th>节点</th><th>更新时间</th><th>操作</th></tr></thead>
                 <tbody>${workflows.map((workflow, index) => {
         const publishedVersion = Number(workflow.published_version || 0);
+        const isFavorite = Boolean(preference(workflow.id).favorite);
+        const recentRun = experience?.recent?.(workflow.id);
+        const recentStatusText = recentRun ? (({ completed: '已完成', error: '失败', partial: '部分完成', needs_input: '需补充', running: '运行中', queued: '排队中', cancelled: '已取消' })[recentRun.status] || '运行记录') : '';
+        const currentVersion = Number(workflow.current_version || 1);
+        const favoriteTitle = isFavorite ? '取消收藏' : '加入收藏';
+        const workflowTitle = agentEscapeAttr(workflow.name || '未命名工作流');
+        const workflowDesc = agentEscapeAttr(workflow.description || '暂无说明');
+        const versionTagHtml = (publishedVersion && currentVersion > publishedVersion)
+            ? `<span class="automation-version-badge">V${currentVersion}</span> <small class="automation-version-sub">线上 V${publishedVersion}</small>`
+            : `<span class="automation-version-badge">V${publishedVersion || currentVersion}</span>`;
         return `
                     <tr>
-                        <td class="text-center">${index + 1}</td>
-                        <td><strong>${agentEscape(workflow.name || '未命名工作流')}</strong></td>
-                        <td>${agentEscape(workflow.description || '暂无说明')}</td>
-                        <td><span class="automation-status ${publishedVersion ? 'published' : 'draft'}">${publishedVersion ? '已发布' : '草稿'}</span></td>
-                        <td><span class="automation-scope ${workflow.is_owner && workflow.scope === 'shared' ? 'is-shared' : ''}">${agentEscape(automationWorkflowScopeText(workflow))}</span></td>
-                        <td>版本 ${Number(workflow.current_version || 1)}${publishedVersion ? ` / 已发布版本 ${publishedVersion}` : ''}</td>
-                        <td>${agentWorkflowNodeCount(workflow)}</td>
-                        <td>${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</td>
-                        <td><div class="automation-row-actions">
-                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">详情</button><button class="btn-secondary" type="button" data-automation-workflow-metadata-edit="${agentEscapeAttr(workflow.id)}">编辑</button>` : `<button class="btn-secondary" type="button" data-automation-workflow-view="${agentEscapeAttr(workflow.id)}">详情</button>`}
-                            ${!workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-dependencies="${agentEscapeAttr(workflow.id)}">配置依赖</button>` : ''}
-                            ${publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
-                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}">版本</button>` : ''}
-                            ${workflow.can_edit && publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-triggers="${agentEscapeAttr(workflow.id)}">自动启动</button>` : ''}
-                            ${workflow.can_edit && publishedVersion ? `<button class="btn-secondary" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}">计划</button>` : ''}
-                            ${workflow.can_edit ? `<button class="btn-secondary" type="button" data-automation-workflow-share="${agentEscapeAttr(workflow.id)}" title="设置共享范围">分享</button>` : ''}
-                        </div></td>
+                        <td class="text-center automation-index-cell">${index + 1}</td>
+                        <td>
+                            <div class="automation-name-cell">
+                                <button type="button" class="btn-secondary automation-workflow-title-link" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}" title="${workflowTitle}">
+                                    <strong>${agentEscape(workflow.name || '未命名工作流')}</strong>
+                                </button>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="automation-desc-cell ${workflow.description ? '' : 'is-empty'}" title="${workflowDesc}">
+                                ${agentEscape(workflow.description || '暂无说明')}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="automation-status-cell">
+                                <span class="automation-status-badge ${publishedVersion ? 'published' : 'draft'}">
+                                    <span class="automation-status-dot" aria-hidden="true"></span>
+                                    ${publishedVersion ? '已发布' : '草稿'}
+                                </span>
+                            </div>
+                        </td>
+                        <td><span class="automation-scope-tag ${workflow.is_owner && workflow.scope === 'shared' ? 'is-shared' : ''}">${agentEscape(automationWorkflowScopeText(workflow))}</span></td>
+                        <td><span class="automation-version-tag">${versionTagHtml}</span></td>
+                        <td><span class="automation-nodes-badge">${agentWorkflowNodeCount(workflow)} 步</span></td>
+                        <td><span class="automation-time-text">${agentEscape(agentWorkflowUpdatedText(workflow) || '-')}</span></td>
+                        <td>
+                            <div class="automation-row-actions">
+                                ${workflow.can_edit ? `<button class="btn-primary-outline btn-xs automation-action-btn" type="button" data-automation-workflow-edit="${agentEscapeAttr(workflow.id)}">编排</button>` : `<button class="btn-primary-outline btn-xs automation-action-btn" type="button" data-automation-workflow-view="${agentEscapeAttr(workflow.id)}">查看</button>`}
+                                ${publishedVersion ? `<button class="btn-secondary btn-success-outline btn-xs automation-action-btn" type="button" data-automation-workflow-run="${agentEscapeAttr(workflow.id)}">运行</button>` : ''}
+                                <button class="btn-secondary btn-xs automation-action-btn automation-favorite-btn ${isFavorite ? 'is-favorited' : ''}" type="button" data-workflow-favorite="${agentEscapeAttr(workflow.id)}" aria-pressed="${isFavorite}" title="${favoriteTitle}">
+                                    <span>${isFavorite ? '已收藏' : '收藏'}</span>
+                                </button>
+                                <details class="automation-dropdown">
+                                    <summary class="btn-secondary btn-xs automation-action-btn automation-dropdown-summary" title="更多操作">
+                                        <span>更多</span>
+                                        <svg class="automation-dropdown-caret" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                    </summary>
+                                    <div class="automation-dropdown-menu automation-dropdown-menu-right">
+                                        ${workflow.can_edit ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-metadata-edit="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg> 编辑信息</button>` : ''}
+                                        ${workflow.can_edit ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-versions="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg> 版本历史</button>` : ''}
+                                        ${workflow.can_edit && publishedVersion ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-schedule="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg> 计划任务</button>` : ''}
+                                        ${workflow.can_edit && publishedVersion ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-triggers="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> 自动启动</button>` : ''}
+                                        ${!workflow.can_edit ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-dependencies="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.55 4.24a1.79 1.79 0 0 0-1.8 0l-4.5 2.58a1.78 1.78 0 0 0-.9 1.55v5.18c0 .64.34 1.23.9 1.55l4.5 2.58a1.78 1.78 0 0 0 1.8 0l8.95-5.16a1.8 1.8 0 0 0 .9-1.55V9.4z"></path></svg> 配置依赖</button>` : ''}
+                                        ${workflow.can_edit ? `<button class="automation-dropdown-item" type="button" data-automation-workflow-share="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg> 设置分享</button>` : ''}
+                                        ${recentRun ? `<button class="automation-dropdown-item" type="button" data-workflow-recent="${agentEscapeAttr(workflow.id)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> 最近结果 (${agentEscape(recentStatusText)})</button>` : ''}
+                                    </div>
+                                </details>
+                            </div>
+                        </td>
                     </tr>`;
     }).join('')}</tbody>
             </table>
         </div>
     ` : '<div class="automation-empty-state"><strong>暂无匹配的工作流</strong><span>新建工作流后，可在这里统一管理版本、发布和计划。</span></div>');
 
+    workflowList.querySelectorAll('[data-workflow-favorite]').forEach(button => button.addEventListener('click', () => experience.toggleFavorite(button.dataset.workflowFavorite)));
+    workflowList.querySelectorAll('[data-workflow-recent]').forEach(button => button.addEventListener('click', () => experience.openRecent(button.dataset.workflowRecent)));
+    workflowList.querySelectorAll('.automation-dropdown-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const details = item.closest('details.automation-dropdown');
+            if (details) details.open = false;
+        });
+    });
+    workflowList.querySelectorAll('.automation-dropdown').forEach(dropdown => {
+        dropdown.addEventListener('toggle', () => {
+            const tr = dropdown.closest('tr');
+            const td = dropdown.closest('td');
+            if (dropdown.open) {
+                tr?.classList.add('is-dropdown-open');
+                td?.classList.add('is-dropdown-open');
+                workflowList.querySelectorAll('.automation-dropdown[open]').forEach(other => {
+                    if (other !== dropdown) other.open = false;
+                });
+                const rect = dropdown.getBoundingClientRect();
+                const spaceBelow = window.innerHeight - rect.bottom;
+                if (spaceBelow < 220 && rect.top > 220) {
+                    dropdown.classList.add('is-dropup');
+                } else {
+                    dropdown.classList.remove('is-dropup');
+                }
+            } else {
+                tr?.classList.remove('is-dropdown-open');
+                td?.classList.remove('is-dropdown-open');
+                dropdown.classList.remove('is-dropup');
+            }
+        });
+    });
+    if (!workflowList.dataset.dropdownBound) {
+        workflowList.dataset.dropdownBound = 'true';
+        document.addEventListener('click', event => {
+            if (!event.target.closest('.automation-dropdown')) {
+                workflowList.querySelectorAll('.automation-dropdown[open]').forEach(d => { d.open = false; });
+            }
+        });
+    }
     const schedules = agentSchedulesCache.filter(schedule => {
         const config = automationScheduleConfig(schedule);
         const workflow = agentWorkflowsCache.find(item => String(item.id) === String(config.workflowId || config.workflow_id || ''));
@@ -217,8 +303,17 @@ function showAutomationAssetCenter(options = {}) {
     agentWorkflowReadOnly = false;
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
-    document.getElementById('automation-assets-view')?.classList.remove('hidden');
-    document.getElementById('automation-editor-view')?.classList.add('hidden');
+    const assetsView = document.getElementById('automation-assets-view');
+    const editorView = document.getElementById('automation-editor-view');
+    if (assetsView) {
+        assetsView.classList.remove('hidden');
+        assetsView.hidden = false;
+    }
+    if (editorView) {
+        editorView.classList.add('hidden');
+        editorView.hidden = true;
+    }
+    window.Pivot.moduleApi('agent.workflowExperience')?.closed?.();
     document.getElementById('automation-new-workflow-btn')?.classList.toggle('hidden', activeAutomationTab !== 'workflows');
     document.getElementById('automation-refresh-btn')?.classList.remove('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.add('hidden');
@@ -227,7 +322,7 @@ function showAutomationAssetCenter(options = {}) {
     document.getElementById('agent-workflow-readonly-run-btn')?.classList.add('hidden');
     document.getElementById('agent-dag-back-btn')?.classList.add('hidden');
     document.getElementById('agent-workflow-management-menu')?.classList.remove('hidden');
-    document.getElementById('automation-editor-view')?.classList.remove('is-readonly');
+    editorView?.classList.remove('is-readonly');
     const title = document.getElementById('automation-workspace-title');
     const description = document.getElementById('automation-workspace-description');
     if (title) title.textContent = '自动化';
@@ -236,10 +331,19 @@ function showAutomationAssetCenter(options = {}) {
 }
 
 function showAutomationWorkflowEditor(workflowId = '', options = {}) {
+    window.Pivot.moduleApi('agent.workflowResults')?.stop?.();
     agentWorkflowReadOnly = Boolean(options.readOnly && workflowId);
     window.Pivot.legacy.syncAutomationPrimaryTabs?.('workflows');
-    document.getElementById('automation-assets-view')?.classList.add('hidden');
-    document.getElementById('automation-editor-view')?.classList.remove('hidden');
+    const assetsView = document.getElementById('automation-assets-view');
+    const editorView = document.getElementById('automation-editor-view');
+    if (assetsView) {
+        assetsView.classList.add('hidden');
+        assetsView.hidden = true;
+    }
+    if (editorView) {
+        editorView.classList.remove('hidden');
+        editorView.hidden = false;
+    }
     document.getElementById('automation-new-workflow-btn')?.classList.add('hidden');
     document.getElementById('automation-refresh-btn')?.classList.add('hidden');
     document.getElementById('agent-dag-save-btn')?.classList.toggle('hidden', agentWorkflowReadOnly);
@@ -261,6 +365,7 @@ function showAutomationWorkflowEditor(workflowId = '', options = {}) {
     mountAgentDagEditor();
     window.Pivot.legacy.refreshAgentDagEditor?.();
     updateAgentWorkflowRunUi();
+    window.Pivot.moduleApi('agent.workflowExperience')?.opened?.();
 }
 
 async function openAgentDagWorkbench(options = {}) {
@@ -310,6 +415,7 @@ async function openAgentDagWorkbench(options = {}) {
 window.Pivot.legacy.closeAgentDagWorkbench = async function() {
     const confirmed = await confirmAgentWorkflowDiscard('关闭工作流编排会放弃当前画布中尚未保存的修改，确定继续吗？');
     if (!confirmed) return;
+    window.Pivot.moduleApi('agent.workflowExperience')?.closed?.();
     closeAgentDagJsonModal();
     closeAgentDagNodeDrawer();
     window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
@@ -359,7 +465,7 @@ window.Pivot.legacy.bindAgentDagWorkbench = function() {
     const newWorkflowBtn = document.getElementById('automation-new-workflow-btn');
     if (newWorkflowBtn && newWorkflowBtn.dataset.boundAutomationNew !== '1') {
         newWorkflowBtn.dataset.boundAutomationNew = '1';
-        newWorkflowBtn.addEventListener('click', () => showAutomationWorkflowEditor());
+        newWorkflowBtn.addEventListener('click', () => window.Pivot.moduleApi('agent.workflowExperience')?.start?.() || showAutomationWorkflowEditor());
     }
     const newScheduleBtn = document.getElementById('automation-new-schedule-btn');
     if (newScheduleBtn && newScheduleBtn.dataset.boundAutomationNewSchedule !== '1') {

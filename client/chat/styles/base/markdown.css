@@ -203,6 +203,7 @@
 .message-stats {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     flex: 0 1 auto;
     min-width: 0;
     max-width: 100%;
@@ -211,7 +212,7 @@
     border: 1px solid rgba(148, 163, 184, 0.12);
     border-radius: 999px;
     background: rgba(15, 23, 42, 0.025);
-    color: #64748b;
+    color: var(--text-muted);
     font-size: 0.66rem;
     font-weight: 500;
     line-height: 1.2;
@@ -228,6 +229,12 @@
 .message-stats .stat-model {
     flex: 0 1 auto;
     max-width: min(180px, 35vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.message-stats .stat-model span {
+    display: block;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -309,6 +316,9 @@
     color: var(--primary);
     font-weight: 700;
 }
+.message.user .message-content li::marker {
+    color: inherit;
+}
 
 /* 任务列表 (Task Lists) */
 .message-content ul li input[type="checkbox"] {
@@ -317,7 +327,8 @@
     cursor: default;
     vertical-align: middle;
 }
-.message-content ul li:has(input[type="checkbox"]) {
+.message-content ul li:has(> input[type="checkbox"]),
+.message-content ul li:has(> p > input[type="checkbox"]) {
     list-style-type: none;
     margin-left: -18px;
     padding-left: 0;
@@ -365,6 +376,7 @@
     border-radius: 4px; 
     font-family: "Fira Code", "Cascadia Code", Consolas, monospace;
     font-size: 0.92em;
+    font-style: normal;
     border: 1px solid rgba(15, 23, 42, 0.08);
 }
 .message.user .message-content :not(pre) > code {
@@ -393,14 +405,16 @@
     background: #0b1220;
     border: 1px solid rgba(100, 116, 139, 0.32);
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+    font-style: normal;
 }
 .code-block .code-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 6px 12px;
     min-height: 38px;
-    padding: 0 12px;
+    padding: 6px 12px;
     background: #1e293b;
     border-bottom: 1px solid rgba(148, 163, 184, 0.15);
 }
@@ -408,6 +422,10 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    flex-wrap: wrap;
+    max-width: 100%;
 }
 .code-language {
     color: #94a3b8;
@@ -417,11 +435,15 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 .code-language::before {
     content: "";
     width: 6px;
     height: 6px;
+    flex: 0 0 6px;
     background: #10b981;
     border-radius: 50%;
     box-shadow: 0 0 8px #10b981;
@@ -441,6 +463,8 @@
     font-weight: 600;
     cursor: pointer;
     transition: 0.2s;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 .code-copy-btn:hover,
 .code-save-local-btn:hover {
@@ -472,6 +496,7 @@
     font-size: 0.82rem;
     line-height: 1.6;
     color: #e2e8f0;
+    font-style: normal;
 }
 .code-block-wrap pre {
     overflow-x: hidden;
@@ -493,6 +518,11 @@
     text-align: center;
     border: 1px solid rgba(16, 185, 129, 0.08);
 }
+.math-block > .katex-display {
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
+}
 
 /* Markdown 表格包装器 (处理滚动和外边框) */
 .table-wrapper {
@@ -505,7 +535,7 @@
     border-radius: 8px;
     border: 1px solid var(--border);
     box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-    background: white;
+    background: var(--surface);
 }
 
 /* Markdown 表格样式 (现代网格风格) */
@@ -516,9 +546,10 @@
     margin: 0;
     font-size: 0.84rem; 
     table-layout: auto;
+    color: var(--text-main);
 }
 .message-content th { 
-    background: #f8fafc; 
+    background: var(--bg-side);
     color: var(--text-main); 
     font-weight: 700; 
     text-align: left;
@@ -528,7 +559,12 @@
     padding: 12px 16px;
     border-right: 1px solid rgba(148, 163, 184, 0.12);
     border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    max-width: min(32rem, 70vw);
+    overflow-wrap: anywhere;
+    vertical-align: top;
 }
+.message-content :is(th, td)[align="center"] { text-align: center; }
+.message-content :is(th, td)[align="right"] { text-align: right; }
 .message-content th:last-child, .message-content td:last-child {
     border-right: none;
 }
@@ -536,13 +572,22 @@
     border-bottom: none;
 }
 .message-content tr:nth-child(even) { 
-    background: #fcfdfe; 
+    background: var(--bg-side);
 }
 .message-content tr:hover { 
     background: rgba(16, 185, 129, 0.03); 
 }
 .message-content tr td code {
     background: rgba(15, 23, 42, 0.04);
+}
+.message.user .message-content table :not(pre) > code {
+    color: var(--text-main);
+    background: var(--bg-side);
+    border-color: var(--border);
+}
+.message.user .message-content table a {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
 }
 .message.user pre { background: rgba(255,255,255,0.2); }
 
@@ -647,7 +692,7 @@
 .thought-block .thought-summary { 
     padding: 9px 12px;
     cursor: pointer;
-    color: #6366f1;
+    color: var(--text-main);
     font-weight: 600;
     list-style: none;
     display: flex;
@@ -740,7 +785,7 @@
 
 .thought-block .thought-content { 
     padding: 0 12px;
-    color: #5b5e6e;
+    color: var(--text-muted);
     border-top: 1px dashed transparent; 
     font-style: italic;
     line-height: 1.6;
@@ -755,3 +800,32 @@
 }
 .thought-block .thought-content p:first-child { margin-top: 0; }
 .thought-block .thought-content p:last-child { margin-bottom: 0; }
+
+/* 窄屏和触屏无法可靠悬浮，消息操作应在气泡内可见且可点击。 */
+@media (max-width: 720px), (hover: none) {
+    .message.assistant .message-actions,
+    .message.user .message-actions {
+        position: static;
+        margin: 8px 0 0;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message.assistant .message-content,
+    .thought-block.thinking,
+    .thought-block.thinking .thought-summary::before {
+        animation: none;
+    }
+    .message-content,
+    .thought-block,
+    .thought-block .thought-content-wrapper,
+    .thought-block .thought-content,
+    .thought-block .thought-summary,
+    .thought-block .thought-summary::after {
+        transition: none;
+    }
+}

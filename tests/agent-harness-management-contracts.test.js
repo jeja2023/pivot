@@ -157,7 +157,8 @@ test('受管生命周期 Hook 包提供管理员可见的签名状态与独立�
 });
 
 test('已批准但仍排队的工具授权可被安全撤销', () => {
-    const routes = read('server/routes/agents.js');
+    const routes = read('server/routes/agent-run-controls.js');
+    assert.match(read('server/routes/agents.js'), /registerAgentRunControlRoutes\(router/);
     const revocation = read('server/services/agent-runtime/approval-revocation.js');
     const detail = read('client/chat/agent-run-detail.js');
     const actions = read('client/chat/agent-run-actions.js');

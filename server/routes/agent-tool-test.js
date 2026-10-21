@@ -20,7 +20,7 @@ function registerAgentToolTestRoute({ router, authMiddleware, logAction }) {
             const states = new Map(Array.isArray(rawContext.states) ? rawContext.states : (rawContext.states && typeof rawContext.states === 'object' ? Object.entries(rawContext.states) : []));
             const nodeMap = new Map(Array.isArray(rawContext.nodes) ? rawContext.nodes.map(node => [node.id, node]) : (rawContext.nodes && typeof rawContext.nodes === 'object' ? Object.entries(rawContext.nodes) : []));
             const dagInputs = req.body?.dagInputs && typeof req.body.dagInputs === 'object' ? req.body.dagInputs : (rawContext.inputs || {});
-            resolvedInput = resolveDagNodeInput({ tool: toolName, input }, { goal: String(rawContext.goal || req.body?.dagInputs?.goal || '').trim(), inputs: dagInputs, states, nodeMap });
+            resolvedInput = resolveDagNodeInput({ tool: toolName, input }, { strictReferences: true, goal: String(rawContext.goal || req.body?.dagInputs?.goal || '').trim(), inputs: dagInputs, states, nodeMap });
         }
         const startedAt = Date.now(); let output;
         try {

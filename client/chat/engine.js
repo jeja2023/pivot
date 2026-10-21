@@ -85,6 +85,8 @@ function parseChatAgentStepPayload(value) {
 
 function chatAgentProgressText(detail = {}, status = '') {
     const normalizedStatus = String(status || detail?.run?.status || '').toLowerCase();
+    if (normalizedStatus === 'needs_input') return `连续 Agent 等待补充信息${detail?.run?.error_message ? `：${String(detail.run.error_message).slice(0, 240)}` : '，请补充要求后继续'}`;
+    if (normalizedStatus === 'verifying') return '连续 Agent 正在核验答案和资料来源';
     const metadata = typeof detail?.run?.metadata === 'string'
         ? (() => { try { return JSON.parse(detail.run.metadata); } catch (_) { return {}; } })()
         : (detail?.run?.metadata || {});
@@ -115,8 +117,23 @@ function chatAgentProgressText(detail = {}, status = '') {
     return action ? `${base} · ${action.slice(0, 120)}${action.length > 120 ? '…' : ''}` : base;
 }
 
+function chatAgentResultText(run = {}) {
+    const answer = String(run.final_answer || '').trim();
+    const error = String(run.error_message || '').trim();
+    if (String(run.status).toLowerCase() === 'needs_input') {
+        return [answer, `任务等待补充：${error || '请通过“调整方向”补充资料或要求后继续。'}`].filter(Boolean).join('\n\n');
+    }
+    return answer || (error ? `任务执行失败：${error}` : '任务未生成可用结果。');
+}
+
 function attachChatAgentControls(messageContent, runId, status = '') {
     if (!messageContent || !runId) return;
+    const tasks = window.Pivot.moduleApi('chat.tasks');
+    if (typeof tasks.attach === 'function') {
+        tasks.attach(messageContent, runId, { status });
+        return;
+    }
+    messageContent.dataset.chatAgentRunId = String(runId);
     const actions = messageContent.querySelector('.message-actions');
     if (!actions) return;
     let controls = messageContent.querySelector('.chat-agent-controls');
@@ -161,9 +178,18 @@ function attachChatAgentControls(messageContent, runId, status = '') {
     }
     if (canResume) {
         addButton('继续', 'btn-primary', '从上次执行位置继续任务', async () => {
-            await postChatAgentControl(runId, '/resume');
-            showToast('已创建续跑任务', 'info');
-            window.Pivot.legacy.attachChatAgentRunsForSession?.(currentSessionId);
+            const result = await postChatAgentControl(runId, '/resume');
+            if (result.run?.id && result.run.id !== runId) {
+                unregisterChatAgentStreamingTarget(runId);
+                messageContent.dataset.chatAgentRunId = String(result.run.id);
+            }
+            if (['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted'].includes(result.run?.status)) {
+                showToast('已找到最新任务结果', 'info');
+                await selectSession(currentSessionId);
+                return;
+            }
+            showToast('任务已继续执行', 'info');
+            await window.Pivot.legacy.attachChatAgentRunsForSession?.(currentSessionId);
         });
     }
 }
@@ -177,29 +203,35 @@ function registerChatAgentStreamingTarget(runId, messageContent, sessionId = cur
     });
 }
 
-function unregisterChatAgentStreamingTarget(runId) {
-    chatAgentStreamingTargets.delete(String(runId || '').trim());
+function unregisterChatAgentStreamingTarget(runId, element = null) {
+    const key = String(runId || '').trim();
+    if (element && chatAgentStreamingTargets.get(key)?.element !== element) return;
+    chatAgentStreamingTargets.delete(key);
 }
 
 function handleChatAgentStreamingEvent(payload = {}) {
+    const tasks = window.Pivot.moduleApi('chat.tasks');
+    if (typeof tasks.handleStreaming === 'function') return tasks.handleStreaming(payload);
     const runId = String(payload.runId || '').trim();
     const target = chatAgentStreamingTargets.get(runId);
     if (!target || String(currentSessionId || '') !== target.sessionId) return;
     const step = Number(payload.step || 0);
     const hasTools = Array.isArray(payload.partialToolCalls) && payload.partialToolCalls.length > 0;
     const status = payload.controlMessage || (payload.completed
-        ? (hasTools ? `连续 Agent 第 ${step || 1} 步工具调用已完成` : `连续 Agent 第 ${step || 1} 步规划已完成`)
+        ? (hasTools ? `连续 Agent 第 ${step || 1} 步调用参数已生成，等待实际执行` : `连续 Agent 第 ${step || 1} 步规划已完成`)
         : (hasTools ? `连续 Agent 正在处理第 ${step || 1} 步工具调用` : `连续 Agent 正在生成第 ${step || 1} 步计划`));
     const textBody = target.element?.querySelector?.('.text-body');
     if (textBody) PivotSafeHtml.setHtml(textBody, `<div class="queue-detail">${escapeChatStatusHtml(status)}</div>`);
 }
 
 async function cancelCurrentChatAgent() {
-    const runId = currentAbortController?.pivotAgentRunId;
-    if (runId) {
-        try { await cancelChatAgentRun(runId); } catch (error) { showToast(error.message || '停止连续 Agent 失败', 'error'); }
+    const controller = currentAbortController;
+    // 输入区按钮只停止文字流；持久任务使用消息旁的“停止任务”明确取消。
+    if (controller?.pivotAgentRunId) {
+        controller.pivotSupersededBySend = true;
+        showToast('已停止当前文字生成；需要结束后台工作时，请点击对应任务的“停止任务”。', 'info');
     }
-    currentAbortController?.abort();
+    controller?.abort();
 }
 
 window.Pivot.exposeModule('chat.agentBridge', {
@@ -208,6 +240,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
     openChatAgentRunDetail,
     steerChatAgentRun,
     chatAgentProgressText,
+    chatAgentResultText,
     registerChatAgentStreamingTarget,
     unregisterChatAgentStreamingTarget,
     handleChatAgentStreamingEvent
@@ -217,6 +250,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
     'openChatAgentRunDetail',
     'steerChatAgentRun',
     'chatAgentProgressText',
+    'chatAgentResultText',
     'registerChatAgentStreamingTarget',
     'unregisterChatAgentStreamingTarget',
     'handleChatAgentStreamingEvent'
@@ -448,6 +482,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         });
     };
     const updateAssistantStatus = (message, type = 'queue') => {
+        if (aiMsgEl.dataset.chatAgentTaskManaged === 'true') return;
         if (!textBody) return;
         const cls = type === 'error' ? 'error-detail' : 'queue-detail';
         PivotSafeHtml.setHtml(textBody, `<div class="${cls}">${escapeChatStatusHtml(message)}</div>`);
@@ -635,21 +670,30 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             }
         };
         const trackChatAgentRun = async (runId) => {
+            const tasks = window.Pivot.moduleApi('chat.tasks');
+            if (typeof tasks.attach === 'function') {
+                tasks.attach(aiMsgEl, runId, { sessionId: requestSessionId });
+                return;
+            }
+            aiMsgEl.dataset.chatAgentTracking = 'active';
             const terminalStatuses = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
+            try {
             for (let attempt = 0; attempt < 43200; attempt += 1) {
+                if (!isRequestMessageVisible()) return;
                 try {
                     const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+                    if (!isRequestMessageVisible()) return;
                     if (!response.ok) throw new Error(`Agent 任务查询失败（${response.status}）`);
                     const detail = await response.json();
+                    if (!isRequestMessageVisible()) return;
                     const run = detail?.run || detail?.data?.run || detail?.data || detail;
                     const status = String(run?.status || '').toLowerCase();
-                    if (terminalStatuses.has(status)) {
+                    if (terminalStatuses.has(status) || status === 'needs_input') {
                         const metadata = typeof run?.metadata === 'string'
                             ? (() => { try { return JSON.parse(run.metadata); } catch (_) { return {}; } })()
                             : (run?.metadata || {});
                         const bridge = metadata?.chatBridge || {};
-                        const answer = String(run?.final_answer
-                            || (run?.error_message ? `任务执行失败：${run.error_message}` : '任务未生成可用结果。')).trim();
+                        const answer = chatAgentResultText(run);
                         if (answer) renderPersistedAssistantContent(answer);
                         if (bridge.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, bridge.messageId);
                         unregisterChatAgentStreamingTarget(runId);
@@ -666,13 +710,15 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                                     modelName: run?.model_name || assistantModelName,
                                     costTime: elapsed,
                                     outputTokens: run?.output_tokens,
+                                    inputTokens: run?.input_tokens,
+                                    totalTokens: run?.total_tokens,
                                     status
                                 });
                             }
                             window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                             window.Pivot.legacy.scrollMessagesToBottom?.();
                         } else {
-                            showToast('原会话的 Agent 任务已完成，可切回查看。', 'info');
+                            showToast(status === 'needs_input' ? '原会话的 Agent 任务需要补充信息，可切回查看。' : '原会话的 Agent 任务已完成，可切回查看。', 'info');
                         }
                         if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
                         return;
@@ -683,9 +729,13 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                         attachChatAgentControls(aiMsgEl, runId, status);
                     }
                 } catch (error) {
-                    if (isViewingRequestSession()) updateAssistantStatus('连续 Agent 仍在后台运行，暂时无法读取最新状态');
+                    if (isViewingRequestSession()) updateAssistantStatus('暂时无法确认任务最新状态，正在重新连接');
                 }
                 await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            } finally {
+                delete aiMsgEl.dataset.chatAgentTracking;
+                unregisterChatAgentStreamingTarget(runId, aiMsgEl);
             }
         };
         const sseParser = createBrowserSseParser({

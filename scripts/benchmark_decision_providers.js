@@ -7,7 +7,7 @@ const { queryOne } = require('../server/db/client');
 const { getRunnableModelForUserAsync } = require('../server/services/models');
 const { callModelText } = require('../server/services/agent-model');
 const { benchmarkDecisionProviders } = require('../server/services/decision-benchmark');
-const { createHttpDecisionProvider, createLinearDecisionProvider, createStructuredModelDecisionProvider } = require('../server/services/decision-provider');
+const { createLinearDecisionProvider, createStructuredModelDecisionProvider } = require('../server/services/decision-provider');
 const { loadLocalLinearDecisionModel } = require('../server/services/decision-light-model');
 const { getDecisionRuntimeConfig } = require('../server/services/decision-runtime');
 const { loadReviewedDecisionEvaluationCases } = require('../server/services/decision-evaluation-reviews');
@@ -66,7 +66,10 @@ async function main() {
     const cases = reviewedSetVersion
         ? await loadReviewedDecisionEvaluationCases(reviewedSetVersion)
         : verifiedCases(evaluationSet);
-    const requested = new Set(arg('--providers', 'laya,light,qwen').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
+    const requested = new Set(arg('--providers', 'light,qwen').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
+    const supported = new Set(['existing-router', 'baseline', 'light', 'qwen']);
+    const unknown = [...requested].filter(provider => !supported.has(provider));
+    if (unknown.length) throw new Error('不支持的基准提供器：' + unknown.join(', '));
     const config = getDecisionRuntimeConfig(process.env);
     const providers = [];
     if (requested.has('existing-router') || requested.has('baseline')) {
@@ -80,15 +83,6 @@ async function main() {
             modelFile: arg('--light-model-file', config.light.modelFile)
         });
         providers.push(createLinearDecisionProvider({ id: 'light-linear', version: model.modelVersion, model, weight: config.light.weight }));
-    }
-    if (requested.has('laya')) {
-        const url = arg('--laya-url', config.laya.url);
-        if (!url) throw new Error('Laya 基准需要 --laya-url 或 PIVOT_LAYA_DECISION_URL。');
-        providers.push(createHttpDecisionProvider({
-            id: 'laya', version: arg('--laya-version', config.laya.version), url,
-            timeoutMs: Number.parseInt(arg('--laya-timeout-ms', config.laya.timeoutMs), 10) || config.laya.timeoutMs,
-            weight: config.laya.weight
-        }));
     }
     if (requested.has('qwen')) providers.push(await createQwenProvider(arg('--qwen-model'), arg('--qwen-user-id'), config.qwen.weight));
     if (!providers.length) throw new Error('没有可执行的基准提供器。');

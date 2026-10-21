@@ -640,7 +640,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/apps-workbench-ocr-review-views.js', '/chat/apps-workbench-ocr-actions.js', '/chat/apps-workbench-ocr.js', '/chat/apps-workbench-pdf-tools.js', '/chat/apps-workbench-presentations-collab.js', '/chat/apps-workbench-presentations-templates.js', '/chat/apps-workbench-presentations-presenter.js', '/chat/apps-workbench-presentations.js'
     ],
     agent: [
-        '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
+        '/chat/dag-definition.js', '/chat/dag-editor-history.js', '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
         '/chat/dag-toolbar-tools.js', '/chat/dag-toolbar-db.js', '/chat/dag-toolbar.js', '/chat/dag-toolbar-field-overrides.js',
         '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
         '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-report-assist.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-readiness.js', '/chat/dag-empty-canvas.js', '/chat/dag-inspector-special-fields.js', '/chat/dag-inspector-testing.js', '/chat/dag-inspector.js',
@@ -651,7 +651,9 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
         '/chat/agent-workflow-editor.js', '/chat/agent-workflow-core.js', '/chat/agent-workflow-runners.js', '/chat/agent-workflows.js',
         '/chat/agent-templates.js', '/chat/agent-schedules.js', '/chat/agent-workflow-schedules.js', '/chat/agent-artifacts.js',
-        '/chat/agent-evaluations.js'
+        '/chat/agent-evaluations.js', '/chat/workflow-product-bridge.js', '/chat/workflow-product-templates.js',
+        '/chat/workflow-draft-store.js', '/chat/workflow-product-data-fields.js', '/chat/workflow-product-results.js', '/chat/workflow-product-run-form.js',
+        '/chat/workflow-product-release.js', '/chat/workflow-product-workspace.js', '/chat/workflow-product-authoring.js'
     ],
     knowledge: [
         '/chat/rag-graph-layout.js', '/chat/rag-graph-render.js', '/chat/rag-graph-ui.js',

@@ -436,6 +436,9 @@ function createMarkdownRenderSandbox() {
     });
     if (!sandbox.marked) fail('marked vendor did not expose a global renderer in the chat asset sandbox');
 
+    vm.runInContext(fs.readFileSync(path.join(chatDir, 'render-markdown-emphasis.js'), 'utf8'), context, {
+        filename: 'client/chat/render-markdown-emphasis.js'
+    });
     vm.runInContext(fs.readFileSync(path.join(chatDir, 'render.js'), 'utf8'), context, {
         filename: 'client/chat/render.js'
     });

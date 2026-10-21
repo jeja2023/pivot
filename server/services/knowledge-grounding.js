@@ -259,6 +259,7 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
 }
 
 module.exports = {
+    extractKnowledgeSources,
     validateKnowledgeAnswer,
     verifyKnowledgeAnswerSemantics,
     verifyKnowledgeAnswerWithRepair

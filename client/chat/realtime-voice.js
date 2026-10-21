@@ -360,7 +360,7 @@
         const start = { id: '', cancelled: false, terminalEventSent: false, promise: null };
         voiceStart = start;
         setButtonState(false, { starting: true });
-        setStatus('正在检查麦克风、识别与本地朗读…', 'starting');
+        setStatus('正在检查麦克风、语音服务与本地朗读…', 'starting');
         start.promise = (async () => {
             let stream;
             try {
@@ -370,12 +370,10 @@
             if (start.cancelled) return null;
             if (!localVoice) throw Object.assign(new Error(), { voiceMessage: '当前浏览器没有可用的本地朗读声音，实时语音无法启动；可使用语音输入。' });
             stream = recognition.usesDesktopInput ? null : await getUserMedia({ audio: true });
+            await platform.enhanceStream?.(stream);
             if (start.cancelled) { stopTracks(stream); return null; }
             // 服务器识别直接使用该轨道；默认采集成功后再尝试回声消除，不兼容时沿用原轨道。
-            if (recognition.usesServerInput) {
-                try { await stream?.getAudioTracks?.()[0]?.applyConstraints?.({ echoCancellation: true, noiseSuppression: true }); } catch (_) {}
-                if (start.cancelled) { stopTracks(stream); return null; }
-            }
+            if (start.cancelled) { stopTracks(stream); return null; }
             recognition.attachStream?.(stream);
             if (!currentSessionId) {
                 const created = await window.Pivot?.moduleApi?.('chat.sessions')?.createSession?.('临时语音会话');
@@ -395,7 +393,7 @@
             const response = await apiFetch(`${API_BASE}/chat/voice-sessions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId: chatSessionId, transport: 'browser_native', language: recognition.lang,
-                    inputProvider: recognition.usesServerInput ? 'server_local_speech' : recognition.usesDesktopInput ? 'desktop_local_speech' : 'browser_speech_recognition' })
+                    inputProvider: recognition.inputProvider || (recognition.usesServerInput ? 'server_local_speech' : recognition.usesDesktopInput ? 'desktop_local_speech' : 'browser_speech_recognition') })
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || '无法启动实时语音会话。');
@@ -420,6 +418,13 @@
                     const transcript = String(event.results[index]?.[0]?.transcript || '').trim();
                     const exitCommand = event.results[index].isFinal && voiceText().isExitCommand(transcript);
                     if (!exitCommand && isPlaybackEcho(session, transcript)) continue;
+                    if (event.results[index].requiresReview) {
+                        const input = document.getElementById('user-input');
+                        if (input) { input.value = voiceText().joinTranscript(input.value, transcript); input.dispatchEvent(new Event('input', { bubbles: true })); }
+                        showToast('这段语音识别存疑，已保留在输入框，请核对后发送。', 'warning');
+                        release({ event: 'paused' });
+                        return;
+                    }
                     if (event.results[index].isFinal) finalText = voiceText().joinTranscript(finalText, transcript);
                     else interimText = voiceText().joinTranscript(interimText, transcript);
                 }
@@ -442,7 +447,7 @@
             recognition.onend = () => { if (voice === session && session.active) setTimeout(() => startRecognition(session), 250); };
             session.heartbeatTimer = setInterval(() => { if (voice === session && session.active) void recordEvent(session.id, 'heartbeat').catch(() => {}); }, VOICE_HEARTBEAT_MS);
             await new Promise((resolve, reject) => {
-                const timer = setTimeout(() => reject(Object.assign(new Error(), { voiceMessage: '本地识别服务未响应，实时语音未启动。请检查语音包和麦克风。' })), 8000);
+                const timer = setTimeout(() => reject(Object.assign(new Error(), { voiceMessage: '语音识别服务未响应，实时语音未启动。请检查服务和麦克风。' })), 10000);
                 const finish = error => { clearTimeout(timer); session.rejectStart = null; session.cancelStart = null; error ? reject(error) : resolve(); };
                 session.rejectStart = finish;
                 session.cancelStart = () => finish(Object.assign(new Error(), { name: 'AbortError' }));

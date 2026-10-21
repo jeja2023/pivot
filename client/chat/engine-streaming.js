@@ -467,7 +467,7 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     const tps = safeTokenCount > 0 ? (safeTokenCount / elapsed).toFixed(1) : 0;
     const modelName = String(statsEl?.dataset?.modelName || '').trim();
     const modelHtml = modelName
-        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}${escapeChatStatusHtml(modelName)}</span>`
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(modelName)}">${ICONS.model}<span>${escapeChatStatusHtml(modelName)}</span></span>`
         : '';
     PivotSafeHtml.setHtml(statsEl, `
         ${modelHtml}
@@ -483,7 +483,7 @@ function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, toke
     if (normalizedModelName) statsEl.dataset.modelName = normalizedModelName;
     const currentModelName = String(statsEl.dataset.modelName || '').trim();
     const modelHtml = currentModelName
-        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}${escapeChatStatusHtml(currentModelName)}</span>`
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}<span>${escapeChatStatusHtml(currentModelName)}</span></span>`
         : '';
     const safeCostTime = Number.isFinite(Number(costTime)) ? Number(costTime) : 0;
     const safeTokenCount = Number.isFinite(Number(tokenCount)) ? Math.max(0, Math.round(Number(tokenCount))) : 0;
@@ -499,18 +499,21 @@ function renderFinalAssistantStats(statsEl, { modelName = '', costTime = 0, toke
     footerEl?.classList.remove('hover-time-only');
 }
 
-function renderAgentTaskStats(statsEl, { modelName = '', costTime = 0, outputTokens = 0, status = '' } = {}) {
+function renderAgentTaskStats(statsEl, { modelName = '', costTime = 0, outputTokens = 0, inputTokens = 0, totalTokens = 0, status = '' } = {}) {
     if (!statsEl) return;
     const normalizedModelName = String(modelName || statsEl.dataset.modelName || '').trim();
     if (normalizedModelName) statsEl.dataset.modelName = normalizedModelName;
     const currentModelName = String(statsEl.dataset.modelName || '').trim();
     const modelHtml = currentModelName
-        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}${escapeChatStatusHtml(currentModelName)}</span>`
+        ? `<span class="stat-item stat-model" title="模型：${escapeAttrValue(currentModelName)}">${ICONS.model}<span>${escapeChatStatusHtml(currentModelName)}</span></span>`
         : '';
     const safeCostTime = Number.isFinite(Number(costTime)) ? Math.max(Number(costTime), 0) : 0;
     const safeOutputTokens = Number.isFinite(Number(outputTokens)) ? Math.max(Math.round(Number(outputTokens)), 0) : 0;
     const isTimeout = String(status || '').toLowerCase() === 'completed_with_errors';
-    const outputHtml = safeOutputTokens > 0
+    const safeTotalTokens = Math.max(Number(totalTokens) || 0, 0);
+    const outputHtml = safeTotalTokens > 0
+        ? `<span class="stat-item" title="累计输入 ${Math.max(Number(inputTokens) || 0, 0)} / 输出 ${safeOutputTokens} Tokens">累计模型用量 ${safeTotalTokens} Tokens</span>`
+        : safeOutputTokens > 0
         ? `<span class="stat-item">累计模型输出 ${safeOutputTokens} Tokens</span>`
         : `<span class="stat-item">${isTimeout ? '模型未返回可计量输出' : '连续任务'}</span>`;
     PivotSafeHtml.setHtml(statsEl, `

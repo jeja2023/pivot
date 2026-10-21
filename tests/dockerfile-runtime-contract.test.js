@@ -9,6 +9,33 @@ const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml')
 const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
 const veraPdfInstall = fs.readFileSync(path.join(__dirname, '..', 'docker', 'verapdf-auto-install.xml'), 'utf8');
 
+test('标准主镜像包含 CPU 双遍语音运行时，模型只读挂载且只暴露应用端口', () => {
+    assert.match(dockerfile, /FROM python-base AS speech-engine/);
+    assert.match(dockerfile, /COPY artifacts\/speech-wheelhouse\/ \/wheels\//);
+    assert.match(dockerfile, /-r requirements\.txt -c requirements-cpu\.txt/);
+    assert.match(dockerfile, /assert torch\.version\.cuda is None/);
+    assert.match(dockerfile, /COPY --from=speech-engine/);
+    assert.match(dockerfile, /PIVOT_VOICE_PROVIDER=embedded/);
+    assert.match(compose, /\.\/data\/speech-models:\/models:ro/);
+    assert.doesNotMatch(compose, /8000:8000/);
+});
+
+test('项目 Python 基线在主镜像、语音镜像和离线依赖准备中一致，并保留系统解释器', () => {
+    const baseline = fs.readFileSync(path.join(__dirname, '..', '.python-version'), 'utf8').trim();
+    const speechDockerfile = fs.readFileSync(path.join(__dirname, '../docker/speech-service/Dockerfile'), 'utf8');
+    const prepare = fs.readFileSync(path.join(__dirname, '../docker/speech-service/prepare_assets.py'), 'utf8');
+    assert.equal(baseline, '3.12');
+    const mainImage = dockerfile.match(/^ARG PYTHON_IMAGE=(.+)$/m)?.[1];
+    const speechImage = speechDockerfile.match(/^ARG SPEECH_PYTHON_IMAGE=(.+)$/m)?.[1];
+    assert.ok(mainImage?.endsWith(`python:${baseline}-slim-bookworm`));
+    assert.ok(speechImage?.endsWith(`python:${baseline}-slim-bookworm`));
+    assert.match(dockerfile, /FROM python-base AS speech-recognition/);
+    assert.match(dockerfile, /FROM python-base AS runtime/);
+    assert.match(dockerfile, /PIVOT_AGENT_PYTHON=\/usr\/local\/bin\/python3\.12/);
+    assert.match(prepare, /sys\.version_info\[:2\] != \(3, 12\)/);
+    assert.doesNotMatch(dockerfile, /ln\s+.*\/usr\/bin\/python/);
+});
+
 test('Docker 镜像构建时安装固定版本离线中文识别，运行时无需下载模型', () => {
     assert.match(dockerfile, /AS speech-recognition/);
     assert.match(dockerfile, /COPY --from=speech-recognition --chown=node:node \/opt\/pivot-speech \/opt\/pivot-speech/);

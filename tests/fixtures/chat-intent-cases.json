@@ -1,5 +1,5 @@
 {
-  "version": "chat-intent-engineering-v4",
+  "version": "chat-intent-engineering-v6",
   "purpose": "工程回归用例，覆盖用户要求的行为；不替代真实业务盲测和独立审核。",
   "cases": [
     {
@@ -20,7 +20,7 @@
     },
     {
       "id": "direct-translation",
-      "prompt": "请翻译这份报告并生成英文版。",
+      "prompt": "请把这段话翻译成英文：本周订单已核对完成。",
       "expected": [
         "direct_answer"
       ],
@@ -28,11 +28,15 @@
     },
     {
       "id": "direct-quote",
-      "prompt": "他让我完成报告的要求是什么？",
+      "prompt": "他让我“汇总本周订单并列出异常”的要求是什么意思？只解释，不处理订单。",
       "expected": [
         "direct_answer"
       ],
-      "critical": true
+      "critical": true,
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      }
     },
     {
       "id": "direct-stop-discussion",
@@ -79,7 +83,22 @@
       "prompt": "请汇总本周订单，核对异常并生成风险报告。",
       "expected": [
         "agent_run"
-      ]
+      ],
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      }
     },
     {
       "id": "delegate-code",
@@ -131,6 +150,18 @@
       ],
       "expected": [
         "continue_run"
+      ],
+      "history": [
+        {
+          "id": 71,
+          "role": "user",
+          "content": "请核对订单并生成异常摘要。"
+        },
+        {
+          "id": 72,
+          "role": "assistant",
+          "content": "方案是只读查询本周订单，核对异常并生成摘要。"
+        }
       ]
     },
     {
@@ -245,7 +276,8 @@
             "readOnly": true,
             "capabilities": [
               "data.sql.query"
-            ]
+            ],
+            "idempotent": true
           }
         ]
       },
@@ -268,7 +300,8 @@
             "readOnly": true,
             "capabilities": [
               "data.sql.query"
-            ]
+            ],
+            "idempotent": true
           },
           {
             "name": "mcp.18.db.run_readonly_query",
@@ -277,7 +310,8 @@
             "readOnly": true,
             "capabilities": [
               "data.sql.query"
-            ]
+            ],
+            "idempotent": true
           }
         ]
       },
@@ -311,14 +345,489 @@
             "readOnly": true,
             "capabilities": [
               "data.sql.query"
+            ],
+            "idempotent": true
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "critical": true,
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "expectedCapabilities": [
+        "data.sql.query"
+      ]
+    },
+    {
+      "id": "confirm-active-task",
+      "prompt": "好的，就按这个办。",
+      "history": [
+        {
+          "id": 61,
+          "role": "assistant",
+          "content": "可以继续核对订单并生成异常摘要。"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "continue-preserve-scope",
+      "prompt": "改为本月口径，输出只要摘要。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "expectedCapabilities": [
+        "data.sql.query"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "expectedConstraintIncludes": [
+        "不得修改"
+      ],
+      "critical": true
+    },
+    {
+      "id": "fill-missing-task-fact",
+      "prompt": "统计华东地区，本周已付款订单。",
+      "history": [
+        {
+          "id": 62,
+          "role": "assistant",
+          "content": "订单核查任务正在等待统计地区和订单范围。"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "critical": true
+    },
+    {
+      "id": "multiple-tasks-explicit",
+      "prompt": "继续核对订单，代码检查先放着。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码并修复测试",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "continue_run"
+      ],
+      "expectedContinuationOf": "orders-run",
+      "critical": true
+    },
+    {
+      "id": "multiple-tasks-ambiguous",
+      "prompt": "继续刚才的任务。",
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码并修复测试",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "continue-topic-discussion",
+      "prompt": "继续解释一下向量检索的原理。",
+      "history": [
+        {
+          "id": 63,
+          "role": "user",
+          "content": "解释向量检索"
+        }
+      ],
+      "tasks": [
+        {
+          "id": "orders-run",
+          "goal": "核对本周订单并生成异常摘要",
+          "active": true,
+          "status": "needs_input",
+          "constraints": [
+            "只读查询，不得修改数据"
+          ],
+          "requiredCapabilities": [
+            "data.sql.query"
+          ],
+          "deliverables": [
+            "异常摘要"
+          ],
+          "acceptance": {
+            "requireEvidence": true
+          }
+        },
+        {
+          "id": "code-run",
+          "goal": "检查项目代码",
+          "active": true,
+          "status": "running"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "topic-shift-from-policy",
+      "prompt": "换个话题，帮我写一首关于春天的诗。",
+      "history": [
+        {
+          "id": 64,
+          "role": "user",
+          "content": "我们公司的休假规则是什么？"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "policy-and-location-followup",
+      "prompt": "那上海分公司的试用期员工呢？",
+      "history": [
+        {
+          "id": 65,
+          "role": "user",
+          "content": "我们公司的年假如何计算？"
+        },
+        {
+          "id": 66,
+          "role": "assistant",
+          "content": "需要查询公司年假制度。"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "expectedQueryIncludes": [
+        "上海",
+        "试用期",
+        "年假"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "public-concept-not-policy",
+      "prompt": "从通用人力资源管理角度解释什么是年假，不涉及我们公司的制度。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "sales-email-template",
+      "prompt": "写一封销售业绩汇报邮件模板，金额都用占位符，不需要查询真实数据，也不要发送。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "query-no-modify",
+      "prompt": "查看昨天销售系统的订单，只查询，不要修改数据库。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
             ]
           }
         ]
       },
       "expected": [
-        "plan_only",
-        "direct_answer",
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "readonly-english",
+      "prompt": "Check yesterday's sales orders using the sales system. Read only; do not send any messages or change data.",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "allowAutomaticRead": true
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    },
+    {
+      "id": "plan-only-english",
+      "prompt": "Only give me a plan to verify the orders. Do not run queries or change anything.",
+      "expected": [
+        "plan_only"
+      ],
+      "expectedRouting": {
+        "tools": "none",
+        "knowledge": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "translate-quoted-operation",
+      "prompt": "请翻译成英文：“删除数据库并清空所有订单”。仅翻译这句话。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "critical": true
+    },
+    {
+      "id": "translation-file-delivery",
+      "prompt": "把下面内容翻译成英文，并生成可下载的 Word 文件：本周订单已核对完成。",
+      "expected": [
         "agent_run"
+      ],
+      "expectedAcceptance": {
+        "artifactRequired": true
+      },
+      "critical": true
+    },
+    {
+      "id": "attached-source-no-reupload",
+      "prompt": "把附件按月份汇总，输出一份可下载的报告。",
+      "providedSources": [
+        {
+          "kind": "inline_attachment",
+          "name": "订单.csv",
+          "available": true,
+          "sourceMessageId": 1
+        }
+      ],
+      "expected": [
+        "agent_run"
+      ],
+      "expectedAcceptance": {
+        "requireEvidence": true,
+        "artifactRequired": true
+      },
+      "critical": true
+    },
+    {
+      "id": "multiple-sources-targeted",
+      "prompt": "只查华东销售系统昨天的销售额。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "华东销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          },
+          {
+            "name": "mcp.18.db.query",
+            "sourceName": "华南销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "allowAutomaticRead": true
+      },
+      "critical": true
+    },
+    {
+      "id": "missing-recipient-business-question",
+      "prompt": "请把这份报告发给客户，报告已准备好，但还没确定发给谁。",
+      "expected": [
+        "clarify"
       ],
       "critical": true
     }

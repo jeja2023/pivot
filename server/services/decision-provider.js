@@ -2,8 +2,7 @@
 
 /*
  * 业务动作决策的通用契约接口。
- * Laya 的 Router 负责选择内部语言模型检查点；本模块则仅在已通过
- * Pivot 权限检查的候选动作中进行选择与打分。
+ * 仅在已通过 Pivot 权限检查的候选动作中进行选择与打分。
  */
 const crypto = require('crypto');
 
@@ -313,44 +312,6 @@ function createStructuredModelDecisionProvider({ id = 'qwen', version = '', mode
     };
 }
 
-function createHttpDecisionProvider({ id = 'laya', version = '', url = '', timeoutMs = 1200, headers = {}, weight = 1, fetchFn = globalThis.fetch } = {}) {
-    const endpoint = String(url || '').trim();
-    return {
-        id: safeText(id, 80) || 'laya',
-        version: safeText(version, 128),
-        weight: Math.max(0, Number(weight) || 0),
-        async decide(context, { signal } = {}) {
-            if (!endpoint) throw new Error('provider_not_configured');
-            if (typeof fetchFn !== 'function') throw new Error('fetch_unavailable');
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(new Error('provider_timeout')), Math.max(100, Number(timeoutMs) || 1200));
-            const abortFromCaller = () => controller.abort(signal?.reason || new Error('provider_aborted'));
-            signal?.addEventListener?.('abort', abortFromCaller, { once: true });
-            try {
-                const response = await fetchFn(endpoint, {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json', ...headers },
-                    body: JSON.stringify(buildDecisionProviderContext(context, { includeRoutingText: context?.requestState?.routingText !== undefined })),
-                    signal: controller.signal
-                });
-                if (!response.ok) throw new Error('provider_http_' + response.status);
-                const body = await response.json();
-                const returnedVersion = safeText(body?.providerVersion || body?.modelVersion || '', 128);
-                if (version && returnedVersion && returnedVersion !== safeText(version, 128)) throw new Error('provider_version_mismatch');
-                if (version && !returnedVersion) throw new Error('provider_version_missing');
-                return {
-                    ...body,
-                    providerVersion: body?.providerVersion || body?.modelVersion || version,
-                    metadata: { ...(body?.metadata || {}), model: body?.model || body?.metadata?.model || 'laya' }
-                };
-            } finally {
-                clearTimeout(timer);
-                signal?.removeEventListener?.('abort', abortFromCaller);
-            }
-        }
-    };
-}
-
 async function evaluateDecisionProviders({ providers = [], context = {}, signal = null } = {}) {
     const sanitized = buildDecisionProviderContext(context, { includeRoutingText: context?.includeRoutingText === true });
     const candidates = sanitized.candidates;
@@ -391,7 +352,6 @@ function createDecisionId(prefix = 'decision') {
 
 module.exports = {
     createDecisionId,
-    createHttpDecisionProvider,
     createLinearDecisionProvider,
     createScoreDecisionProvider,
     createStructuredModelDecisionProvider,

@@ -162,7 +162,7 @@ function createDagWizardSpecialFieldControls() {
             setActiveField(control);
         });
     };
-    const normalizedWorkflowInputType = value => ['text', 'number', 'boolean', 'object', 'array'].includes(String(value || ''))
+    const normalizedWorkflowInputType = value => ['text', 'number', 'boolean', 'object', 'array', 'date', 'file'].includes(String(value || ''))
         ? String(value)
         : 'text';
     const defaultEditorForType = (control, type) => control.querySelector(`[data-pivot-dag-input-default-editor="${['object', 'array'].includes(type) ? 'json' : type}"]`);

@@ -31,6 +31,14 @@
         const reason = availability();
         if (reason) throw failure(reason);
         let serverError;
+        if (serverRecognition()?.status) {
+            const policy = await serverRecognition().status();
+            if (policy.serverPreferred) {
+                if (!policy.available) throw failure(policy.reason || '统一语音服务不可用，请联系管理员。');
+                if (!serverRecognition().supported()) throw failure('统一语音识别需要 HTTPS 或受信任的本地地址，请使用部署的安全访问地址后重试。');
+                return serverRecognition().prepare(language());
+            }
+        }
         if (desktopRecognition()?.supported?.()) {
             try { const native = await desktopRecognition().prepare(language()); if (native) return native; }
             catch (error) { serverError = error; }
@@ -63,6 +71,15 @@
         }
         return recognition;
     }
+    async function enhanceStream(stream) {
+        const track = stream?.getAudioTracks?.()[0];
+        if (!track?.applyConstraints) return;
+        let accepted = {};
+        // 先取得默认设备，再逐项尝试可选增强，避免某一驱动不支持时整组参数失效。
+        for (const constraints of [{ echoCancellation: true }, { noiseSuppression: true }, { autoGainControl: true }, { channelCount: 1 }]) {
+            try { await track.applyConstraints({ ...accepted, ...constraints }); accepted = { ...accepted, ...constraints }; } catch (_) { /* 不支持的增强不影响基础采集。 */ }
+        }
+    }
     function errorMessage(error) {
         if (error?.voiceMessage) return error.voiceMessage;
         const detail = [error?.error, error?.name, error?.code, error?.message].filter(Boolean).join(' ').toLowerCase();
@@ -86,7 +103,7 @@
             button.setAttribute('aria-label', message ? `${label}不可用：${message}` : label);
         }
     }
-    window.Pivot?.exposeModule?.('chat.voicePlatform', { availability, errorMessage, language, prepareRecognition, refreshButtons,
+    window.Pivot?.exposeModule?.('chat.voicePlatform', { availability, errorMessage, language, prepareRecognition, enhanceStream, refreshButtons,
         usesDesktopInput: () => desktopRecognition()?.supported?.() === true });
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', refreshButtons, { once: true });
     else refreshButtons();

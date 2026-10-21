@@ -148,6 +148,15 @@ function createAgentRunFactory(deps = {}) {
         const normalizedRunMode = normalizeRunMode(runMode);
         const normalizedRouter = normalizeRouterStrategy(modelRouter);
         const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+        // 新运行必须建立独立的消息和验收关联，不能把父任务的回写标记当作本次结果。
+        if (runMetadata.chatBridge) {
+            runMetadata.chatBridge = { ...runMetadata.chatBridge };
+            delete runMetadata.chatBridge.messageId;
+            delete runMetadata.chatBridge.persistedAt;
+        }
+        delete runMetadata.taskVerification;
+        delete runMetadata.taskTransactionId;
+        delete runMetadata.taskTransactionStatus;
         delete runMetadata.evaluationCandidate;
         // 项目资料包必须由服务端按当前 ACL 解析；请求体不能伪造包名或快照。
         delete runMetadata.projectContextPack;
@@ -225,6 +234,9 @@ function createAgentRunFactory(deps = {}) {
             const requestedWorkflowVersion = workflowVersion || runMetadata.workflowVersion || runMetadata.workflow_version || null;
             if (requestedWorkflowId && requestedWorkflowVersion) {
                 const sourceWorkflow = await resolveAgentWorkflowVersion(requestedWorkflowId, user, requestedWorkflowVersion || 'current');
+                if (sourceWorkflow && runMetadata.workflowExpectedVersionId && Number(sourceWorkflow.version_id) !== Number(runMetadata.workflowExpectedVersionId)) {
+                    throw Object.assign(new Error('发布版本已变化，请重新载入参数并预检。'), { status: 409, code: 'WORKFLOW_RUN_VERSION_CHANGED' });
+                }
                 if (!sourceWorkflow) {
                     const err = new Error('工作流版本不可用。');
                     err.status = 404;

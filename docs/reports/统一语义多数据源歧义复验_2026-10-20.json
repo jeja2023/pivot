@@ -1,0 +1,334 @@
+{
+  "generatedAt": "2026-10-20T02:36:06.729Z",
+  "kind": "synthetic_model_evaluation_with_transport_timing",
+  "modelId": 18,
+  "modelName": "gpt-5.6-sol",
+  "fixtureVersion": "chat-intent-engineering-v6",
+  "fixtureDigest": "546059101c43e7ddcec75a944bff3189c3cb686f22f56bfec36da5762dcd142c",
+  "implementationDigest": "7af837c9f8efed15c2cc94b4ed4004de96eeb8208b1c5e8e10bf94565c29cee9",
+  "timeoutMs": 30000,
+  "businessToolsExecuted": false,
+  "evaluationCases": [
+    {
+      "id": "source-ambiguous",
+      "prompt": "查询昨天的销售额",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.run_readonly_query",
+            "sourceName": "华东销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ],
+            "idempotent": true
+          },
+          {
+            "name": "mcp.18.db.run_readonly_query",
+            "sourceName": "华南销售系统",
+            "description": "查询销售订单",
+            "readOnly": true,
+            "capabilities": [
+              "data.sql.query"
+            ],
+            "idempotent": true
+          }
+        ]
+      },
+      "expected": [
+        "clarify"
+      ],
+      "critical": true
+    },
+    {
+      "id": "multiple-sources-targeted",
+      "prompt": "只查华东销售系统昨天的销售额。",
+      "availability": {
+        "status": "available",
+        "tools": [
+          {
+            "name": "mcp.17.db.query",
+            "sourceName": "华东销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          },
+          {
+            "name": "mcp.18.db.query",
+            "sourceName": "华南销售系统",
+            "description": "只读查询销售订单",
+            "readOnly": true,
+            "idempotent": true,
+            "capabilities": [
+              "data.sql.query"
+            ]
+          }
+        ]
+      },
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "tools": "read_only",
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "allowAutomaticRead": true
+      },
+      "critical": true
+    }
+  ],
+  "results": [
+    {
+      "id": "source-ambiguous",
+      "attempt": 1,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "clarificationPassed": false,
+      "actual": "direct_answer",
+      "question": "暂时无法可靠判断本次任务的处理范围，请稍后重试；你的请求已保留。",
+      "routing": null,
+      "failureCode": "intent_timeout",
+      "reason": "intent_unavailable",
+      "durationMs": 30014,
+      "critical": true,
+      "businessToolsExecuted": false,
+      "timing": {
+        "globalActiveBefore": 0,
+        "globalQueuedBefore": 0,
+        "beforeHttpMs": 9,
+        "httpDurationMs": 30004,
+        "httpErrorCode": "ERR_CANCELED",
+        "httpStatus": null,
+        "responseReceived": false
+      }
+    },
+    {
+      "id": "source-ambiguous",
+      "attempt": 2,
+      "passed": false,
+      "available": false,
+      "actionPassed": false,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "clarificationPassed": false,
+      "actual": "direct_answer",
+      "question": "暂时无法可靠判断本次任务的处理范围，请稍后重试；你的请求已保留。",
+      "routing": null,
+      "failureCode": "intent_timeout",
+      "reason": "intent_unavailable",
+      "durationMs": 30012,
+      "critical": true,
+      "businessToolsExecuted": false,
+      "timing": {
+        "globalActiveBefore": 0,
+        "globalQueuedBefore": 0,
+        "beforeHttpMs": 4,
+        "httpDurationMs": 30008,
+        "httpErrorCode": "ERR_CANCELED",
+        "httpStatus": null,
+        "responseReceived": false
+      }
+    },
+    {
+      "id": "source-ambiguous",
+      "attempt": 3,
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "clarificationPassed": true,
+      "actual": "clarify",
+      "question": "要查询华东销售系统、华南销售系统，还是汇总两个系统的销售额？",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "查询2026年10月19日（Asia/Shanghai）的销售额，业务系统范围待明确。",
+        "requestedCapabilities": [],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "failureCode": "",
+      "reason": "semantic_intent",
+      "durationMs": 10425,
+      "critical": true,
+      "businessToolsExecuted": false,
+      "timing": {
+        "globalActiveBefore": 0,
+        "globalQueuedBefore": 0,
+        "beforeHttpMs": 3,
+        "httpDurationMs": 10366,
+        "httpStatus": 200,
+        "responseReceived": true,
+        "usage": {
+          "prompt_tokens": 5946,
+          "completion_tokens": 441,
+          "total_tokens": 6387,
+          "prompt_tokens_details": {
+            "cached_tokens": 5053
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 200
+          }
+        },
+        "finishReason": "stop"
+      }
+    },
+    {
+      "id": "multiple-sources-targeted",
+      "attempt": 4,
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "clarificationPassed": true,
+      "actual": "direct_answer",
+      "question": "",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "read_only",
+        "retrievalQuery": "仅查询华东销售系统在 Asia/Shanghai 时区下 2026 年 10 月 19 日的销售额，不查询其他系统。",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [
+          "mcp.17.db.query"
+        ],
+        "requireEvidence": true,
+        "allowAutomaticRead": true
+      },
+      "failureCode": "",
+      "reason": "semantic_intent",
+      "durationMs": 14899,
+      "critical": true,
+      "businessToolsExecuted": false,
+      "timing": {
+        "globalActiveBefore": 0,
+        "globalQueuedBefore": 0,
+        "beforeHttpMs": 1,
+        "httpDurationMs": 14895,
+        "httpStatus": 200,
+        "responseReceived": true,
+        "usage": {
+          "prompt_tokens": 5950,
+          "completion_tokens": 396,
+          "total_tokens": 6346,
+          "completion_tokens_details": {
+            "reasoning_tokens": 77
+          }
+        },
+        "finishReason": "stop"
+      }
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "passed": 2,
+    "baselineActionPassed": 0,
+    "criticalFailures": 2,
+    "unavailable": 2,
+    "actionFailures": 2,
+    "routingFailures": 0,
+    "contractFailures": 0,
+    "p50Ms": 14899,
+    "p95Ms": 30014
+  },
+  "initialIndependentProbe": {
+    "result": {
+      "id": "source-ambiguous",
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": null,
+      "actual": "clarify",
+      "routing": {
+        "version": 1,
+        "source": "semantic_intent",
+        "knowledge": "none",
+        "tools": "none",
+        "retrievalQuery": "查询2026年10月19日华东或华南销售系统的销售额",
+        "requestedCapabilities": [
+          "data.sql.query"
+        ],
+        "toolNames": [],
+        "requireEvidence": false,
+        "allowAutomaticRead": false
+      },
+      "passed": true,
+      "available": true,
+      "actionPassed": true,
+      "routingPassed": true,
+      "acceptancePassed": true,
+      "queryPassed": true,
+      "capabilitiesPassed": true,
+      "continuationPassed": true,
+      "constraintsPassed": true,
+      "critical": true,
+      "baseline": "direct_answer",
+      "baselinePassed": false,
+      "durationMs": 5043,
+      "reason": "semantic_intent",
+      "failureCode": "",
+      "acceptance": {
+        "requireEvidence": true,
+        "artifactRequired": false
+      },
+      "continuationOf": null
+    },
+    "summary": {
+      "total": 1,
+      "passed": 1,
+      "baselineActionPassed": 0,
+      "criticalFailures": 0,
+      "unavailable": 0,
+      "actionFailures": 0,
+      "routingFailures": 0,
+      "contractFailures": 0,
+      "p50Ms": 5043,
+      "p95Ms": 5043
+    },
+    "implementationDigest": "7af837c9f8efed15c2cc94b4ed4004de96eeb8208b1c5e8e10bf94565c29cee9"
+  },
+  "finding": {
+    "reproducedSemanticError": false,
+    "intermittentTransportDeadline": true,
+    "deadlineMs": 30000,
+    "originalTimeouts": [
+      30008,
+      30012
+    ],
+    "localQueueEvidence": "Sequential calls in a fresh process; 0 active and 0 queued before each call; 1–9 ms until HTTP request interceptor.",
+    "limitation": "HTTP timing includes network and upstream queue/inference; it cannot identify which upstream phase delayed the response."
+  }
+}

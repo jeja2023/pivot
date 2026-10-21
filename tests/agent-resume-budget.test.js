@@ -9,6 +9,9 @@ const { createAgentRunFactory } = require('../server/services/agent-runtime/run-
 const { createRunLifecycle } = require('../server/services/agent-runtime/run-lifecycle');
 const { ACTIVE_STATUSES, normalizeDagSpec, normalizeToolAllowlist, parseJsonObject } = require('../server/services/agent-validators');
 const { getAgentRunResources, recordAgentRunResourceUsage, reserveChildRunResources } = require('../server/services/agent-run-resources');
+const { resumeWaitingConversationTask } = require('../server/services/chat-task-continuation');
+const { recordAgentModelUsage } = require('../server/services/agent-model');
+const { TaskBudget } = require('../server/services/agent-budget');
 
 const skipWithoutDatabase = { skip: !process.env.DATABASE_URL };
 
@@ -16,6 +19,7 @@ async function fixture(options = {}) {
     const user = await queryOne('SELECT id, username, role, status FROM users ORDER BY id LIMIT 1');
     const model = await queryOne("INSERT INTO models (user_id, name, url, model_name, status) VALUES (?, '续跑预算测试', 'https://example.invalid/v1/chat/completions', 'resume-budget-test', 'active') RETURNING id", [user.id]);
     const ids = [];
+    let enqueued = 0;
     const create = createAgentRunFactory();
     const trackedCreate = async input => { const run = await create(input); ids.push(run.id); return run; };
     const original = await trackedCreate({
@@ -27,13 +31,16 @@ async function fixture(options = {}) {
     await execute("UPDATE agent_runs SET status = ?, total_tokens = 312587 WHERE id = ?", [options.runMode === 'dag' ? 'error' : 'needs_input', original.id]);
     const lifecycle = createRunLifecycle({
         ACTIVE_STATUSES, getRunForUser, getRunMetadata, getAgentRunTitle, normalizeToolAllowlist, parseJsonObject,
-        normalizeDagSpec, createAgentRun: trackedCreate, isChatAgentRun: () => false,
+        normalizeDagSpec, createAgentRun: trackedCreate, isChatAgentRun: run => Boolean(getRunMetadata(run).chatBridge),
+        resumeWaitingConversationTask: (run, owner) => resumeWaitingConversationTask(run, owner, {
+            enqueueAgentRun: () => { enqueued += 1; }, buildAgentResumeContext: async () => ({ latestStepIndex: 3 })
+        }),
         listSteps: async () => [{ id: 1, step_index: 3, status: 'success' }],
         listDagNodes: async () => [{ node_key: 'node', status: 'error', output: null }],
         buildAgentResumeContext: async () => ({ latestStepIndex: 3 }),
         clampText: (text, limit) => text.slice(0, limit)
     });
-    return { original, user, lifecycle, create: trackedCreate, async cleanup() {
+    return { original, user, lifecycle, create: trackedCreate, getEnqueued: () => enqueued, async cleanup() {
         for (const id of ids.reverse()) await execute('DELETE FROM agent_runs WHERE id = ?', [id]);
         await execute('DELETE FROM models WHERE id = ?', [model.id]);
     } };
@@ -56,6 +63,82 @@ test('继续使用父任务扣除已用量及预留后的剩余预算，两层�
         assert.equal(Number(ledger.tokens_reserved), 1735413);
         assert.equal(Number(ledger.tokens_consumed), 312587);
         assert.equal(Number(ledger.token_budget), 2048000);
+    } finally { await current.cleanup(); }
+});
+
+test('聊天等待补充时并发点击继续复用原任务，不创建子运行或重复预留预算', skipWithoutDatabase, async () => {
+    const current = await fixture({ metadata: { autoPersonalSkill: false, chatBridge: { version: 1 } } });
+    try {
+        const results = await Promise.all([current.lifecycle.resumeAgentRun(current.original.id, current.user), current.lifecycle.resumeAgentRun(current.original.id, current.user)]);
+        assert.ok(results.every(run => run.id === current.original.id && run.status === 'queued'));
+        const run = results[0];
+        assert.equal(run.parent_run_id, null);
+        assert.equal(run.resume_from_step, 3);
+        assert.equal(Number(run.total_tokens), 312587);
+        assert.equal(Number(run.max_token_budget), 2048000);
+        assert.equal(current.getEnqueued(), 1);
+        const ledger = await getAgentRunResources(run.id, current.user.id);
+        assert.equal(Number(ledger.tokens_reserved), 0);
+        assert.equal(Number(ledger.active_children), 0);
+        assert.equal(Number(ledger.tokens_consumed), 312587);
+        assert.equal((await current.lifecycle.resumeAgentRun(run.id, current.user)).id, run.id);
+        assert.equal(current.getEnqueued(), 1);
+    } finally { await current.cleanup(); }
+});
+
+test('聊天任务真正耗尽时拒绝恢复并说明操作，不通过新建子任务重置额度', skipWithoutDatabase, async () => {
+    const current = await fixture({ metadata: { autoPersonalSkill: false, chatBridge: { version: 1 } }, budgetConfig: { max_tokens_total: 312587 } });
+    try {
+        await assert.rejects(() => current.lifecycle.resumeAgentRun(current.original.id, current.user), error => error.code === 'AGENT_BUDGET_EXCEEDED' && error.status === 409 && /缩小资料范围/.test(error.message));
+        assert.equal(current.getEnqueued(), 0);
+        assert.equal(Number((await getAgentRunResources(current.original.id, current.user.id)).tokens_reserved), 0);
+    } finally { await current.cleanup(); }
+});
+
+test('旧聊天卡片继续时找到已存在的续跑任务，父额度已预留也不会再次申请', skipWithoutDatabase, async () => {
+    const current = await fixture({ metadata: { autoPersonalSkill: false, chatBridge: { version: 1 } } });
+    try {
+        const child = await current.create({ user: current.user, modelId: current.original.model_id, goal: '继续检索资料', parentRunId: current.original.id,
+            metadata: { autoPersonalSkill: false, chatBridge: { version: 1 }, resumedFromRunId: current.original.id } });
+        await execute("UPDATE agent_runs SET status = 'needs_input' WHERE id = ?", [child.id]);
+        const resumed = await current.lifecycle.resumeAgentRun(current.original.id, current.user);
+        assert.equal(resumed.id, child.id);
+        assert.equal(resumed.status, 'queued');
+        assert.equal(current.getEnqueued(), 1);
+        const ledger = await getAgentRunResources(current.original.id, current.user.id);
+        assert.equal(Number(ledger.active_children), 1);
+        assert.equal(Number(ledger.tokens_reserved), 1735413);
+    } finally { await current.cleanup(); }
+});
+
+test('聊天终态重跑建立新的消息与验收关联，不能继承父任务的已回写标记', skipWithoutDatabase, async () => {
+    const current = await fixture({ metadata: { autoPersonalSkill: false, chatBridge: { version: 1 } } });
+    try {
+        await execute("UPDATE agent_runs SET status = 'error', metadata = ?::jsonb WHERE id = ?", [JSON.stringify({
+            autoPersonalSkill: false, chatBridge: { version: 1, messageId: 123, persistedAt: '2026-10-20 08:00:00' },
+            taskVerification: { outcomeStatus: 'needs_input' }, taskTransactionId: 'parent-transaction', taskTransactionStatus: 'needs_input'
+        }), current.original.id]);
+        const child = await current.lifecycle.resumeAgentRun(current.original.id, current.user);
+        const metadata = getRunMetadata(child);
+        assert.notEqual(child.id, current.original.id);
+        assert.equal(metadata.chatBridge.messageId, undefined);
+        assert.equal(metadata.chatBridge.persistedAt, undefined);
+        assert.equal(metadata.taskVerification, undefined);
+        assert.equal(metadata.taskTransactionId, undefined);
+    } finally { await current.cleanup(); }
+});
+
+test('模型调用越过持久化限额时仍同步内存用量，错误收尾不会误判剩余额度', skipWithoutDatabase, async () => {
+    const current = await fixture({ budgetConfig: { max_tokens_total: 312587 } });
+    try {
+        const budget = new TaskBudget({ max_tokens_total: 312587 });
+        budget.counts.tokens_total = 312587;
+        await assert.rejects(() => recordAgentModelUsage(current.user, { id: current.original.model_id }, [], '结果', 'agent_usage_regression', current.original.id, {
+            usage: { prompt_tokens: 10, completion_tokens: 5 }, budget
+        }), error => error.code === 'AGENT_BUDGET_EXCEEDED');
+        assert.equal(budget.counts.tokens_total, 312602);
+        const ledger = await getAgentRunResources(current.original.id, current.user.id);
+        assert.equal(Number(ledger.tokens_consumed), 312602);
     } finally { await current.cleanup(); }
 });
 

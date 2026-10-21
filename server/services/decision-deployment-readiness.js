@@ -5,7 +5,6 @@ const { getDecisionRuntimeConfig } = require('./decision-runtime');
 const { getDecisionEvaluationReviewStatus } = require('./decision-evaluation-reviews');
 const { getActiveDecisionPolicyArtifact } = require('./decision-policy-registry');
 const { getActiveDecisionModelArtifact, hasApprovedFrozenEvaluation } = require('./decision-model-registry');
-const { checkLayaDecisionHealth } = require('./decision-provider-health');
 
 const DECISION_MIGRATION_IDS = [
     '202609280001_decision_learning_foundations',
@@ -33,8 +32,7 @@ function rolloutTenantScopes(config = {}) {
 async function buildActiveProviderChecks(config = {}, deps = {}) {
     const providers = [
         { id: 'light-linear', enabled: config.light?.enabled === true, version: '' },
-        { id: 'qwen', enabled: config.qwen?.enabled === true, version: String(config.qwen?.version || '').trim() },
-        { id: 'laya', enabled: config.laya?.enabled === true, version: String(config.laya?.version || '').trim() }
+        { id: 'qwen', enabled: config.qwen?.enabled === true, version: String(config.qwen?.version || '').trim() }
     ].filter(provider => provider.enabled);
     const tenants = rolloutTenantScopes(config);
     const checks = [];
@@ -109,11 +107,6 @@ async function getDecisionDeploymentReadiness({ env = process.env } = {}, deps =
             checks.push({ name: 'activePolicyArtifact', status: 'error', message: String(error?.message || '策略制品不可用').slice(0, 240) });
         }
         checks.push(...await buildActiveProviderChecks(config, deps));
-    }
-
-    if (config.laya?.enabled) {
-        const laya = await (deps.checkLayaDecisionHealth || checkLayaDecisionHealth)({ env });
-        checks.push({ name: 'layaDecision', ...laya });
     }
 
     checks.push({

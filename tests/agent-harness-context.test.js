@@ -161,14 +161,14 @@ test('tool orchestrator orders policy, checkpoint, event, and execution phases',
     });
     assert.deepEqual(output, { rows: [{ value: 1 }] });
     assert.deepEqual(calls.map(item => item[0]), ['policy', 'begin', 'execute', 'complete']);
-    assert.deepEqual(events.map(event => event.type), ['tool.requested', 'tool.completed']);
+    assert.deepEqual(events.map(event => event.type), ['tool.requested', 'tool.started', 'tool.completed']);
     assert.equal(events[0].payload.contextHash, 'ctx-1');
 
     replay = true;
     const replayed = await orchestrator.execute({ ...request, async execute() { throw new Error('must not execute on replay'); } });
     assert.deepEqual(replayed, { cached: true });
     assert.deepEqual(calls.map(item => item[0]), ['policy', 'begin', 'execute', 'complete', 'policy', 'begin']);
-    assert.deepEqual(events.map(event => event.type), ['tool.requested', 'tool.completed', 'tool.requested', 'tool.replayed']);
+    assert.deepEqual(events.map(event => event.type), ['tool.requested', 'tool.started', 'tool.completed', 'tool.requested', 'tool.replayed']);
 });
 
 test('tool orchestrator marks failed checkpoint and emits failure event', async () => {

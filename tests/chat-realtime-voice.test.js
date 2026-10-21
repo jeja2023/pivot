@@ -128,11 +128,23 @@ test('服务器识别先采集默认麦克风再尝试回声消除，设备不�
         getUserMedia: async value => { assert.equal(value.audio, true); return stream; } });
     try {
         assert.ok(await voice.api.startRealtimeVoice());
-        assert.equal(constraints.length, 1);
+        assert.equal(constraints.length, 4);
         assert.equal(constraints[0].echoCancellation, true);
         assert.equal(track.stopped, false);
     } finally { voice.api.stopRealtimeVoice(); }
     assert.equal(track.stopped, true);
+});
+
+test('低置信度最终识别不触发对话或任务控制，保留输入并停止自动聆听', async () => {
+    let recognition; let sent = 0;
+    const voice = loadRealtimeVoice({ getUserMedia: async () => createStream().stream,
+        recognitionStart(value) { recognition = value; value.onstart(); }, sendMessage: async () => { sent++; } });
+    await voice.api.startRealtimeVoice();
+    recognition.onresult({ resultIndex: 0, results: [{ isFinal: true, requiresReview: true, 0: { transcript: '金额是十五万元' } }] });
+    assert.equal(sent, 0);
+    assert.match(voice.elements['user-input'].value, /十五万元/);
+    assert.equal(recognition.aborted, true);
+    assert.equal(voice.elements['chat-realtime-voice'].getAttribute('aria-pressed'), 'false');
 });
 
 test('实时语音把明确任务控制口令送往绑定会话，而不提交为聊天文本', async () => {

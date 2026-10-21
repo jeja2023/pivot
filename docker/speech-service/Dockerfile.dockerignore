@@ -1,0 +1,10 @@
+# 使用专用构建上下文，包含离线 wheels，排除录音、密钥、模型与业务数据。
+**
+!docker/
+docker/*
+!docker/speech-service/
+!docker/speech-service/**
+!artifacts/
+artifacts/*
+!artifacts/speech-wheelhouse/
+!artifacts/speech-wheelhouse/**

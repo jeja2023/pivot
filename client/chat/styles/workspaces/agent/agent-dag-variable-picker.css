@@ -8,11 +8,11 @@
     display: flex;
     flex-direction: column;
     background: var(--surface, #ffffff);
-    border: 1px solid var(--border, rgba(15, 23, 42, 0.12));
-    border-radius: 12px;
-    box-shadow: 0 12px 36px -4px var(--shadow-color, rgba(15, 23, 42, 0.18)), 0 4px 12px var(--shadow-subtle, rgba(15, 23, 42, 0.08));
-    font-family: inherit;
-    color: var(--text-main, #1e293b);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 10px);
+    box-shadow: var(--shadow-md, 0 12px 36px -4px rgba(15, 23, 42, 0.18));
+    font-family: var(--font-sans);
+    color: var(--text-main);
     overflow: hidden;
     animation: pivotVarPopoverFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -27,8 +27,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
-    background: var(--bg-side, #f8fafc);
-    border-bottom: 1px solid var(--border, #e2e8f0);
+    background: var(--bg-side);
+    border-bottom: 1px solid var(--border);
 }
 
 .pivot-dag-var-popover-title {
@@ -37,13 +37,13 @@
     gap: 8px;
     font-size: 0.82rem;
     font-weight: 700;
-    color: var(--text-main, #0f172a);
+    color: var(--text-main);
 }
 
 .pivot-dag-var-badge {
     padding: 2px 7px;
-    background: var(--primary-light, rgba(16, 163, 127, 0.12));
-    color: var(--primary, #047857);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    color: var(--primary);
     border-radius: 999px;
     font-size: 0.65rem;
     font-weight: 600;
@@ -54,35 +54,40 @@
     border: none;
     font-size: 1.25rem;
     line-height: 1;
-    color: var(--text-muted, #94a3b8);
+    color: var(--text-muted);
     cursor: pointer;
     padding: 0 4px;
     border-radius: 4px;
+    transition: all 0.15s ease;
 }
 
 .pivot-dag-var-popover-close:hover {
-    color: var(--text-main, #475569);
-    background: var(--surface-hover, #e2e8f0);
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--text-muted) 15%, transparent);
 }
 
 .pivot-dag-var-popover-search {
     padding: 8px 12px;
-    border-bottom: 1px solid var(--border, #f1f5f9);
+    border-bottom: 1px solid var(--border);
 }
 
 .pivot-dag-var-popover-search input {
     width: 100%;
     box-sizing: border-box;
     padding: 6px 10px;
-    font-size: 0.76rem;
-    border: 1px solid var(--border, #cbd5e1);
-    border-radius: 6px;
+    font-size: 0.78rem;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    color: var(--text-main);
     outline: none;
+    transition: all 0.15s ease;
 }
 
 .pivot-dag-var-popover-search input:focus {
-    border-color: var(--primary, #10a37f);
-    box-shadow: 0 0 0 2px var(--primary-focus, rgba(16, 163, 127, 0.18));
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
 }
 
 .pivot-dag-var-popover-body {
@@ -103,7 +108,7 @@
 .pivot-dag-var-group-title {
     font-size: 0.68rem;
     font-weight: 700;
-    color: var(--text-muted, #64748b);
+    color: var(--text-muted);
     padding: 2px 4px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -112,7 +117,7 @@
 .pivot-dag-var-items {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
 }
 
 .pivot-dag-var-item {
@@ -121,23 +126,23 @@
     justify-content: space-between;
     gap: 8px;
     padding: 6px 8px;
-    background: var(--surface, #ffffff);
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
     cursor: pointer;
     text-align: left;
     transition: all 0.12s ease;
 }
 
 .pivot-dag-var-item:hover {
-    background: var(--primary-light, #f0fdf4);
-    border-color: var(--primary-border, #86efac);
+    background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 
 .pivot-dag-var-item-label {
-    font-size: 0.72rem;
+    font-size: 0.74rem;
     font-weight: 600;
-    color: var(--text-main, #1e293b);
+    color: var(--text-main);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -145,9 +150,9 @@
 
 .pivot-dag-var-item-expr {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.65rem;
-    color: var(--primary, #059669);
-    background: var(--primary-light, rgba(16, 163, 127, 0.08));
+    font-size: 0.66rem;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
     padding: 2px 6px;
     border-radius: 4px;
     white-space: nowrap;
@@ -162,7 +167,7 @@
 .pivot-dag-token-group-title {
     font-size: 0.72rem;
     font-weight: 700;
-    color: var(--text-muted, #475569);
+    color: var(--text-muted);
     margin-bottom: 4px;
     display: block;
 }

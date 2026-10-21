@@ -3,7 +3,7 @@ const { requeueAgentRunAfterLeaseLoss } = require('./lease-loss');
 const { buildToolTraceContext } = require('../tool-trace-context');
 const { resolveRunLongTermMemory } = require('./run-memory');
 const { continueRunFromCheckpoint: continueRunFromCheckpointHelper } = require('./run-continuation');
-const { verifyTaskOutcome } = require('../agent-verification');
+const { verifyTaskOutcome, taskVerificationFailureMessage } = require('../agent-verification');
 const { inferTaskType } = require('../agent-model-quality');
 const { recordWorkingObservation } = require('../agent-working-state');
 const { plannerCoreSection } = require('../agent-prompt-registry');
@@ -150,6 +150,7 @@ const {
             effectiveBudgetConfig.max_steps = maxSteps;
         }
         const normalizedBudget = normalizeTaskBudget(effectiveBudgetConfig);
+        if (Number(run.max_token_budget) > 0) normalizedBudget.max_tokens_total = Math.min(normalizedBudget.max_tokens_total, Number(run.max_token_budget));
         const normalizedRunTimeout = normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
         const configuredRuntimeMs = Number.isFinite(normalizedBudget.max_runtime_seconds)
             ? Number(normalizedBudget.max_runtime_seconds) * 1000
@@ -160,6 +161,8 @@ const {
             startedAt: Date.now(),
             enabled: true
         });
+        // 同一任务从检查点恢复时，已付费的模型用量必须继续计入累计额度。
+        taskBudget.counts.tokens_total = Math.max(Number(run.total_tokens) || 0, 0);
         const assertRunWithinBudget = createRunBudgetGuard({ deadline, taskBudget });
         taskBudgetsBySignal.set(runController.signal, taskBudget);
         deadlineTimer = createRunDeadlineTimer({ deadline, runController });
@@ -227,6 +230,10 @@ const {
         }
 
         let runtimeMetadata = getRunMetadata(run);
+        if (runtimeMetadata.chatBridge?.executionProfile === 'knowledge_qa') {
+            modelCfg = { ...modelCfg, max_input_tokens: Math.min(Number(modelCfg.max_input_tokens) > 0 ? Number(modelCfg.max_input_tokens) : Infinity, 24576) };
+            modelCfgForSummary = modelCfg;
+        }
         const {
             longTermMemoryContext,
             recordActualMemoryUsage,
@@ -299,7 +306,7 @@ const {
             chatBridge, plannerChatHistory, plannerCurrentMessage, longTermMemoryContext, runtimeMetadata, taskWorkingState
         });
         const verifyOutcome = preparation.createOutcomeVerifier({
-            runId, run, user, getTaskContract: () => taskContract, getObservations: () => observations
+            runId, run, user, getTaskContract: () => taskContract, getObservations: () => observations, signal: runController.signal, budget: taskBudget
         });
         await assertRunNotCancelled(runId);
         const startedAt = getBeijingTimestamp();
@@ -614,12 +621,9 @@ const {
             });
 
             if (plannedUsageResult?.budgetExceeded) {
-                const answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
-                    signal: runController.signal,
-                    budget: taskBudget,
-                    allowBudgetExceeded: true,
-                    ...plannerChatContext
-                });
+                const answer = sanitizeUserVisibleText(plan.answer) || (observations.length
+                    ? `已保留 ${observations.length} 项工具执行记录，可在任务详情查看；当前额度不足以继续生成总结。`
+                    : '当前额度已用完，本次尚未生成可用答案。');
                 const warning = '已达到总 Token 预算，任务已停止继续调用工具。';
                 await updateRun(runId, {
                     status: 'completed_with_errors',
@@ -639,8 +643,10 @@ const {
                     budget: taskBudget,
                     ...plannerChatContext
                 });
+                await assertRunNotCancelled(runId);
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer);
+                await assertRunNotCancelled(runId);
                 const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
                 const finalStatus = awaitingCommit
                     ? 'awaiting_commit'
@@ -652,7 +658,7 @@ const {
                     ? ''
                     : awaitingCommit
                         ? '任务结果已验证，仍有外部副作用等待提交。'
-                    : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
+                    : taskVerificationFailureMessage(verification);
                 await updateRun(runId, {
                     status: finalStatus,
                     final_answer: answer,

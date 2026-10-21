@@ -150,6 +150,7 @@ function summarizeSchema(schema = {}) {
 }
 
 function inspectDagContracts(dag = {}, toolList = []) {
+    const referenceIssues = require('../../client/chat/dag-definition').inspectReferences(dag, toolList);
     const tools = new Map((toolList || []).map(tool => [String(tool.name || tool.fullName || ''), tool]));
     const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
     const results = nodes.map(node => {
@@ -161,7 +162,7 @@ function inspectDagContracts(dag = {}, toolList = []) {
             : toolInputSchema;
         const outputSchema = normalizeJsonSchema(node.outputSchema || node.output_schema || {});
         const blockers = [];
-        const inputBlockers = [];
+        const inputBlockers = referenceIssues.filter(issue => issue.nodeId === node.id).map(issue => issue.message);
         const outputBlockers = [];
         const warnings = [];
         if (!tool) blockers.push(`${node.title || node.id} 使用的工具不可用：${node.tool || '-'}。`);

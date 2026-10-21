@@ -3,12 +3,11 @@
 const crypto = require('crypto');
 const { recordUserDecisionFeedback } = require('./decision-observability');
 const { redactRoutingText } = require('./decision-provider');
+const { currentRequestText, isPlanOnlyRequest } = require('./chat-request-constraints');
 
 // 只读取本轮用户自己表达的限制；引用、代码和附件不能撤销或授予任务权限。
 function detectChatRouteCorrection(prompt = '') {
-    const text = String(prompt).split(/\n---\s*\n【参考文档/)[0]
-        .replace(/```[\s\S]*?```/g, '').replace(/^[ \t]*>.*$/gm, '')
-        .replace(/[“「][^”」]*[”」]|"[^"\n]*"/g, '').trim();
+    const text = currentRequestText(prompt);
     const clauses = text.split(/[，,。！!；;\n]/).map(item => item.trim()).filter(Boolean);
     const prefix = '(?:(?:不对|不是这个意思|刚才|这次|这轮|当前|请|我|你|现在|先)[，,：: ]*)*';
     const matches = pattern => clauses.some(clause => new RegExp(`^${prefix}${pattern}$`, 'i').test(clause));
@@ -16,8 +15,7 @@ function detectChatRouteCorrection(prompt = '') {
         || matches('(?:不需要|无需|不用|不要|先别|暂不)(?:实际|真的|自动|继续|再)?(?:执行|操作|处理任务|启动任务)(?:了|吧)?')
         || matches('(?:不是|并非)让你(?:执行|操作|启动任务)')
         || matches('(?:只需要|只要|直接)(?:回答|解释)(?:问题|一下)?(?:就好|即可|就行|吧)?');
-    const planOnly = matches('(?:只|仅|先)(?:给出|给|提供|输出)?(?:我)?[^?？：:]{0,12}(?:方案|计划|建议|思路)(?:就好|即可|就行|吧)?')
-        || matches('(?:不要|不用|先别|暂不)(?:修改|改代码|写入|删除|发送|发布)(?:文件|代码|数据)?(?:了|吧)?');
+    const planOnly = isPlanOnlyRequest(text);
     const excludeTools = answerOnly || planOnly || matches('(?:不要|不用|无需|先别)(?:再|继续)?(?:调用|使用|用)?(?:任何|外部)?工具(?:了|吧)?');
     const excludeRag = answerOnly || planOnly || matches('(?:不要|不用|无需|先别)(?:再|继续)?(?:检索|搜索|查|使用|用)?(?:知识库|资料库)(?:检索|搜索)?(?:了|吧)?');
     const forceRag = !excludeRag && /不对|不是这个意思|应该|应当/.test(text)

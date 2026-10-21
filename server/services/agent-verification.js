@@ -3,6 +3,7 @@
 const { normalizeJsonSchema, schemaHasRules, validateValueAgainstSchema } = require('./agent-dag-contracts');
 const { queryOne } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { buildChatRagEvidenceObservation } = require('./chat-rag-context');
 
 const MAX_CONTRACT_ITEMS = 32;
 
@@ -118,11 +119,31 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
     };
 }
 
-async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata } = {}) {
+function taskVerificationFailureMessage(report = {}) {
+    const labels = {
+        final_answer_non_empty: '未生成有效答案', evidence: '缺少可核验的资料来源',
+        required_phrase: '缺少要求的内容', forbidden_phrase: '包含禁止的内容', min_length: '答复内容不完整',
+        valid_json: '结果格式不符合要求', output_schema: '结果结构不符合要求',
+        artifact_required: '尚未生成要求的文件', required_artifact: '缺少要求的文件',
+        deliverables_verified: '交付内容尚未通过核验'
+    };
+    const semanticReasons = { source_revoked: '原始资料已不可用', source_not_fully_read: '尚未读取完整资料',
+        artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试' };
+    const semantic = report.semanticVerification;
+    const details = [...new Set((report.hardFailures || []).map(key => labels[key] || '结果尚未通过验收'))];
+    if (semantic?.reason && semanticReasons[semantic.reason]) details.push(semanticReasons[semantic.reason]);
+    if (Array.isArray(semantic?.missing)) details.push(...semantic.missing.slice(0, 3).map(item => text(item, 200)));
+    return `任务需要补充或修复：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
+}
+
+async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget } = {}) {
+    signal?.throwIfAborted();
     let metadata = run?.metadata;
     if (typeof metadata === 'string') {
         try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; }
     }
+    const ragEvidence = buildChatRagEvidenceObservation(metadata?.chatBridge);
+    observations = [...(Array.isArray(observations) ? observations : []), ...(ragEvidence ? [ragEvidence] : [])];
     let evidence = [];
     if (runId) {
         try {
@@ -134,14 +155,15 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     }
     const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '');
     const semanticVerification = contract.acceptance.requireSemanticVerification && !partial
-        ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run.user_id }, contract, answer, observations }) : null;
+        ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null;
+    signal?.throwIfAborted();
     const report = verifyTaskOutcome({
         taskContract: taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract,
         goal: run?.goal || '',
         answer,
         observations,
         evidence,
-        partial,
+        partial: partial || semanticVerification?.reason === 'budget_exceeded',
         reason,
         semanticVerification
     });
@@ -182,6 +204,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     // 再推进事务。无副作用事务可在验收后自动提交；带副作用事务会停在
     // awaiting_commit，直到每个 effect 提供提交证据，绝不因模型文本而自动交付。
     const transactionId = String(metadata?.taskTransactionId || metadata?.task_transaction_id || '').trim();
+    signal?.throwIfAborted();
     if (runId && transactionId && (user?.id || run?.user_id)) {
         const transactionUser = user || { id: run.user_id };
         const {
@@ -190,6 +213,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
             recordTaskTransactionVerification
         } = require('./agent-task-transactions');
         let taskTransaction = await getTaskTransactionForUser(transactionId, transactionUser);
+        signal?.throwIfAborted();
         if (taskTransaction && ['executing', 'verifying'].includes(taskTransaction.status)) {
             taskTransaction = await recordTaskTransactionVerification(transactionId, transactionUser, report);
         }
@@ -198,6 +222,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
                 effect.commitMode !== 'preview' && effect.status !== 'committed'
             ));
             if (!hasPendingEffect) {
+                signal?.throwIfAborted();
                 taskTransaction = await commitTaskTransaction(transactionId, transactionUser, {
                     kind: 'verification_auto_commit',
                     verificationId: `verify_${runId}`.slice(0, 128),
@@ -252,6 +277,7 @@ async function getTaskVerificationForUser(runId, user) {
 module.exports = {
     getTaskVerificationForUser,
     normalizeTaskContract,
+    taskVerificationFailureMessage,
     verifyAndRecordTaskOutcome,
     verifyTaskOutcome
 };

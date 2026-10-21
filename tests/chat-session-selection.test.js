@@ -42,6 +42,7 @@ function createSessionClientHarness() {
         markActiveSessionInList() {},
         updateContextUsage() {},
         attachChatAgentControls(element, runId, status) {
+            element.dataset.chatAgentRunId = runId;
             controls.push({ element, runId, status });
         },
         registerChatAgentStreamingTarget(runId, element, sessionId) {
@@ -64,7 +65,8 @@ function createSessionClientHarness() {
     const sandbox = {
         window,
         document: {
-            body: { contains: () => false },
+            body: { contains: element => appended.includes(element) },
+            querySelectorAll: () => appended.filter(element => element.dataset.chatAgentRunId),
             getElementById(id) {
                 if (id === 'current-title') return title;
                 if (id === 'message-container') return messageContainer;
@@ -94,6 +96,7 @@ function createSessionClientHarness() {
         appendMessage(role, content, messageId, options = {}) {
             const textBody = { innerHTML: '', querySelector: selector => selector === '.text-body' ? textBody : null };
             const element = {
+                dataset: {},
                 role,
                 content,
                 messageId,
@@ -107,6 +110,7 @@ function createSessionClientHarness() {
             return element;
         },
         escapeChatStatusHtml(value) { return String(value || ''); },
+        renderAiMessage(value) { return String(value || ''); },
         setTimeout(fn) { return globalThis.setTimeout(fn, 0); },
         console
     };
@@ -123,7 +127,8 @@ function createSessionClientHarness() {
         controls,
         streamingTargets,
         unregisteredRuns,
-        selectSession: window.Pivot.legacy.selectSession
+        selectSession: window.Pivot.legacy.selectSession,
+        attachChatAgentRunsForSession: window.Pivot.legacy.attachChatAgentRunsForSession
     };
 }
 
@@ -151,6 +156,95 @@ test('late session responses cannot overwrite the session selected later', async
 
     assert.deepEqual(harness.starts.map(item => item.sessionId), ['session-b']);
     assert.equal(harness.title.innerText, '会话 B');
+});
+
+test('等待输入保留已生成答案并停止轮询，继续同一任务时复用消息气泡', async () => {
+    const harness = createSessionClientHarness();
+    const selection = harness.selectSession('session-wait', '知识问答');
+    harness.pending.find(request => request.kind === 'session').resolve({ ok: true, json: async () => ({ session: { title: '知识问答' }, messages: [], page: {} }) });
+    await selection;
+    harness.pending.find(request => request.kind === 'active').resolve({ ok: true, json: async () => ({ runs: [{ id: 'run-wait', status: 'needs_input' }] }) });
+    await new Promise(resolve => setImmediate(resolve));
+    harness.pending.find(request => request.kind === 'run').resolve({ ok: true, json: async () => ({ run: { id: 'run-wait', status: 'needs_input', final_answer: '已找到的知识库答案' } }) });
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(harness.appended[0].querySelector('.text-body').innerHTML, /已找到的知识库答案/);
+    assert.equal(harness.pending.filter(request => request.kind === 'run').length, 1);
+    assert.equal(harness.unregisteredRuns.includes('run-wait'), true);
+    const recovery = harness.attachChatAgentRunsForSession('session-wait');
+    harness.pending.filter(request => request.kind === 'active').at(-1).resolve({ ok: true, json: async () => ({ runs: [{ id: 'run-wait', status: 'queued' }] }) });
+    await recovery;
+    assert.equal(harness.appended.length, 1);
+    assert.equal(harness.pending.filter(request => request.kind === 'run').length, 2);
+    harness.pending.filter(request => request.kind === 'run').at(-1).resolve({ ok: true, json: async () => ({ run: { id: 'run-wait', status: 'needs_input', final_answer: '补充后的答案' } }) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(harness.appended[0].querySelector('.text-body').innerHTML, /补充后的答案/);
+});
+
+test('等待输入与验收状态不再显示成正在规划，答案与具体缺口同时展示', () => {
+    const sandbox = { window: { Pivot: { legacy: {}, exposeModule() {} } } };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../client/chat/engine.js'), 'utf8'), sandbox);
+    const run = { status: 'needs_input', final_answer: '已有答案', error_message: '缺少量化标准' };
+    const detail = { run, steps: [{ type: 'plan', title: '流式最终答案' }] };
+    assert.match(sandbox.chatAgentProgressText(detail), /等待补充信息/);
+    assert.doesNotMatch(sandbox.chatAgentProgressText(detail), /正在规划/);
+    assert.match(sandbox.chatAgentProgressText(detail, 'verifying'), /正在核验/);
+    assert.match(sandbox.chatAgentResultText(run), /已有答案[\s\S]*缺少量化标准/);
+});
+
+test('多次并发恢复同一任务只创建一个卡片和一条轮询', async () => {
+    const harness = createSessionClientHarness();
+    const selection = harness.selectSession('session-concurrent');
+    harness.pending.find(item => item.kind === 'session').resolve({ ok: true, json: async () => ({ session: {}, messages: [], page: {} }) });
+    await selection;
+    const second = harness.attachChatAgentRunsForSession('session-concurrent');
+    const third = harness.attachChatAgentRunsForSession('session-concurrent');
+    const payload = { runs: Array.from({ length: 3 }, () => ({ id: 'run-one', status: 'running' })) };
+    for (const request of harness.pending.filter(item => item.kind === 'active')) request.resolve({ ok: true, json: async () => payload });
+    await Promise.all([second, third]);
+    assert.equal(harness.appended.length, 1);
+    assert.equal(harness.pending.filter(item => item.kind === 'run').length, 1);
+    harness.pending.find(item => item.kind === 'run').resolve({ ok: true, json: async () => ({ run: { id: 'run-one', status: 'needs_input' } }) });
+    await new Promise(resolve => setImmediate(resolve));
+});
+
+test('切走再切回同一会话后旧详情响应不能覆盖新卡片或触发多余刷新', async () => {
+    const harness = createSessionClientHarness();
+    async function open(id) {
+        const selection = harness.selectSession(id);
+        harness.pending.filter(item => item.kind === 'session').at(-1).resolve({ ok: true, json: async () => ({ session: {}, messages: [], page: {} }) });
+        await selection;
+        harness.pending.filter(item => item.kind === 'active').at(-1).resolve({ ok: true, json: async () => ({ runs: id === 'session-a' ? [{ id: 'run-a', status: 'running' }] : [] }) });
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    await open('session-a');
+    const oldRequest = harness.pending.filter(item => item.kind === 'run').at(-1);
+    await open('session-b');
+    await open('session-a');
+    const freshRequest = harness.pending.filter(item => item.kind === 'run').at(-1);
+    assert.notEqual(oldRequest, freshRequest);
+    const sessionReads = harness.pending.filter(item => item.kind === 'session').length;
+    oldRequest.resolve({ ok: true, json: async () => ({ run: { id: 'run-a', status: 'completed' } }) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(harness.pending.filter(item => item.kind === 'session').length, sessionReads);
+    freshRequest.resolve({ ok: true, json: async () => ({ run: { id: 'run-a', status: 'needs_input', final_answer: '新恢复的答案' } }) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(harness.appended.at(-1).querySelector('.text-body').innerHTML, /新恢复的答案/);
+});
+
+test('任务删除或访问权限撤销后停止轮询，移除可操作按钮', async () => {
+    const harness = createSessionClientHarness();
+    const selection = harness.selectSession('session-deleted');
+    harness.pending.find(item => item.kind === 'session').resolve({ ok: true, json: async () => ({ session: {}, messages: [], page: {} }) });
+    await selection;
+    harness.pending.find(item => item.kind === 'active').resolve({ ok: true, json: async () => ({ runs: [{ id: 'run-deleted', status: 'running' }] }) });
+    await new Promise(resolve => setImmediate(resolve));
+    harness.pending.find(item => item.kind === 'run').resolve({ ok: false, status: 404 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(harness.pending.filter(item => item.kind === 'run').length, 1);
+    assert.match(harness.appended[0].querySelector('.text-body').innerHTML, /任务已删除/);
+    assert.equal(harness.controls.at(-1).status, 'deleted');
 });
 
 test('selecting a session reattaches active chat Agents and refreshes on terminal completion', async () => {
