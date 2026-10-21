@@ -686,6 +686,23 @@ body.dark-mode .pivot-waterfall-row:hover {
 .waterfall-badge.is-error { background: var(--danger-bg, #fee2e2); color: var(--danger, #991b1b); }
 .waterfall-badge.is-pending { background: var(--surface-secondary, #f1f5f9); color: var(--text-muted, #64748b); }
 
+.pivot-waterfall-rerun-btn {
+    border: none;
+    background: var(--primary, #3b82f6);
+    color: #ffffff;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    cursor: pointer;
+    line-height: 1.2;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.pivot-waterfall-rerun-btn:hover {
+    background: var(--primary-hover, #2563eb);
+    transform: translateY(-1px);
+}
+
 .pivot-waterfall-track {
     position: relative;
     width: 100%;

@@ -111,6 +111,100 @@ function registerAgentRunEvidenceRoutes(router, { authMiddleware, automationGuar
         if (!checkpoints) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json({ data: checkpoints });
     }));
+    router.get('/agents/runs/:id/audit-bundle', authMiddleware, asyncHandler(async (req, res) => {
+        const detail = await getRunDetailForUser(req.params.id, req.user);
+        if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
+        const run = detail.run || {};
+        const steps = detail.steps || [];
+        const evidence = (await listAgentEvidenceForUser(req.params.id, req.user, { limit: 100 })) || [];
+        const verification = await getTaskVerificationForUser(req.params.id, req.user).catch(() => null);
+        const browserSessions = await listAgentBrowserSessionsForRun(req.params.id, req.user, { includeClosed: true }).catch(() => []);
+        const transactions = await listTaskTransactionsForRun(req.params.id, req.user, { limit: 50 }).catch(() => []);
+
+        const bundle = {
+            runId: run.id,
+            title: run.title || run.goal,
+            status: run.status,
+            createdAt: run.created_at,
+            completedAt: run.completed_at,
+            durationMs: run.duration_ms,
+            goal: run.goal,
+            finalAnswer: run.final_answer || '',
+            errorMessage: run.error_message || '',
+            stepsCount: steps.length,
+            steps: steps.map(s => ({
+                stepIndex: s.step_index,
+                type: s.type,
+                title: s.title,
+                toolName: s.tool_name,
+                durationMs: s.duration_ms,
+                status: s.status,
+                createdAt: s.created_at
+            })),
+            evidenceCount: evidence.length,
+            evidence: evidence.map(e => ({
+                id: e.id,
+                kind: e.kind || e.evidence_type,
+                title: e.title,
+                sha256: e.sha256,
+                uri: e.uri,
+                createdAt: e.created_at
+            })),
+            verification: verification?.outcomeStatus ? {
+                status: verification.outcomeStatus,
+                report: verification.report
+            } : null,
+            browserSessionsCount: browserSessions.length,
+            transactionsCount: transactions.length
+        };
+
+        if (req.query.format === 'json') {
+            return res.json({ success: true, bundle });
+        }
+
+        const lines = [
+            `# 智能体任务交付与全景审计报告`,
+            ``,
+            `- **任务ID**: \`${run.id}\``,
+            `- **任务标题**: ${run.title || run.goal || '-'}`,
+            `- **执行状态**: **${run.status}**`,
+            `- **开始时间**: ${run.created_at || '-'}`,
+            `- **完成时间**: ${run.completed_at || '-'}`,
+            `- **总耗时**: ${run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)} 秒` : '-'}`,
+            `- **运行模式**: ${run.run_mode || 'standard'}`,
+            ``,
+            `## 一、任务目标与最终交付`,
+            ``,
+            `### 任务目标`,
+            `> ${String(run.goal || '').replace(/\n/g, '\n> ')}`,
+            ``,
+            `### 最终结果`,
+            run.final_answer ? run.final_answer : (run.error_message ? `**异常退出**：${run.error_message}` : '*(尚无最终回答)*'),
+            ``,
+            `## 二、执行步骤时间线 (共 ${steps.length} 步)`,
+            ``,
+            `| 步数 | 类型 | 工具 / 动作 | 耗时 | 状态 | 发生时间 |`,
+            `| :--- | :--- | :--- | :--- | :--- | :--- |`,
+            ...steps.map(s => `| ${s.step_index} | ${s.type || 'step'} | ${s.title || s.tool_name || '-'} | ${s.duration_ms ? `${s.duration_ms}ms` : '-'} | ${s.status || 'done'} | ${s.created_at || '-'} |`),
+            ``,
+            `## 三、工程证据凭据 (共 ${evidence.length} 项)`,
+            ``,
+            evidence.length ? [
+                `| 凭据ID | 证据类别 | 说明 | SHA-256 校验哈希 | 记录时间 |`,
+                `| :--- | :--- | :--- | :--- | :--- |`,
+                ...evidence.map(e => `| \`${e.id}\` | ${e.kind || e.evidence_type || 'evidence'} | ${e.title || '-'} | \`${(e.sha256 || '-').slice(0, 16)}...\` | ${e.created_at || '-'} |`)
+            ].join('\n') : '*(无独立外置凭据文件)*',
+            ``,
+            verification ? `## 四、验收核验报告\n\n- **核验结论**: ${verification.outcomeStatus}\n\n\`\`\`json\n${JSON.stringify(verification.report, null, 2)}\n\`\`\`\n` : '',
+            `---`,
+            `*本审计包由 Pivot 自动化控制面于 ${new Date().toISOString()} 生成，受控于平台访问审计。*`
+        ];
+
+        logAction(req, '导出任务全景审计包', `任务ID: ${run.id}`);
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="pivot-audit-${run.id}.md"`);
+        res.send(lines.join('\n'));
+    }));
 }
 
 module.exports = { registerAgentRunEvidenceRoutes };

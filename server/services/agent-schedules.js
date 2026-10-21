@@ -50,6 +50,12 @@ function configureAgentSchedules({ createAgentRun, createAgentNotification, runP
     if (typeof runSloMonitor === 'function') sloMonitorRunner = runSloMonitor;
 }
 
+function normalizeMissedRunPolicy(policy) {
+    const raw = String(policy || '').trim().toLowerCase();
+    if (raw === 'skip_missed' || raw === 'skip') return 'skip_missed';
+    return 'fire_once';
+}
+
 function parseBeijingDate(value) {
     const text = String(value || '').replace(' ', 'T');
     const date = text ? new Date(text) : new Date();
@@ -155,7 +161,9 @@ function normalizeSchedulePayload(body = {}) {
     const templateId = body.templateId ? Number.parseInt(body.templateId, 10) || null : null;
     const modelId = body.modelId ? Number.parseInt(body.modelId, 10) || null : null;
     const runMode = normalizeRunMode(body.runMode || body.run_mode);
-    const workflowId = runMode === 'dag' ? (Number.parseInt(body.workflowId || body.workflow_id, 10) || null) : null;
+    const missedRunPolicy = ['skip_missed', 'fire_once'].includes(String(body.missedRunPolicy || body.missed_run_policy || '').toLowerCase())
+        ? String(body.missedRunPolicy || body.missed_run_policy).toLowerCase()
+        : 'fire_once';
     return {
         name,
         goal: goal.slice(0, MAX_GOAL_LENGTH),
@@ -169,6 +177,7 @@ function normalizeSchedulePayload(body = {}) {
         modelId,
         runConfig: {
             runMode,
+            missedRunPolicy,
             maxSteps: normalizeOptionalMaxSteps(body.maxSteps ?? body.max_steps),
             toolPolicy: normalizeToolPolicy(body.toolPolicy || body.tool_policy),
             toolAllowlist: normalizeToolAllowlist(body.toolAllowlist || body.tool_allowlist),
@@ -354,7 +363,13 @@ async function runDueAgentSchedules(limit = 20) {
         LIMIT ?
     `, [normalizePositiveInt(limit, 20, 1, 100)]);
     const created = [];
+    const JITTER_STEP_MS = 250;
+    let scheduleIndex = 0;
     for (const schedule of due) {
+        if (scheduleIndex > 0) {
+            await new Promise(r => setTimeout(r, Math.min(scheduleIndex * JITTER_STEP_MS, 2000)));
+        }
+        scheduleIndex += 1;
         const user = { id: schedule.user_id, username: schedule.username, nickname: schedule.nickname, unit: schedule.unit, role: schedule.role };
         const claimToken = randomUUID();
         try {
@@ -370,6 +385,36 @@ async function runDueAgentSchedules(limit = 20) {
                 schedule.id
             ]);
             if (changes === 0) continue;
+
+            const cfg = parseJsonObject(schedule.run_config) || {};
+            const scheduledForDate = schedule.next_run_at ? new Date(String(schedule.next_run_at).replace(' ', 'T')) : null;
+            const isSeverelyOverdue = scheduledForDate && !Number.isNaN(scheduledForDate.getTime()) && (Date.now() - scheduledForDate.getTime() > 15 * 60 * 1000);
+
+            // 错失策略：若配置了 skip_missed 且错失超过 15 分钟，跳过补跑，直接对齐下个未来周期
+            if (cfg.missedRunPolicy === 'skip_missed' && isSeverelyOverdue) {
+                const nextRunAt = computeNextScheduleRun(
+                    schedule.frequency,
+                    schedule.time_of_day,
+                    schedule.day_of_week,
+                    getBeijingTimestamp(),
+                    schedule.cron_expression,
+                    schedule.interval_minutes
+                );
+                await execute(`
+                    UPDATE agent_schedules
+                    SET next_run_at = ?, claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                    WHERE id = ? AND claim_token = ?
+                `, [nextRunAt, getBeijingTimestamp(), schedule.id, claimToken]);
+                enqueueAuditLog({
+                    userId: user.id,
+                    action: '计划任务错失跳过',
+                    details: `计划ID: ${schedule.id}，名称: ${schedule.name}，原计划时间: ${schedule.next_run_at}，已按策略跳过并对齐至: ${nextRunAt}`,
+                    ipAddress: '127.0.0.1',
+                    timestamp: getBeijingTimestamp()
+                });
+                continue;
+            }
+
             const run = await runAgentScheduleNow(schedule.id, user, { scheduledFor: schedule.next_run_at });
             if (!run) throw new Error('计划所属账号已被禁用或删除。');
             const nextRunAt = computeNextScheduleRun(
@@ -475,5 +520,6 @@ module.exports = {
     runAgentScheduleNow,
     runDueAgentSchedules,
     startAgentScheduleRunner,
-    updateAgentSchedule
+    updateAgentSchedule,
+    normalizeMissedRunPolicy
 };

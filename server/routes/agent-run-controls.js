@@ -12,10 +12,15 @@ function registerAgentRunControlRoutes(router, { authMiddleware, automationGuard
     }));
 
     router.post('/agents/runs/:id/approval', authMiddleware, asyncHandler(async (req, res) => {
-        const binding = req.body?.inputHash === undefined ? null : { inputHash: req.body.inputHash, key: req.body.key, requestedAt: req.body.requestedAt };
+        const binding = req.body?.inputHash === undefined ? null : {
+            inputHash: req.body.inputHash,
+            key: req.body.key,
+            requestedAt: req.body.requestedAt,
+            rememberForRun: req.body?.rememberForRun === true || req.body?.remember_for_run === true
+        };
         const run = await approveAgentTool(req.params.id, req.user, req.body?.approve !== false, binding);
         if (!run) return res.status(404).json({ error: '智能体任务不存在。' });
-        logAction(req, req.body?.approve === false ? '拒绝智能体工具审批' : '批准智能体工具审批', `任务ID: ${run.id}`);
+        logAction(req, req.body?.approve === false ? '拒绝智能体工具审批' : '批准智能体工具审批', `任务ID: ${run.id}${binding?.rememberForRun ? ' (本次运行免密放行)' : ''}`);
         res.json({ success: true, run, steps: await listSteps(run.id) });
     }));
 

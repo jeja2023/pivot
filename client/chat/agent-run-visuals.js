@@ -169,7 +169,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
     const input = node.input ? (typeof node.input === 'string' ? node.input : JSON.stringify(node.input, null, 2)) : '';
     const output = node.output ? (typeof node.output === 'string' ? node.output : JSON.stringify(node.output, null, 2)) : '';
     const readableOutput = agentDagNodeReadableOutputMarkup(node);
-    const canRerun = String(node.status || '').toLowerCase() === 'error';
+    const canRerun = ['error', 'cancelled', 'continued_error'].includes(String(node.status || '').toLowerCase());
     const status = String(node.status || 'pending').toLowerCase();
     const statusLabel = {
         completed: '已完成',
@@ -253,7 +253,7 @@ function agentDagNodeMarkup(node, index = null, runId = null) {
                         ` : ''}
                     </details>
                     ${canFocusInCanvas ? `<button type="button" class="btn-secondary agent-dag-node-focus" data-agent-dag-focus-node="${agentEscape(nodeKey)}">在画布中定位</button>` : ''}
-                    ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}">只重试这一步</button>` : ''}
+                    ${canRerun ? `<button type="button" class="btn-secondary agent-dag-node-rerun" data-agent-dag-rerun-node="${agentEscape(node.node_key)}" title="保留上游已成功节点的缓存，仅从此步骤及其下游重新执行">从本节点断点续跑</button>` : ''}
                 </div>
             </details>
         </div>

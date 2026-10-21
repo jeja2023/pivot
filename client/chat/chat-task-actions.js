@@ -49,6 +49,12 @@
                 await artifactAction(entry, action, button);
                 return await tasks.refresh(entry);
             }
+            if (action === 'create-schedule') {
+                return window.Pivot.legacy.createScheduleFromAgentRun?.(entry.runId, entry.state.run);
+            }
+            if (action === 'save-template') {
+                return window.Pivot.legacy.saveTemplateFromAgentRun?.(entry.runId, entry.state.run);
+            }
             if (action === 'steer') {
                 await window.Pivot.legacy.steerChatAgentRun?.(entry.runId);
                 return await tasks.refresh(entry);
@@ -57,7 +63,13 @@
             if (['approve', 'reject', 'renew-approval'].includes(action)) {
                 const binding = entry.state.approval?.binding;
                 if (!binding?.inputHash) throw new Error('授权请求已变化，请刷新状态后重新确认。');
-                result = await request(entry.runId, action === 'renew-approval' ? '/approval/refresh' : '/approval', { approve: action === 'approve', ...binding });
+                const rememberEl = entry.element?.querySelector('[data-task-approval-remember]');
+                const rememberForRun = action === 'approve' && Boolean(rememberEl?.checked);
+                result = await request(entry.runId, action === 'renew-approval' ? '/approval/refresh' : '/approval', {
+                    approve: action === 'approve',
+                    ...binding,
+                    rememberForRun
+                });
             } else if (['pause', 'resume', 'cancel'].includes(action)) {
                 result = await request(entry.runId, `/${action}`);
                 if (entry.disposed) return;

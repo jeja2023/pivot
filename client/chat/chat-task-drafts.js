@@ -3,6 +3,7 @@
     const modal = document.getElementById('chat-task-draft-modal');
     const titleInput = document.getElementById('chat-task-draft-title');
     const goalInput = document.getElementById('chat-task-draft-goal');
+    const steeringInput = document.getElementById('chat-task-draft-steering');
     const status = document.getElementById('chat-task-draft-status');
     const plan = document.getElementById('chat-task-draft-plan');
     const saveButton = document.getElementById('chat-task-draft-save');
@@ -228,6 +229,7 @@
         activeDraft = draft;
         opener = options.opener || document.activeElement;
         onRunCreated = typeof options.onRunCreated === 'function' ? options.onRunCreated : null;
+        if (steeringInput) steeringInput.value = '';
         modal.classList.remove('hidden');
         modal.removeAttribute('hidden');
         render(draft);
@@ -268,12 +270,19 @@
         if (!activeDraft || busy || startingInFlight) return;
         setBusy(true);
         try {
+            const steering = (steeringInput?.value || '').trim();
+            let nextGoal = (goalInput?.value || '').trim();
+            if (steering && !nextGoal.includes(`【调整要求】: ${steering}`)) {
+                nextGoal = `${nextGoal}\n\n【调整要求】: ${steering}`;
+                if (goalInput) goalInput.value = nextGoal;
+            }
             const draft = await request(`/agents/task-drafts/${encodeURIComponent(activeDraft.id)}`, {
                 method: 'PATCH',
-                body: JSON.stringify({ revision: activeDraft.revision, title: titleInput.value, goal: goalInput.value })
+                body: JSON.stringify({ revision: activeDraft.revision, title: titleInput.value, goal: nextGoal, steering })
             });
+            if (steeringInput) steeringInput.value = '';
             render(draft);
-            showToastSafe('任务计划已重新生成，请再次审阅。', 'success');
+            showToastSafe('任务计划已根据调整意见重新生成，请再次审阅。', 'success');
         } catch (error) {
             showToastSafe(error.message || '任务计划更新失败。', 'error');
         } finally {

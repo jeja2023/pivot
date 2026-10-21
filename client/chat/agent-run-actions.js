@@ -158,16 +158,18 @@ async function saveCurrentAgentTaskAsSchedule() {
     });
 }
 
-window.Pivot.legacy.approveAgentRun = async function(runId, approve = true) {
+window.Pivot.legacy.approveAgentRun = async function(runId, approve = true, options = {}) {
+    const rememberEl = document.getElementById('agent-approval-remember-check');
+    const rememberForRun = approve && (options.rememberForRun === true || Boolean(rememberEl?.checked));
     await runAgentActionOnce(`approval:${runId}:${approve}`, runId, '[data-agent-approve], [data-agent-reject]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ approve })
+            body: JSON.stringify({ approve, rememberForRun })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '审批处理失败');
-        showToast(approve ? '已批准工具调用，任务继续排队' : '已拒绝工具调用', 'success');
+        showToast(approve ? (rememberForRun ? '已批准并在此任务中信任该工具后续操作' : '已批准工具调用，任务继续执行') : '已拒绝工具调用', 'success');
         await loadAgentRuns();
         await window.Pivot.legacy.openAgentRun(runId);
     }, '审批处理失败');
@@ -279,6 +281,103 @@ window.Pivot.legacy.createWorkflowDraftFromAgentRun = async function(runId) {
     } catch (e) {
         showToast(e.message || '生成工作流草稿失败', 'error');
     }
+};
+
+window.Pivot.legacy.createScheduleFromAgentRun = async function(runId, runData = null) {
+    let run = runData;
+    if (!run || !run.goal) {
+        try {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+            const data = await res.json().catch(() => ({}));
+            run = data.data || data.run || run;
+        } catch (_) {}
+    }
+    if (!run || !run.goal) return showToast('未能读取当前任务配置', 'error');
+
+    const meta = typeof run.metadata === 'string' ? JSON.parse(run.metadata || '{}') : (run.metadata || {});
+    const draft = {
+        goal: run.goal,
+        modelId: run.model_id,
+        runMode: run.run_mode,
+        toolPolicy: run.tool_policy,
+        toolAllowlist: run.tool_allowlist,
+        approvalPolicy: run.approval_policy,
+        contextConfig: run.context_config,
+        dagSpec: meta.dagSpec || meta.dag || null,
+        workflowId: meta.workflowId || null,
+        workflowVersion: meta.workflowVersion || null
+    };
+
+    window.Pivot.moduleApi('agent.schedules')?.openEditor?.('', {
+        name: `${(run.title || run.goal).slice(0, 32)} 定时计划`,
+        draft
+    });
+};
+
+window.Pivot.legacy.saveTemplateFromAgentRun = async function(runId, runData = null) {
+    let run = runData;
+    if (!run || !run.goal) {
+        try {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+            const data = await res.json().catch(() => ({}));
+            run = data.data || data.run || run;
+        } catch (_) {}
+    }
+    if (!run || !run.goal) return showToast('未能读取当前任务配置', 'error');
+
+    const suggestedName = (run.title || run.goal).slice(0, 24);
+    const promptFn = window.Pivot.legacy.showInputPrompt;
+    const value = typeof promptFn === 'function'
+        ? await promptFn({
+            title: '保存为智能体模板',
+            message: '填写模板名称，当前任务的目标、模型、工具和策略设置将一并保存。',
+            value: suggestedName,
+            placeholder: '例如：自动化数据巡检',
+            requiredMessage: '请填写模板名称'
+        })
+        : window.prompt('模板名称', suggestedName);
+    if (!value) return;
+
+    try {
+        const meta = typeof run.metadata === 'string' ? JSON.parse(run.metadata || '{}') : (run.metadata || {});
+        const res = await apiFetch(`${API_BASE}/agents/templates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: String(value).trim().slice(0, 80),
+                goalTemplate: run.goal,
+                description: `从已成功运行的任务 #${run.id} 沉淀的模版。`,
+                modelId: run.model_id,
+                runMode: run.run_mode,
+                toolPolicy: run.tool_policy,
+                toolAllowlist: run.tool_allowlist,
+                approvalPolicy: run.approval_policy,
+                maxSteps: run.max_steps,
+                maxTokenBudget: run.max_token_budget,
+                retryLimit: run.retry_limit,
+                contextConfig: run.context_config,
+                dagSpec: meta.dagSpec || meta.dag || null,
+                workflowId: meta.workflowId || null,
+                workflowVersion: meta.workflowVersion || null
+            })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '保存模板失败');
+        showToast('已成功保存为智能体模板', 'success');
+    } catch (e) {
+        showToast(e.message || '保存模板失败', 'error');
+    }
+};
+
+window.Pivot.legacy.exportAgentAuditBundle = function(runId) {
+    const url = `${API_BASE}/agents/runs/${encodeURIComponent(runId)}/audit-bundle`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pivot-audit-${runId}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('正在导出全景审计报告…', 'info');
 };
 
 async function learnFromAgentRun(runId) {

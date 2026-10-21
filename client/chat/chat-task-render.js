@@ -34,11 +34,13 @@
         const approval = state.approval;
         if (!approval) return '';
         const expired = approval.expiresAt && model().timestamp(approval.expiresAt) <= Date.now();
+        const rememberHtml = !expired ? `<label class="chat-task-approval-remember" style="display:flex;align-items:center;gap:6px;margin:8px 0;font-size:0.8rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" data-task-approval-remember="1"> <span>在此次任务中信任该工具后续操作（免密继续）</span></label>` : '';
         return `<section class="chat-task-approval" aria-label="操作授权">
             <strong>${escape(approval.title)}需要你的确认</strong>
             <p>执行位置：${escape(approval.location)}。本次决定仅作用于当前操作和参数。</p>
             ${approval.fields?.length ? `<dl>${approval.fields.map(field => `<div><dt>${escape(field.label)}</dt><dd>${escape(field.value)}</dd></div>`).join('')}</dl>` : ''}
             ${approval.expiresAt ? `<p>${expired ? '本次请求已过期，请刷新任务状态后处理。' : `本次请求有效至 ${escape(dateText(approval.expiresAt))}。`}</p>` : ''}
+            ${rememberHtml}
             <div class="chat-task-approval-actions">${expired ? button('renew-approval', '重新申请授权', '重新生成当前操作的授权请求', 'btn-primary') : button('approve', '本次允许', '允许当前操作并继续任务', 'btn-primary')}
                 ${button('reject', '拒绝并停止', '拒绝当前操作并停止后续处理', 'btn-danger-outline')}
                 ${button('details', '查看完整范围', '查看任务详情中的完整操作范围')}</div>
@@ -72,6 +74,8 @@
             entry.busyAction === action ? ({ cancel: '正在停止…', pause: '正在暂停…', resume: '正在继续…' })[action] || '处理中…' : label,
             title, className, '', entry.actionInFlight);
         return `<div class="chat-task-actions"><div class="chat-task-actions-primary">${button('details', '任务详情', '查看完整执行记录与诊断')}
+            ${terminal && (status === 'completed' || state.run.final_answer) ? button('create-schedule', '转为计划', '将本次调试成功的任务创建为周期计划') : ''}
+            ${terminal && (status === 'completed' || state.run.final_answer) ? button('save-template', '另存模板', '保存为常用智能体模板') : ''}
             ${state.connection === 'unavailable' ? button('refresh', terminal ? '刷新记录' : '重新连接', '重新获取任务最新状态') : ''}
             ${!terminal && status !== 'awaiting_commit' ? button('steer', '补充要求', '为当前任务补充要求') : ''}
             ${!terminal && !waiting ? control('pause', '暂停', '暂停当前任务，可随后继续') : ''}

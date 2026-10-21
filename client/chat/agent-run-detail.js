@@ -81,11 +81,14 @@ function agentRunActionMarkup(run = {}, options = {}) {
         actions.push(`<button type="button" class="btn-secondary" data-agent-save-artifact="${agentEscape(run.id)}">保存结果</button>`);
     }
     if (!isPreview && !isActive) actions.push(`<button type="button" class="btn-secondary" data-agent-export-md="${agentEscape(run.id)}">导出结果</button>`);
+    if (!isPreview && !isActive) actions.push(`<button type="button" class="btn-secondary" data-agent-export-bundle="${agentEscape(run.id)}" title="一键导出全景审计报告与证据清单">导出完整证据包</button>`);
     const secondary = [];
     if (canRerun) {
         secondary.push(`<button type="button" class="btn-secondary" data-agent-resume="${agentEscape(run.id)}">${Number(checkpoints.total || 0) ? '从检查点继续' : '从断点继续'}</button>`);
     }
     if (canCreateWorkflowDraft) secondary.push(`<button type="button" class="btn-secondary" data-agent-create-workflow-draft="${agentEscape(run.id)}">转为工作流</button>`);
+    if (!isPreview && !isActive) secondary.push(`<button type="button" class="btn-secondary" data-agent-create-schedule="${agentEscape(run.id)}">转为定时计划</button>`);
+    if (!isPreview && !isActive) secondary.push(`<button type="button" class="btn-secondary" data-agent-save-template="${agentEscape(run.id)}">另存为模板</button>`);
     if (!isPreview && !isActive && (run.final_answer || run.error_message)) secondary.push(`<button type="button" class="btn-secondary" data-agent-create-skill-draft="${agentEscape(run.id)}">生成技能草稿</button>`);
     if (!isPreview && !isActive && (run.final_answer || run.error_message)) secondary.push(`<button type="button" class="btn-secondary" data-agent-learn-from-run="${agentEscape(run.id)}">记住这个方法</button>`);
     if (!isPreview && !isActive) secondary.push(`<button type="button" class="btn-secondary" data-agent-add-evaluation="${agentEscape(run.id)}">加入评测集</button>`);
@@ -455,6 +458,9 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-steer]')?.addEventListener('click', () => window.Pivot.legacy.steerAgentRun(run.id));
     container.querySelector('[data-agent-delegate-batch]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.delegateBatchFromAgentRun?.(run.id));
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.Pivot.legacy.createWorkflowDraftFromAgentRun(run.id));
+    container.querySelector('[data-agent-create-schedule]')?.addEventListener('click', () => window.Pivot.legacy.createScheduleFromAgentRun?.(run.id, run));
+    container.querySelector('[data-agent-save-template]')?.addEventListener('click', () => window.Pivot.legacy.saveTemplateFromAgentRun?.(run.id, run));
+    container.querySelector('[data-agent-export-bundle]')?.addEventListener('click', () => window.Pivot.legacy.exportAgentAuditBundle?.(run.id));
     container.querySelector('[data-agent-create-skill-draft]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runPersonalContext')?.createSkillDraftFromRun?.(run.id).catch(error => window.Pivot?.legacy?.showToast?.(error.message || '生成技能草稿失败', 'error')));
     container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
     container.querySelectorAll('[data-agent-transaction-commit]').forEach(button => {
@@ -805,7 +811,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             const activeApprovalGrants = Array.isArray(run.metadata?.approvalGrants)
                 ? run.metadata.approvalGrants.filter(item => item?.key && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())) : [];
             if (run.status === 'approval_required') {
-                approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>待人工授权执行</h4><p>智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p><div class="agent-run-approval-actions"><button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button><button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button></div></div>`;
+                approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>待人工授权执行</h4><p>智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p><label style="display:flex;align-items:center;gap:6px;margin:8px 0;font-size:0.8rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="agent-approval-remember-check"> <span>在本次任务中信任该工具后续同类操作（免密继续）</span></label><div class="agent-run-approval-actions"><button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button><button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button></div></div>`;
             }
             if (run.status === 'queued' && activeApprovalGrants.length) {
                 approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>已批准、尚未执行</h4><p>任务仍在队列中。撤销后将停止领取并要求重新审批。</p><div class="agent-run-approval-actions">${activeApprovalGrants.map(item => `<button type="button" class="btn-danger-outline btn-xs" data-agent-revoke-approval="${agentEscapeAttr(item.key)}">撤销 ${agentEscape(item.tool || '工具')} 授权</button>`).join('')}</div></div>`;

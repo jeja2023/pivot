@@ -781,6 +781,10 @@ function createDagInspectorController(ctx) {
         const nodeTestSnapshot = getNodeTestOutputSnapshots().get(String(node.id));
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
+        const runStates = getRunStates();
+        const nodeRunState = runStates.get(String(node.id));
+        const currentRunId = (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '') || window.Pivot?.legacy?.currentAgentRunId || '';
+        const canRerunNode = Boolean(nodeRunState && ['error', 'cancelled', 'continued_error'].includes(nodeRunState.status) && currentRunId);
         const nodeReadinessIssues = getReadinessIssues().filter(issue => String(issue?.nodeId || '') === String(node.id));
         const upstreamNodes = getDependencyCandidateNodes(node);
         const referencedNodes = [...inputNodeReferences(node.input)];
@@ -890,6 +894,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-secondary" data-pivot-dag-pick-var="1" title="查看并复制上游变量">+{x} 插入变量</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
+                    ${canRerunNode ? `<button type="button" class="btn-secondary pivot-dag-rerun-node-btn" data-pivot-dag-rerun-node="${dagEscapeAttr(node.id)}" title="保留上游已成功节点的快取，从本节点开始断点续跑">从本节点断点续跑</button>` : ''}
                 </div>
                 <pre class="pivot-dag-test-result" data-pivot-dag-test-result hidden></pre>
                 ${testControls?.renderMarkup?.(nodeTestSnapshot) || ''}
@@ -972,6 +977,12 @@ function createDagInspectorController(ctx) {
                 });
             }
         });
+        inspector.querySelector('[data-pivot-dag-rerun-node]')?.addEventListener('click', () => {
+            const runId = (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '') || window.Pivot?.legacy?.currentAgentRunId || '';
+            if (runId && typeof window.Pivot?.legacy?.rerunAgentDagNode === 'function') {
+                window.Pivot.legacy.rerunAgentDagNode(runId, node.id);
+            }
+        });
         testControls?.bind?.(node);
         inspector.querySelectorAll('[data-pivot-dag-input-field]').forEach(input => {
             const commitInput = ({ rerender = false } = {}) => {
@@ -990,7 +1001,22 @@ function createDagInspectorController(ctx) {
                 ctx.flushOut?.();
                 if (rerender) ctx.render?.();
             };
-            input.addEventListener('input', () => commitInput());
+            input.addEventListener('input', () => {
+                commitInput();
+                if (typeof input.value === 'string' && typeof input.selectionStart === 'number') {
+                    const cursor = input.selectionStart;
+                    const textBefore = input.value.slice(0, cursor);
+                    if (textBefore.endsWith('{{')) {
+                        showVariablePicker({
+                            anchorEl: input,
+                            targetInput: input,
+                            nodeId: node.id,
+                            nodes: ctx.spec?.nodes || [],
+                            tools: currentTools()
+                        });
+                    }
+                }
+            });
             input.addEventListener('change', () => commitInput({ rerender: input.tagName === 'SELECT' || input.type === 'checkbox' }));
             input.addEventListener('blur', () => ctx.render?.());
         });
@@ -1026,6 +1052,19 @@ function createDagInspectorController(ctx) {
                     input.dataset.pivotDagHistoryRecorded = '1';
                 }
                 commitMergeFields();
+                if (input.matches('[data-pivot-dag-merge-value]') && typeof input.value === 'string' && typeof input.selectionStart === 'number') {
+                    const cursor = input.selectionStart;
+                    const textBefore = input.value.slice(0, cursor);
+                    if (textBefore.endsWith('{{')) {
+                        showVariablePicker({
+                            anchorEl: input,
+                            targetInput: input,
+                            nodeId: node.id,
+                            nodes: ctx.spec?.nodes || [],
+                            tools: currentTools()
+                        });
+                    }
+                }
             });
             input.addEventListener('blur', () => commitMergeFields(true));
         });

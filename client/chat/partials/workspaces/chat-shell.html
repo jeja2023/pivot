@@ -254,6 +254,10 @@
                         <span class="chat-task-draft-label-text">任务目标与具体要求</span>
                         <textarea id="chat-task-draft-goal" class="form-input" rows="3" maxlength="12000" placeholder="详细描述任务的具体目标、边界约束与期望交付物"></textarea>
                     </label>
+                    <label class="chat-task-draft-field" for="chat-task-draft-steering">
+                        <span class="chat-task-draft-label-text">补充调整建议（重新生成时应用）</span>
+                        <input id="chat-task-draft-steering" class="form-input" maxlength="1000" placeholder="例如：将步数限制在3步内；只读取不修改文件；增加表格输出">
+                    </label>
                 </div>
                 <div id="chat-task-draft-plan" class="chat-task-draft-plan" aria-live="polite"></div>
             </div>

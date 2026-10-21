@@ -50,12 +50,14 @@ function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimes
         const approvedApprovalKeys = new Set(Array.isArray(metadata.approvedApprovalKeys) ? metadata.approvedApprovalKeys : []);
         if (pending.key) approvedApprovalKeys.add(pending.key);
         else if (pending.tool) approvedTools.add(pending.tool);
+        const rememberForRun = Boolean(expected?.rememberForRun);
         const approvalGrant = {
             tool: pending.tool || '',
             key: pending.key || '',
             inputHash: pending.inputHash || approvalInputHash(pending.input || {}),
+            rememberForRun,
             grantedAt: now,
-            expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + 15 * 60 * 1000))
+            expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + (rememberForRun ? 60 * 60 * 1000 : 15 * 60 * 1000)))
         };
         const approvalGrants = Array.isArray(metadata.approvalGrants)
             ? metadata.approvalGrants.filter(item => item && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()))

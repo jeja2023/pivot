@@ -153,12 +153,18 @@
                         ? 'is-bar-error'
                         : 'is-bar-normal';
 
+            const canRerunNode = Boolean(snapshot.run?.id && ['error', 'continued_error', 'cancelled'].includes(item.status));
+            const rerunBtn = canRerunNode
+                ? `<button type="button" class="pivot-waterfall-rerun-btn" data-waterfall-rerun-node="${escapeHtml(item.id)}" title="保留上游已成功节点的快取，从本节点开始断点续跑">断点续跑</button>`
+                : '';
+
             return `
                 <div class="pivot-waterfall-row" data-node-id="${escapeHtml(item.id)}" role="button" tabindex="0" title="点击定位至该节点">
                     <div class="pivot-waterfall-row-meta">
                         <span class="pivot-waterfall-node-name">${escapeHtml(item.title)}</span>
                         <span class="pivot-waterfall-tool-tag">${escapeHtml(item.tool)}</span>
                         ${statusBadge}
+                        ${rerunBtn}
                     </div>
                     <div class="pivot-waterfall-track">
                         <div class="pivot-waterfall-bar ${barColorClass}" data-bar-width="${item.widthPercent}" data-bar-offset="${item.offsetPercent}"></div>
@@ -208,6 +214,20 @@
         document.body.appendChild(modal);
         modal.querySelector('.pivot-dag-waterfall-close')?.focus();
         modal.addEventListener('click', (e) => {
+            const rerunBtn = e.target.closest('[data-waterfall-rerun-node]');
+            if (rerunBtn) {
+                e.stopPropagation();
+                e.preventDefault();
+                const nodeId = rerunBtn.getAttribute('data-waterfall-rerun-node');
+                const runId = snapshot.run?.id;
+                if (runId && nodeId) {
+                    close();
+                    if (typeof window.Pivot?.legacy?.rerunAgentDagNode === 'function') {
+                        window.Pivot.legacy.rerunAgentDagNode(runId, nodeId);
+                    }
+                }
+                return;
+            }
             if (e.target === modal || e.target.closest('.pivot-dag-waterfall-close')) { close(); return; }
             const row = e.target.closest('.pivot-waterfall-row');
             const id = row?.getAttribute('data-node-id');
