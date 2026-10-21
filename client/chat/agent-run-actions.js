@@ -325,17 +325,18 @@ async function saveTemplateFromAgentRun(runId, runData = null) {
     }
     if (!run || !run.goal) return showToast('未能读取当前任务配置', 'error');
 
-    const suggestedName = (run.title || run.goal).slice(0, 24);
-    const promptFn = window.Pivot.legacy.showInputPrompt;
-    const value = typeof promptFn === 'function'
-        ? await promptFn({
-            title: '保存为智能体模板',
-            message: '填写模板名称，当前任务的目标、模型、工具和策略设置将一并保存。',
-            value: suggestedName,
-            placeholder: '例如：自动化数据巡检',
-            requiredMessage: '请填写模板名称'
-        })
-        : window.prompt('模板名称', suggestedName);
+    const promptFn = window.Pivot?.legacy?.showInputPrompt;
+    if (typeof promptFn !== 'function') {
+        showToast('输入窗口尚未加载，请刷新页面后重试。', 'error');
+        return;
+    }
+    const value = await promptFn({
+        title: '保存为智能体模板',
+        message: '填写模板名称，当前任务的目标、模型、工具和策略设置将一并保存。',
+        value: suggestedName,
+        placeholder: '例如：自动化数据巡检',
+        requiredMessage: '请填写模板名称'
+    });
     if (!value) return;
 
     try {
