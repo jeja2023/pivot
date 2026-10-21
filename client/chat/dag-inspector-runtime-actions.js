@@ -1,3 +1,4 @@
+/* global activeAgentRunId */
 /* DAG 检查器运行时状态感知与断点续跑、行内变量补全动作 */
 (function () {
     function canRerunNode(node, { getRunStates } = {}) {
