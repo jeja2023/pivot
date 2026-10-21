@@ -7,7 +7,7 @@ const TRANSACTION_STATUSES = Object.freeze(new Set([
     'draft', 'planned', 'executing', 'verifying', 'awaiting_commit', 'committed',
     'compensating', 'rolled_back', 'partial', 'needs_input', 'failed', 'cancelled'
 ]));
-const EFFECT_STATUSES = Object.freeze(new Set(['planned', 'staged', 'executing', 'committed', 'compensation_pending', 'compensated', 'failed', 'cancelled']));
+const _EFFECT_STATUSES = Object.freeze(new Set(['planned', 'staged', 'executing', 'committed', 'compensation_pending', 'compensated', 'failed', 'cancelled']));
 const COMMIT_MODES = Object.freeze(new Set(['preview', 'after_verify', 'manual', 'irreversible']));
 const TRANSACTION_TRANSITIONS = Object.freeze({
     draft: new Set(['planned', 'cancelled']),

@@ -1,4 +1,5 @@
 /* 运行诊断面板：负责单次运行的缓存、请求与交互，不承担授权决策。 */
+/* eslint-disable no-undef */
 /* global API_BASE */
 (function () {
     function create({ diagnostics, escape, escapeAttr, formatDate, shortText, jsonText, setMarkup, prependMarkup, setNotice, apiJson }) {
@@ -320,8 +321,10 @@ if (typeof document !== 'undefined') {
             try {
                 if (typeof copyAgentText === 'function') {
                     await copyAgentText(report);
-                } else if (window.Pivot?.legacy?.copyAgentText) {
-                    await window.Pivot.legacy.copyAgentText(report);
+                } else if (typeof window.Pivot?.legacy?.chatDialogHelpers?.writeTextToClipboard === 'function') {
+                    await window.Pivot.legacy.chatDialogHelpers.writeTextToClipboard(report);
+                } else if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                    await navigator.clipboard.writeText(report);
                 }
                 const originalHtml = copyDiagBtn.innerHTML;
                 PivotSafeHtml.setHtml(copyDiagBtn, '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>已复制</span>');

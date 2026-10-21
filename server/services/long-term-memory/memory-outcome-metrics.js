@@ -1,6 +1,6 @@
 'use strict';
 
-const { query, queryOne, execute } = require('../../db/client');
+const { query, queryOne } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 
 const MIN_EVALUATED_SAMPLES = 30;

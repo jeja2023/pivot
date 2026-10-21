@@ -199,7 +199,7 @@ function normalizeEvidenceManifest(value, domainKey, evidenceType) {
     if (evidenceType === 'nonfunctional') normalized = normalizeNonfunctionalManifest(base, domainKey);
     if (evidenceType === 'canary') normalized = normalizeCanaryManifest(base, domainKey);
     if (evidenceType === 'committee') normalized = normalizeCommitteeManifest(base);
-    const { raw, ...result } = normalized || {};
+    const { raw: _raw, ...result } = normalized || {};
     return result;
 }
 function evidenceManifestValidation(row = {}) {

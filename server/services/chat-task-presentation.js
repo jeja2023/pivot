@@ -129,4 +129,4 @@ function presentLegacyStep(step) {
         location: type === 'tool' ? executionLocation(step.tool_name) : '', detail: '' };
 }
 
-module.exports = { EVENT_TYPES, STATUS_LABELS, PHASE_TITLES, parseObject, safeTaskText, toolLabel, executionLocation, approvalSummary, presentTaskEvent, presentLegacyStep };
+module.exports = { EVENT_TYPES, STATUS_LABELS, parseObject, safeTaskText, toolLabel, executionLocation, approvalSummary, presentTaskEvent, presentLegacyStep };

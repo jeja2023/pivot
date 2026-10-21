@@ -251,7 +251,7 @@ test('从未同步的新草稿也能从本机找回，未完成 JSON 原文可�
     await page.evaluate(() => {
         const specEl = document.getElementById('agent-dag-spec');
         specEl.value = '{"nodes":[';
-        specEl.dispatchEvent(new Event('input', { bubbles: true }));
+        specEl.dispatchEvent(new window.Event('input', { bubbles: true }));
     });
     await expect(page.locator('#workflow-product-save')).toHaveText('保存失败，修改仍保留', { timeout: 15000 });
     const draft = await page.evaluate(() => window.Pivot.moduleApi('agent.workflowDrafts').current());

@@ -467,7 +467,7 @@ function createChatRouter({
         // 显式 Agent 请求保持兼容。在普通对话中，
         // 服务端高置信度决策可直接接入同一治理运行时，无需手动模式选择或指令。
         const useChatAgent = chatMode === 'agent' || automaticExecution.action === 'agent_run';
-        if (useChatAgent && (automaticExecution.action === 'agent_run' || modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH)) {
+        if (useChatAgent && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const handoff = await createChatAgentHandoff({

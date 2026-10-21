@@ -89,7 +89,3 @@ window.Pivot?.exposeModule?.('settings.scale', {
     updateSettingsWorkspaceScale
 }, ['scheduleSettingsWorkspaceScale', 'updateSettingsWorkspaceScale']);
 
-if (window.Pivot && window.Pivot.legacy) {
-    window.Pivot.legacy.scheduleSettingsWorkspaceScale = scheduleSettingsWorkspaceScale;
-    window.Pivot.legacy.updateSettingsWorkspaceScale = updateSettingsWorkspaceScale;
-}

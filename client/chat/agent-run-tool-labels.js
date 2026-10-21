@@ -377,10 +377,10 @@ const AGENT_RESULT_FIELD_LABELS = {
     solution: '解决方案', action_type: '动作类型', actionType: '动作类型', target_type: '目标类型',
     targetType: '目标类型', filter: '过滤条件', filters: '过滤条件', sort: '排序规则', sorting: '排序规则',
     order: '排序', direction: '方向', offset: '偏移量', page: '页码', pageSize: '每页条数', page_size: '每页条数',
-    headers: '请求头', body: '请求体', method: '请求方法', encoding: '字符编码', mimeType: '媒体类型',
+    requestHeaders: '请求头', request_headers: '请求头', body: '请求体', method: '请求方法', encoding: '字符编码', mimeType: '媒体类型',
     mime_type: '媒体类型', is_directory: '是否为目录', isDirectory: '是否为目录', file_size: '文件大小',
     fileSize: '文件大小', line_number: '行号', lineNumber: '行号', line_content: '行内容', lineContent: '行内容',
-    total_matches: '匹配总数', totalMatches: '匹配总数', matches: '匹配结果', match: '匹配项'
+    total_matches: '匹配总数', totalMatches: '匹配总数', match: '匹配项'
 };
 
 function agentResultFieldLabel(key) {

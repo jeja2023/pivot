@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { query, queryOne, execute, transaction } = require('../db/client');
+const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { isSuperAdmin } = require('../permissions');
 const { canonicalJson } = require('./canonical-json');

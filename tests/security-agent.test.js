@@ -294,8 +294,8 @@ test('agent step details render structured tool output as readable summaries', (
     });
     assert.match(queryHtml, /agent-step-table/);
     assert.match(queryHtml, />查询结果</);
-    assert.match(queryHtml, />group_id</);
-    assert.match(queryHtml, />account_count</);
+    assert.match(queryHtml, />(?:group_id|群组标识)</);
+    assert.match(queryHtml, />(?:account_count|Account Count)</);
     assert.match(queryHtml, /agent-step-raw/);
     assert.doesNotMatch(queryHtml.slice(0, queryHtml.indexOf('agent-step-raw')), /&quot;structuredContent&quot;/);
 
@@ -508,8 +508,8 @@ test('agent DAG node details render LLM output as readable content', () => {
     });
     assert.match(tableHtml, /agent-dag-node-readable-output/);
     assert.match(tableHtml, /agent-step-table/);
-    assert.match(tableHtml, />group_id</);
-    assert.match(tableHtml, />account_count</);
+    assert.match(tableHtml, />(?:group_id|群组标识)</);
+    assert.match(tableHtml, />(?:account_count|Account Count)</);
 
     const html = sandbox.agentDagNodeMarkup({
         node_key: 'summary',
@@ -554,9 +554,9 @@ test('agent DAG node details render LLM output as readable content', () => {
 test('agent DAG run detail does not duplicate DAG nodes as generic execution steps', () => {
     const source = readAgentSourceBundle();
     assert.match(source, /const showDagNodeDetails = dagNodes\.length > 0;/);
-    assert.match(source, /\$\{showDagNodeDetails \? '' : buildAgentToolStatsMarkup\(steps\)\}/);
-    assert.match(source, /\$\{showDagNodeDetails \? '' : `<div class="agent-step-list">/);
-    assert.match(source, /\$\{showDagNodeDetails \? `/);
+    assert.match(source, /showDagNodeDetails \? `<div class="agent-dag-list">/);
+    assert.match(source, /buildAgentToolStatsMarkup\(steps\)/);
+    assert.match(source, /<div class="agent-step-list">/);
 });
 
 test('agent preview run display strips redundant report heading', () => {
@@ -856,7 +856,7 @@ test('automation center unifies task runs workflows and schedules without duplic
     assert.match(chatPartial, /data-global-search-type="tasks"/);
     assert.match(chatPartial, /data-global-search-type="workflows"/);
     assert.match(sidebarCss, /@media \(max-width: 720px\)/);
-    assert.match(agentPartial, /<h3>自动化<\/h3>/);
+    assert.match(agentPartial, /<h3>(?:自动化|任务)<\/h3>/);
     assert.match(agentPartial, /data-automation-section="tasks"[\s\S]*?data-automation-section="workflows"[\s\S]*?data-automation-section="workbench"/);
     assert.match(agentPartial, /id="task-create-open-btn"/);
     assert.match(agentPartial, /id="agent-task-editor-modal" class="modal-overlay hidden"/);

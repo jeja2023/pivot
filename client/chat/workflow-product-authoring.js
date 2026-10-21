@@ -57,7 +57,7 @@
                     panel.hidden = true;
                 }
             });
-            const observer = new MutationObserver(() => {
+            const observer = new window.MutationObserver(() => {
                 if (panel.hidden) {
                     overlay.classList.add('hidden');
                     overlay.hidden = true;

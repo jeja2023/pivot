@@ -222,7 +222,6 @@
         const disclosure = [...panel.querySelectorAll('details')].map(item => item.open);
         const statusClass = run ? (run.status || 'default') : (error ? 'error' : (key.startsWith('node:') ? 'debug' : 'completed'));
         const statusText = run ? (statusNames[run.status] || run.status) : (error ? '失败' : (key.startsWith('node:') ? '单步测试' : '已完成'));
-        const currentItem = sessions.get(key);
         let pillSource = source;
         if (pillSource === '历史发布运行' || pillSource === '发布版运行') pillSource = '发布版';
         else if (pillSource === '试运行草稿') pillSource = '草稿试跑';

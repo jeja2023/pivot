@@ -3,7 +3,7 @@
 // 本机代码工作区的实际路径不离开桌面端。服务端只保存设备标识、受控工作树名和
 // 由桌面端计算的工作区版本摘要，并用持久 outbox 把来源失效投递给长期记忆。
 const crypto = require('crypto');
-const { execute, queryOne, transaction } = require('../db/client');
+const { execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
 

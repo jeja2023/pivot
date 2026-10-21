@@ -32,7 +32,6 @@ test('设置工作区缩放模块同时导出 moduleApi 与 legacy 别名以支�
 
     assert.ok(source.includes("exposeModule?.('settings.scale'"));
     assert.ok(source.includes("'scheduleSettingsWorkspaceScale', 'updateSettingsWorkspaceScale'"));
-    assert.ok(source.includes('window.Pivot.legacy.scheduleSettingsWorkspaceScale = scheduleSettingsWorkspaceScale'));
     assert.ok(admin.includes('scaleApi?.updateSettingsWorkspaceScale'));
 });
 

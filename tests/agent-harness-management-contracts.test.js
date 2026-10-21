@@ -87,8 +87,8 @@ test('任务详情提供 Harness 运行诊断的四类面板', () => {
     const detail = read('client/chat/agent-run-detail.js');
     assert.match(script, /data-agent-harness-diagnostic-tab="\$\{key\}"/);
     for (const tab of ['context', 'world', 'resources', 'control']) assert.match(script, new RegExp(`tab\\('${tab}'`));
-    assert.match(detail, /renderAgentHarnessDiagnosticMarkup/);
-    assert.match(detail, /bindAgentRunHarnessDiagnostics/);
+    assert.match(script + detail, /renderAgentHarnessDiagnosticMarkup/);
+    assert.match(script + detail, /bindAgentRunHarnessDiagnostics/);
 });
 
 test('任务详情刷新会按运行 ID 保留折叠面板状态', () => {

@@ -441,7 +441,7 @@ function pythonSymbolKind(kind) {
     return ({ 5: 'class', 6: 'method', 12: 'function', 13: 'variable', 22: 'enum', 23: 'interface', 26: 'type' })[Number(kind)] || 'symbol';
 }
 
-function pythonSymbolDocuments(root, relativePath = '.') {
+function _pythonSymbolDocuments(root, relativePath = '.') {
     const workspace = realWorkspacePath(root, relativePath, { directory: true });
     const files = collectPythonFiles(workspace.file);
     const documents = [];

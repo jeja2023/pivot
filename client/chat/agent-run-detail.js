@@ -96,7 +96,6 @@ let currentRunDetailRecord = null;
 let currentRunDetailData = null;
 
 async function copyAgentText(text) {
-    if (typeof window !== "undefined" && window.Pivot?.legacy) window.Pivot.legacy.copyAgentText = copyAgentText;
     if (!text && text !== '') return;
     const dialogHelpers = window.Pivot?.legacy?.chatDialogHelpers;
     if (typeof dialogHelpers?.writeTextToClipboard === 'function') {
