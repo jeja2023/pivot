@@ -51,11 +51,39 @@
         if (!editor) return;
         mounted = true;
         const libraryBar = editor.querySelector('.agent-dag-library-bar');
-        const save = document.createElement('span'); save.id = 'workflow-product-save'; save.setAttribute('role', 'status');
-        libraryBar.appendChild(save);
-        const results = document.createElement('button'); results.id = 'agent-dag-canvas-view-results'; results.type = 'button'; results.className = 'btn-secondary'; results.hidden = true; results.textContent = '查看结果';
-        results.addEventListener('click', () => window.Pivot.moduleApi('agent.workflowResults').open());
-        libraryBar.appendChild(results);
+        const actionsGroup = editor.querySelector('.agent-dag-library-bar-actions') || libraryBar;
+        let save = el('workflow-product-save');
+        if (!save) {
+            save = document.createElement('span');
+            save.id = 'workflow-product-save';
+            save.className = 'workflow-product-save';
+            save.setAttribute('role', 'status');
+            const management = el('agent-workflow-management-menu');
+            if (management && management.parentElement === actionsGroup) {
+                actionsGroup.insertBefore(save, management);
+            } else {
+                actionsGroup.appendChild(save);
+            }
+        }
+        let results = el('agent-dag-canvas-view-results');
+        if (!results) {
+            results = document.createElement('button');
+            results.id = 'agent-dag-canvas-view-results';
+            results.type = 'button';
+            results.className = 'btn-secondary agent-dag-canvas-results-btn';
+            results.hidden = true;
+            results.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>查看结果</span>';
+            const management = el('agent-workflow-management-menu');
+            if (management && management.parentElement === actionsGroup) {
+                actionsGroup.insertBefore(results, management);
+            } else {
+                actionsGroup.appendChild(results);
+            }
+        }
+        if (results && results.dataset.boundViewResults !== '1') {
+            results.dataset.boundViewResults = '1';
+            results.addEventListener('click', () => window.Pivot.moduleApi('agent.workflowResults').open());
+        }
         const feedback = document.createElement('section'); feedback.id = 'workflow-product-feedback'; feedback.hidden = true;
         PivotSafeHtml.setHtml(feedback, '<div id="workflow-product-save-actions" class="workflow-product-row" hidden><button type="button" class="btn-secondary" data-save-retry>重试保存</button><button type="button" class="btn-secondary" data-draft-compare>查看冲突</button><button type="button" class="btn-secondary" data-draft-copy>另存草稿副本</button><button type="button" class="btn-secondary" data-draft-export>导出副本</button></div><div id="workflow-product-recovery" class="workflow-product-notice" hidden></div><div id="workflow-product-status" role="status" aria-live="polite"></div>');
         libraryBar.after(feedback);
@@ -68,14 +96,32 @@
         });
         feedback.querySelector('[data-draft-export]').addEventListener('click', () => download());
         const management = el('agent-workflow-management-menu');
-        const menu = management.querySelector('[role="menu"]');
         for (const [id, label, action] of [
             ['agent-workflow-ai-edit-btn', '用自然语言修改', () => window.Pivot.moduleApi('agent.workflowAuthoring').describe()],
             ['agent-workflow-export-draft-btn', '导出当前草稿', () => download()]
         ]) {
-            const button = document.createElement('button'); button.id = id; button.type = 'button'; button.className = 'agent-workflow-management-item'; button.setAttribute('role', 'menuitem'); button.textContent = label;
-            button.addEventListener('click', () => { management.open = false; if (!bridge().readOnly()) action(); });
-            menu.appendChild(button);
+            let button = el(id);
+            if (!button && management) {
+                const menu = management.querySelector('[role="menu"]');
+                button = document.createElement('button');
+                button.id = id;
+                button.type = 'button';
+                button.className = 'agent-workflow-management-item';
+                button.setAttribute('role', 'menuitem');
+                const span = document.createElement('span');
+                span.textContent = label;
+                button.appendChild(span);
+                const deleteBtn = el('agent-workflow-delete-btn');
+                if (deleteBtn) menu.insertBefore(button, deleteBtn);
+                else menu.appendChild(button);
+            }
+            if (button && button.dataset.boundWorkflowProductAction !== '1') {
+                button.dataset.boundWorkflowProductAction = '1';
+                button.addEventListener('click', () => {
+                    if (management) management.open = false;
+                    if (!bridge().readOnly()) action();
+                });
+            }
         }
         for (const id of ['workflow-product-results', 'workflow-product-run-form', 'workflow-product-start', 'workflow-product-release']) {
             const panel = document.createElement('section'); panel.id = id; panel.className = 'workflow-product-panel'; panel.hidden = true;
@@ -96,7 +142,10 @@
         el('workflow-product-release').hidden = true; el('workflow-product-recovery').hidden = true;
         el('workflow-product-status').textContent = ''; el('workflow-product-save-actions').hidden = true;
         el('workflow-product-save').textContent = ''; el('workflow-product-save').hidden = bridge().readOnly();
-        el('agent-workflow-ai-edit-btn').hidden = bridge().readOnly(); el('agent-workflow-export-draft-btn').hidden = bridge().readOnly();
+        const aiEditBtn = el('agent-workflow-ai-edit-btn');
+        const exportDraftBtn = el('agent-workflow-export-draft-btn');
+        if (aiEditBtn) aiEditBtn.hidden = bridge().readOnly();
+        if (exportDraftBtn) exportDraftBtn.hidden = bridge().readOnly();
         refreshFeedback();
         draftId = bridge().current()?.id ? `workflow-${bridge().current().id}` : `new-${globalThis.crypto.randomUUID()}`;
         if (!bridge().readOnly()) { const identity = draftId; void drafts().load(draftId, draftBridge()).then(() => { if (draftId === identity) void window.Pivot.moduleApi('agent.workflowResults').restore(identity); }); }

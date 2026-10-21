@@ -325,8 +325,8 @@ function showAutomationAssetCenter(options = {}) {
     editorView?.classList.remove('is-readonly');
     const title = document.getElementById('automation-workspace-title');
     const description = document.getElementById('automation-workspace-description');
-    if (title) title.textContent = '自动化';
-    if (description) description.textContent = '集中管理工作流与计划任务，并跟踪发布和运行状态。';
+    if (title) title.textContent = '工作流';
+    if (description) description.textContent = '集中管理工作流与计划任务，可视化编排、发布与执行多步流程。';
     setAutomationTab(options.tab || activeAutomationTab);
 }
 

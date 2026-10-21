@@ -8,6 +8,7 @@ const { asyncHandler, getClientIp } = require('../http');
 const { createKnowledgeUploadMiddleware, normalizeUploadedOriginalName, uploadSecurityMiddleware } = require('../upload');
 const { clearRagCacheForUser } = require('../services/rag-cache');
 const { enqueueAuditLog } = require('../services/db-write-queue');
+const { getBeijingTimestamp } = require('../time');
 const { assertSafeOutboundUrl, redactAuditDetails } = require('../security');
 const {
     batchDeleteKnowledgeDocuments,
@@ -87,7 +88,8 @@ function auditRagAction(req, action, details) {
         userId,
         action: normalizeAuditAction(action),
         details: serializedDetails,
-        ip
+        ipAddress: ip,
+        timestamp: getBeijingTimestamp()
     });
 }
 

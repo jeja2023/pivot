@@ -6,6 +6,7 @@
  * 延迟、不可阻塞主链路」的写入。本模块把它们缓冲成批，攒批落库。
  */
 const { logger } = require('../logger');
+const { getBeijingTimestamp } = require('../time');
 
 // ──────────────────────────────────────────────────────────────────────────
 // 队列定义
@@ -229,6 +230,9 @@ async function runPgWriteQuery(pool, sql, params) {
 }
 
 function sanitizeQueueValue(field, val) {
+    if ((field === 'timestamp' || field === 'createdAt') && (val === undefined || val === null || val === '')) {
+        return getBeijingTimestamp();
+    }
     if (val === undefined || val === null) return null;
     // 整型与主外键列校验：严格防范 Object/Promise/NaN/无效字符传进 PostgreSQL BIGINT/INTEGER 列
     if (/Id|Tokens|Count|durationMs/i.test(field)) {
@@ -417,11 +421,23 @@ function pgQueueDiagnostics() {
 
 // ──────────────────────────────────────────────────────────────────────────
 function enqueueAuditLog(item) {
-    return pgEnqueue('auditLogs', item);
+    if (!item || typeof item !== 'object') return;
+    const normalized = {
+        ...item,
+        ipAddress: item.ipAddress || item.ip || item.clientIp || null,
+        timestamp: item.timestamp || item.createdAt || getBeijingTimestamp()
+    };
+    return pgEnqueue('auditLogs', normalized);
 }
 
 function enqueueApiCallLog(item) {
-    return pgEnqueue('apiCallLogs', item);
+    if (!item || typeof item !== 'object') return;
+    const normalized = {
+        ...item,
+        ipAddress: item.ipAddress || item.ip || item.clientIp || null,
+        createdAt: item.createdAt || item.timestamp || getBeijingTimestamp()
+    };
+    return pgEnqueue('apiCallLogs', normalized);
 }
 
 function enqueueMcpCallLog(item) {

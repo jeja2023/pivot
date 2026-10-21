@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.22",
+  "version": "0.7.23",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -108,7 +108,8 @@
     "qs": "^6.16.0",
     "debug": "^4.4.3",
     "hono": "^4.13.5",
-    "image-size": "^2.0.4"
+    "image-size": "^2.0.4",
+    "follow-redirects": "^1.16.1"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",
@@ -124,6 +125,7 @@
     "electron-updater": "^6.8.9",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
+    "follow-redirects": "^1.16.1",
     "helmet": "^8.3.0",
     "js-yaml": "^5.4.1",
     "jsonwebtoken": "^9.0.2",

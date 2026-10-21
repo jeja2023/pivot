@@ -837,21 +837,19 @@
         const title = panel.querySelector('.agent-modal-header h3');
         const subtitle = panel.querySelector('.agent-modal-header p');
         if (!title || !subtitle) return;
+        title.textContent = '智能体管理';
         if (subview === 'inbox') {
-            title.textContent = '待办中心';
             subtitle.textContent = '集中处理审批请求、异常告警与运行通知，确保业务流程畅通。';
         } else if (subview === 'goals') {
-            title.textContent = '我的自动化';
             subtitle.textContent = '管理常驻自主 Agent 目标、定时调度计划与事件触发自动化。';
         } else if (subview === 'governance') {
-            title.textContent = '技能与助手';
             subtitle.textContent = '管理智能体技能库、系统预设助手、自进化提案与记忆策略。';
         } else if (subview === 'channels') {
-            title.textContent = '通知设置';
             subtitle.textContent = '配置向企业微信、钉钉、飞书、邮件或 Webhook 推送任务提醒与审批。';
         } else if (subview === 'quality') {
-            title.textContent = '运行质量与运维指标';
             subtitle.textContent = '近 30 天自主任务完成率、人工审批中位数耗时与工具可靠性。';
+        } else {
+            subtitle.textContent = '集中管理智能体技能与助手、待办审批、自动目标与通知运行质量。';
         }
     }
 

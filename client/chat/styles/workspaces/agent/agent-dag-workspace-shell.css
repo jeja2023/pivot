@@ -958,12 +958,24 @@
     min-width: 220px;
 }
 
-.agent-dag-library-bar .agent-workflow-lifecycle {
+.agent-dag-library-bar-actions {
     margin-left: auto;
-    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    min-height: 34px;
+}
+
+.agent-dag-library-bar .agent-workflow-lifecycle {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: flex-end;
+}
+
+.agent-dag-library-bar > .agent-workflow-lifecycle {
+    margin-left: auto;
 }
 
 .agent-dag-library-bar .agent-workflow-management-menu {
@@ -1256,11 +1268,13 @@
     gap: 7px;
     min-width: 0;
     max-width: 100%;
-    min-height: 30px;
-    padding: 0 10px;
-    border: 1px solid rgba(148, 163, 184, 0.24);
+    min-height: 32px;
+    height: 32px;
+    padding: 0 11px;
+    border: 1px solid var(--border, rgba(148, 163, 184, 0.24));
     border-radius: 999px;
-    background: #fff;
+    background: var(--surface, #fff);
+    box-sizing: border-box;
 }
 
 .agent-workflow-status-dot {
@@ -1339,22 +1353,32 @@
 }
 
 .agent-workflow-management-trigger.btn-secondary {
-    display: grid;
-    width: 34px;
-    min-width: 34px;
-    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
     padding: 0;
-    place-items: center;
     border-radius: var(--radius-sm, 6px);
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-main);
+    cursor: pointer;
+    box-sizing: border-box;
     transition: all 0.15s ease;
 }
 
 .agent-workflow-management-trigger svg {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+    transition: color 0.15s ease;
+}
+
+.agent-workflow-management-trigger.btn-secondary:hover svg,
+.agent-workflow-management-menu[open] .agent-workflow-management-trigger svg {
+    color: var(--primary);
 }
 
 .agent-workflow-management-menu[open] .agent-workflow-management-trigger {
@@ -1363,50 +1387,122 @@
     background: color-mix(in srgb, var(--primary) 8%, var(--surface));
 }
 
+#agent-dag-canvas-view-results.btn-secondary,
+.agent-dag-canvas-results-btn.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-main);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+#agent-dag-canvas-view-results.btn-secondary:hover:not(:disabled),
+.agent-dag-canvas-results-btn.btn-secondary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+#agent-dag-canvas-view-results svg,
+.agent-dag-canvas-results-btn svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+#agent-dag-canvas-view-results.btn-secondary:hover:not(:disabled) svg,
+.agent-dag-canvas-results-btn.btn-secondary:hover:not(:disabled) svg {
+    color: var(--primary);
+}
+
 .agent-workflow-management-popover {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
     z-index: 45;
     display: flex;
-    width: 180px;
+    min-width: 176px;
+    width: max-content;
+    max-width: 230px;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     padding: 6px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
     background: var(--surface);
-    box-shadow: var(--shadow-md, 0 16px 38px rgba(15, 23, 42, 0.14));
+    box-shadow: var(--shadow-md, 0 10px 25px -5px rgba(0, 0, 0, 0.12));
+    animation: workflowMenuPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes workflowMenuPopIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .agent-workflow-management-item {
-    display: grid;
-    width: 100%;
-    min-height: 34px;
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 8px;
+    display: flex;
     align-items: center;
-    padding: 0 9px;
+    width: 100%;
+    min-height: 32px;
+    height: 32px;
+    gap: 9px;
+    padding: 0 10px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm, 6px);
     background: transparent;
     color: var(--text-main);
     cursor: pointer;
-    font-size: 0.72rem;
-    font-weight: 700;
+    font-size: 0.78rem;
+    font-weight: 500;
     text-align: left;
+    white-space: nowrap;
+    user-select: none;
+    box-sizing: border-box;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.agent-workflow-management-item span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1;
 }
 
 .agent-workflow-management-item svg {
     width: 15px;
     height: 15px;
-    color: #64748b;
+    color: var(--text-muted, #64748b);
+    flex-shrink: 0;
+    transition: color 0.12s ease;
 }
 
 .agent-workflow-management-item:hover:not(:disabled),
 .agent-workflow-management-item:focus-visible {
-    background: #f1f5f9;
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+    color: var(--text-main);
     outline: none;
+}
+
+.agent-workflow-management-item:hover:not(:disabled) svg {
+    color: var(--primary);
 }
 
 .agent-workflow-management-item:disabled {
@@ -1415,11 +1511,27 @@
 }
 
 .agent-workflow-management-item.is-danger {
-    color: #dc2626;
+    color: var(--danger, #ef4444);
 }
 
 .agent-workflow-management-item.is-danger svg {
-    color: #ef4444;
+    color: var(--danger, #ef4444);
+}
+
+.agent-workflow-management-item.is-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger, #ef4444) 10%, var(--surface));
+    color: var(--danger, #ef4444);
+}
+
+.agent-workflow-management-item.is-danger:hover:not(:disabled) svg {
+    color: var(--danger, #ef4444);
+}
+
+.agent-workflow-management-divider {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border, rgba(148, 163, 184, 0.2));
+    flex-shrink: 0;
 }
 
 body.dark-mode .agent-workflow-picker-menu,
@@ -1578,7 +1690,17 @@ body.dark-mode .agent-workflow-management-item:hover:not(:disabled),
 body.dark-mode .agent-workflow-management-item:focus-visible,
 .dark-mode .agent-workflow-management-item:hover:not(:disabled),
 .dark-mode .agent-workflow-management-item:focus-visible {
-    background: rgba(30, 41, 59, 0.92);
+    background: var(--surface-hover, rgba(30, 41, 59, 0.92));
+}
+
+body.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled),
+.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger, #ef4444) 18%, transparent);
+}
+
+body.dark-mode .agent-workflow-management-divider,
+.dark-mode .agent-workflow-management-divider {
+    background: var(--border, rgba(148, 163, 184, 0.2));
 }
 
 body.dark-mode .agent-workflow-lifecycle-summary.is-ready,

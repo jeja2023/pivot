@@ -188,3 +188,15 @@ test('hung PostgreSQL write times out and removes the stuck client', async () =>
     assert.equal(loaded.clientState.releases.length, 1);
     assert.equal(loaded.clientState.releases[0]?.code, 'PG_WRITE_QUEUE_QUERY_TIMEOUT');
 });
+
+test('enqueueAuditLog normalizes ip and defaults missing timestamp', async () => {
+    const queries = [];
+    const { queue } = loadQueueModule({ failTimes: 0, flushMs: 5, onQuery: (q) => queries.push(q) });
+    queue.enqueueAuditLog({ userId: 1, action: '向量模型连接测试', details: '{}', ip: '192.168.1.123' });
+    await queue.flushWriteQueue();
+
+    const insert = queries.find(q => q.sql.includes('INSERT INTO "audit_logs"'));
+    assert.ok(insert);
+    assert.equal(insert.params[3], '192.168.1.123');
+    assert.match(insert.params[4], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+});

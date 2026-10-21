@@ -33,9 +33,44 @@
     transition: all 0.15s ease;
 }
 
-#workflow-product-save {
+#workflow-product-save,
+.workflow-product-save {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    height: 28px;
+    padding: 0 9px;
+    border-radius: var(--radius-sm, 6px);
     font-size: 0.72rem;
+    font-weight: 500;
     color: var(--text-muted);
+    background: color-mix(in srgb, var(--surface-hover, #f1f5f9) 90%, transparent);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    line-height: 1;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+#workflow-product-save:empty,
+.workflow-product-save:empty {
+    display: none !important;
+}
+
+#workflow-product-save[data-tone="error"],
+.workflow-product-save[data-tone="error"] {
+    color: var(--danger, #ef4444);
+    background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--surface, #fff));
+    border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+    font-weight: 600;
+}
+
+#workflow-product-save[data-tone="success"],
+.workflow-product-save[data-tone="success"] {
+    color: var(--success, #10b981);
+    background: color-mix(in srgb, var(--success, #10b981) 8%, var(--surface, #fff));
+    border-color: color-mix(in srgb, var(--success, #10b981) 30%, transparent);
 }
 
 .workflow-product-field {
@@ -921,13 +956,18 @@ body.is-main-workspace-full .chat-container {
     overflow: hidden !important;
 }
 
-#agent-dag-workbench-modal.main-workspace-view {
+#agent-dag-workbench-modal.main-workspace-view:not(.hidden):not([hidden]) {
     height: 100% !important;
     max-height: 100% !important;
     min-height: 0 !important;
     overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
+}
+
+#agent-dag-workbench-modal.hidden,
+#agent-dag-workbench-modal[hidden] {
+    display: none !important;
 }
 
 .agent-dag-modal {
@@ -1112,3 +1152,13 @@ body.dark-mode .automation-editor-view .pivot-dag-editor-canvas {
 .automation-editor-view [hidden] {
     display: none !important;
 }
+
+body.dark-mode #workflow-product-save,
+.dark-mode #workflow-product-save,
+body.dark-mode .workflow-product-save,
+.dark-mode .workflow-product-save {
+    background: color-mix(in srgb, var(--surface, #1e293b) 80%, transparent);
+    border-color: var(--border, rgba(148, 163, 184, 0.2));
+    color: var(--text-muted);
+}
+

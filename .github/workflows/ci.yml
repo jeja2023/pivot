@@ -116,6 +116,22 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache speech wheelhouse
+        id: cache-speech-wheelhouse
+        uses: actions/cache@v4
+        with:
+          path: artifacts/speech-wheelhouse
+          key: speech-wheelhouse-${{ runner.os }}-${{ hashFiles('docker/speech-service/requirements*.txt') }}
+
+      - name: Prepare speech wheelhouse for container build
+        if: steps.cache-speech-wheelhouse.outputs.cache-hit != 'true'
+        run: python3 docker/speech-service/prepare_assets.py --dependencies-only
+
       - name: Build production Docker image
         run: docker build --pull -t pivot:ci .
 
