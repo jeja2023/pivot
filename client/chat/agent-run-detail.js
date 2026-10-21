@@ -458,9 +458,9 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelector('[data-agent-steer]')?.addEventListener('click', () => window.Pivot.legacy.steerAgentRun(run.id));
     container.querySelector('[data-agent-delegate-batch]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.delegateBatchFromAgentRun?.(run.id));
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.Pivot.legacy.createWorkflowDraftFromAgentRun(run.id));
-    container.querySelector('[data-agent-create-schedule]')?.addEventListener('click', () => window.Pivot.legacy.createScheduleFromAgentRun?.(run.id, run));
-    container.querySelector('[data-agent-save-template]')?.addEventListener('click', () => window.Pivot.legacy.saveTemplateFromAgentRun?.(run.id, run));
-    container.querySelector('[data-agent-export-bundle]')?.addEventListener('click', () => window.Pivot.legacy.exportAgentAuditBundle?.(run.id));
+    container.querySelector('[data-agent-create-schedule]')?.addEventListener('click', () => (window.Pivot?.moduleApi?.('agent.runActions')?.createScheduleFromAgentRun || window.Pivot?.legacy?.createScheduleFromAgentRun)?.(run.id, run));
+    container.querySelector('[data-agent-save-template]')?.addEventListener('click', () => (window.Pivot?.moduleApi?.('agent.runActions')?.saveTemplateFromAgentRun || window.Pivot?.legacy?.saveTemplateFromAgentRun)?.(run.id, run));
+    container.querySelector('[data-agent-export-bundle]')?.addEventListener('click', () => (window.Pivot?.moduleApi?.('agent.runActions')?.exportAgentAuditBundle || window.Pivot?.legacy?.exportAgentAuditBundle)?.(run.id));
     container.querySelector('[data-agent-create-skill-draft]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runPersonalContext')?.createSkillDraftFromRun?.(run.id).catch(error => window.Pivot?.legacy?.showToast?.(error.message || '生成技能草稿失败', 'error')));
     container.querySelector('[data-agent-learn-from-run]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.learnFromAgentRun?.(run.id));
     container.querySelectorAll('[data-agent-transaction-commit]').forEach(button => {

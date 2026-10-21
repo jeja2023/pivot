@@ -161,9 +161,8 @@ function normalizeSchedulePayload(body = {}) {
     const templateId = body.templateId ? Number.parseInt(body.templateId, 10) || null : null;
     const modelId = body.modelId ? Number.parseInt(body.modelId, 10) || null : null;
     const runMode = normalizeRunMode(body.runMode || body.run_mode);
-    const missedRunPolicy = ['skip_missed', 'fire_once'].includes(String(body.missedRunPolicy || body.missed_run_policy || '').toLowerCase())
-        ? String(body.missedRunPolicy || body.missed_run_policy).toLowerCase()
-        : 'fire_once';
+    const workflowId = runMode === 'dag' ? (Number.parseInt(body.workflowId || body.workflow_id, 10) || null) : null;
+    const missedRunPolicy = normalizeMissedRunPolicy(body.missedRunPolicy || body.missed_run_policy);
     return {
         name,
         goal: goal.slice(0, MAX_GOAL_LENGTH),
@@ -390,33 +389,21 @@ async function runDueAgentSchedules(limit = 20) {
             const scheduledForDate = schedule.next_run_at ? new Date(String(schedule.next_run_at).replace(' ', 'T')) : null;
             const isSeverelyOverdue = scheduledForDate && !Number.isNaN(scheduledForDate.getTime()) && (Date.now() - scheduledForDate.getTime() > 15 * 60 * 1000);
 
-            // 错失策略：若配置了 skip_missed 且错失超过 15 分钟，跳过补跑，直接对齐下个未来周期
-            if (cfg.missedRunPolicy === 'skip_missed' && isSeverelyOverdue) {
-                const nextRunAt = computeNextScheduleRun(
-                    schedule.frequency,
-                    schedule.time_of_day,
-                    schedule.day_of_week,
-                    getBeijingTimestamp(),
-                    schedule.cron_expression,
-                    schedule.interval_minutes
-                );
-                await execute(`
-                    UPDATE agent_schedules
-                    SET next_run_at = ?, claim_token = NULL, claim_expires_at = NULL, updated_at = ?
-                    WHERE id = ? AND claim_token = ?
-                `, [nextRunAt, getBeijingTimestamp(), schedule.id, claimToken]);
+            const isSkippedMissed = cfg.missedRunPolicy === 'skip_missed' && isSeverelyOverdue;
+            let run = null;
+            if (isSkippedMissed) {
                 enqueueAuditLog({
                     userId: user.id,
                     action: '计划任务错失跳过',
-                    details: `计划ID: ${schedule.id}，名称: ${schedule.name}，原计划时间: ${schedule.next_run_at}，已按策略跳过并对齐至: ${nextRunAt}`,
+                    details: `计划ID: ${schedule.id}，名称: ${schedule.name}，原计划时间: ${schedule.next_run_at}，已按策略跳过并对齐未来周期`,
                     ipAddress: '127.0.0.1',
                     timestamp: getBeijingTimestamp()
                 });
-                continue;
+            } else {
+                run = await runAgentScheduleNow(schedule.id, user, { scheduledFor: schedule.next_run_at });
+                if (!run) throw new Error('计划所属账号已被禁用或删除。');
             }
 
-            const run = await runAgentScheduleNow(schedule.id, user, { scheduledFor: schedule.next_run_at });
-            if (!run) throw new Error('计划所属账号已被禁用或删除。');
             const nextRunAt = computeNextScheduleRun(
                 schedule.frequency,
                 schedule.time_of_day,
@@ -425,13 +412,25 @@ async function runDueAgentSchedules(limit = 20) {
                 schedule.cron_expression,
                 schedule.interval_minutes
             );
-            await execute(`
-                UPDATE agent_schedules
-                SET next_run_at = ?, last_run_id = ?, last_run_at = ?, dispatch_retry_at = NULL,
-                    dispatch_failures = 0, last_error = NULL, claim_token = NULL,
-                    claim_expires_at = NULL, updated_at = ?
-                WHERE id = ? AND claim_token = ?
-            `, [nextRunAt, run.id, getBeijingTimestamp(), getBeijingTimestamp(), schedule.id, claimToken]);
+            const updateSql = isSkippedMissed
+                ? `
+                    UPDATE agent_schedules
+                    SET next_run_at = ?, claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                    WHERE id = ? AND claim_token = ?
+                `
+                : `
+                    UPDATE agent_schedules
+                    SET next_run_at = ?, last_run_id = ?, last_run_at = ?, dispatch_retry_at = NULL,
+                        dispatch_failures = 0, last_error = NULL, claim_token = NULL,
+                        claim_expires_at = NULL, updated_at = ?
+                    WHERE id = ? AND claim_token = ?
+                `;
+            const updateParams = isSkippedMissed
+                ? [nextRunAt, getBeijingTimestamp(), schedule.id, claimToken]
+                : [nextRunAt, run.id, getBeijingTimestamp(), getBeijingTimestamp(), schedule.id, claimToken];
+            await execute(updateSql, updateParams);
+
+            if (isSkippedMissed) continue;
             try {
                 await createAgentNotificationCallback(user.id, run.id, 'schedule', '计划任务已入队', schedule.name);
             } catch (notificationError) {

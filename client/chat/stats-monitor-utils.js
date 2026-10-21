@@ -257,6 +257,8 @@ const ROUTE_NAME_MAP = {
     '/chat/dag-readiness.js': 'DAG 可运行性检查脚本',
     '/chat/dag-empty-canvas.js': 'DAG 空画布引导脚本',
     '/chat/dag-inspector-special-fields.js': 'DAG 检查器专用字段脚本',
+    '/chat/dag-inspector-json-editor.js': 'DAG 检查器高级参数脚本',
+    '/chat/dag-inspector-runtime-actions.js': 'DAG 检查器运行动作脚本',
     '/chat/dag-wizard.js': 'DAG 向导主脚本',
     '/chat/dag-variable-picker.js': 'DAG 变量选择器脚本',
     '/chat/dag-timeline-waterfall.js': 'DAG 甘特瀑布图脚本',

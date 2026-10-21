@@ -206,124 +206,17 @@ function createDagInspectorController(ctx) {
     const notifySelectionChange = (node) => {
         if (typeof onNodeSelectionChange !== 'function') return;
         if (ctx.readOnly) return onNodeSelectionChange(null);
-        onNodeSelectionChange(node ? {
-            id: node.id,
-            title: node.title,
-            tool: node.tool
-        } : null);
+        onNodeSelectionChange(node ? { id: node.id, title: node.title, tool: node.tool } : null);
     };
+    const runtimeActions = window.Pivot?.moduleApi?.('agent.dagInspectorRuntimeActions');
+    const jsonEditorApi = window.Pivot?.moduleApi?.('agent.dagInspectorJsonEditor');
     const openNodeJsonEditor = (nodeId) => {
-        const node = ctx.spec.nodes.find(n => n.id === nodeId);
-        if (!node) return;
-        const tool = resolveToolForNode(currentTools(), node.tool);
-        let modal = document.getElementById('pivot-dag-json-input-editor');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'pivot-dag-json-input-editor';
-            modal.className = 'modal-overlay hidden pivot-dag-json-input-overlay';
-            document.body.appendChild(modal);
+        if (typeof jsonEditorApi?.openNodeJsonEditor === 'function') {
+            return jsonEditorApi.openNodeJsonEditor(nodeId, {
+                ctx, currentTools, resolveToolForNode, friendlyToolTitle,
+                renderToolSchemaHint, showDagToast, PivotSafeHtml, dagEscapeHtml, dagEscapeAttr
+            });
         }
-        const getVarOptions = ctx.getAvailableVariableOptions;
-        const variableGroups = typeof getVarOptions === 'function'
-            ? getVarOptions(ctx.spec?.nodes || [], node.id, currentTools())
-            : [];
-        PivotSafeHtml.setHtml(modal, `
-            <div class="modal rag-detail-modal pivot-dag-json-input-editor">
-                <div class="rag-detail-header pivot-dag-input-head">
-                    <div>
-                        <h3>编辑高级参数</h3>
-                        <p class="model-modal-desc">${dagEscapeHtml([friendlyToolTitle(tool), node.title || node.id].filter(Boolean).join(' · '))}</p>
-                    </div>
-                    <button type="button" class="btn-danger-outline" data-pivot-dag-json-close="1">关闭</button>
-                </div>
-                <div class="pivot-dag-json-input-body">
-                    <div class="pivot-dag-json-main">
-                        <textarea class="form-input" data-pivot-dag-json-input spellcheck="false">${dagEscapeHtml(JSON.stringify(node.input || {}, null, 2))}</textarea>
-                        <div class="pivot-dag-json-error" data-pivot-dag-json-error></div>
-                    </div>
-                    <aside class="pivot-dag-json-side">
-                        <div class="pivot-dag-json-side-section">
-                            <strong>参数字段</strong>
-                            ${renderToolSchemaHint(tool)}
-                        </div>
-                        <div class="pivot-dag-json-side-section">
-                            <strong>插入上游变量与全局输入</strong>
-                            <div class="pivot-dag-token-groups">
-                                ${variableGroups.map(grp => `
-                                    <div class="pivot-dag-token-group">
-                                        <span class="pivot-dag-token-group-title">${dagEscapeHtml(grp.group)}</span>
-                                        <div class="pivot-dag-token-list">
-                                            ${grp.items.map(item => `
-                                                <button type="button" class="btn-secondary pivot-dag-token-btn" data-pivot-dag-json-token="${dagEscapeAttr(item.expression)}" title="${dagEscapeAttr(item.description || item.expression)}">
-                                                    ${dagEscapeHtml(item.label)}
-                                                </button>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </aside>
-                </div>
-                <div class="agent-workflow-create-actions pivot-dag-json-actions">
-                    <button type="button" class="btn-secondary" data-pivot-dag-json-format="1">格式化</button>
-                    <button type="button" class="btn-primary" data-pivot-dag-json-apply="1">应用</button>
-                </div>
-            </div>
-        `);
-        const textareaEl = modal.querySelector('[data-pivot-dag-json-input]');
-        const errorEl = modal.querySelector('[data-pivot-dag-json-error]');
-        const setError = message => {
-            if (!errorEl) return;
-            errorEl.textContent = message || '';
-        };
-        const closeJson = () => modal.classList.add('hidden');
-        const parseInput = () => {
-            try {
-                const parsed = JSON.parse(textareaEl.value || '{}');
-                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('高级参数必须是对象。');
-                setError('');
-                textareaEl.classList.remove('is-invalid');
-                return parsed;
-            } catch (e) {
-                textareaEl.classList.add('is-invalid');
-                setError(e.message || '高级参数格式不正确。');
-                return null;
-            }
-        };
-        const applyJson = () => {
-            const parsed = parseInput();
-            if (!parsed) return;
-            ctx.recordHistory?.();
-            node.input = parsed;
-            ctx.render?.();
-            ctx.flushOut?.();
-            closeJson();
-            showDagToast('高级参数已更新', 'success');
-        };
-        const insertToken = token => {
-            if (!token || !textareaEl) return;
-            const start = textareaEl.selectionStart ?? textareaEl.value.length;
-            const end = textareaEl.selectionEnd ?? textareaEl.value.length;
-            const before = textareaEl.value.slice(0, start);
-            const quoteCount = (before.match(/(?<!\\)"/g) || []).length;
-            const insertText = quoteCount % 2 === 1 ? token : JSON.stringify(token);
-            textareaEl.value = `${before}${insertText}${textareaEl.value.slice(end)}`;
-            textareaEl.selectionStart = start + insertText.length;
-            textareaEl.selectionEnd = start + insertText.length;
-            textareaEl.focus();
-        };
-        modal.querySelector('[data-pivot-dag-json-close]')?.addEventListener('click', closeJson);
-        modal.querySelector('[data-pivot-dag-json-apply]')?.addEventListener('click', applyJson);
-        modal.querySelector('[data-pivot-dag-json-format]')?.addEventListener('click', () => {
-            const parsed = parseInput();
-            if (parsed) textareaEl.value = JSON.stringify(parsed, null, 2);
-        });
-        modal.querySelectorAll('[data-pivot-dag-json-token]').forEach(btn => {
-            btn.addEventListener('click', () => insertToken(btn.dataset.pivotDagJsonToken || ''));
-        });
-        modal.classList.remove('hidden');
-        requestAnimationFrame(() => textareaEl?.focus?.({ preventScroll: true }));
     };
     const openNodeContractEditor = (nodeId) => {
         const node = ctx.spec.nodes.find(n => n.id === nodeId);
@@ -781,10 +674,7 @@ function createDagInspectorController(ctx) {
         const nodeTestSnapshot = getNodeTestOutputSnapshots().get(String(node.id));
         const inputContract = schemaSummary(effectiveInputSchema(node, selectedTool));
         const outputContract = schemaSummary(node.outputSchema || {});
-        const runStates = getRunStates();
-        const nodeRunState = runStates.get(String(node.id));
-        const currentRunId = (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '') || window.Pivot?.legacy?.currentAgentRunId || '';
-        const canRerunNode = Boolean(nodeRunState && ['error', 'cancelled', 'continued_error'].includes(nodeRunState.status) && currentRunId);
+        const rerunBtnMarkup = runtimeActions?.renderNodeRerunButton?.(node, { getRunStates, dagEscapeAttr }) || '';
         const nodeReadinessIssues = getReadinessIssues().filter(issue => String(issue?.nodeId || '') === String(node.id));
         const upstreamNodes = getDependencyCandidateNodes(node);
         const referencedNodes = [...inputNodeReferences(node.input)];
@@ -894,7 +784,7 @@ function createDagInspectorController(ctx) {
                     <button type="button" class="btn-secondary" data-pivot-dag-pick-var="1" title="查看并复制上游变量">+{x} 插入变量</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-apply-template="1">套用模板</button>
                     <button type="button" class="btn-secondary" data-pivot-dag-test-node="1">测试节点</button>
-                    ${canRerunNode ? `<button type="button" class="btn-secondary pivot-dag-rerun-node-btn" data-pivot-dag-rerun-node="${dagEscapeAttr(node.id)}" title="保留上游已成功节点的快取，从本节点开始断点续跑">从本节点断点续跑</button>` : ''}
+                    ${rerunBtnMarkup}
                 </div>
                 <pre class="pivot-dag-test-result" data-pivot-dag-test-result hidden></pre>
                 ${testControls?.renderMarkup?.(nodeTestSnapshot) || ''}
@@ -977,12 +867,7 @@ function createDagInspectorController(ctx) {
                 });
             }
         });
-        inspector.querySelector('[data-pivot-dag-rerun-node]')?.addEventListener('click', () => {
-            const runId = (typeof activeAgentRunId !== 'undefined' ? activeAgentRunId : '') || window.Pivot?.legacy?.currentAgentRunId || '';
-            if (runId && typeof window.Pivot?.legacy?.rerunAgentDagNode === 'function') {
-                window.Pivot.legacy.rerunAgentDagNode(runId, node.id);
-            }
-        });
+        runtimeActions?.bindNodeRerunAction?.(inspector, { node });
         testControls?.bind?.(node);
         inspector.querySelectorAll('[data-pivot-dag-input-field]').forEach(input => {
             const commitInput = ({ rerender = false } = {}) => {
@@ -1003,19 +888,7 @@ function createDagInspectorController(ctx) {
             };
             input.addEventListener('input', () => {
                 commitInput();
-                if (typeof input.value === 'string' && typeof input.selectionStart === 'number') {
-                    const cursor = input.selectionStart;
-                    const textBefore = input.value.slice(0, cursor);
-                    if (textBefore.endsWith('{{')) {
-                        showVariablePicker({
-                            anchorEl: input,
-                            targetInput: input,
-                            nodeId: node.id,
-                            nodes: ctx.spec?.nodes || [],
-                            tools: currentTools()
-                        });
-                    }
-                }
+                runtimeActions?.checkVariableAutocompleteTrigger?.(input, { nodeId: node.id, getNodes: () => ctx.spec?.nodes || [], getTools: currentTools, showVariablePicker });
             });
             input.addEventListener('change', () => commitInput({ rerender: input.tagName === 'SELECT' || input.type === 'checkbox' }));
             input.addEventListener('blur', () => ctx.render?.());
@@ -1052,18 +925,8 @@ function createDagInspectorController(ctx) {
                     input.dataset.pivotDagHistoryRecorded = '1';
                 }
                 commitMergeFields();
-                if (input.matches('[data-pivot-dag-merge-value]') && typeof input.value === 'string' && typeof input.selectionStart === 'number') {
-                    const cursor = input.selectionStart;
-                    const textBefore = input.value.slice(0, cursor);
-                    if (textBefore.endsWith('{{')) {
-                        showVariablePicker({
-                            anchorEl: input,
-                            targetInput: input,
-                            nodeId: node.id,
-                            nodes: ctx.spec?.nodes || [],
-                            tools: currentTools()
-                        });
-                    }
+                if (input.matches('[data-pivot-dag-merge-value]')) {
+                    runtimeActions?.checkVariableAutocompleteTrigger?.(input, { nodeId: node.id, getNodes: () => ctx.spec?.nodes || [], getTools: currentTools, showVariablePicker });
                 }
             });
             input.addEventListener('blur', () => commitMergeFields(true));

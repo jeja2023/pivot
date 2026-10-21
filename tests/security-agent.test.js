@@ -117,6 +117,8 @@ function readDagEditorSourceBundle() {
         'dag-readiness.js',
         'dag-empty-canvas.js',
         'dag-inspector-special-fields.js',
+        'dag-inspector-json-editor.js',
+        'dag-inspector-runtime-actions.js',
         'dag-wizard.js',
         'dag-inspector.js',
         'agents-dag-editor.js'

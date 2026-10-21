@@ -283,7 +283,7 @@ window.Pivot.legacy.createWorkflowDraftFromAgentRun = async function(runId) {
     }
 };
 
-window.Pivot.legacy.createScheduleFromAgentRun = async function(runId, runData = null) {
+async function createScheduleFromAgentRun(runId, runData = null) {
     let run = runData;
     if (!run || !run.goal) {
         try {
@@ -314,7 +314,7 @@ window.Pivot.legacy.createScheduleFromAgentRun = async function(runId, runData =
     });
 };
 
-window.Pivot.legacy.saveTemplateFromAgentRun = async function(runId, runData = null) {
+async function saveTemplateFromAgentRun(runId, runData = null) {
     let run = runData;
     if (!run || !run.goal) {
         try {
@@ -369,7 +369,7 @@ window.Pivot.legacy.saveTemplateFromAgentRun = async function(runId, runData = n
     }
 };
 
-window.Pivot.legacy.exportAgentAuditBundle = function(runId) {
+function exportAgentAuditBundle(runId) {
     const url = `${API_BASE}/agents/runs/${encodeURIComponent(runId)}/audit-bundle`;
     const a = document.createElement('a');
     a.href = url;
@@ -434,7 +434,13 @@ async function delegateBatchFromAgentRun(runId) {
     }, '批量委派失败');
 }
 
-window.Pivot?.exposeModule?.('agent.runActions', { delegateBatchFromAgentRun, learnFromAgentRun }, ['delegateBatchFromAgentRun', 'learnFromAgentRun']);
+window.Pivot?.exposeModule?.('agent.runActions', {
+    delegateBatchFromAgentRun,
+    learnFromAgentRun,
+    createScheduleFromAgentRun,
+    saveTemplateFromAgentRun,
+    exportAgentAuditBundle
+}, ['delegateBatchFromAgentRun', 'learnFromAgentRun']);
 
 window.Pivot.legacy.rerunAgentDagNode = async function(runId, nodeId = '') {
     await runAgentActionOnce(`dag-rerun:${runId}:${nodeId}`, runId, '[data-agent-dag-rerun-node]', async () => {

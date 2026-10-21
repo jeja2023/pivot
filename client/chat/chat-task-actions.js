@@ -50,10 +50,10 @@
                 return await tasks.refresh(entry);
             }
             if (action === 'create-schedule') {
-                return window.Pivot.legacy.createScheduleFromAgentRun?.(entry.runId, entry.state.run);
+                return (window.Pivot?.moduleApi?.('agent.runActions')?.createScheduleFromAgentRun || window.Pivot?.legacy?.createScheduleFromAgentRun)?.(entry.runId, entry.state.run);
             }
             if (action === 'save-template') {
-                return window.Pivot.legacy.saveTemplateFromAgentRun?.(entry.runId, entry.state.run);
+                return (window.Pivot?.moduleApi?.('agent.runActions')?.saveTemplateFromAgentRun || window.Pivot?.legacy?.saveTemplateFromAgentRun)?.(entry.runId, entry.state.run);
             }
             if (action === 'steer') {
                 await window.Pivot.legacy.steerChatAgentRun?.(entry.runId);
