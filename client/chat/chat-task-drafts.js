@@ -328,5 +328,35 @@
         if (typeof window.Pivot?.legacy?.openAgentRun === 'function') await window.Pivot.legacy.openAgentRun(activeDraft.runId);
     });
 
-    window.Pivot.exposeModule('chat.taskDrafts', { createAndOpen, open, close, render });
+    function mountInitialTaskMessage(draft, options = {}) {
+        if (options.clearInput !== false) {
+            const input = document.getElementById('user-input');
+            if (input) input.value = '';
+            window.Pivot.legacy?.resizeUserInput?.();
+        }
+        const runId = String(draft?.runId || draft?.run?.id || '').trim();
+        if (!runId) return;
+
+        window.Pivot.moduleApi('chat.taskSuggestion')?.dismiss?.();
+        if (document.querySelector(`[data-chat-agent-run-id="${runId}"]`)) return;
+
+        const targetSessionId = String(options.sessionId || draft.sessionId || '');
+        const modelName = draft.modelId || draft.plan?.budget?.modelId || document.getElementById('selected-model-name')?.innerText || '';
+        const aiMsgEl = typeof appendMessage === 'function' ? appendMessage('assistant', '', null, {
+            agentRunId: runId,
+            modelName,
+            createdAt: new Date().toISOString()
+        }) : null;
+        const tasks = window.Pivot.moduleApi('chat.tasks');
+        if (tasks?.attach && aiMsgEl) {
+            tasks.attach(aiMsgEl, runId, {
+                sessionId: targetSessionId,
+                status: draft.run?.status || 'queued',
+                title: draft.title || draft.goal
+            });
+        }
+        window.Pivot.legacy?.scrollMessagesToBottom?.();
+    }
+
+    window.Pivot.exposeModule('chat.taskDrafts', { createAndOpen, open, close, render, mountInitialTaskMessage });
 }());

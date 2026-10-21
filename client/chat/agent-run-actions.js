@@ -383,3 +383,134 @@ window.Pivot.legacy.showAgentRunAudit = async function() {
         showToast(e.message || '删除审计加载失败', 'error');
     }
 };
+
+// --- 任务编辑与删除审计弹窗 (拆自 agent-run-detail.js) ---
+function openAgentTaskEditModal(runId) {
+    const run = (typeof agentRunsCache !== 'undefined' && Array.isArray(agentRunsCache) ? agentRunsCache.find(r => r.id === runId) : null) || (currentRunDetailRecord?.id === runId ? currentRunDetailRecord : null);
+    if (!run) return;
+    const modal = document.getElementById('agent-task-edit-modal');
+    if (!modal) return;
+    const displayTitle = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '';
+    document.getElementById('agent-task-edit-run-id').value = run.id;
+    document.getElementById('agent-task-edit-title-input').value = displayTitle;
+    document.getElementById('agent-task-edit-goal-input').value = run.goal || '';
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => document.getElementById('agent-task-edit-goal-input')?.focus(), 0);
+}
+
+function closeAgentTaskEditModal() {
+    const modal = document.getElementById('agent-task-edit-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+async function saveAgentTaskEdit() {
+    const runId = document.getElementById('agent-task-edit-run-id')?.value;
+    const titleInput = document.getElementById('agent-task-edit-title-input')?.value || '';
+    const goalInput = document.getElementById('agent-task-edit-goal-input')?.value || '';
+    if (!runId) return;
+    if (!goalInput.trim()) {
+        if (typeof showToast === 'function') showToast('任务目标不能为空', 'error');
+        return;
+    }
+    try {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: titleInput.trim(), goal: goalInput.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (typeof showToast === 'function') showToast(data.error || '修改任务记录失败', 'error');
+            return;
+        }
+        if (typeof showToast === 'function') showToast('任务目标与标题已成功修改', 'success');
+        closeAgentTaskEditModal();
+        if (typeof loadAgentRuns === 'function') loadAgentRuns(agentRunsPage);
+        if (activeAgentRunId === runId && isAgentRunDetailModalOpen()) {
+            window.Pivot.legacy.openAgentRun(runId, { silent: true });
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast(`修改失败: ${e.message}`, 'error');
+    }
+}
+
+function ensureAgentAuditModal() {
+    let modal = document.getElementById('agent-audit-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'agent-audit-modal';
+    modal.className = 'modal-overlay hidden rag-detail-modal-overlay';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('aria-labelledby', 'agent-audit-title');
+    PivotSafeHtml.setHtml(modal, `
+        <div class="modal rag-detail-modal agent-audit-modal" role="document">
+            <div class="rag-detail-header">
+                <div>
+                    <h3 id="agent-audit-title">任务删除审计</h3>
+                    <p class="model-modal-desc">仅管理员权限层级可查看，普通用户移除的任务记录会保留在这里。</p>
+                </div>
+                <button type="button" id="agent-audit-close-btn" class="btn-danger-outline">关闭</button>
+            </div>
+            <div class="table-container rag-audit-table-wrap agent-audit-table-wrap">
+                <table class="data-table compact-table">
+                    <thead>
+                        <tr>
+                            <th class="agent-audit-col-index text-center">序号</th>
+                            <th>任务</th>
+                            <th class="agent-audit-col-user">用户</th>
+                            <th class="agent-audit-col-status">状态</th>
+                            <th class="agent-audit-col-model">模型</th>
+                            <th class="agent-audit-col-stats">统计</th>
+                            <th class="agent-audit-col-time">删除时间</th>
+                            <th class="agent-audit-col-operator">删除人</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agent-audit-body"></tbody>
+                </table>
+            </div>
+        </div>
+    `);
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (event) => {
+        if (event.target.closest('#agent-audit-close-btn')) {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+        }
+    });
+    return modal;
+}
+
+function renderAgentAuditRows(items = []) {
+    if (!items.length) {
+        return '<tr><td colspan="8" class="text-center muted-text">暂无已移除的任务记录</td></tr>';
+    }
+    return items.map((item, index) => {
+        const userName = item.nickname || item.username || `用户 ${item.user_id || '-'}`;
+        const deletedBy = item.deleted_by_nickname || item.deleted_by_username || `用户 ${item.deleted_by_user || '-'}`;
+        const stats = `记录 ${Number(item.step_count || 0)} / 工具 ${Number(item.tool_count || 0)} / 错误 ${Number(item.error_count || 0)}`;
+        const modelDisplay = item.model_name ? agentEscape(item.model_name) : '-';
+        const taskTitle = item.goal || item.title;
+        const taskTitleAttr = taskTitle ? ` title="${agentEscape(taskTitle)}"` : '';
+        return `
+            <tr>
+                <td class="text-center">${index + 1}</td>
+                <td${taskTitleAttr}>
+                    <strong>${agentEscape(agentDisplayTitle(item) || '-')}</strong>
+                    <small>${agentEscape(agentShortText(item.goal || '', 90))}</small>
+                </td>
+                <td>${agentEscape(userName)}</td>
+                <td>${agentEscape(agentStatusLabel(item.status))}</td>
+                <td>${modelDisplay}</td>
+                <td>${agentEscape(stats)}</td>
+                <td>${agentEscape(formatAgentAuditDate(item.deleted_at))}</td>
+                <td>${agentEscape(deletedBy)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+

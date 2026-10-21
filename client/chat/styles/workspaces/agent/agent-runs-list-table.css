@@ -1226,4 +1226,11 @@
     color: var(--text-muted);
     font-size: 0.72rem;
 }
+.agent-audit-col-index { width: 52px; }
+.agent-audit-col-user { width: 120px; }
+.agent-audit-col-status { width: 90px; }
+.agent-audit-col-model { width: 150px; }
+.agent-audit-col-stats { width: 115px; }
+.agent-audit-col-time { width: 155px; }
+.agent-audit-col-operator { width: 120px; }
 
