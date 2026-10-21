@@ -286,21 +286,23 @@ function selectDropdownModel(id, shouldClose = true) {
     // 更新上传按钮状态
     const uploadBtn = document.getElementById('chat-tools-menu-btn');
     if (uploadBtn) {
+        uploadBtn.disabled = false;
+        uploadBtn.style.opacity = '1';
+        uploadBtn.style.cursor = 'pointer';
         if (hasVision) {
-            uploadBtn.disabled = false;
-            uploadBtn.style.opacity = '1';
-            uploadBtn.style.cursor = 'pointer';
-            uploadBtn.title = '添加文件或文件夹';
+            uploadBtn.title = '添加文件或图片 (支持图片与文档解析)';
         } else {
-            uploadBtn.disabled = true;
-            uploadBtn.style.opacity = '0.4';
-            uploadBtn.style.cursor = 'not-allowed';
-            uploadBtn.title = '当前模型不支持附件 (请切换至视觉模型)';
+            uploadBtn.title = '添加文档或文件 (当前模型不支持图片识别，图片需切换至视觉模型)';
         }
     }
 
-    if (window.Pivot.legacy.pendingAttachments && window.Pivot.legacy.pendingAttachments.length > 0 && !hasVision) {
-        showToast('警告：当前模型不支持已添加的附件，发送将受限', 'warning');
+    const hasPendingImages = (window.Pivot.legacy.pendingAttachments || []).some(file =>
+        typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+            ? window.Pivot.legacy.isChatImageAttachment(file)
+            : String(file.type || '').startsWith('image/')
+    );
+    if (hasPendingImages && !hasVision) {
+        showToast('警告：当前模型不支持图片视觉分析，图片附件发送将受限', 'warning');
     }
 
     if (shouldClose) {

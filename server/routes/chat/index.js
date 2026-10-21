@@ -821,7 +821,7 @@ function createChatRouter({
                     const assistantTokens = stats.assistantTokens;
                     const costTime = stats.costTime;
                     const tokensPerSec = stats.tokensPerSec;
-                    const { assistantMessageResult, assistantMessageId } = await persistFinalChatResponse({
+                    const { assistantMessageResult, assistantMessageId, sessionTitle } = await persistFinalChatResponse({
                         persistAssistantResponse, sessionId, userId, userMessageId, user: req.user, modelCfg,
                         visibleContent, assistantContent, assistantTokens, costTime, tokensPerSec, routePlan,
                         providerUsage: apiUsage || providerSnapshot.usage?.raw || null
@@ -856,7 +856,8 @@ function createChatRouter({
                         tps: tokensPerSec,
                         content: assistantContent,
                         routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null,
-                        ragGrounding: ragGrounding?.grounding || null
+                        ragGrounding: ragGrounding?.grounding || null,
+                        sessionTitle: sessionTitle || null
                     }));
                     writeSse('[DONE]');
                     res.end();

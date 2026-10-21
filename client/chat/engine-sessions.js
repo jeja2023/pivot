@@ -243,7 +243,7 @@ async function selectSession(id, title, options = {}) {
 
     const messageVirtualizer = window.Pivot?.modules?.['chat.messageVirtualizer'];
     if (messageVirtualizer) {
-        messageVirtualizer.start({ sessionId: id, records: messages, page: data.page });
+        messageVirtualizer.start({ sessionId: id, records: messages, page: data.page, targetMessageId: options.targetMessageId });
         if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
         attachChatAgentRunsForSession(id);
         return;
@@ -271,8 +271,22 @@ async function selectSession(id, title, options = {}) {
         });
     container.appendChild(fragment);
     assistantContentNodes.forEach(node => window.Pivot.legacy.renderPivotCharts?.(node));
-    window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 2400 });
-    setTimeout(() => window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 900 }), 320);
+    if (options.targetMessageId) {
+        const targetEl = container.querySelector(`.message[data-id="${options.targetMessageId}"]`);
+        if (targetEl) {
+            setTimeout(() => {
+                targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                targetEl.classList.add('message-search-highlight');
+                setTimeout(() => targetEl.classList.remove('message-search-highlight'), 3000);
+            }, 80);
+        } else {
+            window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 2400 });
+            setTimeout(() => window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 900 }), 320);
+        }
+    } else {
+        window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 2400 });
+        setTimeout(() => window.Pivot.legacy.scrollMessagesToBottom?.({ duration: 900 }), 320);
+    }
     if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
     attachChatAgentRunsForSession(id);
 }

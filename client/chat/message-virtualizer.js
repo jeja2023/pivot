@@ -316,7 +316,7 @@
         state = null;
     }
 
-    function start({ sessionId, records, page }) {
+    function start({ sessionId, records, page, targetMessageId = null } = {}) {
         stop();
         const container = document.getElementById('message-container');
         state = {
@@ -339,7 +339,33 @@
         PivotSafeHtml.setHtml(container, '');
         container.classList.add('is-virtualized');
         container.addEventListener('scroll', handleScroll, { passive: true });
+        if (targetMessageId) {
+            renderWindow(true);
+            scrollToMessage(targetMessageId);
+        } else {
+            renderWindow(true);
+        }
+    }
+
+    function scrollToMessage(messageId) {
+        if (!state?.active || !messageId) return;
+        const targetId = Number(messageId);
+        const targetIndex = state.records.findIndex(r => Number(r.id) === targetId);
+        if (targetIndex === -1) return;
+        state.pinBottom = false;
+        cancelBottomPinRelease(state);
+        const offsets = buildOffsets(state.records);
+        const targetTop = Math.max(0, (offsets[targetIndex] || 0) - 100);
+        setProgrammaticScrollTop(state.container, targetTop);
         renderWindow(true);
+        requestAnimationFrame(() => {
+            const key = `message:${targetId}`;
+            const targetEl = state.container.querySelector(`.message[data-virtual-message-key="${key}"], .message[data-id="${targetId}"]`);
+            if (targetEl) {
+                targetEl.classList.add('message-search-highlight');
+                setTimeout(() => targetEl.classList.remove('message-search-highlight'), 3000);
+            }
+        });
     }
 
     function prepareForLiveAppend() {
@@ -375,6 +401,7 @@
         isActive: () => Boolean(state?.active),
         loadOlderMessages,
         prepareForLiveAppend,
+        scrollToMessage,
         start,
         stop
     });

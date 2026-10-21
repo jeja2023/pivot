@@ -477,16 +477,25 @@ if (typeof marked !== 'undefined') {
         }
     };
 
-    // 3. 思考块 <thought>...</thought>
+    // 3. 思考块 <thought>...</thought>, <think>...</think>, <thinking>...</thinking>
     const thoughtBlock = {
         name: 'thought',
         level: 'block',
-        start(src) { return src.indexOf('<thought>'); },
+        start(src) {
+            const match = src.match(/<(thought|think|thinking)>/i);
+            return match ? match.index : -1;
+        },
         tokenizer(src) {
-            const rule = /^<thought>([\s\S]*?)(?:<\/thought>|$)/;
+            const rule = /^<(thought|think|thinking)>([\s\S]*?)(?:<\/\1>|$)/i;
             const match = rule.exec(src);
             if (match) {
-                return { type: 'thought', raw: match[0], text: match[1].trim(), isClosed: match[0].includes('</thought>') };
+                const tag = match[1];
+                return {
+                    type: 'thought',
+                    raw: match[0],
+                    text: match[2].trim(),
+                    isClosed: new RegExp(`</${tag}>`, 'i').test(match[0])
+                };
             }
         },
         renderer(token) {

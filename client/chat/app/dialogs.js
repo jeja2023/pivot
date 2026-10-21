@@ -108,6 +108,7 @@ document.getElementById('modal-input-prompt-ok')?.addEventListener('click', subm
 document.getElementById('modal-input-prompt-cancel')?.addEventListener('click', () => closeInputPrompt(null));
 ['input-prompt-field', 'input-prompt-textarea'].forEach(id => document.getElementById(id)?.addEventListener('input', resetInputPromptError));
 ['input-prompt-field', 'input-prompt-textarea'].forEach(id => document.getElementById(id)?.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (inputPromptOptions.multiline === true && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return;
     if (event.key === 'Enter') {
         event.preventDefault();

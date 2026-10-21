@@ -378,8 +378,13 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const model = (window.Pivot.legacy._cachedModels || []).find(m => String(m.id) === String(modelId));
     
     if (window.Pivot.legacy.pendingAttachments.length > 0) {
-        if (!model || Number(model.supports_vision || 0) !== 1) {
-            showToast('当前模型不支持附件处理能力（图片、文档等）', 'error');
+        const hasPendingImages = window.Pivot.legacy.pendingAttachments.some(file =>
+            typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+                ? window.Pivot.legacy.isChatImageAttachment(file)
+                : String(file.type || '').startsWith('image/')
+        );
+        if (hasPendingImages && (!model || Number(model.supports_vision || 0) !== 1)) {
+            showToast('当前模型不支持图片视觉分析，请移除图片附件或切换至视觉模型', 'error');
             return;
         }
     }
@@ -826,6 +831,18 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                                 tps: data.tps ?? getAverageTps()
                             });
                         }
+                        if (data.sessionTitle) {
+                            if (isViewingRequestSession()) {
+                                const titleEl = document.getElementById('current-title');
+                                if (titleEl) titleEl.innerText = data.sessionTitle;
+                            }
+                            const sessionItem = document.querySelector(`.session-item[data-id="${requestSessionId}"] .session-title, .session-item[data-session-id="${requestSessionId}"] .session-title`);
+                            if (sessionItem) {
+                                sessionItem.innerText = data.sessionTitle;
+                                sessionItem.title = data.sessionTitle;
+                            }
+                            if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
+                        }
                         window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     return;
@@ -915,11 +932,9 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
         showTaskPromotionForResponse();
         
-        // 延迟刷新侧边栏，等待后台标题生成完成
-        if (!ephemeralVoice) {
-            setTimeout(() => {
-                if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
-            }, 1500);
+        // 结束时立即同步侧边栏（如果已由 message_saved 刷新则只做兜底，不再空等 1.5 秒）
+        if (!ephemeralVoice && window.Pivot.legacy.loadSessions) {
+            window.Pivot.legacy.loadSessions();
         }
     } catch (e) {
         if (localReplayTimer) clearTimeout(localReplayTimer);

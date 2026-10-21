@@ -346,6 +346,7 @@ window.Pivot.legacy.resizeUserInput = () => {
 userInput?.addEventListener('input', window.Pivot.legacy.resizeUserInput);
 userInput && (userInput.onkeydown = (e) => {
     if (e.defaultPrevented) return;
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (/^\/task\s+.+/i.test(String(userInput.value || '').trim())) {

@@ -546,3 +546,24 @@ body.dark-mode .session-search-tabs .tab-btn-mini.active,
     font-size: 40px; font-weight: bold; cursor: pointer; transition: color 0.2s;
 }
 .close-viewer:hover { color: #ccc; }
+
+/* 全局搜索历史消息深跳转高亮动画 */
+.message.message-search-highlight {
+    animation: message-highlight-pulse 2.4s ease-out;
+    border-radius: var(--radius-md, 8px);
+}
+
+@keyframes message-highlight-pulse {
+    0% {
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.6);
+        background-color: rgba(99, 102, 241, 0.08);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+        background-color: rgba(99, 102, 241, 0.05);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+        background-color: transparent;
+    }
+}

@@ -114,22 +114,24 @@ async function generateTitle(sessionId, userId, userMsg, aiMsg, modelCfg, user =
     }
 
     const session = await sessionsRepository.getSessionTitle(sessionId, userId);
-    if (!session) return;
+    if (!session) return null;
 
     if (!shouldReplaceAutoTitle(session.title, userMsg)) {
         logger.info({ sessionId, currentTitle: session.title }, '跳过标题更新：当前标题疑似已被用户修改');
-        return;
+        return null;
     }
 
     await sessionsRepository.updateSessionTitle(sessionId, userId, newTitle);
     logger.info({ sessionId, newTitle }, '会话标题已更新');
+    return newTitle;
 }
 
 async function maybeGenerateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user = null) {
     const msgCount = await countVisibleConversationMessages(sessionId, userId);
     if (msgCount <= 2) {
-        await generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user);
+        return await generateTitle(sessionId, userId, userMsg, assistantContent, modelCfg, user);
     }
+    return null;
 }
 
 module.exports = {

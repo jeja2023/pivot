@@ -71,8 +71,8 @@ const cleanRawMarkdownForClipboard = (content) => {
             .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END/gi, '')
             .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
             .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
-            .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
-            .replace(/<thought>[\s\S]*$/gi, '')
+            .replace(/<(thought|think|thinking)>[\s\S]*?<\/\1>/gi, '')
+            .replace(/<(thought|think|thinking)>[\s\S]*$/gi, '')
     );
 };
 
@@ -354,6 +354,45 @@ const saveSessionTags = async () => {
     if (res.ok) { window.Pivot.legacy.loadSessions(); closeTagsModal(); showToast('标签已保存'); }
 };
 
+const setSessionSystemPrompt = async (id, title) => {
+    let initialPrompt = '';
+    try {
+        const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(id)}`);
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            initialPrompt = data?.session?.system_prompt || '';
+        }
+    } catch (_) {}
+
+    const prompt = await window.Pivot.legacy.showInputPrompt?.({
+        title: `设置提示词 - ${title || '会话'}`,
+        message: '为当前会话设置专属角色、指令或前置约束，对话时将作为系统上下文生效。留空则清除。',
+        multiline: true,
+        required: false,
+        value: initialPrompt,
+        placeholder: '例如：你是一名资深公文起草专家，回答需严谨、规范并符合公文行文习惯...',
+        width: 520
+    });
+
+    if (prompt === null || prompt === undefined) return;
+
+    try {
+        const res = await apiFetch(`${API_BASE}/sessions/${encodeURIComponent(id)}/system-prompt`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt: prompt })
+        });
+        if (res.ok) {
+            showToast(prompt ? '会话系统提示词已更新' : '已清除会话系统提示词');
+        } else {
+            const err = await res.json().catch(() => ({}));
+            showToast(err.error || '设置系统提示词失败', 'error');
+        }
+    } catch (e) {
+        showToast('设置系统提示词失败: ' + e.message, 'error');
+    }
+};
+
 window.Pivot?.exposeModule?.('chat.sessionActions', {
     copyMsg,
     extractMessageTextForClipboard,
@@ -370,7 +409,8 @@ window.Pivot?.exposeModule?.('chat.sessionActions', {
     saveSessionTitle,
     editSessionTags,
     closeTagsModal,
-    saveSessionTags
+    saveSessionTags,
+    setSessionSystemPrompt
 }, [
     'copyMsg',
     'extractMessageTextForClipboard',

@@ -324,18 +324,26 @@ function createSessionsRouter({
         const ftsQuery = buildFtsQuery(keyword);
         if (!ftsQuery) return res.json({ data: [] });
 
-        // 内容搜索使用 PostgreSQL 文本检索，不依赖 snippet 或虚拟 FTS 表语法。
+        // 内容搜索使用 PostgreSQL 文本检索，关联匹配的消息ID与摘要片段。
         const sessions = await query(`
-            SELECT DISTINCT s.*,
-            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id AND m.deleted_at IS NULL) as msg_count,
-            '' as snippet
-            FROM sessions s
-            JOIN messages m ON m.session_id = s.id
-            WHERE s.user_id = ? AND s.deleted_at IS NULL AND m.deleted_at IS NULL
-              AND m.content ILIKE ?
+            SELECT s.*,
+            (SELECT COUNT(*) FROM messages m2 WHERE m2.session_id = s.id AND m2.deleted_at IS NULL) as msg_count,
+            m.matched_message_id,
+            m.snippet
+            FROM (
+                SELECT DISTINCT ON (m_inner.session_id)
+                    m_inner.session_id,
+                    m_inner.id AS matched_message_id,
+                    substr(m_inner.content, 1, 150) AS snippet
+                FROM messages m_inner
+                WHERE m_inner.user_id = ? AND m_inner.deleted_at IS NULL AND m_inner.content ILIKE ?
+                ORDER BY m_inner.session_id, m_inner.id DESC
+            ) m
+            JOIN sessions s ON s.id = m.session_id
+            WHERE s.user_id = ? AND s.deleted_at IS NULL
             ORDER BY s.updated_at DESC
             LIMIT 50
-        `, [req.user.id, `%${keyword}%`]);
+        `, [req.user.id, `%${keyword}%`, req.user.id]);
 
         res.json({ data: sessions });
     }));

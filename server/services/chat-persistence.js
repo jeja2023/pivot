@@ -40,8 +40,8 @@ async function persistAssistantTurn({
         user,
         modelCfg
     }).catch(error => logger.warn({ sessionId, userId, code: error.code }, '自动记忆调度暂不可用，回答已保留'));
-    await maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
-    return { assistantMessageResult, assistantMessageId };
+    const sessionTitle = await maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
+    return { assistantMessageResult, assistantMessageId, sessionTitle: sessionTitle || null };
 }
 
 module.exports = {

@@ -352,8 +352,13 @@ document.addEventListener('click', async (event) => {
             updateSessionBatchBar();
             return;
         }
+        const targetMessageId = searchResult.dataset.sessionSearchMessageId || null;
         getSidebarSearchApi().close?.();
-        window.Pivot.legacy.selectSession(searchResult.dataset.sessionSearchId, searchResult.dataset.sessionSearchTitle || '新对话');
+        window.Pivot.legacy.selectSession(
+            searchResult.dataset.sessionSearchId,
+            searchResult.dataset.sessionSearchTitle || '新对话',
+            { targetMessageId }
+        );
         return;
     }
 
@@ -471,6 +476,7 @@ const toggleSessionMenu = (e, id, title, isPinned, isArchived, tags) => {
     makeItem(isPinned ? '取消置顶' : '置顶对话', '', () => togglePinSession(id, isPinned));
     makeItem('重命名', '', () => renameSession(id, title));
     makeItem('编辑标签', '', () => editSessionTags(id, tags));
+    makeItem('设置提示词', '', () => window.Pivot.moduleApi('chat.sessionActions')?.setSessionSystemPrompt?.(id, title));
     makeItem(isArchived ? '恢复对话' : '归档对话', '', () => toggleArchiveSession(id, isArchived));
     makeItem('导出为 Markdown', '', () => exportSession(id));
     makeItem('打印 / 导出 PDF', '', () => window.Pivot.legacy.printSession?.(id));

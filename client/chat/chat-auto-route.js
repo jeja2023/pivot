@@ -383,6 +383,7 @@
         renderMentionMenu();
     });
     input()?.addEventListener('keydown', event => {
+        if (event.isComposing || event.keyCode === 229) return;
         const menu = document.getElementById('chat-route-mention-menu');
         if (!menu?.hidden && event.key === 'Escape') {
             event.preventDefault();

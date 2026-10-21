@@ -292,10 +292,7 @@ function createUploadProgress(label) {
 async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支持的文件' } = {}) {
     const modelId = document.getElementById('model-selector').value;
     const model = (window.Pivot.legacy._cachedModels || []).find(m => String(m.id) === String(modelId));
-    if (!model || Number(model.supports_vision || 0) !== 1) {
-        showToast('当前选中的模型不具备视觉或文档分析能力，无法上传附件', 'error');
-        return { acceptedCount: 0, rejected: true };
-    }
+    const hasVision = Number(model?.supports_vision || 0) === 1;
 
     const selectedFiles = Array.from(inputFiles || []).map(item => {
         if (item?.file) return { file: item.file, relativePath: String(item.relativePath || '') };
@@ -303,7 +300,7 @@ async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支�
     }).filter(item => item.file);
     if (selectedFiles.length === 0) return { acceptedCount: 0 };
     const supportedExtension = /\.(png|jpe?g|gif|webp|bmp|pdf|txt|md|csv|docx?|xlsx?)$/i;
-    const files = selectedFiles.filter(item => supportedExtension.test(String(item.file.name || '')));
+    let files = selectedFiles.filter(item => supportedExtension.test(String(item.file.name || '')));
     const unsupportedCount = selectedFiles.length - files.length;
     const TOAST_WARN = 'warning';
     const TOAST_INFO = 'info';
@@ -311,6 +308,20 @@ async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支�
     if (files.length === 0) {
         showToast(emptyMessage, TOAST_WARN);
         return { acceptedCount: 0, unsupportedCount };
+    }
+
+    let skippedImageCount = 0;
+    if (!hasVision) {
+        const nonImageFiles = files.filter(item => !isChatImageAttachment(item.file));
+        skippedImageCount = files.length - nonImageFiles.length;
+        if (nonImageFiles.length === 0) {
+            showToast('当前模型不支持图片视觉分析，无法添加图片附件 (请切换至视觉模型)', TOAST_WARN);
+            return { acceptedCount: 0, rejected: true };
+        }
+        if (skippedImageCount > 0) {
+            showToast(`当前模型仅支持文档解析，已跳过 ${skippedImageCount} 个图片文件`, TOAST_WARN);
+        }
+        files = nonImageFiles;
     }
     const maxAttachments = getMaxPendingAttachments();
     if (pendingAttachments.length >= maxAttachments) {

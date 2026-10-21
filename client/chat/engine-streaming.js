@@ -352,7 +352,11 @@ const resolveStreamInterval = (contentLength) => {
     if (window.Pivot && typeof window.Pivot.chooseStreamInterval === 'function') {
         return window.Pivot.chooseStreamInterval(contentLength);
     }
-    return STREAM_RENDER_INTERVAL_MS;
+    const len = Number(contentLength) || 0;
+    if (len < 600) return 80;
+    if (len < 2000) return 140;
+    if (len < 6000) return 220;
+    return 320;
 };
 
 function estimateStreamingTokenCount(content) {
@@ -448,11 +452,12 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     if (!textBody) return;
     const messageContent = textBody.closest('.message-content') || textBody.parentElement;
     if (messageContent) messageContent._rawMessageContent = content;
-    const hasOpenThought = content.includes('<thought>') && !content.includes('</thought>');
+    const openThoughtMatch = content.match(/^<(thought|think|thinking)>/i);
+    const hasOpenThought = Boolean(openThoughtMatch) && !new RegExp(`</${openThoughtMatch[1]}>`, 'i').test(content);
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
 
     if (hasOpenThought && existingThoughtContent) {
-        PivotSafeHtml.setHtml(existingThoughtContent, renderMarkdown(content.replace(/^<thought>/, ''), { deferPivotCharts: true }));
+        PivotSafeHtml.setHtml(existingThoughtContent, renderMarkdown(content.replace(/^<(thought|think|thinking)>/i, ''), { deferPivotCharts: true }));
         if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
             const inner = existingThoughtContent.closest('.thought-content-inner');
             inner.scrollTop = inner.scrollHeight;
@@ -585,6 +590,7 @@ async function readChatErrorMessage(response) {
 window.Pivot.exposeModule('chat.streaming', {
     renderAssistantRouteMetadata,
     renderAssistantTraceEvent,
+    resolveStreamInterval,
     stripStreamingThoughtContent,
     estimateStreamingAnswerTokenCount,
     splitAssistantStreamDelta,
@@ -601,6 +607,7 @@ window.Pivot.exposeModule('chat.streaming', {
 }, [
     'renderAssistantRouteMetadata',
     'renderAssistantTraceEvent',
+    'resolveStreamInterval',
     'stripStreamingThoughtContent',
     'estimateStreamingAnswerTokenCount',
     'refreshCurrentContextUsage'

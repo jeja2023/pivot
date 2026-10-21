@@ -100,7 +100,8 @@ function renderSessionSearchResults(sessions) {
         return `
             <div class="session-search-result${selectedClass}"
                 data-session-search-id="${sessionEscapeAttr(sessionId)}"
-                data-session-search-title="${sessionEscapeAttr(title)}">
+                data-session-search-title="${sessionEscapeAttr(title)}"
+                data-session-search-message-id="${sessionEscapeAttr(s.matched_message_id || '')}">
                 <label class="session-search-select-box">
                     <input type="checkbox" data-session-select-id="${sessionEscapeAttr(sessionId)}" ${checked} aria-label="选择会话">
                 </label>
