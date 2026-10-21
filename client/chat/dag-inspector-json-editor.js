@@ -19,10 +19,18 @@
             ? getVarOptions(ctx.spec?.nodes || [], node.id, tools)
             : [];
         const safeHtml = (typeof PivotSafeHtml !== 'undefined' && PivotSafeHtml) || window.Pivot?.safeHtml;
-        const escHtml = dagEscapeHtml || (s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-        const escAttr = dagEscapeAttr || (s => escHtml(s).replace(/"/g, '&quot;'));
-        const getTitle = friendlyToolTitle || (t => t?.title || t?.name || '');
-        const getSchemaHint = renderToolSchemaHint || (() => '');
+        const escHtml = function (str) {
+            if (typeof dagEscapeHtml === 'function') return dagEscapeHtml(str);
+            if (typeof PivotSafeHtml?.escapeHtml === 'function') return PivotSafeHtml.escapeHtml(str);
+            return String(str ?? '');
+        };
+        const escAttr = function (str) {
+            if (typeof dagEscapeAttr === 'function') return dagEscapeAttr(str);
+            if (typeof PivotSafeHtml?.escapeAttr === 'function') return PivotSafeHtml.escapeAttr(str);
+            return escHtml(str);
+        };
+        const getTitle = friendlyToolTitle || function (t) { return t?.title || t?.name || ''; };
+        const getSchemaHint = renderToolSchemaHint || function () { return ''; };
 
         safeHtml.setHtml(modal, `
             <div class="modal rag-detail-modal pivot-dag-json-input-editor">
