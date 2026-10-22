@@ -106,11 +106,8 @@ document.addEventListener('click', async (event) => {
     if (editBtn) {
         const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun || activeAgentRunId || currentRunDetailRecord?.id;
         if (runId) {
-            if (typeof openAgentTaskEditModal === 'function') {
-                openAgentTaskEditModal(runId);
-            } else if (typeof window.Pivot?.legacy?.openAgentTaskEditModal === 'function') {
-                window.Pivot.legacy.openAgentTaskEditModal(runId);
-            }
+            const openModal = window.Pivot?.moduleApi?.('agent.taskEdit')?.openAgentTaskEditModal || (typeof openAgentTaskEditModal === 'function' ? openAgentTaskEditModal : null);
+            openModal?.(runId);
         }
         return;
     }
@@ -131,19 +128,13 @@ document.addEventListener('click', async (event) => {
         }
     }
     if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn') || event.target.id === 'agent-task-edit-modal') {
-        if (typeof closeAgentTaskEditModal === 'function') {
-            closeAgentTaskEditModal();
-        } else if (typeof window.Pivot?.legacy?.closeAgentTaskEditModal === 'function') {
-            window.Pivot.legacy.closeAgentTaskEditModal();
-        }
+        const closeModal = window.Pivot?.moduleApi?.('agent.taskEdit')?.closeAgentTaskEditModal || (typeof closeAgentTaskEditModal === 'function' ? closeAgentTaskEditModal : null);
+        closeModal?.();
         return;
     }
     if (event.target.closest('#agent-task-edit-save-btn')) {
-        if (typeof saveAgentTaskEdit === 'function') {
-            saveAgentTaskEdit();
-        } else if (typeof window.Pivot?.legacy?.saveAgentTaskEdit === 'function') {
-            window.Pivot.legacy.saveAgentTaskEdit();
-        }
+        const saveModal = window.Pivot?.moduleApi?.('agent.taskEdit')?.saveAgentTaskEdit || (typeof saveAgentTaskEdit === 'function' ? saveAgentTaskEdit : null);
+        saveModal?.();
         return;
     }
     const activeMoreActions = event.target.closest('.agent-run-more-actions');
@@ -435,11 +426,8 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
     container.querySelectorAll('[data-agent-edit-run], [data-agent-run-edit]').forEach(btn => {
         btn.addEventListener('click', () => {
             const targetRunId = btn.dataset.agentEditRun || btn.dataset.agentRunEdit || run.id;
-            if (typeof openAgentTaskEditModal === 'function') {
-                openAgentTaskEditModal(targetRunId);
-            } else if (typeof window.Pivot?.legacy?.openAgentTaskEditModal === 'function') {
-                window.Pivot.legacy.openAgentTaskEditModal(targetRunId);
-            }
+            const openModal = window.Pivot?.moduleApi?.('agent.taskEdit')?.openAgentTaskEditModal || (typeof openAgentTaskEditModal === 'function' ? openAgentTaskEditModal : null);
+            openModal?.(targetRunId);
         });
     });
     container.querySelector('[data-agent-delegate-batch]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.delegateBatchFromAgentRun?.(run.id));

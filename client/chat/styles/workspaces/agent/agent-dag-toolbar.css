@@ -564,19 +564,17 @@ body.dark-mode .pivot-dag-waterfall-header {
     font-weight: 800;
 }
 
-.pivot-dag-waterfall-close {
-    background: transparent;
-    border: none;
-    font-size: 20px;
-    line-height: 1;
-    color: var(--text-muted, #64748b);
+.pivot-dag-waterfall-close.btn-danger-outline {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: normal;
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-}
-.pivot-dag-waterfall-close:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.06));
-    color: var(--text-main, #0f172a);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .pivot-dag-waterfall-summary {

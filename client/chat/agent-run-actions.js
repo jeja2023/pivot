@@ -611,14 +611,12 @@ async function saveAgentTaskEdit() {
     }
 }
 
-window.Pivot = window.Pivot || {};
-window.Pivot.legacy = window.Pivot.legacy || {};
-window.Pivot.legacy.openAgentTaskEditModal = openAgentTaskEditModal;
-window.Pivot.legacy.closeAgentTaskEditModal = closeAgentTaskEditModal;
-window.Pivot.legacy.saveAgentTaskEdit = saveAgentTaskEdit;
-window.openAgentTaskEditModal = openAgentTaskEditModal;
-window.closeAgentTaskEditModal = closeAgentTaskEditModal;
-window.saveAgentTaskEdit = saveAgentTaskEdit;
+window.Pivot?.exposeModule?.('agent.taskEdit', {
+    openAgentTaskEditModal,
+    closeAgentTaskEditModal,
+    saveAgentTaskEdit,
+    ensureAgentTaskEditModal
+});
 
 function ensureAgentAuditModal() {
     let modal = document.getElementById('agent-audit-modal');

@@ -180,7 +180,7 @@
                     <div class="pivot-dag-waterfall-title">
                         <span>工作流执行耗时甘特瀑布图</span>
                     </div>
-                    <button class="workspace-modal-close pivot-dag-waterfall-close" type="button" aria-label="关闭">×</button>
+                    <button class="btn-danger-outline pivot-dag-waterfall-close" type="button" aria-label="关闭">关闭</button>
                 </div>
                 <div class="pivot-dag-waterfall-summary">
                     <span class="summary-chip">总耗时: <strong>${escapeHtml(totalSeconds)}s</strong></span>

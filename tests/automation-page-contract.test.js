@@ -408,10 +408,21 @@ test('运行详情异常提示卡片中的重试整项任务、从检查点恢�
     // 4. 任务编辑弹窗支持动态补齐注入、高于详情弹窗的层级(z-index: 2100)与全局挂载
     assert.match(actionsJs, /function ensureAgentTaskEditModal\(\)/);
     assert.match(actionsJs, /modal\.style\.zIndex\s*=\s*'2100'/);
-    assert.match(actionsJs, /window\.Pivot\.legacy\.openAgentTaskEditModal\s*=\s*openAgentTaskEditModal/);
+    assert.match(actionsJs, /window\.Pivot\?\.exposeModule\?\.\('agent\.taskEdit'/);
     assert.match(agentHtml, /id="agent-task-edit-modal"[^>]*style="z-index:\s*2100;"/);
 });
 
+test('工作流执行耗时甘特瀑布图弹窗右上角关闭按钮使用全局统一红色边框红色文字样式', () => {
+    const waterfallJs = read('client/chat/dag-timeline-waterfall.js');
+    const toolbarCss = read('client/chat/styles/workspaces/agent/agent-dag-toolbar.css');
+
+    // 1. 甘特瀑布图弹窗使用 btn-danger-outline 类且文案为“关闭”
+    assert.match(waterfallJs, /<button class="btn-danger-outline pivot-dag-waterfall-close" type="button" aria-label="关闭">关闭<\/button>/);
+    assert.doesNotMatch(waterfallJs, /workspace-modal-close pivot-dag-waterfall-close/);
+
+    // 2. CSS 针对 .pivot-dag-waterfall-close.btn-danger-outline 保持一致的按钮尺寸规范
+    assert.match(toolbarCss, /\.pivot-dag-waterfall-close\.btn-danger-outline\s*\{/);
+});
 
 test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {
     const ragJs = read('client/chat/rag.js');
