@@ -60,6 +60,11 @@ test('模型配置页统一管理语音 API，保存后生效且刷新保留，�
         await page.locator('#speech-config-save').click();
         await expect(page.locator('#speech-config-status')).toContainText('已保存并应用');
         const disabled = await (await page.request.get('/api/chat/voice-recognition')).json(); expect(disabled.available).toBe(false);
+        // 恢复启用状态，保持环境干净，避免干扰其他语音测试
+        await page.locator('#speech-enabled').check();
+        await page.locator('#speech-config-save').click();
+        await expect(page.locator('#speech-config-status')).toContainText('已保存并应用');
+        const restored = await (await page.request.get('/api/chat/voice-recognition')).json(); expect(restored.available).toBe(true);
         expect(errors).toEqual([]);
     } finally { await new Promise(resolve => gateway.close(resolve)); }
 });

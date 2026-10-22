@@ -225,7 +225,7 @@ function handleChatAgentStreamingEvent(payload = {}) {
 }
 
 async function cancelCurrentChatAgent() {
-    const controller = currentAbortController;
+    const controller = currentAbortController || (typeof globalThis !== 'undefined' ? globalThis.currentAbortController : null);
     // 输入区按钮只停止文字流；持久任务使用消息旁的“停止任务”明确取消。
     if (controller?.pivotAgentRunId) {
         controller.pivotSupersededBySend = true;

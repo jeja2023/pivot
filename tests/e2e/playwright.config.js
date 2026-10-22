@@ -5,6 +5,7 @@ module.exports = {
     outputDir: process.env.PIVOT_E2E_OUTPUT_DIR,
     timeout: 30_000,
     retries: process.env.CI ? 1 : 0,
+    workers: process.env.PIVOT_E2E_WORKERS ? Number(process.env.PIVOT_E2E_WORKERS) : 1,
     use: {
         baseURL,
         trace: 'retain-on-failure',
