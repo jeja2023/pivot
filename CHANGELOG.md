@@ -1,3 +1,33 @@
+## [v0.7.29] - 2026-10-22
+
+### 工作流产品化画布草稿协作加固、智能体诊断优化与测试全量通过
+
+- **工作流产品化画布草稿协作与恢复机制深度加固**：
+  - 彻底解决草稿离线编辑恢复与双窗口修订冲突时恢复面板被跳过的问题：为编排器原生自定义事件注入 `{ programmatic: true }` 标记，严格区分用户主动输入与底层框架渲染（`writeJson` / `writeAgentWorkflowText`），避免异步宏任务/渲染动画将草稿误判为 dirty；
+  - 优化 `workflowExperience.opened()` 状态机调度，增加 `isOpeningDraft` 模式，避免打开已有草稿时触发随机 UUID 竞争覆盖或误隐藏恢复提示；
+  - 增强客户端本地草稿存储与读取回退（`getStoredDraft` / `listLocal`），在用户身份初次异步获取的空窗期内支持前缀扫描，确保断网/离线暂存草稿 100% 可视与可恢复；
+  - 优化单步测试（Debug）结果历史选项排序与就地测试/发布运行（inline run）输出联动，统一纯表格交付视图展示；
+  - 修复窄屏与深色主题下的布局与层级体验：管理菜单折叠时隐藏浮层 DOM 矩形，解决结果面板重叠遮挡顶部运行按钮交互等问题。
+
+- **智能体执行详情与技术诊断面板渲染去重**：
+  - 在 `client/chat/agent-run-diagnostics.js` 中重构技术诊断渲染逻辑，消除 `legacyHarnessMarkup` 与 `traceMarkup` 在 DOM 中的重复追加，确保 `#agent-run-detail .agent-run-harness-diagnostics` 与 `details.agent-trace-panel` 元素全局唯一，解决复杂任务状态下前端选择器冲突与内存重复占有问题。
+
+- **语音识别安全上下文与网关反向代理实践澄清**：
+  - 明确并遵循 W3C Secure Contexts 规范：统一语音识别麦克风采集（Web Audio API / MediaRecorder）强制需要 HTTPS 或受信任本地回环地址（`localhost`）；
+  - 补充并规范了网关反代（如 Nginx、Traefik、APISIX）下启用 SSL/TLS 终止与 WebSocket 协议头传递的标准配置，以及内网开发测试场景下的浏览器安全白名单指引。
+
+- **PDF 工具链运行时与解耦后基础镜像选型明确**：
+  - 官方生产 Docker 镜像在构建阶段（`Dockerfile`）已默认内置 `qpdf`、`chromium`、`default-jre-headless` 与 `veraPDF`，并通过 Compose 环境变量自动绑定 `/usr/bin/qpdf`，澄清了容器化环境无需再次手动 apt 安装的机制；
+  - 确认了主镜像与独立语音服务均基于 Debian `slim`（`node:22-bookworm-slim` 与 `python:3.12-slim-bookworm`）实现轻量化生产部署，无需使用臃肿的完整开发大镜像。
+
+- **全流程端到端自动化测试与代码质量门禁 100% 验收**：
+  - `workflow-product.spec.js` 全部 10 项端到端验收用例全绿通过；
+  - `chat-task-execution.spec.js` 全部 7 项端到端用例全绿通过；
+  - `smoke.spec.js` 智能体详情与推理摘要用例全绿通过；
+  - 语法检查（1602 个文件）、开发规范（check:standards）、PostgreSQL 关键索引基线与迁移覆盖门禁 100% 通过。
+
+详见 [发布记录](docs/releases/v0.7.29-工作流草稿协作加固与智能体诊断优化.md)。
+
 ## [v0.7.28] - 2026-10-22
 
 ### 容器架构深度解耦、离线生产交付加固与通用语音微服务化
