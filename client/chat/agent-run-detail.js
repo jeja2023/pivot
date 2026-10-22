@@ -2,54 +2,9 @@
 // 拆自 agent-runs-list.js。
 // Agent 运行详情、预览轮询和审计弹窗渲染。
 /* eslint-disable no-undef */
-function bindAgentRunTitleTooltip(list = document.getElementById('agent-runs-list')) {
-    if (!list || list.dataset.boundAgentRunTitleTooltip === '1') return;
-    list.dataset.boundAgentRunTitleTooltip = '1';
-    const getTarget = event => event.target.closest?.('[data-agent-run-title-full]');
-    list.addEventListener('mouseover', event => {
-        const target = getTarget(event);
-        if (target) showAgentRunTitleTooltip(target);
-    });
-    list.addEventListener('mousemove', event => {
-        const target = getTarget(event);
-        if (target && target === agentRunTitleTooltipTarget) positionAgentRunTitleTooltip(target);
-    });
-    list.addEventListener('mouseout', event => {
-        const target = getTarget(event);
-        if (target && !target.contains(event.relatedTarget)) hideAgentRunTitleTooltip(target);
-    });
-    list.addEventListener('focusin', event => {
-        const target = getTarget(event);
-        if (target) showAgentRunTitleTooltip(target);
-    });
-    list.addEventListener('focusout', event => {
-        const target = getTarget(event);
-        if (target) hideAgentRunTitleTooltip(target);
-    });
-    list.addEventListener('scroll', () => {
-        if (agentRunTitleTooltipTarget?.isConnected) positionAgentRunTitleTooltip(agentRunTitleTooltipTarget);
-    });
-    window.addEventListener('resize', () => hideAgentRunTitleTooltip());
-}
 function isAgentRunDetailModalOpen() {
     const modal = document.getElementById('agent-run-detail-modal');
     return Boolean(modal && !modal.classList.contains('hidden'));
-}
-function agentRunMetadata(run = {}) {
-    const metadata = run?.metadata || {};
-    if (metadata && typeof metadata === 'object') return metadata;
-    if (typeof metadata !== 'string') return {};
-    try {
-        const parsed = JSON.parse(metadata);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (e) {
-        return {};
-    }
-}
-function isAgentWorkflowPreviewRun(run = {}, options = {}) {
-    if (options.workflowPreview) return true;
-    const metadata = agentRunMetadata(run);
-    return String(metadata.workflowRunSource || metadata.workflow_run_source || metadata.runSource || '').toLowerCase() === 'preview';
 }
 function ensureAgentRunDetailModalVisible() {
     const modal = document.getElementById('agent-run-detail-modal');
@@ -58,13 +13,6 @@ function ensureAgentRunDetailModalVisible() {
         if (modal.parentElement !== document.body) document.body.appendChild(modal);
     }
     return modal;
-}
-function agentRunDurationLabel(value) {
-    const ms = Math.max(Number(value) || 0, 0);
-    if (!ms) return '—';
-    if (ms >= 60000) return `${(ms / 60000).toFixed(ms >= 600000 ? 0 : 1)} 分钟`;
-    if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} 秒`;
-    return `${Math.round(ms)} 毫秒`;
 }
 function agentRunActionMarkup(run = {}, options = {}) {
     const { isPreview = false, canCancel = false, canApprove = false, canRerun = false,
@@ -97,20 +45,6 @@ function agentRunActionMarkup(run = {}, options = {}) {
 
 let currentRunDetailRecord = null;
 let currentRunDetailData = null;
-
-async function copyAgentText(text) {
-    if (!text && text !== '') return;
-    const dialogHelpers = window.Pivot?.legacy?.chatDialogHelpers;
-    if (typeof dialogHelpers?.writeTextToClipboard === 'function') {
-        return dialogHelpers.writeTextToClipboard(text);
-    }
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        return navigator.clipboard.writeText(text);
-    }
-    throw new Error('复制功能不可用');
-}
-
-
 
 document.addEventListener('click', async (event) => {
     const copyGoalBtn = event.target.closest('[data-agent-copy-goal]');
