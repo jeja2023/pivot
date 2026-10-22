@@ -38,9 +38,9 @@ services:
     ports:
       - "${PIVOT_SPEECH_BIND_IP:-127.0.0.1}:8000:8000"
 
-    # 数据挂载：加载离线模型权重目录（生产模型放入宿主机 ./data/speech-models/）
+    # 数据挂载：加载离线模型权重目录（支持通过 SPEECH_MODELS_PATH 指定宿主机任意独立路径，如 /data/speech-models）
     volumes:
-      - ./data/speech-models:/models:ro
+      - ${SPEECH_MODELS_PATH:-./data/speech-models}:/models:ro
 
     # 安全加固与资源限制
     read_only: true

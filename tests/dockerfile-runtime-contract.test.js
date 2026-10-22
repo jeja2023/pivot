@@ -22,7 +22,7 @@ test('语音识别深度学习引擎由独立微服务容器承载，主镜像�
     assert.match(speechDockerfile, /requirements\.txt/);
     assert.match(speechDockerfile, /artifacts\/speech-wheelhouse/);
     assert.match(speechCompose, /image:\s*\$\{SPEECH_IMAGE:-speech-service:latest\}/);
-    assert.match(speechCompose, /\.\/data\/speech-models:\/models:ro/);
+    assert.match(speechCompose, /\$\{SPEECH_MODELS_PATH:-\.\/data\/speech-models\}:\/models:ro/);
     assert.match(speechCompose, /8000:8000/);
     assert.doesNotMatch(compose, /8000:8000/);
 });
