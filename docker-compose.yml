@@ -1,70 +1,73 @@
 # Pivot AI 智能中枢 - 生产环境部署配置
+#
+# 常用启动命令：
+#   离线标准启动：docker compose up -d
+#   叠加 GPU 监控：docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   叠加语音微服务：docker compose -f docker-compose.yml -f docker-compose.speech.yml up -d
 
 services:
   pivot:
-    # 镜像名称：需要与打包时生成的镜像标签保持一致
-    image: pivot
+    # 镜像名称：默认使用 pivot:latest；离线生产环境直接通过 docker load 载入；支持在 .env 中通过 PIVOT_IMAGE 覆盖
+    image: ${PIVOT_IMAGE:-pivot:latest}
+    # 离线环境强制使用本地已载入镜像，绝不连接公网 Registry
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
     container_name: pivot
-    # 镜像内固定使用非 root 的 node 用户（UID/GID 1000）。
+    # 容器安全：以非 root 的 node 用户（UID/GID 1000）运行
     user: "${PIVOT_UID:-1000}:${PIVOT_GID:-1000}"
     security_opt:
       - no-new-privileges:true
 
-    # 端口映射：宿主机端口 -> 容器端口
+    # 端口映射：宿主机端口 -> 容器端口（默认 9006，可通过 .env 中 PIVOT_HOST_PORT 自定义）
     ports:
-      - "9006:3000"
+      - "${PIVOT_HOST_PORT:-9006}:3000"
 
-    # 环境变量：运行时自动读取同目录下的 .env 文件
+    # 环境变量：运行时自动读取同目录下的 .env 配置文件
     env_file:
       - .env
 
-    # 正式镜像在构建阶段已安装 qpdf 与 veraPDF；空值时使用镜像内固定路径。
-    # 如部署方使用受控自定义二进制，可在 .env 显式覆盖该路径。
+    # 核心运行时工具与服务模式配置（可在 .env 中覆盖）
     environment:
+      # PDF 工具二进制路径：正式镜像已内置安装 qpdf 与 veraPDF，留空时使用镜像内默认路径
       DOCUMENT_QPDF_PATH: ${DOCUMENT_QPDF_PATH:-/usr/bin/qpdf}
       DOCUMENT_VERAPDF_PATH: ${DOCUMENT_VERAPDF_PATH:-/opt/verapdf/verapdf}
-      PIVOT_VOICE_PROVIDER: ${PIVOT_VOICE_PROVIDER:-embedded}
-      PIVOT_EMBEDDED_VOICE_MODEL_ROOT: /models
-      PIVOT_EMBEDDED_VOICE_PYTHON: ${PIVOT_EMBEDDED_VOICE_PYTHON:-/opt/pivot-speech/engine-venv/bin/python}
-      PIVOT_EMBEDDED_VOICE_WORKER: ${PIVOT_EMBEDDED_VOICE_WORKER:-/opt/pivot-speech/engine/embedded_worker.py}
+      # 语音识别提供方：local（默认内置 Vosk 轻量离线识别，零外部依赖）；gateway（调用独立 speech-service 或外部网关）
+      PIVOT_VOICE_PROVIDER: ${PIVOT_VOICE_PROVIDER:-local}
 
-    # 默认 CPU-only，可在 GPU 主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控。
+    # 默认 CPU-only，可在 GPU 算力主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控
 
-    # 数据持久化：保证数据库和上传文件在容器重建后仍然保留
+    # 数据持久化挂载：保证业务数据与上传文件在容器重建后持续保留
+    # 注意：Linux 离线生产机首次启动前，请确保宿主机已创建目录并赋予权限：
+    # mkdir -p data uploads downloads logs && sudo chown -R 1000:1000 data uploads downloads logs
     volumes:
       - ./data:/app/data
-      # 内置 CPU 中文识别；三个完整模型目录由部署方导入，容器只读加载。
-      - ./data/speech-models:/models:ro
       - ./uploads:/app/uploads
-      # 客户端下载目录挂载（可选）：用于提供 Windows 客户端下载
-      # 将 Pivot-Setup.exe 放在宿主机 ./downloads 目录中即可通过 Web 页面下载
-      # 优点：更新客户端无需重新构建镜像，保持镜像精简
+      # 客户端下载目录挂载（可选）：将 Pivot-Setup.exe 放在宿主机 ./downloads 即可提供 Web 端直接下载客户端
       - ./downloads:/app/downloads
       - ./logs:/app/logs
 
-    # 网络：加入外部共享网络 ai-bridge
+    # 网络配置：加入外部共享网络 ai-bridge（用于与独立 OCR、PostgreSQL、独立语音等微服务互通）
+    # 提示：离线主机首次启动前执行一次即可：docker network create ai-bridge || true
     networks:
       - ai-bridge
 
-    # 重启策略：容器异常退出后自动拉起
+    # 重启策略：容器异常退出或系统重启后自动拉起
     restart: always
 
-    # 防止容器内写入镜像层；业务写目录均通过下方挂载显式提供。
+    # 安全加固：开启只读根文件系统，临时写操作与缓存通过 tmpfs 显式内存挂载提供
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
       - /home/node/.cache:size=128m,mode=0700,uid=1000,gid=1000
 
-    # 日志管理：限制单文件大小和保留数量，避免占满磁盘
+    # 日志管理：限制单文件大小和保留数量，避免占满宿主机磁盘
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
 
 networks:
   ai-bridge:

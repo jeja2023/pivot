@@ -1,4 +1,10 @@
-# GPU 主机的可选覆盖层：仅在安装 NVIDIA Container Toolkit 后叠加使用。
+# GPU 算力主机的可选覆盖层：启用 NVIDIA GPU 透传与 nvidia-smi 运行时监控
+#
+# 使用方式：
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 前置条件：宿主机已正确安装 NVIDIA 驱动及 NVIDIA Container Toolkit
+
 services:
   pivot:
     gpus: all

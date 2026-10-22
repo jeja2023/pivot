@@ -1,3 +1,26 @@
+## [v0.7.28] - 2026-10-22
+
+### 容器架构深度解耦、离线生产交付加固与通用语音微服务化
+
+- **AI 语音大模型引擎彻底解耦为通用独立微服务**：
+  - 将 PyTorch 2.8 CPU、TorchAudio 与 FunASR 深度学习离线推理引擎彻底剥离为主应用外的独立微服务容器（`speech-service:latest`），彻底解除主 Web 业务与庞大深度学习底层依赖的绑定；
+  - 命名彻底去私有化，以通用 ASR 微服务 `speech-service:latest` 命名，对外暴露标准 REST API（POST `/v1/speech/transcriptions`）与 WebSocket（`/v1/speech/stream`）接口，可供内网多个第三方业务系统复用；
+  - 主镜像内保留极轻量（~110MB）的 Vosk 离线模型作为默认单机兜底识别，默认零外部依赖开箱即用。
+
+- **运行时基础镜像切换至 slim 基线，镜像体积由 1.41G 缩减至 ~600MB**：
+  - 运行时基础镜像由完整版 `node:22-bookworm` 切换为官方精简版 `node:22-bookworm-slim`；
+  - 彻底剔除 Debian buildpack 中近 813MB 无用的 gcc/g++/make/git 等编译器及开发头文件；
+  - 导出归档（`pivot.tar`）从 1.41 GB 缩减至约 600 MB，体积锐减逾 57%，日常构建与镜像传输效率质的飞跃。
+
+- **无网络生产环境（`docker load`）直接交付深度加固**：
+  - 显式声明 `pull_policy: never`，在完全断网生产环境中杜绝尝试连接公网 Registry 导致的 30~60 秒超时卡死；
+  - 镜像标签参数化 `${PIVOT_IMAGE:-pivot:latest}` 与 `${SPEECH_IMAGE:-speech-service:latest}`，支持无缝适配企业内网私有 Harbor/Nexus 仓库；
+  - 宿主机端口支持 `${PIVOT_HOST_PORT:-9006}:3000` 覆盖，避免生产机 9006 端口冲突时修改编排文件；
+  - 解决非 root（UID 1000）用户在 Linux 离线宿主机创建挂载目录时 `logs` 权限遗漏引发的 `EACCES` 陷阱；
+  - 规范并补齐了根目录下全部 Compose 文件（`docker-compose.yml`、`docker-compose.speech.yml`、`docker-compose.gpu.yml`、`docker-compose.speech.gpu.yml`）的架构说明、运行命令与安全配置注释。
+
+详见 [发布记录](docs/releases/v0.7.28-容器架构深度解耦与离线生产交付加固.md)。
+
 ## [v0.7.27] - 2026-10-22
 
 ### 现有核心功能高并发与运行时性能深度升级

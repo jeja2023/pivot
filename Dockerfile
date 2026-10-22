@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22-bookworm
+ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22-bookworm-slim
 ARG PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim-bookworm
 ARG VERAPDF_VERSION=1.30.3
 ARG VERAPDF_RELEASE_SERIES=1.30
@@ -46,20 +46,10 @@ WORKDIR /tmp/speech
 RUN python3 -m venv /opt/pivot-speech/venv
 COPY docker/speech/requirements.txt docker/speech/install_model.py ./
 RUN /opt/pivot-speech/venv/bin/pip install --no-cache-dir -r requirements.txt \
-  && python3 install_model.py
+  && python3 install_model.py \
+  && find /opt/pivot-speech/venv -type d \( -name "__pycache__" -o -name "tests" -o -name "test" \) -exec rm -rf {} + 2>/dev/null || true
 COPY server/services/speech-recognition/vosk-worker.py /opt/pivot-speech/vosk-worker.py
 RUN PIVOT_SERVER_SPEECH_MODE=probe /opt/pivot-speech/venv/bin/python /opt/pivot-speech/vosk-worker.py
-
-FROM python-base AS speech-engine
-WORKDIR /tmp/speech-engine
-RUN python3 -m venv /opt/pivot-speech/engine-venv
-COPY docker/speech-service/requirements.txt docker/speech-service/requirements-cpu.txt ./
-COPY artifacts/speech-wheelhouse/ /wheels/
-RUN /opt/pivot-speech/engine-venv/bin/pip install --no-index --find-links=/wheels -r requirements.txt -c requirements-cpu.txt \
-  && /opt/pivot-speech/engine-venv/bin/pip check \
-  && /opt/pivot-speech/engine-venv/bin/python -c "import torch, torchaudio, funasr, silero_vad, uvicorn; assert torch.version.cuda is None; print('embedded speech CPU runtime ready')" \
-  && rm -rf /wheels
-COPY docker/speech-service/app.py docker/speech-service/engine.py docker/speech-service/embedded_worker.py /opt/pivot-speech/engine/
 
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
@@ -110,16 +100,13 @@ ENV NODE_ENV=production \
   PIVOT_SERVER_VOICE_PYTHON=/opt/pivot-speech/venv/bin/python \
   PIVOT_SERVER_VOICE_MODEL_PATH=/opt/pivot-speech/model \
   PIVOT_AGENT_PYTHON=/usr/local/bin/python3.12 \
-  PIVOT_VOICE_PROVIDER=embedded \
-  PIVOT_EMBEDDED_VOICE_PYTHON=/opt/pivot-speech/engine-venv/bin/python \
-  PIVOT_EMBEDDED_VOICE_WORKER=/opt/pivot-speech/engine/embedded_worker.py \
-  PIVOT_EMBEDDED_VOICE_MODEL_ROOT=/models \
+  PIVOT_VOICE_PROVIDER=local \
+  PYTHONDONTWRITEBYTECODE=1 \
   PYTHON=python3
 
 COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=verapdf --chown=node:node /opt/verapdf /opt/verapdf
 COPY --from=speech-recognition --chown=node:node /opt/pivot-speech /opt/pivot-speech
-COPY --from=speech-engine --chown=node:node /opt/pivot-speech /opt/pivot-speech
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
@@ -135,7 +122,6 @@ RUN node scripts/build_chat_css.js && \
   python3 --version && \
   python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version" && \
   /opt/pivot-speech/venv/bin/python -c "import sys, vosk; assert sys.version_info[:2] == (3, 12), sys.version" && \
-  /opt/pivot-speech/engine-venv/bin/python -c "import torch, torchaudio, funasr, silero_vad; assert torch.version.cuda is None" && \
   qpdf --version && \
   java -version && \
   /opt/verapdf/verapdf --version && \

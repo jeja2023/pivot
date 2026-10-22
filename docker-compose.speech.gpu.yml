@@ -1,4 +1,11 @@
-# 仅在独立语音服务器叠加；显卡编号通过部署环境指定，避免占用聊天模型的 GPU。
+# 独立语音微服务 GPU 算力覆盖层：将 FunASR 推理从 CPU 调度至指定 GPU 显卡
+#
+# 使用方式：
+#   docker compose -f docker-compose.speech.yml -f docker-compose.speech.gpu.yml up -d
+#
+# 环境变量说明：
+#   SPEECH_GPU_ID：指定分配给语音服务的 GPU 物理卡号（默认卡 0，避免占用主对话模型的显卡）
+
 services:
   speech:
     environment:

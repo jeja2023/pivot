@@ -1,24 +1,48 @@
-# 可选：在另一台局域网服务器提供语音 API。默认内置 CPU 模式只运行主 Compose，无需此容器。
-# 模型目录预先离线导入。
+# 独立高精度语音识别微服务（ASR）编排配置
+#
+# 功能说明：
+#   基于 FunASR / Paraformer / CT-Transformer / Silero VAD 提供生产级中文双遍实时语音转写服务。
+#   对外暴露标准 REST API（POST /v1/speech/transcriptions）与 WebSocket（/v1/speech/stream）接口。
+#   不仅支持与 Pivot 主应用在同一主机通过 ai-bridge 共享网络互联，也支持独立部署于内网专有服务器供多项目共享调用。
+#
+# 常用启动命令：
+#   CPU 模式启动：docker compose -f docker-compose.speech.yml up -d
+#   GPU 加速启动：docker compose -f docker-compose.speech.yml -f docker-compose.speech.gpu.yml up -d
+
 services:
   speech:
-    image: pivot-speech:1
+    container_name: speech-service
+    # 镜像名称：默认使用 speech-service:latest，支持通过 SPEECH_IMAGE 覆盖自定义标签
+    image: ${SPEECH_IMAGE:-speech-service:latest}
+    # 离线环境强制使用本地 docker load 导入的镜像，绝不尝试联网拉取
+    pull_policy: never
     build:
       context: .
       dockerfile: docker/speech-service/Dockerfile
+
+    # 运行环境参数
     environment:
+      # 服务端 API 鉴权密钥（必填，须与调用方客户端配置的 API_KEY 保持一致）
       SPEECH_API_KEY: ${PIVOT_VOICE_API_KEY:?请配置语音服务密钥}
+      # 语音推理后端：funasr（默认）或 qwen
       SPEECH_BACKEND: funasr
+      # 推理设备：cpu（默认）或 cuda:0（需叠加 docker-compose.speech.gpu.yml）
       SPEECH_DEVICE: cpu
+      # 容器内模型路径映射（对应下方 volumes 挂载目录）
       SPEECH_MODEL_DIR: /models/paraformer
       SPEECH_STREAM_MODEL_DIR: /models/paraformer-streaming
       SPEECH_PUNC_MODEL_DIR: /models/punctuation
+
+    # 端口映射：宿主机端口 -> 容器端口
+    # 默认仅绑定 127.0.0.1:8000；若需供其他局域网服务器访问，可在 .env 设置 PIVOT_SPEECH_BIND_IP=0.0.0.0
     ports:
       - "${PIVOT_SPEECH_BIND_IP:-127.0.0.1}:8000:8000"
+
+    # 数据挂载：加载离线模型权重目录（生产模型放入宿主机 ./data/speech-models/）
     volumes:
-      # 与主服务 ./data、./uploads、./logs 一样，相对于部署目录挂载。
-      # artifacts/ 仅用于联网准备；生产模型放在 ./data/speech-models/。
       - ./data/speech-models:/models:ro
+
+    # 安全加固与资源限制
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777
@@ -27,11 +51,21 @@ services:
     restart: unless-stopped
     mem_limit: 8g
     cpus: 4
-    networks: [speech-private]
+
+    # 网络配置：同时接入内部私有网络与外部共享网络 ai-bridge
+    networks:
+      - speech-private
+      - ai-bridge
+
+    # 日志管理：限制单文件大小和保留数量，避免占满磁盘
     logging:
       driver: json-file
-      options: {max-size: 10m, max-file: "3"}
+      options:
+        max-size: 10m
+        max-file: "3"
 
 networks:
   speech-private:
     driver: bridge
+  ai-bridge:
+    external: true

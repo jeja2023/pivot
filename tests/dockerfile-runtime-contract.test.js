@@ -9,14 +9,21 @@ const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml')
 const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
 const veraPdfInstall = fs.readFileSync(path.join(__dirname, '..', 'docker', 'verapdf-auto-install.xml'), 'utf8');
 
-test('标准主镜像包含 CPU 双遍语音运行时，模型只读挂载且只暴露应用端口', () => {
-    assert.match(dockerfile, /FROM python-base AS speech-engine/);
-    assert.match(dockerfile, /COPY artifacts\/speech-wheelhouse\/ \/wheels\//);
-    assert.match(dockerfile, /-r requirements\.txt -c requirements-cpu\.txt/);
-    assert.match(dockerfile, /assert torch\.version\.cuda is None/);
-    assert.match(dockerfile, /COPY --from=speech-engine/);
-    assert.match(dockerfile, /PIVOT_VOICE_PROVIDER=embedded/);
-    assert.match(compose, /\.\/data\/speech-models:\/models:ro/);
+test('语音识别深度学习引擎由独立微服务容器承载，主镜像保持轻量化解耦', () => {
+    const speechDockerfile = fs.readFileSync(path.join(__dirname, '../docker/speech-service/Dockerfile'), 'utf8');
+    const speechCompose = fs.readFileSync(path.join(__dirname, '../docker-compose.speech.yml'), 'utf8');
+    // 主镜像不携带笨重的 PyTorch/FunASR，保持轻量级 Web 容器基线
+    assert.doesNotMatch(dockerfile, /FROM python-base AS speech-engine/);
+    assert.doesNotMatch(dockerfile, /torch/);
+    assert.match(dockerfile, /AS speech-recognition/);
+    assert.match(dockerfile, /COPY --from=speech-recognition --chown=node:node \/opt\/pivot-speech \/opt\/pivot-speech/);
+    assert.match(dockerfile, /PIVOT_VOICE_PROVIDER=local/);
+    // 高精度双遍语音识别由专用独立微服务容器提供
+    assert.match(speechDockerfile, /requirements\.txt/);
+    assert.match(speechDockerfile, /artifacts\/speech-wheelhouse/);
+    assert.match(speechCompose, /image:\s*\$\{SPEECH_IMAGE:-speech-service:latest\}/);
+    assert.match(speechCompose, /\.\/data\/speech-models:\/models:ro/);
+    assert.match(speechCompose, /8000:8000/);
     assert.doesNotMatch(compose, /8000:8000/);
 });
 
