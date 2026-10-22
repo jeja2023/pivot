@@ -11,7 +11,7 @@ const gpuCompose = fs.readFileSync(path.join(root, 'docker-compose.gpu.yml'), 'u
 test('CI 同时覆盖 Node 20、Node 22、真实 Docker 构建和 Windows 桌面冒烟包', () => {
     assert.match(ci, /node-version:\s*\['20', '22'\]/);
     assert.match(ci, /container-build:/);
-    assert.match(ci, /docker build --pull -t pivot:ci/);
+    assert.match(ci, /docker build --pull (?:--build-arg\s+\S+\s+)*-t pivot:ci/);
     assert.match(ci, /desktop-windows:/);
     assert.match(ci, /npm run pack:win/);
 });

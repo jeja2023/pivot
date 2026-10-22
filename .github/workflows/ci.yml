@@ -133,7 +133,7 @@ jobs:
         run: python3 docker/speech-service/prepare_assets.py --dependencies-only
 
       - name: Build production Docker image
-        run: docker build --pull --build-arg NODE_IMAGE=node:22-bookworm-slim --build-arg PYTHON_IMAGE=python:3.12-slim-bookworm -t pivot:ci .
+        run: docker build --pull -t pivot:ci .
 
       - name: Inspect non-root image contract
         run: docker image inspect pivot:ci --format '{{.Config.User}}' | grep -x node
