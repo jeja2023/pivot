@@ -351,6 +351,7 @@ test('历史任务随虚拟列表滚动恢复，输入区不重复显示任务�
         await expect(page.locator(`[data-chat-agent-run-id="${id}"]`)).toHaveCount(0);
         await page.locator('#message-container').hover();
         await page.mouse.wheel(0, -20000);
+        await page.locator('#message-container').evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
         const card = page.locator(`[data-chat-agent-run-id="${id}"]`);
         await expect(card).toHaveCount(1);
         await expect(card.locator('.chat-task-process')).toHaveAttribute('open');

@@ -3,6 +3,11 @@
 # 使用方式：
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 #
+# 推荐配置（永久生效，避免更新后遗漏 -f 参数）：
+#   在宿主机 .env 中增加一行：
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+#   配置后直接执行常规 docker compose up -d 即可自动启用 GPU 透传与监控。
+#
 # 前置条件：宿主机已正确安装 NVIDIA 驱动及 NVIDIA Container Toolkit
 
 services:

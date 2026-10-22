@@ -158,7 +158,8 @@ const migrationModules = [
     require('./chat-message-turn-link-repair'),
     require('./workflow-editor-drafts'),
     require('./chat-task-feed-index'),
-    require('./audit-logs-timestamp-repair')
+    require('./audit-logs-timestamp-repair'),
+    require('./knowledge-claim-evidence-relation-index')
 ];
 
 module.exports = migrationModules

@@ -521,6 +521,7 @@
     "CREATE INDEX IF NOT EXISTS idx_kg_claims_lookup ON knowledge_graph_claims(user_id, source_entity_id, target_entity_id, relation_type, status)",
     "CREATE INDEX IF NOT EXISTS idx_kg_claim_evidence_source ON knowledge_graph_claim_evidence(source_doc_id, source_state, claim_id)",
     "CREATE INDEX IF NOT EXISTS idx_kg_claim_evidence_claim ON knowledge_graph_claim_evidence(claim_id, source_state, confidence DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_kg_claim_evidence_legacy_relation ON knowledge_graph_claim_evidence(legacy_relation_id, source_state)",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_graph_merge_audits_user ON knowledge_graph_merge_audits(user_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_sources_owner_status ON knowledge_sources(user_id, status, deleted_at, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_sources_collection ON knowledge_sources(collection_id, status, deleted_at)",

@@ -68,7 +68,7 @@
                 result = await request(entry.runId, action === 'renew-approval' ? '/approval/refresh' : '/approval', {
                     approve: action === 'approve',
                     ...binding,
-                    rememberForRun
+                    ...(rememberForRun ? { rememberForRun: true } : {})
                 });
             } else if (['pause', 'resume', 'cancel'].includes(action)) {
                 result = await request(entry.runId, `/${action}`);

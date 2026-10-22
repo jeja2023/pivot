@@ -473,31 +473,52 @@ async function getEntityGraph({ userId, user = null, entityId, depth = 1, limit 
     const relationMap = new Map();
     let frontier = [Number(entity.id)];
     for (let hop = 0; hop < safeDepth && frontier.length && relationMap.size < safeLimit; hop += 1) {
-        const placeholders = frontier.map(() => '?').join(',');
-        const relationWhere = [
+        const baseWhere = [
             relationAccess.sql,
             `r.status IN (${statusList.map(() => '?').join(',')})`,
-            graphRelationEvidenceReadySql('r'),
-            `(r.source_entity_id IN (${placeholders}) OR r.target_entity_id IN (${placeholders}))`
+            graphRelationEvidenceReadySql('r')
         ];
-        const params = [...relationAccess.params, ...statusList, ...frontier, ...frontier];
-        if (relationScope.sql) { relationWhere.push(relationScope.sql.replace(/^\s*AND\s+/i, '')); params.push(...relationScope.params); }
-        if (relationType) { relationWhere.push('r.relation_type = ?'); params.push(String(relationType).trim()); }
+        const baseParams = [...relationAccess.params, ...statusList];
+        if (relationScope.sql) { baseWhere.push(relationScope.sql.replace(/^\s*AND\s+/i, '')); baseParams.push(...relationScope.params); }
+        if (relationType) { baseWhere.push('r.relation_type = ?'); baseParams.push(String(relationType).trim()); }
         const min = Number(minConfidence);
-        if (Number.isFinite(min)) { relationWhere.push('r.confidence >= ?'); params.push(Math.min(Math.max(min, 0), 1)); }
+        if (Number.isFinite(min)) { baseWhere.push('r.confidence >= ?'); baseParams.push(Math.min(Math.max(min, 0), 1)); }
+        const baseWhereSql = baseWhere.join(' AND ');
+        const limitNeeded = safeLimit - relationMap.size;
         const rows = await query(`
+            WITH matched_relations AS (
+                SELECT r.id, r.confidence, r.updated_at
+                FROM knowledge_relations r
+                JOIN knowledge_entities s ON s.id = r.source_entity_id AND s.deleted_at IS NULL
+                JOIN knowledge_entities t ON t.id = r.target_entity_id AND t.deleted_at IS NULL
+                WHERE ${baseWhereSql} AND r.source_entity_id IN (${placeholders})
+                UNION
+                SELECT r.id, r.confidence, r.updated_at
+                FROM knowledge_relations r
+                JOIN knowledge_entities s ON s.id = r.source_entity_id AND s.deleted_at IS NULL
+                JOIN knowledge_entities t ON t.id = r.target_entity_id AND t.deleted_at IS NULL
+                WHERE ${baseWhereSql} AND r.target_entity_id IN (${placeholders})
+                ORDER BY confidence DESC, updated_at DESC
+                LIMIT ?
+            )
             SELECT r.*, s.name AS source_name, s.type AS source_type, t.name AS target_name, t.type AS target_type,
                    d.name AS doc_name, c.content AS chunk_text, evidence.excerpt_text, evidence.locator_json, evidence.stance,
                    claim.confidence_reason_json
-            FROM knowledge_relations r
+            FROM matched_relations m
+            JOIN knowledge_relations r ON r.id = m.id
             JOIN knowledge_entities s ON s.id = r.source_entity_id AND s.deleted_at IS NULL
             JOIN knowledge_entities t ON t.id = r.target_entity_id AND t.deleted_at IS NULL
             LEFT JOIN knowledge_docs d ON d.id = r.source_doc_id
             LEFT JOIN knowledge_chunks c ON c.id = r.source_chunk_id
-            LEFT JOIN knowledge_graph_claim_evidence evidence ON evidence.legacy_relation_id = r.id AND evidence.source_state = 'active'
+            LEFT JOIN knowledge_graph_claim_evidence evidence ON evidence.id = (
+                SELECT e.id FROM knowledge_graph_claim_evidence e
+                WHERE e.legacy_relation_id = r.id AND e.source_state = 'active'
+                ORDER BY e.confidence DESC
+                LIMIT 1
+            )
             LEFT JOIN knowledge_graph_claims claim ON claim.id = evidence.claim_id
-            WHERE ${relationWhere.join(' AND ')} ORDER BY r.confidence DESC, r.updated_at DESC LIMIT ?
-        `, [...params, safeLimit - relationMap.size]);
+            ORDER BY m.confidence DESC, m.updated_at DESC
+        `, [...baseParams, ...frontier, ...baseParams, ...frontier, limitNeeded]);
         const next = new Set();
         for (const row of rows || []) {
             relationMap.set(Number(row.id), row);

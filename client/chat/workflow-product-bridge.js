@@ -14,9 +14,20 @@
     function restore(value) {
         agentWorkflowDraftName = value.name || '未命名工作流';
         agentWorkflowDraftDescription = value.description || '';
+        const nameInput = document.getElementById('workflow-product-name');
+        if (nameInput) nameInput.value = value.name || '';
         writeAgentWorkflowText(value.specText);
         try { editor()?.setValue?.(JSON.parse(value.specText), { notify: false }); } catch (_) { /* 未完成 JSON 仍作为可恢复草稿保留。 */ }
         refreshAgentDagInputsPanel();
+        const runBtn = document.getElementById('workflow-product-run');
+        if (runBtn) {
+            let disabled = false;
+            try {
+                const parsed = JSON.parse(value.specText);
+                if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes)) disabled = true;
+            } catch (_) { disabled = true; }
+            runBtn.disabled = disabled;
+        }
     }
     window.Pivot.registerModule('agent.workflowBridge', {
         request, editor, current, spec, capture, restore,
@@ -28,11 +39,35 @@
         },
         readOnly: () => agentWorkflowReadOnly, userId: () => currentUser?.id,
         tools: () => agentToolsCache || [], models: () => window.Pivot.legacy._cachedAgentModels || [],
-        setName: name => { agentWorkflowDraftName = name.slice(0, 100); renderAgentWorkflowLibrary(); window.Pivot.moduleApi('agent.workflowDrafts')?.changed?.(); },
-        inputs: () => collectAgentDagInputs(), write: value => { writeAgentWorkflowText(value); editor()?.setValue?.(value); },
+        setName: name => {
+            agentWorkflowDraftName = name.slice(0, 100);
+            const nameInput = document.getElementById('workflow-product-name');
+            if (nameInput && nameInput.value !== name) nameInput.value = name;
+            renderAgentWorkflowLibrary();
+            window.Pivot.moduleApi('agent.workflowDrafts')?.changed?.();
+        },
+        inputs: () => collectAgentDagInputs(),
+        write: value => {
+            writeAgentWorkflowText(value);
+            editor()?.setValue?.(value);
+            const runBtn = document.getElementById('workflow-product-run');
+            if (runBtn) {
+                let disabled = false;
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes)) disabled = true;
+                } catch (_) { disabled = true; }
+                runBtn.disabled = disabled;
+            }
+        },
         choose: workflow => { activeAgentWorkflowId = String(workflow?.id || ''); const picker = document.getElementById('agent-workflow-select'); if (picker) picker.value = activeAgentWorkflowId; },
         openEditor: (id, options) => showAutomationWorkflowEditor(id, options),
-        newWorkflow: values => { newAgentWorkflow({ showToast: false, ...values }); showAutomationWorkflowEditor('', { keepDraft: true }); },
+        newWorkflow: values => {
+            newAgentWorkflow({ showToast: false, ...values });
+            const nameInput = document.getElementById('workflow-product-name');
+            if (nameInput) nameInput.value = values?.name || '';
+            showAutomationWorkflowEditor('', { keepDraft: true });
+        },
         run: (source, options) => runAgentWorkflowFromWorkbench(source, options),
         persist: options => saveAgentWorkflowToLibrary(options), publish: options => publishSelectedAgentWorkflow(options?.targetVersion || 'current', options),
         focus: id => focusAgentDagNode(id), refreshInputs: () => refreshAgentDagInputsPanel(),

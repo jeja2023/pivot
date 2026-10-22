@@ -114,13 +114,13 @@
 
         let html = '';
         if (debugItems.length && historyRuns.length) {
-            html += `<optgroup label="历史运行记录">` +
-                historyRuns.map(([id, item]) => `<option value="${escape(id)}" ${id === selectedKey ? 'selected' : ''}>${escape(formatOptionLabel(id, item))}</option>`).join('') +
-                `</optgroup><optgroup label="单步/调试测试">` +
+            html += `<optgroup label="单步/调试测试">` +
                 debugItems.map(([id, item]) => `<option value="${escape(id)}" ${id === selectedKey ? 'selected' : ''}>${escape(formatOptionLabel(id, item))}</option>`).join('') +
+                `</optgroup><optgroup label="历史运行记录">` +
+                historyRuns.map(([id, item]) => `<option value="${escape(id)}" ${id === selectedKey ? 'selected' : ''}>${escape(formatOptionLabel(id, item))}</option>`).join('') +
                 `</optgroup>`;
         } else {
-            const allItems = [...historyRuns, ...debugItems];
+            const allItems = [...debugItems, ...historyRuns];
             if (!allItems.length && selectedKey) {
                 html = `<option value="${escape(selectedKey)}" selected>✓ 当前运行结果</option>`;
             } else {

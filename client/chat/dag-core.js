@@ -387,7 +387,7 @@ function syncLlmOutputContract(node, input = null) {
 function writeJson(textarea, spec) {
         if (!textarea) return;
         textarea.value = JSON.stringify(serialize(spec), null, 2);
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new CustomEvent('input', { bubbles: true, detail: { programmatic: true } }));
     }
 
 function getToolSchema(tool) {

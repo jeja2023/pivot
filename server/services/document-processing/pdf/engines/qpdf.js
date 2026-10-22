@@ -42,11 +42,16 @@ function getQpdfHealth({ refresh = false } = {}) {
             encoding: 'utf8'
         });
         const version = truncateLog(result.stdout || result.stderr);
-        cachedHealth = result.status === 0 && /^qpdf\s+/i.test(version)
-            ? { available: true, command, version }
-            : { available: false, command: '', version: '', message: '未检测到可用的 qpdf CLI。' };
-    } catch (_error) {
-        cachedHealth = { available: false, command: '', version: '', message: '未检测到可用的 qpdf CLI。' };
+        if (result.status === 0 && /^qpdf\s+/i.test(version)) {
+            cachedHealth = { available: true, command, version };
+        } else {
+            const detail = result.error
+                ? (result.error.code || result.error.message)
+                : (result.stderr ? truncateLog(result.stderr) : (result.status !== null ? `退出码 ${result.status}` : '命令未响应'));
+            cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 qpdf CLI（命令: ${command}，原因: ${detail}）。` };
+        }
+    } catch (error) {
+        cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 qpdf CLI（${error.message || '配置异常'}）。` };
     }
     cachedAt = Date.now();
     return cachedHealth;

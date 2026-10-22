@@ -788,8 +788,8 @@ function getPdfToolCapabilities() {
             ...meta,
             available: !(meta.requiresQpdf && !qpdf.available) && !(meta.requiresVeraPdf && !verapdf.available),
             unavailableReason: meta.requiresQpdf && !qpdf.available
-                ? '当前部署未安装 qpdf。'
-                : (meta.requiresVeraPdf && !verapdf.available ? '当前部署未安装 veraPDF。' : '')
+                ? (qpdf.message || '当前部署未安装 qpdf。')
+                : (meta.requiresVeraPdf && !verapdf.available ? (verapdf.message || '当前部署未安装 veraPDF。') : '')
         })),
         presets: [
             { id: 'merge-submission', label: '材料合并归档', operation: PDF_TOOL_OPERATIONS.MERGE, config: {} },

@@ -58,6 +58,65 @@ function createDagInspectorController(ctx) {
         else if (value && typeof value === 'object') Object.values(value).forEach(item => inputNodeReferences(item, refs));
         return refs;
     };
+    const exprToTag = (str, nodes = []) => {
+        if (!str || typeof str !== 'string') return str;
+        return str.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, expr) => {
+            const trimmed = expr.trim();
+            if (/^(?:inputs|input)\.([A-Za-z0-9_-]+)$/.test(trimmed)) {
+                const name = RegExp.$1;
+                const inputNode = nodes.find(n => n.tool === 'workflow.input' && (n.input?.name === name || n.id === name));
+                const label = inputNode?.input?.label || inputNode?.title || inputNode?.input?.name || name;
+                return `⟦${label}⟧`;
+            }
+            if (/^(?:nodes|node)\.([A-Za-z0-9_-]+)\.output(?:\.([A-Za-z0-9_-]+))?$/.test(trimmed)) {
+                const nodeId = RegExp.$1;
+                const field = RegExp.$2;
+                const sourceNode = nodes.find(n => n.id === nodeId);
+                const nodeLabel = sourceNode?.title || nodeId;
+                if (!field) return `⟦${nodeLabel} → 输出⟧`;
+                let fieldLabel = field;
+                if (field === 'text') fieldLabel = '文本结果';
+                else if (field === 'rows') fieldLabel = '业务记录';
+                else if (field === 'count') fieldLabel = '数量';
+                else if (sourceNode?.outputSchema?.properties?.[field]?.title) fieldLabel = sourceNode.outputSchema.properties[field].title;
+                return `⟦${nodeLabel} → ${fieldLabel}⟧`;
+            }
+            if (/^(?:nodes|node)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.test(trimmed)) {
+                const nodeId = RegExp.$1;
+                const field = RegExp.$2;
+                const sourceNode = nodes.find(n => n.id === nodeId);
+                const nodeLabel = sourceNode?.title || nodeId;
+                return `⟦${nodeLabel} → ${field}⟧`;
+            }
+            return match;
+        });
+    };
+    const tagToExpr = (str, nodes = []) => {
+        if (!str || typeof str !== 'string') return str;
+        return str.replace(/⟦\s*([^⟧]+?)\s*⟧/g, (match, token) => {
+            const trimmed = token.trim();
+            if (trimmed.includes('→')) {
+                const [nodePart, fieldPart] = trimmed.split(/\s*→\s*/);
+                const sourceNode = nodes.find(n => n.title === nodePart || n.id === nodePart);
+                const nodeId = sourceNode?.id || nodePart;
+                if (fieldPart === '输出') return `{{nodes.${nodeId}.output}}`;
+                let field = fieldPart;
+                if (fieldPart === '文本结果') field = 'text';
+                else if (fieldPart === '业务记录') field = 'rows';
+                else if (fieldPart === '数量') field = 'count';
+                else if (sourceNode?.outputSchema?.properties) {
+                    const found = Object.entries(sourceNode.outputSchema.properties).find(([k, v]) => v?.title === fieldPart);
+                    if (found) field = found[0];
+                }
+                return `{{nodes.${nodeId}.output.${field}}}`;
+            }
+            const inputNode = nodes.find(n => n.tool === 'workflow.input' && (n.input?.label === trimmed || n.title === trimmed || n.input?.name === trimmed || n.id === trimmed));
+            if (inputNode) return `{{inputs.${inputNode.input?.name || inputNode.id}}}`;
+            const otherNode = nodes.find(n => n.title === trimmed || n.id === trimmed);
+            if (otherNode) return `{{nodes.${otherNode.id}.output.text}}`;
+            return `{{inputs.${trimmed}}}`;
+        });
+    };
     const quickFieldMarkup = (node, tool) => {
         const toolName = String(node?.tool || tool?.name || tool?.fullName || '').replace(/^mcp\.[^.]+\./i, '');
         const isImNotification = /(?:^|\.)im\.send_/.test(toolName);
@@ -114,7 +173,13 @@ function createDagInspectorController(ctx) {
             const listMarkup = isImNotification && key === 'target' ? `list="${imTargetListId}"` : '';
             const comparisonNeeded = ['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than'].includes(String(input.operator || 'not_empty'));
             const hidden = toolName === 'workflow.condition' && key === 'compareTo' && !comparisonNeeded ? ' hidden aria-hidden="true"' : '';
-            return `<label class="pivot-dag-inline-field ${type === 'textarea' ? 'is-wide' : ''}"${hidden}><span>${label}${variableButton}</span>${type === 'textarea' ? `<textarea class="form-input" rows="${key === 'prompt' || key === 'template' ? 4 : 3}" data-pivot-dag-input-field="${key}" ${json ? 'data-pivot-dag-input-json="1"' : ''}>${dagEscapeHtml(valueText(key, value))}</textarea>` : `<input class="form-input" type="text" data-pivot-dag-input-field="${key}" ${listMarkup} value="${escape(valueText(key, value))}">`}</label>`;
+            const isTagField = key === 'prompt' || key === 'template';
+            const displayVal = isTagField ? exprToTag(valueText(key, value), ctx.spec?.nodes || []) : valueText(key, value);
+            const ariaAttr = isTagField ? ` aria-label="${escape(label)}（来源标签编辑）"` : '';
+            const sourcePickBtn = isTagField
+                ? `<div class="workflow-product-source"><button type="button" class="btn-secondary" data-pivot-dag-source-pick="${key}">选择数据</button></div>`
+                : '';
+            return `<label class="pivot-dag-inline-field ${type === 'textarea' ? 'is-wide' : ''}"${hidden}><span>${label}${variableButton}</span>${type === 'textarea' ? `<textarea class="form-input" rows="${key === 'prompt' || key === 'template' ? 4 : 3}" data-pivot-dag-input-field="${key}" ${json ? 'data-pivot-dag-input-json="1"' : ''}${ariaAttr}>${dagEscapeHtml(displayVal)}</textarea>${sourcePickBtn}` : `<input class="form-input" type="text" data-pivot-dag-input-field="${key}" ${listMarkup} value="${escape(valueText(key, value))}">`}</label>`;
         };
         const imTargetsMarkup = isImNotification ? `<datalist id="${imTargetListId}">${cachedImTargets.map(target => `<option value="${escape(target)}"></option>`).join('')}</datalist><button type="button" class="btn-secondary pivot-dag-im-target-load" data-pivot-dag-im-target-load>读取允许通知目标</button>` : '';
         const refs = [...inputNodeReferences(node.input)];
@@ -882,6 +947,9 @@ function createDagInspectorController(ctx) {
                 if (input.dataset.pivotDagInputJson === '1' && String(value || '').trim()) {
                     try { value = JSON.parse(value); input.classList.remove('is-invalid'); } catch (_) { input.classList.add('is-invalid'); return; }
                 }
+                if (key === 'prompt' || key === 'template') {
+                    value = tagToExpr(value, ctx.spec?.nodes || []);
+                }
                 node.input[key] = value;
                 ctx.flushOut?.();
                 if (rerender) ctx.render?.();
@@ -968,11 +1036,60 @@ function createDagInspectorController(ctx) {
             ctx.flushOut?.();
             showDagToast('已添加变量引用所需的上游依赖', 'success');
         });
+        inspector.querySelectorAll('[data-pivot-dag-source-pick]').forEach(button => {
+            button.addEventListener('click', event => {
+                const field = event.currentTarget.dataset.pivotDagSourcePick;
+                const targetInput = inspector.querySelector(`[data-pivot-dag-input-field="${cssEscape(field)}"]`);
+                if (targetInput) {
+                    showVariablePicker({
+                        anchorEl: event.currentTarget,
+                        targetInput,
+                        nodeId: node.id,
+                        nodes: ctx.spec?.nodes || [],
+                        tools: currentTools(),
+                        expectedType: 'text',
+                        onSelect: expr => {
+                            const tag = exprToTag(expr, ctx.spec?.nodes || []);
+                            const pickerModule = window.Pivot?.moduleApi?.('agent.dagVariablePicker');
+                            if (pickerModule?.insertTextIntoInput) {
+                                pickerModule.insertTextIntoInput(targetInput, tag);
+                            } else {
+                                targetInput.value = (targetInput.value || '') + tag;
+                                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        }
+                    });
+                }
+            });
+        });
         inspector.querySelectorAll('[data-pivot-dag-inline-pick-var]').forEach(button => {
             button.addEventListener('click', event => {
                 const field = event.currentTarget.dataset.pivotDagInlinePickVar;
                 const targetInput = inspector.querySelector(`[data-pivot-dag-input-field="${cssEscape(field)}"]`);
-                if (targetInput) showVariablePicker({ anchorEl: event.currentTarget, targetInput, nodeId: node.id, nodes: ctx.spec?.nodes || [], tools: currentTools() });
+                if (targetInput) {
+                    if (field === 'prompt' || field === 'template') {
+                        showVariablePicker({
+                            anchorEl: event.currentTarget,
+                            targetInput,
+                            nodeId: node.id,
+                            nodes: ctx.spec?.nodes || [],
+                            tools: currentTools(),
+                            expectedType: 'text',
+                            onSelect: expr => {
+                                const tag = exprToTag(expr, ctx.spec?.nodes || []);
+                                const pickerModule = window.Pivot?.moduleApi?.('agent.dagVariablePicker');
+                                if (pickerModule?.insertTextIntoInput) {
+                                    pickerModule.insertTextIntoInput(targetInput, tag);
+                                } else {
+                                    targetInput.value = (targetInput.value || '') + tag;
+                                    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+                            }
+                        });
+                    } else {
+                        showVariablePicker({ anchorEl: event.currentTarget, targetInput, nodeId: node.id, nodes: ctx.spec?.nodes || [], tools: currentTools() });
+                    }
+                }
             });
         });
         inspector.querySelector('[data-pivot-dag-im-target-load]')?.addEventListener('click', async (event) => {

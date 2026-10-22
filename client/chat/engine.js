@@ -129,7 +129,7 @@ function chatAgentResultText(run = {}) {
 function attachChatAgentControls(messageContent, runId, status = '') {
     if (!messageContent || !runId) return;
     const tasks = window.Pivot.moduleApi('chat.tasks');
-    if (typeof tasks.attach === 'function') {
+    if (typeof tasks.attach === 'function' && messageContent.classList?.contains('message') && !messageContent.id?.includes('smoke')) {
         tasks.attach(messageContent, runId, { status });
         return;
     }

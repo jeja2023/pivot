@@ -33,12 +33,6 @@
     max-width: 180px;
 }
 
-#speech-service-modal .model-modal-header [data-speech-close] {
-    flex: 0 0 auto;
-    min-width: 58px;
-    white-space: nowrap;
-}
-
 .retrieval-config-modal {
     z-index: 5500;
     backdrop-filter: blur(8px);

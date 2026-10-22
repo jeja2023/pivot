@@ -45,13 +45,44 @@
         const feedback = el('workflow-product-feedback');
         if (feedback) feedback.hidden = el('workflow-product-save-actions').hidden && el('workflow-product-recovery').hidden && !el('workflow-product-status').textContent;
     }
+    function updateRunButtonState() {
+        const runBtn = el('workflow-product-run');
+        if (!runBtn) return;
+        const specEl = el('agent-dag-spec');
+        let disabled = false;
+        try {
+            const text = specEl?.value || '';
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.nodes)) disabled = true;
+        } catch (_) {
+            disabled = true;
+        }
+        runBtn.disabled = disabled;
+    }
     function mount() {
         if (mounted) return;
         const editor = el('automation-editor-view');
         if (!editor) return;
         mounted = true;
+        editor.classList.add('workflow-product-modern');
         const libraryBar = editor.querySelector('.agent-dag-library-bar');
         const actionsGroup = editor.querySelector('.agent-dag-library-bar-actions') || libraryBar;
+        let nameInput = el('workflow-product-name');
+        if (!nameInput) {
+            nameInput = document.createElement('input');
+            nameInput.id = 'workflow-product-name';
+            nameInput.className = 'form-input workflow-product-name';
+            nameInput.placeholder = '未命名工作流';
+            nameInput.setAttribute('aria-label', '工作流名称');
+            const picker = el('agent-workflow-picker') || el('agent-workflow-select');
+            if (picker) picker.after(nameInput);
+            else if (libraryBar) libraryBar.prepend(nameInput);
+            nameInput.addEventListener('input', () => {
+                bridge().setName(nameInput.value);
+                drafts().changed();
+                updateRunButtonState();
+            });
+        }
         let save = el('workflow-product-save');
         if (!save) {
             save = document.createElement('span');
@@ -64,6 +95,33 @@
             } else {
                 actionsGroup.appendChild(save);
             }
+        }
+        let runBtn = el('workflow-product-run');
+        let publishBtn = el('workflow-product-publish');
+        if (!publishBtn) {
+            publishBtn = document.createElement('button');
+            publishBtn.id = 'workflow-product-publish';
+            publishBtn.type = 'button';
+            publishBtn.className = 'btn-primary';
+            publishBtn.textContent = '发布';
+            publishBtn.setAttribute('title', '发布当前工作流');
+            const management = el('agent-workflow-management-menu');
+            if (management && management.parentElement === actionsGroup) {
+                actionsGroup.insertBefore(publishBtn, management);
+            } else {
+                actionsGroup.appendChild(publishBtn);
+            }
+            publishBtn.addEventListener('click', () => release());
+        }
+        if (!runBtn) {
+            runBtn = document.createElement('button');
+            runBtn.id = 'workflow-product-run';
+            runBtn.type = 'button';
+            runBtn.className = 'btn-secondary';
+            runBtn.textContent = '运行';
+            runBtn.setAttribute('title', '运行当前工作流');
+            actionsGroup.insertBefore(runBtn, publishBtn);
+            runBtn.addEventListener('click', () => bridge().run('draft', { inline: true }));
         }
         let results = el('agent-dag-canvas-view-results');
         if (!results) {
@@ -128,7 +186,11 @@
             if (id === 'workflow-product-start') el('automation-assets-view').prepend(panel);
             else editor.appendChild(panel);
         }
-        el('agent-dag-spec').addEventListener('input', event => { if (event.isTrusted && !bridge().readOnly()) changed(); });
+        el('agent-dag-spec')?.addEventListener('input', event => {
+            updateRunButtonState();
+            if (event.detail?.programmatic) return;
+            if (!bridge().readOnly()) changed();
+        });
     }
     function draftBridge() { return { request: bridge().request, capture: bridge().capture, restore: bridge().restore, readOnly: bridge().readOnly }; }
     function opened() {
@@ -136,24 +198,38 @@
         window.Pivot.moduleApi('agent.workflowRunForm')?.close();
         window.Pivot.moduleApi('agent.workflowResults')?.reset();
         window.Pivot.moduleApi('agent.workflowRelease')?.close();
+        const isOpeningDraft = suppress;
         suppress = true;
         el('automation-editor-view').classList.remove('workflow-product-run-mode');
         el('workflow-product-results').hidden = true; el('workflow-product-run-form').hidden = true;
-        el('workflow-product-release').hidden = true; el('workflow-product-recovery').hidden = true;
+        el('workflow-product-release').hidden = true;
+        if (!isOpeningDraft) el('workflow-product-recovery').hidden = true;
         el('workflow-product-status').textContent = ''; el('workflow-product-save-actions').hidden = true;
         el('workflow-product-save').textContent = ''; el('workflow-product-save').hidden = bridge().readOnly();
         const aiEditBtn = el('agent-workflow-ai-edit-btn');
         const exportDraftBtn = el('agent-workflow-export-draft-btn');
         if (aiEditBtn) aiEditBtn.hidden = bridge().readOnly();
         if (exportDraftBtn) exportDraftBtn.hidden = bridge().readOnly();
+        const nameInput = el('workflow-product-name');
+        if (nameInput) {
+            nameInput.value = bridge().capture()?.name || bridge().current()?.name || '';
+        }
+        updateRunButtonState();
         refreshFeedback();
-        draftId = bridge().current()?.id ? `workflow-${bridge().current().id}` : `new-${globalThis.crypto.randomUUID()}`;
-        if (!bridge().readOnly()) { const identity = draftId; void drafts().load(draftId, draftBridge()).then(() => { if (draftId === identity) void window.Pivot.moduleApi('agent.workflowResults').restore(identity); }); }
-        else drafts().detach();
-        suppress = false;
+        if (!isOpeningDraft) {
+            draftId = bridge().current()?.id ? `workflow-${bridge().current().id}` : `new-${globalThis.crypto.randomUUID()}`;
+            if (!bridge().readOnly()) { const identity = draftId; void drafts().load(draftId, draftBridge()).then(() => { if (draftId === identity) void window.Pivot.moduleApi('agent.workflowResults').restore(identity); }); }
+            else drafts().detach();
+        }
+        suppress = isOpeningDraft;
         bridge().refreshInputs();
     }
-    function changed() { if (mounted && !suppress) drafts().changed(); }
+    function changed() {
+        if (mounted && !suppress) {
+            drafts().changed();
+            updateRunButtonState();
+        }
+    }
     async function release() { await window.Pivot.moduleApi('agent.workflowRelease').open(); }
     async function start() {
         mount(); const panel = el('workflow-product-start'); panel.hidden = false;
@@ -181,10 +257,13 @@
             if (draftResponse && !draftResponse.ok && draftResponse.status !== 404) { el('workflow-product-start-detail').textContent = data.error || '无法读取原草稿，请重试。'; return; }
             const draft = data.draft || (entry?.local ? { draft_key: entry.draft_key, workflow_id: entry.local.workflowId, name: entry.local.name, description: entry.local.description, spec_text: entry.local.specText } : null);
             if (!draft) return;
+            drafts().detach();
+            draftId = draft.draft_key;
+            suppress = true;
             if (draft.workflow_id) bridge().openEditor(draft.workflow_id, { readOnly: false });
             else bridge().newWorkflow({ name: draft.name });
-            drafts().detach(); draftId = draft.draft_key;
             bridge().restore({ specText: draft.spec_text, name: draft.name, description: draft.description });
+            suppress = false;
             await drafts().load(draftId, draftBridge());
             if (!data.draft && entry?.local?.pending) drafts().changed();
             panel.hidden = true;
@@ -210,7 +289,7 @@
         await bridge().request(`/agents/workflows/${id}/preference`, { method: 'PATCH', body: JSON.stringify({ favorite }) });
         await refreshPreferences(); window.Pivot.moduleApi('agent.automation').renderAssetCenter();
     }
-    function closed() { drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
+    function closed() { draftId = null; drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
     window.Pivot.registerModule('agent.workflowExperience', { mount, opened, changed, status, saveStatus, offerRecovery, compareDraft, start, release, closed,
         showNodeResult: (...args) => window.Pivot.moduleApi('agent.workflowResults').nodeResult(...args),
         refreshPreferences, toggleFavorite, recent, openRecent, preferences: () => preferences });

@@ -5,6 +5,8 @@
         const statusLabel = document.getElementById('runtime-setting-stealth-mode-status-label');
         const secretInput = document.getElementById('runtime-setting-stealth-secret');
         if (!toggle) return;
+        const isSuperAdmin = typeof isSuperAdminUser === 'function' ? isSuperAdminUser() : Boolean(window.Pivot?.permissions?.isSuperAdminUser?.());
+        if (!isSuperAdmin) return;
 
         try {
             const apiBase = window.Pivot.legacy.API_BASE || '/api';
@@ -158,11 +160,9 @@
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             initStealthControls();
-            loadStealthSettings();
         });
     } else {
         initStealthControls();
-        loadStealthSettings();
     }
 
     window.Pivot?.exposeModule?.('settings.stealth', {

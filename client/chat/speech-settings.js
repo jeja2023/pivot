@@ -87,12 +87,28 @@
         clearTimeout(poll);
         if (status?.readiness === 'starting' && document.visibilityState !== 'hidden' && byId('speech-model-service-card')?.getClientRects().length) poll = setTimeout(() => refreshStatus(), 3000);
     }
+    async function fetchStatus() {
+        if (config?.canManage) return request('');
+        const abort = new AbortController(); const timer = setTimeout(() => abort.abort(), 15000);
+        controller = abort;
+        try {
+            const response = await apiFetch(`${API_BASE}/chat/voice-recognition`, { signal: abort.signal, cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || '语音服务状态检查失败。');
+            return { config, status: data };
+        } catch (error) {
+            if (error.name === 'AbortError') throw new Error('语音服务状态检查已取消或超时。');
+            throw error;
+        } finally { clearTimeout(timer); if (controller === abort) controller = null; }
+    }
     async function refreshStatus() {
-        if (!config?.canManage || refreshing) return;
+        if (refreshing) return;
         const generation = epoch;
-        refreshing = request('').then(data => {
+        refreshing = fetchStatus().then(data => {
             if (generation !== epoch) return;
-            config = data.config; status = data.status; updateCard();
+            if (data?.config) config = data.config;
+            status = data?.status || null;
+            updateCard();
             if (visible() && !dirty && !saving) message(summary(), status?.available === false && status?.readiness !== 'starting');
             scheduleRefresh();
         }).catch(() => {}).finally(() => { refreshing = null; });

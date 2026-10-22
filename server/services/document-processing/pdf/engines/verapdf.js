@@ -39,14 +39,22 @@ function commandInvocation(command, args) {
 
 function getVeraPdfHealth({ refresh = false } = {}) {
     if (!refresh && cachedHealth && Date.now() - cachedAt < 60_000) return cachedHealth;
+    let command = '';
     try {
-        const command = commandForVeraPdf();
+        command = commandForVeraPdf();
         const invocation = commandInvocation(command, ['--version']);
         const result = spawnSync(invocation.command, invocation.args, { shell: false, windowsHide: true, timeout: 5000, encoding: 'utf8' });
         const version = String(result.stdout || result.stderr || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
-        cachedHealth = result.status === 0 && version ? { available: true, command, version } : { available: false, message: '未检测到可用的 veraPDF CLI。' };
-    } catch (_error) {
-        cachedHealth = { available: false, message: '未检测到可用的 veraPDF CLI。' };
+        if (result.status === 0 && version) {
+            cachedHealth = { available: true, command, version };
+        } else {
+            const detail = result.error
+                ? (result.error.code || result.error.message)
+                : (result.stderr ? String(result.stderr).slice(0, 200) : (result.status !== null ? `退出码 ${result.status}` : '命令未响应'));
+            cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 veraPDF CLI（命令: ${invocation.command}，原因: ${detail}）。` };
+        }
+    } catch (error) {
+        cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 veraPDF CLI（${error.message || '配置异常'}）。` };
     }
     cachedAt = Date.now();
     return cachedHealth;

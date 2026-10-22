@@ -57,6 +57,8 @@
     async function load() {
         const el = elements();
         if (!el.status) return null;
+        const isAdmin = typeof isAdminUser === 'function' ? isAdminUser() : Boolean(window.Pivot?.permissions?.isAdminUser?.());
+        if (!isAdmin) return null;
         try {
             const data = await request('/settings/skill-signing');
             render(data);
@@ -108,7 +110,6 @@
         el.generate?.addEventListener('click', generate);
         el.disable?.addEventListener('click', disable);
         el.importButton?.addEventListener('click', importKey);
-        load();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

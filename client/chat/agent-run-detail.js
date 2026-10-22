@@ -870,6 +870,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             browserEvidenceMarkup,
             isDiagnosticsOpen
         });
+        const legacyHarnessMarkup = window.Pivot?.legacy?.renderAgentHarnessDiagnosticMarkup?.(run.id) || '';
 
         const errorCardMarkup = run.error_message ? `
             <div class="agent-run-error-card error-detail">
@@ -932,12 +933,13 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             <details class="agent-run-process" data-disclosure-key="process"${isProcessOpen ? ' open' : ''}>
                 <summary><span>执行过程</span><em>${showDagNodeDetails ? `${dagNodes.length} 个步骤` : `${steps.length} 个步骤`}</em></summary>
                 <div class="agent-run-process-body">
+                    ${renderAgentTrace(trace, run.status, run.id)}
                     ${fallbackDagMarkup}
                     ${fallbackToolStatsMarkup}
                     ${showDagNodeDetails ? '' : `<div class="agent-step-list">${fallbackStepsMarkup}</div>`}
                 </div>
             </details>
-
+            ${legacyHarnessMarkup}
             ${technicalDiagnosticsMarkup}
         `);
         const progressFill = detail.querySelector('.agent-progress-fill');

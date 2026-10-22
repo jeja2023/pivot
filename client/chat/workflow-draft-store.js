@@ -5,13 +5,43 @@
     const pending = new Map();
     const api = () => window.Pivot.moduleApi('agent.workflowExperience');
     const userKey = () => String(window.Pivot.legacy.currentUser?.id || window.Pivot.moduleApi('agent.workflowBridge').userId?.() || '');
-    const localKey = key => `pivot.workflow.draft.${userKey()}.${key}`;
+    function getStoredDraft(key) {
+        const uid = userKey();
+        if (uid) {
+            try {
+                const item = localStorage.getItem(`pivot.workflow.draft.${uid}.${key}`);
+                if (item) return JSON.parse(item);
+            } catch (_) {}
+        }
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith('pivot.workflow.draft.') && k.endsWith(`.${key}`)) {
+                    const item = localStorage.getItem(k);
+                    if (item) return JSON.parse(item);
+                }
+            }
+        } catch (_) {}
+        return null;
+    }
+    const localKey = key => {
+        const uid = userKey();
+        if (uid) return `pivot.workflow.draft.${uid}.${key}`;
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                const m = k && k.match(/^pivot\.workflow\.draft\.([^.]+)\./);
+                if (m && m[1]) return `pivot.workflow.draft.${m[1]}.${key}`;
+            }
+        } catch (_) {}
+        return `pivot.workflow.draft..${key}`;
+    };
     const same = value => active === value;
     const status = (text, tone = '', error = null) => api().saveStatus?.(text, tone, error);
     function localWrite(value, payload) {
-        if (!userKey()) return false;
+        const key = localKey(value.key);
         if (/"(?:password|passwd|authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|secret|private[-_]?key)"\s*:\s*"(?!\{\{)[^"\s]+|[?&](?:token|secret|password|api[-_]?key)=[^&\s"}]+/i.test(payload.specText)) return false;
-        try { localStorage.setItem(localKey(value.key), JSON.stringify({ ...payload, revision: value.revision, pending: value.dirty, savedAt: Date.now() })); return true; }
+        try { localStorage.setItem(key, JSON.stringify({ ...payload, revision: value.revision, pending: value.dirty, savedAt: Date.now() })); return true; }
         catch (_) { return false; }
     }
     async function load(key, bridge) {
@@ -21,7 +51,7 @@
         let finishLoad; value.loaded = new Promise(resolve => { finishLoad = resolve; });
         active = value;
         let local = null;
-        try { local = JSON.parse(localStorage.getItem(localKey(key)) || 'null'); } catch (_) { /* 浏览器存储不可用时继续使用服务器修订。 */ }
+        try { local = getStoredDraft(key); } catch (_) { /* 浏览器存储不可用时继续使用服务器修订。 */ }
         try {
             if (pending.has(key)) await pending.get(key);
             const response = await bridge.request(`/agents/workflow-editor/drafts/${encodeURIComponent(key)}`);
@@ -114,13 +144,18 @@
     }
     function detach() { clearTimeout(timer); if (active?.dirty) void flush(active); active = null; }
     function listLocal() {
-        const result = []; const prefix = `pivot.workflow.draft.${userKey()}.`;
-        if (!userKey()) return result;
+        const result = [];
+        const uid = userKey();
+        const prefix = uid ? `pivot.workflow.draft.${uid}.` : 'pivot.workflow.draft.';
         try {
             for (let index = 0; index < localStorage.length; index++) {
-                const storageKey = localStorage.key(index); if (!storageKey?.startsWith(prefix)) continue;
+                const storageKey = localStorage.key(index);
+                if (!storageKey?.startsWith(prefix)) continue;
                 const value = JSON.parse(localStorage.getItem(storageKey));
-                if (value?.specText) result.push({ ...value, key: storageKey.slice(prefix.length) });
+                if (value?.specText) {
+                    const keyPart = uid ? storageKey.slice(prefix.length) : storageKey.replace(/^pivot\.workflow\.draft\.[^.]+\./, '');
+                    result.push({ ...value, key: keyPart });
+                }
             }
         } catch (_) { /* 本机存储不可用不影响服务器草稿。 */ }
         return result.sort((a, b) => b.savedAt - a.savedAt).slice(0, 100);

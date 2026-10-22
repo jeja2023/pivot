@@ -239,8 +239,6 @@ function renderAgentRunTechnicalDiagnostics(run, options = {}) {
     const toolCount = Number(progress.toolCount || 0);
     const errorCount = Number(progress.errorCount || 0);
     const openAttr = isDiagnosticsOpen ? ' open' : '';
-    const traceMarkup = renderAgentTrace(trace, run.status, run.id);
-    const legacyHarnessMarkup = window.Pivot?.legacy?.renderAgentHarnessDiagnosticMarkup?.(run.id) || '';
 
     return `
         <details class="agent-run-technical-diagnostics" data-disclosure-key="technical-diagnostics"${openAttr}>
@@ -298,12 +296,10 @@ function renderAgentRunTechnicalDiagnostics(run, options = {}) {
                         <strong class="agent-run-metadata-value">${checkpointCount} 个</strong>
                     </div>` : ''}
                 </div>
-                ${traceMarkup ? `<div class="agent-run-tech-section">${traceMarkup}</div>` : ''}
                 ${transactionMarkup ? `<div class="agent-run-tech-section">${transactionMarkup}</div>` : ''}
                 ${workingMemoryMarkup ? `<div class="agent-run-tech-section">${workingMemoryMarkup}</div>` : ''}
                 ${promptProvenanceMarkup ? `<div class="agent-run-tech-section">${promptProvenanceMarkup}</div>` : ''}
                 ${browserEvidenceMarkup ? `<div class="agent-run-tech-section">${browserEvidenceMarkup}</div>` : ''}
-                ${legacyHarnessMarkup ? `<div class="agent-run-tech-section">${legacyHarnessMarkup}</div>` : ''}
             </div>
         </details>
     `;

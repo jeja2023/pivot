@@ -83,7 +83,7 @@ function writeAgentWorkflowText(value) {
     const textarea = document.getElementById('agent-dag-spec');
     if (!textarea) return;
     textarea.value = typeof value === 'string' ? value : JSON.stringify(value || { nodes: [] }, null, 2);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new CustomEvent('input', { bubbles: true, detail: { programmatic: true } }));
     updateAgentWorkflowRunUi();
 }
 

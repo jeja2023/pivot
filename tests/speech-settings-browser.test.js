@@ -98,3 +98,76 @@ test('真实 Chromium 语音设置支持模式切换、密钥留空保存、测�
         assert.deepEqual(errors, []);
     } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 });
+
+test('非最高管理员角色展示只读统一维护状态，并能通过语音能力接口自动更新为就绪', async () => {
+    const root = path.resolve(__dirname, '..');
+    const server = http.createServer((req, res) => {
+        if (req.url === '/speech-settings.js') {
+            res.setHeader('Content-Type', 'application/javascript');
+            res.end(fs.readFileSync(path.join(root, 'client/chat/speech-settings.js')));
+            return;
+        }
+        res.setHeader('Content-Type', 'text/html');
+        res.end(`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"></head><body><div id="retrieval-model-services-body"></div></body></html>`);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const browser = await chromium.launch({ headless: true });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const nonAdminConfig = {
+        enabled: true,
+        provider: 'gateway',
+        revision: 'r1',
+        source: 'settings',
+        canManage: false,
+        configured: true,
+        endpoint: '********',
+        streamEndpoint: '********',
+        hasApiKey: true
+    };
+    try {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+        let voiceRecognitionRequested = false;
+        await page.route('**/api/chat/voice-recognition**', async route => {
+            voiceRecognitionRequested = true;
+            await route.fulfill({
+                json: {
+                    success: true,
+                    available: true,
+                    streaming: true,
+                    provider: 'gateway',
+                    languages: ['zh-CN']
+                }
+            });
+        });
+        await page.goto(base);
+        await page.evaluate(() => {
+            const modules = new Map();
+            window.Pivot = { exposeModule: (name, api) => modules.set(name, api), moduleApi: (name, fallback = {}) => modules.get(name) || fallback };
+            window.API_BASE = '/api';
+            window.apiFetch = (...args) => fetch(...args);
+            window.escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+            window.PivotSafeHtml = { setHtml: (node, html) => { node.innerHTML = html; } };
+            window.showToast = () => {};
+        });
+        await page.addScriptTag({ url: '/speech-settings.js' });
+        await page.evaluate(value => {
+            window.PivotSafeHtml.setHtml(document.getElementById('retrieval-model-services-body'), window.Pivot.moduleApi('settings.speech').renderCard(value));
+        }, nonAdminConfig);
+
+        const card = page.locator('#speech-model-service-card');
+        assert.ok(await card.textContent().then(t => t.includes('由系统管理员统一维护')));
+        assert.ok(await card.textContent().then(t => t.includes('已配置，等待检查运行状态')));
+        assert.equal(await page.locator('[data-speech-config-open]').count(), 0);
+        assert.equal(await page.locator('[data-speech-card-test]').count(), 0);
+
+        await page.evaluate(() => window.Pivot.moduleApi('settings.speech').refreshStatus());
+        await page.waitForFunction(() => document.getElementById('speech-model-service-card')?.textContent.includes('服务已就绪 · 双遍流式识别'));
+        assert.equal(voiceRecognitionRequested, true);
+        assert.equal(await card.evaluate(el => el.classList.contains('is-ready')), true);
+        assert.equal(await card.evaluate(el => el.classList.contains('is-warning')), false);
+        assert.ok(await card.textContent().then(t => t.includes('由系统管理员统一维护')));
+    } finally {
+        await browser.close();
+        await new Promise(resolve => server.close(resolve));
+    }
+});

@@ -487,6 +487,7 @@ async function loadTabDataInternal(tab, page = 1) {
             if (tab === 'global-params' && window.Pivot.legacy.loadSettings) {
                 await window.Pivot.legacy.loadSettings();
                 await window.Pivot?.moduleApi?.('settings.skillSigning')?.load?.();
+                await window.Pivot?.moduleApi?.('settings.stealth')?.loadStealthSettings?.();
             }
             if (tab === 'keys' && window.Pivot.legacy.loadApiKeys) {
                 await window.Pivot.legacy.loadApiKeys();

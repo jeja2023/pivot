@@ -23,6 +23,19 @@
     letter-spacing: -0.01em;
 }
 
+#workflow-product-name,
+.workflow-product-name {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm, 6px);
+    font-size: 0.82rem;
+    font-weight: 500;
+    min-width: 0;
+    max-width: 220px;
+    flex: 1 1 120px;
+    box-sizing: border-box;
+}
+
 #workflow-product-run,
 #workflow-product-publish {
     height: 32px;
@@ -340,9 +353,17 @@ body.dark-mode .workflow-authoring-select:focus-visible,
     background: var(--bg-side);
 }
 
+.agent-workflow-management-menu:not([open]) .agent-workflow-management-popover,
+details.agent-workflow-management-menu:not([open]) > .agent-workflow-management-popover {
+    display: none !important;
+}
+
 #workflow-product-results {
     position: fixed;
-    inset: 0;
+    top: 54px;
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 1050;
     display: flex;
     align-items: center;
@@ -1013,6 +1034,27 @@ body.is-main-workspace-full .chat-container {
 
 .automation-editor-view .agent-dag-library-bar {
     display: flex !important;
+    flex-wrap: wrap !important;
+    height: auto !important;
+    min-height: 48px !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    position: relative !important;
+    z-index: 1060 !important;
+}
+
+.automation-editor-view .agent-dag-library-bar .agent-workflow-picker {
+    min-width: 0 !important;
+    flex: 1 1 140px !important;
+    max-width: 100% !important;
+}
+
+.automation-editor-view .agent-dag-library-bar-actions {
+    display: inline-flex !important;
+    flex-wrap: wrap !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin-left: auto;
 }
 
 .automation-editor-view .agent-dag-workbench {
@@ -1160,5 +1202,13 @@ body.dark-mode .workflow-product-save,
     background: color-mix(in srgb, var(--surface, #1e293b) 80%, transparent);
     border-color: var(--border, rgba(148, 163, 184, 0.2));
     color: var(--text-muted);
+}
+
+body.dark-mode .agent-dag-inputs-panel,
+.dark-mode .agent-dag-inputs-panel,
+body.dark-mode .workflow-product-modern .agent-dag-inputs-panel,
+.dark-mode .workflow-product-modern .agent-dag-inputs-panel {
+    background: var(--surface, #1e293b) !important;
+    border-color: var(--border, rgba(148, 163, 184, 0.2)) !important;
 }
 
