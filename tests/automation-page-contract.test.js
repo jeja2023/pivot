@@ -416,12 +416,11 @@ test('工作流执行耗时甘特瀑布图弹窗右上角关闭按钮使用全�
     const waterfallJs = read('client/chat/dag-timeline-waterfall.js');
     const toolbarCss = read('client/chat/styles/workspaces/agent/agent-dag-toolbar.css');
 
-    // 1. 甘特瀑布图弹窗使用 btn-danger-outline 类且文案为“关闭”
-    assert.match(waterfallJs, /<button class="btn-danger-outline pivot-dag-waterfall-close" type="button" aria-label="关闭">关闭<\/button>/);
-    assert.doesNotMatch(waterfallJs, /workspace-modal-close pivot-dag-waterfall-close/);
+    // 1. 甘特瀑布图弹窗使用全局统一的 btn-secondary workspace-modal-close 样式且文案为“关闭”
+    assert.match(waterfallJs, /<button class="btn-secondary workspace-modal-close pivot-dag-waterfall-close" type="button" aria-label="关闭">关闭<\/button>/);
 
-    // 2. CSS 针对 .pivot-dag-waterfall-close.btn-danger-outline 保持一致的按钮尺寸规范
-    assert.match(toolbarCss, /\.pivot-dag-waterfall-close\.btn-danger-outline\s*\{/);
+    // 2. CSS 针对 .pivot-dag-waterfall-close.workspace-modal-close 适配深色主题与统一交互
+    assert.match(toolbarCss, /\.pivot-dag-waterfall-close\.workspace-modal-close\s*\{/);
 });
 
 test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {

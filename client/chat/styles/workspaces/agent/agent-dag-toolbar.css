@@ -564,17 +564,23 @@ body.dark-mode .pivot-dag-waterfall-header {
     font-weight: 800;
 }
 
-.pivot-dag-waterfall-close.btn-danger-outline {
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 8px;
-    font-size: 0.76rem;
-    font-weight: 500;
-    line-height: normal;
+.pivot-dag-waterfall-close.workspace-modal-close {
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+body.dark-mode .pivot-dag-waterfall-close.workspace-modal-close,
+[data-theme="dark"] .pivot-dag-waterfall-close.workspace-modal-close {
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+body.dark-mode .pivot-dag-waterfall-close.workspace-modal-close:hover,
+[data-theme="dark"] .pivot-dag-waterfall-close.workspace-modal-close:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: #f87171;
 }
 
 .pivot-dag-waterfall-summary {
