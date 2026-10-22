@@ -77,35 +77,23 @@ function createAgentQueue({
     }
 
     async function claimNextRun() {
-        const rows = await dbRunner.query(`
-            SELECT id, user_id
-            FROM agent_runs
-            WHERE status = 'queued'
-              AND deleted_at IS NULL
-              AND (retry_after IS NULL OR retry_after <= ${currentTimeExpr})
-              AND (
-                  locked_by IS NULL
-                  OR lock_expires_at IS NULL
-                  OR lock_expires_at <= ${currentTimeExpr}
-              )
-            ORDER BY priority DESC, created_at ASC
-            LIMIT 50
-        `);
+        const saturatedUsers = [];
+        for (const [userId, count] of activeUserCounts.entries()) {
+            if (count >= safeMaxConcurrentPerUser) saturatedUsers.push(userId);
+        }
+        const now = getTimestamp();
+        const userExcludeClause = saturatedUsers.length > 0
+            ? `AND user_id NOT IN (${saturatedUsers.map(() => '?').join(', ')})`
+            : '';
+        const userExcludeParams = saturatedUsers.length > 0 ? saturatedUsers : [];
 
-        for (const row of rows) {
-            if ((activeUserCounts.get(row.user_id) || 0) >= safeMaxConcurrentPerUser) continue;
-            const now = getTimestamp();
-            const changes = await dbRunner.execute(`
-                UPDATE agent_runs
-                SET status = 'running',
-                    locked_by = ?,
-                    lock_expires_at = ?,
-                    retry_after = NULL,
-                    started_at = COALESCE(started_at, ?),
-                    last_heartbeat_at = ?,
-                    updated_at = ?
-                WHERE id = ?
-                  AND status = 'queued'
+        // 采用 PostgreSQL 原生 WITH ... FOR UPDATE SKIP LOCKED 原子认领，
+        // 彻底消除多进程或多 Worker 争抢同一批候选任务导致的行级锁竞争与空轮询。
+        const claimedRows = await dbRunner.query(`
+            WITH candidate_run AS (
+                SELECT id
+                FROM agent_runs
+                WHERE status = 'queued'
                   AND deleted_at IS NULL
                   AND (retry_after IS NULL OR retry_after <= ${currentTimeExpr})
                   AND (
@@ -113,9 +101,33 @@ function createAgentQueue({
                       OR lock_expires_at IS NULL
                       OR lock_expires_at <= ${currentTimeExpr}
                   )
-            `, [instanceId, lockExpiresAt(), now, now, now, row.id]);
+                  ${userExcludeClause}
+                ORDER BY priority DESC, created_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE agent_runs r
+            SET status = 'running',
+                locked_by = ?,
+                lock_expires_at = ?,
+                retry_after = NULL,
+                started_at = COALESCE(r.started_at, ?),
+                last_heartbeat_at = ?,
+                updated_at = ?
+            FROM candidate_run c
+            WHERE r.id = c.id
+            RETURNING r.id, r.user_id
+        `, [
+            ...userExcludeParams,
+            instanceId,
+            lockExpiresAt(),
+            now,
+            now,
+            now
+        ]);
 
-            if (changes === 1) return row;
+        if (Array.isArray(claimedRows) && claimedRows.length > 0) {
+            return claimedRows[0];
         }
 
         return null;

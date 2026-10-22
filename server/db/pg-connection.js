@@ -68,12 +68,12 @@ function getPgPool() {
             throw new Error('[PG] DATABASE_URL 未配置，无法初始化 PostgreSQL 连接池');
         }
         applyPgTypeParsers();
-        const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '60000', 10);
+        const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '20000', 10);
         const testSchema = String(process.env.PG_TEST_SCHEMA || '').trim();
         const safeTestSchema = /^[a-z_][a-z0-9_]{0,62}$/i.test(testSchema) ? testSchema : '';
         pgPool = new Pool({
             connectionString,
-            max: parseInt(process.env.PG_POOL_MAX || '10', 10),
+            max: parseInt(process.env.PG_POOL_MAX || '30', 10),
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             connectionTimeoutMillis: parseInt(process.env.PG_CONNECT_TIMEOUT_MS || '5000', 10),
             statement_timeout: statementTimeout > 0 ? statementTimeout : undefined,

@@ -1,3 +1,26 @@
+## [v0.7.27] - 2026-10-22
+
+### 现有核心功能高并发与运行时性能深度升级
+
+- **事件循环主线程同步 I/O 阻塞彻底消除**：
+  - 在 `server/app.js` 中引入 `cachedVendorRevision` 与 `cachedRenderedServiceWorker` 内存单例缓存；
+  - 首次计算后直接复用第三方库静态哈希与 Service Worker 注入模板，彻底消除客户端高频访问 `/sw.js` 与轮询 `/version.json` 时重复递归遍历同步读取大文件（如 1.1MB ECharts 与 277KB KaTeX）造成的事件循环卡顿，保证高并发下 LLM SSE 流式输出平滑无抖动。
+
+- **数据库连接池与语句超时基线标准对齐**：
+  - 对齐 `server/db/pg-connection.js` 在缺省环境变量时的回退值与 `server/config/env-registry.js` 统一配置注册表规范；
+  - `PG_POOL_MAX` 兜底默认值从 10 提升至 30，杜绝系统内置 25+ 个后台 Worker/Runner 突发并发时耗尽连接池导致普通用户 HTTP 请求排队超时的问题；
+  - `PG_STATEMENT_TIMEOUT_MS` 兜底执行超时从 60 秒下调对齐至标准的 20 秒，避免慢查询长时间锁定连接资源。
+
+- **智能体队列任务认领升级为 PostgreSQL 原子行锁调度**：
+  - 重构 `server/services/agent-queue.js` 的 `claimNextRun` 任务认领逻辑，将两阶段 `SELECT ... LIMIT 50` 循环更新升级为原生 `WITH ... FOR UPDATE SKIP LOCKED` 原子 CTE 模式；
+  - 多进程或集群多实例 Worker 并发调度时自动跳过已被其他实例锁定的候选任务，从根本上消除了行级锁竞争冲突与空轮询损耗，单次认领往返由 2 次网络请求收敛至 1 次原子执行。
+
+- **实时事件（SSE）连接容量校验与监控算法复杂度降至 O(1)**：
+  - 在 `server/services/realtime-events.js` 中引入原子连接计数器 `totalConnectedClients`；
+  - 客户端握手上限判定（429 检查）与 `getRealtimeStats` 监控接口从遍历所有在线用户的 $O(N)$ 循环彻底优化为 $O(1)$ 常数时间复杂度，降低大型团队并发重连时的 CPU 损耗。
+
+详见 [发布记录](docs/releases/v0.7.27-现有核心功能高并发与运行时性能深度升级.md)。
+
 ## [v0.7.26] - 2026-10-21
 
 ### 自动化与智能体工作流全链路产品级优化

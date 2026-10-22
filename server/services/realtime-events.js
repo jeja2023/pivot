@@ -3,6 +3,7 @@ const { logger } = require('../logger');
 const { createSseResponseWriter } = require('./sse-response');
 
 const clientsByUser = new Map();
+let totalConnectedClients = 0;
 const MAX_REALTIME_CLIENTS_PER_USER = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS_PER_USER || '8', 10) || 8, 1);
 const MAX_REALTIME_CLIENTS = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS || '1000', 10) || 1000, MAX_REALTIME_CLIENTS_PER_USER);
 
@@ -30,7 +31,9 @@ function encodeSse(type, payload = {}) {
 function removeClient(userId, client) {
     const set = clientsByUser.get(userId);
     if (!set) return;
-    set.delete(client);
+    if (set.delete(client)) {
+        totalConnectedClients = Math.max(0, totalConnectedClients - 1);
+    }
     if (set.size === 0) clientsByUser.delete(userId);
 }
 
@@ -43,7 +46,7 @@ function subscribeUserEvents(user, res, options = {}) {
 
     // 必须在创建 writer 和登记客户端之前判定容量；否则被 429 拒绝的响应
     // 会残留在 clientsByUser 中，反而使连接上限失效并造成内存泄漏。
-    const currentTotal = getRealtimeStats().clients;
+    const currentTotal = totalConnectedClients;
     const currentUserCount = clientsByUser.get(userId)?.size || 0;
     if (currentUserCount >= MAX_REALTIME_CLIENTS_PER_USER || currentTotal >= MAX_REALTIME_CLIENTS) {
         res.status?.(429);
@@ -62,6 +65,7 @@ function subscribeUserEvents(user, res, options = {}) {
     const client = { res, createdAt: Date.now() };
     if (!clientsByUser.has(userId)) clientsByUser.set(userId, new Set());
     clientsByUser.get(userId).add(client);
+    totalConnectedClients += 1;
 
     const write = (type, payload) => {
         if (!writer.isWritable()) {
@@ -111,11 +115,9 @@ function publishUserEvent(userOrId, type, payload = {}) {
 }
 
 function getRealtimeStats() {
-    let clients = 0;
-    for (const set of clientsByUser.values()) clients += set.size;
     return {
         users: clientsByUser.size,
-        clients
+        clients: totalConnectedClients
     };
 }
 

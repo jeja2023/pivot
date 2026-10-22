@@ -355,19 +355,31 @@ function walkFiles(root, files = []) {
     return files;
 }
 
+let cachedVendorRevision = null;
+let cachedRenderedServiceWorker = null;
+
 function getVendorRevision() {
+    if (cachedVendorRevision) return cachedVendorRevision;
     const digest = crypto.createHash('sha256');
     for (const file of walkFiles(VENDOR_ROOT).sort()) {
         digest.update(path.relative(VENDOR_ROOT, file));
         digest.update(fs.readFileSync(file));
     }
-    return `vendor-${digest.digest('hex').slice(0, 16)}`;
+    cachedVendorRevision = `vendor-${digest.digest('hex').slice(0, 16)}`;
+    return cachedVendorRevision;
 }
 
 function renderServiceWorker() {
+    if (process.env.NODE_ENV === 'production' && cachedRenderedServiceWorker) {
+        return cachedRenderedServiceWorker;
+    }
     const revision = getVendorRevision();
     const source = fs.readFileSync(SW_TEMPLATE_PATH, 'utf8');
-    return { revision, source: source.replace('__PIVOT_VENDOR_REVISION__', revision) };
+    const rendered = { revision, source: source.replace('__PIVOT_VENDOR_REVISION__', revision) };
+    if (process.env.NODE_ENV === 'production') {
+        cachedRenderedServiceWorker = rendered;
+    }
+    return rendered;
 }
 const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
 <html lang="zh-CN">
