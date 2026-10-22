@@ -385,6 +385,34 @@ test('运行详情的审批、异常与产物操作区使用 Agent 工作区样�
     assert.match(detailCss, /\.agent-run-error-card\s*\{/);
 });
 
+test('运行详情异常提示卡片中的重试整项任务、从检查点恢复与修改任务目标均具备完整交互绑定与模态层级契约', () => {
+    const detailJs = read('client/chat/agent-run-detail.js');
+    const actionsJs = read('client/chat/agent-run-actions.js');
+    const agentHtml = read('client/chat/partials/workspaces/agent.html');
+
+    // 1. 运行详情卡片渲染重试、恢复、修改目标三个操作按钮
+    assert.match(detailJs, /data-agent-rerun=/);
+    assert.match(detailJs, /data-agent-resume=/);
+    assert.match(detailJs, /data-agent-edit-run=/);
+
+    // 2. bindAgentRunDetailDomEvents 使用 querySelectorAll 确保同容器内所有对应按钮（含异常卡片）均能绑定事件
+    assert.match(detailJs, /container\.querySelectorAll\('\[data-agent-rerun\]'\)\.forEach/);
+    assert.match(detailJs, /container\.querySelectorAll\('\[data-agent-resume\]'\)\.forEach/);
+    assert.match(detailJs, /container\.querySelectorAll\('\[data-agent-edit-run\],\s*\[data-agent-run-edit\]'\)\.forEach/);
+
+    // 3. 全局委托确保动态挂载和弹窗内部点击均能响应
+    assert.match(detailJs, /event\.target\.closest\('\[data-agent-rerun\]'\)/);
+    assert.match(detailJs, /event\.target\.closest\('\[data-agent-resume\]'\)/);
+    assert.match(detailJs, /event\.target\.closest\('\[data-agent-run-edit\],\s*\[data-agent-edit-run\]'\)/);
+
+    // 4. 任务编辑弹窗支持动态补齐注入、高于详情弹窗的层级(z-index: 2100)与全局挂载
+    assert.match(actionsJs, /function ensureAgentTaskEditModal\(\)/);
+    assert.match(actionsJs, /modal\.style\.zIndex\s*=\s*'2100'/);
+    assert.match(actionsJs, /window\.Pivot\.legacy\.openAgentTaskEditModal\s*=\s*openAgentTaskEditModal/);
+    assert.match(agentHtml, /id="agent-task-edit-modal"[^>]*style="z-index:\s*2100;"/);
+});
+
+
 test('知识图谱顶部入口与文档列表行操作入口具备范围隔离契约', () => {
     const ragJs = read('client/chat/rag.js');
     const graphControllerJs = read('client/chat/rag-graph-controller.js');

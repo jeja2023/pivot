@@ -170,16 +170,46 @@ document.addEventListener('click', async (event) => {
     }
     const editBtn = event.target.closest('[data-agent-run-edit], [data-agent-edit-run]');
     if (editBtn) {
-        const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun;
-        if (runId) openAgentTaskEditModal(runId);
+        const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun || activeAgentRunId || currentRunDetailRecord?.id;
+        if (runId) {
+            if (typeof openAgentTaskEditModal === 'function') {
+                openAgentTaskEditModal(runId);
+            } else if (typeof window.Pivot?.legacy?.openAgentTaskEditModal === 'function') {
+                window.Pivot.legacy.openAgentTaskEditModal(runId);
+            }
+        }
         return;
     }
-    if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn')) {
-        closeAgentTaskEditModal();
+    const rerunBtn = event.target.closest('[data-agent-rerun]');
+    if (rerunBtn) {
+        const runId = rerunBtn.dataset.agentRerun || activeAgentRunId || currentRunDetailRecord?.id;
+        if (runId && typeof window.Pivot?.legacy?.rerunAgentRun === 'function') {
+            window.Pivot.legacy.rerunAgentRun(runId);
+            return;
+        }
+    }
+    const resumeBtn = event.target.closest('[data-agent-resume]');
+    if (resumeBtn) {
+        const runId = resumeBtn.dataset.agentResume || activeAgentRunId || currentRunDetailRecord?.id;
+        if (runId && typeof window.Pivot?.legacy?.resumeAgentRun === 'function') {
+            window.Pivot.legacy.resumeAgentRun(runId);
+            return;
+        }
+    }
+    if (event.target.closest('#agent-task-edit-close-btn, #agent-task-edit-cancel-btn') || event.target.id === 'agent-task-edit-modal') {
+        if (typeof closeAgentTaskEditModal === 'function') {
+            closeAgentTaskEditModal();
+        } else if (typeof window.Pivot?.legacy?.closeAgentTaskEditModal === 'function') {
+            window.Pivot.legacy.closeAgentTaskEditModal();
+        }
         return;
     }
     if (event.target.closest('#agent-task-edit-save-btn')) {
-        saveAgentTaskEdit();
+        if (typeof saveAgentTaskEdit === 'function') {
+            saveAgentTaskEdit();
+        } else if (typeof window.Pivot?.legacy?.saveAgentTaskEdit === 'function') {
+            window.Pivot.legacy.saveAgentTaskEdit();
+        }
         return;
     }
     const activeMoreActions = event.target.closest('.agent-run-more-actions');
@@ -444,18 +474,40 @@ const appendAgentWorkflowRelations = (container, relations) => window.Pivot?.mod
 
 function bindAgentRunDetailDomEvents(container, run, isPreview) {
     if (!container) return;
-    container.querySelector('[data-agent-cancel]')?.addEventListener('click', () => {
-        if (isPreview) return window.Pivot.legacy.cancelAgentWorkflowPreviewRun(run.id);
-        return window.Pivot.legacy.cancelAgentRun(run.id);
+    container.querySelectorAll('[data-agent-cancel]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (isPreview) return window.Pivot.legacy.cancelAgentWorkflowPreviewRun(run.id);
+            return window.Pivot.legacy.cancelAgentRun(run.id);
+        });
     });
-    container.querySelector('[data-agent-approve]')?.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, true));
-    container.querySelector('[data-agent-reject]')?.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, false));
+    container.querySelectorAll('[data-agent-approve]').forEach(btn => {
+        btn.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, true));
+    });
+    container.querySelectorAll('[data-agent-reject]').forEach(btn => {
+        btn.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, false));
+    });
     container.querySelectorAll('[data-agent-revoke-approval]').forEach(button => {
         button.addEventListener('click', () => window.Pivot.legacy.revokeAgentApproval(run.id, button.dataset.agentRevokeApproval || ''));
     });
-    container.querySelector('[data-agent-rerun]')?.addEventListener('click', () => window.Pivot.legacy.rerunAgentRun(run.id));
-    container.querySelector('[data-agent-resume]')?.addEventListener('click', () => window.Pivot.legacy.resumeAgentRun(run.id));
-    container.querySelector('[data-agent-steer]')?.addEventListener('click', () => window.Pivot.legacy.steerAgentRun(run.id));
+    container.querySelectorAll('[data-agent-rerun]').forEach(btn => {
+        btn.addEventListener('click', () => window.Pivot.legacy.rerunAgentRun(btn.dataset.agentRerun || run.id));
+    });
+    container.querySelectorAll('[data-agent-resume]').forEach(btn => {
+        btn.addEventListener('click', () => window.Pivot.legacy.resumeAgentRun(btn.dataset.agentResume || run.id));
+    });
+    container.querySelectorAll('[data-agent-steer]').forEach(btn => {
+        btn.addEventListener('click', () => window.Pivot.legacy.steerAgentRun(run.id));
+    });
+    container.querySelectorAll('[data-agent-edit-run], [data-agent-run-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetRunId = btn.dataset.agentEditRun || btn.dataset.agentRunEdit || run.id;
+            if (typeof openAgentTaskEditModal === 'function') {
+                openAgentTaskEditModal(targetRunId);
+            } else if (typeof window.Pivot?.legacy?.openAgentTaskEditModal === 'function') {
+                window.Pivot.legacy.openAgentTaskEditModal(targetRunId);
+            }
+        });
+    });
     container.querySelector('[data-agent-delegate-batch]')?.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.runActions')?.delegateBatchFromAgentRun?.(run.id));
     container.querySelector('[data-agent-create-workflow-draft]')?.addEventListener('click', () => window.Pivot.legacy.createWorkflowDraftFromAgentRun(run.id));
     container.querySelector('[data-agent-create-schedule]')?.addEventListener('click', () => (window.Pivot?.moduleApi?.('agent.runActions')?.createScheduleFromAgentRun || window.Pivot?.legacy?.createScheduleFromAgentRun)?.(run.id, run));
@@ -817,7 +869,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
                 approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>已批准、尚未执行</h4><p>任务仍在队列中。撤销后将停止领取并要求重新审批。</p><div class="agent-run-approval-actions">${activeApprovalGrants.map(item => `<button type="button" class="btn-danger-outline btn-xs" data-agent-revoke-approval="${agentEscapeAttr(item.key)}">撤销 ${agentEscape(item.tool || '工具')} 授权</button>`).join('')}</div></div>`;
             }
             if (run.error_message) {
-                approvalsHtml += `<div class="error-detail agent-run-error-card"><strong>执行异常原因：</strong><div class="agent-run-error-message">${agentEscape(run.error_message)}</div><div class="agent-run-error-actions"><button type="button" class="btn-secondary btn-xs" data-agent-rerun>重试整项任务</button>${checkpoints?.total ? `<button type="button" class="btn-secondary btn-xs" data-agent-resume>从检查点恢复</button>` : ''}</div></div>`;
+                approvalsHtml += `<div class="error-detail agent-run-error-card"><strong>执行异常原因：</strong><div class="agent-run-error-message">${agentEscape(run.error_message)}</div><div class="agent-run-error-actions">${canRerun ? `<button type="button" class="btn-primary btn-xs" data-agent-rerun="${agentEscapeAttr(run.id)}">重试整项任务</button>` : ''}${Number(checkpoints?.total || 0) ? `<button type="button" class="btn-secondary btn-xs" data-agent-resume="${agentEscapeAttr(run.id)}">从检查点恢复</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscapeAttr(run.id)}">修改任务目标</button></div></div>`;
             }
             if (!run.error_message && run.status !== 'approval_required') {
                 approvalsHtml += `<div class="empty-state agent-empty-state"><p>当前任务无待处理的人工审批或执行异常。</p></div>`;

@@ -215,24 +215,26 @@ window.Pivot.legacy.cancelAgentWorkflowPreviewRun = function(runId) {
 };
 
 window.Pivot.legacy.rerunAgentRun = async function(runId) {
+    if (!runId) return;
     await runAgentActionOnce(`rerun:${runId}`, runId, '[data-agent-rerun]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '重新运行失败');
         showToast('已创建新的自主任务', 'success');
-        await loadAgentRuns(1);
-        await window.Pivot.legacy.openAgentRun(data.run.id);
+        if (typeof loadAgentRuns === 'function') await loadAgentRuns(1);
+        if (data.run?.id) await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '重新运行失败');
 };
 
 window.Pivot.legacy.resumeAgentRun = async function(runId) {
+    if (!runId) return;
     await runAgentActionOnce(`resume:${runId}`, runId, '[data-agent-resume]', async () => {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '断点续跑失败');
         showToast('已从上次执行位置创建续跑任务', 'success');
-        await loadAgentRuns(1);
-        await window.Pivot.legacy.openAgentRun(data.run.id);
+        if (typeof loadAgentRuns === 'function') await loadAgentRuns(1);
+        if (data.run?.id) await window.Pivot.legacy.openAgentRun(data.run.id);
     }, '断点续跑失败');
 };
 
@@ -491,18 +493,83 @@ window.Pivot.legacy.showAgentRunAudit = async function() {
 };
 
 // --- 任务编辑与删除审计弹窗 (拆自 agent-run-detail.js) ---
-function openAgentTaskEditModal(runId) {
-    const run = (typeof agentRunsCache !== 'undefined' && Array.isArray(agentRunsCache) ? agentRunsCache.find(r => r.id === runId) : null) || (currentRunDetailRecord?.id === runId ? currentRunDetailRecord : null);
-    if (!run) return;
-    const modal = document.getElementById('agent-task-edit-modal');
-    if (!modal) return;
-    const displayTitle = run.title && !agentLooksLikeCorruptTitle(run.title) ? run.title : '';
-    document.getElementById('agent-task-edit-run-id').value = run.id;
-    document.getElementById('agent-task-edit-title-input').value = displayTitle;
-    document.getElementById('agent-task-edit-goal-input').value = run.goal || '';
+function ensureAgentTaskEditModal() {
+    let modal = document.getElementById('agent-task-edit-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'agent-task-edit-modal';
+        modal.className = 'modal-overlay hidden';
+        modal.style.zIndex = '2100';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-hidden', 'true');
+        modal.setAttribute('aria-labelledby', 'agent-task-edit-modal-title');
+        PivotSafeHtml.setHtml(modal, `
+            <div class="modal agent-task-editor-modal" role="document">
+                <div class="agent-config-modal-head">
+                    <div>
+                        <h3 id="agent-task-edit-modal-title">修改任务</h3>
+                        <span>修改智能体任务标题与任务目标</span>
+                    </div>
+                    <button type="button" id="agent-task-edit-close-btn" class="btn-secondary btn-xs" aria-label="关闭" style="margin-left: auto;">关闭</button>
+                </div>
+                <div class="agent-task-editor-body">
+                    <input type="hidden" id="agent-task-edit-run-id">
+                    <label class="modal-form-field">
+                        <span>任务标题</span>
+                        <input type="text" id="agent-task-edit-title-input" class="form-input agent-title-input" placeholder="输入简短任务标题">
+                    </label>
+                    <label class="modal-form-field agent-task-goal-field">
+                        <span>任务目标</span>
+                        <textarea id="agent-task-edit-goal-input" class="form-input agent-goal-input" rows="4"
+                            placeholder="输入完整的任务描述与目标"></textarea>
+                    </label>
+                    <div class="agent-task-editor-foot">
+                        <button id="agent-task-edit-cancel-btn" class="btn-secondary" type="button">取消</button>
+                        <button id="agent-task-edit-save-btn" class="btn-primary" type="button">保存修改</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        document.body.appendChild(modal);
+    } else {
+        modal.style.zIndex = '2100';
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+    }
+    return modal;
+}
+
+async function openAgentTaskEditModal(runId) {
+    if (!runId) return;
+    let run = (typeof agentRunsCache !== 'undefined' && Array.isArray(agentRunsCache) ? agentRunsCache.find(r => r.id === runId) : null)
+        || (typeof currentRunDetailRecord !== 'undefined' && currentRunDetailRecord?.id === runId ? currentRunDetailRecord : null);
+    if (!run) {
+        try {
+            const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`);
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data?.run) {
+                run = data.run;
+            }
+        } catch (_) {}
+    }
+    if (!run) {
+        if (typeof showToast === 'function') showToast('无法加载任务详情，请稍后重试', 'error');
+        return;
+    }
+    const modal = ensureAgentTaskEditModal();
+    const isCorrupt = typeof agentLooksLikeCorruptTitle === 'function' ? agentLooksLikeCorruptTitle(run.title) : false;
+    const displayTitle = run.title && !isCorrupt ? run.title : '';
+    const idInput = modal.querySelector('#agent-task-edit-run-id') || document.getElementById('agent-task-edit-run-id');
+    const titleInput = modal.querySelector('#agent-task-edit-title-input') || document.getElementById('agent-task-edit-title-input');
+    const goalInput = modal.querySelector('#agent-task-edit-goal-input') || document.getElementById('agent-task-edit-goal-input');
+    if (idInput) idInput.value = run.id;
+    if (titleInput) titleInput.value = displayTitle;
+    if (goalInput) goalInput.value = run.goal || '';
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
-    setTimeout(() => document.getElementById('agent-task-edit-goal-input')?.focus(), 0);
+    setTimeout(() => goalInput?.focus(), 0);
 }
 
 function closeAgentTaskEditModal() {
@@ -513,11 +580,12 @@ function closeAgentTaskEditModal() {
 }
 
 async function saveAgentTaskEdit() {
-    const runId = document.getElementById('agent-task-edit-run-id')?.value;
-    const titleInput = document.getElementById('agent-task-edit-title-input')?.value || '';
-    const goalInput = document.getElementById('agent-task-edit-goal-input')?.value || '';
+    const modal = document.getElementById('agent-task-edit-modal');
+    const runId = modal?.querySelector('#agent-task-edit-run-id')?.value || document.getElementById('agent-task-edit-run-id')?.value;
+    const titleInput = (modal?.querySelector('#agent-task-edit-title-input')?.value || document.getElementById('agent-task-edit-title-input')?.value || '').trim();
+    const goalInput = (modal?.querySelector('#agent-task-edit-goal-input')?.value || document.getElementById('agent-task-edit-goal-input')?.value || '').trim();
     if (!runId) return;
-    if (!goalInput.trim()) {
+    if (!goalInput) {
         if (typeof showToast === 'function') showToast('任务目标不能为空', 'error');
         return;
     }
@@ -525,7 +593,7 @@ async function saveAgentTaskEdit() {
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: titleInput.trim(), goal: goalInput.trim() })
+            body: JSON.stringify({ title: titleInput, goal: goalInput })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -534,14 +602,23 @@ async function saveAgentTaskEdit() {
         }
         if (typeof showToast === 'function') showToast('任务目标与标题已成功修改', 'success');
         closeAgentTaskEditModal();
-        if (typeof loadAgentRuns === 'function') loadAgentRuns(agentRunsPage);
-        if (activeAgentRunId === runId && isAgentRunDetailModalOpen()) {
+        if (typeof loadAgentRuns === 'function') loadAgentRuns(typeof agentRunsPage !== 'undefined' ? agentRunsPage : 1);
+        if (typeof activeAgentRunId !== 'undefined' && activeAgentRunId === runId && typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen()) {
             window.Pivot.legacy.openAgentRun(runId, { silent: true });
         }
     } catch (e) {
         if (typeof showToast === 'function') showToast(`修改失败: ${e.message}`, 'error');
     }
 }
+
+window.Pivot = window.Pivot || {};
+window.Pivot.legacy = window.Pivot.legacy || {};
+window.Pivot.legacy.openAgentTaskEditModal = openAgentTaskEditModal;
+window.Pivot.legacy.closeAgentTaskEditModal = closeAgentTaskEditModal;
+window.Pivot.legacy.saveAgentTaskEdit = saveAgentTaskEdit;
+window.openAgentTaskEditModal = openAgentTaskEditModal;
+window.closeAgentTaskEditModal = closeAgentTaskEditModal;
+window.saveAgentTaskEdit = saveAgentTaskEdit;
 
 function ensureAgentAuditModal() {
     let modal = document.getElementById('agent-audit-modal');
