@@ -30,40 +30,156 @@ function buildAuditInvocation(args, platform = process.platform, env = process.e
     return { command: 'npm', args };
 }
 
-function runAudit({ omitDev = false } = {}) {
+function parseJsonSafely(text) {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    try {
+        return JSON.parse(trimmed);
+    } catch (_) {
+        const firstBrace = trimmed.indexOf('{');
+        const lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try {
+                return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
+            } catch (_) {}
+        }
+        return null;
+    }
+}
+
+function extractAuditErrorMessage(auditResult, rawOutput = '', stderr = '') {
+    if (typeof auditResult?.error === 'string' && auditResult.error.trim()) {
+        return auditResult.error.trim();
+    }
+    if (auditResult?.message && typeof auditResult.message === 'string' && auditResult.message.trim()) {
+        return auditResult.message.trim();
+    }
+    if (auditResult?.error && typeof auditResult.error === 'object') {
+        const err = auditResult.error;
+        if (err.summary && typeof err.summary === 'string' && err.summary.trim()) return err.summary.trim();
+        if (err.detail && typeof err.detail === 'string' && err.detail.trim()) return err.detail.trim();
+        if (err.message && typeof err.message === 'string' && err.message.trim()) return err.message.trim();
+        if (err.code) return String(err.code);
+        try {
+            const str = JSON.stringify(err);
+            if (str && str !== '{}') return str;
+        } catch (_) {}
+    }
+    if (stderr && stderr.trim()) {
+        const lines = stderr.trim().split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('npm notice') && !l.includes('A complete log of this run'));
+        if (lines.length) return lines.join('; ');
+    }
+    if (rawOutput && rawOutput.trim()) {
+        const lines = rawOutput.trim().split(/\r?\n/)
+            .map(l => l.trim())
+            .filter(l => l && !l.startsWith('{') && !l.startsWith('}') && !l.startsWith('"') && !l.startsWith('npm notice'));
+        if (lines.length) return lines.join('; ');
+    }
+    return '未知错误';
+}
+
+function isTransientAuditError(message = '') {
+    const text = String(message || '').toLowerCase();
+    return (
+        text.includes('econnreset') ||
+        text.includes('etimedout') ||
+        text.includes('econnrefused') ||
+        text.includes('enotfound') ||
+        text.includes('socket hang up') ||
+        text.includes('timeout') ||
+        text.includes('超时') ||
+        text.includes('500') ||
+        text.includes('502') ||
+        text.includes('503') ||
+        text.includes('504') ||
+        text.includes('429') ||
+        text.includes('fetch failed') ||
+        text.includes('service unavailable') ||
+        text.includes('gateway timeout') ||
+        text.includes('bad gateway') ||
+        text.includes('audit endpoint returned an error')
+    );
+}
+
+function sleepSync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isOfflineBypassAllowed() {
+    return process.env.PIVOT_AUDIT_ALLOW_OFFLINE === 'true' ||
+        process.env.PIVOT_OFFLINE === 'true' ||
+        process.argv.includes('--offline');
+}
+
+function runAudit({ omitDev = false, maxRetries = 3 } = {}) {
     const args = ['audit'];
     if (omitDev) args.push('--omit=dev');
     args.push('--audit-level=high', '--json');
     // 新版 Node 在 Windows 上直接 spawn npm.cmd 可能返回 EINVAL；通过 cmd.exe 调用静态命令参数。
     const invocation = buildAuditInvocation(args);
-    const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8' });
 
-    if (result.error) {
-        throw new Error(`无法启动 npm audit：${result.error.message}`);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const result = spawnSync(invocation.command, invocation.args, { encoding: 'utf8' });
+
+        if (result.error) {
+            lastError = new Error(`无法启动 npm audit：${result.error.message}`);
+            if (attempt < maxRetries) {
+                console.warn(`[audit:policy] 无法启动 npm audit（第 ${attempt} 次重试）：${result.error.message}`);
+                sleepSync(1500 * attempt);
+                continue;
+            }
+            throw lastError;
+        }
+
+        const output = result.stdout || result.stderr || '';
+        if (!output.trim()) {
+            lastError = new Error(`npm audit 未返回审计结果（退出码 ${result.status ?? '未知'}）`);
+            if (attempt < maxRetries) {
+                console.warn(`[audit:policy] npm audit 未返回数据，准备重试（第 ${attempt} 次）...`);
+                sleepSync(1500 * attempt);
+                continue;
+            }
+            throw lastError;
+        }
+
+        const auditResult = parseJsonSafely(output);
+        if (!auditResult) {
+            console.error(output);
+            lastError = new Error('无法解析 npm audit 的 JSON 输出');
+            if (attempt < maxRetries) {
+                console.warn(`[audit:policy] npm audit 输出 JSON 解析异常，准备重试（第 ${attempt} 次）...`);
+                sleepSync(1500 * attempt);
+                continue;
+            }
+            throw lastError;
+        }
+
+        const hasError = Boolean(auditResult?.error || (result.status !== 0 && !auditResult?.vulnerabilities));
+        if (hasError) {
+            const detail = extractAuditErrorMessage(auditResult, output, result.stderr);
+            lastError = new Error(`npm audit 执行失败：${detail}`);
+            if (isTransientAuditError(detail)) {
+                if (attempt < maxRetries) {
+                    console.warn(`[audit:policy] 依赖审计服务遇到瞬态异常（第 ${attempt} 次）：${detail}，将在 ${attempt * 1.5}s 后重试...`);
+                    sleepSync(1500 * attempt);
+                    continue;
+                }
+                if (isOfflineBypassAllowed()) {
+                    console.warn(`[audit:policy] 检测到离线环境配置，已允许跳过在线依赖审计：${detail}`);
+                    return { vulnerabilities: {} };
+                }
+            }
+            throw lastError;
+        }
+
+        return auditResult;
     }
 
-    const output = result.stdout || result.stderr || '';
-    if (!output.trim()) {
-        throw new Error(`npm audit 未返回审计结果（退出码 ${result.status ?? '未知'}）`);
-    }
-
-    let auditResult;
-    try {
-        auditResult = JSON.parse(output);
-    } catch (error) {
-        console.error(output);
-        throw new Error(`无法解析 npm audit 的 JSON 输出：${error.message}`);
-    }
-
-    if (auditResult?.error) {
-        const detail = auditResult.error.summary || auditResult.error.detail || auditResult.error.code || '未知错误';
-        throw new Error(`npm audit 执行失败：${detail}`);
-    }
-    if (result.status !== 0 && !auditResult?.vulnerabilities) {
-        throw new Error(`npm audit 异常退出（退出码 ${result.status}）`);
-    }
-
-    return auditResult;
+    throw lastError || new Error('npm audit 执行超时或未知失败');
 }
 
 function getAliasPackageVersions(lock = {}, aliases = UPSTREAM_ALIASES) {
@@ -77,7 +193,7 @@ function getAliasPackageVersions(lock = {}, aliases = UPSTREAM_ALIASES) {
     return result;
 }
 
-function requestJson(url, payload, timeoutMs = 10000) {
+function requestJsonOnce(url, payload, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
         const request = https.request(url, {
@@ -94,7 +210,9 @@ function requestJson(url, payload, timeoutMs = 10000) {
             response.on('data', chunk => { text += chunk; });
             response.on('end', () => {
                 if (response.statusCode < 200 || response.statusCode >= 300) {
-                    reject(new Error(`上游 advisory 查询返回 HTTP ${response.statusCode}`));
+                    const error = new Error(`上游 advisory 查询返回 HTTP ${response.statusCode}`);
+                    error.statusCode = response.statusCode;
+                    reject(error);
                     return;
                 }
                 try { resolve(JSON.parse(text || '{}')); } catch (error) { reject(error); }
@@ -104,6 +222,26 @@ function requestJson(url, payload, timeoutMs = 10000) {
         request.once('error', reject);
         request.end(body);
     });
+}
+
+async function requestJson(url, payload, timeoutMs = 10000, maxRetries = 3) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await requestJsonOnce(url, payload, timeoutMs);
+        } catch (error) {
+            lastError = error;
+            const isTransient = (error.statusCode && error.statusCode >= 500) ||
+                isTransientAuditError(error.message);
+            if (isTransient && attempt < maxRetries) {
+                console.warn(`[audit:policy] 上游 advisory 查询遇到瞬态异常（第 ${attempt} 次重试）：${error.message}`);
+                await new Promise(r => setTimeout(r, 1500 * attempt));
+                continue;
+            }
+            throw error;
+        }
+    }
+    throw lastError;
 }
 
 function buildAliasAuditResult(advisories = {}, aliases = UPSTREAM_ALIASES) {
@@ -133,7 +271,16 @@ async function runUpstreamAliasAudit({ root = path.resolve(__dirname, '..'), ali
     const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const versions = getAliasPackageVersions(lock, aliases);
     const payload = Object.fromEntries([...versions].map(([name, version]) => [name, [version]]));
-    const advisories = await request('https://registry.npmjs.org/-/npm/v1/security/advisories/bulk', payload);
+    let advisories = {};
+    try {
+        advisories = await request('https://registry.npmjs.org/-/npm/v1/security/advisories/bulk', payload);
+    } catch (error) {
+        if (isOfflineBypassAllowed() && isTransientAuditError(error.message)) {
+            console.warn(`[audit:policy] 检测到离线环境配置，已跳过上游别名 advisory 在线查询：${error.message}`);
+            return { vulnerabilities: {} };
+        }
+        throw error;
+    }
     return buildAliasAuditResult(advisories, aliases);
 }
 
@@ -269,7 +416,12 @@ module.exports = {
     buildAliasAuditResult,
     classifyAuditFindings,
     evaluateException,
+    extractAuditErrorMessage,
     getAliasPackageVersions,
+    isOfflineBypassAllowed,
+    isTransientAuditError,
+    parseJsonSafely,
+    runAudit,
     runUpstreamAliasAudit,
     selectAuditPackages
 };

@@ -4,7 +4,17 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildAliasAuditResult, buildAuditInvocation, classifyAuditFindings, getAliasPackageVersions, selectAuditPackages } = require('../scripts/check_audit_policy');
+const {
+    buildAliasAuditResult,
+    buildAuditInvocation,
+    classifyAuditFindings,
+    extractAuditErrorMessage,
+    getAliasPackageVersions,
+    isOfflineBypassAllowed,
+    isTransientAuditError,
+    parseJsonSafely,
+    selectAuditPackages
+} = require('../scripts/check_audit_policy');
 
 // 构造一份最小可用的 npm audit JSON 结果。
 function buildAuditResult({ name = 'demo-pkg', severity = 'high', fixAvailable = false, title = '示例高危漏洞', url = 'https://example.test/GHSA-demo' } = {}) {
@@ -154,3 +164,54 @@ test('forwarded packages query the upstream advisory identity instead of silentl
     });
     assert.match(classifyAuditFindings(result).failures[0], /Sheet parser issue/);
 });
+
+test('extractAuditErrorMessage extracts message when error object has empty summary and detail', () => {
+    const auditResult = {
+        message: 'request to https://registry.npmjs.org/-/npm/v1/security/advisories/bulk failed, reason: 503 Service Unavailable',
+        error: { summary: '', detail: '' }
+    };
+    const msg = extractAuditErrorMessage(auditResult);
+    assert.match(msg, /503 Service Unavailable/);
+});
+
+test('extractAuditErrorMessage extracts various error field types and fallbacks', () => {
+    assert.equal(extractAuditErrorMessage({ error: { summary: '明确的摘要错误' } }), '明确的摘要错误');
+    assert.equal(extractAuditErrorMessage({ error: { detail: '明确的详情错误' } }), '明确的详情错误');
+    assert.equal(extractAuditErrorMessage({ error: '字符串形式错误' }), '字符串形式错误');
+    assert.equal(extractAuditErrorMessage({ error: { code: 'ENOTFOUND' } }), 'ENOTFOUND');
+    assert.equal(extractAuditErrorMessage(null, '', 'npm error connection reset'), 'npm error connection reset');
+    assert.equal(extractAuditErrorMessage(null, '原始命令行输出错误', ''), '原始命令行输出错误');
+    assert.equal(extractAuditErrorMessage(null, '', ''), '未知错误');
+});
+
+test('parseJsonSafely parses JSON even when prefixed with npm warning notices', () => {
+    const raw = 'npm warn audit bulk advisory failed\n{\n  "vulnerabilities": {}\n}';
+    const parsed = parseJsonSafely(raw);
+    assert.ok(parsed && typeof parsed.vulnerabilities === 'object');
+    assert.equal(parseJsonSafely('not json at all'), null);
+});
+
+test('isTransientAuditError identifies network and registry 5xx outages', () => {
+    assert.equal(isTransientAuditError('503 Service Unavailable'), true);
+    assert.equal(isTransientAuditError('connect ECONNRESET 127.0.0.1:443'), true);
+    assert.equal(isTransientAuditError('socket hang up'), true);
+    assert.equal(isTransientAuditError('上游 advisory 查询超时'), true);
+    assert.equal(isTransientAuditError('未豁免的高危漏洞'), false);
+});
+
+test('isOfflineBypassAllowed reflects environment variable configuration', () => {
+    const originalOffline = process.env.PIVOT_AUDIT_ALLOW_OFFLINE;
+    try {
+        delete process.env.PIVOT_AUDIT_ALLOW_OFFLINE;
+        assert.equal(isOfflineBypassAllowed(), false);
+        process.env.PIVOT_AUDIT_ALLOW_OFFLINE = 'true';
+        assert.equal(isOfflineBypassAllowed(), true);
+    } finally {
+        if (originalOffline !== undefined) {
+            process.env.PIVOT_AUDIT_ALLOW_OFFLINE = originalOffline;
+        } else {
+            delete process.env.PIVOT_AUDIT_ALLOW_OFFLINE;
+        }
+    }
+});
+
