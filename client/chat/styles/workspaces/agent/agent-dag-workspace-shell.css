@@ -1442,7 +1442,7 @@
     border: 1px solid var(--border, rgba(226, 232, 240, 0.9));
     border-radius: var(--radius-md, 10px);
     background: var(--surface, #ffffff);
-    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+    box-shadow: var(--shadow-popover, 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.04));
     animation: workflowMenuPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1457,7 +1457,8 @@
     }
 }
 
-.agent-workflow-management-item {
+.agent-workflow-management-item,
+.btn-secondary.agent-workflow-management-item {
     display: flex;
     align-items: center;
     width: 100%;
@@ -1480,14 +1481,16 @@
     transition: background 0.15s ease, color 0.15s ease;
 }
 
-.agent-workflow-management-item span {
+.agent-workflow-management-item span,
+.btn-secondary.agent-workflow-management-item span {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.2;
 }
 
-.agent-workflow-management-item svg {
+.agent-workflow-management-item svg,
+.btn-secondary.agent-workflow-management-item svg {
     width: 15px;
     height: 15px;
     color: var(--text-muted, #64748b);
@@ -1496,13 +1499,16 @@
 }
 
 .agent-workflow-management-item:hover:not(:disabled),
-.agent-workflow-management-item:focus-visible {
+.agent-workflow-management-item:focus-visible,
+.btn-secondary.agent-workflow-management-item:hover:not(:disabled),
+.btn-secondary.agent-workflow-management-item:focus-visible {
     background: color-mix(in srgb, var(--primary, #10b981) 9%, var(--surface, #ffffff));
     color: var(--primary, #10b981);
     outline: none;
 }
 
-.agent-workflow-management-item:hover:not(:disabled) svg {
+.agent-workflow-management-item:hover:not(:disabled) svg,
+.btn-secondary.agent-workflow-management-item:hover:not(:disabled) svg {
     color: var(--primary, #10b981);
 }
 
@@ -1683,37 +1689,49 @@ body.dark-mode .agent-workflow-lifecycle-summary,
 .dark-mode .agent-workflow-lifecycle-summary,
 body.dark-mode .agent-workflow-management-popover,
 .dark-mode .agent-workflow-management-popover {
-    border-color: rgba(148, 163, 184, 0.24);
-    background: #0f172a;
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.24));
+    background: var(--surface-popover-dark, #0f172a);
 }
 
 body.dark-mode .agent-workflow-management-item,
-.dark-mode .agent-workflow-management-item {
+.dark-mode .agent-workflow-management-item,
+body.dark-mode .btn-secondary.agent-workflow-management-item,
+.dark-mode .btn-secondary.agent-workflow-management-item {
     color: var(--text-main, #f1f5f9);
 }
 
 body.dark-mode .agent-workflow-management-item svg,
-.dark-mode .agent-workflow-management-item svg {
-    color: #94a3b8;
+.dark-mode .agent-workflow-management-item svg,
+body.dark-mode .btn-secondary.agent-workflow-management-item svg,
+.dark-mode .btn-secondary.agent-workflow-management-item svg {
+    color: var(--text-muted, #94a3b8);
 }
 
 body.dark-mode .agent-workflow-management-item:hover:not(:disabled),
 body.dark-mode .agent-workflow-management-item:focus-visible,
 .dark-mode .agent-workflow-management-item:hover:not(:disabled),
-.dark-mode .agent-workflow-management-item:focus-visible {
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
+.dark-mode .agent-workflow-management-item:focus-visible,
+body.dark-mode .btn-secondary.agent-workflow-management-item:hover:not(:disabled),
+body.dark-mode .btn-secondary.agent-workflow-management-item:focus-visible,
+.dark-mode .btn-secondary.agent-workflow-management-item:hover:not(:disabled),
+.dark-mode .btn-secondary.agent-workflow-management-item:focus-visible {
+    background: var(--surface-hover-dark, rgba(255, 255, 255, 0.08));
+    color: var(--text-light, #ffffff);
 }
 
 body.dark-mode .agent-workflow-management-item:hover:not(:disabled) svg,
-.dark-mode .agent-workflow-management-item:hover:not(:disabled) svg {
+.dark-mode .agent-workflow-management-item:hover:not(:disabled) svg,
+body.dark-mode .btn-secondary.agent-workflow-management-item:hover:not(:disabled) svg,
+.dark-mode .btn-secondary.agent-workflow-management-item:hover:not(:disabled) svg {
     color: var(--primary, #34d399);
 }
 
 body.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled),
-.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled) {
+.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled),
+body.dark-mode .btn-secondary.agent-workflow-management-item.is-danger:hover:not(:disabled),
+.dark-mode .btn-secondary.agent-workflow-management-item.is-danger:hover:not(:disabled) {
     background: color-mix(in srgb, var(--danger, #ef4444) 18%, transparent);
-    color: #fca5a5;
+    color: var(--danger-light, #fca5a5);
 }
 
 body.dark-mode .agent-workflow-management-divider,
