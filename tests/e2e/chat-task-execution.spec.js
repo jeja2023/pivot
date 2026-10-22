@@ -1,4 +1,4 @@
-/* global window, document, currentAbortController, getComputedStyle -- Playwright 浏览器端执行上下文 */
+/* global window, document, Event, currentAbortController, getComputedStyle -- Playwright 浏览器端执行上下文 */
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');

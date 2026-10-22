@@ -473,6 +473,7 @@ async function getEntityGraph({ userId, user = null, entityId, depth = 1, limit 
     const relationMap = new Map();
     let frontier = [Number(entity.id)];
     for (let hop = 0; hop < safeDepth && frontier.length && relationMap.size < safeLimit; hop += 1) {
+        const placeholders = frontier.map(() => '?').join(',');
         const baseWhere = [
             relationAccess.sql,
             `r.status IN (${statusList.map(() => '?').join(',')})`,

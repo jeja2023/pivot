@@ -1433,16 +1433,16 @@
     right: 0;
     z-index: 45;
     display: flex;
-    min-width: 176px;
+    min-width: 184px;
     width: max-content;
-    max-width: 230px;
+    max-width: 240px;
     flex-direction: column;
     gap: 2px;
     padding: 6px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md, 8px);
-    background: var(--surface);
-    box-shadow: var(--shadow-md, 0 10px 25px -5px rgba(0, 0, 0, 0.12));
+    border: 1px solid var(--border, rgba(226, 232, 240, 0.9));
+    border-radius: var(--radius-md, 10px);
+    background: var(--surface, #ffffff);
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
     animation: workflowMenuPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1461,29 +1461,30 @@
     display: flex;
     align-items: center;
     width: 100%;
-    min-height: 32px;
-    height: 32px;
-    gap: 9px;
-    padding: 0 10px;
-    border: 0;
+    min-height: 36px;
+    height: 36px;
+    gap: 10px;
+    padding: 0 12px;
+    border: none !important;
     border-radius: var(--radius-sm, 6px);
     background: transparent;
-    color: var(--text-main);
+    color: var(--text-main, #334155);
     cursor: pointer;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-weight: 500;
     text-align: left;
     white-space: nowrap;
     user-select: none;
     box-sizing: border-box;
-    transition: background 0.12s ease, color 0.12s ease;
+    box-shadow: none !important;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 
 .agent-workflow-management-item span {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1;
+    line-height: 1.2;
 }
 
 .agent-workflow-management-item svg {
@@ -1491,18 +1492,18 @@
     height: 15px;
     color: var(--text-muted, #64748b);
     flex-shrink: 0;
-    transition: color 0.12s ease;
+    transition: color 0.15s ease;
 }
 
 .agent-workflow-management-item:hover:not(:disabled),
 .agent-workflow-management-item:focus-visible {
-    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
-    color: var(--text-main);
+    background: color-mix(in srgb, var(--primary, #10b981) 9%, var(--surface, #ffffff));
+    color: var(--primary, #10b981);
     outline: none;
 }
 
 .agent-workflow-management-item:hover:not(:disabled) svg {
-    color: var(--primary);
+    color: var(--primary, #10b981);
 }
 
 .agent-workflow-management-item:disabled {
@@ -1519,7 +1520,7 @@
 }
 
 .agent-workflow-management-item.is-danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--danger, #ef4444) 10%, var(--surface));
+    background: color-mix(in srgb, var(--danger, #ef4444) 10%, var(--surface, #ffffff));
     color: var(--danger, #ef4444);
 }
 
@@ -1686,16 +1687,33 @@ body.dark-mode .agent-workflow-management-popover,
     background: #0f172a;
 }
 
+body.dark-mode .agent-workflow-management-item,
+.dark-mode .agent-workflow-management-item {
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .agent-workflow-management-item svg,
+.dark-mode .agent-workflow-management-item svg {
+    color: #94a3b8;
+}
+
 body.dark-mode .agent-workflow-management-item:hover:not(:disabled),
 body.dark-mode .agent-workflow-management-item:focus-visible,
 .dark-mode .agent-workflow-management-item:hover:not(:disabled),
 .dark-mode .agent-workflow-management-item:focus-visible {
-    background: var(--surface-hover, rgba(30, 41, 59, 0.92));
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+body.dark-mode .agent-workflow-management-item:hover:not(:disabled) svg,
+.dark-mode .agent-workflow-management-item:hover:not(:disabled) svg {
+    color: var(--primary, #34d399);
 }
 
 body.dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled),
 .dark-mode .agent-workflow-management-item.is-danger:hover:not(:disabled) {
     background: color-mix(in srgb, var(--danger, #ef4444) 18%, transparent);
+    color: #fca5a5;
 }
 
 body.dark-mode .agent-workflow-management-divider,

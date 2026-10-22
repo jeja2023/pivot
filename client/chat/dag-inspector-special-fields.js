@@ -86,7 +86,7 @@ function dagInspectorTagToExpr(str, nodes = []) {
             else if (fieldPart === '业务记录') field = 'rows';
             else if (fieldPart === '数量') field = 'count';
             else if (sourceNode?.outputSchema?.properties) {
-                const found = Object.entries(sourceNode.outputSchema.properties).find(([k, v]) => v?.title === fieldPart);
+                const found = Object.entries(sourceNode.outputSchema.properties).find(([, v]) => v?.title === fieldPart);
                 if (found) field = found[0];
             }
             return `{{nodes.${nodeId}.output.${field}}}`;

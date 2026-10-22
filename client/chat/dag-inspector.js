@@ -1,4 +1,4 @@
-/* global renderDagInspectorChannelBindingField -- DAG 检查器与 JSON 输入编辑器 */
+/* global renderDagInspectorChannelBindingField, DAG_INSPECTOR_QUICK_FIELD_GROUPS, DAG_INSPECTOR_QUICK_FIELD_LABELS, dagInspectorExprToTag, dagInspectorTagToExpr, bindDagInspectorVariablePickerTriggers -- DAG 检查器与 JSON 输入编辑器 */
 function createDagInspectorController(ctx) {
     const inspector = ctx.inspector;
     const onNodeSelectionChange = ctx.onNodeSelectionChange;
