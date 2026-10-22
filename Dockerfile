@@ -1,8 +1,8 @@
 # 基础镜像默认使用 Docker Hub 官方镜像；国内网络构建可通过 --build-arg 覆盖镜像源：
-#   --build-arg NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22-bookworm-slim
-#   --build-arg PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim-bookworm
-ARG NODE_IMAGE=node:22-bookworm-slim
-ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+#   --build-arg NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:22-bookworm
+#   --build-arg PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-bookworm
+ARG NODE_IMAGE=node:22-bookworm
+ARG PYTHON_IMAGE=python:3.12-bookworm
 ARG VERAPDF_VERSION=1.30.3
 ARG VERAPDF_RELEASE_SERIES=1.30
 # 官方 Greenfield CLI-only 安装包的 SHA-256；更新版本必须同时更新 URL、摘要和回归契约。

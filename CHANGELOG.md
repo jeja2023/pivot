@@ -21,6 +21,10 @@
   - 在 `server/services/agent-verification.js` 中修复 `evidence` 规则实际核验值的硬编码问题，提供清晰的来源检索与佐证判断；
   - 在 `client/chat/agent-run-status-views.js` 中建立完善的规则名称与未通过原因中文本地化字典（如将 `artifact_required` 显示为 `成果交付文件`，`deliverables_verified` 显示为 `交付内容核验`，`evidence` 显示为 `资料来源与佐证`，`artifact_not_materialized` 转换为 `尚未生成要求的文件` 等），大幅提升非技术人员使用体验。
 
+- **Docker 基础镜像选型切回完整版（node:22-bookworm 与 python:3.12-bookworm）**：
+  - 响应生产与离线交付中关于完整开发依赖环境的需求，将主服务及独立语音服务 Dockerfile 中的基础镜像由 `slim` 调整回官方完整版 `node:22-bookworm` 与 `python:3.12-bookworm`；
+  - 完整内置系统构建与编译工具链，杜绝第三方原生模块或复杂 Python 动态依赖在精简环境下偶发缺少系统运行库的风险。
+
 详见 [发布记录](docs/releases/v0.7.30-大模型工具发现容错与任务验收体验优化.md)。
 
 ## [v0.7.29] - 2026-10-22

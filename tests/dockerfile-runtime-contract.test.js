@@ -31,11 +31,12 @@ test('项目 Python 基线在主镜像、语音镜像和离线依赖准备中一
     const baseline = fs.readFileSync(path.join(__dirname, '..', '.python-version'), 'utf8').trim();
     const speechDockerfile = fs.readFileSync(path.join(__dirname, '../docker/speech-service/Dockerfile'), 'utf8');
     const prepare = fs.readFileSync(path.join(__dirname, '../docker/speech-service/prepare_assets.py'), 'utf8');
-    assert.equal(baseline, '3.12');
+    const nodeImage = dockerfile.match(/^ARG NODE_IMAGE=(.+)$/m)?.[1];
     const mainImage = dockerfile.match(/^ARG PYTHON_IMAGE=(.+)$/m)?.[1];
     const speechImage = speechDockerfile.match(/^ARG SPEECH_PYTHON_IMAGE=(.+)$/m)?.[1];
-    assert.ok(mainImage?.endsWith(`python:${baseline}-slim-bookworm`));
-    assert.ok(speechImage?.endsWith(`python:${baseline}-slim-bookworm`));
+    assert.ok(nodeImage?.endsWith('node:22-bookworm'));
+    assert.ok(mainImage?.endsWith(`python:${baseline}-bookworm`));
+    assert.ok(speechImage?.endsWith(`python:${baseline}-bookworm`));
     assert.match(dockerfile, /FROM python-base AS speech-recognition/);
     assert.match(dockerfile, /FROM python-base AS runtime/);
     assert.match(dockerfile, /PIVOT_AGENT_PYTHON=\/usr\/local\/bin\/python3\.12/);

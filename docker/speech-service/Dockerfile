@@ -1,7 +1,7 @@
 # 在联网准备机构建并验收，再将镜像整体导入内网。
 # 基础镜像默认使用 Docker Hub 官方镜像；国内网络构建可通过 --build-arg 覆盖镜像源：
-#   --build-arg SPEECH_PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim-bookworm
-ARG SPEECH_PYTHON_IMAGE=python:3.12-slim-bookworm
+#   --build-arg SPEECH_PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-bookworm
+ARG SPEECH_PYTHON_IMAGE=python:3.12-bookworm
 FROM ${SPEECH_PYTHON_IMAGE}
 WORKDIR /opt/speech
 RUN python -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
