@@ -118,17 +118,23 @@ if (consolePretty) {
 }
 
 // 始终将结构化 JSON 日志写入文件（同步写入避免进程快速退出或单例检测退出时 sonic-boom 尚未就绪导致异常）
-const fileLogDestination = pino.destination({
-    dest: logFilePath,
-    sync: true,
-    mkdir: true
-});
-streams.push({
-    level: 'info',
-    stream: fileLogDestination
-});
+let fileLogDestination = null;
+try {
+    fileLogDestination = pino.destination({
+        dest: logFilePath,
+        sync: true,
+        mkdir: true
+    });
+    streams.push({
+        level: 'info',
+        stream: fileLogDestination
+    });
+} catch (err) {
+    console.error(`[WARN] 无法写入日志文件 ${logFilePath} (${err.code || err.message})，请检查宿主机挂载目录权限（生产环境建议执行: sudo chown -R 1000:1000 logs）。已降级为仅控制台日志输出。`);
+}
 
 function rotateLogFileIfNeeded() {
+    if (!fileLogDestination) return;
     try {
         const stat = fs.statSync(logFilePath);
         if (stat.size < logFileMaxBytes) return;
