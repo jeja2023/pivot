@@ -244,3 +244,51 @@ test('both Agent execution paths keep full catalog execution behind the progress
     assert.match(streaming, /resolveProgressiveExecution/);
     assert.match(streaming, /toolDiscoveryState/);
 });
+
+test('candidate toolRef can be resolved by toolName when definitionDigest is omitted by model', () => {
+    const { createToolDiscoveryState, rememberSearch, assertSearched, assertDescribed, rememberDescription } = require('../server/services/agent-tool-progressive-discovery');
+    const state = createToolDiscoveryState();
+    const canonicalRef = { toolName: 'web_search', releaseId: 5, definitionDigest: 'sha256-full-digest-abc' };
+    rememberSearch(state, { candidates: [{ toolRef: canonicalRef }] });
+
+    // Model only passes toolName without digest or releaseId
+    const callerRef = { toolName: 'web_search' };
+    assert.doesNotThrow(() => assertSearched(state, callerRef));
+    // Verify canonical release and digest are auto-populated
+    assert.equal(callerRef.releaseId, 5);
+    assert.equal(callerRef.definitionDigest, 'sha256-full-digest-abc');
+
+    // Model calls describe and remembers description
+    rememberDescription(state, callerRef, { name: 'web_search', inputSchema: {} });
+    assert.doesNotThrow(() => assertDescribed(state, { toolName: 'web_search' }));
+});
+
+test('executeToolDiscoveryMeta gracefully auto-searches authorized catalog if tools.describe is called directly', async () => {
+    const { executeToolDiscoveryMeta } = require('../server/services/agent-tools-discovery');
+    const { createToolDiscoveryState } = require('../server/services/agent-tool-progressive-discovery');
+    const state = createToolDiscoveryState();
+    const context = { toolDiscoveryState: state, run: { toolPolicy: 'all' } };
+    const user = { id: 1, role: 'user' };
+
+    // Direct describe call with { toolName: 'rag.search' } without calling tools.search first
+    const result = await executeToolDiscoveryMeta('tools.describe', { toolName: 'rag.search' }, user, context);
+    assert.equal(result.handled, true);
+    assert.equal(result.value.name, 'rag.search');
+    assert.ok(result.value.toolRef.definitionDigest);
+
+    // After describe, assertDescribed passes for subsequent tools.execute
+    const { assertDescribed } = require('../server/services/agent-tool-progressive-discovery');
+    assert.doesNotThrow(() => assertDescribed(state, { toolName: 'rag.search' }));
+});
+
+test('streaming payload extractor safely handles empty choices array without delta crash', () => {
+    const { extractStreamPayload } = require('../server/streaming');
+    // Frame with choices: [] which triggered TypeError: Cannot read properties of undefined (reading 'delta')
+    const frameWithEmptyChoices = { id: 'chatcmpl-123', choices: [], usage: { total_tokens: 10 } };
+    assert.doesNotThrow(() => {
+        const payload = extractStreamPayload(frameWithEmptyChoices);
+        assert.equal(payload.delta, '');
+        assert.equal(payload.isThought, false);
+    });
+});
+

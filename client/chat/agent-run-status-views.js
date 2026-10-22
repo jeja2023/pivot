@@ -24,6 +24,42 @@ function agentRunFriendlySummary(run = {}, progress = {}) {
     return agentStatusLabel(status) || '任务状态已更新。';
 }
 
+const AGENT_VERIFICATION_RULE_NAMES = {
+    artifact_required: '成果交付文件',
+    deliverables_verified: '交付内容核验',
+    evidence: '资料来源与佐证',
+    final_answer_non_empty: '完整回答',
+    required_phrase: '必须包含内容',
+    forbidden_phrase: '禁止包含内容',
+    min_length: '回答长度要求',
+    valid_json: '数据格式规范 (JSON)',
+    output_schema: '输出结构规范',
+    required_artifact: '指定产物文件'
+};
+
+const AGENT_VERIFICATION_REASON_NAMES = {
+    artifact_not_materialized: '尚未生成要求的文件',
+    artifact_integrity_failed: '生成文件未通过完整性检查',
+    source_revoked: '原始资料已失效或不可用',
+    source_not_fully_read: '尚未读取完整资料',
+    verifier_unavailable: '验收服务暂时不可用',
+    evidence: '缺少引用来源或佐证记录',
+    invalid: '格式校验不通过',
+    failed: '未满足验收条件'
+};
+
+function formatAgentVerificationItem(rule) {
+    const rawKey = String(rule?.key || 'verification').trim();
+    const keyLabel = AGENT_VERIFICATION_RULE_NAMES[rawKey] || rawKey;
+    let actual = String(rule?.actual || '').trim();
+    if (!actual || actual === 'false' || actual === '未通过') {
+        actual = rawKey === 'artifact_required' ? '尚未生成要求的文件' : '未满足要求';
+    } else if (AGENT_VERIFICATION_REASON_NAMES[actual]) {
+        actual = AGENT_VERIFICATION_REASON_NAMES[actual];
+    }
+    return `<li><strong>${agentEscape(keyLabel)}</strong>：${agentEscape(actual)}</li>`;
+}
+
 function renderAgentVerification(verification = null) {
     if (!verification || typeof verification !== 'object') return '';
     const report = verification.report && typeof verification.report === 'object' ? verification.report : verification;
@@ -32,7 +68,7 @@ function renderAgentVerification(verification = null) {
     const label = ({ verified: '验收通过', partial: '部分完成', needs_input: '需要补充' })[status] || '验收结果';
     const hardFailures = Array.isArray(report.hardFailures) ? report.hardFailures : [];
     const failedRules = (Array.isArray(report.rules) ? report.rules : []).filter(rule => rule && rule.passed === false).slice(0, 8);
-    return `<section class="agent-verification ${agentEscape(status)}"><div class="agent-verification-head"><strong>${agentEscape(label)}</strong><span>${hardFailures.length ? `${hardFailures.length} 项硬性条件未通过` : '关键条件已核验'}</span></div>${failedRules.length ? `<ul>${failedRules.map(rule => `<li>${agentEscape(rule.key || 'verification')}：${agentEscape(rule.actual || '未通过')}</li>`).join('')}</ul>` : ''}</section>`;
+    return `<section class="agent-verification ${agentEscape(status)}"><div class="agent-verification-head"><strong>${agentEscape(label)}</strong><span>${hardFailures.length ? `${hardFailures.length} 项硬性条件未通过` : '关键条件已核验'}</span></div>${failedRules.length ? `<ul>${failedRules.map(formatAgentVerificationItem).join('')}</ul>` : ''}</section>`;
 }
 
 function renderAgentEvidence(evidence = []) {

@@ -12,7 +12,7 @@ function extractStreamPayload(json) {
         isThought = true;
     } else if (json.type === 'response.content_part.delta') {
         delta = json.delta?.text || '';
-    } else if (json.choices && json.choices[0].delta) {
+    } else if (Array.isArray(json.choices) && json.choices[0]?.delta) {
         const d = json.choices[0].delta;
         if (d.reasoning_content !== undefined && d.reasoning_content !== null) {
             delta = d.reasoning_content;
@@ -21,7 +21,7 @@ function extractStreamPayload(json) {
             delta = d.content;
             isThought = false;
         }
-    } else if (json.choices && json.choices[0].message) {
+    } else if (Array.isArray(json.choices) && json.choices[0]?.message) {
         const messageContent = json.choices[0].message.content;
         if (typeof messageContent === 'string') {
             delta = messageContent;

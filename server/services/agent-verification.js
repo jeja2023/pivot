@@ -100,10 +100,11 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
         add('output_schema', issues.length === 0, issues[0] || 'valid');
     }
     const artifactNames = findArtifactNames(observations);
-    if (acceptance.artifactRequired) add('artifact_required', artifactNames.length > 0, artifactNames.join('、'));
+    if (acceptance.artifactRequired) add('artifact_required', artifactNames.length > 0, artifactNames.length > 0 ? artifactNames.join('、') : '尚未生成要求的文件');
     if (acceptance.requireSemanticVerification) add('deliverables_verified', semanticVerification?.passed === true, semanticVerification?.reason || (semanticVerification?.missing || []).join('；'));
     acceptance.requiredArtifacts.forEach(required => add('required_artifact', artifactNames.includes(required), required));
-    if (acceptance.requireEvidence) add('evidence', hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0), 'evidence');
+    const evidenceFound = hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0);
+    if (acceptance.requireEvidence) add('evidence', evidenceFound, evidenceFound ? '已提供可核验来源' : '缺少引用来源与佐证');
     const hardFailures = rules.filter(rule => rule.hard && !rule.passed);
     const outcomeStatus = partial ? 'partial' : hardFailures.length ? 'needs_input' : 'verified';
     return {

@@ -52,3 +52,29 @@ test('浏览器恢复提示先核对旧执行器和写入结果', () => {
     const unflagged = context.renderAgentBrowserActionEvidence([], [{ id: 'browser', status: 'needs_user_recovery', mutationPendingRecovery: false }]);
     assert.match(unflagged, /data-agent-browser-close=/);
 });
+
+test('任务验收状态面板清晰展示本地化中文条件与失败原因', () => {
+    const context = { agentEscape: value => String(value), agentEscapeAttr: value => String(value) };
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-run-status-views.js'), 'utf8'), context);
+    const verification = {
+        outcomeStatus: 'needs_input',
+        hardFailures: ['artifact_required', 'deliverables_verified', 'evidence'],
+        rules: [
+            { key: 'artifact_required', passed: false, actual: '' },
+            { key: 'deliverables_verified', passed: false, actual: 'artifact_not_materialized' },
+            { key: 'evidence', passed: false, actual: 'evidence' }
+        ]
+    };
+    const html = context.renderAgentVerification(verification);
+    assert.match(html, /3 项硬性条件未通过/);
+    assert.match(html, /成果交付文件/);
+    assert.match(html, /交付内容核验/);
+    assert.match(html, /资料来源与佐证/);
+    assert.match(html, /尚未生成要求的文件/);
+    assert.match(html, /缺少引用来源或佐证记录/);
+    // Ensure raw technical keys are replaced
+    assert.doesNotMatch(html, /<li>artifact_required/);
+    assert.doesNotMatch(html, /deliverables_verified：artifact_not_materialized/);
+    assert.doesNotMatch(html, /evidence：evidence/);
+});
+

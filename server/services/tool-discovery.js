@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { formatToolList } = require('./agent-tool-catalog');
 const { getCapabilityDefinition } = require('./agent-capability-registry');
 
-const DEFAULT_DISCOVERY_CACHE_TTL_MS = 30 * 1000;
+const DEFAULT_DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_DISCOVERY_CACHE_ENTRIES = 100;
 
 function normalizeTerms(value) {
@@ -124,7 +124,7 @@ function catalogVersion(user, tools = [], input = {}, options = {}) {
 }
 
 function discoveryCacheTtl(options = {}) {
-    return Math.min(Math.max(Number(options.cacheTtlMs ?? options.cache_ttl_ms) || DEFAULT_DISCOVERY_CACHE_TTL_MS, 1_000), 5 * 60 * 1000);
+    return Math.min(Math.max(Number(options.cacheTtlMs ?? options.cache_ttl_ms) || DEFAULT_DISCOVERY_CACHE_TTL_MS, 1_000), 30 * 60 * 1000);
 }
 
 function discoveryCacheKey(input = {}, version = '', scope = {}) {

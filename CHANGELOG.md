@@ -1,3 +1,28 @@
+## [v0.7.30] - 2026-10-22
+
+### 大模型渐进式工具发现容错、长思考周期适配与任务验收体验优化
+
+- **大模型渐进式工具发现与调用入参高容错加固**：
+  - 解决大模型调用 `tools.describe` / `tools.execute` 时省略 SHA-256 契约摘要（`definitionDigest`）或发布版本号（`releaseId`）时报 `TOOL_DISCOVERY_SEARCH_REQUIRED`（"请先使用 tools.search 获取当前已授权工具的 toolRef，再读取其契约"）的硬性阻断问题；
+  - 引入 `candidatesByName` 工具候选索引机制与 `resolveReferenceKey` 动态规范化，支持大模型通过扁平 `{ toolName }`、`{ toolRef: "..." }` 或省略摘要对象进行契约读取与执行；
+  - 在 `tools.describe` 中增加已授权工具目录平滑自动搜索与记录回退机制（Auto-search Fallback），当模型具备工具认知直接读取契约时无缝补齐状态，避免连续失败造成任务中断；
+  - 放宽 `tools.describe` 与 `tools.execute` 输入 Schema 校验定义，原生兼容顶层 `toolName` 传参风格。
+
+- **深度思考/推理大模型长周期适配与缓存 TTL 升级**：
+  - 将渐进式工具发现缓存有效时间（`DISCOVERY_CACHE_TTL_MS`）从默认 30 秒（`30 * 1000`）大幅提升至 10 分钟（`10 * 60 * 1000`，上限允许至 30 分钟）；
+  - 彻底解决 Qwen3.5-35B（思考模式）、DeepSeek-R1、o1 等强推理大模型因长时间思考（单轮常见 60s-120s+，截图实测 69.0s）导致工具发现状态提早过期、触发 `连续错误次数超过预算` 熔断被异常中止的问题。
+
+- **流式通信底层稳健性修复（消除通道自适应切换误报）**：
+  - 修复 `server/streaming.js` 在接收第三方推理引擎（vLLM / FastChat / 部分 OpenAI 兼容服务）发送的 `choices: []` 空帧时抛出 `TypeError: Cannot read properties of undefined (reading 'delta')` 的隐蔽问题；
+  - 消除由此触发的“通道自适应平滑切换：检测到底层通信波动”降级告警，提升大模型长文本推理流式传输的稳定性。
+
+- **智能体任务核验与结果验收展示全面本地化**：
+  - 彻底解决任务未完成或需补充时，前端验收面板直接展示晦涩技术代码（`artifact_required: 未通过`、`deliverables_verified: artifact_not_materialized`、`evidence: evidence`）的糟糕体验；
+  - 在 `server/services/agent-verification.js` 中修复 `evidence` 规则实际核验值的硬编码问题，提供清晰的来源检索与佐证判断；
+  - 在 `client/chat/agent-run-status-views.js` 中建立完善的规则名称与未通过原因中文本地化字典（如将 `artifact_required` 显示为 `成果交付文件`，`deliverables_verified` 显示为 `交付内容核验`，`evidence` 显示为 `资料来源与佐证`，`artifact_not_materialized` 转换为 `尚未生成要求的文件` 等），大幅提升非技术人员使用体验。
+
+详见 [发布记录](docs/releases/v0.7.30-大模型工具发现容错与任务验收体验优化.md)。
+
 ## [v0.7.29] - 2026-10-22
 
 ### 工作流产品化画布草稿协作加固、智能体诊断优化与测试全量通过

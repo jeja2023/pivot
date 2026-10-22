@@ -19,6 +19,24 @@ function isReadOnlyDescription(description = {}) {
         && description.requiresApproval !== true;
 }
 
+function normalizeToolReference(input = {}) {
+    if (!input) return {};
+    if (typeof input === 'string') return { toolName: input.trim() };
+    const candidate = input.toolRef || input.tool_ref || input.reference || (input.toolName || input.tool_name || input.name ? input : null);
+    if (typeof candidate === 'string') return { toolName: candidate.trim() };
+    if (candidate && typeof candidate === 'object') {
+        const toolName = String(candidate.toolName || candidate.tool_name || candidate.name || '').trim();
+        const releaseId = candidate.releaseId ?? candidate.release_id ?? null;
+        const definitionDigest = String(candidate.definitionDigest || candidate.definition_digest || '').trim();
+        return {
+            toolName,
+            ...(releaseId !== null && releaseId !== undefined && releaseId !== '' ? { releaseId: Number(releaseId) } : {}),
+            ...(definitionDigest ? { definitionDigest } : {})
+        };
+    }
+    return {};
+}
+
 async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = {}) {
     const items = Array.isArray(calls) ? calls : [];
     if (!items.length || items.length > MAX_BATCH_READ_CALLS) {
@@ -31,7 +49,7 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
     const { describeToolForUser, executeDiscoveredTool } = deps.toolDiscovery || require('./tool-discovery');
     const descriptions = [];
     for (const item of items) {
-        const reference = item?.toolRef || item?.tool_ref || {};
+        const reference = normalizeToolReference(item);
         assertDescribed(state, reference);
         const description = await describeToolForUser(user, reference, {}, {
             toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
@@ -44,7 +62,7 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
     }
     const { executeToolCallsInOrder } = require('./agent-tool-scheduler');
     const results = await executeToolCallsInOrder(items.map((item, index) => ({ tool: descriptions[index], item })), async entry => {
-        const reference = entry.item.toolRef || entry.item.tool_ref || {};
+        const reference = normalizeToolReference(entry.item);
         return await executeDiscoveredTool(user, {
             toolRef: reference,
             input: entry.item.input && typeof entry.item.input === 'object' ? entry.item.input : {}
@@ -88,8 +106,9 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
             cacheable: true,
             description: '根据 toolRef 读取一个已授权工具的完整输入输出契约、风险、权限和执行要求。',
             input_schema: asJsonSchema({
-                toolRef: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: 'integer' }, definitionDigest: { type: 'string' } }, required: ['toolName'] }
-            }, ['toolRef']),
+                toolRef: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: 'integer' }, definitionDigest: { type: 'string' } }, required: ['toolName'] },
+                toolName: { type: 'string' }
+            }, []),
             output_schema: { type: 'object', required: ['toolRef', 'name', 'inputSchema'], properties: { toolRef: { type: 'object' }, name: { type: 'string' }, inputSchema: { type: 'object' }, outputSchema: { type: 'object' } } }
         },
         {
@@ -98,8 +117,9 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
             description: '使用已确认的 toolRef 执行工具。目标工具会再次经过授权、风险、审批、连接、版本和输入输出契约检查。',
             input_schema: asJsonSchema({
                 toolRef: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: 'integer' }, definitionDigest: { type: 'string' } }, required: ['toolName'] },
+                toolName: { type: 'string' },
                 input: { type: 'object' }
-            }, ['toolRef', 'input'])
+            }, [])
         },
         {
             name: 'tools.batch_read',
@@ -144,8 +164,35 @@ async function executeToolDiscoveryMeta(name, input, user, context) {
     }
     if (name === 'tools.describe') {
         const { describeToolForUser } = require('./tool-discovery');
-        const reference = input.toolRef || input.tool_ref || {};
-        assertSearched(state, reference);
+        const reference = normalizeToolReference(input);
+        try {
+            assertSearched(state, reference);
+        } catch (searchErr) {
+            if (searchErr?.code === 'TOOL_DISCOVERY_SEARCH_REQUIRED') {
+                const toolName = String(reference.toolName || '').trim();
+                if (toolName) {
+                    const { formatToolList } = require('./agent-tool-catalog');
+                    const tools = await formatToolList(user, {
+                        toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
+                        toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
+                    });
+                    const found = tools.find(t => (t.name === toolName || t.fullName === toolName) && !String(t.name).startsWith('tools.'));
+                    if (found) {
+                        const { toolRef: buildRef } = require('./tool-discovery');
+                        const candidateRef = buildRef(found);
+                        rememberSearch(state, { candidates: [{ toolRef: candidateRef }] });
+                        if (!reference.definitionDigest) reference.definitionDigest = candidateRef.definitionDigest;
+                        if (reference.releaseId == null) reference.releaseId = candidateRef.releaseId;
+                    } else {
+                        throw searchErr;
+                    }
+                } else {
+                    throw searchErr;
+                }
+            } else {
+                throw searchErr;
+            }
+        }
         const value = await describeToolForUser(user, reference, {}, {
             toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
             toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
@@ -155,8 +202,14 @@ async function executeToolDiscoveryMeta(name, input, user, context) {
     }
     if (name === 'tools.execute') {
         const { executeDiscoveredTool } = require('./tool-discovery');
-        assertDescribed(state, input.toolRef || input.tool_ref || {});
-        return { handled: true, value: await executeDiscoveredTool(user, input, context) };
+        const reference = normalizeToolReference(input);
+        const effectiveInput = {
+            ...input,
+            toolRef: reference,
+            input: input?.input && typeof input.input === 'object' ? input.input : {}
+        };
+        assertDescribed(state, reference);
+        return { handled: true, value: await executeDiscoveredTool(user, effectiveInput, context) };
     }
     if (name === 'tools.batch_read') {
         return { handled: true, value: await executeReadOnlyDiscoveredBatch(user, input.calls || [], context) };
