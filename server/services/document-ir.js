@@ -19,7 +19,7 @@ const { canonicalJson } = require('./canonical-json');
 const IR_VERSION = '1';
 
 const DOC_TYPES = Object.freeze(['official_document', 'report', 'table', 'memo']);
-const BLOCK_TYPES = Object.freeze(['heading', 'paragraph', 'table', 'list', 'page_break', 'image']);
+const BLOCK_TYPES = Object.freeze(['heading', 'paragraph', 'table', 'list', 'page_break', 'image', 'audio']);
 const SECURITY_LEVELS = Object.freeze(['public', 'internal', 'confidential', 'secret']);
 const PAGE_SIZES = Object.freeze(['A4', 'A3', 'Letter']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right', 'justify']);
@@ -58,7 +58,7 @@ const ALLOWED_META_FIELDS = Object.freeze(new Set(['title', 'doc_number', 'issue
 const ALLOWED_PAGE_FIELDS = Object.freeze(new Set(['size', 'orientation', 'margin_mm']));
 const ALLOWED_STYLE_FIELDS = Object.freeze(new Set(['indent_chars', 'line_height', 'align', 'font', 'space_after_pt']));
 const ALLOWED_FONT_FIELDS = Object.freeze(new Set(['eastAsia', 'ascii', 'size_pt', 'bold', 'color', 'family_chain']));
-const ALLOWED_RUN_FIELDS = Object.freeze(new Set(['text', 'bold', 'italic', 'underline', 'color', 'font']));
+const ALLOWED_RUN_FIELDS = Object.freeze(new Set(['text', 'bold', 'italic', 'underline', 'color', 'font', 'revision']));
 const ALLOWED_FOOTER_FIELDS = Object.freeze(new Set(['page_number', 'format']));
 
 function unknownFields(source, allowed) {
@@ -164,6 +164,12 @@ function validateBlock(block, index, docType, errors) {
         return;
     }
     if (type === 'paragraph') {
+        if (block.paragraphRevision !== undefined) {
+            const r = block.paragraphRevision;
+            if (!isPlainObject(r) || !['insert', 'delete'].includes(r.type) || !Number.isSafeInteger(r.id) || r.id < 1
+                || typeof r.author !== 'string' || r.author.length > 120 || !r.author.trim()
+                || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(String(r.date)) || !Number.isFinite(Date.parse(r.date))) errors.push(`${location} 段落修订标记无效。`);
+        }
         if (!Array.isArray(block.runs) && typeof block.text === 'string') {
             block.runs = [{ text: block.text }];
         }
@@ -177,6 +183,13 @@ function validateBlock(block, index, docType, errors) {
                     return;
                 }
                 unknownFields(run, ALLOWED_RUN_FIELDS).forEach(key => errors.push(`${location}.runs[${runIndex}] 含未知字段：${key}`));
+                if (run.revision !== undefined) {
+                    const r = run.revision;
+                    if (!isPlainObject(r) || unknownFields(r, new Set(['type', 'id', 'author', 'date'])).length
+                        || !['insert', 'delete'].includes(r.type) || !Number.isSafeInteger(r.id) || r.id < 1
+                        || typeof r.author !== 'string' || !r.author.trim() || r.author.length > 120
+                        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(String(r.date)) || !Number.isFinite(Date.parse(r.date))) errors.push(`${location} 修订标记无效。`);
+                }
                 if (normalizeText(run.text).length > MAX_TEXT_LENGTH) errors.push(`${location}.runs[${runIndex}].text 超过长度上限。`);
             });
         }
@@ -214,7 +227,7 @@ function validateBlock(block, index, docType, errors) {
         validateStyle(block.style, location, errors);
         return;
     }
-    if (type === 'image') {
+    if (type === 'image' || type === 'audio') {
         const ref = String(block.asset_ref || '');
         if (!CAS_REF_PATTERN.test(ref)) {
             errors.push(`${location}.asset_ref 必须是 artifact-cas://<objectId> 受控引用，禁止内联 base64。`);
@@ -293,6 +306,7 @@ function canonicalizeBlock(block) {
                 if (run.bold !== undefined) item.bold = Boolean(run.bold);
                 if (run.italic !== undefined) item.italic = Boolean(run.italic);
                 if (run.underline !== undefined) item.underline = Boolean(run.underline);
+                if (run.revision !== undefined) item.revision = { ...run.revision };
                 if (run.color !== undefined) item.color = String(run.color);
                 if (isPlainObject(run.font)) item.font = canonicalizeStyle({ font: run.font })?.font;
                 return item;
@@ -300,6 +314,7 @@ function canonicalizeBlock(block) {
         };
         const style = canonicalizeStyle(block.style);
         if (style) result.style = style;
+        if (block.paragraphRevision) result.paragraphRevision = { ...block.paragraphRevision };
         return result;
     }
     if (type === 'table') {
@@ -319,7 +334,7 @@ function canonicalizeBlock(block) {
         if (style) result.style = style;
         return result;
     }
-    if (type === 'image') {
+    if (type === 'image' || type === 'audio') {
         const result = { type, asset_ref: String(block.asset_ref) };
         if (block.width_mm !== undefined) result.width_mm = clampNumber(block.width_mm, 120, 1, 400);
         if (block.height_mm !== undefined) result.height_mm = clampNumber(block.height_mm, 0, 1, 400);
@@ -375,7 +390,7 @@ function computeIrDigest(ir) {
 /** 收集 IR 中引用的全部 CAS 对象 id，供渲染前的授权校验使用。 */
 function collectIrAssetRefs(ir) {
     return [...new Set((ir?.blocks || [])
-        .filter(block => block?.type === 'image' && block.asset_ref)
+        .filter(block => ['image', 'audio'].includes(block?.type) && block.asset_ref)
         .map(block => String(block.asset_ref)))];
 }
 

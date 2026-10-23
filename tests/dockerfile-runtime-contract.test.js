@@ -6,7 +6,6 @@ const test = require('node:test');
 const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
 const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
 const compose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.yml'), 'utf8');
-const gpuCompose = fs.readFileSync(path.join(__dirname, '..', 'docker-compose.gpu.yml'), 'utf8');
 const veraPdfInstall = fs.readFileSync(path.join(__dirname, '..', 'docker', 'verapdf-auto-install.xml'), 'utf8');
 
 test('语音识别深度学习引擎由独立微服务容器承载，主镜像保持轻量化解耦', () => {
@@ -133,8 +132,8 @@ test('Ubuntu production image packages hash-pinned veraPDF CLI and JRE without G
     assert.match(veraPdfInstall, /name="veraPDF Sample Plugins" selected="false"/);
 });
 
-test('默认 Compose 可运行于 CPU 主机，GPU 透传由独立覆盖层启用', () => {
-    assert.doesNotMatch(compose, /^\s*gpus:\s*all\s*$/m);
-    assert.match(gpuCompose, /^\s*gpus:\s*all\s*$/m);
-    assert.match(gpuCompose, /NVIDIA_VISIBLE_DEVICES/);
+test('生产主 Compose 内置 GPU 监控驱动能力，不依赖覆盖文件或镜像内安装驱动', () => {
+    assert.match(compose, /^\s*gpus:\s*all\s*$/m);
+    assert.match(compose, /NVIDIA_VISIBLE_DEVICES:\s*all/);
+    assert.match(compose, /NVIDIA_DRIVER_CAPABILITIES:\s*compute,utility/);
 });

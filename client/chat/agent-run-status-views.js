@@ -16,7 +16,7 @@ function agentRunFriendlySummary(run = {}, progress = {}) {
     if (status === 'awaiting_commit') return '结果已通过验收，但外部副作用仍等待提交证据；尚未完成交付。';
     if (status === 'completed') return `${records} 条执行记录已完成，结果已生成。`;
     if (status === 'partial') return '任务已保留可用的部分结果；请查看缺失项后继续。';
-    if (status === 'needs_input') return '任务结果还缺少必要信息或交付物，请补充要求后继续。';
+    if (status === 'needs_input') return limitMessage || '任务尚未完成，请查看具体待处理事项；可继续处理，或补充确实缺少的信息。';
     if (status === 'completed_with_errors' && /最大执行轮次/.test(limitMessage)) return limitMessage;
     if (status === 'completed_with_errors') return `${records} 条执行记录已完成，但有部分结果需要留意。`;
     if (status === 'error') return '任务未能顺利完成，可直接重试或修改目标后重新执行。';
@@ -65,7 +65,7 @@ function renderAgentVerification(verification = null) {
     const report = verification.report && typeof verification.report === 'object' ? verification.report : verification;
     const status = String(verification.outcomeStatus || report.outcomeStatus || '').trim();
     if (!status) return '';
-    const label = ({ verified: '验收通过', partial: '部分完成', needs_input: '需要补充' })[status] || '验收结果';
+    const label = ({ verified: '验收通过', partial: '部分完成', needs_input: '核验有待处理项' })[status] || '验收结果';
     const hardFailures = Array.isArray(report.hardFailures) ? report.hardFailures : [];
     const failedRules = (Array.isArray(report.rules) ? report.rules : []).filter(rule => rule && rule.passed === false).slice(0, 8);
     return `<section class="agent-verification ${agentEscape(status)}"><div class="agent-verification-head"><strong>${agentEscape(label)}</strong><span>${hardFailures.length ? `${hardFailures.length} 项硬性条件未通过` : '关键条件已核验'}</span></div>${failedRules.length ? `<ul>${failedRules.map(formatAgentVerificationItem).join('')}</ul>` : ''}</section>`;

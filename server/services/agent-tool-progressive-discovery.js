@@ -5,6 +5,14 @@
 const META_TOOL_NAMES = Object.freeze(new Set(['tools.search', 'tools.describe', 'tools.execute', 'tools.batch_read']));
 const DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
 
+function isDiscoveryMetaTool(tool = {}) {
+    return tool.source === 'builtin' && META_TOOL_NAMES.has(String(tool.name || ''));
+}
+
+function isDiscoveryRecoveryError(error) {
+    return ['TOOL_DISCOVERY_SEARCH_REQUIRED', 'TOOL_DISCOVERY_SEARCH_EXPIRED', 'TOOL_DISCOVERY_DESCRIBE_REQUIRED', 'TOOL_REFERENCE_STALE'].includes(error?.code);
+}
+
 function buildProgressivePlannerToolList(toolList = []) {
     return (toolList || [])
         .filter(tool => META_TOOL_NAMES.has(String(tool?.name || '')))
@@ -67,12 +75,22 @@ function clearDiscoveryState(state) {
 
 function invalidateOnCatalogChange(state, catalogVersion = '') {
     if (!state || !catalogVersion) return;
-    if (state.catalogVersion && state.catalogVersion !== catalogVersion) clearDiscoveryState(state);
+    const hasRememberedCatalog = state.catalogVersion || state.searched?.size || state.described?.size;
+    if (hasRememberedCatalog && state.catalogVersion !== catalogVersion) clearDiscoveryState(state);
     state.catalogVersion = catalogVersion;
 }
 
 function throwExpiredDiscovery(reference = {}) {
     throw discoveryError(`工具目录发现已过期，请重新搜索并确认 ${String(reference.toolName || reference.tool_name || reference.name || '该工具')}。`, 'TOOL_DISCOVERY_SEARCH_EXPIRED');
+}
+
+function forgetSupersededReferences(state, name, currentKey) {
+    const prefix = `${name}|`;
+    for (const collection of [state.searched, state.described, state.descriptions, state.searchExpiry, state.descriptionExpiry]) {
+        for (const key of collection?.keys?.() || []) {
+            if (key !== currentKey && key.startsWith(prefix)) collection.delete(key);
+        }
+    }
 }
 
 function rememberSearch(state, result = {}) {
@@ -83,9 +101,10 @@ function rememberSearch(state, result = {}) {
         const ref = candidate?.toolRef || {};
         const key = referenceKey(ref);
         if (key !== '||') {
+            const name = String(ref.toolName || ref.tool_name || ref.name || '').trim();
+            if (name) forgetSupersededReferences(state, name, key);
             state.searched.add(key);
             state.searchExpiry?.set?.(key, expiresAt);
-            const name = String(ref.toolName || ref.tool_name || ref.name || '').trim();
             if (name && state.candidatesByName) {
                 state.candidatesByName.set(name, {
                     toolRef: { ...ref, toolName: name },
@@ -189,6 +208,8 @@ module.exports = {
     buildProgressivePlannerToolList,
     createToolDiscoveryState,
     getRememberedDescription,
+    isDiscoveryMetaTool,
+    isDiscoveryRecoveryError,
     plannerToolNames,
     referenceKey,
     rememberDescription,

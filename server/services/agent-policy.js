@@ -2,6 +2,8 @@ const { normalizeToolContract, validateToolInput } = require('./agent-contracts'
 const { capabilitiesCoverTool, normalizeCapabilityList } = require('./agent-capability-registry');
 const { recordLegacyUnrestrictedHit, recordPolicyDecision } = require('./agent-governance-metrics');
 const { getBeijingTimestamp } = require('../time');
+const { isDiscoveryMetaTool } = require('./agent-tool-progressive-discovery');
+const { toolMatchesAllowlist } = require('./agent-tool-identities');
 
 class PolicyError extends Error {
     constructor(message, details = {}) {
@@ -15,7 +17,13 @@ class PolicyError extends Error {
 
 function normalizeAllowlist(value) {
     if (Array.isArray(value)) return [...new Set(value.map(item => String(item || '').trim()).filter(Boolean))];
-    if (typeof value === 'string') return normalizeAllowlist(value.split(','));
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            if (Array.isArray(parsed)) return normalizeAllowlist(parsed);
+        } catch (_) {}
+        return normalizeAllowlist(value.split(','));
+    }
     return [];
 }
 
@@ -155,7 +163,7 @@ function isShadowMode(env = process.env) {
  * legacy=true 表示历史 fail-open 语义下同样会拒绝，改造未新增影响面；
  * legacy=false 表示这是默认拒绝改造新增的拒绝，影子模式下只记录不生效。
  */
-function evaluateSkillConstraints(skillContext, tool) {
+function evaluateSkillConstraints(skillContext, tool, input = {}, inspectOnly = false) {
     if (!skillContext.present) return [];
     if (isLegacyUnrestrictedEffective(skillContext)) {
         recordLegacyUnrestrictedHit();
@@ -184,7 +192,7 @@ function evaluateSkillConstraints(skillContext, tool) {
             message: '当前 Skill 未声明任何工具，按默认拒绝语义拒绝全部工具调用。',
             legacy: false
         });
-    } else if (!skillContext.tools.includes(tool.name)) {
+    } else if (!toolMatchesAllowlist(tool, skillContext.tools, input, inspectOnly)) {
         denials.push({
             code: 'skill_tool_not_declared',
             message: '工具未在当前 Skill 声明的工具集合中。',
@@ -194,8 +202,9 @@ function evaluateSkillConstraints(skillContext, tool) {
     return denials;
 }
 
-function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null, allowApproval = false } = {}) {
+function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null, allowApproval = false, inspectOnly = false } = {}) {
     const tool = normalizeToolContract(rawTool);
+    const discoveryControl = isDiscoveryMetaTool(tool);
     input = normalizeToolInput(tool.name, input, run);
     const policy = String(run.tool_policy || run.toolPolicy || 'all');
     const allowlist = normalizeAllowlist(run.tool_allowlist || run.toolAllowlist);
@@ -203,27 +212,29 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     const reasonCodes = [];
     const deny = (code, message) => { reasonCodes.push(code); reasons.push(message); };
     if (!tool.name) deny('tool_name_missing', '工具契约缺少名称。');
-    const inputIssues = validateToolInput(tool, input);
+    const inputIssues = inspectOnly ? [] : validateToolInput(tool, input);
     if (inputIssues.length) deny('tool_input_invalid', `工具输入契约校验失败：${inputIssues[0]}`);
     if (policy === 'builtin_only' && tool.source === 'mcp') deny('tool_policy_builtin_only', '当前任务仅允许内置工具。');
     // 任务级 allowlist 保持「未设置表示不额外收窄」语义，与 Skill 级默认拒绝语义相互独立。
-    if (allowlist.length && !allowlist.includes(tool.name)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
+    if (!discoveryControl && allowlist.length && !toolMatchesAllowlist(tool, allowlist, input, inspectOnly)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
     const conversationScope = parseRunMetadata(run.metadata).capabilityConstraints;
     if (conversationScope?.excludeKnowledge === true && tool.capabilities.some(cap => /^knowledge\./.test(cap))) {
         deny('conversation_knowledge_excluded', '本轮已按用户要求排除知识库检索。');
     }
-    if (conversationScope?.readOnly === true && (tool.side_effect || tool.approval_required || tool.risk_level >= 4 || !tool.idempotent)) {
+    if (!discoveryControl && conversationScope?.readOnly === true && (tool.side_effect || tool.approval_required || tool.risk_level >= 4 || !tool.idempotent)) {
         deny('conversation_readonly_scope', '本轮只读查询不允许写入、非幂等操作或需要审批的工具。');
     }
-    if (conversationScope?.present === true && (!(tool.capabilities || []).length || !tool.capabilities.every(cap => capabilitiesCoverTool(conversationScope.capabilities || [], [cap])))) {
+    if (!discoveryControl && conversationScope?.present === true && (!(tool.capabilities || []).length || !tool.capabilities.every(cap => capabilitiesCoverTool(conversationScope.capabilities || [], [cap])))) {
         deny('conversation_capability_scope', '工具超出本次用户委托的能力范围，请补充具体处理要求后再尝试。');
     }
     const capabilityAllowlist = normalizeAllowlist(run.capability_allowlist || run.capabilityAllowlist || run.capabilities);
-    if (capabilityAllowlist.length && !tool.capabilities.some(capability => capabilityAllowlist.includes(capability))) {
+    if (!discoveryControl && capabilityAllowlist.length && !tool.capabilities.some(capability => capabilityAllowlist.includes(capability))) {
         deny('task_capability_allowlist', '工具能力不在当前任务能力上下文中。');
     }
     const skillContext = resolveSkillPolicyContext(run);
-    const skillDenials = evaluateSkillConstraints(skillContext, tool);
+    // 发现元工具只负责路由与读取契约；它们的业务目标由目录过滤和嵌套执行
+    // 再次按原始 Run 约束检查，不能要求 Skill 额外声明平台内部控制能力。
+    const skillDenials = discoveryControl ? [] : evaluateSkillConstraints(skillContext, tool, input, inspectOnly);
     const shadow = isShadowMode();
     skillDenials.forEach(item => {
         if (shadow && item.legacy === false) {

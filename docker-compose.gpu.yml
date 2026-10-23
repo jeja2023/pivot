@@ -1,18 +1,4 @@
-# GPU 算力主机的可选覆盖层：启用 NVIDIA GPU 透传与 nvidia-smi 运行时监控
-#
-# 使用方式：
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-#
-# 推荐配置（永久生效，避免更新后遗漏 -f 参数）：
-#   在宿主机 .env 中增加一行：
-#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
-#   配置后直接执行常规 docker compose up -d 即可自动启用 GPU 透传与监控。
-#
-# 前置条件：宿主机已正确安装 NVIDIA 驱动及 NVIDIA Container Toolkit
-
-services:
-  pivot:
-    gpus: all
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+# 历史 GPU 覆盖文件的兼容占位。
+# GPU 透传和监控已合并到 docker-compose.yml；新部署无需携带或引用本文件。
+# 保留空覆盖层，使尚未调整的旧 -f 命令不会重复叠加 GPU 设备请求。
+services: {}

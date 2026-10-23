@@ -359,11 +359,11 @@ async function createPresentation(user, body = {}) {
             (tenant_id, owner_user_id, client_id, artifact_id, title, status, aspect_ratio, template_id, template_version, template_digest, tags_json, cover_asset_ref, current_version, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
         RETURNING *
-    `, [tenant.tenantId, user.id, clientId, artifact.id, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || '')]);
+    `, [tenant.tenantId, user.id, clientId, artifact?.id || null, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || '')]);
     await execute(`
         INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
         VALUES (?, 1, ?, ?, ?, ?, ?, ?, NOW())
-    `, [row.id, artifact.current_version_id || null, serializeJson(content), computePresentationDigest(content), serializeJson(validation), '创建演示文稿', user.id]);
+    `, [row.id, artifact?.current_version_id || null, serializeJson(content), computePresentationDigest(content), serializeJson(validation), '创建演示文稿', user.id]);
     return await getPresentation(user, clientId);
 }
 
@@ -411,27 +411,37 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     // presentation_versions.created_by 与路由审计记录。这样既允许协作者保存，
     // 又不会把 Artifact 所有权或下载边界意外转移给协作者。
     const artifactOwner = Number(current.owner_user_id) === Number(user.id) ? user : { id: Number(current.owner_user_id) };
-    const artifact = await createStandaloneArtifact(artifactOwner, {
+    let artifact = current.artifact_id ? await createStandaloneArtifact(artifactOwner, {
         artifactId: current.artifact_id,
         type: 'presentation',
         title,
         content: contentJson,
         preserveWhitespace: true,
         note: String(body.note || '保存演示文稿').trim().slice(0, 500)
-    });
+    }) : null;
+    if (!artifact) {
+        artifact = await createStandaloneArtifact(artifactOwner, {
+            type: 'presentation',
+            title,
+            content: contentJson,
+            preserveWhitespace: true,
+            note: String(body.note || '保存演示文稿').trim().slice(0, 500)
+        });
+    }
+    const resolvedArtifactId = artifact?.id || current.artifact_id || null;
     const nextVersion = baseVersion + 1;
     const updated = await transaction(async trx => {
         const document = await trx.queryOne(`
             UPDATE presentation_documents
-            SET title = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, updated_at = NOW()
+            SET title = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, artifact_id = COALESCE(?, artifact_id), updated_at = NOW()
             WHERE id = ? AND current_version = ? AND deleted_at IS NULL
             RETURNING *
-        `, [title, String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion]);
+        `, [title, String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, resolvedArtifactId, current.id, baseVersion]);
         if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
         await trx.execute(`
             INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-        `, [current.id, nextVersion, artifact.current_version_id || null, contentJson, computePresentationDigest(content), serializeJson(validation), String(body.note || '保存演示文稿').trim().slice(0, 500), user.id]);
+        `, [current.id, nextVersion, artifact?.current_version_id || null, contentJson, computePresentationDigest(content), serializeJson(validation), String(body.note || '保存演示文稿').trim().slice(0, 500), user.id]);
         return document;
     });
     const output = { ...toPublicPresentation(updated), content, validation };

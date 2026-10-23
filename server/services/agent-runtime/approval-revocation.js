@@ -1,4 +1,5 @@
 'use strict';
+const { approvalExpiryMs } = require('../agent-approval-grants');
 
 function createApprovalRevocation({
     getRunForUser,
@@ -30,7 +31,7 @@ function createApprovalRevocation({
         }
         const metadata = getRunMetadata(run);
         const grants = Array.isArray(metadata.approvalGrants) ? metadata.approvalGrants : [];
-        const revoked = grants.find(item => item && String(item.key || '') === key && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()));
+        const revoked = grants.find(item => item && !item.consumedAt && String(item.key || '') === key && approvalExpiryMs(item.expiresAt) > Date.now());
         if (!revoked) {
             const error = new Error('指定审批不存在、已过期或已撤销。');
             error.code = 'AGENT_APPROVAL_GRANT_NOT_ACTIVE';

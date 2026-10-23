@@ -559,8 +559,8 @@
             tip: '目录需在环境变量白名单 KNOWLEDGE_LOCAL_SOURCE_ROOTS 内。'
         },
         lan_http: {
-            template: JSON.stringify({ indexUrl: "http://192.168.1.100/docs/index.json" }, null, 2),
-            tip: '必须指向内网或局域网 HTTP 端点，不能为公网外部地址。'
+            template: JSON.stringify({ url: "http://192.168.1.100/policies/", crawl: { pathPrefix: "/policies/", selector: "main", waitForSelector: "main article", maxPages: 10 } }, null, 2),
+            tip: '动态网页可配置 crawl；凭据仅引用凭据库，不粘贴密钥。普通 JSON 清单删除 crawl 即可。网页抓取不自动删除已有知识。'
         },
         database: {
             template: JSON.stringify({ connectionId: "db-conn-1", queryTemplateId: 1 }, null, 2),

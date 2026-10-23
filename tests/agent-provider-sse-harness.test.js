@@ -173,6 +173,88 @@ function streamingDeps({ run, _modelCfg, _toolList, steps, events, executeToolBy
     };
 }
 
+test('streaming planning receives the refreshed tool contract and continues without counting a stale reference as an error', async () => {
+    const { formatToolList } = require('../server/services/agent-tool-catalog');
+    const { executeToolDiscoveryMeta } = require('../server/services/agent-tools-discovery');
+    const { toolRef } = require('../server/services/tool-discovery');
+    const { createToolDiscoveryState, rememberSearch, plannerToolNames } = require('../server/services/agent-tool-progressive-discovery');
+    const user = { id: 1, role: 'user' };
+    const toolList = await formatToolList(user, { toolPolicy: 'builtin_only', toolAllowlist: ['rag.search'], preserveDiscoveryTools: true });
+    const currentRef = toolRef(toolList.find(tool => tool.name === 'rag.search'));
+    const staleRef = { ...currentRef, releaseId: 999 };
+    const state = createToolDiscoveryState();
+    rememberSearch(state, { candidates: [{ toolRef: staleRef }] });
+    const run = { id: 'describe-recovery-stream', user_id: 1, goal: '确认当前工具契约', max_steps: 3, run_mode: 'standard', tool_policy: 'builtin_only' };
+    const steps = [];
+    const taskBudget = new TaskBudget({ max_steps: 3, max_tool_calls: 1, max_consecutive_errors: 1 });
+    let modelCalls = 0;
+    const deps = streamingDeps({
+        run, steps, events: [], maybePauseForApproval: async () => false,
+        executeToolByName: async (name, input, actor, _tools, context) => (await executeToolDiscoveryMeta(name, input, actor, context)).value
+    });
+    deps.taskBudget = taskBudget;
+    deps.verifyAgentOutcome = async () => ({ outcomeStatus: 'verified', hardFailures: [] });
+    deps.callModelStreamingWithTools = async (_model, messages) => {
+        modelCalls += 1;
+        if (modelCalls === 1) return { hasToolCalls: true, toolCalls: [{ id: 'describe-call', name: 'tools.describe', arguments: { toolRef: staleRef } }] };
+        const result = JSON.parse(messages.find(message => message.role === 'tool').content);
+        assert.deepEqual(result.toolRef, currentRef);
+        assert.equal(result.referenceRefresh.reason, 'TOOL_REFERENCE_STALE');
+        return { hasToolCalls: false, toolCalls: [], content: '已确认当前工具契约。' };
+    };
+    const result = await tryRunAgentStreaming({
+        run, user, modelCfg: { id: 3 }, runId: run.id, toolList, toolDiscoveryState: state,
+        plannerToolList: toolList.filter(tool => tool.name.startsWith('tools.')), plannerToolNames: plannerToolNames(toolList),
+        deadline: Date.now() + 30_000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: []
+    }, deps);
+    assert.deepEqual(result, { completed: true, roundsUsed: 2 });
+    assert.equal(modelCalls, 2);
+    assert.equal(taskBudget.counts.consecutive_errors, 0);
+    assert.equal(taskBudget.counts.tool_calls, 1);
+    assert.equal(steps.some(step => step.status === 'error'), false);
+    assert.equal(steps.some(step => step.title === '流式工具调用兜底'), false);
+});
+
+test('streaming execute without a description returns a contract first and executes only on the next explicit call', async () => {
+    const { formatToolList } = require('../server/services/agent-tool-catalog');
+    const { executeToolDiscoveryMeta } = require('../server/services/agent-tools-discovery');
+    const { createToolDiscoveryState, plannerToolNames } = require('../server/services/agent-tool-progressive-discovery');
+    const user = { id: 1, role: 'user' };
+    const toolList = await formatToolList(user, { toolAllowlist: ['rag.search'], preserveDiscoveryTools: true });
+    const run = { id: 'missing-contract-stream', user_id: 1, goal: '查询资料', max_steps: 3, run_mode: 'standard', tool_allowlist: '["rag.search"]' };
+    const state = createToolDiscoveryState();
+    const taskBudget = new TaskBudget({ max_steps: 3, max_tool_calls: 2, max_consecutive_errors: 1 });
+    const steps = [];
+    let modelCalls = 0;
+    let businessCalls = 0;
+    const deps = streamingDeps({ run, steps, events: [], maybePauseForApproval: async () => false,
+        executeToolByName: async (name, input, actor, _tools, context) => (await executeToolDiscoveryMeta(name, input, actor, context, {
+            toolDiscovery: { executeDiscoveredTool: async () => { businessCalls += 1; return { text: '已查询资料' }; } }
+        })).value
+    });
+    deps.taskBudget = taskBudget;
+    deps.verifyAgentOutcome = async () => ({ outcomeStatus: 'verified', hardFailures: [] });
+    deps.callModelStreamingWithTools = async (_model, messages) => {
+        modelCalls += 1;
+        if (modelCalls === 1) return { hasToolCalls: true, toolCalls: [{ id: 'first-execute', name: 'tools.execute', arguments: { toolName: 'rag.search', input: { query: '业务问题' } } }] };
+        const output = JSON.parse(messages.filter(message => message.role === 'tool').at(-1).content);
+        if (modelCalls === 2) {
+            assert.equal(output.executed, false);
+            assert.equal(businessCalls, 0);
+            return { hasToolCalls: true, toolCalls: [{ id: 'confirmed-execute', name: 'tools.execute', arguments: { toolRef: output.toolRef, input: { query: '业务问题' } } }] };
+        }
+        assert.equal(businessCalls, 1);
+        return { hasToolCalls: false, toolCalls: [], content: output.text };
+    };
+    const result = await tryRunAgentStreaming({ run, user, modelCfg: { id: 3 }, runId: run.id, toolList, toolDiscoveryState: state,
+        plannerToolList: toolList.filter(tool => tool.name.startsWith('tools.')), plannerToolNames: plannerToolNames(toolList), deadline: Date.now() + 30_000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] }, deps);
+    assert.deepEqual(result, { completed: true, roundsUsed: 3 });
+    assert.equal(businessCalls, 1);
+    assert.equal(taskBudget.counts.consecutive_errors, 0);
+    assert.equal(steps.some(step => step.status === 'error'), false);
+});
+
 test('mock SSE harness verifies provider isolation, tool execution, and next model request', async () => {
     const received = [];
     const server = await startMockProvider(received);

@@ -1,8 +1,5 @@
-const crypto = require('crypto');
-
-function approvalInputHash(input) {
-    return crypto.createHash('sha256').update(JSON.stringify(input ?? {})).digest('hex');
-}
+const { evaluateToolPolicy } = require('../agent-policy');
+const { approvalInputHash, approvalExpiryMs, findApprovalGrant, resolveApprovalKey } = require('../agent-approval-grants');
 
 function assertApprovalBinding(pending = {}, expected = null, approve = true) {
     if (!pending.tool) throw Object.assign(new Error('授权请求已变化，请刷新任务后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_STALE' });
@@ -12,7 +9,7 @@ function assertApprovalBinding(pending = {}, expected = null, approve = true) {
         throw Object.assign(new Error('操作目标或参数已经变化，请查看最新请求后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_STALE' });
     }
     const expiry = String(pending.expiresAt || '');
-    const expiresAt = Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(expiry) ? expiry : `${expiry.replace(' ', 'T')}+08:00`);
+    const expiresAt = approvalExpiryMs(expiry);
     if (approve && expiry && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
         throw Object.assign(new Error('本次授权请求已过期，请刷新任务后重新确认。'), { status: 409, code: 'AGENT_APPROVAL_EXPIRED' });
     }
@@ -30,33 +27,23 @@ function createApprovalHelpers({
     recordAgentEvent = null
 }) {
     function isApprovalGranted(run, toolName, approvalKey = '', input = {}) {
-        const metadata = getRunMetadata(run);
-        const hash = approvalInputHash(input);
-        const grants = Array.isArray(metadata.approvalGrants) ? metadata.approvalGrants : [];
-        const exactGrant = grants.find(grant => grant
-            && grant.tool === toolName
-            && (grant.rememberForRun === true || (String(grant.key || '') === String(approvalKey || '') && grant.inputHash === hash))
-            && (!grant.expiresAt || Date.parse(grant.expiresAt) > Date.now()));
-        return Boolean(exactGrant);
+        return Boolean(findApprovalGrant({ ...run, metadata: getRunMetadata(run) }, toolName, approvalKey, input));
     }
 
     function shouldPauseForApproval(run, tool, approvalKey = '', input = {}) {
         if (!tool || isApprovalGranted(run, tool.name, approvalKey, input)) return false;
-        if (tool.alwaysRequiresApproval) return true;
-        if (tool.source !== 'mcp') return false;
-        const policy = normalizeApprovalPolicy(run.approval_policy);
-        if (policy === 'approve_all_mcp') return true;
-        return Boolean(tool.requiresApproval || tool.risk === 'high');
+        const approvalPolicy = normalizeApprovalPolicy ? normalizeApprovalPolicy(run.approval_policy || run.approvalPolicy) : run.approval_policy;
+        return evaluateToolPolicy({ run: { ...run, approval_policy: approvalPolicy }, tool, input, user: { id: run.user_id } }).decision === 'require_approval';
     }
 
     async function maybePauseForApproval(run, tool, input, approvalKey = '') {
-        const scopedKey = String(approvalKey || '').trim();
+        const scopedKey = resolveApprovalKey(run, tool.name, input, String(approvalKey || '').trim());
         if (!shouldPauseForApproval(run, tool, scopedKey, input)) return false;
         const user = { id: run.user_id };
         const review = await require('../chat-action-review').reviewChatAction({ run, tool, input, user });
         if (review.allowed) {
             const { updateAgentRunMetadataWithRetry } = require('../agent-run-metadata-patch');
-            const grant = { tool: tool.name, key: scopedKey, inputHash: approvalInputHash(input), expiresAt: getTimestamp(new Date(Date.now() + 2 * 60 * 1000)), source: 'independent_readonly_review', reviewer: review.reviewer };
+            const grant = { tool: tool.name, key: scopedKey, inputHash: approvalInputHash(input), hashVersion: 2, expiresAt: getTimestamp(new Date(Date.now() + 2 * 60 * 1000)), source: 'independent_readonly_review', reviewer: review.reviewer };
             const nextMetadata = await updateAgentRunMetadataWithRetry(run.id, current => ({ ...current, approvalGrants: [...(current.approvalGrants || []), grant].slice(-100) }), { userId: run.user_id });
             run.metadata = nextMetadata;
             await recordAgentEvent?.({ runId: run.id, userId: run.user_id, type: 'approval.auto_reviewed', payload: { tool: tool.name, key: scopedKey, inputHash: grant.inputHash, reviewer: review.reviewer }, eventKey: `auto-review:${scopedKey}:${grant.inputHash}` });
@@ -71,6 +58,7 @@ function createApprovalHelpers({
                 requestedAt: now,
                 expiresAt: getTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
                 inputHash: approvalInputHash(input),
+                hashVersion: 2,
                 input
             }
         });

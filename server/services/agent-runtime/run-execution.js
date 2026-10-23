@@ -14,6 +14,7 @@ const { createRunBudgetGuard, createRemainingModelRequestMs, createRunDeadlineTi
 const { createRunFinalizer } = require('./run-finalizer');
 const { executeAutomaticModelFailover } = require('./model-failover');
 const { recordPlannerModelEvent } = require('./planning-lifecycle');
+const { resolveApprovalKey } = require('../agent-approval-grants');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -302,6 +303,7 @@ const {
         let taskWorkingState = runtimeMetadata.workingState || null;
         const taskTransaction = await ensureTaskTransactionExecuting(run, user, taskContract);
         const taskTransactionId = String(taskTransaction?.id || runtimeMetadata.taskTransactionId || '').trim();
+        if (taskTransactionId) run.metadata = { ...getRunMetadata(run), taskTransactionId };
         const plannerChatContext = preparation.buildPlannerContext({
             chatBridge, plannerChatHistory, plannerCurrentMessage, longTermMemoryContext, runtimeMetadata, taskWorkingState
         });
@@ -645,8 +647,16 @@ const {
                 });
                 await assertRunNotCancelled(runId);
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
-                const verification = await verifyOutcome(answer);
+                const verification = await verifyOutcome(answer, false, '', { allowed: true, remainingSteps: sliceEndStep - step });
                 await assertRunNotCancelled(runId);
+                if (verification.repair?.allowed) {
+                    taskContract = verification.taskContract;
+                    run.metadata = { ...getRunMetadata(run), taskContract };
+                    observations.push({ type: 'verification_repair', step, tool: 'task.verification', output: {
+                        executed: false, message: require('../agent-verification-repair').buildVerificationRepairMessage(verification)
+                    } });
+                    continue;
+                }
                 const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
                 const finalStatus = awaitingCommit
                     ? 'awaiting_commit'
@@ -667,7 +677,7 @@ const {
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行完成' : awaitingCommit ? '任务等待提交' : '任务需要补充或修复', getAgentRunTitle(run));
+                await createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行完成' : awaitingCommit ? '任务等待提交' : '任务结果有待处理事项', getAgentRunTitle(run));
                 return;
             }
 
@@ -708,7 +718,7 @@ const {
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = progressiveExecution.approvalTool;
-                const approvalKey = `${runId}:${step}:${progressiveExecution.approvalToolName}`;
+                const approvalKey = resolveApprovalKey(run, progressiveExecution.approvalToolName, progressiveExecution.approvalInput, `${runId}:${step}:${progressiveExecution.approvalToolName}`);
                 if (await maybePauseForApproval(run, selectedTool, progressiveExecution.approvalInput, approvalKey)) return;
                 const toolContext = {
                     run,
@@ -722,8 +732,10 @@ const {
                     budget: taskBudget,
                     taskTransactionId,
                     approvalGranted: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
+                    approvalKey,
                     allowApproval: isApprovalGranted(run, progressiveExecution.approvalToolName, approvalKey, progressiveExecution.approvalInput),
                     toolDiscoveryState,
+                    discoveryRequired: progressiveExecution.discoveryRequired,
                     plannerToolNames: progressivePlannerToolNames,
                     waitForWorkflowDelay,
                     delayKey: plan.tool === 'workflow.delay'

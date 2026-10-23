@@ -134,10 +134,10 @@ function taskVerificationFailureMessage(report = {}) {
     const details = [...new Set((report.hardFailures || []).map(key => labels[key] || '结果尚未通过验收'))];
     if (semantic?.reason && semanticReasons[semantic.reason]) details.push(semanticReasons[semantic.reason]);
     if (Array.isArray(semantic?.missing)) details.push(...semantic.missing.slice(0, 3).map(item => text(item, 200)));
-    return `任务需要补充或修复：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
+    return `任务尚未完成：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
 }
 
-async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget } = {}) {
+async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget, repairOptions = null } = {}) {
     signal?.throwIfAborted();
     let metadata = run?.metadata;
     if (typeof metadata === 'string') {
@@ -169,6 +169,10 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         semanticVerification
     });
     if (semanticVerification) report.semanticVerification = semanticVerification;
+    if (require('./agent-verification-repair').canAttemptVerificationRepair(report, { ...repairOptions, budget })) {
+        report.taskContract.repairAttempts += 1;
+        report.repair = { allowed: true, attempt: report.taskContract.repairAttempts, maxAttempts: 2 };
+    }
     if (typeof setRunMetadata === 'function' && runId) {
         await setRunMetadata(runId, { taskContract: report.taskContract, taskVerification: report });
     }
@@ -206,7 +210,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     // awaiting_commit，直到每个 effect 提供提交证据，绝不因模型文本而自动交付。
     const transactionId = String(metadata?.taskTransactionId || metadata?.task_transaction_id || '').trim();
     signal?.throwIfAborted();
-    if (runId && transactionId && (user?.id || run?.user_id)) {
+    if (runId && transactionId && !report.repair?.allowed && (user?.id || run?.user_id)) {
         const transactionUser = user || { id: run.user_id };
         const {
             commitTaskTransaction,

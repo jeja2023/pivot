@@ -48,7 +48,7 @@ function isAgentImageGenerationAvailable(env = process.env) {
 }
 
 function isAgentTextToSpeechAvailable(env = process.env) {
-    return Boolean(providerConfiguration(MEDIA_KINDS.speech, env).endpoint);
+    return Boolean(env.PIVOT_TTS_ENDPOINT || providerConfiguration(MEDIA_KINDS.speech, env).endpoint);
 }
 
 function normalizeMediaUrl(value) {
@@ -181,7 +181,18 @@ function executeAgentImageGeneration(input, user, context, options) {
     return executeAgentMediaGeneration(MEDIA_KINDS.image, input, user, context, options);
 }
 
-function executeAgentTextToSpeech(input, user, context, options) {
+async function executeAgentTextToSpeech(input, user, context = {}, options) {
+    if (!options?.env && process.env.PIVOT_TTS_ENDPOINT) {
+        await assertNetworkPolicyUrl(process.env.PIVOT_TTS_ENDPOINT, resolveRunNetworkPolicy(context, input), { requireAllowlist: true });
+        const bytes = await require('./speech-synthesis').synthesizeSpeech(user, input, { signal: context.signal });
+        const { assertTenantContext } = require('./agent-tenant-context');
+        const tenant = await assertTenantContext(user);
+        const { putBuffer, buildCasRef } = require('./agent-artifact-cas');
+        const asset = await putBuffer({ buffer: Buffer.from(bytes), mimeType: 'audio/wav', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'speech_audio' });
+        return await require('./agent-tools-artifacts').executeArtifactTool('artifact.render', { format: 'wav', ir: {
+            ir_version: '1', doc_type: 'report', meta: { title: '离线语音朗读' }, blocks: [{ type: 'audio', asset_ref: buildCasRef(asset.objectId) }]
+        } }, user, context);
+    }
     return executeAgentMediaGeneration(MEDIA_KINDS.speech, input, user, context, options);
 }
 

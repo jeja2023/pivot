@@ -1,9 +1,9 @@
-# Pivot AI 智能中枢 - 生产环境部署配置
+# Pivot AI 智能中枢 - NVIDIA GPU 服务器生产部署配置
 #
 # 常用启动命令：
 #   离线标准启动：docker compose up -d
-#   叠加 GPU 监控：docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 #   叠加语音微服务：docker compose -f docker-compose.yml -f docker-compose.speech.yml up -d
+# 前置条件：Docker Compose 2.30.0+、NVIDIA 驱动及 NVIDIA Container Toolkit
 
 services:
   pivot:
@@ -30,13 +30,17 @@ services:
 
     # 核心运行时工具与服务模式配置（可在 .env 中覆盖）
     environment:
+      # GPU 驱动工具由宿主机运行时注入，utility 用于 nvidia-smi/NVML 指标采集
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
       # PDF 工具二进制路径：正式镜像已内置安装 qpdf 与 veraPDF，留空时使用镜像内默认路径
       DOCUMENT_QPDF_PATH: ${DOCUMENT_QPDF_PATH:-/usr/bin/qpdf}
       DOCUMENT_VERAPDF_PATH: ${DOCUMENT_VERAPDF_PATH:-/opt/verapdf/verapdf}
       # 语音识别提供方：local（默认内置 Vosk 轻量离线识别，零外部依赖）；gateway（调用独立 speech-service 或外部网关）
       PIVOT_VOICE_PROVIDER: ${PIVOT_VOICE_PROVIDER:-local}
 
-    # 默认 CPU-only，可在 GPU 算力主机叠加 docker-compose.gpu.yml 启用 nvidia-smi 监控
+    # 主配置直接启用 GPU 透传，无需 GPU 覆盖文件或 COMPOSE_FILE 环境变量
+    gpus: all
 
     # 数据持久化挂载：保证业务数据与上传文件在容器重建后持续保留
     # 注意：Linux 离线生产机首次启动前，请确保宿主机已创建目录并赋予权限：

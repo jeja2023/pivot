@@ -26,6 +26,7 @@
         session.speechBuffer = '';
         session.playbackEchoes.forEach(item => { item.expiresAt = Math.min(item.expiresAt, echoDeadline(session)); });
         globalThis.speechSynthesis?.cancel?.();
+        window.Pivot.moduleApi('chat.serverVoiceSynthesis')?.cancel();
         window.Pivot.moduleApi('chat.execution')?.stopVoiceRequest?.(session.id);
         void recordEvent(session.id, 'barge_in').catch(() => {});
     }
@@ -118,7 +119,25 @@
     }
 
     function speak(text) {
-        if (!voice?.active || !text || !globalThis.speechSynthesis) return;
+        if (!voice?.active || !text) return;
+        if (voice.serverSynthesis) {
+            const session = voice;
+            session.speaking = true; session.spokenAny = true;
+            const echo = { text, expiresAt: Infinity };
+            session.playbackEchoes = [...session.playbackEchoes.filter(item => item.expiresAt > Date.now()).slice(-63), echo];
+            setStatus('正在合成朗读…', 'speaking');
+            void window.Pivot.moduleApi('chat.serverVoiceSynthesis').speak(text, {
+                onstart: () => { if (voice === session) setStatus('正在朗读，可直接说话打断。', 'speaking'); },
+                onend: () => {
+                    if (voice !== session) return;
+                    echo.expiresAt = echoDeadline(session); session.speaking = false;
+                    speakNext(); if (!session.speechQueue.length) { startRecognition(session); listeningStatus(session); }
+                },
+                onerror: () => { if (voice === session) { showToast('统一朗读失败，请检查服务与音频设备。', 'error'); release({ event: 'failed' }); } }
+            });
+            return;
+        }
+        if (!globalThis.speechSynthesis) return;
         const session = voice;
         const utterance = new globalThis.SpeechSynthesisUtterance(text);
         utterance.lang = session.localVoice?.lang || window.Pivot.moduleApi('chat.voicePlatform')?.language?.() || 'zh-CN';
@@ -327,6 +346,7 @@
         }
         globalThis.speechSynthesis?.cancel?.();
         if (current?.heartbeatTimer) clearInterval(current.heartbeatTimer);
+        window.Pivot.moduleApi('chat.serverVoiceSynthesis')?.cancel();
         if (current?.recognition) {
             current.recognition.onresult = null;
             current.recognition.onerror = null;
@@ -346,7 +366,7 @@
         const platform = window.Pivot.moduleApi('chat.voicePlatform');
         const getUserMedia = navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
         const reason = platform?.availability?.() || (!platform ? '语音组件尚未加载，请刷新后重试。' : '');
-        if (reason || !getUserMedia && !platform.usesDesktopInput?.() || !globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) {
+        if (reason || !getUserMedia && !platform.usesDesktopInput?.() || (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance) && !window.Pivot.moduleApi('chat.serverVoiceSynthesis')) {
             showToast(reason || '当前浏览器不支持本地朗读，实时语音不可用。', 'warning');
             return null;
         }
@@ -366,9 +386,11 @@
             try {
             const recognition = await platform.prepareRecognition();
             if (start.cancelled) return null;
-            const localVoice = await waitForLocalVoice();
+            const synthesis = await window.Pivot.moduleApi('chat.serverVoiceSynthesis')?.capabilities();
+            const serverSynthesis = synthesis?.available === true;
+            const localVoice = serverSynthesis ? null : await waitForLocalVoice();
             if (start.cancelled) return null;
-            if (!localVoice) throw Object.assign(new Error(), { voiceMessage: '当前浏览器没有可用的本地朗读声音，实时语音无法启动；可使用语音输入。' });
+            if (!serverSynthesis && !localVoice) throw Object.assign(new Error(), { voiceMessage: '当前浏览器没有可用的本地朗读声音，实时语音无法启动；可使用语音输入。' });
             stream = recognition.usesDesktopInput ? null : await getUserMedia({ audio: true });
             await platform.enhanceStream?.(stream);
             if (start.cancelled) { stopTracks(stream); return null; }
@@ -407,7 +429,7 @@
             recognition.continuous = true;
             recognition.interimResults = true;
             const session = { id: start.id, chatSessionId, active: true, stream, recognition, localVoice, history: [], answerText: '',
-                speaking: false, spokenAny: false, submitting: false, replyInterrupted: false, playbackEchoes: [],
+                speaking: false, spokenAny: false, submitting: false, replyInterrupted: false, playbackEchoes: [], serverSynthesis,
                 speechBuffer: '', speechQueue: [], heartbeatTimer: null };
             voice = session;
             recognition.onresult = event => {

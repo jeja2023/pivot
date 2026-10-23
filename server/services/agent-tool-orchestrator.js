@@ -14,8 +14,12 @@ const { beginPreviewTaskEffect, recordPreviewTaskEffect, stageDeferredToolEffect
 const { invokeAgentLifecycleHooks } = require('./agent-lifecycle-hooks');
 const { assertPreviewToolAllowed } = require('./agent-dag-execution-guard');
 const { summarizeToolOutcome } = require('./agent-tool-progress');
+const { isDiscoveryMetaTool } = require('./agent-tool-progressive-discovery');
 
 function operationKeyFor({ run, tool, input, context = {} }) {
+    // 元工具重读授权目录并重建本轮状态；实际业务工具自行保留持久检查点。
+    // 重放元工具输出会漏记发现状态，且会让路由包装层误触非幂等恢复审批。
+    if (isDiscoveryMetaTool(tool)) return '';
     const runId = run?.id || context.runId;
     if (!runId) return '';
     const hash = checkpointInputHash(input);

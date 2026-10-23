@@ -534,6 +534,7 @@ const { runAgent } = createAgentRunner({
     createPersistedAgentStepContext,
     recordAgentEvent,
     persistWorkingMemoryRevision,
+    verifyAgentOutcome: options => verifyAndRecordTaskOutcome({ ...options, setRunMetadata }),
     recordPromptInvocation,
         resolveActivePromptSection,
     buildAgentAuditFields,

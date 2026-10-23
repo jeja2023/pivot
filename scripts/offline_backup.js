@@ -14,7 +14,7 @@ async function main(args = process.argv.slice(2)) {
     if (!process.env.DATABASE_URL) throw new Error('未配置 PostgreSQL 连接。');
     await createBackupBundle({ output: args[outputIndex + 1], maintenanceConfirmed: args.includes('--maintenance-confirmed'), dumpDatabase: destination => new Promise((resolve, reject) => {
         // 连接串只经子进程环境传递，不放入命令行、日志或清单。
-        const child = spawn('pg_dump', ['--format=custom', '--file', destination], { env: { ...process.env, PGDATABASE: process.env.DATABASE_URL }, stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true });
+        const child = spawn('pg_dump', ['--no-password', '--format=custom', '--file', destination], { env: require('../server/services/postgres-command-env').postgresCommandEnv(process.env.DATABASE_URL), stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true });
         child.once('error', () => reject(new Error('无法启动 pg_dump，请检查 PostgreSQL 客户端。')));
         child.once('exit', code => code === 0 ? resolve() : reject(new Error('PostgreSQL 备份失败，请检查连接与权限。')));
     }) });

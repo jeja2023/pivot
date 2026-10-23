@@ -6,7 +6,8 @@ const MAX_CHECKPOINT_STATE_LENGTH = 120000;
 const CHECKPOINT_TYPES = new Set(['plan', 'tool', 'dag', 'approval', 'control']);
 
 function checkpointInputHash(input) {
-    return createHash('sha256').update(JSON.stringify(input ?? {})).digest('hex');
+    return createHash('sha256').update(JSON.stringify(input ?? {}, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)).digest('hex');
 }
 
 function parseCheckpointState(value) {
@@ -145,7 +146,9 @@ async function beginAgentToolCheckpoint(runId, data = {}) {
                 error.code = 'AGENT_OPERATION_SCOPE_MISMATCH'; error.category = 'policy'; error.status = 409; throw error;
             }
             const state = parseCheckpointState(existing.state);
-            if (existing.input_hash && String(existing.input_hash) !== inputHash) {
+            const legacyStoredHash = createHash('sha256').update(JSON.stringify(state.input ?? {})).digest('hex');
+            const sameLegacyInput = String(existing.input_hash) === legacyStoredHash && checkpointInputHash(state.input) === inputHash;
+            if (existing.input_hash && String(existing.input_hash) !== inputHash && !sameLegacyInput) {
                 const error = new Error('工具操作键与输入摘要不匹配，已拒绝潜在重放混淆。');
                 error.code = 'AGENT_OPERATION_INPUT_MISMATCH'; error.category = 'policy'; error.status = 409; throw error;
             }

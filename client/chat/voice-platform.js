@@ -96,7 +96,7 @@
         for (const [id, label] of [['chat-voice-input', '语音输入'], ['chat-realtime-voice', '实时语音']]) {
             const button = document.getElementById(id);
             if (!button || button.getAttribute('aria-pressed') === 'true') continue;
-            const message = reason || (id === 'chat-realtime-voice' && (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance)
+            const message = reason || (id === 'chat-realtime-voice' && !window.Pivot.moduleApi('chat.serverVoiceSynthesis') && (!globalThis.speechSynthesis || !globalThis.SpeechSynthesisUtterance)
                 ? '当前浏览器没有语音朗读能力，实时语音不可用。' : '');
             button.setAttribute('aria-disabled', message ? 'true' : 'false');
             button.setAttribute('title', message || (id === 'chat-voice-input' ? '语音输入：部署内识别，完成后可编辑发送' : '启动实时语音：部署内识别并朗读模型回答'));

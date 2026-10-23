@@ -117,6 +117,7 @@ function normalizeSourceConfig(kind, config = {}, options = {}) {
         }
         return {
             url,
+            ...(config.crawl ? { crawl: require('./knowledge-web-crawler').normalizeCrawlConfig({ ...config.crawl, url, credentialRef: config.credentialRef }) } : {}),
             manifestPath: String(config.manifestPath || config.manifest_path || '').trim().slice(0, 240),
             credentialRef: String(config.credentialRef || config.credential_ref || '').trim().slice(0, 64),
             credentialHeader: String(config.credentialHeader || config.credential_header || 'Authorization').trim().slice(0, 80),
@@ -448,7 +449,7 @@ async function syncHttpManifestSource(source, actor, deps = {}) {
     }
     const url = resolveManifestUrl(config);
     const get = deps.safeJsonGet || safeJsonGet;
-    const response = await get(url, {
+    const response = config.crawl ? { status: 200, headers: {}, data: { items: (await require('./knowledge-web-crawler').crawlKnowledgePages(config.crawl, actor)).items } } : await get(url, {
         user: actor,
         assertUrl: assertSafeMcpOutboundUrl,
         createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }),
@@ -481,7 +482,8 @@ async function syncHttpManifestSource(source, actor, deps = {}) {
             if (staged?.path) await fs.promises.rm(staged.path, { force: true }).catch(() => {});
         }
     }
-    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: normalizeBool(config.syncDeletes, false) });
+    // 网页分页、登录状态或页面额度不代表完整目录，抓取来源不能据此自动删除原知识。
+    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: !config.crawl && normalizeBool(config.syncDeletes, false) });
     stats.cursor = JSON.stringify({ syncedAt: getBeijingTimestamp(), items: items.length, etag: String(response.headers?.etag || '').slice(0, 500), target: new URL(url).origin });
     return stats;
 }

@@ -10,7 +10,7 @@
 const { recordRenderResult } = require('../agent-governance-metrics');
 const { validateDocumentIr } = require('../document-ir');
 
-const SUPPORTED_FORMATS = Object.freeze(['docx', 'pdf', 'xlsx', 'html', 'md', 'svg', 'png']);
+const SUPPORTED_FORMATS = Object.freeze(['docx', 'pdf', 'xlsx', 'html', 'md', 'svg', 'png', 'wav']);
 
 function renderError(message, code = 'DOCUMENT_RENDER_FAILED', status = 422) {
     const error = new Error(message);
@@ -23,6 +23,13 @@ function renderError(message, code = 'DOCUMENT_RENDER_FAILED', status = 422) {
 
 /** 惰性加载各渲染器，避免任一格式的依赖缺失导致整个服务无法启动。 */
 function loadRenderer(format) {
+    if (format === 'wav') return { format, version: '1.0.0', mimeType: 'audio/wav', available: () => true, render: async (ir, options) => {
+        const blocks = ir.blocks.filter(block => block.type === 'audio');
+        if (blocks.length !== 1 || !options.imageResolver) throw new Error('音频导出需要一个受控音频资产。');
+        const bytes = await options.imageResolver(blocks[0].asset_ref);
+        if (!bytes || bytes.length > 9 * 1024 * 1024 || bytes.subarray(0, 4).toString() !== 'RIFF' || bytes.subarray(8, 12).toString() !== 'WAVE') throw new Error('音频资产格式无效或超过大小上限。');
+        return bytes;
+    } };
     if (format === 'svg' || format === 'png') {
         return { format, version: '1.0.0', mimeType: format === 'svg' ? 'image/svg+xml' : 'image/png', available: () => true,
             render: (ir, options) => require('./image-renderer').renderImage(ir, format, options) };
@@ -110,6 +117,9 @@ async function renderDocumentIr(ir, format, options = {}) {
     if (!checked.valid) {
         recordRenderResult({ format: safeFormat, failureReason: 'ir_invalid' });
         throw renderError(`Document IR 校验失败：${checked.errors.join('；')}`, 'DOCUMENT_IR_INVALID');
+    }
+    if (!['docx', 'html', 'md'].includes(safeFormat) && checked.ir.blocks.some(block => block.paragraphRevision || block.runs?.some(run => run.revision))) {
+        throw renderError('当前格式不能保留修订语义，请使用 DOCX 或 HTML 对照。', 'DOCUMENT_REVISION_FORMAT_UNSUPPORTED', 422);
     }
     const renderer = getRenderer(safeFormat);
     if (!renderer.available()) {

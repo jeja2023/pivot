@@ -71,7 +71,9 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
         ...current,
         conversationTaskId: current.conversationTaskId || run.id,
         requiredSourceMessages: [...new Set([...(current.requiredSourceMessages || []), ...(sourceContent.length > 12000 ? [userMessageId] : [])])],
-        ...(current.capabilityConstraints?.present === true && Array.isArray(decision.requiredCapabilities) ? { capabilityConstraints: { ...current.capabilityConstraints, capabilities: decision.requiredCapabilities, authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
+        ...(current.capabilityConstraints?.present === true && Array.isArray(decision.requiredCapabilities) ? { capabilityConstraints: { ...current.capabilityConstraints,
+            capabilities: [...new Set([...decision.requiredCapabilities, ...(current.chatBridge ? ['conversation.read_source'] : [])])],
+            authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
         conversationMessageIds: [...new Set([...(current.conversationMessageIds || []), userMessageId])].slice(-100)
     }), { userId: user.id });
     if (run.status === 'needs_input') {

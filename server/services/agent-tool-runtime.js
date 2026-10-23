@@ -9,6 +9,7 @@ const { evaluateToolInvocation, validateToolOutput } = require('./tool-policy-en
 const { recordToolInvocationEvent } = require('./tool-invocation-events');
 const { acquire: acquireToolExecutionGuard } = require('./tool-execution-guard');
 const { acquireSharedToolLease } = require('./agent-shared-tool-guard');
+const { approvedOperationKey, completeApprovalInvocation } = require('./agent-approval-grants');
 
 const MAX_TOOL_CONTEXT_TOKENS = Math.max(4000, Math.min(
     Number.parseInt(process.env.AGENT_TOOL_CONTEXT_MAX_TOKENS || '120000', 10) || 120000,
@@ -128,6 +129,8 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         err.status = 403;
         throw err;
     }
+    const approvedKey = context.approvalGranted === true ? approvedOperationKey(context.run, safeName, context.approvalKey, input) : '';
+    if (approvedKey) context = { ...context, operationKey: approvedKey };
     const policyRun = {
         ...(context.run || { tool_policy: 'all', approval_policy: 'approve_all_mcp' })
     };
@@ -181,7 +184,9 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         tool,
         input: policyEvaluation.input,
         user,
-        context,
+        // tools.execute 是路由控制层，业务调用由其内部运行时记账；缺少契约时
+        // 恢复分支会单独记录一次控制读取，避免普通与流式路径重复扣预算。
+        context: safeName === 'tools.execute' ? { ...context, budgetAlreadyConsumed: true } : context,
         executionPlan,
         onComplete: async ({ output, effectiveInput }) => {
             await releaseGuards();
@@ -198,6 +203,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 policyDecision: 'allow', source: policyEvaluation.source, input: effectiveInput, output,
                 status: 'success', ...policyEvaluation.trace
             });
+            if (context.approvalGranted === true) await completeApprovalInvocation(context.run, user, safeName, context.approvalKey, input);
         },
         onFailure: async ({ error, effectiveInput }) => {
             await releaseGuards({ error });

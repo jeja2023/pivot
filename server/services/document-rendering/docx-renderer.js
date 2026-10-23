@@ -22,7 +22,7 @@ const styleConstants = require('./official-styles');
 const { deriveDeterministicTimestamp, repackDeterministic } = require('./docx-package');
 
 /** 渲染器语义版本：参与 rendition 去重键，改版式必须升版本，否则历史交付不可复现。 */
-const RENDERER_VERSION = 'docx-1.0.0';
+const RENDERER_VERSION = 'docx-1.1.0';
 
 /** DOCX 的 MIME 类型。 */
 const MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -126,6 +126,11 @@ function buildTextRun(text, resolved, runOverride) {
     if (runOverride && runOverride.underline) options.underline = { type: docx.UnderlineType.SINGLE };
     const color = (runOverride && runOverride.color) || (runFont && runFont.color) || resolved.color;
     if (color) options.color = String(color);
+    if (runOverride?.revision) {
+        const revision = runOverride.revision;
+        const Type = revision.type === 'insert' ? docx.InsertedTextRun : docx.DeletedTextRun;
+        return new Type({ ...options, id: revision.id, author: revision.author, date: revision.date });
+    }
     return new docx.TextRun(options);
 }
 
@@ -186,7 +191,10 @@ function buildHeadingBlock(block, profile) {
 function buildParagraphBlock(block, profile) {
     const resolved = resolveSpec(profile.body, block.style);
     const runs = (block.runs || []).map(run => buildTextRun(run.text, resolved, run));
-    return buildParagraph(resolved, runs.length ? runs : [buildTextRun('', resolved, null)]);
+    const revision = block.paragraphRevision;
+    return buildParagraph(resolved, runs.length ? runs : [buildTextRun('', resolved, null)], revision ? {
+        run: { [revision.type === 'insert' ? 'insertion' : 'deletion']: { id: revision.id, author: revision.author, date: revision.date } }
+    } : {});
 }
 
 /**

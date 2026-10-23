@@ -495,42 +495,30 @@ function getVersionCompareText(value) {
     return version?.draft || '';
 }
 
-function buildLineDiff(leftText, rightText) {
-    const left = String(leftText || '').split(/\n{2,}/);
-    const right = String(rightText || '').split(/\n{2,}/);
-    const max = Math.max(left.length, right.length);
-    const rows = [];
-    let changed = 0;
-    for (let index = 0; index < max; index += 1) {
-        const before = left[index] ?? '';
-        const after = right[index] ?? '';
-        if (before === after) {
-            rows.push({ type: 'same', before, after, line: index + 1 });
-        } else {
-            changed += 1;
-            const type = before && after ? 'changed' : before ? 'removed' : 'added';
-            rows.push({ type, before, after, line: index + 1 });
-        }
-    }
-    return { rows, changed, total: max };
-}
-
-function compareOfficialWritingVersions() {
+async function compareOfficialWritingVersions() {
+    const trigger = document.getElementById('official-writing-compare-btn');
+    if (trigger?.disabled) return;
+    if (trigger) trigger.disabled = true;
     syncOfficialWritingStateFromInputs();
     const left = getVersionCompareText(document.getElementById('official-writing-base-version')?.value || 'source');
     const right = getVersionCompareText(document.getElementById('official-writing-target-version')?.value || 'draft');
-    const diff = buildLineDiff(left, right);
+    let data;
+    try {
+        const response = await apiFetch(`${API_BASE}/apps/official-writing/compare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ before: left, after: right, exportDocx: true }) });
+        data = await response.json();
+        if (!response.ok) throw new Error(data.error || '文档比较失败。');
+    } catch (error) { showToast(error.message || '文档比较失败，请稍后重试。', 'error'); return; }
+    finally { if (trigger) trigger.disabled = false; }
+    const diff = data.comparison;
     const summary = document.getElementById('official-writing-diff-summary');
     const result = document.getElementById('official-writing-diff-result');
-    if (summary) summary.textContent = `共 ${diff.total} 段，${diff.changed} 段存在差异`;
+    if (summary) summary.textContent = `${diff.changed} 处增删变更，${diff.moves.length} 处完整段落移动；修订文档已保存到产物。`;
     if (!result) return;
-    PivotSafeHtml.setHtml(result, diff.rows.map(row => `
-        <div class="official-writing-diff-row is-${row.type}">
-            <span>段 ${row.line}</span>
-            <p>${escapeAppsHtml(row.before || ' ')}</p>
-            <p>${escapeAppsHtml(row.after || ' ')}</p>
-        </div>
-    `).join(''));
+    PivotSafeHtml.setHtml(result, diff.changes.map(part => part.type === 'same' ? escapeAppsHtml(part.text)
+        : `<${part.type === 'add' ? 'ins' : 'del'}>${escapeAppsHtml(part.text)}</${part.type === 'add' ? 'ins' : 'del'}>`).join(''));
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'btn-secondary'; open.textContent = '查看并下载修订文档';
+    open.addEventListener('click', () => window.Pivot.moduleApi('agent.artifacts')?.openVersions(data.delivery.artifactId));
+    result.appendChild(open);
 }
 
 async function copyAppsText(text) {

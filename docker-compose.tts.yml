@@ -1,0 +1,27 @@
+services:
+  tts:
+    image: pivot-tts:1.0.0
+    pull_policy: never
+    user: "1000:1000"
+    read_only: true
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 64
+    environment:
+      TTS_TOKEN_FILE: /run/secrets/offline_tools_token
+    secrets: [offline_tools_token]
+    volumes:
+      - ./data/tts-models:/models:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /runtime:rw,exec,nosuid,nodev,size=32m,uid=1000,gid=1000,mode=0700
+    networks: [ai-bridge]
+networks:
+  ai-bridge:
+    external: true
+secrets:
+  offline_tools_token:
+    file: ./data/secrets/offline-tools-token

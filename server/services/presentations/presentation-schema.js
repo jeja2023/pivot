@@ -143,11 +143,16 @@ function normalizeElement(input, canvas, index) {
     if (!isPlainObject(input)) throw presentationError(`第 ${index + 1} 个元素必须是对象。`);
     const type = String(input.type || '').trim();
     if (!ELEMENT_TYPES.includes(type)) throw presentationError(`不支持的元素类型：${type || '空'}。`, 400, 'PRESENTATION_ELEMENT_TYPE_INVALID');
+    const defaultZ = String(input.id || '').startsWith('pivotTemplate_')
+        ? 1
+        : ['text', 'image', 'chart', 'table', 'diagram', 'media', 'attachment'].includes(type)
+            ? 10
+            : index + 1;
     const base = {
         id: normalizeId(input.id || `element_${index + 1}`, '元素标识'),
         type,
         ...normalizeBounds(input, canvas),
-        zIndex: normalizeNumber(input.zIndex, index + 1, -1000, 1000, '元素层级'),
+        zIndex: normalizeNumber(input.zIndex, defaultZ, -1000, 1000, '元素层级'),
         groupId: input.groupId || input.group_id ? normalizeId(input.groupId || input.group_id, '元素组合标识') : '',
         locked: normalizeBoolean(input.locked),
         visible: normalizeBoolean(input.visible, true),
@@ -274,8 +279,9 @@ function normalizeSlide(input, canvas, index) {
         const normalized = normalizeElement(element, canvas, elementIndex);
         if (ids.has(normalized.id)) throw presentationError(`第 ${index + 1} 页存在重复元素标识。`, 400, 'PRESENTATION_ELEMENT_ID_DUPLICATE');
         ids.add(normalized.id);
-        return normalized;
-    }).sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id));
+        return { normalized, elementIndex };
+    }).sort((a, b) => a.normalized.zIndex - b.normalized.zIndex || a.elementIndex - b.elementIndex)
+      .map(item => item.normalized);
     const transitionInput = input.transition && isPlainObject(input.transition) ? input.transition : {};
     const transitionType = String(transitionInput.type || 'none');
     if (!TRANSITION_TYPES.includes(transitionType)) throw presentationError('不支持的页面转场类型。', 400, 'PRESENTATION_TRANSITION_INVALID');

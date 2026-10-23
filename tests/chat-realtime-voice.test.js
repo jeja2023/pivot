@@ -24,7 +24,7 @@ function createStream() {
 
 function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionStart = null, recognitionUsesServerInput = false,
     sendMessage = null, stopVoiceRequest = null, voices = null, navigatorLanguage = 'zh-CN',
-    timeout = setTimeout, cancelTimeout = clearTimeout }) {
+    timeout = setTimeout, cancelTimeout = clearTimeout, serverSynthesis = null }) {
     const modules = new Map();
     const toasts = [];
     const requests = [];
@@ -73,6 +73,7 @@ function loadRealtimeVoice({ getUserMedia, apiFetchHandler = null, recognitionSt
         moduleApi(name) { return modules.get(name); }
     };
     modules.set('chat.execution', { stopVoiceRequest(id) { stoppedRequests.push(id); stopVoiceRequest?.(id); } });
+    if (serverSynthesis) modules.set('chat.serverVoiceSynthesis', serverSynthesis);
     vm.runInNewContext(platform, context, { filename: 'client/chat/voice-platform.js' });
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/voice-text.js'), 'utf8'), context);
     vm.runInNewContext(source, context, { filename: 'client/chat/realtime-voice.js' });
@@ -102,6 +103,17 @@ test('实时语音使用默认麦克风，并在采集成功后才创建服务�
         voice.api.stopRealtimeVoice();
     }
     assert.equal(track.stopped, true);
+});
+
+test('统一朗读可在无系统音色时启动，停止会取消合成或播放', async () => {
+    const { stream, track } = createStream(); let cancelled = 0; const spoken = [];
+    const voice = loadRealtimeVoice({ getUserMedia: async () => stream, voices: [], serverSynthesis: {
+        capabilities: async () => ({ available: true }), cancel() { cancelled++; }, speak(text) { spoken.push(text); }
+    } });
+    const session = await voice.api.startRealtimeVoice(); assert.ok(session); assert.equal(session.serverSynthesis, true);
+    voice.api.handleAssistantDelta('统一后端朗读。', session.id);
+    assert.equal(spoken[0], '统一后端朗读。');
+    voice.api.stopRealtimeVoice(); assert.ok(cancelled > 0); assert.equal(track.stopped, true);
 });
 
 test('实时语音将不存在的麦克风设备转换为可操作提示且不创建会话', async () => {

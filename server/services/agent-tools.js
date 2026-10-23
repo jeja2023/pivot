@@ -637,7 +637,7 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({}),
             admin: true
         },
-        ...getArtifactToolDefinitions()
+        ...getArtifactToolDefinitions(), ...require('./agent-tools-offline-office').offlineOfficeDefinitions()
     ].filter(tool => !tool.admin || adminOnly);
     // Docker 服务镜像只携带 Playwright 包，不携带 Chromium；在工具目录层
     // 隐藏不可用能力，避免模型规划后才触发审批再失败。
@@ -904,6 +904,7 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
+    if (['document.compare', 'viz.mindmap'].includes(name)) return await require('./agent-tools-offline-office').executeOfflineOffice(name, input, user, context);
     if (name === 'chat.read_source') return executeChatSource(input, user, context);
     assertDynamicCodeExecutionIsSandboxed(name, context);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);

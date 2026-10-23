@@ -1,5 +1,7 @@
 'use strict';
 
+const reflowModule = require('./presentation-template-reflow');
+
 /** 模板定义、版本快照、审核、导入任务与源文件审计。 */
 function createPresentationTemplateService(deps) {
     const {
@@ -52,6 +54,7 @@ function templateVersionToPublic(templateRow, versionRow, { includeDefinition = 
 }
 
 function systemTemplateToPublic(template) {
+    const masters = Array.isArray(template.masters) ? JSON.parse(JSON.stringify(template.masters)) : [];
     return {
         id: template.id,
         name: template.name,
@@ -63,7 +66,12 @@ function systemTemplateToPublic(template) {
         aspectRatio: template.aspectRatio,
         tags: [...template.tags],
         snapshotDigest: template.snapshotDigest,
-        definition: { theme: template.theme, layouts: template.layouts }
+        masters,
+        definition: {
+            theme: template.theme,
+            masters,
+            layouts: template.layouts
+        }
     };
 }
 
@@ -148,86 +156,11 @@ function normalizeBrandControls(input = {}) {
 }
 
 function applyTemplateBrandControls(content, template) {
-    const controls = template?.definition?.brandControls || template?.brandControls || {};
-    const hasExistingBrandElements = (content.slides || []).some(slide => (slide.elements || []).some(element => String(element.id || '').startsWith('pivotBrand_')));
-    if (!controls.lockBrandElements && !controls.lockFonts && !hasExistingBrandElements) return content;
-    const theme = template?.definition?.theme || content.theme || {};
-    const slides = (content.slides || []).map((slide, slideIndex) => {
-        let elements = (slide.elements || []).filter(element => !String(element.id || '').startsWith('pivotBrand_')).map(element => ({ ...element, style: element.style ? { ...element.style } : element.style }));
-        if (controls.lockFonts) {
-            elements = elements.map(element => element.type === 'text' ? { ...element, style: { ...element.style, fontFamily: Number(element.style?.fontSize || 0) >= 24 ? theme.fonts?.heading || element.style?.fontFamily : theme.fonts?.body || element.style?.fontFamily } } : element);
-        }
-        if (controls.lockBrandElements) {
-            const textColor = theme.colors?.text || '#1F2937';
-            const footerY = Math.max(664, Number(content.height || 720) - 48);
-            if (controls.footerText) elements.push({ id: 'pivotBrand_footer', type: 'text', x: 64, y: footerY, width: 900, height: 24, rotation: 0, zIndex: 990, locked: true, visible: true, sourceRefs: [], content: { text: controls.footerText }, style: { fontFamily: theme.fonts?.body || 'Microsoft YaHei', fontSize: 10, fontWeight: 400, color: textColor, align: 'left', verticalAlign: 'middle', lineHeight: 1.2, italic: false, underline: false, bullet: false, padding: 0 } });
-            if (controls.showPageNumber) elements.push({ id: 'pivotBrand_page', type: 'text', x: 1160, y: footerY, width: 56, height: 24, rotation: 0, zIndex: 991, locked: true, visible: true, sourceRefs: [], content: { text: String(slideIndex + 1) }, style: { fontFamily: theme.fonts?.body || 'Microsoft YaHei', fontSize: 10, fontWeight: 400, color: textColor, align: 'right', verticalAlign: 'middle', lineHeight: 1.2, italic: false, underline: false, bullet: false, padding: 0 } });
-            if (controls.logoAssetRef) elements.push({ id: 'pivotBrand_logo', type: 'image', x: 1080, y: 28, width: 120, height: 48, rotation: 0, zIndex: 992, locked: true, visible: true, sourceRefs: [], assetRef: controls.logoAssetRef, fit: 'contain', opacity: 1, alt: '组织品牌 Logo' });
-        }
-        return { ...slide, elements };
-    });
-    return normalizePresentation({ ...content, theme: { ...content.theme, ...theme, colors: { ...(content.theme?.colors || {}), ...(theme.colors || {}) }, fonts: { ...(content.theme?.fonts || {}), ...(theme.fonts || {}) } }, slides });
+    return reflowModule.applyTemplateBrandControls(content, template, { normalizePresentation });
 }
 
-function layoutForSlide(template, slide) {
-    const layouts = Array.isArray(template?.definition?.layouts) ? template.definition.layouts : (Array.isArray(template?.layouts) ? template.layouts : []);
-    const requested = String(slide?.layoutId || '').trim();
-    return layouts.find(layout => layout.id === requested)
-        || layouts.find(layout => layout.legacyLayoutId === requested)
-        || layouts.find(layout => slide?.type === 'cover' && (layout.legacyLayoutId === 'cover' || /封面|cover/i.test(layout.name)))
-        || layouts[0]
-        || null;
-}
-
-function templateLayerElements(template, layout, slideIndex) {
-    const masters = Array.isArray(template?.definition?.masters) ? template.definition.masters : [];
-    const master = masters.find(item => item.id === layout?.masterId) || null;
-    const source = [...(master?.decorations || []), ...(layout?.decorations || [])];
-    return source.map((element, index) => ({
-        ...JSON.parse(JSON.stringify(element)),
-        id: `pivotTemplate_${String(master?.id || 'default').replace(/[^A-Za-z0-9_-]/g, '_')}_${String(layout?.id || 'layout').replace(/[^A-Za-z0-9_-]/g, '_')}_${slideIndex + 1}_${index + 1}`,
-        locked: element.locked !== false,
-        visible: element.visible !== false,
-        sourceRefs: []
-    }));
-}
-
-function slotForTextElement(element, placeholders, used) {
-    const text = String(element?.content?.text || '');
-    const role = element?.id === 'title' || Number(element?.style?.fontSize || 0) >= 28 ? 'title' : /副标题|subtitle/i.test(text) ? 'subtitle' : 'body';
-    return placeholders.find(slot => slot.kind === 'text' && !used.has(slot.id) && slot.role === role)
-        || placeholders.find(slot => slot.kind === 'text' && !used.has(slot.id));
-}
-
-function applyTemplateLayoutLayers(content, template, { reflow = false } = {}) {
-    const definition = template?.definition || template || {};
-    if (!Array.isArray(definition.masters) || !definition.masters.length) return content;
-    const theme = definition.theme || content.theme || {};
-    const slides = (content.slides || []).map((slide, slideIndex) => {
-        const layout = layoutForSlide(template, slide);
-        if (!layout) return slide;
-        const master = definition.masters.find(item => item.id === layout.masterId) || null;
-        const elements = (slide.elements || []).filter(element => !String(element.id || '').startsWith('pivotTemplate_')).map(element => JSON.parse(JSON.stringify(element)));
-        if (reflow) {
-            const used = new Set();
-            elements.forEach(element => {
-                if (element.type !== 'text') return;
-                const slot = slotForTextElement(element, layout.placeholders || [], used);
-                if (!slot) return;
-                used.add(slot.id);
-                element.x = slot.x; element.y = slot.y; element.width = slot.width; element.height = slot.height; element.rotation = slot.rotation || 0;
-                if (slot.style && Object.keys(slot.style).length) element.style = { ...element.style, ...slot.style };
-                if (layout.slotAnimations?.[slot.role]) element.animation = { ...layout.slotAnimations[slot.role] };
-            });
-        }
-        const background = master?.background ? {
-            fill: master.background.fill || slide.background?.fill || theme.colors?.background || '#FFFFFF',
-            imageAssetRef: master.background.imageAssetRef || '',
-            opacity: master.background.opacity === undefined ? 1 : master.background.opacity
-        } : slide.background;
-        return { ...slide, layoutId: layout.id, background, transition: layout.defaultTransition?.type !== 'none' ? { ...layout.defaultTransition } : slide.transition, elements: [...templateLayerElements(template, layout, slideIndex), ...elements] };
-    });
-    return normalizePresentation({ ...content, theme: { ...content.theme, ...theme, colors: { ...(content.theme?.colors || {}), ...(theme.colors || {}) }, fonts: { ...(content.theme?.fonts || {}), ...(theme.fonts || {}) } }, slides });
+function applyTemplateLayoutLayers(content, template, options = {}) {
+    return reflowModule.applyTemplateLayoutLayers(content, template, { ...options, normalizePresentation });
 }
 
 async function assertBrandControlAssetAccess(user, definition) {
@@ -382,7 +315,14 @@ function normalizeTemplateDefinition(body = {}) {
         aspectRatio
     }));
     const withTheme = normalizePresentation({ ...normalized, theme: { ...normalized.theme, ...theme, colors: { ...normalized.theme.colors, ...(theme.colors || {}) }, fonts: { ...normalized.theme.fonts, ...(theme.fonts || {}) } } });
-    const masters = Array.isArray(template.masters) ? template.masters.slice(0, 20).map((master, index) => {
+    let rawMasters = Array.isArray(template.masters) ? template.masters : [];
+    if (!rawMasters.length && Array.isArray(template.layouts)) {
+        const neededMasterIds = [...new Set(template.layouts.map(l => String(l?.masterId || l?.master_id || '').trim()).filter(Boolean))];
+        if (neededMasterIds.length) {
+            rawMasters = neededMasterIds.map(id => ({ id, name: id === 'master_cover' ? '封面母版' : '标准母版', background: { fill: withTheme.theme.colors?.background || '#FFFFFF' }, decorations: [] }));
+        }
+    }
+    const masters = rawMasters.slice(0, 20).map((master, index) => {
         const source = master && typeof master === 'object' && !Array.isArray(master) ? master : {};
         const id = normalizeClientId(source.id || `master_${index + 1}`);
         return {
@@ -391,7 +331,7 @@ function normalizeTemplateDefinition(body = {}) {
             background: normalizeTemplateBackground(source.background, withTheme.theme),
             decorations: normalizeTemplateDecorations(source.decorations, aspectRatio, withTheme.theme, `母版 ${id} 的装饰元素`)
         };
-    }) : [];
+    });
     const masterIds = new Set(masters.map(master => master.id));
     if (masterIds.size !== masters.length) throw publicError('模板不能包含重复母版标识。', 400, 'PRESENTATION_TEMPLATE_MASTER_DUPLICATE');
     const layouts = Array.isArray(template.layouts) ? template.layouts.slice(0, 30).map(layout => {

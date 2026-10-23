@@ -8,6 +8,21 @@ const { voiceStreaming } = require('../../services/speech-recognition/streaming'
 function registerVoiceRecognitionRoutes(router, { authMiddleware, service = speechService }) {
     const limiter = rateLimit({ windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id),
         standardHeaders: true, legacyHeaders: false, message: { error: '语音请求过于频繁，请稍后重试。', code: 'VOICE_RATE_LIMIT' } });
+    router.get('/chat/voice-synthesis', authMiddleware, limiter, asyncHandler(async (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        const configured = Boolean(require('../../config/env-registry').readTypedEnv('PIVOT_TTS_ENDPOINT'));
+        if (!configured) return res.json({ available: false });
+        res.json(await require('../../services/speech-synthesis').synthesizeSpeech(req.user, {}, { method: 'get' }));
+    }));
+    router.post('/chat/voice-synthesis', authMiddleware, limiter, asyncHandler(async (req, res) => {
+        const controller = new AbortController();
+        const cancel = () => { if (!res.writableEnded) controller.abort(); };
+        res.once('close', cancel);
+        try {
+            const bytes = await require('../../services/speech-synthesis').synthesizeSpeech(req.user, req.body, { signal: controller.signal });
+            res.set('Cache-Control', 'no-store').type('audio/wav').send(bytes);
+        } finally { res.removeListener('close', cancel); }
+    }));
     router.get('/chat/voice-recognition', authMiddleware, asyncHandler(async (_req, res) => {
         res.set('Cache-Control', 'no-store');
         const status = await service.capabilities();

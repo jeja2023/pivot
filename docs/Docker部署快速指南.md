@@ -80,6 +80,10 @@ docker-compose up -d
 
 ## 三、生产环境部署示例
 
+生产服务器的主 `docker-compose.yml` 已直接启用 NVIDIA GPU 透传，原 `docker-compose.gpu.yml` 已移除。宿主机需安装 NVIDIA 驱动和 NVIDIA Container Toolkit，并使用 Docker Compose 2.30.0+。旧 `.env` 中引用 GPU 覆盖文件的 `COMPOSE_FILE`、仅为此设置的 `COMPOSE_PATH_SEPARATOR`，以及启动命令中对应的 `-f` 参数应删除。
+
+更新配置后执行 `docker compose up -d --no-build --force-recreate pivot` 重建主容器，再用 `docker exec pivot nvidia-smi` 验证；普通 restart 不会更新设备请求。无 GPU 的主机需先从主配置移除 `gpus` 与两项 NVIDIA 环境变量。
+
 ### 完整的 docker-compose.yml
 
 ```yaml
@@ -89,6 +93,7 @@ services:
   pivot:
     image: pivot:latest
     container_name: pivot
+    gpus: all
     ports:
       - "3000:3000"
     
@@ -100,6 +105,8 @@ services:
       - ./logs:/app/logs              # 日志（可选）
     
     environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - NODE_ENV=production
       - TZ=Asia/Shanghai
       # - ENABLE_DESKTOP_DOWNLOAD=true  # 如需显式启用

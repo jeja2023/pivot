@@ -116,7 +116,7 @@ function buildSlidesMessages(body = {}) {
                 materials ? `材料：\n${materials}` : '材料：未提供。',
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
-                `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":80,"y":180,"width":1120,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
+                `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
                 '仅可使用 text、shape、table、chart 元素；不要输出 image 或任意外部 URL。每页最多 4 个元素（含标题），每个 text 的文字不超过 240 个字符，speakerNotes 不超过 160 个字符；坐标基于 1280x720，元素不能越界。图表仅在材料给出数值数据时使用。表格必须提供至少一个非空 columns 字段，所有 rows 的列数必须与 columns 一致；无法提供可核实表格数据时，改用 text 元素。图表必须提供至少两个 data.columns 字段及其对应数值行。',
                 compact ? '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
             ].join('\n')
@@ -421,7 +421,7 @@ function repairAiPresentationProposal(proposal, options = {}) {
             }
             return [];
         });
-        if (!elements.length) elements.push({ id: uniqueAiId('content_placeholder', 'content_placeholder_' + (slideIndex + 1), usedElementIds), type: 'text', x: 80, y: 180, width: Math.min(960, canvas.width - 160), height: 120, rotation: 0, zIndex: 1, locked: false, visible: true, sourceRefs: [], content: { text: '本页内容待补充' }, style: { fontSize: 24, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, padding: 0 } });
+        if (!elements.length) elements.push({ id: uniqueAiId('content_placeholder', 'content_placeholder_' + (slideIndex + 1), usedElementIds), type: 'text', x: 100, y: 180, width: Math.min(960, canvas.width - 200), height: 120, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text: '本页内容待补充' }, style: { fontSize: 24, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, padding: 0 } });
         const background = isAiObject(safeSlide.background) ? safeSlide.background : {};
         return { ...safeSlide, id: uniqueAiId(safeSlide.id, 'slide_' + (slideIndex + 1), usedSlideIds), type: normalizeAiText(safeSlide.type, 'content', 48), layoutId: normalizeAiText(safeSlide.layoutId, 'title-content', 96), background: { fill: normalizeAiColor(background.fill, '#FFFFFF'), imageAssetRef: '', opacity: normalizeAiNumber(background.opacity, 1, 0, 1) }, elements, speakerNotes: normalizeAiText(safeSlide.speakerNotes, '', 12000), sourceRefs: normalizeAiSourceRefs(safeSlide.sourceRefs, sourceIds) };
     });

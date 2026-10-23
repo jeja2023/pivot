@@ -173,46 +173,11 @@
     function textElement(id, x, y, width, height, text, style = {}) {
         return { id, type: 'text', x, y, width, height, rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text }, style: { fontFamily: 'Microsoft YaHei', fontSize: 20, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'top', lineHeight: 1.35, italic: false, underline: false, bullet: false, padding: 0, ...style } };
     }
-    const PRESENTATION_LAYOUT_LABELS = Object.freeze({
-        cover: '封面页', section: '章节过渡页', 'title-content': '标题与正文', 'two-column': '双栏图文',
-        'three-card': '三栏卡片', 'image-focus': '大图重点页', chart: '数据图表页', 'data-chart': '数据图表页',
-        table: '数据表格页', 'data-table': '数据表格页', quote: '引用重点页', summary: '总结行动页'
-    });
     function presentationLayoutLabel(layoutId) {
-        const id = String(layoutId || '').trim();
-        if (PRESENTATION_LAYOUT_LABELS[id]) return PRESENTATION_LAYOUT_LABELS[id];
-        const layouts = templateById(state.active?.template?.id)?.definition?.layouts || [];
-        const configuredName = layouts.find(layout => layout.id === id)?.name?.trim();
-        return configuredName || '自定义布局';
+        return window.Pivot?.moduleApi?.('apps.presentations.templates')?.presentationLayoutLabel?.(layoutId, state, templateById) || '自定义布局';
     }
-    function emptySlide(index) {
-        const template = templateById(state.active?.template?.id);
-        const theme = template?.definition?.theme || state.active?.content?.theme || {};
-        const colors = theme?.colors || state.active?.content?.theme?.colors || {};
-        const layouts = template?.definition?.layouts || [];
-        const layout = layouts.find(item => item.id === 'title-content' || item.legacyLayoutId === 'title-content') || layouts[0] || null;
-        const masters = template?.definition?.masters || [];
-        const master = masters.find(item => item.id === layout?.masterId) || null;
-        const slideId = `slide_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const placeholders = layout?.placeholders || [];
-        const titleSlot = placeholders.find(item => item.kind === 'text' && item.role === 'title') || placeholders.find(item => item.kind === 'text');
-        const bodySlot = placeholders.find(item => item.kind === 'text' && item.id !== titleSlot?.id) || null;
-        const layers = [...(master?.decorations || []), ...(layout?.decorations || [])].map((item, itemIndex) => ({ ...deepClone(item), id: `pivotTemplate_${layout?.id || 'default'}_${index + 1}_${itemIndex + 1}`, locked: item.locked !== false, sourceRefs: [] }));
-        return {
-            id: slideId,
-            index,
-            type: 'content',
-            layoutId: layout?.id || 'title-content',
-            sectionId: '',
-            background: master?.background ? { fill: master.background.fill || colors.background || '', imageAssetRef: master.background.imageAssetRef || '', opacity: master.background.opacity ?? 1 } : { fill: colors.background || '', imageAssetRef: '', opacity: 1 },
-            transition: layout?.defaultTransition?.type && layout.defaultTransition.type !== 'none' ? deepClone(layout.defaultTransition) : { type: 'none', durationMs: 0, direction: '' },
-            elements: [
-                ...layers,
-                { ...textElement('title', titleSlot?.x ?? 80, titleSlot?.y ?? 58, titleSlot?.width ?? 1120, titleSlot?.height ?? 72, '新页面标题', { fontFamily: theme?.fonts?.heading || 'Microsoft YaHei', fontSize: 32, fontWeight: 700, color: colors.text || '', ...(titleSlot?.style || {}) }), animation: deepClone(layout?.slotAnimations?.[titleSlot?.role] || { type: 'none', durationMs: 0, delayMs: 0, direction: '' }) },
-                { ...textElement('body', bodySlot?.x ?? 100, bodySlot?.y ?? 180, bodySlot?.width ?? 1040, bodySlot?.height ?? 380, '在此输入页面内容', { fontFamily: theme?.fonts?.body || 'Microsoft YaHei', fontSize: 20, color: colors.text || '', ...(bodySlot?.style || {}) }), animation: deepClone(layout?.slotAnimations?.[bodySlot?.role] || { type: 'none', durationMs: 0, delayMs: 0, direction: '' }) }
-            ],
-            speakerNotes: '', sourceRefs: []
-        };
+    function emptySlide(index, requestedLayoutId = 'title-content') {
+        return window.Pivot?.moduleApi?.('apps.presentations.templates')?.buildEmptySlide?.(index, requestedLayoutId, state, { templateById, textElement, deepClone }) || { id: `slide_${Date.now()}`, index, elements: [] };
     }
     function ensureView() {
         const view = byId('presentations-view');
@@ -308,7 +273,7 @@
             wrap.appendChild(dot);
             const titleBtn = document.createElement('button'); titleBtn.type = 'button'; titleBtn.className = 'presentation-table-title-btn'; titleBtn.dataset.presentationAction = 'open'; titleBtn.dataset.presentationId = doc.id; titleBtn.textContent = doc.title || '未命名演示文稿'; titleBtn.title = doc.title || '未命名演示文稿';
             wrap.appendChild(titleBtn);
-            if (doc.favorite) { const fav = document.createElement('span'); fav.className = 'presentation-favorite-badge'; fav.textContent = '★'; fav.title = '已收藏'; wrap.appendChild(fav); }
+            if (doc.favorite) { const fav = document.createElement('span'); fav.className = 'presentation-favorite-badge'; PivotSafeHtml.setHtml(fav, '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'); fav.title = '已收藏'; wrap.appendChild(fav); }
             tdTitle.appendChild(wrap);
             const tdTpl = document.createElement('td'); const tplName = templateById(doc.template?.id)?.name || doc.template?.name || '自定义主题'; tdTpl.textContent = tplName; tdTpl.title = tplName;
             const tdVer = document.createElement('td'); tdVer.className = 'text-center'; tdVer.textContent = 'v' + (doc.version || 1);
@@ -353,6 +318,7 @@
     const collab = () => window.Pivot?.moduleApi?.('apps.presentations.collab');
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
     const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
+    const templates = templatePresenter;
     async function openPresentation(id) {
         await saveActive({ force: true });
         setStatus('正在打开演示文稿…');
@@ -446,21 +412,57 @@
         const content = state.active.content;
         stage.style.width = `${content.width * state.zoom}px`;
         stage.style.height = `${content.height * state.zoom}px`;
-        stage.style.background = slide.background.fill;
+        const prevSlideId = stage.dataset.slideId;
+        const transitionType = slide.transition?.type && slide.transition.type !== 'none' ? slide.transition.type : 'fade';
         stage.dataset.slideId = slide.id;
+        if (prevSlideId && prevSlideId !== slide.id) {
+            stage.classList.remove('presentation-transition-fade', 'presentation-transition-push', 'presentation-transition-zoom', 'presentation-transition-wipe');
+            void stage.offsetWidth;
+            stage.classList.add('presentation-transition-' + transitionType);
+        }
         if (slide.background.imageAssetRef) renderImage({ assetRef: slide.background.imageAssetRef }, stage);
         slide.elements.filter(element => element.visible).sort((a, b) => a.zIndex - b.zIndex).forEach(element => {
+            const isTemplateLayer = String(element.id || '').startsWith('pivotTemplate_');
+            const isLocked = element.locked === true || isTemplateLayer;
             const node = document.createElement('div');
-            node.className = `presentation-canvas-element presentation-canvas-${element.type}${(state.selectedElementIds || []).includes(element.id) ? ' is-selected' : ''}`;
+            node.className = `presentation-canvas-element presentation-canvas-${element.type}${(state.selectedElementIds || []).includes(element.id) ? ' is-selected' : ''}${isLocked ? ' is-locked' : ''}`;
             node.dataset.presentationElementId = element.id;
-            Object.assign(node.style, cssElement(element)); node.style.zIndex = String(element.zIndex || 1); if (element.animation?.type && element.animation.type !== 'none') { node.classList.add('presentation-animate-' + element.animation.type); node.style.animationDuration = String(element.animation.durationMs || 500) + 'ms'; node.style.animationDelay = String(element.animation.delayMs || 0) + 'ms'; }
+            Object.assign(node.style, cssElement(element));
+            node.style.zIndex = String(element.zIndex || 1);
+            if (isTemplateLayer) node.style.pointerEvents = 'none';
+            if (isLocked) node.style.cursor = 'default';
+            if (element.animation?.type && element.animation.type !== 'none') {
+                node.classList.add('presentation-animate-' + element.animation.type);
+                node.style.setProperty('--anim-duration', `${element.animation.durationMs || 500}ms`);
+                node.style.animationDelay = `${element.animation.delayMs || 0}ms`;
+            }
             if (element.type === 'text') {
-                node.textContent = element.content?.text || '';
-                node.style.fontFamily = element.style?.fontFamily || 'Microsoft YaHei'; node.style.fontSize = `${Number(element.style?.fontSize || 18) * state.zoom}px`;
-                node.style.fontWeight = String(element.style?.fontWeight || 400); node.style.color = element.style?.color || '#1F2937'; node.style.textAlign = element.style?.align || 'left'; node.style.lineHeight = String(element.style?.lineHeight || 1.35); node.style.padding = `${Number(element.style?.padding || 0) * state.zoom}px`;
+                const tplApi = templatePresenter();
+                if (tplApi?.renderPresentationTextWithSvgIcons) { tplApi.renderPresentationTextWithSvgIcons(node, element.content?.text, element.style, state.zoom); } else { node.textContent = element.content?.text || ''; }
+                node.style.fontFamily = element.style?.fontFamily || 'Microsoft YaHei';
+                node.style.fontSize = `${Number(element.style?.fontSize || 18) * state.zoom}px`;
+                node.style.fontWeight = String(element.style?.fontWeight || 400);
+                node.style.color = element.style?.color || '#1F2937';
+                node.style.textAlign = element.style?.align || 'left';
+                node.style.lineHeight = String(element.style?.lineHeight || 1.35);
+                node.style.padding = `${Number(element.style?.padding || 0) * state.zoom}px`;
+                node.style.flexDirection = 'column';
                 node.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[element.style?.verticalAlign] || 'flex-start';
+                node.style.alignItems = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[element.style?.align] || 'flex-start';
             } else if (element.type === 'shape') {
-                node.style.background = element.style?.fill || '#FFFFFF'; node.style.borderColor = element.style?.stroke || '#CBD5E1'; node.style.borderWidth = `${Math.max(1, Number(element.style?.strokeWidth || 1) * state.zoom)}px`; node.style.opacity = String(element.style?.opacity ?? 1); node.style.borderRadius = element.shapeType === 'ellipse' ? '50%' : `${Number(element.style?.radius || 0) * state.zoom}px`;
+                node.style.background = element.style?.fill || '#FFFFFF';
+                const strokeW = Number(element.style?.strokeWidth ?? 1);
+                if (element.shapeType === 'line') {
+                    node.style.background = 'transparent';
+                    node.style.borderTop = `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || '#CBD5E1'}`;
+                    node.style.borderLeft = 'none';
+                    node.style.borderRight = 'none';
+                    node.style.borderBottom = 'none';
+                } else {
+                    node.style.border = strokeW > 0 ? `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || '#CBD5E1'}` : 'none';
+                    node.style.borderRadius = element.shapeType === 'ellipse' ? '50%' : `${Number(element.style?.radius || 0) * state.zoom}px`;
+                }
+                node.style.opacity = String(element.style?.opacity ?? 1);
             } else if (element.type === 'image') {
                 node.style.backgroundSize = element.fit === 'contain' ? 'contain' : element.fit === 'stretch' ? '100% 100%' : 'cover'; node.style.backgroundPosition = `${Math.max(0, Math.min(100, Number(element.cropX || 0))) + 50}% ${Math.max(0, Math.min(100, Number(element.cropY || 0))) + 50}%`; node.style.backgroundRepeat = 'no-repeat'; node.style.opacity = String(element.opacity ?? 1); renderImage(element, node);
             } else if (element.type === 'table') {

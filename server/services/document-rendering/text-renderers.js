@@ -133,6 +133,8 @@ function markdownInline(run) {
     if (run.underline) decorated = `_${decorated}_`;
     if (run.italic) decorated = `*${decorated}*`;
     if (run.bold) decorated = `**${decorated}**`;
+    if (run.revision?.type === 'delete') decorated = `~~${decorated}~~`;
+    if (run.revision?.type === 'insert') decorated = `++${decorated}++`;
     return decorated;
 }
 
@@ -312,6 +314,7 @@ function htmlRun(run) {
     if (run.underline) html = `<u>${html}</u>`;
     if (run.italic) html = `<em>${html}</em>`;
     if (run.bold) html = `<strong>${html}</strong>`;
+    if (run.revision) html = `<${run.revision.type === 'insert' ? 'ins' : 'del'}>${html}</${run.revision.type === 'insert' ? 'ins' : 'del'}>`;
     if (declarations.length) html = `<span style="${escapeHtml(declarations.join(';'))}">${html}</span>`;
     return html;
 }

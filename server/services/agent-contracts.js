@@ -90,6 +90,7 @@ function normalizeToolContract(definition = {}) {
         title: String(definition.title || definition.name || '').slice(0, 255),
         description: String(definition.description || '').slice(0, 2000),
         source,
+        ...(definition.databaseTool === true ? { databaseTool: true, databaseConnections: Array.isArray(definition.databaseConnections) ? definition.databaseConnections : [] } : {}),
         capabilities: resolveToolContractCapabilities(definition, toolName, source),
         risk_level: riskLevel,
         idempotent: definition.idempotent === undefined ? inferredIdempotent : Boolean(definition.idempotent),

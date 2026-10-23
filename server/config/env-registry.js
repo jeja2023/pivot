@@ -8,6 +8,8 @@ const REGISTRY_END = '# <<< PIVOT_TYPED_CONFIG_REGISTRY <<<';
 const ROOT = path.resolve(__dirname, '../..');
 
 const ENV_CONFIG_REGISTRY = Object.freeze({
+    PIVOT_TTS_ENDPOINT: { group: '语音合成', type: 'string', defaultValue: '', description: '管理员批准的统一离线 WAV 语音合成端点，例如 http://tts:8502/speech；浏览器不能指定目标。' },
+    PIVOT_TTS_CREDENTIAL: { group: '语音合成', type: 'string', defaultValue: '', description: '统一朗读服务的受控凭据引用；仅有凭据使用权限的账号可以朗读，留空关闭服务。' },
     PIVOT_SERVER_VOICE_ENABLED: { group: '语音识别', type: 'boolean', defaultValue: true, description: '允许登录用户通过统一语音识别服务处理短录音。默认仅本地或内网处理；禁用后不发起服务端识别。' },
     PIVOT_VOICE_PROVIDER: { group: '语音识别', type: 'enum', defaultValue: 'local', values: ['embedded', 'local', 'gateway', 'openai', 'qwen'], description: '标准 Docker 默认 embedded 常驻 CPU 中文双遍识别；源码或桌面未显式配置时保留 local 系统/Vosk 兼容。gateway 连接其他内网服务器，openai/qwen 使用兼容 API；故障不静默切换。' },
     PIVOT_EMBEDDED_VOICE_MODEL_ROOT: { group: '语音识别', type: 'string', defaultValue: 'data/speech-models', description: '内置语音三个模型的根目录；标准 Docker 映射为 /models，子目录为 paraformer、paraformer-streaming、punctuation。' },

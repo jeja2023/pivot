@@ -175,6 +175,7 @@ async function loadAgentArtifactModal(artifactId) {
     modal.querySelector('#agent-artifact-title').textContent = artifact.title || '结果版本';
     modal.querySelector('#agent-artifact-desc').textContent = `${versions.length} 个版本 · 当前版本 ${artifact.current_version || 1}`;
     modal.querySelector('#agent-artifact-content').value = artifact.content || '';
+    window.Pivot.moduleApi('chat.mindmapEditor')?.mount(modal.querySelector('.agent-artifact-editor') || modal.querySelector('.agent-artifact-body') || modal, artifact);
     modal.querySelector('#agent-artifact-note').value = '';
     PivotSafeHtml.setHtml(modal.querySelector('#agent-artifact-diff'), '');
     void loadAgentArtifactRenditions(modal, artifactId);

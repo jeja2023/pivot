@@ -1,6 +1,6 @@
 # Pivot (智枢) —— AI 智能中枢管理系统
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.7.32-%2310b981)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.7.34-%2310b981)
 ![授权](https://img.shields.io/badge/%E6%8E%88%E6%9D%83-%E5%85%A8%E6%A0%88%E7%89%88-blue)
 
 **Pivot (智枢)** 是面向组织内部的全场景智能协同与业务自动化中枢平台，适用于私有化、离线化和企业内网场景。系统以统一的智能工作入口连接对话、专业应用、知识库、工具库和自动化流程，覆盖从信息理解、内容生产、数据分析到任务执行、流程编排和结果沉淀的完整工作链路，并提供多模型接入、审计日志、系统监控和企业级权限治理能力。
@@ -19,13 +19,11 @@ Windows 源码开发启用内置语音前，运行 `python scripts/setup_speech_
 
 左侧导航保持单层结构：`搜索`打开会话、工作流及相关运行记录的全局搜索，`应用`进入应用中心，`自动化`进入统一工作区，并通过顶部的`工作流`和`计划任务`标签切换对应功能，`知识库`管理资料，`工具库`管理数据源、工具与连接；下方展示最近会话，底部`设置`会按账号权限打开系统设置或个人设置。
 
-## 最新版本：0.7.32
+## 最新版本：0.7.34
 
-本版本交付离线工具受控接入与产物链路的代码改造：修复签名 `SKILL.md` ZIP 正文丢失，校验实际工具执行全名；为全局内网连接增加服务端授权核验；交付带认证与资源限制的 MCP 扫描／绘图服务，使结果进入原有产物和下载流程，并支持受控 SVG/PNG 导出及数据库、CAS、上传文件的备份清单校验。
+本版本交付 PPT 演示文稿排版充盈与孤字白板排版治理、纯矢量 SVG 图标体系及前沿范式融合。全面消除段落末行孤字（Orphan）问题，修复 SVG 尺寸解析导致右侧卡片白板的渲染中断缺陷，并充盈双栏清单与引用卡片空白；继续保持前后端模块行数严格受控于 1,000 行治理红线内。
 
-主程序更新后重启；本版无数据库结构迁移，可选工具服务需按部署手册另行安装、配置密钥和授权。全量回归 2,234 项通过、0 失败，两个默认跳过的真实 SDK／Docker 用例已单独验证通过。生产性能和恢复演练仍须在目标环境完成。
-
-详见 [CHANGELOG.md](CHANGELOG.md)、[v0.7.32 发布记录](docs/releases/v0.7.32-离线工具受控接入与产物交付.md)、[部署手册](docs/deployment/离线工具服务部署与验收.md)和[验收记录](docs/reports/离线工具集成代码改造与验收记录_2026-10-23.md)。
+详见 [CHANGELOG.md](CHANGELOG.md)、[v0.7.34 发布记录](docs/releases/v0.7.34-演示文稿版式充盈与孤字白板排版治理.md)、[PPT 验收报告](docs/reports/演示文稿前沿多色排版与架构治理验收报告_2026-10-23.md)、[部署手册](docs/deployment/离线办公增强部署与验收.md)和[实施记录](docs/reports/离线办公增强实施与验收记录_2026-10-23.md)。
 
 v0.7.19 的模型回复重复修复继续保留：结束快照不再作为新正文追加，短回复收尾只发送一次，正常重复措辞保留。详见 [修复记录](docs/reports/v0.7.19-模型回复重复修复记录_2026-10-20.md)。
 
@@ -264,11 +262,16 @@ docker network create ai-bridge
 docker compose up -d
 ```
 
-GPU 主机安装 NVIDIA Container Toolkit 后，再显式叠加 GPU 覆盖层：
+生产主 Compose 已直接启用 NVIDIA GPU 透传。宿主机需安装 NVIDIA 驱动及 NVIDIA Container Toolkit，Docker Compose 需为 2.30.0 或更新版本。无需携带 GPU 覆盖文件，也无需在 `.env` 设置对应的 `COMPOSE_FILE`。
+
+`docker-compose.gpu.yml` 已移除。从旧部署切换时，删除 `.env` 中引用它的 `COMPOSE_FILE` 及启动命令中对应的 `-f` 参数；仅为此设置的 `COMPOSE_PATH_SEPARATOR` 也可删除。更新主文件后重新创建容器，`docker restart` 不会改变设备请求：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+docker compose up -d --no-build --force-recreate pivot
+docker exec pivot nvidia-smi
 ```
+
+该主配置面向 GPU 服务器；无 NVIDIA GPU 的主机需移除 `gpus` 及对应的两项 NVIDIA 环境变量后使用。
 
 ### 3. 升级已有部署
 
@@ -618,4 +621,4 @@ npm run check:external:live
 
 详细变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
-**当前版本**：v0.7.32
+**当前版本**：v0.7.34

@@ -38,12 +38,16 @@ function wrapText(text, maxChars) {
     const lines = [];
     String(text ?? '').split('\n').forEach(sourceLine => {
         let line = '';
+        let currentUnits = 0;
         for (const char of sourceLine) {
-            line += char;
-            if (line.length >= maxChars) {
+            const charUnits = char.charCodeAt(0) <= 255 ? 1 : 1.75;
+            if (currentUnits + charUnits > maxChars && line.length > 0) {
                 lines.push(line);
                 line = '';
+                currentUnits = 0;
             }
+            line += char;
+            currentUnits += charUnits;
         }
         lines.push(line || ' ');
     });
@@ -241,16 +245,38 @@ async function slideSvg(slide, presentation, options = {}) {
             if (data) pieces.push(`<image href="${data}" x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" opacity="${element.opacity}" preserveAspectRatio="xMidYMid ${element.fit === 'contain' ? 'meet' : element.fit === 'stretch' ? 'none' : 'slice'}"/>`);
             continue;
         }
+const SVG_VECTOR_ICONS = {
+    '💡': { color: '#D8A23A', svg: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" fill="none" stroke="currentColor" stroke-width="2"/>' },
+    '🎯': { color: '#C84A4A', svg: '<circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/>' },
+    '✦': { color: '#1F5EA8', svg: '<path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" fill="currentColor"/>' },
+    '★': { color: '#D8A23A', svg: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/>' },
+    '☑': { color: '#2E8B57', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="#E8F5E9" stroke="#2E8B57" stroke-width="2"/><path d="M9 12l2 2 4-4" fill="none" stroke="#2E8B57" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' },
+    '□': { color: '#94A3B8', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2"/>' },
+    '🚀': { color: '#1F5EA8', svg: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" fill="none" stroke="currentColor" stroke-width="2"/>' },
+    '📌': { color: '#17A8C7', svg: '<line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" stroke-width="2"/><path d="M5 17h14v-2l-2-2V5a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v8l-2 2v2z" fill="none" stroke="currentColor" stroke-width="2"/>' },
+    '⚠️': { color: '#D8A23A', svg: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" fill="none" stroke="currentColor" stroke-width="2"/><line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" stroke-width="2"/><line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" stroke-width="2"/>' },
+    '🛡️': { color: '#7A5AF8', svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="none" stroke="currentColor" stroke-width="2"/>' }
+};
+
         if (element.type === 'media') {
             const poster = await resolveDataUri(element.posterAssetRef, options.assetResolver);
             if (poster) pieces.push('<image href="' + poster + '" x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" preserveAspectRatio="xMidYMid meet"/>');
             pieces.push('<rect x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" rx="10" fill="' + (poster ? '#000000' : '#0F172A') + '" fill-opacity="' + (poster ? '0.22' : '1') + '" stroke="#64748B"/>');
-            pieces.push('<text x="' + (element.x + element.width / 2) + '" y="' + (element.y + element.height / 2) + '" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="22" fill="#FFFFFF">' + (element.mediaType === 'audio' ? '🔊 音频' : '▶ 视频') + '</text>');
+            const centerX = element.x + element.width / 2;
+            const centerY = element.y + element.height / 2;
+            if (element.mediaType === 'audio') {
+                pieces.push(`<g transform="translate(${centerX - 50}, ${centerY - 12})"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5" fill="#FFFFFF"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/></g>`);
+                pieces.push(`<text x="${centerX + 8}" y="${centerY + 7}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#FFFFFF">音频媒体</text>`);
+            } else {
+                pieces.push(`<g transform="translate(${centerX - 50}, ${centerY - 12})"><polygon points="5,3 19,12 5,21" fill="#FFFFFF"/></g>`);
+                pieces.push(`<text x="${centerX + 8}" y="${centerY + 7}" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="20" font-weight="600" fill="#FFFFFF">视频媒体</text>`);
+            }
             continue;
         }
         if (element.type === 'attachment') {
             pieces.push('<rect x="' + element.x + '" y="' + element.y + '" width="' + element.width + '" height="' + element.height + '" rx="8" fill="#F8FAFC" stroke="#64748B"/>');
-            pieces.push('<text x="' + (element.x + 14) + '" y="' + (element.y + 28) + '" font-family="Microsoft YaHei, sans-serif" font-size="16" fill="#1E293B">📎 ' + escapeXml(element.filename) + '</text>');
+            pieces.push(`<g transform="translate(${element.x + 14}, ${element.y + 11})"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="#1E293B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>`);
+            pieces.push('<text x="' + (element.x + 40) + '" y="' + (element.y + 28) + '" font-family="Microsoft YaHei, sans-serif" font-size="16" fill="#1E293B">' + escapeXml(element.filename) + '</text>');
             continue;
         }
         if (element.type === 'diagram') {
@@ -284,7 +310,28 @@ async function slideSvg(slide, presentation, options = {}) {
         const textX = element.style.align === 'center' ? element.x + element.width / 2 : element.style.align === 'right' ? element.x + element.width - element.style.padding : element.x + element.style.padding;
         const startY = element.y + element.style.padding + element.style.fontSize;
         const weight = element.style.fontWeight >= 600 ? '700' : '400';
-        pieces.push(`<text x="${textX}" y="${startY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? element.style.fontSize * element.style.lineHeight : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`);
+        const hasIcons = lines.some(l => Object.keys(SVG_VECTOR_ICONS).some(k => l.includes(k)));
+        if (!hasIcons) {
+            pieces.push(`<text x="${textX}" y="${startY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? element.style.fontSize * element.style.lineHeight : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`);
+        } else {
+            lines.forEach((line, index) => {
+                const lineY = startY + index * element.style.fontSize * element.style.lineHeight;
+                let foundKey = null;
+                for (const k of Object.keys(SVG_VECTOR_ICONS)) {
+                    if (line.trim().startsWith(k)) { foundKey = k; break; }
+                }
+                if (foundKey) {
+                    const iconDef = SVG_VECTOR_ICONS[foundKey];
+                    const cleanText = line.replace(foundKey, '').trim();
+                    const scale = (element.style.fontSize * 0.95) / 24;
+                    const iconY = lineY - element.style.fontSize * 0.82;
+                    pieces.push(`<g transform="translate(${textX}, ${iconY}) scale(${scale.toFixed(3)})" color="${iconDef.color}">${iconDef.svg}</g>`);
+                    pieces.push(`<text x="${textX + element.style.fontSize * 1.35}" y="${lineY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}">${escapeXml(cleanText)}</text>`);
+                } else {
+                    pieces.push(`<text x="${textX}" y="${lineY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}">${escapeXml(line)}</text>`);
+                }
+            });
+        }
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${presentation.width}" height="${presentation.height}" viewBox="0 0 ${presentation.width} ${presentation.height}">${pieces.join('')}</svg>`;
 }

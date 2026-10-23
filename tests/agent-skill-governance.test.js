@@ -312,7 +312,7 @@ test('Document IR 白名单校验拒绝非法块与内联图片，并保证规�
 test('渲染器输出确定性，公文 DOCX 满足结构与度量断言且页脚不含 ASCII 问号', async () => {
     const checked = validateDocumentIr(officialIr());
     const statuses = listRendererStatus();
-    assert.deepEqual(statuses.map(item => item.format).sort(), ['docx', 'html', 'md', 'pdf', 'png', 'svg', 'xlsx']);
+    assert.deepEqual(statuses.map(item => item.format).sort(), ['docx', 'html', 'md', 'pdf', 'png', 'svg', 'wav', 'xlsx']);
     for (const format of ['docx', 'xlsx', 'html', 'md']) {
         const first = await renderDocumentIr(checked.ir, format, { skipValidation: true });
         const second = await renderDocumentIr(checked.ir, format, { skipValidation: true });

@@ -18,6 +18,7 @@ const {
 const { verifyTaskOutcome, taskVerificationFailureMessage } = require('./agent-verification');
 const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle');
 const { observationMessages } = require('./agent-runtime/planner');
+const { resolveApprovalKey } = require('./agent-approval-grants');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -112,9 +113,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const recordUsage = deps.recordAgentModelUsage || recordAgentModelUsage;
         const recordToolCallCapability = deps.recordNativeToolCallCapability || recordNativeToolCallCapability;
         const taskBudget = deps.taskBudget || null;
-        const verifyOutcome = async (answer, partial = false, reason = '') => {
+        const verifyOutcome = async (answer, partial = false, reason = '', repairOptions = null) => {
             const verify = deps.verifyAgentOutcome || (options => verifyTaskOutcome(options));
-            return await verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget });
+            return await verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget, repairOptions });
         };
         const tools = buildAgentToolSchemas(plannerToolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
@@ -515,8 +516,17 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const budgetWarning = usageResult?.budgetExceeded ? '已达到总 Token 预算，以下为当前已生成结果。' : '';
                 await assertRunNotCancelled(runId);
                 await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
-                const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning);
+                const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning, { allowed: !budgetWarning, remainingSteps: sliceEndStep - step });
                 await assertRunNotCancelled(runId);
+                if (verification.repair?.allowed) {
+                    const metadata = deps.getRunMetadata?.(run) || {};
+                    run.metadata = { ...metadata, taskContract: verification.taskContract };
+                    const message = require('./agent-verification-repair').buildVerificationRepairMessage(verification);
+                    observations.push({ type: 'verification_repair', step, tool: 'task.verification', output: { executed: false, message } });
+                    conversation.push({ role: 'assistant', content: answer }, { role: 'user', content: message });
+                    finalizingAnswer = false;
+                    continue;
+                }
                 const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
                 const finalStatus = awaitingCommit
                     ? 'awaiting_commit'
@@ -537,7 +547,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     last_heartbeat_at: getBeijingTimestamp(),
                     updated_at: getBeijingTimestamp()
                 });
-                await deps.createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行已完成' : awaitingCommit ? '任务等待提交' : '任务需要补充或修复', deps.getAgentRunTitle(run));
+                await deps.createAgentNotification(user.id, runId, verified ? 'completed' : 'warning', verified ? '任务运行已完成' : awaitingCommit ? '任务等待提交' : '任务结果有待处理事项', deps.getAgentRunTitle(run));
                 return { completed: true, roundsUsed };
             }
 
@@ -590,11 +600,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     preparedCalls.push({ call, tool: selectedTool, input: args, unavailable: error.message, error });
                     continue;
                 }
-                if (await deps.maybePauseForApproval(run, progressive.approvalTool, progressive.approvalInput)) {
+                const approvalKey = resolveApprovalKey(run, progressive.approvalToolName, progressive.approvalInput);
+                if (await deps.maybePauseForApproval(run, progressive.approvalTool, progressive.approvalInput, approvalKey)) {
                     // 保持运行处于待审批状态；审批通过后由恢复流程继续。
                     return { completed: true, roundsUsed };
                 }
-                preparedCalls.push({ ...progressive, call, tool: progressive.approvalTool, input: args });
+                preparedCalls.push({ ...progressive, call, tool: progressive.approvalTool, input: args, approvalKey });
             }
 
             const executedCalls = await executeToolCallsInOrder(preparedCalls, async prepared => {
@@ -603,7 +614,16 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     return { ...prepared, status: 'unavailable', durationMs: 0 };
                 }
                 const { call, input: args } = prepared;
-                if (taskBudget) taskBudget.consumeTool(prepared.approvalTool || prepared.tool || { name: call?.name || '' });
+                // 排程可能先准备多个同名调用。前一个调用消耗单次审批后，后一个
+                // 必须重新暂停，不能沿用准备阶段的旧授权或只抛错误而遗留 running。
+                if (deps.isApprovalGranted && !prepared.discoveryRequired) {
+                    prepared.approvalKey = resolveApprovalKey(run, prepared.approvalToolName, prepared.approvalInput, prepared.approvalKey);
+                    if (await deps.maybePauseForApproval(run, prepared.approvalTool, prepared.approvalInput, prepared.approvalKey)) {
+                        throw Object.assign(new Error('等待当前操作审批。'), { code: 'AGENT_APPROVAL_REQUIRED' });
+                    }
+                }
+                const delegatedBudget = call.name === 'tools.execute' && !prepared.discoveryRequired;
+                if (taskBudget && !delegatedBudget) taskBudget.consumeTool(prepared.approvalTool || prepared.tool || { name: call?.name || '' });
                 const callStart = Date.now();
                 await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
@@ -626,10 +646,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                             contextHash: stepContext?.contextHash || '',
                             budget: deps.taskBudget || null,
                             taskTransactionId: String(taskTransactionId || ''),
-                            budgetAlreadyConsumed: true,
-                            approvalGranted: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),
-                            allowApproval: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, '', prepared.approvalInput || args)),
+                            budgetAlreadyConsumed: !delegatedBudget,
+                            approvalGranted: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, prepared.approvalKey, prepared.approvalInput || args)),
+                            allowApproval: Boolean(deps.isApprovalGranted?.(run, prepared.approvalToolName || call.name, prepared.approvalKey, prepared.approvalInput || args)),
+                            approvalKey: prepared.approvalKey,
                             toolDiscoveryState,
+                            discoveryRequired: prepared.discoveryRequired,
                             plannerToolNames,
                             signal,
                             waitForWorkflowDelay: deps.waitForWorkflowDelay,

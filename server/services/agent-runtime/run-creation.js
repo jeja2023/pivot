@@ -148,6 +148,12 @@ function createAgentRunFactory(deps = {}) {
         const normalizedRunMode = normalizeRunMode(runMode);
         const normalizedRouter = normalizeRouterStrategy(modelRouter);
         const runMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+        // 新运行不继承或接受调用方自报的审批。审批只能由参数绑定的服务端决定写入。
+        for (const key of ['approvalGrants', 'approvedTools', 'approvedApprovalKeys', 'pendingApproval', 'revokedApproval']) delete runMetadata[key];
+        if (runMetadata.resumeContext) {
+            runMetadata.resumeContext = { ...runMetadata.resumeContext };
+            for (const key of ['approvedTool', 'approvedInputHash', 'approvedApprovalKey', 'approvalHashVersion']) delete runMetadata.resumeContext[key];
+        }
         // 新运行必须建立独立的消息和验收关联，不能把父任务的回写标记当作本次结果。
         if (runMetadata.chatBridge) {
             runMetadata.chatBridge = { ...runMetadata.chatBridge };

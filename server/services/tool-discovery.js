@@ -47,11 +47,16 @@ function toolRef(tool = {}) {
     return {
         toolName: tool.name || tool.fullName || '',
         releaseId: tool.catalogReleaseId || null,
-        definitionDigest: tool.definitionDigest || tool.definition_digest || crypto.createHash('sha256').update(JSON.stringify({
+        definitionDigest: tool.definitionDigest || tool.definition_digest || digest({
             name: tool.name || tool.fullName || '', version: tool.version || '',
             inputSchema: tool.input_schema || tool.inputSchema || {}, outputSchema: tool.output_schema || tool.outputSchema || {},
-            capabilities: tool.capabilities || [], risk: tool.risk_level || tool.risk || '', source: tool.source || ''
-        })).digest('hex')
+            capabilities: tool.capabilities || [], risk: tool.risk_level || tool.risk || '', source: tool.source || '',
+            sideEffect: Boolean(tool.side_effect ?? tool.sideEffect), idempotent: Boolean(tool.idempotent),
+            requiresApproval: Boolean(tool.approval_required || tool.requiresApproval || tool.alwaysRequiresApproval),
+            concurrency: tool.concurrency || 'read', network: Boolean(tool.network),
+            timeout: tool.timeout || {}, authScopes: tool.authScopes || [],
+            databaseConnections: (tool.databaseConnections || []).map(item => String(item.fullName || item.serverId || '')).sort()
+        })
     };
 }
 
@@ -203,11 +208,11 @@ async function describeToolForUser(user, reference = {}, deps = {}, options = {}
     const resolvedRef = toolRef(tool);
     const expectedRelease = reference.releaseId ?? reference.release_id;
     if (expectedRelease != null && String(expectedRelease) !== String(resolvedRef.releaseId ?? '')) {
-        const error = new Error('工具发布版本已更新，请重新搜索并确认最新版本。'); error.status = 409; error.code = 'TOOL_REFERENCE_STALE'; throw error;
+        const error = new Error('工具发布版本已更新，请重新搜索并确认最新版本。'); error.status = 409; error.code = 'TOOL_REFERENCE_STALE'; error.referenceRejected = true; throw error;
     }
     const expectedDigest = String(reference.definitionDigest || reference.definition_digest || '').trim();
     if (expectedDigest && expectedDigest !== resolvedRef.definitionDigest) {
-        const error = new Error('工具定义已更新，请重新搜索并确认最新版本。'); error.status = 409; error.code = 'TOOL_REFERENCE_STALE'; throw error;
+        const error = new Error('工具定义已更新，请重新搜索并确认最新版本。'); error.status = 409; error.code = 'TOOL_REFERENCE_STALE'; error.referenceRejected = true; throw error;
     }
     return {
         toolRef: resolvedRef, name: tool.name, title: tool.title || tool.name, description: tool.description || '',

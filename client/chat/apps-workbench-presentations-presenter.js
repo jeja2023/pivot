@@ -108,17 +108,31 @@
         node.style.height = (Number(element.height || 0) / 7.2) + '%';
         node.style.zIndex = String(element.zIndex || 0);
         if (element.type === 'text') {
-            node.textContent = element.content?.text || '';
+            if (window.Pivot?.moduleApi?.('apps.presentations.templates')?.renderPresentationTextWithSvgIcons) { window.Pivot.moduleApi('apps.presentations.templates').renderPresentationTextWithSvgIcons(node, element.content?.text, element.style, 0.55); } else { node.textContent = element.content?.text || ''; }
             node.style.fontFamily = element.style?.fontFamily || 'Microsoft YaHei';
             node.style.fontSize = Math.max(9, Number(element.style?.fontSize || 18) * 0.55) + 'px';
             node.style.fontWeight = String(element.style?.fontWeight || 400);
             node.style.color = element.style?.color || '#1F2937';
             node.style.textAlign = element.style?.align || 'left';
             node.style.lineHeight = String(element.style?.lineHeight || 1.3);
+            node.style.display = 'flex';
+            node.style.flexDirection = 'column';
+            node.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[element.style?.verticalAlign] || 'flex-start';
+            node.style.alignItems = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[element.style?.align] || 'flex-start';
         } else if (element.type === 'shape') {
             node.style.background = element.style?.fill || '#FFFFFF';
-            node.style.border = Math.max(1, Number(element.style?.strokeWidth || 1)) + 'px solid ' + (element.style?.stroke || '#CBD5E1');
-            node.style.borderRadius = (element.shapeType === 'ellipse' ? '50%' : Math.max(0, Number(element.style?.radius || 0) * 0.55) + 'px');
+            const strokeW = Number(element.style?.strokeWidth ?? 1);
+            if (element.shapeType === 'line') {
+                node.style.background = 'transparent';
+                node.style.borderTop = `${Math.max(1, strokeW)}px solid ${element.style?.stroke || '#CBD5E1'}`;
+                node.style.borderLeft = 'none';
+                node.style.borderRight = 'none';
+                node.style.borderBottom = 'none';
+            } else {
+                node.style.border = strokeW > 0 ? `${Math.max(1, strokeW)}px solid ${element.style?.stroke || '#CBD5E1'}` : 'none';
+                node.style.borderRadius = (element.shapeType === 'ellipse' ? '50%' : Math.max(0, Number(element.style?.radius || 0) * 0.55) + 'px');
+            }
+            node.style.opacity = String(element.style?.opacity ?? 1);
         } else if (element.type === 'image') {
             node.src = API + '/assets/content/by-ref?ref=' + encodeURIComponent(element.assetRef) + '&presentationId=' + encodeURIComponent(state.active?.id || '');
             node.alt = element.alt || '';
@@ -129,6 +143,11 @@
             node.style.padding = '10px';
             node.style.border = '1px solid #CBD5E1';
             node.style.background = '#FFFFFF';
+        }
+        if (element.animation?.type && element.animation.type !== 'none') {
+            node.classList.add('presentation-animate-' + element.animation.type);
+            node.style.setProperty('--anim-duration', `${element.animation.durationMs || 500}ms`);
+            node.style.animationDelay = `${element.animation.delayMs || 0}ms`;
         }
         return node;
     }
@@ -142,7 +161,8 @@
         if (preview) {
             preview.replaceChildren();
             const canvas = document.createElement('div');
-            canvas.className = 'presentation-presenter-canvas';
+            const transitionType = slide.transition?.type && slide.transition.type !== 'none' ? slide.transition.type : 'fade';
+            canvas.className = `presentation-presenter-canvas presentation-transition-${transitionType}`;
             canvas.style.background = slide.background?.fill || '#FFFFFF';
             (slide.elements || []).filter(item => item.visible !== false).sort((a, b) => Number(a.zIndex || 0) - Number(b.zIndex || 0)).forEach(item => canvas.appendChild(presenterTextElement(item, state)));
             preview.appendChild(canvas);
@@ -600,65 +620,7 @@
     }
 
     function applyLayoutToSlide(layoutId, state) {
-        const slide = state.active?.content?.slides?.find(s => s.id === state.selectedSlideId) || state.active?.content?.slides?.[0];
-        if (!slide) return;
-        const template = state.active?.templateDefinition
-            ? { ...state.active.template, definition: state.active.templateDefinition }
-            : state.templates?.find(item => item.id === state.active?.template?.id);
-        const importedLayout = template?.definition?.layouts?.find(layout => layout.id === layoutId);
-        if (importedLayout?.placeholders?.length) {
-            const editable = slide.elements.filter(element => !String(element.id || '').startsWith('pivotTemplate_'));
-            const texts = editable.filter(element => element.type === 'text').sort((left, right) => Number(right.style?.fontSize || 0) - Number(left.style?.fontSize || 0));
-            const used = new Set();
-            editable.forEach(element => {
-                const role = element.type === 'text' && (element.id === 'title' || Number(element.style?.fontSize || 0) >= 28) ? 'title' : element.type === 'image' ? 'image' : element.type === 'chart' ? 'chart' : element.type === 'table' ? 'table' : 'body';
-                const slot = importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === element.type && item.role === role)
-                    || (element.type === 'text' ? importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === 'text' && texts.includes(element)) : importedLayout.placeholders.find(item => !used.has(item.id) && item.kind === element.type));
-                if (!slot) return;
-                used.add(slot.id); element.x = slot.x; element.y = slot.y; element.width = slot.width; element.height = slot.height; element.rotation = slot.rotation || 0;
-                if (element.type === 'text' && slot.style && Object.keys(slot.style).length) element.style = { ...element.style, ...slot.style };
-                if (slot.role && importedLayout.slotAnimations?.[slot.role]) element.animation = { ...importedLayout.slotAnimations[slot.role] };
-            });
-            slide.layoutId = layoutId;
-            return;
-        }
-        const textElements = slide.elements.filter(element => element.type === 'text').sort((a, b) => (b.style?.fontSize || 0) - (a.style?.fontSize || 0));
-        const title = textElements[0];
-        const body = textElements.filter(element => element !== title);
-        const nonTitle = slide.elements.filter(element => element !== title);
-        if (layoutId === 'cover' && title) {
-            title.x = 88; title.y = 205; title.width = 1104; title.height = 96; title.style.align = 'center';
-            body.forEach((element, index) => { element.x = 180; element.y = 345 + index * 72; element.width = 920; element.height = 54; if (element.type === 'text') element.style.align = 'center'; });
-        }
-        if (layoutId === 'section' && title) { title.x = 130; title.y = 280; title.width = 1020; title.height = 100; title.style.align = 'center'; title.style.fontSize = Math.max(36, title.style.fontSize); }
-        if (layoutId === 'title-content' && title) {
-            title.x = 80; title.y = 58; title.width = 1120; title.height = 72; title.style.align = 'left';
-            body.forEach((element, index) => { element.x = 100; element.y = 180 + index * 200; element.width = 1040; element.height = index ? 150 : 390; });
-        }
-        if (layoutId === 'two-column' && title) {
-            title.x = 80; title.y = 54; title.width = 1120; title.height = 72;
-            nonTitle.forEach((element, index) => { const column = index % 2; const row = Math.floor(index / 2); element.x = 80 + column * 570; element.y = 170 + row * 250; element.width = 530; element.height = 220; });
-        }
-        if (layoutId === 'three-card' && title) {
-            title.x = 80; title.y = 54; title.width = 1120; title.height = 72;
-            nonTitle.forEach((element, index) => { element.x = 70 + (index % 3) * 390; element.y = 190 + Math.floor(index / 3) * 240; element.width = 350; element.height = 210; });
-        }
-        if (layoutId === 'image-focus' && title) {
-            title.x = 80; title.y = 54; title.width = 1120; title.height = 72;
-            nonTitle.forEach((element, index) => { element.x = index === 0 ? 80 : 810; element.y = index === 0 ? 160 : 185; element.width = index === 0 ? 670 : 330; element.height = index === 0 ? 420 : 260; });
-        }
-        if ((layoutId === 'chart' || layoutId === 'table') && title) {
-            title.x = 80; title.y = 54; title.width = 1120; title.height = 72;
-            nonTitle.forEach((element, index) => { element.x = index === 0 ? 80 : 930; element.y = index === 0 ? 155 : 185; element.width = index === 0 ? 800 : 240; element.height = index === 0 ? 440 : 290; });
-        }
-        if (layoutId === 'quote') {
-            nonTitle.forEach((element, index) => { element.x = 160; element.y = 190 + index * 220; element.width = 960; element.height = 170; if (element.type === 'text') element.style.align = 'center'; });
-        }
-        if (layoutId === 'summary' && title) {
-            title.x = 80; title.y = 54; title.width = 1120; title.height = 72;
-            nonTitle.forEach((element, index) => { element.x = 110; element.y = 175 + index * 160; element.width = 1010; element.height = 125; });
-        }
-        slide.layoutId = layoutId;
+        return window.Pivot?.moduleApi?.('apps.presentations.templates')?.applyLayoutToSlide?.(layoutId, state);
     }
 
     // ==========================================

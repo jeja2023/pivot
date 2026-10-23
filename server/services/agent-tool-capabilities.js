@@ -17,6 +17,8 @@ const { normalizeCapabilityList } = require('./agent-capability-registry');
 
 /** 内置工具的精确能力登记。新增内置工具必须在此登记，否则只获得最小能力。 */
 const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
+    'document.compare': ['document.render'],
+    'viz.mindmap': ['viz.render'],
     'chat.read_source': ['conversation.read_source'],
     'agent.llm': ['model.invoke'],
     'agent.content_review': ['model.invoke', 'agent.review'],

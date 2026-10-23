@@ -1,6 +1,7 @@
 'use strict';
 
 const { assertApprovalBinding } = require('./approvals');
+const { approvalExpiryMs } = require('../agent-approval-grants');
 
 // 审批决定先以参数绑定的比较更新认领，避免并发决定重复放行。
 function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimestamp, updateRunCas,
@@ -55,12 +56,13 @@ function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimes
             tool: pending.tool || '',
             key: pending.key || '',
             inputHash: pending.inputHash || approvalInputHash(pending.input || {}),
+            hashVersion: pending.hashVersion || 1,
             rememberForRun,
             grantedAt: now,
             expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + (rememberForRun ? 60 * 60 * 1000 : 15 * 60 * 1000)))
         };
         const approvalGrants = Array.isArray(metadata.approvalGrants)
-            ? metadata.approvalGrants.filter(item => item && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()))
+            ? metadata.approvalGrants.filter(item => item && !item.consumedAt && approvalExpiryMs(item.expiresAt) > Date.now())
             : [];
         approvalGrants.push(approvalGrant);
         const resumeContext = await buildAgentResumeContext(runId);
@@ -73,7 +75,9 @@ function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimes
                 ...resumeContext,
                 previousStatus: run.status,
                 approvedTool: pending.tool || '',
-                approvedInputHash: approvalGrant.inputHash
+                approvedInputHash: approvalGrant.inputHash,
+                approvedApprovalKey: approvalGrant.key,
+                approvalHashVersion: approvalGrant.hashVersion
             }
         };
         const changed = await updateRunCas(runId, ['approval_required'], {

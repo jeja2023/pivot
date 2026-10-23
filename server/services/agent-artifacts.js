@@ -349,6 +349,7 @@ async function exportAgentRun(runId, user, format = 'json') {
 }
 
 module.exports = {
+    createAgentArtifactVersion,
     configureAgentArtifacts,
     createOrUpdateRunArtifact,
     createStandaloneArtifact,
