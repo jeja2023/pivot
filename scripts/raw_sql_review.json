@@ -169,6 +169,12 @@
       "count": 4,
       "rationale": "对话任务的轻量只读模型集中在仓储层，查询均参数化。快照复核运行归属和有效会话，公开事件使用固定类型白名单与快照水位分页，历史步骤有界读取，实际产物及交付回执同时按用户和租户过滤。读取版本指针兼容历史缺列，产物标识和归属按文本等值兼容 UUID 与 BIGINT，不改变账号隔离，不读取全量追踪或完整上下文。",
       "verification": "tests/chat-task-feed.test.js、tests/chat-task-controls-http.test.js 验证历史 UUID/缺列结构、归属、删除、游标、脱敏、审批绑定与文件字节；tests/e2e/chat-task-execution.spec.js 验证真实进度读取、历史回看、停止确认与定位。"
+    },
+    {
+      "file": "server/services/presentations/presentation-service.js",
+      "count": 14,
+      "rationale": "演示文稿草稿自动保存与里程碑版本分离机制：在事务内按文稿 ID 与 current_version 执行乐观锁条件更新，仅更新当前文稿草稿内容、验证状态及关联产物，不冗余插入历史版本快照；全部查询均已参数化并按租户和所有者权限隔离。",
+      "verification": "tests/presentation-workbench.test.js、tests/presentation-workbench-contract.test.js、tests/presentation-workbench-integration.test.js 覆盖自动保存、乐观锁冲突、草稿与里程碑版本隔离。"
     }
   ]
 }
