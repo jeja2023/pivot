@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { canAttemptVerificationRepair } = require('../server/services/agent-verification-repair');
+const { buildVerificationRepairMessage, canAttemptVerificationRepair } = require('../server/services/agent-verification-repair');
 const { TaskBudget } = require('../server/services/agent-budget');
 const { verifyAndRecordTaskOutcome } = require('../server/services/agent-verification');
 const { queryOne, execute } = require('../server/db/client');
@@ -18,11 +18,28 @@ test('only bounded internal verification gaps can request another planning attem
     for (const reason of ['source_revoked', 'verifier_unavailable', 'budget_exceeded']) {
         assert.equal(canAttemptVerificationRepair({ ...base, semanticVerification: { reason } }, options), false);
     }
-    assert.equal(canAttemptVerificationRepair({ ...base, hardFailures: ['deliverables_verified'], semanticVerification: { missing: ['缺少统计月份'] } }, options), false);
+    const incompleteDeliverable = { ...base, hardFailures: ['deliverables_verified'], semanticVerification: { missing: ['总结缺少文档中的部署前检查项'] } };
+    assert.equal(canAttemptVerificationRepair(incompleteDeliverable, options), true);
+    assert.equal(canAttemptVerificationRepair({ ...incompleteDeliverable, semanticVerification: { missing: [] } }, options), false);
+    assert.equal(canAttemptVerificationRepair(incompleteDeliverable, { ...options, remainingSteps: 1 }), false);
+    assert.equal(canAttemptVerificationRepair(incompleteDeliverable, { ...options, budget: new TaskBudget({ max_tool_calls: 0 }) }), false);
+    assert.match(buildVerificationRepairMessage(incompleteDeliverable), /总结缺少文档中的部署前检查项/);
     assert.equal(canAttemptVerificationRepair({ ...base, taskContract: { repairAttempts: 2 } }, options), false);
     assert.equal(canAttemptVerificationRepair(base, { ...options, remainingSteps: 1 }), false);
     const budget = new TaskBudget({ max_tool_calls: 0 });
     assert.equal(canAttemptVerificationRepair(base, { ...options, budget }), false);
+});
+
+test('语义核验缺少交付项时把具体缺口交给受限修复轮次', () => {
+    const report = {
+        outcomeStatus: 'needs_input',
+        taskContract: { repairAttempts: 0 },
+        hardFailures: ['deliverables_verified'],
+        semanticVerification: { missing: ['总结缺少文档中的部署前检查项'] }
+    };
+    const message = buildVerificationRepairMessage(report);
+    assert.match(message, /总结缺少文档中的部署前检查项/);
+    assert.equal(canAttemptVerificationRepair(report, { allowed: true, remainingSteps: 3 }), true);
 });
 
 test('repairable verification keeps the task transaction executable until final verification succeeds', async () => {

@@ -7,9 +7,9 @@
   "entries": [
     {
       "file": "server/repositories/chat-conversation-turns.js",
-      "count": 17,
-      "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。续跑查询限定父运行、当前用户及未删除的真实续跑关联，等待输入的同一运行通过状态 CAS 只排队一次并保留检查点。",
-      "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；tests/agent-resume-budget.test.js 聊天并发继续、旧续跑链复用和额度耗尽；security-chat HTTP 回归。"
+      "count": 18,
+      "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。续跑查询限定父运行、当前用户及未删除的真实续跑关联，等待输入的同一运行通过状态 CAS 只排队一次并保留检查点。任务来源资料读取严格限定在当前运行关联的原始消息与明确登记的后续消息白名单内，按未删除会话与任务隔离复核。",
+      "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；tests/agent-resume-budget.test.js 聊天并发继续、旧续跑链复用和额度耗尽；tests/chat-source-tool.test.js 任务附件原始资料读取白名单与回退安全；security-chat HTTP 回归。"
     },
     {
       "file": "server/repositories/agent-learning-evaluation.js",

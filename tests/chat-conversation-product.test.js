@@ -176,6 +176,7 @@ test('首轮长附件按页读取真实消息，遗漏资料阻断完成，删�
     const { user, sessionId, suffix } = await fixture('long-attachment');
     const original = `分析附件并生成报告\n\n---\n【参考文档: 订单.txt】\n${'已授权订单数据。'.repeat(2500)}\n---`;
     const message = await queryOne("INSERT INTO messages (session_id,user_id,role,content,created_at) VALUES (?,?,'user',?,NOW()) RETURNING id", [sessionId, user.id, original]);
+    const followUp = await queryOne("INSERT INTO messages (session_id,user_id,role,content,created_at) VALUES (?,?,'user',?,NOW()) RETURNING id", [sessionId, user.id, '补充材料正文']);
     let captured;
     const decision = await decideAutomaticChatExecution({ user, userId: user.id, sessionId, userMessageId: message.id, agentExecutionAllowed: true, autoExecutionEnabled: true,
         modelContent: original, sessionsRepository: { listMessages: async () => [{ ...message, role: 'user', content: original }] } }, {
@@ -185,7 +186,7 @@ test('首轮长附件按页读取真实消息，遗漏资料阻断完成，删�
     assert.equal(captured.prompt, '分析附件并生成报告\n');
     assert.deepEqual(captured.providedSources, [{ kind: 'inline_attachment', name: '订单.txt', available: true, sourceMessageId: message.id }]);
     const runId = `run-${suffix}`;
-    await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,?,?,?,'planning',?,NOW(),NOW())", [runId, user.id, sessionId, '附件分析', '分析附件并生成报告', JSON.stringify({ chatBridge: { version: 1, sessionId, userMessageId: message.id } })]);
+    await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,?,?,?,'planning',?,NOW(),NOW())", [runId, user.id, sessionId, '附件分析', '分析附件并生成报告', JSON.stringify({ chatBridge: { version: 1, sessionId, userMessageId: message.id }, conversationMessageIds: [followUp.id] })]);
     const run = { id: runId };
     const contract = { deliverables: ['报告'], acceptance: { requireCompleteSource: true } };
     assert.equal((await verifyAutomaticTask({ run, user, contract, answer: '完成' })).reason, 'source_not_fully_read');
@@ -196,6 +197,13 @@ test('首轮长附件按页读取真实消息，遗漏资料阻断完成，删�
         combined += result.text;
     }
     assert.equal(combined, original);
+    const invalidReference = await executeChatSource({ messageId: 999999999, limit: 200 }, user, { run });
+    assert.match(invalidReference.text, /^分析附件并生成报告/);
+    assert.match(invalidReference.instruction, /已安全回退到创建任务的原始用户消息/);
+    const followUpSource = await executeChatSource({ messageId: Number(followUp.id), limit: 200 }, user, { run });
+    assert.equal(followUpSource.text, '补充材料正文');
+    await execute('UPDATE messages SET deleted_at = NOW() WHERE id = ?', [followUp.id]);
+    await assert.rejects(executeChatSource({ messageId: Number(followUp.id) }, user, { run }), error => error.code === 'CHAT_SOURCE_REVOKED');
     const verified = await verifyAutomaticTask({ run, user, contract, answer: '报告' }, { getModel: async () => ({}), callModelJson: async () => '{"passed":true,"coveredDeliverables":["报告"],"missing":[]}' });
     assert.equal(verified.passed, true);
     await assert.rejects(executeChatSource({}, { id: Number(user.id) + 999 }, { run }), error => error.code === 'CHAT_SOURCE_REVOKED');

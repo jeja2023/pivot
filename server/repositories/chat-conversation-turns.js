@@ -96,10 +96,31 @@ async function currentExecutionScope(runId, userId) {
 }
 
 async function readTaskSource(runId, userId, messageId = null) {
-    return queryOne(`SELECT m.id,m.content FROM agent_runs r JOIN messages m ON m.id::text = COALESCE(?::text,r.metadata->'chatBridge'->>'userMessageId')
-        JOIN sessions s ON s.id = r.session_id WHERE r.id = ? AND r.user_id = ? AND m.user_id = r.user_id
+    const run = await queryOne(`SELECT r.session_id,r.metadata FROM agent_runs r
+        JOIN sessions s ON s.id = r.session_id AND s.deleted_at IS NULL
+        WHERE r.id = ? AND r.user_id = ? AND r.deleted_at IS NULL`, [runId, userId]);
+    if (!run) return null;
+
+    let metadata = run.metadata || {};
+    if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; }
+    }
+    const originalMessageId = String(metadata.chatBridge?.userMessageId || '');
+    if (!/^\d+$/.test(originalMessageId)) return null;
+    const requestedMessageId = messageId === null || messageId === undefined ? '' : String(messageId);
+    const allowedMessageIds = new Set([
+        originalMessageId,
+        ...(Array.isArray(metadata.conversationMessageIds) ? metadata.conversationMessageIds.map(String) : [])
+    ]);
+    const requestedIsAllowed = /^\d+$/.test(requestedMessageId) && allowedMessageIds.has(requestedMessageId);
+    const resolvedMessageId = requestedIsAllowed ? requestedMessageId : originalMessageId;
+    const source = await queryOne(`SELECT m.id,m.content FROM agent_runs r
+        JOIN messages m ON m.id::text = ?::text
+        JOIN sessions s ON s.id = r.session_id
+        WHERE r.id = ? AND r.user_id = ? AND m.user_id = r.user_id
           AND m.session_id = r.session_id AND r.deleted_at IS NULL AND m.deleted_at IS NULL AND s.deleted_at IS NULL
-          AND (m.id::text = r.metadata->'chatBridge'->>'userMessageId' OR COALESCE(r.metadata->'conversationMessageIds','[]'::jsonb) @> to_jsonb(ARRAY[m.id]))`, [messageId, runId, userId]);
+          AND (m.id::text = r.metadata->'chatBridge'->>'userMessageId' OR COALESCE(r.metadata->'conversationMessageIds','[]'::jsonb) @> to_jsonb(ARRAY[m.id]))`, [resolvedMessageId, runId, userId]);
+    return source ? { ...source, requestedMessageId: requestedMessageId || null, requestedMessageFallback: Boolean(requestedMessageId && !requestedIsAllowed) } : null;
 }
 
 async function getExecutionMetrics(userId, { admin = false, days = 30 } = {}) {

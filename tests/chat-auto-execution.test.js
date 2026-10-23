@@ -88,6 +88,16 @@ test('自动任务缺少独立交付核验或真实产物不能被标记为已�
     assert.equal(failed.passed, false);
 });
 
+test('交付核验遗漏了未逐字覆盖的目标时返回具体缺项，供任务内部补全', async () => {
+    const contract = { goal: '分析上传文件', deliverables: ['逐项总结文件中的部署检查清单'], acceptance: { requireSemanticVerification: true } };
+    const result = await verifyAutomaticTask({ run: { id: 'r', model_id: 8 }, user: { id: 9 }, contract, answer: '已总结检查清单。' }, {
+        getModel: async () => ({}),
+        callModelJson: async () => JSON.stringify({ passed: true, coveredDeliverables: ['检查清单摘要'], missing: [] })
+    });
+    assert.equal(result.passed, false);
+    assert.deepEqual(result.missing, ['逐项总结文件中的部署检查清单']);
+});
+
 test('独立后台审查只处理已知只读范围，强制人工、写入和策略拒绝均不可覆盖', async () => {
     const run = { user_id: 9, goal: '查询订单', metadata: { automaticExecution: {}, capabilityConstraints: { present: true, capabilities: ['data.sql.query'] } } };
     const tool = { name: 'db.run_readonly_query', source: 'mcp', databaseTool: true, risk: 'high', capabilities: ['data.sql.query'], idempotent: true, network: false, input_schema: { type: 'object' } };

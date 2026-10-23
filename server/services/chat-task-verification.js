@@ -51,8 +51,10 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
         if (usage?.budgetExceeded) return { passed: false, reason: 'budget_exceeded' };
         const result = typeof output === 'object' ? output : JSON.parse(String(output).replace(/^```(?:json)?\s*|\s*```$/g, ''));
         const covered = Array.isArray(result.coveredDeliverables) ? result.coveredDeliverables : [];
-        const missing = Array.isArray(result.missing) ? result.missing : ['核验响应缺少缺口清单'];
+        const reportedMissing = Array.isArray(result.missing) ? result.missing.map(String) : ['核验响应缺少缺口清单'];
         const expected = contract.deliverables || [];
+        const uncovered = expected.map(String).filter(item => !covered.includes(item));
+        const missing = [...new Set([...reportedMissing, ...uncovered])].slice(0, 16);
         return { passed: result.passed === true && missing.length === 0 && expected.every(item => covered.includes(String(item))), missing: missing.slice(0, 16).map(String), coveredDeliverables: covered.slice(0, 16).map(String), artifactIds: artifacts.map(item => item.id), verifier: 'chat-deliverables-v1' };
     } catch (_) { signal?.throwIfAborted(); return { passed: false, reason: 'verifier_unavailable', verifier: 'chat-deliverables-v1' }; }
     finally { clearTimeout(timer); }

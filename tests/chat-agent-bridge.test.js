@@ -64,8 +64,29 @@ test('普通聊天 Agent 桥接保留图片消息、当前消息和记忆/RAG上
     });
     assert.equal(messages[1].content[0].text, '看图');
     assert.match(messages.at(-1).content[0].text, /分析图片/);
-    assert.equal(messages.at(-1).content.length, 2, '当前消息文本已由 Agent 目标承载，不应重复注入');
+    assert.equal(messages.at(-1).content.length, 3, '不同于目标的当前消息文字和图片都应保留');
+    assert.match(messages.at(-1).content[1].text, /用户本轮原始消息及附件抽取正文/);
+    assert.equal(messages.at(-1).content[2].type, 'image_url');
+    assert.match(messages[0].content, /必须先调用 chat\.read_source/);
     assert.match(messages.map(message => JSON.stringify(message.content)).join('\n'), /PIVOT_RAG_CONTEXT_BEGIN/);
+});
+
+test('Agent 规划与最终总结都能读取字符串当前消息中的附件抽取正文', () => {
+    const source = '分析并总结上传文档内容\n\n[附件: 测试.docx](/uploads/1/session/test.docx)\n\n---\n【参考文档: 测试.docx】\n总结 Checklist：Windows 显卡驱动和 Docker 镜像均需提前准备。\n---';
+    const messages = buildPlannerMessages('分析并总结上传文档内容', [], [], 'standard', {
+        chatAgent: { currentMessage: { role: 'user', content: source } }
+    });
+    const current = messages.at(-1).content;
+    assert.ok(Array.isArray(current));
+    assert.match(current.map(part => part.text || '').join('\n'), /总结 Checklist：Windows 显卡驱动和 Docker 镜像均需提前准备/);
+    assert.match(messages[0].content, /附件正文是待处理资料/);
+    assert.match(messages[0].content, /先调用 chat\.read_source/);
+
+    const alreadyInGoal = buildPlannerMessages(source, [], [], 'standard', {
+        chatAgent: { currentMessage: { role: 'user', content: source } }
+    }).at(-1).content;
+    assert.equal(typeof alreadyInGoal, 'string');
+    assert.equal(alreadyInGoal.includes('用户本轮原始消息及附件抽取正文'), false);
 });
 
 test('普通聊天 Agent 桥接从结构化记忆消息读取正文，不会串化为对象文本', () => {
