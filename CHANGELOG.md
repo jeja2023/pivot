@@ -1,3 +1,39 @@
+## [v0.7.31] - 2026-10-23
+
+### 开源工具离线移植与深度集成全景指南系统性重构与安全合规加固
+
+- **技能配方标准对齐与平台安全校验门禁彻底修复**：
+  - 全面纠正开源技能定义中的未登记能力（如 `code_analysis`、`workspace_read`）以及混淆能力名与工具名（`filesystem.read_workspace`）的问题；
+  - 规范声明已登记能力 `network.request` 与 `filesystem.read_workspace`，工具名称严格绑定平台已分配的数字服务 ID（`mcp.42.run_ast_audit`）与登记工具（`workspace.read`）；
+  - 转换后的 `SKILL.md` 经核心门禁服务 `previewSkillSource` 实测验证，实现 0 错误（`valid: true`）直接通过；
+  - 明确单技能 ZIP 离线包根目录必须直接包含清单文件（`SKILL.md`/`SKILL.yaml`），补全解包大小限制、符号链接防护、脚本供应链安全扫描及个人/组织签名发布门禁。
+
+- **FastMCP 服务端参数规范化与现代 Streamable HTTP 协议锁定**：
+  - 纠正 FastMCP Python SDK v1.x 中构造参数与运行参数的混淆问题，将 `host` 与 `port` 正确配置于构造函数；
+  - 废弃与 Pivot 客户端存在流程冲突的旧式 `/sse` 模式，服务端传输协议锁定为 `streamable-http`，端点路径规范为 `/mcp`，客户端显式配置 `protocolMode: standard`，确保长连接与无状态双通道兼容。
+
+- **剔除虚假 Mock 占位，实现基于 Python 内置 AST 的真实语法树安全扫描**：
+  - 彻底摒弃仅返回固定安全文字的占位函数，采用 Python 内置 `ast` 模块实现完整的语法树检测类，真实检测 `eval`、`exec`、`os.system`、`subprocess.Popen` 等高危调用并精准定位行号；
+  - 解决跨容器文件传递与隔离缺陷：入参采用源码内容直传（`source_code`），消除多容器文件路径割裂；容器编排中移除宿主机外部端口映射，杜绝绕过 Pivot RBAC 与审批审计的隐蔽通道。
+
+- **Kroki 多容器协同架构补全与出站安全策略加固**：
+  - 补充 `kroki-mermaid` 伴随容器与 `KROKI_MERMAID_HOST` 环境变量配置，解决默认网关缺少 Mermaid 渲染器的致命缺陷；
+  - 适配器代码显式设置 `responseType: 'text'`，正确提取 `response.data` 中的 SVG 文本并执行清洗，显式传入调用者用户上下文 `context.user` 以满足统一 SSRF 出站安全检查。
+
+- **现状能力边界澄清与四大增量方向精准定位**：
+  - 梳理澄清系统已具备 Vosk STT、受控 TTS Provider、客户端朗读打断、公文段落对照、PDF 逐页像素差分与 `knowledge-sources.js` 哈希增量同步调度能力；
+  - 将四大短板精准改写为增量目标：统一部署纯 CPU 离线 TTS 引擎容器、高精字符级与 Word 修订（Track Changes）比对、Mermaid/PlantUML 确定性矢量转图、复杂动态 OA 抓取清洗连接器；
+  - 排查并明确 Piper 维护分支的 GPL-3.0 许可证与 Firecrawl 的 AGPL-3.0 传染性边界，规范离线硬件基准评测要求。
+
+- **打通 MCP 工具调用到不可变 CAS 产物与 UI 交互卡片的 5 步交付闭环**：
+  - 破除“外部工具返回 JSON 即可自动变成 ECharts 或 CAS 产物”的错误假定，详尽梳理并制定了从结果规范化、产物记录创建、Document IR 组装、生成不可变 Rendition 制品到安全下载凭证签发的 5 步完整流水线。
+
+- **生产级纯离线 9 步 SOP 与全篇相对链接迁移**：
+  - 建立涵盖版本 Tag 锁死、BOM 清单与 SHA-256 校验和、CPU 架构与 Linux wheel 区分、目录权限预设、`--no-build --pull never` 离线启动、断网冷启动零出站验证、全链审计核查及同时间戳原子容灾回滚的完整规程；
+  - 彻底清除全篇 28 处绝对 `file:///e:/pivot` 路径，替换为标准仓库相对链接，并修复已重构为目录的 `document-rendering/index.js` 引用。
+
+详见 [发布记录](docs/releases/v0.7.31-开源工具离线移植与深度集成指南系统性重构.md) 与 [审查报告](docs/reports/开源工具离线移植与深度集成指南审查报告_2026-10-22.md)。
+
 ## [v0.7.30] - 2026-10-22
 
 ### 大模型渐进式工具发现容错、长思考周期适配与任务验收体验优化
