@@ -371,7 +371,7 @@
                                 fontFamily: isTitle ? (theme?.fonts?.heading || "Microsoft YaHei") : (theme?.fonts?.body || "Microsoft YaHei"),
                                 fontSize: slot.style?.fontSize || (isTitle ? 32 : 18),
                                 fontWeight: slot.style?.fontWeight || (isTitle ? 700 : 400),
-                                color: slot.style?.color || colors.text || "#1F2937",
+                                color: slot.style?.color || colors.text || "var(--text, #1F2937)",
                                 align: slot.style?.align || "left",
                                 verticalAlign: slot.style?.verticalAlign || "top",
                                 lineHeight: slot.style?.lineHeight || 1.4,
@@ -429,7 +429,7 @@
             const used = new Set();
             const placed = new Set();
 
-            // 1. Match and place the title element
+            // 1. 匹配并放置主标题元素
             const titleSlot = placeholders.find(s => s.role === 'title' && s.kind === 'text');
             let titleEl = editable.find(el => el.type === 'text' && (el.id === 'title' || el.role === 'title'));
             if (!titleEl && titleSlot) {
@@ -463,7 +463,7 @@
                     if (secondEl) {
                         placed.add(secondEl);
                         secondEl.x = subSlot.x; secondEl.y = subSlot.y + 64; secondEl.width = subSlot.width; secondEl.height = 42;
-                        secondEl.style = { ...secondEl.style, fontSize: 18, fontWeight: 400, color: colors.text || '#64748B', align: 'left', lineHeight: 1.4 };
+                        secondEl.style = { ...secondEl.style, fontSize: 18, fontWeight: 400, color: colors.text || 'var(--text-muted, #64748B)', align: 'left', lineHeight: 1.4 };
                         if (importedLayout.slotAnimations?.subtitle) secondEl.animation = { ...importedLayout.slotAnimations.subtitle, delayMs: (importedLayout.slotAnimations.subtitle.delayMs || 220) + 100 };
                     }
                 }
@@ -486,12 +486,12 @@
                     const anim = importedLayout.slotAnimations?.[slot.role];
 
                     const cardPalette = colors.cardPalette || [
-                        colors.primary || '#1769AA',
-                        colors.secondary || '#5B8FF9',
-                        colors.accent || '#61DDAA',
-                        '#D8A23A',
-                        '#7A5AF8',
-                        '#C84A4A'
+                        colors.primary || 'var(--primary, #1769AA)',
+                        colors.secondary || 'var(--secondary, #5B8FF9)',
+                        colors.accent || 'var(--accent, #61DDAA)',
+                        'var(--warning, #D8A23A)',
+                        'var(--purple, #7A5AF8)',
+                        'var(--danger, #C84A4A)'
                     ];
 
                     if (title && body && title !== body) {
@@ -500,7 +500,7 @@
                         title.x = slot.x; title.y = slot.y; title.width = slot.width; title.height = 38;
                         title.style = { ...title.style, fontSize: 20, fontWeight: 700, color: cColor, align: 'left', lineHeight: 1.3 };
                         body.x = slot.x; body.y = slot.y + 46; body.width = slot.width; body.height = slot.height - 46;
-                        body.style = { ...body.style, fontSize: 15, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.55 };
+                        body.style = { ...body.style, fontSize: 15, fontWeight: 400, color: colors.text || 'var(--text, #344054)', align: 'left', lineHeight: 1.55 };
                         if (anim) {
                             title.animation = { ...anim };
                             body.animation = { ...anim, delayMs: (anim.delayMs || 0) + 60 };
@@ -517,12 +517,12 @@
                 const leftSlot = placeholders.find(s => s.role === 'left');
                 const rightSlot = placeholders.find(s => s.role === 'right');
                 const cardPalette = colors.cardPalette || [
-                    colors.primary || '#1769AA',
-                    colors.secondary || '#5B8FF9',
-                    colors.accent || '#61DDAA',
-                    '#D8A23A',
-                    '#7A5AF8',
-                    '#C84A4A'
+                    colors.primary || 'var(--primary, #1769AA)',
+                    colors.secondary || 'var(--secondary, #5B8FF9)',
+                    colors.accent || 'var(--accent, #61DDAA)',
+                    'var(--warning, #D8A23A)',
+                    'var(--purple, #7A5AF8)',
+                    'var(--danger, #C84A4A)'
                 ];
                 const layoutCol = (slot, regex) => {
                     if (!slot) return;
@@ -538,7 +538,7 @@
                         title.x = slot.x; title.y = slot.y; title.width = slot.width; title.height = 40;
                         title.style = { ...title.style, fontSize: 22, fontWeight: 700, color: colColor, align: 'left', lineHeight: 1.3 };
                         body.x = slot.x; body.y = slot.y + 48; body.width = slot.width; body.height = slot.height - 48;
-                        body.style = { ...body.style, fontSize: 17, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.95 };
+                        body.style = { ...body.style, fontSize: 17, fontWeight: 400, color: colors.text || 'var(--text, #344054)', align: 'left', lineHeight: 1.95 };
                         if (anim) {
                             title.animation = { ...anim };
                             body.animation = { ...anim, delayMs: (anim.delayMs || 0) + 60 };
@@ -575,7 +575,7 @@
                             const isNote = notes.includes(el);
                             el.x = bodySlot.x; el.y = isNote ? (bodySlot.y + bodySlot.height - 40) : (bodySlot.y + idx * spacing);
                             el.width = bodySlot.width; el.height = isNote ? 36 : Math.min(80, spacing - 8);
-                            el.style = { ...el.style, fontSize: isNote ? 14 : count <= 3 ? 22 : count <= 5 ? 19 : 17, fontWeight: isNote ? 400 : 500, lineHeight: 1.6, color: isNote ? '#64748B' : colors.text || '#1F2937', align: 'left' };
+                            el.style = { ...el.style, fontSize: isNote ? 14 : count <= 3 ? 22 : count <= 5 ? 19 : 17, fontWeight: isNote ? 400 : 500, lineHeight: 1.6, color: isNote ? 'var(--text-muted, #64748B)' : colors.text || 'var(--text, #1F2937)', align: 'left' };
                             if (importedLayout.slotAnimations?.body) {
                                 el.animation = { ...importedLayout.slotAnimations.body, delayMs: (importedLayout.slotAnimations.body.delayMs || 150) + idx * 90 };
                             }
@@ -664,13 +664,13 @@
                             placed.add(el);
                             if (idx === 0) {
                                 el.x = subSlot.x; el.y = subSlot.y; el.width = subSlot.width; el.height = 56;
-                                el.style = { ...el.style, fontSize: 22, fontWeight: 600, color: colors.primary || '#1769AA', align: subSlot.style?.align || 'left', lineHeight: 1.4 };
+                                el.style = { ...el.style, fontSize: 22, fontWeight: 600, color: colors.primary || 'var(--primary, #1769AA)', align: subSlot.style?.align || 'left', lineHeight: 1.4 };
                             } else if (idx === 1) {
                                 el.x = subSlot.x; el.y = subSlot.y + 60; el.width = subSlot.width; el.height = 44;
-                                el.style = { ...el.style, fontSize: 16, fontWeight: 400, color: colors.text || '#1F2937', align: subSlot.style?.align || 'left', lineHeight: 1.4 };
+                                el.style = { ...el.style, fontSize: 16, fontWeight: 400, color: colors.text || 'var(--text, #1F2937)', align: subSlot.style?.align || 'left', lineHeight: 1.4 };
                             } else {
                                 el.x = subSlot.x; el.y = 560 + (idx - 2) * 32; el.width = subSlot.width; el.height = 30;
-                                el.style = { ...el.style, fontSize: 14, fontWeight: 400, color: '#64748B', align: subSlot.style?.align || 'left' };
+                                el.style = { ...el.style, fontSize: 14, fontWeight: 400, color: 'var(--text-muted, #64748B)', align: subSlot.style?.align || 'left' };
                             }
                             if (importedLayout.slotAnimations?.subtitle) {
                                 el.animation = { ...importedLayout.slotAnimations.subtitle, delayMs: (importedLayout.slotAnimations.subtitle.delayMs || 200) + idx * 100 };
@@ -690,7 +690,7 @@
                 if (slot.role && importedLayout.slotAnimations?.[slot.role]) el.animation = { ...importedLayout.slotAnimations[slot.role] };
             });
 
-            // Only insert placeholders if no content element was provided for that slot
+            // 仅在插槽未分配内容元素时插入占位符
             importedLayout.placeholders.forEach(slot => {
                 if (used.has(slot.id)) return;
                 if (slot.kind === 'text') {
@@ -713,7 +713,7 @@
                             fontFamily: theme?.fonts?.body || 'Microsoft YaHei',
                             fontSize: slot.style?.fontSize || 18,
                             fontWeight: slot.style?.fontWeight || 400,
-                            color: slot.style?.color || colors.text || '#1F2937',
+                            color: slot.style?.color || colors.text || 'var(--text, #1F2937)',
                             align: slot.style?.align || 'left',
                             verticalAlign: slot.style?.verticalAlign || 'top',
                             lineHeight: slot.style?.lineHeight || 1.5,
@@ -745,7 +745,7 @@
             });
             if (master?.background) {
                 slide.background = {
-                    fill: master.background.fill || slide.background?.fill || theme?.colors?.background || '#FFFFFF',
+                    fill: master.background.fill || slide.background?.fill || theme?.colors?.background || 'var(--bg-canvas, #FFFFFF)',
                     imageAssetRef: master.background.imageAssetRef || '',
                     opacity: master.background.opacity ?? 1
                 };
@@ -795,16 +795,16 @@
     }
 
     const PRESENTATION_SVG_ICONS = {
-        '💡': { color: '#D8A23A', svg: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/>' },
-        '🎯': { color: '#C84A4A', svg: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>' },
-        '✦': { color: '#1F5EA8', svg: '<path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" fill="currentColor"/>' },
-        '★': { color: '#D8A23A', svg: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/>' },
-        '☑': { color: '#2E8B57', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="#E8F5E9" stroke="#2E8B57" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="#2E8B57" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' },
-        '□': { color: '#94A3B8', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2"/>' },
-        '🚀': { color: '#1F5EA8', svg: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>' },
-        '📌': { color: '#17A8C7', svg: '<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-2l-2-2V5a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v8l-2 2v2z"/>' },
-        '⚠️': { color: '#D8A23A', svg: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
-        '🛡️': { color: '#7A5AF8', svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' }
+        '💡': { color: 'var(--warning, #D8A23A)', svg: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/>' },
+        '🎯': { color: 'var(--danger, #C84A4A)', svg: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>' },
+        '✦': { color: 'var(--primary, #1F5EA8)', svg: '<path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" fill="currentColor"/>' },
+        '★': { color: 'var(--warning, #D8A23A)', svg: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor"/>' },
+        '☑': { color: 'var(--success, #2E8B57)', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="var(--bg-canvas, #E8F5E9)" stroke="currentColor" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' },
+        '□': { color: 'var(--text-muted, #94A3B8)', svg: '<rect x="3" y="3" width="18" height="18" rx="4" fill="var(--bg-canvas, #FFFFFF)" stroke="currentColor" stroke-width="2"/>' },
+        '🚀': { color: 'var(--primary, #1F5EA8)', svg: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>' },
+        '📌': { color: 'var(--cyan, #17A8C7)', svg: '<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-2l-2-2V5a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v8l-2 2v2z"/>' },
+        '⚠️': { color: 'var(--warning, #D8A23A)', svg: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' },
+        '🛡️': { color: 'var(--purple, #7A5AF8)', svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' }
     };
 
     function renderPresentationTextWithSvgIcons(container, rawText, style = {}, zoom = 1) {
@@ -842,8 +842,9 @@
                 iconWrap.style.alignItems = 'center';
                 iconWrap.style.justifyContent = 'center';
                 iconWrap.style.flexShrink = '0';
+                iconWrap.style.color = def.color;
                 const size = Math.max(12, Math.round(Number(style.fontSize || 18) * zoom * 0.95));
-                PivotSafeHtml.setHtml(iconWrap, `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:${def.color};">${def.svg}</svg>`);
+                PivotSafeHtml.setHtml(iconWrap, `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${def.svg}</svg>`);
                 const span = document.createElement('span');
                 span.style.flex = '1';
                 span.style.minWidth = '0';

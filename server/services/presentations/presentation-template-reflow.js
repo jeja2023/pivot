@@ -61,7 +61,7 @@ function reflowSlideElements(elements, layout, template) {
         el.zIndex = Math.max(Number(el.zIndex) || 10, 10);
     });
 
-    // 1. Identify and place the primary title element
+    // 1. 识别并放置主标题元素
     const titleSlot = placeholders.find(s => s.role === 'title' && s.kind === 'text');
     let titleEl = editable.find(el => el.type === 'text' && (el.id === 'title' || el.role === 'title'));
     if (!titleEl && titleSlot) {
@@ -87,7 +87,7 @@ function reflowSlideElements(elements, layout, template) {
         }
     }
 
-    // 2. Specialized layout mapping
+    // 2. 专用版式插槽映射
     const layoutId = layout.id || layout.legacyLayoutId;
     const remaining = editable.filter(el => !placed.has(el));
 
@@ -333,7 +333,7 @@ function reflowSlideElements(elements, layout, template) {
         }
     }
 
-    // 3. Fallback for any unplaced elements
+    // 3. 兜底处理未放置的元素
     editable.forEach(el => {
         if (!placed.has(el)) {
             const slot = slotForTextElement(el, placeholders, used);

@@ -120,16 +120,16 @@
             node.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[element.style?.verticalAlign] || 'flex-start';
             node.style.alignItems = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[element.style?.align] || 'flex-start';
         } else if (element.type === 'shape') {
-            node.style.background = element.style?.fill || '#FFFFFF';
+            node.style.background = element.style?.fill || 'var(--bg-canvas, #FFFFFF)';
             const strokeW = Number(element.style?.strokeWidth ?? 1);
             if (element.shapeType === 'line') {
                 node.style.background = 'transparent';
-                node.style.borderTop = `${Math.max(1, strokeW)}px solid ${element.style?.stroke || '#CBD5E1'}`;
+                node.style.borderTop = `${Math.max(1, strokeW)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}`;
                 node.style.borderLeft = 'none';
                 node.style.borderRight = 'none';
                 node.style.borderBottom = 'none';
             } else {
-                node.style.border = strokeW > 0 ? `${Math.max(1, strokeW)}px solid ${element.style?.stroke || '#CBD5E1'}` : 'none';
+                node.style.border = strokeW > 0 ? `${Math.max(1, strokeW)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}` : 'none';
                 node.style.borderRadius = (element.shapeType === 'ellipse' ? '50%' : Math.max(0, Number(element.style?.radius || 0) * 0.55) + 'px');
             }
             node.style.opacity = String(element.style?.opacity ?? 1);

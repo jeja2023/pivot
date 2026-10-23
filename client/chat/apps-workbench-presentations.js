@@ -441,7 +441,7 @@
                 node.style.fontFamily = element.style?.fontFamily || 'Microsoft YaHei';
                 node.style.fontSize = `${Number(element.style?.fontSize || 18) * state.zoom}px`;
                 node.style.fontWeight = String(element.style?.fontWeight || 400);
-                node.style.color = element.style?.color || '#1F2937';
+                node.style.color = element.style?.color || 'var(--text, #1F2937)';
                 node.style.textAlign = element.style?.align || 'left';
                 node.style.lineHeight = String(element.style?.lineHeight || 1.35);
                 node.style.padding = `${Number(element.style?.padding || 0) * state.zoom}px`;
@@ -449,16 +449,16 @@
                 node.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[element.style?.verticalAlign] || 'flex-start';
                 node.style.alignItems = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[element.style?.align] || 'flex-start';
             } else if (element.type === 'shape') {
-                node.style.background = element.style?.fill || '#FFFFFF';
+                node.style.background = element.style?.fill || 'var(--bg-canvas, #FFFFFF)';
                 const strokeW = Number(element.style?.strokeWidth ?? 1);
                 if (element.shapeType === 'line') {
                     node.style.background = 'transparent';
-                    node.style.borderTop = `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || '#CBD5E1'}`;
+                    node.style.borderTop = `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}`;
                     node.style.borderLeft = 'none';
                     node.style.borderRight = 'none';
                     node.style.borderBottom = 'none';
                 } else {
-                    node.style.border = strokeW > 0 ? `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || '#CBD5E1'}` : 'none';
+                    node.style.border = strokeW > 0 ? `${Math.max(1, strokeW * state.zoom)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}` : 'none';
                     node.style.borderRadius = element.shapeType === 'ellipse' ? '50%' : `${Number(element.style?.radius || 0) * state.zoom}px`;
                 }
                 node.style.opacity = String(element.style?.opacity ?? 1);
