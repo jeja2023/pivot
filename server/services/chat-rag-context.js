@@ -81,6 +81,39 @@ function buildChatRagEvidenceObservation(chatBridge = {}) {
     };
 }
 
+function buildChatAttachmentEvidenceObservation(chatBridge = {}) {
+    const currentContent = chatBridge?.currentMessage?.content;
+    const message = Array.isArray(currentContent)
+        ? currentContent.filter(part => part?.type === 'text').map(part => String(part.text || '')).join('\n')
+        : String(currentContent || '');
+    if (!message) return null;
+
+    const uploadedNames = new Set([...message.matchAll(/\[附件:\s*((?:\\.|[^\]])+)\]\((\/uploads\/[^)\s]+)\)/g)]
+        .map(match => String(match[1] || '').replace(/\\([\\[\]])/g, '$1').trim())
+        .filter(Boolean));
+    if (!uploadedNames.size) return null;
+
+    const sources = [];
+    const pattern = /---\s*\r?\n【参考文档:\s*([^\r\n】]{1,240})】\s*\r?\n([\s\S]*?)(?:\r?\n---(?=\r?\n|$)|$)/g;
+    for (const match of message.matchAll(pattern)) {
+        const name = String(match[1] || '').trim();
+        const content = String(match[2] || '').trim();
+        if (!name || !content || !uploadedNames.has(name)) continue;
+        sources.push({ name, content: content.slice(0, 1600) });
+        if (sources.length >= 20) break;
+    }
+    if (!sources.length) return null;
+
+    const sourceMessageId = Number(chatBridge.userMessageId || 0) || null;
+    return {
+        tool: 'chat.attachment_sources',
+        output: {
+            content: sources.map(source => `【来源: ${source.name}】\n${source.content}`).join('\n\n').slice(0, 6000),
+            sources: sources.map(source => ({ name: source.name, ...(sourceMessageId ? { sourceMessageId } : {}) }))
+        }
+    };
+}
+
 // 多查询召回时合并上下文并重新编号，避免不同查询各自从“引用 1”开始造成引用歧义。
 function mergeRagContexts(contexts = [], { maxCitations = 12 } = {}) {
     const blocks = [];
@@ -112,6 +145,7 @@ function mergeRagContexts(contexts = [], { maxCitations = 12 } = {}) {
 module.exports = {
     buildRagInsufficientContextMessage,
     buildRagContextMessage,
+    buildChatAttachmentEvidenceObservation,
     buildChatRagEvidenceObservation,
     injectRagContextBeforeLatestUser,
     mergeRagContexts,

@@ -31,8 +31,8 @@
 .chat-task-process > summary > span:first-child::before { content: '›'; font-weight: 600; }
 .chat-task-records {
     list-style: none;
-    padding: 6px 8px 10px;
-    margin: 2px 0 8px;
+    padding: 4px 6px 6px;
+    margin: 2px 0 6px;
     max-height: 400px;
     overflow-y: auto;
     scrollbar-gutter: stable;
@@ -47,8 +47,8 @@
 .chat-task-record {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    padding: 7px 8px;
+    gap: 8px;
+    padding: 4px 6px;
     border-radius: var(--radius-sm, 6px);
     transition: background 0.15s ease;
     min-width: 0;
@@ -90,10 +90,12 @@
     color: var(--info, var(--primary));
 }
 .chat-task-record-main { flex: 1; min-width: 0; }
-.chat-task-record-line { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.chat-task-record-line { display: flex; align-items: baseline; justify-content: space-between; gap: 2px 10px; flex-wrap: wrap; line-height: 1.35; }
+.chat-task-record-title { display: inline-flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.chat-task-record-title-text { min-width: 0; overflow-wrap: anywhere; }
 .chat-task-record-meta, .chat-task-record-location { color: var(--text-muted); }
-.chat-task-record-meta { flex-shrink: 0; }
-.chat-task-record-location { display: block; margin-top: 3px; }
+.chat-task-record-meta { flex-shrink: 0; white-space: nowrap; }
+.chat-task-record-location { display: inline; flex: 0 0 auto; margin: 0; font-size: 0.92em; white-space: nowrap; }
 .chat-task-record-detail { margin-top: 5px; color: var(--text-muted); }
 .chat-task-record-detail summary { cursor: pointer; }
 .chat-task-record-detail p { margin: 6px 0; white-space: pre-wrap; }

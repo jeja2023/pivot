@@ -68,7 +68,7 @@ const {
     leavePresence
 } = require('../../services/presentations/presentation-presence');
 const { runPresentationValidation } = require('../../services/presentations/presentation-validation');
-const { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal } = require('../../services/presentations/presentation-ai');
+const { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal } = require('../../services/presentations/presentation-ai');
 const { resolveAppsModel, buildModelSecretErrorPayload } = require('./helpers');
 const { buildChart } = require('../../services/data-analysis');
 const { normalizePresentation } = require('../../services/presentations/presentation-schema');
@@ -496,9 +496,40 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         let slide = body.slide;
         if (body.presentationId) {
             const current = await getPresentation(req.user, body.presentationId);
-            slide = current?.content?.slides?.find(item => item.id === body.slide.id);
-            if (!slide) return res.status(404).json({ error: '页面不存在或无权访问。', code: 'PRESENTATION_SLIDE_NOT_FOUND' });
-            if (slide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成版式方案。', code: 'PRESENTATION_SLIDE_APPROVED' });
+            const stored = current?.content?.slides?.find(item => item.id === body.slide.id);
+            if (!stored) return res.status(404).json({ error: '页面不存在或无权访问。', code: 'PRESENTATION_SLIDE_NOT_FOUND' });
+            if (stored.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成版式方案。', code: 'PRESENTATION_SLIDE_APPROVED' });
+            slide = body.slide || stored;
+        }
+        if (body.model) {
+            try {
+                const messages = buildLayoutVariantsMessages({
+                    slide,
+                    instruction: body.instruction,
+                    aspectRatio: body.aspectRatio
+                });
+                return await runAiRequest(req, res, body, messages, {
+                    source: 'presentation_layout_variants',
+                    auditAction: 'PPT AI生成版式方案',
+                    maxTokens: 3500,
+                    retryMalformedJson: true,
+                    parse: async result => {
+                        const parsed = parseLayoutVariantsProposal(result.content, slide, { aspectRatio: body.aspectRatio });
+                        const variants = parsed.variants.map(variant => ({
+                            ...variant,
+                            slide: mergeLockedElements(slide, variant.slide)
+                        }));
+                        return { variants, aiGenerated: true };
+                    }
+                });
+            } catch (error) {
+                if (error.code === 'PRESENTATION_AI_CANCELLED' || req.aborted) throw error;
+                writeLog(req, 'PPT AI版式生成降级', `AI 版式生成失败，降级为规则排版: ${error.message}`);
+                return res.json({
+                    variants: buildSlideLayoutVariants(slide, { aspectRatio: body.aspectRatio }),
+                    fallback: true
+                });
+            }
         }
         return res.json({ variants: buildSlideLayoutVariants(slide, { aspectRatio: body.aspectRatio }) });
     }));

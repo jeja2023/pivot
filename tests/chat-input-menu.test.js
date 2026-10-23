@@ -157,6 +157,12 @@ test('聊天输入框支持拖放和粘贴文件并复用附件队列', () => {
     assert.match(attachments, /collectDroppedEntryFiles/);
 });
 
+test('发送后通过附件队列清理器移除预览，避免旧队列被同步回来', () => {
+    const engine = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine.js'), 'utf8');
+    assert.match(engine, /const sentAttachments = window\.Pivot\.legacy\.pendingAttachments\.map\(item => \(\{ \.\.\.item \}\)\);[\s\S]*?clearPendingAttachments\(\);/);
+    assert.doesNotMatch(engine, /window\.Pivot\.legacy\.pendingAttachments\s*=\s*\[\];/);
+});
+
 test('聊天 Agent 详情会懒加载任务模块并展示安全的执行判断摘要', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine.js'), 'utf8');
     const sessions = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine-sessions.js'), 'utf8');

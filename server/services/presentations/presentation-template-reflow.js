@@ -15,14 +15,41 @@ function layoutForSlide(template, slide) {
         || null;
 }
 
-function templateLayerElements(template, layout, slideIndex) {
+function coverNavigationModel(presentation = {}) {
+    const coverSlide = presentation.slides?.[0];
+    const sections = (presentation.slides || []).slice(1, 6).map((slide, index) => {
+        const title = (slide.elements || []).filter(element => element.type === 'text' && element.content?.text)
+            .sort((left, right) => Number(right.style?.fontSize || 0) - Number(left.style?.fontSize || 0))[0]?.content?.text;
+        const section = String(slide.sectionTitle || slide.section || title || `章节 ${index + 1}`)
+            .split(/[\r\n|｜]/)[0].replace(/^\s*(?:第\s*)?[一二三四五六七八九十\d]+[、.．）)]\s*/, '').trim();
+        const chars = Array.from(section);
+        return chars.length > 9 ? `${chars.slice(0, 8).join('')}…` : section;
+    });
+    const visuals = (coverSlide?.elements || []).filter(element => element.visible !== false
+        && element.type !== 'text' && Number(element.y) < 504 && Number(element.y) + Number(element.height) > 384
+        && Number(element.x) < 1210 && Number(element.x) + Number(element.width) > 72);
+    const existingNavigation = visuals.some(element => ['diagram', 'table', 'chart'].includes(element.type)
+        || (element.type === 'shape' && Number(element.width) > 600))
+        || visuals.filter(element => element.type === 'shape' && Number(element.width) >= 120 && Number(element.width) <= 260 && Number(element.height) >= 20 && Number(element.height) <= 90).length >= 4;
+    return { sections, existingNavigation, visible: Boolean(sections.length || existingNavigation), generated: Boolean(sections.length && !existingNavigation) };
+}
+
+function templateLayerElements(template, layout, slideIndex, presentation = {}) {
     const masters = Array.isArray(template?.definition?.masters) ? template.definition.masters : (Array.isArray(template?.masters) ? template.masters : []);
     const master = masters.find(item => item.id === layout?.masterId) || null;
     const source = [...(master?.decorations || []), ...(layout?.decorations || [])];
-    return source.map((element, index) => {
+    const coverNavigation = layout?.id === 'cover' ? coverNavigationModel(presentation) : { sections: [], visible: false, generated: false };
+
+    return source.filter(element => {
+        if (element.id === 'cover_nav_panel' && !coverNavigation.generated) return false;
+        const navIndex = String(element.id || '').match(/^cover_nav_(?:pill|label)_(\d+)$/);
+        return !navIndex || (coverNavigation.generated && Number(navIndex[1]) <= coverNavigation.sections.length);
+    }).map((element, index) => {
         const cloned = JSON.parse(JSON.stringify(element));
         if (cloned.content?.text) {
             cloned.content.text = cloned.content.text.replace(/^[★✦]\s*/, '');
+            cloned.content.text = cloned.content.text.replace(/\{\{presentationTitle\}\}/g, String(presentation.title || '演示文稿').slice(0, 40));
+            cloned.content.text = cloned.content.text.replace(/\{\{coverSection(\d+)\}\}/g, (_match, number) => coverNavigation.sections[Number(number) - 1] || '');
         }
         return {
             ...cloned,
@@ -42,7 +69,99 @@ function slotForTextElement(element, placeholders, used) {
         || placeholders.find(slot => slot.kind === 'text' && !used.has(slot.id) && (isTitle ? slot.role === 'title' : slot.role !== 'title'));
 }
 
-function reflowSlideElements(elements, layout, template) {
+function reflowCoverDescriptions(elements, placed, layout, template, subtitleSlot, presentation) {
+    const isNavigationOrCardText = el => {
+        const id = String(el.id || '').toLowerCase();
+        if (/agenda|nav|step|pill|badge|tab|menu|card_text|col_text|grid_text|item_text/i.test(id)) return true;
+        if (el.role && !['subtitle', 'description', 'body', 'summary', 'closing'].includes(el.role)) return true;
+        const shapes = elements.filter(s => s.type === 'shape' && Number(s.width) > 0 && Number(s.height) > 0 && Number(s.width) < 500);
+        return shapes.some(s => el.x >= s.x - 15 && el.x + el.width <= s.x + s.width + 15 && el.y >= s.y - 15 && el.y + el.height <= s.y + s.height + 15);
+    };
+    const descriptions = elements.filter(element => element.type === 'text' && !placed.has(element) && !isNavigationOrCardText(element));
+    if (!descriptions.length || !subtitleSlot) return;
+
+    const width = subtitleSlot.width;
+    const left = subtitleSlot.x;
+    const aspectRatio = String(template.aspectRatio || '16:9');
+    const canvas = aspectRatio === '4:3' ? { width: 960, height: 720 } : { width: 1280, height: 720 };
+    const footerLine = (layout.decorations || []).find(element => element.type === 'shape'
+        && element.shapeType === 'line' && Number(element.y) > subtitleSlot.y + subtitleSlot.height);
+    const footerMeta = (layout.decorations || []).find(element => element.id === 'cover_footer_meta');
+    const bottomLimit = Math.min(Number(footerLine?.y || canvas.height), Number(footerMeta?.y || canvas.height));
+    const end = Math.min(bottomLimit - 8, canvas.height - 48);
+    const start = subtitleSlot.y + subtitleSlot.height + 4;
+    const pageArea = canvas.width * canvas.height;
+    const coverNavigation = coverNavigationModel(presentation);
+    const master = (template.definition?.masters || template.masters || []).find(item => item.id === layout.masterId);
+    const decorations = (layout.decorations || []).filter(element => element.id !== 'cover_nav_panel' || coverNavigation.generated)
+        .filter(element => !/^cover_nav_(?:pill|label)_\d+$/.test(element.id || ''));
+    const occupied = [...elements, ...decorations, ...(master?.decorations || [])]
+        .filter(element => element.visible !== false)
+        .filter(element => {
+            if (element.type !== 'text') return true;
+            if (element.locked && element.id === 'cover_footer_meta') return true;
+            return false;
+        })
+        .filter(element => Number(element.width) > 0 && Number(element.height) > 0)
+        .filter(element => Number(element.width) * Number(element.height) < pageArea * 0.35)
+        .map(element => ({ x: Number(element.x), y: Number(element.y), width: Number(element.width), height: Number(element.height) }));
+
+    const textLines = (value, fontSize) => String(value || '').split('\n').reduce((count, line) => {
+        const charsPerLine = Math.max(8, Math.floor(width / Math.max(1, fontSize * 0.58)));
+        return count + Math.max(1, Math.ceil(line.length / charsPerLine));
+    }, 0);
+    const findY = height => {
+        const obstacles = occupied.filter(box => left < box.x + box.width && left + width > box.x)
+            .map(box => [box.y, box.y + box.height]).sort((a, b) => a[0] - b[0]);
+        let y = start;
+        while (y + height <= end) {
+            const collision = obstacles.find(([top, bottom]) => y < bottom && y + height > top);
+            if (!collision) return y;
+            y = Math.max(y + 2, collision[1] + 4);
+        }
+        return null;
+    };
+
+    descriptions.forEach((element, index) => {
+        const preferredFontSize = Math.min(18, Math.max(14, Number(element.style?.fontSize) || 18));
+        let placement = null;
+        for (const fontSize of [preferredFontSize, 16, 14, 12]) {
+            const lines = textLines(element.content?.text, fontSize);
+            const height = Math.max(22, Math.ceil(lines * fontSize * 1.3));
+            const y = findY(height);
+            if (y !== null) {
+                placement = { y, height, fontSize };
+                break;
+            }
+        }
+        if (!placement) {
+            const fontSize = 12;
+            const height = 22;
+            placement = { y: Math.max(start, end - height), height, fontSize };
+        }
+
+        element.x = left;
+        element.y = placement.y;
+        element.width = width;
+        element.height = placement.height;
+        element.style = {
+            ...element.style,
+            fontSize: placement.fontSize,
+            fontWeight: 400,
+            color: element.style?.color || template.definition?.theme?.colors?.text || template.theme?.colors?.text || '#344054',
+            align: 'left',
+            verticalAlign: 'middle',
+            lineHeight: 1.3
+        };
+        if (layout.slotAnimations?.subtitle) {
+            element.animation = { ...layout.slotAnimations.subtitle, delayMs: (layout.slotAnimations.subtitle.delayMs || 220) + 100 + index * 80 };
+        }
+        occupied.push({ x: left, y: placement.y, width, height: placement.height });
+        placed.add(element);
+    });
+}
+
+function reflowSlideElements(elements, layout, template, presentation) {
     const theme = template.definition?.theme || template.theme || {};
     const colors = theme.colors || {};
     const placeholders = layout.placeholders || [];
@@ -103,27 +222,8 @@ function reflowSlideElements(elements, layout, template) {
             subEl.height = subSlot.height;
             if (subSlot.style) subEl.style = { ...subEl.style, ...subSlot.style };
             if (layout.slotAnimations?.subtitle) subEl.animation = { ...layout.slotAnimations.subtitle };
-
-            const secondEl = remaining.find(el => el !== subEl && el.type === 'text' && !placed.has(el));
-            if (secondEl) {
-                placed.add(secondEl);
-                secondEl.x = subSlot.x;
-                secondEl.y = subSlot.y + 64;
-                secondEl.width = subSlot.width;
-                secondEl.height = 42;
-                secondEl.style = {
-                    ...secondEl.style,
-                    fontSize: 18,
-                    fontWeight: 400,
-                    color: colors.text || '#64748B',
-                    align: 'left',
-                    lineHeight: 1.4
-                };
-                if (layout.slotAnimations?.subtitle) {
-                    secondEl.animation = { ...layout.slotAnimations.subtitle, delayMs: (layout.slotAnimations.subtitle.delayMs || 220) + 100 };
-                }
-            }
         }
+        reflowCoverDescriptions(editable, placed, layout, template, subSlot, presentation);
     } else if (layoutId === 'three-card') {
         const cardSlots = [
             placeholders.find(s => s.role === 'card1'),
@@ -158,12 +258,12 @@ function reflowSlideElements(elements, layout, template) {
                 title.y = slot.y;
                 title.width = slot.width;
                 title.height = 38;
-                title.style = { ...title.style, fontSize: 20, fontWeight: 700, color: cColor, align: 'left', lineHeight: 1.3 };
+                title.style = { ...title.style, fontSize: 24, fontWeight: 700, color: cColor, align: 'left', lineHeight: 1.3 };
                 body.x = slot.x;
                 body.y = slot.y + 46;
                 body.width = slot.width;
                 body.height = slot.height - 46;
-                body.style = { ...body.style, fontSize: 15, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.55 };
+                body.style = { ...body.style, fontSize: 18, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.6 };
                 if (anim) {
                     title.animation = { ...anim };
                     body.animation = { ...anim, delayMs: (anim.delayMs || 0) + 60 };
@@ -207,12 +307,12 @@ function reflowSlideElements(elements, layout, template) {
                 title.y = slot.y;
                 title.width = slot.width;
                 title.height = 40;
-                title.style = { ...title.style, fontSize: 22, fontWeight: 700, color: colColor, align: 'left', lineHeight: 1.3 };
+                title.style = { ...title.style, fontSize: 24, fontWeight: 700, color: colColor, align: 'left', lineHeight: 1.3 };
                 body.x = slot.x;
                 body.y = slot.y + 48;
                 body.width = slot.width;
                 body.height = slot.height - 48;
-                body.style = { ...body.style, fontSize: 17, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.95 };
+                body.style = { ...body.style, fontSize: 18, fontWeight: 400, color: colors.text || '#344054', align: 'left', lineHeight: 1.6 };
                 if (anim) {
                     title.animation = { ...anim };
                     body.animation = { ...anim, delayMs: (anim.delayMs || 0) + 60 };
@@ -359,7 +459,7 @@ function applyTemplateLayoutLayers(content, template, { reflow = false, normaliz
         const master = definition.masters.find(item => item.id === layout.masterId) || null;
         let elements = (slide.elements || []).filter(element => !String(element.id || '').startsWith('pivotTemplate_')).map(element => JSON.parse(JSON.stringify(element)));
         if (reflow) {
-            elements = reflowSlideElements(elements, layout, template);
+            elements = reflowSlideElements(elements, layout, template, content);
         } else {
             elements.forEach(element => {
                 element.zIndex = Math.max(Number(element.zIndex) || 10, 10);
@@ -370,7 +470,7 @@ function applyTemplateLayoutLayers(content, template, { reflow = false, normaliz
             imageAssetRef: master.background.imageAssetRef || '',
             opacity: master.background.opacity === undefined ? 1 : master.background.opacity
         } : slide.background;
-        return { ...slide, layoutId: layout.id, background, transition: layout.defaultTransition?.type !== 'none' ? { ...layout.defaultTransition } : slide.transition, elements: [...templateLayerElements(template, layout, slideIndex), ...elements] };
+        return { ...slide, layoutId: layout.id, background, transition: layout.defaultTransition?.type !== 'none' ? { ...layout.defaultTransition } : slide.transition, elements: [...templateLayerElements(template, layout, slideIndex, content), ...elements] };
     });
     const result = { ...content, theme: { ...content.theme, ...theme, colors: { ...(content.theme?.colors || {}), ...(theme.colors || {}) }, fonts: { ...(content.theme?.fonts || {}), ...(theme.fonts || {}) } }, slides };
     return typeof normalizePresentation === 'function' ? normalizePresentation(result) : result;

@@ -457,9 +457,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
 
     document.getElementById('user-input').value = '';
     if (window.Pivot.legacy.resizeUserInput) window.Pivot.legacy.resizeUserInput();
-    window.Pivot.legacy.pendingAttachments = [];
-    syncPendingAttachmentsGlobal();
-    renderAttachmentPreviews();
+    clearPendingAttachments();
 
     const requestSessionId = String(currentSessionId);
     const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;

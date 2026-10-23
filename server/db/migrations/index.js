@@ -79,6 +79,7 @@ const migrationModules = [
     require('./presentation-template-versions'),
     require('./presentation-template-source-metadata'),
     require('./presentation-template-import-jobs'),
+    require('./presentation-draft-content'),
     require('./long-term-memory-productization'),
     require('./long-term-memory-evaluations'),
     require('./long-term-memory-embedding-recovery'),

@@ -484,7 +484,6 @@
                                 <label class="presentation-library-favorite-filter"><input id="presentation-library-favorite-only" type="checkbox"> 仅收藏</label>
                                 <button id="presentation-library-reset-btn" class="btn-secondary presentation-library-reset-btn" type="button" title="重置全部筛选">重置</button>
                             </div>
-                            <div id="presentation-template-strip" class="presentation-template-strip" aria-label="可选模板"></div>
                             <div id="presentation-library-status-banner" class="presentation-status" role="status" aria-live="polite"></div>
                             <div class="table-container workspace-table-wrap presentation-doc-table-wrap">
                                 <table class="data-table compact-table presentation-doc-table">
@@ -527,6 +526,10 @@
                                             <span>重做</span>
                                         </button>
                                     </div>
+                                    <button id="presentation-create-version-btn" class="btn-secondary presentation-btn-with-icon" type="button" title="将当前草稿保存为一个新的历史里程碑版本">
+                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                        <span>保存版本</span>
+                                    </button>
                                     <details class="presentation-dropdown" id="presentation-collab-dropdown">
                                         <summary class="btn-secondary presentation-dropdown-summary" title="协同编辑与版本同步">
                                             <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -771,7 +774,7 @@
                                             <button id="presentation-assets-refresh-btn" class="btn-secondary" type="button">刷新</button>
                                         </div>
                                         <div class="presentation-assets-quick-toolbar">
-                                            <button class="btn-secondary" type="button" onclick="document.getElementById('presentation-image-input')?.click()">传图片</button>
+                                            <button id="presentation-assets-upload-image-btn" class="btn-secondary" type="button">传图片</button>
                                             <button id="presentation-upload-font-btn" class="btn-secondary" type="button">传字体</button>
                                             <button id="presentation-insert-media-btn" class="btn-secondary" type="button">音视频</button>
                                             <button id="presentation-insert-attachment-btn" class="btn-secondary" type="button">附件</button>
@@ -838,9 +841,9 @@
                                             <label for="presentation-ai-instruction">对当前页面的要求</label>
                                             <textarea id="presentation-ai-instruction" class="form-input" rows="4" placeholder="例如：将内容压缩成三项行动建议，保留事实和数字。"></textarea>
                                             <div class="presentation-ai-chips">
-                                                <button type="button" class="presentation-ai-chip" onclick="document.getElementById('presentation-ai-instruction').value='将内容精炼为3项带量化数据的核心行动项，保持语气专业干练。'">精简3项行动</button>
-                                                <button type="button" class="presentation-ai-chip" onclick="document.getElementById('presentation-ai-instruction').value='优化为咨询公司汇报风格，突出商业价值、痛点与解决方案。'">咨询汇报风格</button>
-                                                <button type="button" class="presentation-ai-chip" onclick="document.getElementById('presentation-ai-instruction').value='检查当前页逻辑流、事实数据与错别字，提出修改建议。'">检查逻辑与错别字</button>
+                                                <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="将内容精炼为3项带量化数据的核心行动项，保持语气专业干练。">精简3项行动</button>
+                                                <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="优化为咨询公司汇报风格，突出商业价值、痛点与解决方案。">咨询汇报风格</button>
+                                                <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="检查当前页逻辑流、事实数据与错别字，提出修改建议。">检查逻辑与错别字</button>
                                             </div>
                                         </div>
                                         <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
@@ -872,7 +875,7 @@
                                                 <strong>质量与合规检查</strong>
                                                 <small class="presentation-issues-sub">自动检测排版、规范与合规问题</small>
                                             </div>
-                                            <button id="presentation-check-issues-btn" class="btn-secondary" type="button" onclick="document.getElementById('presentation-check-btn')?.click()">立即体检</button>
+                                            <button id="presentation-check-issues-btn" class="btn-secondary" type="button">立即体检</button>
                                         </div>
                                         <div id="presentation-issues-list" class="presentation-issues-list"></div>
                                         <div class="presentation-info-card">
@@ -891,7 +894,10 @@
                                                 <strong>历史版本</strong>
                                                 <small class="presentation-version-sub">支持安全回滚与对比恢复</small>
                                             </div>
-                                            <button id="presentation-refresh-versions-btn" class="btn-secondary" type="button">刷新</button>
+                                            <div class="presentation-version-actions">
+                                                <button id="presentation-create-version-panel-btn" class="btn-secondary" type="button" title="将当前草稿保存为一个新的历史里程碑版本">保存新版本</button>
+                                                <button id="presentation-refresh-versions-btn" class="btn-secondary" type="button">刷新</button>
+                                            </div>
                                         </div>
                                         <div id="presentation-versions-list" class="presentation-versions-list"></div>
                                         <div class="presentation-info-card">
@@ -899,8 +905,8 @@
                                                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                                             </div>
                                             <div class="presentation-info-card-text">
-                                                <strong>无损版本历史</strong>
-                                                <p>每次保存或恢复均会自动生成独立快照，点击“恢复”将安全恢复历史内容，历史版本永不丢失。</p>
+                                                <strong>里程碑版本历史</strong>
+                                                <p>编辑时静默自动保存草稿；点击“保存新版本”、AI 生成或页面审批时将生成历史快照，支持安全对比与随时恢复。</p>
                                             </div>
                                         </div>
                                     </div>

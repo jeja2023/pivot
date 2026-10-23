@@ -90,7 +90,12 @@ async function resolveTemplateForUser(user, templateId, { includeDefinition = tr
           )
         LIMIT 1
     `, [id, tenant.tenantId, user.id, normalizeDepartmentName(user.unit)]);
-    return row ? toPublicTemplate(row, { includeDefinition }) : null;
+    if (row) return toPublicTemplate(row, { includeDefinition });
+    if (['technology-dark', 'government-clean', 'party-red', 'training-green', 'data-insight', 'minimal-white', 'public-welfare'].includes(id)) {
+        const fallback = getBuiltInTemplate('business-blue');
+        return fallback ? systemTemplateToPublic(fallback) : null;
+    }
+    return null;
 }
 
 async function resolveTemplateVersionForUser(user, templateId, version, { includeDefinition = true, historical = false } = {}) {
@@ -113,7 +118,13 @@ async function resolveTemplateVersionForUser(user, templateId, version, { includ
           ))
         LIMIT 1
     `, [requestedVersion, id, tenant.tenantId, historical, user.id, normalizeDepartmentName(user.unit)]);
-    if (!row) return null;
+    if (!row) {
+        if (['technology-dark', 'government-clean', 'party-red', 'training-green', 'data-insight', 'minimal-white', 'public-welfare'].includes(id)) {
+            const fallback = getBuiltInTemplate('business-blue');
+            return fallback && requestedVersion === Number(fallback.version) ? systemTemplateToPublic(fallback) : null;
+        }
+        return null;
+    }
     return templateVersionToPublic(row, {
         version: row.snapshot_version,
         definition_json: row.snapshot_definition_json,

@@ -63,41 +63,37 @@
     function recordHistory() { if (!state.active?.content) return; const snapshot = deepClone(state.active.content); const current = state.history[state.historyIndex]; if (current && JSON.stringify(current) === JSON.stringify(snapshot)) return; state.history.splice(state.historyIndex + 1); state.history.push(snapshot); if (state.history.length > 80) state.history.shift(); state.historyIndex = state.history.length - 1; updateUndoRedo(); scheduleSave(); }
     function restoreHistory(index) { if (!state.active || !state.history[index]) return; state.historyIndex = index; state.active.content = deepClone(state.history[index]); state.active.title = state.active.content.title; renderEditor(); scheduleSave(); }
     function scheduleSave() { if (!state.active?.id || !canEditActivePresentation()) return; clearTimeout(state.saveTimer); state.editRevision += 1; state.dirty = true; setSaveState('待保存', 'dirty'); state.saveTimer = window.setTimeout(() => saveActive().catch(error => { setSaveState('保存失败', 'error'); toast(error.message || '保存失败，内容仍保留在当前页面。', 'error'); }), 1200); }
-    async function saveActive({ force = false, templateApplyMode = '' } = {}) {
+    async function saveActive({ force = false, templateApplyMode = '', note = '' } = {}) {
         if (!state.active?.id || !canEditActivePresentation()) return false;
-        if (state.saving) { await state.savePromise; return state.dirty ? saveActive({ force }) : true; }
+        if (state.saving) { await state.savePromise; return state.dirty ? saveActive({ force, templateApplyMode, note }) : true; }
         if (!state.dirty && !force) return true;
         clearTimeout(state.saveTimer); state.saveTimer = null;
         const content = activeContent(); if (!content) return;
-        const presentationId = state.active.id;
-        const contentSnapshot = deepClone(content);
-        const saveRevision = state.editRevision;
-        state.saving = true;
-        setSaveState('保存中…', 'saving');
+        const presentationId = state.active.id; const contentSnapshot = deepClone(content); const saveRevision = state.editRevision;
+        state.saving = true; setSaveState('保存中…', 'saving');
         const save = (async () => {
             const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/content`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseVersion: state.active.version, title: contentSnapshot.title, templateId: contentSnapshot.template?.id, templateVersion: contentSnapshot.template?.version, templateApplyMode: templateApplyMode || state.pendingTemplateApplyMode || '', content: contentSnapshot, note: force ? '用户主动保存' : '自动保存' })
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                    baseVersion: state.active.version, title: contentSnapshot.title, templateId: contentSnapshot.template?.id,
+                    templateVersion: contentSnapshot.template?.version, templateApplyMode: templateApplyMode || state.pendingTemplateApplyMode || '',
+                    content: contentSnapshot, autoSave: !force, isMilestone: force, note: force ? (note || '用户主动保存') : '自动保存'
+                })
             });
             if (state.active?.id !== presentationId) return true;
-            const changedWhileSaving = state.editRevision !== saveRevision;
-            const currentContent = activeContent();
+            const changedWhileSaving = state.editRevision !== saveRevision; const currentContent = activeContent();
             state.active = data.presentation;
             state.active.content = changedWhileSaving ? currentContent : (data.presentation.content || contentSnapshot);
             state.active.validation = data.presentation.validation || state.active.validation;
             state.pendingTemplateApplyMode = '';
             state.documents = state.documents.map(item => item.id === state.active.id ? { ...item, ...state.active } : item);
-            state.dirty = changedWhileSaving;
-            state.remoteVersionAvailable = false;
-            setSaveState(changedWhileSaving ? '待保存' : '已保存', changedWhileSaving ? 'dirty' : 'saved');
+            state.dirty = changedWhileSaving; state.remoteVersionAvailable = false;
+            setSaveState(changedWhileSaving ? '待保存' : (force ? '版本已保存' : '已保存'), changedWhileSaving ? 'dirty' : 'saved');
             renderIssues();
             return true;
         })();
         state.savePromise = save;
         try { return await save; }
-        finally {
-            state.saving = false;
-            if (state.savePromise === save) state.savePromise = null;
-        }
+        finally { state.saving = false; if (state.savePromise === save) state.savePromise = null; }
     }
     async function refreshRemotePresentation({ force = false } = {}) {
         if (!state.active?.id || state.saving) return false;
@@ -245,7 +241,6 @@
         if (!(state.coverUrls instanceof Map)) state.coverUrls = new Map();
         state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear();
         const tableBody = byId('presentation-library-table-body'), legacyList = byId('presentation-library-list');
-        renderTemplates(byId('presentation-template-strip'), { compact: true });
         if (legacyList) legacyList.replaceChildren();
         if (!tableBody) return;
         tableBody.replaceChildren();
@@ -319,7 +314,7 @@
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
     const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
     async function openPresentation(id) {
-        await saveActive({ force: true });
+        if (state.dirty) await saveActive();
         setStatus('正在打开演示文稿…');
         const data = await requestJson(`${API}/${encodeURIComponent(id)}`);
         state.active = data.presentation;
@@ -341,7 +336,7 @@
         stopPresentationRealtime();
         stopPresentationSync();
         collab()?.stopPresenceHeartbeat();
-        saveActive({ force: true }).catch(() => {});
+        if (state.dirty) saveActive().catch(() => {});
         state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1;
         state.imageUrls.forEach(url => URL.revokeObjectURL(url)); state.imageUrls.clear(); state.fontFaceUrls.forEach(url => URL.revokeObjectURL(url)); state.fontFaceUrls.clear(); if (state.coverUrls instanceof Map) { state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear(); }
         byId('presentation-editor')?.classList.add('hidden');
@@ -362,7 +357,7 @@
         document.querySelector('[data-presentation-panel="metrics"]')?.classList.toggle('hidden', !admin);
         byId('presentation-title-input')?.toggleAttribute('readonly', !editable);
         byId('presentation-speaker-notes')?.toggleAttribute('disabled', !editable || slideApproved);
-        ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-check-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-copy-element-btn', 'presentation-paste-element-btn', 'presentation-group-elements-btn', 'presentation-ungroup-elements-btn', 'presentation-align-left-btn', 'presentation-align-center-btn', 'presentation-distribute-horizontal-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-table-remove-row-btn', 'presentation-table-add-column-btn', 'presentation-table-remove-column-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-layout-variants-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable || slideApproved));
+        ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-copy-element-btn', 'presentation-paste-element-btn', 'presentation-group-elements-btn', 'presentation-ungroup-elements-btn', 'presentation-align-left-btn', 'presentation-align-center-btn', 'presentation-distribute-horizontal-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-table-remove-row-btn', 'presentation-table-add-column-btn', 'presentation-table-remove-column-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-layout-variants-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable || slideApproved));
         const canExport = state.active?.isOwner !== false || (typeof isAdminUser === 'function' && isAdminUser());
         ['presentation-export-pptx-btn', 'presentation-export-pdf-btn', 'presentation-export-png-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !canExport));
         byId('presentation-remote-start-btn')?.toggleAttribute('disabled', !canExport);
@@ -539,6 +534,14 @@
     }
     async function loadVersions() { return presenter()?.loadVersions?.(state, { formatTime }); }
     async function restoreVersion(version) { return presenter()?.restoreVersion?.(version, state, { saveActive, resetHistory, renderEditor, formatTime, toast }); }
+    async function createMilestoneVersion() {
+        if (!state.active?.id || !canEditActivePresentation()) return;
+        const note = await window.Pivot?.legacy?.showInputPrompt?.({ title: '保存新版本', message: '输入新版本说明（留空默认为“用户主动保存”）', value: '', required: false, width: 480 });
+        if (note === null) return;
+        await saveActive({ force: true, note: (note || '').trim() || '用户主动保存' });
+        await loadVersions();
+        toast(`已创建里程碑版本（版本 ${state.active.version}）`);
+    }
     function switchPanel(name) {
         state.panel = name;
         document.querySelectorAll('[data-presentation-panel]').forEach(button => button.classList.toggle('is-active', button.dataset.presentationPanel === name));
@@ -759,7 +762,7 @@ function setSelectedImageAsCover() {
         const button = byId('presentation-ai-validate-btn'); const controller = beginAiRequest();
         button?.setAttribute('disabled', ''); if (button) button.textContent = '正在检查…';
         try {
-            await saveActive({ force: true });
+            if (state.dirty) await saveActive();
             const data = await requestJson(API + '/ai/validate', aiJsonOptions({ model, presentation: content, materials: [] }, controller));
             const deterministic = state.active?.validation?.issues || [];
             const aiIssues = (data.validation?.issues || []).map(issue => ({ ...issue, level: issue.severity === 'blocking' ? 'blocking' : issue.severity === 'warning' ? 'warning' : 'info', message: 'AI 内容检查：' + (issue.message || '发现待核实问题') }));
@@ -774,13 +777,32 @@ function setSelectedImageAsCover() {
     }
     async function runCheck() {
         if (!state.active?.id) return; setSaveState('正在检查…', 'saving');
-        try { await saveActive({ force: true }); const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/render-quality`); state.active.validation = data.validation; switchPanel('issues'); renderIssues(); const label = data.validation.status === 'passed' ? `已完成 ${data.validation.summary?.renderedSlides || 0} 页渲染检查` : `发现 ${data.validation.issues?.length || 0} 项检查结果`; toast(label, Number(data.validation.summary?.blocking || 0) > 0 ? 'warning' : 'success'); }
-        finally { setSaveState('已保存', 'saved'); }
+        const checkIssuesBtn = byId('presentation-check-issues-btn'); const checkBtn = byId('presentation-check-btn');
+        if (checkIssuesBtn) { checkIssuesBtn.disabled = true; checkIssuesBtn.textContent = '体检中…'; }
+        if (checkBtn) checkBtn.disabled = true;
+        try {
+            if (state.dirty) await saveActive();
+            const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/render-quality`);
+            state.active.validation = data.validation; switchPanel('issues'); renderIssues();
+            const label = data.validation.status === 'passed' ? `已完成 ${data.validation.summary?.renderedSlides || 0} 页渲染检查` : `发现 ${data.validation.issues?.length || 0} 项检查结果`;
+            toast(label, Number(data.validation.summary?.blocking || 0) > 0 ? 'warning' : 'success');
+        } finally { setSaveState(state.dirty ? '待保存' : '已保存', state.dirty ? 'dirty' : 'saved'); if (checkIssuesBtn) { checkIssuesBtn.disabled = false; checkIssuesBtn.textContent = '立即体检'; } if (checkBtn) checkBtn.disabled = false; }
     }
     async function applyTemplate(templateId) {
-        if (!state.active?.id || !templateId || templateId === state.active.template?.id) return;
+        if (!state.active?.id || !templateId) return;
         const template = templateById(templateId); if (!template) return;
-        const accepted = await window.Pivot.legacy.showConfirm?.('应用主题模板', '将更新页面的主题色和默认字体；现有元素位置与自定义内容会保留。'); if (!accepted) return; const reflow = await window.Pivot.legacy.showConfirm?.('重新套用布局', '确定后会按新模板的内容槽位重新排版；取消则只更换主题和品牌装饰。') === true;
+        const currentTemplateId = state.active.content?.template?.id || state.active.template?.id;
+        const reapplying = String(templateId) === String(currentTemplateId || '');
+        let reflow = false;
+        if (reapplying) {
+            const accepted = await window.Pivot.legacy.showConfirm?.('重新排版当前封面', '按当前主题模板重新排列封面说明，修复可能重叠的文字；文字内容会保留。');
+            if (!accepted) return;
+            reflow = true;
+        } else {
+            const accepted = await window.Pivot.legacy.showConfirm?.('应用主题模板', '将更新页面的主题色和默认字体；现有元素位置与自定义内容会保留。');
+            if (!accepted) return;
+            reflow = await window.Pivot.legacy.showConfirm?.('重新套用布局', '确定后会按新模板的内容槽位重新排版；取消则只更换主题和品牌装饰。') === true;
+        }
         state.active.content.template = { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }; state.active.content.theme = deepClone(template.definition.theme);
         state.active.content.slides.forEach(slide => { slide.background.fill = template.definition.theme.colors.background || slide.background.fill; slide.elements.forEach(element => { if (element.type === 'text') { element.style.fontFamily = element.style.fontSize >= 24 ? template.definition.theme.fonts.heading : template.definition.theme.fonts.body; } }); });
         state.pendingTemplateApplyMode = reflow ? 'reflow' : 'theme'; recordHistory(); await saveActive({ force: true, templateApplyMode: state.pendingTemplateApplyMode }); renderEditor(); toast(reflow ? '模板已重新套版。' : '主题模板已应用。');
@@ -805,29 +827,10 @@ function setSelectedImageAsCover() {
         const content = activeContent(); const slide = activeSlide(); if (!content || content.slides.length <= 1 || !slide) { toast('演示文稿至少保留一页。', 'warning'); return; }
         const index = content.slides.findIndex(item => item.id === slide.id); content.slides.splice(index, 1); content.slides.forEach((item, itemIndex) => { item.index = itemIndex; }); state.selectedSlideId = content.slides[Math.max(0, index - 1)]?.id || content.slides[0].id; state.selectedElementId = ''; recordHistory(); renderEditor();
     }
-    function selectedElements() {
-        const slide = activeSlide();
-        if (!slide) return [];
-        const ids = state.selectedElementIds?.length ? state.selectedElementIds : state.selectedElementId ? [state.selectedElementId] : [];
-        return slide.elements.filter(element => ids.includes(element.id));
-    }
-    function selectPresentationElement(id, { additive = false } = {}) {
-        const current = new Set(state.selectedElementIds || []);
-        if (additive) current.has(id) ? current.delete(id) : current.add(id);
-        else { current.clear(); current.add(id); }
-        state.selectedElementIds = [...current]; state.selectedElementId = state.selectedElementIds.at(-1) || ''; renderStage(); renderProperties();
-    }
-    function copySelectedElements() {
-        const elements = selectedElements();
-        if (!elements.length) { toast('请先选择要复制的元素。', 'warning'); return; }
-        state.elementClipboard = deepClone(elements); toast('已复制 ' + elements.length + ' 个元素。');
-    }
-    function pasteSelectedElements() {
-        const slide = activeSlide(); const copied = state.elementClipboard;
-        if (!slide || !Array.isArray(copied) || !copied.length) { toast('剪贴板中没有可粘贴的元素。', 'warning'); return; }
-        const created = copied.map((element, index) => ({ ...deepClone(element), id: element.id + '_copy_' + Date.now() + '_' + index, x: Math.min(state.active.content.width - element.width, Math.max(0, Number(element.x || 0) + 24)), y: Math.min(state.active.content.height - element.height, Math.max(0, Number(element.y || 0) + 24)), groupId: '' }));
-        slide.elements.push(...created); state.selectedElementIds = created.map(element => element.id); state.selectedElementId = state.selectedElementIds.at(-1) || ''; recordHistory(); renderEditor(); toast('已粘贴 ' + created.length + ' 个元素。');
-    }
+    function selectedElements() { const slide = activeSlide(); if (!slide) return []; const ids = state.selectedElementIds?.length ? state.selectedElementIds : state.selectedElementId ? [state.selectedElementId] : []; return slide.elements.filter(element => ids.includes(element.id)); }
+    function selectPresentationElement(id, { additive = false } = {}) { const current = new Set(state.selectedElementIds || []); if (additive) current.has(id) ? current.delete(id) : current.add(id); else { current.clear(); current.add(id); } state.selectedElementIds = [...current]; state.selectedElementId = state.selectedElementIds.at(-1) || ''; renderStage(); renderProperties(); }
+    function copySelectedElements() { const elements = selectedElements(); if (!elements.length) { toast('请先选择要复制的元素。', 'warning'); return; } state.elementClipboard = deepClone(elements); toast('已复制 ' + elements.length + ' 个元素。'); }
+    function pasteSelectedElements() { const slide = activeSlide(); const copied = state.elementClipboard; if (!slide || !Array.isArray(copied) || !copied.length) { toast('剪贴板中没有可粘贴的元素。', 'warning'); return; } const created = copied.map((element, index) => ({ ...deepClone(element), id: element.id + '_copy_' + Date.now() + '_' + index, x: Math.min(state.active.content.width - element.width, Math.max(0, Number(element.x || 0) + 24)), y: Math.min(state.active.content.height - element.height, Math.max(0, Number(element.y || 0) + 24)), groupId: '' })); slide.elements.push(...created); state.selectedElementIds = created.map(element => element.id); state.selectedElementId = state.selectedElementIds.at(-1) || ''; recordHistory(); renderEditor(); toast('已粘贴 ' + created.length + ' 个元素。'); }
     function groupSelectedElements() {
         const elements = selectedElements().filter(element => !element.locked);
         if (elements.length < 2) { toast('请至少选择两个未锁定元素后再组合。', 'warning'); return; }
@@ -908,13 +911,14 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-add-chart-btn')) { addChart(); return; }
             if (event.target.closest('#presentation-import-data-chart-btn')) { openDataChartModal().catch(error => toast(error.message, 'error')); return; }
             if (templatePresenter()?.handleTemplateClick?.(event, state, { templateById, renderTemplatePanel, renderLibrary, selectedElement, toast })) return;
-            if (event.target.closest('#presentation-upload-image-btn')) { byId('presentation-image-input')?.click(); return; }
+            if (event.target.closest('#presentation-upload-image-btn') || event.target.closest('#presentation-assets-upload-image-btn')) { byId('presentation-image-input')?.click(); return; }
             if (event.target.closest('#presentation-add-diagram-btn')) { addDiagram(); return; }
             if (event.target.closest('#presentation-insert-media-btn')) { state.pendingAssetType = 'media'; byId('presentation-rich-asset-input')?.click(); return; }
             if (event.target.closest('#presentation-insert-attachment-btn')) { state.pendingAssetType = 'attachment'; byId('presentation-rich-asset-input')?.click(); return; }
             if (event.target.closest('#presentation-upload-font-btn')) { state.pendingAssetType = 'font'; byId('presentation-rich-asset-input')?.click(); return; }
             if (event.target.closest('#presentation-assets-refresh-btn')) { loadAssets().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-metrics-refresh-btn')) { loadPresentationMetrics().catch(error => toast(error.message, 'error')); return; }
+            const aiChip = event.target.closest('.presentation-ai-chip[data-ai-instruction]'); if (aiChip) { const textarea = byId('presentation-ai-instruction'); if (textarea) textarea.value = aiChip.dataset.aiInstruction || ''; return; }
             const layoutVariant = event.target.closest('[data-presentation-layout-variant]'); if (layoutVariant) { presenter()?.applyLayoutVariant?.(layoutVariant.dataset.presentationLayoutVariant, state, { recordHistory, renderEditor, toast }); return; } const assetAction = event.target.closest('[data-presentation-asset-action]'); if (assetAction) { const asset = assetByRef(assetAction.dataset.presentationAssetRef); if (!asset) return; if (assetAction.dataset.presentationAssetAction === 'insert') insertAssetFromLibrary(asset); else if (assetAction.dataset.presentationAssetAction === 'font-heading') applyFontAsset(asset, 'heading'); else if (assetAction.dataset.presentationAssetAction === 'font-body') applyFontAsset(asset, 'body'); return; }
             if (event.target.closest('#presentation-set-cover-btn')) { setSelectedImageAsCover(); return; }
             if (event.target.closest('#presentation-delete-element-btn')) { const slide = activeSlide(); const element = selectedElement(); if (element?.locked) { toast('该元素由组织品牌模板锁定，不能删除。', 'warning'); return; } if (slide && state.selectedElementId) { slide.elements = slide.elements.filter(item => item.id !== state.selectedElementId); state.selectedElementId = ''; recordHistory(); renderEditor(); } return; }
@@ -932,7 +936,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-replace-image-btn')) { byId('presentation-replace-image-input')?.click(); return; }
             if (event.target.closest('#presentation-layer-up-btn')) { changeLayer(1); return; }
             if (event.target.closest('#presentation-layer-down-btn')) { changeLayer(-1); return; }
-            if (event.target.closest('#presentation-check-btn')) { runCheck().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-toggle-slide-review-btn')) { presenter()?.reviewActiveSlide?.(state, activeSlide()?.review?.status !== 'approved', { renderEditor, resetHistory, toast }).catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-check-btn') || event.target.closest('#presentation-check-issues-btn')) { runCheck().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-toggle-slide-review-btn')) { presenter()?.reviewActiveSlide?.(state, activeSlide()?.review?.status !== 'approved', { renderEditor, resetHistory, toast }).catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-presenter-btn') || event.target.closest('#presentation-notes-presenter-btn')) { openPresenterMode().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-delivery-guide-btn')) { presenter()?.loadDeliveryGuide?.(state, { toast }); return; }
             if (event.target.closest('#presentation-remote-start-btn')) { startRemotePresentation().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-remote-stop-btn')) { stopRemotePresentation().catch(error => toast(error.message, 'error')); return; }
@@ -946,6 +950,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-create-cancel-btn') || event.target.id === 'presentation-create-modal') { closeCreateModal(); return; }
         if (event.target.closest('#presentation-create-stop-btn') || event.target.closest('#presentation-outline-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-data-chart-cancel-btn')) { byId('presentation-data-chart-modal')?.classList.add('hidden'); return; }
+            if (event.target.closest('#presentation-create-version-btn') || event.target.closest('#presentation-create-version-panel-btn')) { createMilestoneVersion().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-refresh-versions-btn')) { loadVersions().catch(error => toast(error.message, 'error')); return; }
             const restore = event.target.closest('[data-presentation-restore-version]'); if (restore) { restoreVersion(Number(restore.dataset.presentationRestoreVersion)).catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-outline-cancel-btn')) { cancelOutlineReview(); return; }

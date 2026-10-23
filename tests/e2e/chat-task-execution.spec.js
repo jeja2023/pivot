@@ -230,8 +230,11 @@ test('任务长文本、审批和文件卡适配深浅主题与桌面及窄屏',
     const run = { id: 'browser-layout', session_id: session.id, status: 'approval_required', title: '核对指定资料并生成部门异常汇总报告', waiting: true, terminal: false };
     await page.route(/\/api\/agents\/runs\/chat-active(?:\?.*)?$/, route => route.fulfill({ json: { runs: [run] } }));
     await page.route('**/api/agents/runs/browser-layout/chat-feed?*', route => route.fulfill({ json: {
-        run, events: [{ id: 'event:1', seq: 1, kind: 'tool', operationId: 'long-operation', title: '查询已授权业务数据并核对异常来源', status: 'failed',
-            location: '外部服务', detail: '外部数据源暂时无法连接，请检查已授权连接状态。'.repeat(4), durationMs: 1200 }], legacySteps: [],
+        run, events: [
+            { id: 'event:1', seq: 1, kind: 'tool', operationId: 'long-operation', title: '查询已授权业务数据并核对异常来源', status: 'failed',
+                location: '外部服务', detail: '外部数据源暂时无法连接，请检查已授权连接状态。'.repeat(4), durationMs: 1200 },
+            { id: 'event:2', seq: 2, kind: 'tool', operationId: 'tool-discovery', title: '搜索可用工具', status: 'completed', location: '服务器' }
+        ], legacySteps: [],
         cursor: { eventSeq: 2 }, nextAfter: 2, older: { hasMore: false }, pollAfterMs: null, verification: { status: 'unknown' },
         approval: { title: '更新指定结果文件', location: '隔离执行环境', fields: [{ label: '文件范围', value: '授权工作区内的结果目录，完整范围可在任务详情中核对。' }],
             binding: { inputHash: 'a'.repeat(64), key: 'layout', requestedAt: '2026-10-20T08:00:00+08:00' }, expiresAt: '2099-01-01T08:00:00+08:00' },
@@ -255,6 +258,13 @@ test('任务长文本、审批和文件卡适配深浅主题与桌面及窄屏',
             expect(metrics.pageOverflow, `${colorScheme} ${width} 页面`).toBe(false);
             expect(metrics.panelOverflow, `${colorScheme} ${width} 任务`).toBe(false);
             expect(metrics.inputOverflow, `${colorScheme} ${width} 输入区`).toBe(false);
+            const discoveryRow = card.locator('.chat-task-record').filter({ hasText: '搜索可用工具' });
+            const titleAndLocation = await discoveryRow.evaluate(node => {
+                const title = node.querySelector('.chat-task-record-title-text').getBoundingClientRect();
+                const location = node.querySelector('.chat-task-record-location').getBoundingClientRect();
+                return Math.abs(title.top - location.top);
+            });
+            expect(titleAndLocation, `${colorScheme} ${width} 步骤名称与位置`).toBeLessThan(3);
             await expect(page.locator('#chat-task-composer-bar')).toHaveCount(0);
             const luminance = rgb => {
                 const channels = rgb.match(/[\d.]+/g).slice(0, 3).map(value => Number(value) / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);

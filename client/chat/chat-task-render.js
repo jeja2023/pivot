@@ -23,9 +23,9 @@
         const open = state.disclosures?.has(key) ? ' open' : '';
         return `<li class="chat-task-record is-${attr(record.status)}" data-task-operation="${attr(key)}">
             <span class="chat-task-record-symbol" aria-hidden="true">${symbol}</span>
-            <div class="chat-task-record-main"><div class="chat-task-record-line"><span>${escape(record.title)}${record.attempt > 1 ? `（第 ${record.attempt} 次尝试）` : ''}</span>
+            <div class="chat-task-record-main"><div class="chat-task-record-line"><span class="chat-task-record-title"><span class="chat-task-record-title-text">${escape(record.title)}${record.attempt > 1 ? `（第 ${record.attempt} 次尝试）` : ''}</span>
+                    ${record.location ? `<span class="chat-task-record-location">· ${escape(record.location)}</span>` : ''}</span>
                 <span class="chat-task-record-meta">${escape(label)}${elapsed ? ` · ${escape(elapsed)}` : ''}</span></div>
-                ${record.location ? `<span class="chat-task-record-location">${escape(record.location)}</span>` : ''}
                 ${record.detail ? `<details class="chat-task-record-detail" data-task-disclosure="${attr(key)}"${open}><summary>查看说明</summary><p>${escape(record.detail)}</p></details>` : ''}
             </div></li>`;
     }

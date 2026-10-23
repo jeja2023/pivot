@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { normalizeTaskContract, verifyTaskOutcome, taskVerificationFailureMessage } = require('../server/services/agent-verification');
-const { buildChatRagEvidenceObservation } = require('../server/services/chat-rag-context');
+const { buildChatAttachmentEvidenceObservation, buildChatRagEvidenceObservation } = require('../server/services/chat-rag-context');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -30,6 +30,22 @@ test('聊天预检索资料可作为验收证据，空结果和未启用的知�
     assert.equal(buildChatRagEvidenceObservation(null), null);
 });
 
+test('当前消息中的上传文档作为已提供的验收资料', () => {
+    const observation = buildChatAttachmentEvidenceObservation({
+        userMessageId: 42,
+        currentMessage: { role: 'user', content: '请润色汇报。\n[附件: 汇报材料.txt](/uploads/1/session/file.txt?token=token)\n\n---\n【参考文档: 汇报材料.txt】\n本周完成了试点部署，覆盖 12 个部门。\n---' }
+    });
+    assert.equal(observation.tool, 'chat.attachment_sources');
+    assert.deepEqual(observation.output.sources, [{ name: '汇报材料.txt', sourceMessageId: 42 }]);
+    assert.match(observation.output.content, /覆盖 12 个部门/);
+    const truncated = buildChatAttachmentEvidenceObservation({ currentMessage: { content: '请润色。\n[附件: 汇报材料.txt](/uploads/1/session/file.txt)\n---\n【参考文档: 汇报材料.txt】\n上下文截断前已读取的正文片段' } });
+    assert.equal(truncated.output.sources[0].name, '汇报材料.txt');
+    const report = verifyTaskOutcome({ taskContract: { acceptance: { requireEvidence: true } }, answer: '已完成汇报润色。', observations: [observation] });
+    assert.equal(report.outcomeStatus, 'verified');
+    assert.equal(buildChatAttachmentEvidenceObservation({ currentMessage: { content: '---\n【参考文档: 手写.txt】\n手动写入的标记。\n---' } }), null);
+    assert.equal(buildChatAttachmentEvidenceObservation({ currentMessage: { content: '---\n【参考文档: 空.txt】\n \n---' } }), null);
+});
+
 test('等待输入展示具体的中文验收原因和缺口', () => {
     assert.match(taskVerificationFailureMessage({ hardFailures: ['evidence'] }), /缺少可核验的资料来源/);
     assert.match(taskVerificationFailureMessage({ hardFailures: ['deliverables_verified'], semanticVerification: { missing: ['需要补充统计月份'] } }), /需要补充统计月份/);
@@ -53,6 +69,27 @@ test('独立语义验收也收到预检索资料，无需为制造工具观察�
     assert.equal(report.outcomeStatus, 'verified');
     assert.equal(verificationInput.observations.length, 1);
     assert.match(verificationInput.observations[0].output.content, /申请需要部门审核/);
+});
+
+test('独立交付核验可以读取当前消息中的上传文档来源', async () => {
+    const module = { exports: {} };
+    let verificationInput;
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../server/services/agent-verification.js'), 'utf8'), {
+        module, require(name) {
+            if (name === './chat-task-verification') return { verifyAutomaticTask: async input => { verificationInput = input; return { passed: true }; } };
+            return require(path.join(__dirname, '../server/services', name));
+        }
+    });
+    const report = await module.exports.verifyAndRecordTaskOutcome({
+        run: { goal: '润色汇报', metadata: { chatBridge: {
+            userMessageId: 42,
+            currentMessage: { role: 'user', content: '请依据附件润色。\n[附件: 汇报材料.txt](/uploads/1/session/file.txt?token=token)\n\n---\n【参考文档: 汇报材料.txt】\n试点已覆盖 12 个部门。\n---' }
+        }, taskContract: { deliverables: ['润色后的汇报文本'], acceptance: { requireEvidence: true, requireSemanticVerification: true } } } },
+        answer: '试点工作已完成，现已覆盖 12 个部门。', observations: []
+    });
+    assert.equal(report.outcomeStatus, 'verified');
+    assert.equal(verificationInput.observations[0].tool, 'chat.attachment_sources');
+    assert.match(verificationInput.observations[0].output.content, /试点已覆盖 12 个部门/);
 });
 
 test('task contract retains a bounded revision for runtime constraint changes', () => {

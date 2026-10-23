@@ -81,10 +81,10 @@ function createRemoteService(deps) {
     async function getPresentationRemoteState(token) {
         const hash = remoteTokenHash(token);
         const row = await queryOne(`
-            SELECT rs.*, d.client_id, d.title, d.current_version, v.content_json
+            SELECT rs.*, d.client_id, d.title, d.current_version, COALESCE(d.content_json, v.content_json) AS content_json
             FROM presentation_remote_sessions rs
             JOIN presentation_documents d ON d.id = rs.presentation_id AND d.deleted_at IS NULL
-            JOIN presentation_versions v ON v.presentation_id = d.id AND v.version = d.current_version
+            LEFT JOIN presentation_versions v ON v.presentation_id = d.id AND v.version = d.current_version
             WHERE rs.token_hash = ? AND rs.status = 'active' AND rs.expires_at > NOW()
             LIMIT 1
         `, [hash]);
@@ -106,10 +106,10 @@ function createRemoteService(deps) {
         const objectId = parseCasRef(ref);
         if (!objectId) return null;
         const row = await queryOne(`
-            SELECT rs.tenant_id, v.content_json, a.object_id, a.mime_type, a.filename
+            SELECT rs.tenant_id, COALESCE(d.content_json, v.content_json) AS content_json, a.object_id, a.mime_type, a.filename
             FROM presentation_remote_sessions rs
             JOIN presentation_documents d ON d.id = rs.presentation_id AND d.deleted_at IS NULL
-            JOIN presentation_versions v ON v.presentation_id = d.id AND v.version = d.current_version
+            LEFT JOIN presentation_versions v ON v.presentation_id = d.id AND v.version = d.current_version
             JOIN presentation_assets a ON a.object_id = ? AND a.tenant_id = rs.tenant_id AND a.deleted_at IS NULL
             WHERE rs.token_hash = ? AND rs.status = 'active' AND rs.expires_at > NOW() LIMIT 1
         `, [objectId, hash]);

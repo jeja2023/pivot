@@ -536,13 +536,28 @@
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
-    scrollbar-gutter: stable;
     margin: 16px 0;
     border-radius: 8px;
     border: 1px solid var(--border);
     box-shadow: 0 4px 12px rgba(0,0,0,0.04);
     background: var(--surface);
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.table-wrapper::-webkit-scrollbar {
+    height: 6px;
+}
+.table-wrapper::-webkit-scrollbar-track {
+    background: transparent;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
 }
 
 /* Markdown 表格样式 (现代网格风格) */

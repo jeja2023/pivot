@@ -19,8 +19,8 @@ const { getBuiltInTemplate, listBuiltInTemplates, STANDARD_LAYOUTS } = require('
 const { assertSensitiveExportAllowed, exportRendererVersion, normalizeExportOptions } = require('../server/services/presentations/presentation-export-service');
 const { runPresentationValidation } = require('../server/services/presentations/presentation-validation');
 const { renderPresentation } = require('../server/services/presentations/presentation-renderer');
-const { parsePresentationProposal, parseValidationProposal, buildOutlineMessages, buildSlidesMessages, buildRewriteMessages, buildContinueMessages, buildValidationMessages, filterOutlineSourceRefs, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
-const { normalizeTemplatePackage, applyTemplateBrandControls, inferPresentationAssetType, presentationFromArtifactText } = require('../server/services/presentations/presentation-service');
+const { parsePresentationProposal, parseValidationProposal, buildOutlineMessages, buildSlidesMessages, buildRewriteMessages, buildContinueMessages, buildValidationMessages, buildLayoutVariantsMessages, parseLayoutVariantsProposal, filterOutlineSourceRefs, repairAiPresentationProposal } = require('../server/services/presentations/presentation-ai');
+const { normalizeTemplatePackage, applyTemplateLayoutLayers, applyTemplateBrandControls, inferPresentationAssetType, presentationFromArtifactText } = require('../server/services/presentations/presentation-service');
 const { scanVbaSource } = require('../server/services/presentations/presentation-vba');
 const { recordPresentationOutcome, getPresentationMetricsSnapshot } = require('../server/services/presentations/presentation-metrics');
 const { importPptxTemplatePackage } = require('../server/services/presentations/presentation-pptx-template-import');
@@ -35,11 +35,63 @@ function testPresentation() {
     return defaultPresentation({ title: '季度项目汇报', template: getBuiltInTemplate('business-blue') });
 }
 
-test('内置 PPT 模板覆盖八套主题与十个标准布局', () => {
-    assert.equal(listBuiltInTemplates().length, 8);
+test('内置 PPT 模板覆盖标准主题与十个标准布局', () => {
+    assert.equal(listBuiltInTemplates().length, 1);
     assert.equal(STANDARD_LAYOUTS.length, 10);
     assert.ok(getBuiltInTemplate('business-blue').snapshotDigest);
     assert.equal(getBuiltInTemplate('does-not-exist'), null);
+});
+
+test('商务蓝模板沿用参考汇报的配色、页眉页脚和章节封面结构', () => {
+    const template = getBuiltInTemplate('business-blue');
+    assert.deepEqual(template.theme.colors.cardPalette, ['#1F5EA8', '#17A8C7', '#2E8B57', '#D8A23A', '#7A5AF8', '#C84A4A']);
+    assert.equal(template.theme.colors.background, '#F5F8FC');
+    const contentMaster = template.masters.find(master => master.id === 'master_content');
+    const headerBand = contentMaster.decorations.find(item => item.id === 'master_header_band');
+    assert.deepEqual({ y: headerBand.y, height: headerBand.height, fill: headerBand.style.fill }, { y: 0, height: 21, fill: '#10233F' });
+    assert.equal(contentMaster.decorations.find(item => item.id === 'master_footer_title').content.text, '{{presentationTitle}}');
+
+    const cover = template.layouts.find(layout => layout.id === 'cover');
+    const coverTitle = cover.placeholders.find(slot => slot.role === 'title');
+    assert.deepEqual({ x: coverTitle.x, y: coverTitle.y, fontSize: coverTitle.style.fontSize }, { x: 72, y: 175, fontSize: 49 });
+    assert.equal(cover.decorations.some(item => item.id === 'cover_card'), false);
+    assert.deepEqual({
+        x: cover.decorations.find(item => item.id === 'cover_nav_panel').x,
+        y: cover.decorations.find(item => item.id === 'cover_nav_panel').y,
+        width: cover.decorations.find(item => item.id === 'cover_nav_panel').width
+    }, { x: 72, y: 384, width: 1138 });
+
+    const threeCard = template.layouts.find(layout => layout.id === 'three-card');
+    const firstCardBar = threeCard.decorations.find(item => item.id === 'three_bar_1');
+    assert.deepEqual({ x: firstCardBar.x, y: firstCardBar.y, width: firstCardBar.width, height: firstCardBar.height }, { x: 72, y: 149, width: 10, height: 437 });
+});
+
+test('封面章节条使用文稿实际页标题，已存在步骤图时不会重复生成', () => {
+    const template = getBuiltInTemplate('business-blue');
+    const presentation = defaultPresentation({ title: '侦查项目汇报', template });
+    const cover = presentation.slides[0];
+    const chapter = JSON.parse(JSON.stringify(cover));
+    chapter.id = 'slide_chapter';
+    chapter.index = 1;
+    chapter.type = 'content';
+    chapter.layoutId = 'title-content';
+    chapter.elements = [{
+        id: 'title', type: 'text', x: 100, y: 50, width: 1096, height: 56, rotation: 0,
+        zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text: '一、建设背景' },
+        style: { fontSize: 32, fontWeight: 700, color: '#10233F', align: 'left', verticalAlign: 'middle', lineHeight: 1.25 }
+    }];
+    presentation.slides.push(chapter);
+
+    const generated = applyTemplateLayoutLayers(presentation, template, { reflow: true });
+    assert.ok(generated.slides[0].elements.some(element => element.content?.text === '建设背景'));
+
+    cover.elements.push({
+        id: 'existing_steps', type: 'diagram', diagramType: 'process', items: ['目标', '方案', '成效'],
+        x: 120, y: 410, width: 1040, height: 80, rotation: 0, zIndex: 10, locked: false, visible: true,
+        sourceRefs: [], style: { fill: '#EFF6FF', stroke: '#2563EB', textColor: '#1E3A8A', fontSize: 16 }
+    });
+    const existing = applyTemplateLayoutLayers(presentation, template, { reflow: true });
+    assert.equal(existing.slides[0].elements.some(element => element.type === 'text' && element.content?.text === '建设背景'), false);
 });
 
 test('PPT IR 规范化稳定且拒绝页面越界元素', () => {
@@ -179,6 +231,39 @@ test('页面版式探索生成三种可编辑候选，并保持锁定元素坐�
         assert.equal(logo.y, 20);
         assert.equal(variant.slide.elements.find(element => element.id === 'title').y, 58);
     });
+});
+
+test('AI 版式方案提示词与解析支持内容提炼与坐标重排', () => {
+    const presentation = testPresentation();
+    const slide = presentation.slides[0];
+    const messages = buildLayoutVariantsMessages({
+        slide,
+        instruction: '优化为咨询公司汇报风格，左侧提炼结论，右侧展示数据',
+        aspectRatio: '16:9'
+    });
+    assert.equal(messages.length, 2);
+    assert.match(messages[1].content, /优化为咨询公司汇报风格/);
+
+    const mockAiOutput = JSON.stringify({
+        variants: [
+            {
+                id: 'consulting_summary',
+                name: '咨询决策摘要版式',
+                description: '左侧结论先行，右侧重点展开。',
+                slide: {
+                    id: slide.id,
+                    elements: [
+                        { id: 'title', x: 80, y: 60, width: 1120, height: 70 },
+                        { id: 'body', x: 80, y: 160, width: 500, height: 480 }
+                    ]
+                }
+            }
+        ]
+    });
+    const parsed = parseLayoutVariantsProposal(mockAiOutput, slide, { aspectRatio: '16:9' });
+    assert.equal(parsed.variants.length, 1);
+    assert.equal(parsed.variants[0].name, '咨询决策摘要版式');
+    assert.equal(parsed.variants[0].slide.elements.find(e => e.id === 'title').x, 80);
 });
 
 test('质量检查识别文本溢出、占位符和内容密度', () => {
@@ -397,6 +482,37 @@ test('组织品牌控制会锁定 Logo、页脚、页码和字体，保存时可
     assert.equal(cleared.slides[0].elements.some(item => item.id.startsWith('pivotBrand_')), false);
 });
 
+test('封面模板重排附加说明时避开步骤图形并防止多段文字叠位', () => {
+    const template = getBuiltInTemplate('business-blue');
+    const presentation = defaultPresentation({ title: '中秋祝福', template });
+    const slide = presentation.slides[0];
+    slide.type = 'cover';
+    slide.layoutId = 'cover';
+    const text = (id, content, y, fontSize) => ({
+        id, type: 'text', x: 100, y, width: 1080, height: 42, rotation: 0,
+        zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text: content },
+        style: { fontSize, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'middle', lineHeight: 1.35, padding: 0 }
+    });
+    slide.elements = [
+        text('title', '中秋祝福', 180, 46),
+        text('subtitle', '表达关怀 | 传递感谢 | 凝聚团队', 330, 22),
+        text('description', '☑ 以真诚关怀拉近距离，以切实认可凝聚团队力量', 394, 18),
+        text('closing', '让一句真诚祝福，成为持续团队关怀的起点', 394, 18),
+        { id: 'steps', type: 'shape', shapeType: 'roundRect', x: 140, y: 420, width: 1000, height: 70, rotation: 0,
+            zIndex: 9, locked: false, visible: true, sourceRefs: [], style: { fill: '#FFFFFF', stroke: '#CBD5E1', strokeWidth: 1, opacity: 1, radius: 14 } }
+    ];
+
+    const reflowed = applyTemplateLayoutLayers(presentation, template, { reflow: true });
+    const output = reflowed.slides[0];
+    const descriptions = output.elements.filter(element => ['description', 'closing'].includes(element.id));
+    const stepRow = output.elements.find(element => element.id === 'steps');
+    assert.equal(descriptions.length, 2);
+    assert.ok(descriptions[0].y + descriptions[0].height <= stepRow.y || descriptions[0].y >= stepRow.y + stepRow.height);
+    assert.ok(descriptions[1].y + descriptions[1].height <= stepRow.y || descriptions[1].y >= stepRow.y + stepRow.height);
+    assert.ok(descriptions[0].y + descriptions[0].height <= descriptions[1].y || descriptions[1].y + descriptions[1].height <= descriptions[0].y);
+    assert.equal(runPresentationValidation(reflowed).issues.some(issue => issue.code === 'ELEMENT_OVERLAP'), false);
+});
+
 
 test('受限 PPTX 模板导入提取主题、比例和布局，并拒绝非 OOXML 包', async () => {
     const pptx = await renderPresentation(testPresentation(), 'pptx');
@@ -409,15 +525,15 @@ test('受限 PPTX 模板导入提取主题、比例和布局，并拒绝非 OOXM
 });
 
 
-test('八套内置主题均可生成固定尺寸的 PNG 视觉回归基准', async () => {
-    const templates = listBuiltInTemplates();
+test('内置主题可生成固定尺寸的 PNG 视觉回归基准', async () => {
+    const templates = listBuiltInTemplates().filter(item => item.id === 'business-blue');
     const results = await Promise.all(templates.map(async template => {
         const presentation = defaultPresentation({ title: template.name + '基准页', template });
         const rendered = await renderPresentation(presentation, 'png');
         const metadata = await sharp(rendered.buffer).metadata();
         return { id: template.id, width: metadata.width, height: metadata.height, format: metadata.format, bytes: rendered.buffer.length, sha256: crypto.createHash('sha256').update(rendered.buffer).digest('hex') };
     }));
-    assert.equal(results.length, 8);
+    assert.equal(results.length, 1);
     const baselinePath = path.join(__dirname, 'fixtures', 'presentation-template-visual-baselines.json');
     const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
     results.forEach(result => {

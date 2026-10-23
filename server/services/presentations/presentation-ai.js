@@ -159,6 +159,57 @@ function buildValidationMessages(body = {}) {
     return [{ role: 'system', content: presentationAiSystemPrompt() }, { role: 'user', content: ['请检查下面演示文稿中的事实、数字、引用和内容逻辑。只返回 JSON，不要返回 Markdown。', '无法从来源确认的数字、日期、政策名称或组织名称必须列为 warning，不得自行补全。', '返回格式：{"status":"passed|warning|blocked","issues":[{"severity":"blocking|warning|info","slideId":"","elementId":"","code":"FACT_UNVERIFIED","message":"","suggestion":""}],"assumptions":[]}', JSON.stringify(presentation).slice(0, 50000)].join('\n') }];
 }
 
+function buildLayoutVariantsMessages(body = {}) {
+    const slide = body.slide && typeof body.slide === 'object' ? body.slide : {};
+    const instruction = clamp(body.instruction || '', 1000);
+    const aspectRatio = String(body.aspectRatio || '16:9').trim();
+    const width = aspectRatio === '4:3' ? 960 : 1280;
+    const height = 720;
+    const elementsSummary = (slide.elements || []).map(element => ({
+        id: element.id,
+        type: element.type,
+        locked: Boolean(element.locked),
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+        text: element.content?.text ? clamp(element.content.text, 200) : undefined,
+        chartType: element.chartType,
+        title: element.title,
+        shapeType: element.shapeType
+    }));
+
+    return [
+        {
+            role: 'system',
+            content: [
+                '你是 Pivot 智能演示文稿工作台的顶级版式设计师与排版专家。',
+                '只输出一个有效 JSON 对象，严禁包含 Markdown、代码围栏、解释或多余文本。',
+                '针对当前幻灯片的具体内容与用户的排版要求，生成恰好 3 种不同结构风格的专业版式方案（Layout Variants）。',
+                '方案要求：',
+                '1. 方案一：偏向结论先行与决策汇报（如左侧要点结论、右侧关键图示/数据/事实，适合高管决策）。',
+                '2. 方案二：偏向核心证据与视觉焦点（突出放大核心图表、图示或核心数据卡片，文字作为简短辅证）。',
+                '3. 方案三：偏向逻辑对比与多维平衡（双栏对称、三列卡片或流程对比结构，层次丰富）。',
+                `画布尺寸为 ${width}x${height}，所有元素必须在该画布区域内且不可越界，元素之间不要无意重叠。`,
+                '必须保留页面中所有现有元素的 id、type 和内容（不可丢弃元素，不可随意改写正文字词），重新设计计算每个未锁定元素的合理坐标 (x, y, width, height)。',
+                '注意：如果元素 locked=true，表示由组织品牌模板锁定（如Logo、页码、固定页脚等），其坐标和尺寸绝对不可改动！',
+                '返回格式：',
+                '{"variants":[{"id":"variant_1","name":"方案名称（结合当前页内容的专业提炼）","description":"设计说明（简述排版结构及适用场景）","slide":{"id":"' + (slide.id || 'slide_current') + '","elements":[...重新排布后的完整元素列表...]}}]}'
+            ].join('\n')
+        },
+        {
+            role: 'user',
+            content: [
+                `当前幻灯片标题：${clamp(slide.title || '当前页', 200)}`,
+                instruction ? `用户排版与版式要求：${instruction}` : '用户排版与版式要求：请根据页面内容结构给出 3 种专业版式排版方案。',
+                `画布尺寸：${width}x${height}（比例：${aspectRatio}）`,
+                `当前幻灯片全部元素：\n${JSON.stringify(elementsSummary).slice(0, 15000)}`,
+                '请生成 3 个各具特色、视觉层次分明的高质量版式方案 JSON。'
+            ].join('\n')
+        }
+    ];
+}
+
 function extractAiJsonObject(content) {
     const source = String(content || '').replace(/^\uFEFF/, '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     const start = source.indexOf('{');
@@ -245,6 +296,64 @@ function parseValidationProposal(content) {
     const result = parseAiJsonObject(content, 'AI 返回的检查结果 JSON 无效。', 'PRESENTATION_AI_VALIDATION_INVALID');
     const issues = Array.isArray(result.issues) ? result.issues.slice(0, 200).map(issue => ({ severity: ['blocking', 'warning', 'info'].includes(String(issue && issue.severity)) ? String(issue.severity) : 'warning', slideId: String(issue && issue.slideId || '').slice(0, 96), elementId: String(issue && issue.elementId || '').slice(0, 96), code: String(issue && issue.code || 'AI_REVIEW').slice(0, 64), message: String(issue && issue.message || '').slice(0, 500), suggestion: String(issue && issue.suggestion || '').slice(0, 500) })) : [];
     return { status: ['passed', 'warning', 'blocked'].includes(String(result.status)) ? String(result.status) : (issues.some(item => item.severity === 'blocking') ? 'blocked' : issues.length ? 'warning' : 'passed'), issues, assumptions: Array.isArray(result.assumptions) ? result.assumptions.slice(0, 50).map(item => String(item).slice(0, 500)) : [] };
+}
+
+function applyLayoutElementCoordinates(target, aiEl, width, height) {
+    if (!target || target.locked) return;
+    if (Number.isFinite(Number(aiEl.x))) target.x = Math.max(0, Math.min(width - 50, Math.round(Number(aiEl.x))));
+    if (Number.isFinite(Number(aiEl.y))) target.y = Math.max(0, Math.min(height - 40, Math.round(Number(aiEl.y))));
+    if (Number.isFinite(Number(aiEl.width)) && Number(aiEl.width) > 20) target.width = Math.min(width, Math.round(Number(aiEl.width)));
+    if (Number.isFinite(Number(aiEl.height)) && Number(aiEl.height) > 20) target.height = Math.min(height, Math.round(Number(aiEl.height)));
+    if (aiEl.style?.align && ['left', 'center', 'right', 'justify'].includes(aiEl.style.align)) {
+        target.style = { ...(target.style || {}), align: aiEl.style.align };
+    }
+}
+
+function parseLayoutVariantsProposal(content, originalSlide = {}, { aspectRatio = '16:9' } = {}) {
+    const result = parseAiJsonObject(content, 'AI 返回的版式方案 JSON 无效。', 'PRESENTATION_AI_LAYOUT_VARIANTS_INVALID');
+    const rawVariants = Array.isArray(result.variants) ? result.variants : [];
+    if (!rawVariants.length) {
+        throw presentationError('AI 未返回有效的版式方案列表。', 422, 'PRESENTATION_AI_LAYOUT_VARIANTS_EMPTY');
+    }
+    const width = aspectRatio === '4:3' ? 960 : 1280;
+    const height = 720;
+    const variants = rawVariants.slice(0, 3).map((item, index) => {
+        const id = normalizeAiId(item.id, `variant_${index + 1}`);
+        const name = normalizeAiText(item.name, `版式方案 ${index + 1}`, 60);
+        const description = normalizeAiText(item.description, '根据当前页面内容优化的结构排版。', 300);
+
+        const slideClone = JSON.parse(JSON.stringify(originalSlide || {}));
+        const originalMap = new Map((slideClone.elements || []).map(el => [el.id, el]));
+        const movableOriginal = (slideClone.elements || []).filter(el => !el.locked);
+        const matchedIds = new Set();
+
+        if (item.slide && Array.isArray(item.slide.elements)) {
+            item.slide.elements.forEach(aiEl => {
+                const target = originalMap.get(aiEl.id);
+                if (target && !target.locked) {
+                    matchedIds.add(target.id);
+                    applyLayoutElementCoordinates(target, aiEl, width, height);
+                }
+            });
+            const remainingOriginals = movableOriginal.filter(el => !matchedIds.has(el.id));
+            const remainingAiEls = item.slide.elements.filter(aiEl => !originalMap.has(aiEl.id));
+            remainingAiEls.forEach((aiEl, i) => {
+                const target = remainingOriginals[i];
+                if (target) {
+                    applyLayoutElementCoordinates(target, aiEl, width, height);
+                }
+            });
+        }
+
+        return {
+            id,
+            name,
+            description,
+            slide: slideClone
+        };
+    });
+
+    return { variants };
 }
 
 const AI_ALLOWED_ELEMENT_TYPES = new Set(['text', 'shape', 'table', 'chart']);
@@ -449,4 +558,4 @@ function parsePresentationProposal(content, { templateId = 'business-blue', temp
     return { ...proposal, presentation: contentObject };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, repairAiPresentationProposal };
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };

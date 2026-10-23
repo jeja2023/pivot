@@ -255,7 +255,9 @@ async function getPresentationRow(user, clientId, { includeContent = false } = {
     const idStr = String(clientId || '').trim();
     const isArtifactId = /^\d+$/.test(idStr);
     const row = await queryOne(`
-        SELECT d.*, v.content_json, v.validation_json,
+        SELECT d.*,
+               COALESCE(d.content_json, v.content_json) AS content_json,
+               COALESCE(d.validation_json, v.validation_json) AS validation_json,
                (d.owner_user_id = ?) AS is_owner,
                COALESCE((SELECT pc.role FROM presentation_collaborators pc WHERE pc.presentation_id = d.id AND pc.user_id = ? LIMIT 1), '') AS collaborator_role
         FROM presentation_documents d
@@ -356,10 +358,10 @@ async function createPresentation(user, body = {}) {
     });
     const row = await queryOne(`
         INSERT INTO presentation_documents
-            (tenant_id, owner_user_id, client_id, artifact_id, title, status, aspect_ratio, template_id, template_version, template_digest, tags_json, cover_asset_ref, current_version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
+            (tenant_id, owner_user_id, client_id, artifact_id, title, status, aspect_ratio, template_id, template_version, template_digest, tags_json, cover_asset_ref, content_json, validation_json, current_version, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
         RETURNING *
-    `, [tenant.tenantId, user.id, clientId, artifact?.id || null, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || '')]);
+    `, [tenant.tenantId, user.id, clientId, artifact?.id || null, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || ''), serializeJson(content), serializeJson(validation)]);
     await execute(`
         INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
         VALUES (?, 1, ?, ?, ?, ?, ?, ?, NOW())
@@ -407,6 +409,34 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     const contentJson = serializeJson(content);
     const existingJson = String(current.content_json || '');
     if (existingJson === contentJson && title === current.title) return toPublicPresentation(current, { includeContent: true });
+    // 判断是否为自动保存草稿（只更新草稿，不自增版本号，不生成冗余历史版本快照）
+    const isAutoSave = Boolean(body.autoSave ?? body.isAutoSave ?? (body.note === '自动保存' && !body.isMilestone && !options.isMilestone));
+    if (isAutoSave) {
+        const updated = await transaction(async trx => {
+            const document = await trx.queryOne(`
+                UPDATE presentation_documents
+                SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, status = ?,
+                    template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, updated_at = NOW()
+                WHERE id = ? AND current_version = ? AND deleted_at IS NULL
+                RETURNING *
+            `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion]);
+            if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
+            return document;
+        });
+        if (current.artifact_id) {
+            await execute('UPDATE agent_artifacts SET content = ?, updated_at = NOW() WHERE id = ?', [contentJson, current.artifact_id]).catch(() => {});
+        }
+        const output = { ...toPublicPresentation(updated), content, validation, autoSave: true };
+        if (activeTemplate?.definition) {
+            output.templateDefinition = activeTemplate.definition;
+            output.templateSourceFormat = activeTemplate.sourceFormat || activeTemplate.definition?.importMetadata?.sourceFormat || 'pivot';
+            output.templateImportReport = activeTemplate.importReport || [];
+        }
+        publishPresentationRealtime(current.id, 'presentation.updated', { presentationId: current.client_id, version: output.version, autoSave: true, changedBy: user.id }).catch(() => {});
+        return output;
+    }
+
+    // 里程碑版本：用户主动保存、AI改写、恢复历史、页面审批等重要业务节点才落库新版本。
     // Artifact 物理归属始终保持文稿所有者；授权编辑者的实际操作者仍由
     // presentation_versions.created_by 与路由审计记录。这样既允许协作者保存，
     // 又不会把 Artifact 所有权或下载边界意外转移给协作者。
@@ -433,10 +463,10 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     const updated = await transaction(async trx => {
         const document = await trx.queryOne(`
             UPDATE presentation_documents
-            SET title = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, artifact_id = COALESCE(?, artifact_id), updated_at = NOW()
+            SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, artifact_id = COALESCE(?, artifact_id), updated_at = NOW()
             WHERE id = ? AND current_version = ? AND deleted_at IS NULL
             RETURNING *
-        `, [title, String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, resolvedArtifactId, current.id, baseVersion]);
+        `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, resolvedArtifactId, current.id, baseVersion]);
         if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
         await trx.execute(`
             INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)

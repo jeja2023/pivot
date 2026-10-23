@@ -16,8 +16,8 @@
         return data;
     }
 
-    function jsonOptions(body) {
-        return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    function jsonOptions(body, options = {}) {
+        return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), ...options };
     }
 
     function downloadBlob(name, blob) {
@@ -185,7 +185,7 @@
     async function openPresenterMode(state, { saveActive, syncRemoteSlide } = {}) {
         const content = state.active?.content;
         if (!content) return;
-        await saveActive?.({ force: true });
+        if (state.dirty) await saveActive?.();
         const slide = content.slides?.find(s => s.id === state.selectedSlideId) || content.slides?.[0];
         state.presenterIndex = Math.max(0, content.slides.findIndex(item => item.id === slide?.id));
         state.presenterStartedAt = Date.now();
@@ -518,7 +518,7 @@
         if (!state.versions.length) {
             const empty = document.createElement('div');
             empty.className = 'presentation-empty-note';
-            empty.textContent = '暂无可恢复版本。保存后会自动在这里留下版本记录。';
+            empty.textContent = '暂无历史版本。编辑过程已自动实时保存草稿；点击上方“保存新版本”可创建里程碑版本。';
             list.appendChild(empty);
             return;
         }
@@ -530,11 +530,13 @@
             title.textContent = `版本 ${version.version}`;
             const meta = document.createElement('span');
             meta.textContent = `${formatTime?.(version.createdAt) || version.createdAt} · ${version.note || '保存演示文稿'}`;
+            meta.title = meta.textContent;
             info.append(title, meta);
             const restore = document.createElement('button');
             restore.type = 'button';
             restore.className = 'btn-secondary';
             restore.dataset.presentationRestoreVersion = String(version.version);
+            restore.title = `恢复到版本 ${version.version}`;
             restore.textContent = '恢复';
             row.append(info, restore);
             list.appendChild(row);
@@ -552,7 +554,7 @@
         if (!state.active?.id) return;
         const accepted = await window.Pivot.legacy.showConfirm?.('恢复演示文稿版本', `将以历史版本 ${version} 创建一个新的当前版本，当前内容仍会保留在版本历史中。`);
         if (!accepted) return;
-        await saveActive?.({ force: true });
+        if (state.dirty) await saveActive?.({ force: true, note: '恢复前自动保存' });
         const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/rollback`, jsonOptions({ version, note: `用户恢复版本 ${version}` }));
         state.active = data.presentation;
         state.selectedSlideId = state.active.content?.slides?.[0]?.id || '';
@@ -576,7 +578,7 @@
         let exported = false;
         setSaveState?.(`正在导出 ${format.toUpperCase()}…`, 'saving');
         try {
-            await saveActive?.({ force: true });
+            if (state.dirty) await saveActive?.();
             const options = state.exportOptions || {};
             const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({
                 format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, allowSensitiveExport: options.allowSensitiveExport === true, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
@@ -905,15 +907,41 @@
         const slide = state.active?.content?.slides?.find(item => item.id === state.selectedSlideId) || state.active?.content?.slides?.[0];
         if (!state.active?.id || !slide) return;
         const target = byId('presentation-layout-variants');
-        if (target) { target.classList.remove('hidden'); target.textContent = '正在生成原生版式方案…'; }
+        const btn = byId('presentation-ai-layout-variants-btn');
+        const instruction = byId('presentation-ai-instruction')?.value?.trim() || '';
+        const model = byId('presentation-ai-model')?.value?.trim() || '';
+        if (target) { target.classList.remove('hidden'); target.textContent = model ? 'AI 正在根据页面内容与要求生成版式方案…' : '正在生成版式方案…'; }
+        if (btn) { btn.disabled = true; btn.dataset.originalText = btn.textContent; btn.textContent = '生成中…'; }
+
+        state.aiAbortController?.abort();
+        const controller = new AbortController();
+        state.aiAbortController = controller;
+
         try {
-            const data = await requestJson(`${API}/layout-variants`, jsonOptions({ presentationId: state.active.id, aspectRatio: state.active.content.aspectRatio, slide }));
+            const data = await requestJson(`${API}/layout-variants`, jsonOptions({
+                presentationId: state.active.id,
+                aspectRatio: state.active.content.aspectRatio,
+                slide,
+                instruction,
+                model
+            }, { signal: controller.signal }));
             state.layoutVariantSlideId = slide.id;
             state.layoutVariants = data.variants || [];
             renderLayoutVariants(state);
+            if (data.variants?.length) {
+                toast?.(data.aiGenerated ? `AI 已根据当前页面生成 ${data.variants.length} 项个性化版式方案。` : `已生成 ${data.variants.length} 项版式方案。`);
+            }
         } catch (error) {
+            if (controller.signal.aborted) {
+                if (target) { target.classList.remove('hidden'); target.textContent = '已停止生成版式方案。'; }
+                toast?.('已停止生成。', 'warning');
+                return;
+            }
             if (target) { target.classList.remove('hidden'); target.textContent = '未能生成版式方案，请稍后重试。'; }
             toast?.(error.message || '未能生成版式方案。', 'error');
+        } finally {
+            if (state.aiAbortController === controller) state.aiAbortController = null;
+            if (btn) { btn.disabled = false; btn.textContent = btn.dataset.originalText || '生成版式方案'; }
         }
     }
 

@@ -278,6 +278,7 @@
             button.type = 'button';
             button.className = `presentation-template-card${state.active?.template?.id === template.id ? ' is-active' : ''}${compact ? ' is-compact' : ''}`;
             button.dataset.presentationTemplateId = template.id;
+            button.setAttribute('aria-pressed', String(state.active?.template?.id === template.id));
             const color = template.definition?.theme?.colors?.primary || '';
             button.style.setProperty('--presentation-template-color', color);
             const title = document.createElement('strong'); title.textContent = template.name;
@@ -293,7 +294,7 @@
                 palette.appendChild(dot);
             });
             footer.append(tags, palette);
-            button.append(renderTemplateThumbnail(template), title, desc, footer);
+            button.append(title, desc, footer);
             host.appendChild(button);
         });
     }

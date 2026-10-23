@@ -25,6 +25,8 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /.pptx/);
     assert.match(workspace, /id="presentation-submit-template-review-btn"/);
     assert.match(workspace, /id="presentation-review-template-btn"/);
+    assert.match(editor, /const reapplying = String\(templateId\) === String\(currentTemplateId \|\| ''\)/);
+    assert.match(editor, /重新排版当前封面/);
     assert.match(workspace, /id="presentation-ai-continue-btn"/);
     assert.match(workspace, /id="presentation-ai-layout-variants-btn"/);
     assert.match(workspace, /id="presentation-layout-variants"/);
@@ -53,6 +55,8 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(workspace, /id="presentation-outline-confirm-all-btn"/);
     assert.match(workspace, /id="presentation-outline-confirmation-status"/);
     assert.match(workspace, /id="presentation-toggle-slide-review-btn"/);
+    assert.match(workspace, /id="presentation-create-version-btn"/);
+    assert.match(editor, /function createMilestoneVersion/);
     assert.match(workspace, /演示大纲预览/);
     assert.doesNotMatch(workspace, /id="presentation-outline-editor"/);
     assert.doesNotMatch(workspace, /id="presentation-outline-title-input"/);
@@ -142,6 +146,10 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(organizationControls, /department/);
     assert.match(brandAssets, /presentation_asset_scope_check/);
     assert.match(brandAssets, /organization/);
+    const draftMigration = source('server/db/migrations/presentation-draft-content.js');
+    assert.match(draftMigration, /202610230001_presentation_draft_content/);
+    assert.match(draftMigration, /content_json/);
+    assert.match(draftMigration, /validation_json/);
     const presentationRoutes = source('server/routes/apps/presentations.js');
     const editor = source('client/chat/apps-workbench-presentations.js');
     assert.match(presentationRoutes, /Idempotency-Key/);

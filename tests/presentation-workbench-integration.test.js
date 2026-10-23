@@ -53,6 +53,24 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         assert.equal(presentation.content.metadata.planApproval.status, 'approved');
         assert.equal(presentation.content.metadata.planApproval.approvedBy, String(user.id));
 
+        // 验证自动保存草稿行为：静默更新草稿，不自增版本号，不增加 presentation_versions 快照
+        const draftContent = JSON.parse(JSON.stringify(presentation.content));
+        const draftSubtitle = draftContent.slides[0].elements.find(item => item.id === 'subtitle') || draftContent.slides[0].elements.find(item => item.type === 'text' && item.id !== 'title');
+        draftSubtitle.content.text = '草稿自动同步临时文字';
+        const autoSaved = await savePresentationContent(user, presentation.id, {
+            baseVersion: presentation.version,
+            title: 'PPT 服务集成验证',
+            content: draftContent,
+            autoSave: true,
+            note: '自动保存'
+        });
+        assert.equal(autoSaved.version, 1, '自动保存草稿不自增版本号');
+        const versionsAfterAutoSave = await listPresentationVersions(user, presentation.id);
+        assert.equal(versionsAfterAutoSave.length, 1, '自动保存草稿不生成冗余版本记录');
+        const loadedDraft = await getPresentation(user, presentation.id);
+        const loadedDraftSubtitle = loadedDraft.content.slides[0].elements.find(item => item.id === 'subtitle') || loadedDraft.content.slides[0].elements.find(item => item.type === 'text' && item.id !== 'title');
+        assert.equal(loadedDraftSubtitle?.content?.text, '草稿自动同步临时文字', '读取文稿时应能立即读取到草稿同步的内容');
+
         const changed = JSON.parse(JSON.stringify(presentation.content));
         const subtitleEl = changed.slides[0].elements.find(item => item.id === 'subtitle') || changed.slides[0].elements.find(item => item.type === 'text' && item.id !== 'title');
         assert.ok(subtitleEl && subtitleEl.content, '封面页应包含可编辑副标题或正文元素');

@@ -17,17 +17,10 @@ const STANDARD_LAYOUTS = Object.freeze([
 ]);
 
 const THEME_SEEDS = Object.freeze([
-    ['business-blue', '商务蓝汇报', '适用于项目、经营和工作汇报', '#1769AA', '#5B8FF9', '#61DDAA', '#1F2937', '#F7F9FC', '#FFFFFF', '#E2E8F0', false, ['商务', '汇报', '数据']],
-    ['technology-dark', '科技深色方案', '适用于技术方案、产品发布和数字化主题', '#2D6CDF', '#7C3AED', '#22C55E', '#E2E8F0', '#0F172A', '#1E293B', '#334155', true, ['科技', '深色', '产品']],
-    ['government-clean', '政务简洁汇报', '适用于政策、制度和正式工作汇报', '#0F4C81', '#2B7BBB', '#83B4D8', '#1E293B', '#FFFFFF', '#F8FAFC', '#E2E8F0', false, ['政务', '正式', '制度']],
-    ['party-red', '党建红色宣传', '适用于党建、宣传和会议材料', '#B91C1C', '#DC2626', '#F59E0B', '#3F1D1D', '#FFF7ED', '#FFFFFF', '#FED7AA', false, ['党建', '宣传', '会议']],
-    ['training-green', '教学培训', '适用于课程、培训和知识讲解', '#16803C', '#34A853', '#F9AB00', '#173A2A', '#F4FBF6', '#FFFFFF', '#D1FAE5', false, ['培训', '教学', '知识']],
-    ['data-insight', '数据分析洞察', '适用于指标、趋势和经营分析', '#2563EB', '#14B8A6', '#F97316', '#172033', '#F8FAFC', '#FFFFFF', '#E2E8F0', false, ['数据', '经营', '分析']],
-    ['minimal-white', '极简白正式汇报', '适用于高密度信息和正式沟通', '#111827', '#6B7280', '#2563EB', '#111827', '#FFFFFF', '#F9FAFB', '#E5E7EB', false, ['极简', '正式', '白色']],
-    ['public-welfare', '绿色公益项目', '适用于环保、公益和社会项目', '#15803D', '#65A30D', '#0EA5E9', '#1F3B2A', '#F7FEE7', '#FFFFFF', '#DCFCE7', false, ['公益', '环保', '项目']]
+    ['business-blue', '商务蓝汇报', '适用于项目阶段汇报、方案评审与经营复盘', '#1F5EA8', '#17A8C7', '#2E8B57', '#344054', '#F5F8FC', '#FFFFFF', '#D8E2EE', false, ['项目', '阶段汇报', '复盘']]
 ]);
 
-function buildThemeMasters(colors, _isDark) {
+function buildThemeMasters(colors, _isDark, useReferenceStyle = false) {
     const { cardBorder, background } = colors;
     return [
         {
@@ -35,6 +28,21 @@ function buildThemeMasters(colors, _isDark) {
             name: '标准内容母版',
             background: { fill: background },
             decorations: [
+                ...(useReferenceStyle ? [{
+                    id: 'master_header_band',
+                    type: 'shape',
+                    shapeType: 'rect',
+                    x: 0,
+                    y: 0,
+                    width: 1280,
+                    height: 21,
+                    rotation: 0,
+                    zIndex: 0,
+                    locked: true,
+                    visible: true,
+                    sourceRefs: [],
+                    style: { fill: '#10233F', stroke: '#10233F', strokeWidth: 0, opacity: 1, radius: 0 }
+                }] : []),
                 {
                     id: 'master_footer_line',
                     type: 'shape',
@@ -49,14 +57,40 @@ function buildThemeMasters(colors, _isDark) {
                     visible: true,
                     sourceRefs: [],
                     style: { stroke: cardBorder, strokeWidth: 1, opacity: 0.7 }
-                }
+                },
+                ...(useReferenceStyle ? [{
+                    id: 'master_footer_title',
+                    type: 'text',
+                    x: 65,
+                    y: 673,
+                    width: 520,
+                    height: 24,
+                    rotation: 0,
+                    zIndex: 2,
+                    locked: true,
+                    visible: true,
+                    sourceRefs: [],
+                    content: { text: '{{presentationTitle}}' },
+                    style: { fontSize: 13, fontWeight: 400, color: '#98A2B3', align: 'left', verticalAlign: 'middle', lineHeight: 1 }
+                }] : [])
             ]
         },
         {
             id: 'master_cover',
             name: '标准封面母版',
             background: { fill: background },
-            decorations: []
+            decorations: useReferenceStyle ? [
+                {
+                    id: 'cover_top_band', type: 'shape', shapeType: 'rect', x: 0, y: 0, width: 1280, height: 101,
+                    rotation: 0, zIndex: 0, locked: true, visible: true, sourceRefs: [],
+                    style: { fill: '#10233F', stroke: '#10233F', strokeWidth: 0, opacity: 1, radius: 0 }
+                },
+                {
+                    id: 'cover_bottom_band', type: 'shape', shapeType: 'rect', x: 0, y: 667, width: 1280, height: 53,
+                    rotation: 0, zIndex: 0, locked: true, visible: true, sourceRefs: [],
+                    style: { fill: '#10233F', stroke: '#10233F', strokeWidth: 0, opacity: 1, radius: 0 }
+                }
+            ] : []
         }
     ];
 }
@@ -464,6 +498,111 @@ function buildThemeLayouts(colors, _isDark) {
     ];
 }
 
+function applyReferenceLayoutStyles(layouts, colors) {
+    const titleBounds = { x: 82, y: 46, width: 1128, height: 48 };
+    const chapterPalette = colors.cardPalette || [colors.primary, colors.secondary, colors.accent, '#D8A23A', '#7A5AF8'];
+    const templateShape = (id, shapeType, bounds, fill, stroke = fill, radius = 0, zIndex = 1) => ({
+        id, type: 'shape', shapeType, ...bounds, rotation: 0, zIndex, locked: true, visible: true, sourceRefs: [],
+        style: { fill, stroke, strokeWidth: stroke === fill ? 0 : 1, opacity: 1, radius }
+    });
+    const titleMarker = () => templateShape('reference_title_marker', 'roundRect', { x: 62, y: 56, width: 12, height: 44 }, '#17A8C7', '#17A8C7', 3, 2);
+
+    return layouts.map(layout => {
+        if (layout.id === 'cover') {
+            const nav = Array.from({ length: 5 }, (_, index) => {
+                const x = 96 + index * 216;
+                const color = chapterPalette[index % chapterPalette.length];
+                return [
+                    templateShape(`cover_nav_pill_${index + 1}`, 'roundRect', { x, y: 416, width: 198, height: 50 }, color, color, 5, 2),
+                    {
+                        id: `cover_nav_label_${index + 1}`, type: 'text', x: x + 8, y: 424, width: 182, height: 34, rotation: 0,
+                        zIndex: 3, locked: true, visible: true, sourceRefs: [], content: { text: `{{coverSection${index + 1}}}` },
+                        style: { fontSize: 17, fontWeight: 700, color: '#FFFFFF', align: 'center', verticalAlign: 'middle', lineHeight: 1.15 }
+                    }
+                ];
+            }).flat();
+            return {
+                ...layout,
+                decorations: [
+                    templateShape('cover_accent_line', 'rect', { x: 53, y: 149, width: 106, height: 10 }, '#17A8C7', '#17A8C7', 0, 2),
+                    templateShape('cover_nav_panel', 'roundRect', { x: 72, y: 384, width: 1138, height: 120 }, colors.cardBg, colors.cardBorder, 8, 1),
+                    ...nav,
+                    {
+                        id: 'cover_footer_meta', type: 'text', x: 72, y: 630, width: 1136, height: 26, rotation: 0,
+                        zIndex: 2, locked: true, visible: true, sourceRefs: [], content: { text: '阶段性汇报 · {{presentationTitle}}' },
+                        style: { fontSize: 13, fontWeight: 500, color: '#667085', align: 'left', verticalAlign: 'middle', lineHeight: 1 }
+                    }
+                ],
+                placeholders: layout.placeholders.map(slot => slot.role === 'title'
+                    ? { ...slot, x: 72, y: 175, width: 1136, height: 96, style: { ...slot.style, fontSize: 49, fontWeight: 800, color: '#10233F', align: 'left', verticalAlign: 'middle', lineHeight: 1.2 } }
+                    : slot.role === 'subtitle'
+                        ? { ...slot, x: 72, y: 276, width: 1136, height: 68, style: { ...slot.style, fontSize: 27, fontWeight: 500, color: '#475467', align: 'left', verticalAlign: 'middle', lineHeight: 1.35 } }
+                        : slot)
+            };
+        }
+
+        let decorations = layout.decorations.map(element => {
+            if (/(?:^|_)title_bar$/.test(element.id || '')) {
+                return { ...element, ...titleMarker(), id: element.id };
+            }
+            return element;
+        });
+        let placeholders = layout.placeholders.map(slot => slot.role === 'title'
+            ? { ...slot, ...titleBounds, style: { ...slot.style, fontSize: 32, fontWeight: 700, color: '#10233F', align: 'left', verticalAlign: 'middle', lineHeight: 1.25 } }
+            : slot);
+
+        if (layout.id === 'title-content') {
+            decorations = decorations.map(element => element.id === 'content_card'
+                ? { ...element, x: 72, y: 149, width: 1136, height: 437 }
+                : element);
+            placeholders = placeholders.map(slot => slot.role === 'body'
+                ? { ...slot, x: 100, y: 165, width: 1080, height: 400, style: { ...slot.style, fontSize: 18, color: '#344054', align: 'left', verticalAlign: 'top', lineHeight: 1.65 } }
+                : slot);
+        }
+
+        if (layout.id === 'two-column') {
+            const columns = { left: { x: 72, color: chapterPalette[0] }, right: { x: 664, color: chapterPalette[1] } };
+            decorations = decorations.map(element => {
+                const card = element.id.match(/^two_col_card_(left|right)$/);
+                const bar = element.id.match(/^two_col_bar_(left|right)$/);
+                if (card) return { ...element, x: columns[card[1]].x, y: 149, width: 544, height: 437 };
+                if (bar) return { ...element, x: columns[bar[1]].x, y: 149, width: 10, height: 437, style: { ...element.style, fill: columns[bar[1]].color, stroke: columns[bar[1]].color } };
+                return element;
+            });
+            placeholders = placeholders.map(slot => ['left', 'right'].includes(slot.role)
+                ? { ...slot, x: columns[slot.role].x + 24, y: 162, width: 496, height: 408, style: { ...slot.style, fontSize: 18, color: '#344054', align: 'left', verticalAlign: 'top', lineHeight: 1.6 } }
+                : slot);
+        }
+
+        if (layout.id === 'three-card') {
+            const cards = [
+                { id: 1, x: 72, role: 'card1', color: chapterPalette[0] },
+                { id: 2, x: 466, role: 'card2', color: chapterPalette[1] },
+                { id: 3, x: 860, role: 'card3', color: chapterPalette[3] }
+            ];
+            decorations = decorations.map(element => {
+                const card = element.id.match(/^three_card_(\d)$/);
+                const bar = element.id.match(/^three_bar_(\d)$/);
+                if (card) {
+                    const item = cards[Number(card[1]) - 1];
+                    return { ...element, x: item.x, y: 149, width: 370, height: 437 };
+                }
+                if (bar) {
+                    const item = cards[Number(bar[1]) - 1];
+                    return { ...element, x: item.x, y: 149, width: 10, height: 437, style: { ...element.style, fill: item.color, stroke: item.color } };
+                }
+                return element;
+            });
+            placeholders = placeholders.map(slot => {
+                const card = cards.find(item => item.role === slot.role);
+                return card ? { ...slot, x: card.x + 24, y: 162, width: 322, height: 408, style: { ...slot.style, fontSize: 18, color: '#344054', align: 'left', verticalAlign: 'top', lineHeight: 1.6 } } : slot;
+            });
+        }
+
+        return { ...layout, decorations, placeholders };
+    });
+}
+
 function makeTemplate(seed) {
     const [id, name, description, primary, secondary, accent, text, background, cardBg, cardBorder, isDark, tags] = seed;
     const cardPalette = [
@@ -479,10 +618,12 @@ function makeTemplate(seed) {
         name,
         colors,
         fonts: { heading: 'Microsoft YaHei', body: 'Microsoft YaHei' },
-        chartPalette: [primary, secondary, accent, '#F59E0B', '#8B5CF6', '#EC4899']
+        chartPalette: cardPalette
     };
-    const masters = buildThemeMasters(colors, isDark);
-    const layouts = buildThemeLayouts(colors, isDark);
+    const useReferenceStyle = id === 'business-blue';
+    const masters = buildThemeMasters(colors, isDark, useReferenceStyle);
+    const baseLayouts = buildThemeLayouts(colors, isDark);
+    const layouts = useReferenceStyle ? applyReferenceLayoutStyles(baseLayouts, colors) : baseLayouts;
     const snapshotDigest = crypto.createHash('sha256').update(canonicalJson({ id, version: 1, theme, masters, layouts })).digest('hex');
     return Object.freeze({
         id,

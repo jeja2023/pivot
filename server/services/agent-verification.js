@@ -3,7 +3,7 @@
 const { normalizeJsonSchema, schemaHasRules, validateValueAgainstSchema } = require('./agent-dag-contracts');
 const { queryOne } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
-const { buildChatRagEvidenceObservation } = require('./chat-rag-context');
+const { buildChatAttachmentEvidenceObservation, buildChatRagEvidenceObservation } = require('./chat-rag-context');
 
 const MAX_CONTRACT_ITEMS = 32;
 
@@ -143,8 +143,14 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     if (typeof metadata === 'string') {
         try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; }
     }
-    const ragEvidence = buildChatRagEvidenceObservation(metadata?.chatBridge);
-    observations = [...(Array.isArray(observations) ? observations : []), ...(ragEvidence ? [ragEvidence] : [])];
+    const chatBridge = metadata?.chatBridge;
+    const ragEvidence = buildChatRagEvidenceObservation(chatBridge);
+    const attachmentEvidence = buildChatAttachmentEvidenceObservation(chatBridge);
+    observations = [
+        ...(Array.isArray(observations) ? observations : []),
+        ...(ragEvidence ? [ragEvidence] : []),
+        ...(attachmentEvidence ? [attachmentEvidence] : [])
+    ];
     let evidence = [];
     if (runId) {
         try {
