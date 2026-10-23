@@ -5,6 +5,7 @@ const unzipper = require('unzipper');
 const { validateSkillManifest, verifySkillSignature } = require('./agent-skills');
 const { normalizeRelativeEntryPath, isSymlinkExternalAttributes } = require('./agent-path-safety');
 const { scanSkillPackageEntries } = require('./agent-skill-supply-chain');
+const { parseSkillSourceMarkdown, isSkillSourceMarkdown } = require('./agent-skill-source');
 
 const MAX_PACKAGE_BYTES = 100 * 1024 * 1024;
 const MAX_PACKAGE_FILES = 128;
@@ -78,15 +79,26 @@ async function readSkillPackage(zipPath, options = {}) {
             externalFileAttributes: Number(file.externalFileAttributes) || 0
         });
     }
-    const manifestEntry = entries.find(entry => ['SKILL.yaml', 'SKILL.yml', 'SKILL.json', 'SKILL.md'].includes(entry.name));
+    const manifests = entries.filter(entry => ['SKILL.yaml', 'SKILL.yml', 'SKILL.json', 'SKILL.md'].includes(entry.name));
+    if (manifests.length > 1) throw new Error('Skill 包只能包含一个根目录清单文件。');
+    const manifestEntry = manifests[0];
     if (!manifestEntry) throw new Error('Skill 包缺少根目录 SKILL.yaml。');
     const signatureEntry = entries.find(entry => entry.name === 'SKILL.sig' || entry.name === 'package.sig');
-    const instructionEntry = entries.find(entry => entry.name === 'INSTRUCTIONS.md' || entry.name === 'instructions.md');
+    const instructionEntries = entries.filter(entry => entry.name === 'INSTRUCTIONS.md' || entry.name === 'instructions.md');
+    if (instructionEntries.length > 1) throw new Error('Skill 包包含冲突的指令文件。');
+    const instructionEntry = instructionEntries[0];
+    // 单文件配方必须保留正文；双来源仅在内容一致时接受，避免验签后执行另一份指令。
+    const parsedSource = isSkillSourceMarkdown(manifestEntry.name)
+        ? parseSkillSourceMarkdown(manifestEntry.data.toString('utf8')) : null;
+    const separateInstructions = instructionEntry ? instructionEntry.data.toString('utf8') : '';
+    if (parsedSource && separateInstructions.trim() && parsedSource.instructions.trim() !== separateInstructions.trim()) {
+        throw new Error('SKILL.md 正文与独立指令文件不一致，请只保留一个权威指令来源。');
+    }
     return {
         entries,
         manifestEntryName: manifestEntry.name,
         manifestText: manifestEntry.data.toString('utf8'),
-        instructions: instructionEntry ? instructionEntry.data.toString('utf8') : '',
+        instructions: parsedSource ? parsedSource.instructions : separateInstructions,
         signature: signatureEntry ? signatureEntry.data.toString('utf8').trim() : '',
         signatureForm: signatureEntry ? 'detached' : 'embedded',
         digest: packageDigest(entries),
@@ -96,7 +108,6 @@ async function readSkillPackage(zipPath, options = {}) {
 
 async function verifySkillPackage(zipPath, options = {}) {
     const pack = await readSkillPackage(zipPath, options);
-    const { parseSkillSourceMarkdown, isSkillSourceMarkdown } = require('./agent-skill-source');
     // SKILL.md 与 SKILL.yaml 走同一条规范化路径，保证清单事实来源唯一（§5.2 第 1/2 条）。
     const manifestValue = isSkillSourceMarkdown(pack.manifestEntryName)
         ? parseSkillSourceMarkdown(pack.manifestText).manifest

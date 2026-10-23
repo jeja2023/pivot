@@ -10,7 +10,7 @@
 const { recordRenderResult } = require('../agent-governance-metrics');
 const { validateDocumentIr } = require('../document-ir');
 
-const SUPPORTED_FORMATS = Object.freeze(['docx', 'pdf', 'xlsx', 'html', 'md']);
+const SUPPORTED_FORMATS = Object.freeze(['docx', 'pdf', 'xlsx', 'html', 'md', 'svg', 'png']);
 
 function renderError(message, code = 'DOCUMENT_RENDER_FAILED', status = 422) {
     const error = new Error(message);
@@ -23,6 +23,10 @@ function renderError(message, code = 'DOCUMENT_RENDER_FAILED', status = 422) {
 
 /** 惰性加载各渲染器，避免任一格式的依赖缺失导致整个服务无法启动。 */
 function loadRenderer(format) {
+    if (format === 'svg' || format === 'png') {
+        return { format, version: '1.0.0', mimeType: format === 'svg' ? 'image/svg+xml' : 'image/png', available: () => true,
+            render: (ir, options) => require('./image-renderer').renderImage(ir, format, options) };
+    }
     if (format === 'docx') {
         const module = require('./docx-renderer');
         return {

@@ -110,6 +110,7 @@ function normalizeExternalServerConfig(payload = {}) {
         healthCheckUrl: String(pickConfigValue(payload, current, 'health_check_url', 'healthCheckUrl', '')).trim(),
         timeoutMs,
         protocolMode,
+        protocolVersion: String(pickConfigValue(payload, current, 'protocol_version', 'protocolVersion', protocolMode === 'standard' ? '2025-11-25' : '2024-11-05')).trim(),
         authMode: allowedAuthMode,
         validateToolSchema: parseBoolean(
             pickConfigValue(payload, current, 'validate_tool_schema', 'validateToolSchema', current.validateToolSchema),

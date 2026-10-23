@@ -225,6 +225,8 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             let output;
             if (safeName.startsWith('mcp.')) {
                 output = await executeMcpTool(safeName, effectiveInput, user, {
+                    networkPolicy: context.run?.network_policy || context.run?.networkPolicy || null,
+                    requireNetworkPolicy: context.autonomous === true,
                     source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null,
                     executionGrant: executionGrant?.token || null,
                     executionGrantExpected: executionGrant ? {
@@ -273,7 +275,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 error.category = 'validation';
                 throw error;
             }
-            return output;
+            return await require('./tool-result-artifacts').materializeToolArtifact(output, user, context);
         }
     });
     await releaseGuards();

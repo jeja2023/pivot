@@ -117,6 +117,7 @@ COPY --chown=node:node assets ./assets
 COPY --chown=node:node docs/licenses ./licenses
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
 COPY --chown=node:node scripts/repair_chat_schema.js ./scripts/repair_chat_schema.js
+COPY --chown=node:node scripts/offline_backup.js ./scripts/offline_backup.js
 COPY --chown=node:node package.json package-lock.json CHANGELOG.md 使用帮助.md ./
 
 # 在最终运行阶段重新加载原生模块和系统工具，避免只验证构建阶段而漏掉 runtime 层缺失。

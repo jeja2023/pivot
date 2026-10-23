@@ -74,6 +74,25 @@ function writeZip(target, entries) {
 
 function tempRoot() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-agent-packages-')); }
 
+test('单文件技能包验签后保留正文，冲突的指令来源会被拒绝', async () => {
+    const root = tempRoot(); const zipPath = path.join(root, 'single.skill.zip');
+    const markdown = '---\nid: single-skill\nname: single-skill\nversion: 1.0.0\n---\n\n只读取本次授权的源码。\n';
+    try {
+        writeZip(zipPath, [['SKILL.md', markdown]]);
+        const pack = await readSkillPackage(zipPath);
+        const keys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+        const signature = crypto.sign('RSA-SHA256', Buffer.from(pack.digest), keys.privateKey).toString('base64');
+        writeZip(zipPath, [['SKILL.md', markdown], ['SKILL.sig', signature]]);
+        const checked = await verifySkillPackage(zipPath, { requireSignature: true, publicKey: keys.publicKey });
+        assert.equal(checked.valid, true);
+        assert.equal(checked.package.instructions.trim(), '只读取本次授权的源码。');
+        writeZip(zipPath, [['SKILL.md', markdown], ['INSTRUCTIONS.md', '另一份指令']]);
+        await assert.rejects(readSkillPackage(zipPath), /不一致/);
+        writeZip(zipPath, [['SKILL.md', markdown], ['SKILL.yaml', 'id: another']]);
+        await assert.rejects(readSkillPackage(zipPath), /一个根目录清单/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('skill ZIP runtime declares unzipper as a production dependency and verifies it during image build', () => {
     const projectRoot = path.resolve(__dirname, '..');
     const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));

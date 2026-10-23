@@ -529,10 +529,12 @@ module.exports = [
         ignores: [
             'node_modules/**',
             '.codex-tmp/**',
+            '.tmp/**',
             'data/**',
             'logs/**',
             'uploads/**',
             'dist-electron/**',
+            'dist-electron-*/**',
             'client/common/vendor/**'
         ]
     },

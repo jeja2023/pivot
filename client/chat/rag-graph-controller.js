@@ -310,6 +310,10 @@ const renderGraphCanvas = (graph = {}) => {
     }
     editEntityBtn?.classList.toggle('hidden', !ragGraphState.selectedEntity);
     PivotSafeHtml.setHtml(el, html);
+    el.querySelectorAll(".rag-graph-map-node[data-pos-x]").forEach(btn => {
+        btn.style.left = `%`;
+        btn.style.top = `%`;
+    });
     resetGraphMapView();
 };
 

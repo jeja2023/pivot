@@ -143,6 +143,18 @@
         return map[String(status || '').toLowerCase()] || status || '已确认';
     }
 
+    function graphNodeTone(type) {
+        if (!type) return 'is-concept';
+        const raw = String(type).trim().toLowerCase().replace(/[-\s]+/g, '_');
+        if (['system', 'sys', 'service', 'module', 'component', 'tool'].includes(raw)) return 'is-system';
+        if (['department', 'dept', 'organization', 'org'].includes(raw)) return 'is-department';
+        if (['legal_doc', 'legal', 'law', 'clause', 'article', 'policy', 'standard', 'rule', 'obligation', 'right', 'penalty'].includes(raw)) return 'is-legal';
+        if (['person', 'role', 'subject'].includes(raw)) return 'is-person';
+        if (['process', 'proc', 'project', 'proj', 'event'].includes(raw)) return 'is-process';
+        if (['data', 'metric'].includes(raw)) return 'is-data';
+        return 'is-concept';
+    }
+
     function getGraphNodeName(node) {
         return String(node?.name || '').trim() || `实体 ${node?.id || '-'}`;
     }
@@ -250,10 +262,12 @@
                 ? messages.describeNodeMeta({ isCenter, relationCount })
                 : '';
             const nodeTooltip = buildGraphNodeTooltip(node, relationCount, isCenter);
-            return `<button class="rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" style="left:${pos.x.toFixed(2)}%;top:${pos.y.toFixed(2)}%;">
-            <span>${escapeHtml(graphTypeLabel(node.type))}</span>
-            <strong>${escapeHtml(getGraphNodeName(node))}</strong>
-            <small>${escapeHtml(nodeMeta)}</small>
+            const typeLabel = graphTypeLabel(node.type);
+            const nodeTone = graphNodeTone(node.type);
+            const nodeName = getGraphNodeName(node);
+            return `<button type="button" class="btn-secondary rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''} ${nodeTone}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" data-pos-x="${pos.x.toFixed(2)}" data-pos-y="${pos.y.toFixed(2)}">
+            <span class="rag-graph-node-label-top">${escapeHtml(nodeName)}</span>
+            <span class="rag-graph-node-dot-glyph" aria-hidden="true">${escapeHtml(typeLabel ? typeLabel.slice(0, 1) : '点')}</span>
         </button>`;
         }).join('') || (messages.emptyRelationsHtml || '');
         const hiddenCount = Math.max(0, relations.length - graphEdges.length);
@@ -641,6 +655,7 @@
         getGraphNodeName,
         graphRelationLabel,
         graphTypeLabel,
-        graphStatusLabel
+        graphStatusLabel,
+        graphNodeTone
     };
 })();

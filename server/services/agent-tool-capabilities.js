@@ -137,6 +137,9 @@ function resolveRegisteredToolCapabilities(toolName, source = 'builtin') {
 function isRegisteredToolName(toolName) {
     const name = String(toolName || '').trim();
     if (!name) return false;
+    // 工作区能力由已授权的本机连接器执行，裸名仅用于能力映射，不能作为 Skill 执行入口。
+    if (name.startsWith('workspace.')) return false;
+    if (name.startsWith('mcp.')) return /^mcp\.\d+\.[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(name);
     if (BUILTIN_TOOL_CAPABILITIES[name]) return true;
     return TOOL_PREFIX_CAPABILITIES.some(item => name.startsWith(item.prefix));
 }

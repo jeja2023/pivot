@@ -111,63 +111,280 @@
     .rag-graph-edge-label.is-depend { color: #6d28d9; border-color: rgba(124, 58, 237, 0.24); }
     .rag-graph-edge-label.is-contain { color: #0f766e; border-color: rgba(15, 118, 110, 0.24); }
     .rag-graph-edge-label.is-affect { color: #b91c1c; border-color: rgba(220, 38, 38, 0.24); }
-    .rag-graph-map-node {
+    /* ==========================================================================
+       知识图谱微圆标点 + 上方纯文字方案 (Micro Dot Anchor + Pure Text Top Label)
+       ========================================================================== */
+    .rag-graph-map-node,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node {
         position: absolute;
         z-index: 4;
-        width: 138px;
-        min-height: 64px;
+        width: 26px !important;
+        height: 26px !important;
+        min-width: 26px !important;
+        max-width: 26px !important;
+        min-height: 26px !important;
+        max-height: 26px !important;
+        box-sizing: border-box;
         margin: 0;
+        padding: 0 !important;
         transform: translate(-50%, -50%);
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
         justify-content: center;
-        gap: 3px;
-        padding: 9px 11px;
-        border-radius: 8px;
-        border-color: rgba(148, 163, 184, 0.32);
-        background: rgba(255, 255, 255, 0.94);
-        box-shadow: 0 10px 26px rgba(15, 23, 42, 0.09);
+        border-radius: 50%;
+        border: 2px solid var(--border-subtle, rgba(148, 163, 184, 0.45));
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--bg-subtle, #f1f5f9) 100%);
+        box-shadow: 0 2px 8px var(--shadow-sm, rgba(15, 23, 42, 0.1));
+        cursor: pointer;
+        outline: none;
+        overflow: visible;
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+                    border-color 0.2s ease,
+                    box-shadow 0.2s ease,
+                    background 0.2s ease;
     }
-    .rag-graph-map-node:hover {
-        border-color: rgba(16, 185, 129, 0.45);
-        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+    .rag-graph-map-node:hover,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node:hover {
+        z-index: 10;
+        transform: translate(-50%, -50%) scale(1.22);
+        box-shadow: 0 4px 14px var(--shadow-md, rgba(15, 23, 42, 0.18)), 0 0 0 3px var(--primary-focus, rgba(16, 185, 129, 0.22));
     }
-    .rag-graph-map-node.center {
-        width: 162px;
-        min-height: 76px;
-        border-color: rgba(16, 185, 129, 0.68);
-        background: #ecfdf5;
-        box-shadow: 0 18px 34px rgba(16, 185, 129, 0.16);
+
+    /* 节点上方纯文本名称（零边框、零底色、无框透明） */
+    .rag-graph-node-label-top {
+        position: absolute;
+        bottom: calc(100% + 5px);
+        left: 50%;
+        transform: translateX(-50%);
+        display: block;
+        width: max-content;
+        max-width: 140px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        line-height: 1.2;
+        color: var(--text-main, #0f172a);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: center;
+        pointer-events: none;
+        user-select: none;
+        text-shadow: 0 1px 2px var(--surface, #ffffff), 0 0 4px var(--surface, #ffffff), 0 0 8px var(--surface, #ffffff);
+        transition: color 0.2s ease, font-weight 0.2s ease;
     }
-    .rag-graph-map-node span {
-        max-width: 100%;
-        color: #047857;
-        font-size: 0.64rem;
-        font-weight: 900;
+    .rag-graph-map-node:hover .rag-graph-node-label-top,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node:hover .rag-graph-node-label-top {
+        color: var(--primary, #059669);
+        font-weight: 700;
+    }
+
+    /* 微圆内类别字符（极小徽标） */
+    .rag-graph-node-dot-glyph {
+        font-size: 0.62rem;
+        font-weight: 800;
         line-height: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        pointer-events: none;
+        user-select: none;
+        color: var(--text-muted, #334155);
+        transition: color 0.2s ease;
     }
-    .rag-graph-map-node strong {
-        width: 100%;
-        color: #0f172a;
-        font-size: 0.82rem;
-        line-height: 1.2;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+
+    /* 中心实体强化（34px 微光脉冲呼吸） */
+    .rag-graph-map-node.center,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.center {
+        width: 34px !important;
+        height: 34px !important;
+        min-width: 34px !important;
+        max-width: 34px !important;
+        min-height: 34px !important;
+        max-height: 34px !important;
+        border: 2.5px solid var(--primary, #059669);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--primary-light, #d1fae5) 100%);
+        box-shadow: 0 0 0 4px var(--primary-pulse, rgba(16, 185, 129, 0.22)), 0 4px 12px var(--primary-shadow, rgba(16, 185, 129, 0.3));
+        animation: rag-node-center-breathe 2.6s infinite ease-in-out;
     }
-    .rag-graph-map-node small {
-        width: 100%;
-        color: #64748b;
-        font-size: 0.68rem;
-        line-height: 1.2;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+    .rag-graph-map-node.center .rag-graph-node-dot-glyph {
+        font-size: 0.72rem;
+        font-weight: 900;
+        color: var(--primary-dark, #065f46);
     }
+    .rag-graph-map-node.center .rag-graph-node-label-top {
+        font-size: 0.8rem;
+        font-weight: 800;
+        color: var(--primary-dark, #065f46);
+        text-shadow: 0 1px 3px var(--surface, #ffffff), 0 0 6px var(--primary-glow, rgba(16, 185, 129, 0.35));
+    }
+    .rag-graph-map-node.center:hover,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.center:hover {
+        transform: translate(-50%, -50%) scale(1.18);
+        box-shadow: 0 0 0 6px var(--primary-focus, rgba(16, 185, 129, 0.28)), 0 6px 18px var(--primary-shadow-lg, rgba(16, 185, 129, 0.4));
+    }
+    @keyframes rag-node-center-breathe {
+        0%, 100% {
+            box-shadow: 0 0 0 3px var(--primary-pulse-0, rgba(16, 185, 129, 0.2)), 0 4px 10px var(--primary-pulse-0-glow, rgba(16, 185, 129, 0.25));
+        }
+        50% {
+            box-shadow: 0 0 0 6px var(--primary-pulse-50, rgba(16, 185, 129, 0.12)), 0 8px 18px var(--primary-pulse-50-glow, rgba(16, 185, 129, 0.36));
+        }
+    }
+
+    /* 类型自适应色彩（Type-based Colors） */
+    .rag-graph-map-node.is-system,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-system {
+        border-color: var(--primary, #059669);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-sys-bg, #ecfdf5) 100%);
+    }
+    .rag-graph-map-node.is-system .rag-graph-node-dot-glyph { color: var(--primary-dark, #065f46); }
+
+    .rag-graph-map-node.is-department,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-department {
+        border-color: var(--rag-dept-border, #2563eb);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-dept-bg, #eff6ff) 100%);
+    }
+    .rag-graph-map-node.is-department .rag-graph-node-dot-glyph { color: var(--rag-dept-text, #1d4ed8); }
+
+    .rag-graph-map-node.is-legal,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-legal {
+        border-color: var(--rag-legal-border, #6366f1);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-legal-bg, #eef2ff) 100%);
+    }
+    .rag-graph-map-node.is-legal .rag-graph-node-dot-glyph { color: var(--rag-legal-text, #4338ca); }
+
+    .rag-graph-map-node.is-person,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-person {
+        border-color: var(--rag-person-border, #d97706);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-person-bg, #fffbeb) 100%);
+    }
+    .rag-graph-map-node.is-person .rag-graph-node-dot-glyph { color: var(--rag-person-text, #b45309); }
+
+    .rag-graph-map-node.is-process,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-process {
+        border-color: var(--rag-proc-border, #0891b2);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-proc-bg, #ecfeff) 100%);
+    }
+    .rag-graph-map-node.is-process .rag-graph-node-dot-glyph { color: var(--rag-proc-text, #0e7490); }
+
+    .rag-graph-map-node.is-data,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-data {
+        border-color: var(--rag-data-border, #db2777);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-data-bg, #fdf2f8) 100%);
+    }
+    .rag-graph-map-node.is-data .rag-graph-node-dot-glyph { color: var(--rag-data-text, #be185d); }
+
+    .rag-graph-map-node.is-concept,
+    .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-concept {
+        border-color: var(--rag-concept-border, #7c3aed);
+        background: radial-gradient(circle at 35% 35%, var(--surface, #ffffff) 0%, var(--rag-concept-bg, #f5f3ff) 100%);
+    }
+    .rag-graph-map-node.is-concept .rag-graph-node-dot-glyph { color: var(--rag-concept-text, #6d28d9); }
+
+    /* 深色模式适配 (Dark Mode) */
+    body.dark-mode .rag-graph-map-node,
+    .dark-mode .rag-graph-map-node,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node {
+        border-color: var(--dark-border-subtle, rgba(148, 163, 184, 0.35));
+        background: radial-gradient(circle at 35% 35%, var(--dark-surface, #1e293b) 0%, var(--dark-bg, #0f172a) 100%);
+        box-shadow: 0 2px 10px var(--dark-shadow, rgba(0, 0, 0, 0.4));
+    }
+    body.dark-mode .rag-graph-node-label-top,
+    .dark-mode .rag-graph-node-label-top {
+        color: var(--dark-text-main, #f1f5f9);
+        text-shadow: 0 1px 3px var(--dark-shadow-strong, rgba(0, 0, 0, 0.9)), 0 0 6px var(--dark-shadow-soft, rgba(0, 0, 0, 0.8));
+    }
+    body.dark-mode .rag-graph-map-node .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node .rag-graph-node-dot-glyph {
+        color: var(--dark-text-main, #f1f5f9);
+    }
+
+    body.dark-mode .rag-graph-map-node.is-system,
+    .dark-mode .rag-graph-map-node.is-system,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-system,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-system {
+        border-color: var(--dark-sys-border, rgba(52, 211, 153, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-sys-bg1, #064e3b) 0%, var(--dark-sys-bg2, #022c22) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-system .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-system .rag-graph-node-dot-glyph { color: var(--dark-sys-text, #6ee7b7); }
+
+    body.dark-mode .rag-graph-map-node.is-department,
+    .dark-mode .rag-graph-map-node.is-department,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-department,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-department {
+        border-color: var(--dark-dept-border, rgba(96, 165, 250, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-dept-bg1, #1e3a8a) 0%, var(--dark-bg, #0f172a) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-department .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-department .rag-graph-node-dot-glyph { color: var(--dark-dept-text, #93c5fd); }
+
+    body.dark-mode .rag-graph-map-node.is-legal,
+    .dark-mode .rag-graph-map-node.is-legal,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-legal,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-legal {
+        border-color: var(--dark-legal-border, rgba(129, 140, 248, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-legal-bg1, #312e81) 0%, var(--dark-bg, #0f172a) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-legal .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-legal .rag-graph-node-dot-glyph { color: var(--dark-legal-text, #a5b4fc); }
+
+    body.dark-mode .rag-graph-map-node.is-person,
+    .dark-mode .rag-graph-map-node.is-person,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-person,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-person {
+        border-color: var(--dark-person-border, rgba(251, 191, 36, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-person-bg1, #78350f) 0%, var(--dark-bg, #0f172a) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-person .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-person .rag-graph-node-dot-glyph { color: var(--dark-person-text, #fde68a); }
+
+    body.dark-mode .rag-graph-map-node.is-process,
+    .dark-mode .rag-graph-map-node.is-process,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-process,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-process {
+        border-color: var(--dark-proc-border, rgba(34, 211, 238, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-proc-bg1, #155e75) 0%, var(--dark-proc-bg2, #082f49) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-process .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-process .rag-graph-node-dot-glyph { color: var(--dark-proc-text, #67e8f9); }
+
+    body.dark-mode .rag-graph-map-node.is-data,
+    .dark-mode .rag-graph-map-node.is-data,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-data,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-data {
+        border-color: var(--dark-data-border, rgba(244, 114, 182, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-data-bg1, #831843) 0%, var(--dark-bg, #0f172a) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-data .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-data .rag-graph-node-dot-glyph { color: var(--dark-data-text, #f472b6); }
+
+    body.dark-mode .rag-graph-map-node.is-concept,
+    .dark-mode .rag-graph-map-node.is-concept,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-concept,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.is-concept {
+        border-color: var(--dark-concept-border, rgba(167, 139, 250, 0.85));
+        background: radial-gradient(circle at 35% 35%, var(--dark-concept-bg1, #4c1d95) 0%, var(--dark-bg, #0f172a) 100%);
+    }
+    body.dark-mode .rag-graph-map-node.is-concept .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.is-concept .rag-graph-node-dot-glyph { color: var(--dark-concept-text, #c4b5fd); }
+
+    body.dark-mode .rag-graph-map-node.center,
+    .dark-mode .rag-graph-map-node.center,
+    body.dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.center,
+    .dark-mode .rag-graph-map-stage .btn-secondary.rag-graph-map-node.center {
+        border-color: var(--dark-center-border, #34d399);
+        background: radial-gradient(circle at 35% 35%, var(--primary, #059669) 0%, var(--primary-dark, #047857) 100%);
+        box-shadow: 0 0 0 4px var(--dark-center-shadow1, rgba(52, 211, 153, 0.25)), 0 6px 18px var(--dark-center-shadow2, rgba(5, 150, 105, 0.45));
+    }
+    body.dark-mode .rag-graph-map-node.center .rag-graph-node-dot-glyph,
+    .dark-mode .rag-graph-map-node.center .rag-graph-node-dot-glyph {
+        color: var(--surface, #ffffff);
+    }
+    body.dark-mode .rag-graph-map-node.center .rag-graph-node-label-top,
+    .dark-mode .rag-graph-map-node.center .rag-graph-node-label-top {
+        color: var(--dark-sys-text, #6ee7b7);
+        text-shadow: 0 1px 3px var(--dark-shadow-strong, rgba(0, 0, 0, 0.9)), 0 0 8px var(--dark-center-glow, rgba(5, 150, 105, 0.7));
+    }
+
     .rag-graph-node-tooltip {
         position: fixed;
         z-index: 5510;

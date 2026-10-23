@@ -1,0 +1,44 @@
+services:
+  offline-tools:
+    image: pivot-offline-tools:1.0.0
+    pull_policy: never
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 2
+    secrets: [offline_tools_token]
+    networks: [ai-bridge, renderer]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+  kroki:
+    image: yuzutech/kroki:0.28.0
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      KROKI_MERMAID_HOST: kroki-mermaid
+      KROKI_SAFE_MODE: secure
+      KROKI_COMMAND_TIMEOUT: 30s
+    networks: [renderer]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 2
+  kroki-mermaid:
+    image: yuzutech/kroki-mermaid:0.28.0
+    pull_policy: never
+    restart: unless-stopped
+    networks: [renderer]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 2
+networks:
+  ai-bridge:
+    external: true
+  renderer:
+    internal: true
+secrets:
+  offline_tools_token:
+    file: ./data/secrets/offline-tools-token

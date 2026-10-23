@@ -3,8 +3,6 @@ const { getBeijingTimestamp } = require('../time');
 const {
     decryptSecret,
     validateMcpEndpointUrl,
-    assertSafeMcpOutboundUrl,
-    createSafeHttpAgentsForUser,
     redactSecrets
 } = require('../security');
 const { safeJsonGet, safeJsonPost } = require('./safe-http-client');
@@ -65,6 +63,7 @@ const { getConnectionAuthorization } = require('./connection-accounts');
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
 const externalMcpSessions = new Map();
+const { mcpOutboundOptions } = require('./mcp-managed-outbound');
 const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.list_tables',
     'db.count_tables',
@@ -239,6 +238,10 @@ function previewValue(value, limit = PREVIEW_LIMIT) {
 
 function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status = 'success', durationMs = 0, input, output, error }) {
     try {
+        // 代码与图形源码属于业务原文，审计仅保留体积及结果摘要，避免在日志中复制敏感资料。
+        const contentTool = ['run_ast_audit', 'render_diagram'].includes(String(toolName));
+        const auditInput = contentTool ? { contentBytes: Buffer.byteLength(String(input?.source_code || input?.source || '')) } : input;
+        const auditOutput = contentTool ? { status: output?.isError ? 'error' : 'completed', kind: output?.structuredContent?.pivotArtifact?.kind || '' } : output;
         enqueueMcpCallLog({
             userId: user?.id || null,
             serverId: isLocalDeviceMcpServerId(serverId) ? null : (serverId ?? null),
@@ -246,8 +249,8 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
             source: String(source || 'manual').slice(0, 40),
             status: status === 'error' ? 'error' : 'success',
             durationMs: Math.max(Number(durationMs) || 0, 0),
-            inputPreview: previewValue(input),
-            outputPreview: status === 'error' ? '' : previewValue(output),
+            inputPreview: previewValue(auditInput),
+            outputPreview: status === 'error' ? '' : previewValue(auditOutput),
             errorMessage: status === 'error' ? String(error?.message || error || '').slice(0, 1000) : '',
             createdAt: getBeijingTimestamp()
         });
@@ -523,7 +526,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         'Accept': protocolMode === 'standard' ? 'application/json, text/event-stream' : 'application/json',
         'User-Agent': 'Pivot-MCP-Client/1.0'
     };
-    const protocolVersion = String(config.protocolVersion || config.protocol_version || options.protocolVersion || '2024-11-05');
+    const protocolVersion = String(config.protocolVersion || config.protocol_version || options.protocolVersion || (protocolMode === 'standard' ? '2025-11-25' : '2024-11-05'));
     if (protocolMode === 'standard') headers['MCP-Protocol-Version'] = protocolVersion;
     if (connectionAuthorization?.type === 'bearer' && connectionAuthorization.token) {
         headers.Authorization = `Bearer ${connectionAuthorization.token}`;
@@ -536,6 +539,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         }
     }
     const sessionKey = String(server.id || url);
+    const outbound = await mcpOutboundOptions(server, user, options, getAccessibleMcpServer);
     const statelessTransport = protocolMode === 'standard' && usesStatelessMcpTransport(protocolVersion);
     const send = async (requestMethod, requestParams, requestHeaders, notification = false) => {
         const requestId = notification ? '' : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -548,11 +552,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         }
         const requestOptions = {
             user,
-            assertUrl: (targetUrl, targetUser) => assertSafeMcpOutboundUrl(targetUrl, targetUser),
-            createAgents: (targetUser) => createSafeHttpAgentsForUser(targetUser, {
-                allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS',
-                allowExplicitLoopbackForAdmin: true
-            }),
+            ...outbound,
             headers: effectiveHeaders,
             timeout: timeoutMs,
             signal: options.signal || null,
