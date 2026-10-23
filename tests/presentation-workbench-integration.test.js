@@ -54,7 +54,9 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         assert.equal(presentation.content.metadata.planApproval.approvedBy, String(user.id));
 
         const changed = JSON.parse(JSON.stringify(presentation.content));
-        changed.slides[0].elements[1].content.text = '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围';
+        const subtitleEl = changed.slides[0].elements.find(item => item.id === 'subtitle') || changed.slides[0].elements.find(item => item.type === 'text' && item.id !== 'title');
+        assert.ok(subtitleEl && subtitleEl.content, '封面页应包含可编辑副标题或正文元素');
+        subtitleEl.content.text = '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围';
         const saved = await savePresentationContent(user, presentation.id, {
             baseVersion: presentation.version,
             title: 'PPT 服务集成验证',
@@ -66,7 +68,8 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         const versions = await listPresentationVersions(user, presentation.id);
         assert.deepEqual(versions.map(item => item.version), [2, 1]);
         const loaded = await getPresentation(user, presentation.id);
-        assert.equal(loaded.content.slides[0].elements[1].content.text, '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围');
+        const loadedSubtitle = loaded.content.slides[0].elements.find(item => item.id === 'subtitle') || loaded.content.slides[0].elements.find(item => item.type === 'text' && item.id !== 'title');
+        assert.equal(loadedSubtitle?.content?.text, '已保存到 PostgreSQL 的结构化演示文稿，请填写发布范围');
         assert.equal(loaded.content.metadata.planApproval.approvedBy, String(user.id));
 
         const slideId = loaded.content.slides[0].id;
