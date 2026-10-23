@@ -858,6 +858,7 @@
     }
 
     window.Pivot?.exposeModule?.('apps.presentations.templates', {
+        PRESENTATION_LAYOUT_LABELS,
         applyLayoutToSlide,
         buildEmptySlide,
         presentationLayoutLabel,

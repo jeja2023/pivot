@@ -27,8 +27,8 @@ const THEME_SEEDS = Object.freeze([
     ['public-welfare', '绿色公益项目', '适用于环保、公益和社会项目', '#15803D', '#65A30D', '#0EA5E9', '#1F3B2A', '#F7FEE7', '#FFFFFF', '#DCFCE7', false, ['公益', '环保', '项目']]
 ]);
 
-function buildThemeMasters(colors, isDark) {
-    const { primary, cardBorder, background } = colors;
+function buildThemeMasters(colors, _isDark) {
+    const { cardBorder, background } = colors;
     return [
         {
             id: 'master_content',
@@ -61,7 +61,7 @@ function buildThemeMasters(colors, isDark) {
     ];
 }
 
-function buildThemeLayouts(colors, isDark) {
+function buildThemeLayouts(colors, _isDark) {
     const { primary, secondary, accent, text, cardBg, cardBorder } = colors;
     return [
         {

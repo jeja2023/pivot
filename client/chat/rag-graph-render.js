@@ -265,7 +265,7 @@
             const typeLabel = graphTypeLabel(node.type);
             const nodeTone = graphNodeTone(node.type);
             const nodeName = getGraphNodeName(node);
-            return `<button type="button" class="btn-secondary rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''} ${nodeTone}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" data-pos-x="${pos.x.toFixed(2)}" data-pos-y="${pos.y.toFixed(2)}">
+            return `<button type="button" class="btn-secondary rag-graph-node rag-graph-map-node ${isCenter ? 'center' : ''} ${nodeTone}" data-entity-id="${node.id}" data-graph-node-tooltip="${escapeAttr(nodeTooltip)}" aria-label="${escapeAttr(nodeMeta || nodeName)}" data-pos-x="${pos.x.toFixed(2)}" data-pos-y="${pos.y.toFixed(2)}">
             <span class="rag-graph-node-label-top">${escapeHtml(nodeName)}</span>
             <span class="rag-graph-node-dot-glyph" aria-hidden="true">${escapeHtml(typeLabel ? typeLabel.slice(0, 1) : '点')}</span>
         </button>`;

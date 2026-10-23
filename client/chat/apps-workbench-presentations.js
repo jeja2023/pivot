@@ -318,7 +318,6 @@
     const collab = () => window.Pivot?.moduleApi?.('apps.presentations.collab');
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
     const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
-    const templates = templatePresenter;
     async function openPresentation(id) {
         await saveActive({ force: true });
         setStatus('正在打开演示文稿…');
@@ -668,8 +667,8 @@ function setSelectedImageAsCover() {
         if (generateButton) { generateButton.toggleAttribute('disabled', total > 0 && !complete); generateButton.title = total > 0 && !complete ? '请先确认所有待确认项，或返回调整要求。' : ''; }
         return complete;
     }
-    function renderOutlineReview(input) { const result = presenter()?.renderOutlineReview?.(input, state, { labels: PRESENTATION_LAYOUT_LABELS, templateById }); updateOutlineConfirmationUi(); return result; }
-    function collectOutlineFromReview() { return presenter()?.collectOutlineFromReview?.(state, { labels: PRESENTATION_LAYOUT_LABELS, templateById }); }
+    function renderOutlineReview(input) { const result = presenter()?.renderOutlineReview?.(input, state, { labels: templatePresenter()?.PRESENTATION_LAYOUT_LABELS || {}, templateById }); updateOutlineConfirmationUi(); return result; }
+    function collectOutlineFromReview() { return presenter()?.collectOutlineFromReview?.(state, { labels: templatePresenter()?.PRESENTATION_LAYOUT_LABELS || {}, templateById }); }
     async function generateOutline() {
         const request = createRequestFromForm(); if (!request.topic) { toast('请输入演示主题。', 'error'); return; }
         if (!request.model) { requirePresentationAiModel(); return; }
