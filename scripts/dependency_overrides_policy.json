@@ -33,5 +33,10 @@
     "reason": "axios 传递依赖的重定向处理库；升级至修复 cross-origin 凭据泄露与敏感头正则表达式逃逸漏洞的 1.16.1 补丁版本。",
     "scope": "production",
     "expiresOn": "2026-12-31"
+  },
+  "@azure/msal-node": {
+    "reason": "mssql -> tedious -> @azure/identity 的传递依赖；升级至修复授权码流程参数泄露漏洞（GHSA-xcx6-jx8p-x3h5）的 7.1.1 安全版本。",
+    "scope": "production",
+    "expiresOn": "2026-12-31"
   }
 }

@@ -11,6 +11,14 @@
   - [personal.css](file:///e:/pivot/client/chat/styles/workspaces/personal.css)：将 `.personal-workbench-shell`、`.personal-workbench-content` 及 `.personal-rail` 设置为严格的 `height: 100%; max-height: 100%; box-sizing: border-box;`，并在 `.personal-workbench-scroll` 上追加 `overflow-x: hidden;`，确保卡片与导轨在视口内平稳自适应流动与纵向滚动。
 - 样式包重新编译：同步更新打包产物 [chat.shell.css](file:///e:/pivot/client/chat/chat.shell.css) 与 [chat.workspace.agent.css](file:///e:/pivot/client/chat/chat.workspace.agent.css)。
 
+### 依赖审计与安全治理升级
+
+- 升级生产依赖 `multer` 至 `^2.5.0`，修复请求拆卸后未完成的异步 `fileFilter` 导致的拒绝服务漏洞（GHSA-q7qp-rjg7-q26m）。
+- 升级生产依赖 `body-parser` 至 `^2.4.0`，修复压缩请求体尾部脏字节引发的拒绝服务漏洞（GHSA-27r3-jxmh-p828）。
+- 升级桌面运行时开发依赖 `electron` 至 `^43.8.3`，批量修复 HID/USB 权限源判断、SameSite Cookie 限制、指针锁定目标帧、离屏渲染与 openExternal 等多项高危安全通告。
+- 为 `@azure/msal-node` 配置 `overrides`（`^7.1.1`）并在 [dependency_overrides_policy.json](file:///e:/pivot/scripts/dependency_overrides_policy.json) 登记有效治理条目与复查期限，解决 MSAL Node 授权码流程参数泄露问题（GHSA-xcx6-jx8p-x3h5）。
+- 执行并通过 `npm run audit:policy`，消除全部未豁免的 high/critical 依赖安全告警。
+
 详见 [v0.7.42 发布记录](docs/releases/v0.7.42-个人工作台视口隔离与桌面端防溢出修复.md)。
 
 ## [v0.7.41] - 2026-10-26

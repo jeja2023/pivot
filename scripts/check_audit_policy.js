@@ -12,7 +12,7 @@ const path = require('path');
 //         reason: '上游尚未发布修复版本，已通过 xxx 缓解',
 //         expiresOn: '2026-09-30' // 复查日期，过期后该豁免自动失效
 //     }]
-// 当前无需豁免：axios、js-yaml、sharp 与 body-parser 的历史告警已通过依赖升级清零。
+// 当前无需豁免：axios、js-yaml、sharp、body-parser、multer、@azure/msal-node 与 electron 的历史告警已通过依赖升级清零。
 const allowed = new Map([]);
 // npm audit 以安装包名匹配 advisory。转发/镜像包必须明确声明上游身份，
 // 否则同版本 Excel 解析器的安全公告会被 npm audit 静默遗漏。

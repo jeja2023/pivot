@@ -109,7 +109,8 @@
     "debug": "^4.4.3",
     "hono": "^4.13.5",
     "image-size": "^2.0.4",
-    "follow-redirects": "^1.16.1"
+    "follow-redirects": "^1.16.1",
+    "@azure/msal-node": "^7.1.1"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",
@@ -133,7 +134,7 @@
     "jszip": "^3.10.1",
     "mongodb": "^7.6.0",
     "mssql": "^12.7.1",
-    "multer": "^2.3.0",
+    "multer": "^2.5.0",
     "mysql2": "^3.24.4",
     "natural": "^8.1.1",
     "parse5": "^6.0.1",
@@ -152,12 +153,13 @@
     "unzipper": "^0.12.5",
     "uuid": "^14.0.2",
     "word-extractor": "^1.0.4",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "body-parser": "^2.4.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/conformance": "0.2.0-alpha.11",
     "@playwright/test": "^1.63.0",
-    "electron": "^43.6.0",
+    "electron": "^43.8.3",
     "electron-builder": "^26.15.3",
     "eslint": "^10.10.0",
     "nodemon": "^3.1.0"
