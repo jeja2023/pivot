@@ -374,9 +374,24 @@
                     foldToggle.type = 'button';
                     foldToggle.className = `mindmap-node-fold-btn ${node._collapsed ? 'is-collapsed' : ''}`;
                     foldToggle.title = node._collapsed ? '展开子分支' : '折叠子分支';
-                    foldToggle.innerHTML = node._collapsed
+                    const foldSvg = node._collapsed
                         ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>'
                         : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                    if (typeof PivotSafeHtml !== 'undefined' && PivotSafeHtml.setHtml) {
+                        PivotSafeHtml.setHtml(foldToggle, foldSvg, { USE_PROFILES: { html: true, svg: true } });
+                    } else {
+                        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        svg.setAttribute('width', '12');
+                        svg.setAttribute('height', '12');
+                        svg.setAttribute('viewBox', '0 0 24 24');
+                        svg.setAttribute('fill', 'none');
+                        svg.setAttribute('stroke', 'currentColor');
+                        svg.setAttribute('stroke-width', '2.5');
+                        const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+                        polyline.setAttribute('points', node._collapsed ? '9 18 15 12 9 6' : '6 9 12 15 18 9');
+                        svg.appendChild(polyline);
+                        foldToggle.replaceChildren(svg);
+                    }
                     foldToggle.onclick = (e) => {
                         e.stopPropagation();
                         syncTreeFromInputs();
