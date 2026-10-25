@@ -505,6 +505,7 @@ async function purgeDatasetArtifacts(userId, datasetId) {
 
 async function softDeleteDataset(userId, datasetId) {
     const row = await getDatasetForUser(userId, datasetId, { write: true });
+    await require('../../repositories/analysis-transactions').purgeDataset(datasetId);
     // 数据文件即将被移除，主动取消仍在运行的全量语义任务，避免 worker 对失效 Parquet 重试。
     await execute(`
         UPDATE analysis_semantic_jobs

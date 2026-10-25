@@ -90,7 +90,7 @@ async function getPersonalWorkbench(user) {
         `, [user.id]), []),
         safe(async () => {
             const [artifactRow, runResult] = await Promise.all([
-                queryOne('SELECT COUNT(*) AS count FROM agent_artifacts WHERE user_id = ?', [user.id]),
+                queryOne("SELECT COUNT(*) AS count FROM agent_artifacts WHERE user_id = ? AND (type <> 'mindmap' OR status <> 'deleted')", [user.id]),
                 listRuns(user, { status: 'completed', limit: 1 })
             ]);
             const a = Number(artifactRow?.count || 0);

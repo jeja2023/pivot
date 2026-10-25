@@ -3,7 +3,7 @@
         const old = container.querySelector('[data-mindmap-editor]'); old?.remove();
         if (artifact.type !== 'mindmap') return;
         let tree;
-        try { tree = typeof artifact.content === 'object' ? artifact.content : JSON.parse(artifact.content); } catch (_) { return; }
+        try { const content = typeof artifact.content === 'object' ? artifact.content : JSON.parse(artifact.content); tree = content.schemaVersion ? content.tree : content; } catch (_) { return; }
 
         let zoomLevel = 1.0;
         let currentTheme = 'indigo';
@@ -95,10 +95,11 @@
                 const response = await apiFetch(`${API_BASE}/apps/mindmaps`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ artifactId: artifact.id, tree, note })
+                    body: JSON.stringify({ artifactId: artifact.id, tree, note, expectedVersionId: artifact.current_version_id, requestKey: `legacy:${Date.now()}:${Math.random().toString(36).slice(2)}` })
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.error || '脑图保存失败。');
+                if (data.versionId) artifact.current_version_id = data.versionId;
                 showToast('脑图和图形已保存到产物。', 'success');
                 await window.Pivot.moduleApi('agent.artifacts')?.openVersions?.(artifact.id);
             } catch (error) {

@@ -317,6 +317,7 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
 function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
     require('./document-comparison').registerDocumentComparisonRoutes(router, { authMiddleware, logAction });
+    require('./mindmaps').registerMindmapRoutes(router, { authMiddleware, logAction });
     // 数据分析可安全导入 SQLite 文件；不要放宽通用附件上传白名单。
     // SQLite 仍由上传魔数校验、只读打开和受限数据集导入链路共同保护。
     const dataAnalysisUpload = createSafeUpload({

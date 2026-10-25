@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
 const { callMcpJsonRpc, clearMcpSessions } = require('../server/services/mcp-client');
 
-test('真实 FastMCP 服务拒绝匿名请求，协议握手、规则扫描和请求上限有效', { skip: !process.env.PIVOT_OFFLINE_TOOLS_PYTHON }, async () => {
+test('真实 FastMCP 服务拒绝匿名请求，协议握手、规则扫描和请求上限有效', { skip: !process.env.PIVOT_OFFLINE_TOOLS_PYTHON && '需要含 FastMCP 的 Python 环境；运行 npm run test:offline-tools:integration 补测。' }, async () => {
     const reservation = net.createServer();
     await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
     const port = reservation.address().port;

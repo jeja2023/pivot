@@ -1,0 +1,40 @@
+'use strict';
+/* global window, FormData, File */
+const { test, expect } = require('@playwright/test');
+const fs = require('node:fs');
+const path = require('node:path');
+test('资金分析真实应用完成映射、精确统计、分类修正、报告下载和导图联动', async ({ page }) => {
+    test.setTimeout(120000); const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto('/chat'); await page.locator('#username').fill('admin'); await page.locator('#password').fill(process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123'); await page.locator('#auth-submit').click(); await expect(page.locator('#app')).toBeVisible();
+    const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+    const modelName = `资金分析测试模型${Date.now()}`;
+    expect((await page.request.post('/api/models', { headers: { 'x-csrf-token': csrf }, data: { name: modelName, url: process.env.E2E_MODEL_URL, model_name: 'finance-e2e' } })).ok()).toBeTruthy();
+    const models = await (await page.request.get('/api/models?limit=100')).json(); const model = models.data.find(item => item.name === modelName);
+    expect((await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: model.id } })).ok()).toBeTruthy();
+    const dataset = await page.evaluate(async () => {
+        const form = new FormData(); form.append('name', '资金分析发布验收'); form.append('file', new File(['account,peer,time,amount,memo\n000123,000456,2026-10-01 10:00:00,0.1,工资\n000123,000456,2026-10-01 11:00:00,0.2,工资\n'], '交易.csv', { type: 'text/csv' }));
+        const response = await window.Pivot.legacy.apiFetch('/api/apps/data-analysis/datasets', { method: 'POST', body: form }); if (!response.ok) throw new Error(await response.text()); return (await response.json()).dataset;
+    });
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'data-analysis' }));
+    await page.waitForFunction(id => window.Pivot.legacy.PivotDataAnalysis?.state.datasets.some(row => row.id === id), dataset.id);
+    await page.locator('[data-data-analysis-tab="transactions"]').click(); await page.locator('#finance-dataset').selectOption(dataset.id); await page.getByRole('button', { name: '新建资金分析', exact: true }).click();
+    const key = name => dataset.columns.find(column => column.name === name).key;
+    for (const [field, name] of Object.entries({ account: 'account', counterpartyAccount: 'peer', time: 'time', amount: 'amount', memo: 'memo' })) await page.locator(`#finance-field-${field}`).selectOption(key(name));
+    await page.locator('#finance-categories').fill('工资=工资收入'); await page.getByRole('button', { name: '确认并运行分析', exact: true }).click(); await page.locator('[data-finance="close"]').click();
+    await expect(page.locator('#finance-runs')).toContainText('已完成', { timeout: 30000 }); await page.locator('[data-finance="view"]').first().click();
+    await expect(page.locator('#finance-dialog')).toContainText('0.30'); await expect(page.locator('#finance-dialog')).toContainText('工资收入');
+    await expect(page.locator('#finance-dialog tbody').first().getByText('0.30').first()).toBeVisible();
+    await page.getByRole('button', { name: 'AI 解读', exact: true }).click(); await expect(page.locator('#finance-ai')).toContainText('请核对原始交易记录', { timeout: 20000 });
+    await page.getByRole('button', { name: '生成 Word', exact: true }).click(); await expect(page.locator('#finance-outputs')).toContainText('已生成', { timeout: 20000 });
+    const download = page.waitForEvent('download'); await page.locator('[data-finance="download"]').click(); const downloaded = await download; expect(downloaded.suggestedFilename()).toMatch(/\.docx$/);
+    await page.getByRole('button', { name: '生成导图', exact: true }).click(); await expect(page.locator('[data-finance="open-map"]')).toBeVisible({ timeout: 15000 });
+    fs.mkdirSync(path.resolve('output/mindmaps'), { recursive: true }); await page.screenshot({ path: path.resolve('output/mindmaps/transaction-report.png'), fullPage: true });
+    await page.locator('[data-finance="open-map"]').click(); await expect(page.locator('#mindmap-outline')).toContainText('资金交易分析'); await expect(page.locator('#mindmap-outline')).toContainText('0.30');
+    await page.getByRole('button', { name: '文档列表', exact: true }).click(); await page.getByRole('button', { name: '数据层级映射', exact: true }).click();
+    await page.locator('#mindmap-source-dataset').selectOption(dataset.id); await page.getByRole('button', { name: '配置层级', exact: true }).click();
+    await page.locator('#mindmap-source-level-1').selectOption(key('account')); await page.locator('#mindmap-source-level-2').selectOption(key('peer')); await page.locator('#mindmap-source-aggregation').selectOption('sum'); await page.locator('#mindmap-source-metric').selectOption(key('amount'));
+    await page.getByRole('button', { name: '生成预览', exact: true }).click(); await expect(page.locator('#mindmap-dialog-body')).toContainText('0.30000000'); await page.getByRole('button', { name: '保存为个人导图', exact: true }).click();
+    await expect(page.locator('#mindmap-outline')).toContainText('0.30000000'); await page.getByRole('button', { name: '刷新来源数据', exact: true }).click(); await page.getByRole('button', { name: '确认', exact: true }).click(); await expect(page.locator('#mindmap-save-status')).toContainText('来源数据没有变化');
+    expect(errors).toEqual([]);
+    await page.evaluate(async id => { await window.Pivot.legacy.apiFetch(`/api/apps/data-analysis/datasets/${id}`, { method: 'DELETE' }); }, dataset.id);
+});

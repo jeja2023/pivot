@@ -5,8 +5,8 @@ function normalizeMindmap(tree, options = {}) {
     let count = 0;
     const ids = new Set();
     function normalize(node, depth) {
-        if (!node || typeof node !== 'object' || depth > 6 || ++count > 120 || typeof node.text !== 'string' || node.text.length > 120
-            || (!allowEmpty && !node.text.trim()) || !/^[\w-]{1,64}$/.test(node.id || '') || ids.has(node.id)) throw Object.assign(new Error('脑图节点、层级或标识无效（最多 120 个节点、6 层）。'), { status: 422 });
+        if (!node || typeof node !== 'object' || depth > 12 || ++count > 5000 || typeof node.text !== 'string' || node.text.length > 120
+            || (!allowEmpty && !node.text.trim()) || !/^[\w-]{1,64}$/.test(node.id || '') || ids.has(node.id)) throw Object.assign(new Error('脑图节点、层级或标识无效（最多 5000 个节点、12 层）。'), { status: 422 });
         ids.add(node.id);
         if (node.children !== undefined && !Array.isArray(node.children)) throw new Error('脑图子节点必须是数组。');
         const text = node.text.trim() || (allowEmpty ? '新分支' : '');
@@ -76,7 +76,7 @@ function mindmapSvg(input, themeName = 'indigo') {
 
     // Compute column X coordinates based on adaptive widths
     const colX = { 0: 32 };
-    for (let d = 1; d <= 6; d++) {
+    for (let d = 1; d <= 12; d++) {
         if (maxColWidth[d - 1]) {
             const gap = d === 1 ? 54 : 44;
             colX[d] = colX[d - 1] + maxColWidth[d - 1] + gap;
@@ -86,7 +86,6 @@ function mindmapSvg(input, themeName = 'indigo') {
     // 2. Vertical layout
     let leafY = 28;
     function layoutNode(node, depth, branchIndex) {
-        const cfg = getConfig(depth);
         const children = node.children || [];
         const isLeaf = children.length === 0;
 
@@ -207,17 +206,21 @@ function mindmapSvg(input, themeName = 'indigo') {
 
 async function saveMindmap(user, input, context = {}) {
     const tree = normalizeMindmap(input.tree);
-    const { createStandaloneArtifact, createOrUpdateRunArtifact, getAgentArtifactForUser } = require('./agent-artifacts');
-    let artifact;
-    if (input.artifactId) {
-        const existing = await getAgentArtifactForUser(input.artifactId, user);
-        if (!existing || existing.type !== 'mindmap') throw Object.assign(new Error('脑图不存在或无权编辑。'), { status: 404 });
-        artifact = await require('./agent-artifacts').createAgentArtifactVersion(existing.id, user, { content: JSON.stringify(tree), note: '脑图编辑保存' });
-    } else if (context.run?.id) artifact = await createOrUpdateRunArtifact({ user, runId: context.run.id, type: 'mindmap', title: tree.text, content: JSON.stringify(tree) });
-    else artifact = await createStandaloneArtifact(user, { type: 'mindmap', title: tree.text, content: JSON.stringify(tree) });
+    const documents = require('./mindmaps/documents');
+    if (input.artifactId) await documents.get(user, input.artifactId);
+    const requestKey = `agent:${require('crypto').createHash('sha256').update(`${context.run?.id || user.id}:${context.stepId || context.toolCallId || require('crypto').randomUUID()}`).digest('hex')}`;
+    const artifact = await documents.save(user, { ...input, tree, requestKey: input.requestKey || requestKey }, { legacy: true, runId: context.run?.id });
+    if (require('../../client/common/mindmap-document').count(artifact.document) > 120) {
+        const job = await require('./mindmaps/exports').create(user, artifact.id, { versionId: artifact.versionId, format: 'svg' });
+        return { artifactId: artifact.id, mindmapArtifactId: artifact.id, versionId: artifact.versionId, exportJobId: job.id, exportStatus: job.status, text: '大图正文已保存，完整矢量图正在后台生成。可在思维导图应用中继续编辑和导出。' };
+    }
     const { materializeToolArtifact } = require('./tool-result-artifacts');
-    const rendition = await materializeToolArtifact({ structuredContent: { pivotArtifact: { kind: 'diagram', svg: mindmapSvg(tree) } } }, user, { ...context, targetArtifactId: artifact.id });
-    return { ...rendition, mindmapArtifactId: artifact.id, tree, text: '脑图已保存，可在产物中编辑节点并下载矢量图。' };
+    try {
+        const rendition = await materializeToolArtifact({ structuredContent: { pivotArtifact: { kind: 'diagram', svg: mindmapSvg(tree) } } }, user, { ...context, targetArtifactId: artifact.id });
+        return { ...rendition, mindmapArtifactId: Number(artifact.id), versionId: artifact.versionId, tree, text: '脑图已保存，可在思维导图应用中继续编辑。' };
+    } catch (_) {
+        return { artifactId: artifact.id, mindmapArtifactId: artifact.id, versionId: artifact.versionId, tree, exportStatus: 'failed', text: '导图正文已保存，图形生成失败。请在思维导图应用中重新导出。' };
+    }
 }
 
 module.exports = { normalizeMindmap, mindmapSvg, saveMindmap };

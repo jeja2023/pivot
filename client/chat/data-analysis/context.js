@@ -4,7 +4,7 @@
     const API = '/api/apps/data-analysis';
     const ACTIVE_TAB_STORAGE_KEY = 'pivot_data_analysis_active_tab';
     const SHARED_SCOPE = 'shared';
-    const VALID_TABS = new Set(['overview', 'governance', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'assets', 'dashboards', 'history']);
+    const VALID_TABS = new Set(['overview', 'transactions', 'governance', 'cleaning', 'chart', 'compare', 'query', 'pivot', 'ai', 'assets', 'dashboards', 'history']);
 
     function normalizeTab(tab) {
         const normalized = String(tab || '').trim();

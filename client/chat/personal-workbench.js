@@ -621,9 +621,7 @@
         }
         if (artifactType === 'mindmap') {
             const artifactId = targetId || id;
-            return (window.Pivot.moduleApi?.('workspaces.navigation')?.openAgentArtifact
-                || window.Pivot.moduleApi?.('agent.artifacts')?.openVersions
-                || window.Pivot.legacy?.loadAgentArtifactModal)?.(artifactId);
+            return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({ app: 'mindmaps', artifactId });
         }
         if (runId || (kind === 'run' && id)) {
             const effectiveRunId = runId || id;

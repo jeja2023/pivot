@@ -1,0 +1,262 @@
+{
+  "date": "2026-10-25",
+  "package": {
+    "name": "simple-mind-map",
+    "version": "0.14.0-fix.3",
+    "integrity": "sha512-S8kotb0kcxpty5DKHZPFktZWoa0c+hfPn3Ry7CQBxjH/bOD8ePrc9xW99vi8gLBZJe69OyEZ/W1EODSuCnULyw==",
+    "tarball": "https://registry.npmjs.org/simple-mind-map/-/simple-mind-map-0.14.0-fix.3.tgz"
+  },
+  "environment": {
+    "node": "v24.22.0",
+    "os": "win32 10.0.19045",
+    "cpu": "Intel(R) Core(TM) i5-10500 CPU @ 3.10GHz",
+    "logicalCpus": 12,
+    "memoryGB": 16,
+    "electronInstalled": "43.6.0",
+    "electronTested": false,
+    "browser": "153.0.8010.12"
+  },
+  "tests": [
+    {
+      "name": "ESM loads and renders without unsafe-eval or external requests",
+      "status": "pass",
+      "detail": {
+        "nodes": 15,
+        "violations": []
+      }
+    },
+    {
+      "name": "Chinese plain-text editing through actual double click and input",
+      "status": "pass",
+      "detail": "Committed to tree; native IME composition remains untested."
+    },
+    {
+      "name": "Insert child, undo and redo using core commands",
+      "status": "pass",
+      "detail": {
+        "before": 15,
+        "after": 16
+      }
+    },
+    {
+      "name": "Seven layout variants render",
+      "status": "pass",
+      "detail": [
+        {
+          "layout": "logicalStructure",
+          "ms": 5
+        },
+        {
+          "layout": "logicalStructureLeft",
+          "ms": 4
+        },
+        {
+          "layout": "mindMap",
+          "ms": 4
+        },
+        {
+          "layout": "organizationStructure",
+          "ms": 5
+        },
+        {
+          "layout": "catalogOrganization",
+          "ms": 5
+        },
+        {
+          "layout": "timeline",
+          "ms": 4
+        },
+        {
+          "layout": "fishbone",
+          "ms": 6
+        }
+      ]
+    },
+    {
+      "name": "Legacy ID/text round trip and native JSON config persistence",
+      "status": "pass",
+      "detail": {
+        "layout": "mindMap",
+        "color": "#123456",
+        "note": "纯文本备注",
+        "nodes": 16
+      }
+    },
+    {
+      "name": "SVG exporter works and current Pivot sanitizer acceptance is measured",
+      "status": "pass",
+      "detail": {
+        "bytes": 21034,
+        "foreignObject": false,
+        "image": false,
+        "sanitizerAccepted": false,
+        "sanitizerError": "SVG 包含外部资源或动态内容。"
+      }
+    },
+    {
+      "name": "Browser PNG and Markdown exporters work with selected plugins",
+      "status": "pass",
+      "detail": {
+        "pngBytes": 121271,
+        "markdownBytes": 336
+      }
+    },
+    {
+      "name": "Synthetic expanded tree: 120 nodes",
+      "status": "pass",
+      "detail": {
+        "nodes": 120,
+        "renderMs": 458,
+        "serializedNodes": 120,
+        "domElements": 979,
+        "jsonBytes": 11941
+      }
+    },
+    {
+      "name": "Synthetic expanded tree: 1000 nodes",
+      "status": "pass",
+      "detail": {
+        "nodes": 1000,
+        "renderMs": 3911,
+        "serializedNodes": 1000,
+        "domElements": 8129,
+        "jsonBytes": 98951
+      }
+    },
+    {
+      "name": "Synthetic expanded tree: 5000 nodes",
+      "status": "pass",
+      "detail": {
+        "nodes": 5000,
+        "renderMs": 32287,
+        "serializedNodes": 5000,
+        "domElements": 40629,
+        "jsonBytes": 502451
+      }
+    },
+    {
+      "name": "Plain-text script markup does not execute and instance can be destroyed",
+      "status": "pass",
+      "detail": "Single plain-text payload; not a full import/fuzz security audit."
+    }
+  ],
+  "performance": [
+    {
+      "nodes": 120,
+      "renderMs": 458,
+      "serializedNodes": 120,
+      "domElements": 979,
+      "jsonBytes": 11941
+    },
+    {
+      "nodes": 1000,
+      "renderMs": 3911,
+      "serializedNodes": 1000,
+      "domElements": 8129,
+      "jsonBytes": 98951
+    },
+    {
+      "nodes": 5000,
+      "renderMs": 32287,
+      "serializedNodes": 5000,
+      "domElements": 40629,
+      "jsonBytes": 502451
+    }
+  ],
+  "network": [],
+  "limitations": [
+    "Isolated browser harness with equivalent CSP, not a mounted production Pivot application.",
+    "No database mutations, no full Agent pipeline, no true IME composition test, no real pointer subtree drag test.",
+    "Performance numbers are single-run expanded synthetic trees, not a production capacity guarantee."
+  ],
+  "assets": [
+    {
+      "name": "simpleMindMap.umd.min.js",
+      "bytes": 6826711,
+      "gzipBytes": 1238294,
+      "sha256": "af45a6f6ee5ca6093c79fb08feaa77a774b2e9eca81dbae1bdd6c4892971eb59",
+      "evalCallCount": 1210
+    },
+    {
+      "name": "simpleMindMap.esm.min.js",
+      "bytes": 1605792,
+      "gzipBytes": 516831,
+      "sha256": "411e7070c212801c447158d218b6d073d8fe37944ce08eb6641a18adc3070e32",
+      "evalCallCount": 0
+    }
+  ],
+  "umd": {
+    "loaded": true,
+    "globalType": "undefined",
+    "errors": [
+      "Uncaught EvalError: Evaluating a string as JavaScript violates the following Content Security Policy directive because 'unsafe-eval' is not an allowed source of script: script-src 'self' 'nonce-probe' blob:\".\n"
+    ],
+    "violations": [
+      {
+        "directive": "script-src",
+        "blocked": "eval"
+      }
+    ]
+  },
+  "esm": {
+    "loadAndInitialRenderMs": 359,
+    "availablePlugins": [
+      "miniMap",
+      "watermark",
+      "drag",
+      "keyboardNavigation",
+      "doExportXMind",
+      "doExportPDF",
+      "doExport",
+      "select",
+      "associativeLine",
+      "richText",
+      "touchEvent",
+      "nodeImgAdjust",
+      "search",
+      "painter",
+      "scrollbar",
+      "formula",
+      "rainbowLines",
+      "demonstrate",
+      "outerFrame",
+      "mindMapLayoutPro",
+      "nodeBase64ImageStorage"
+    ],
+    "enabledPlugins": [
+      "drag",
+      "keyboardNavigation",
+      "doExport",
+      "select",
+      "associativeLine",
+      "touchEvent",
+      "search"
+    ],
+    "pageErrors": [],
+    "violations": [],
+    "pluginErrors": []
+  },
+  "svg": {
+    "bytes": 21034,
+    "foreignObject": false,
+    "image": false,
+    "sanitizerAccepted": false,
+    "sanitizerError": "SVG 包含外部资源或动态内容。",
+    "bridge": {
+      "removedEditorMetadata": {
+        "xmlns:svgjs": 1,
+        "svgjs:data": 32
+      },
+      "sanitizerAccepted": true,
+      "serverPngBytes": 32307,
+      "width": 759,
+      "height": 518,
+      "limitations": "Plain text sample only; rich text, images, all layouts and historical-version delivery not validated."
+    }
+  },
+  "summary": {
+    "passed": 11,
+    "failed": 0,
+    "externalRequests": 0
+  }
+}

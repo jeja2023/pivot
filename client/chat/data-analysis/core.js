@@ -212,8 +212,9 @@
         }
         if (requestedTab === 'dashboards') await app.loadDashboards?.({ keepActive: true, silent: true });
         if (requestedTab === 'query') await app.loadAsyncQueryJobs?.({ silent: true });
-        if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
-        if (requestedTab === 'cleaning') {
+        const selectedTab = app.getStoredActiveTab?.() || requestedTab;
+        if (typeof app.activateTab === 'function') app.activateTab(selectedTab);
+        if (selectedTab === 'cleaning') {
             await app.loadCleaningWorkspace?.(state.cleaningDatasetId || state.activeId, { resetPreview: true });
         }
         resumeAiWorkspace();

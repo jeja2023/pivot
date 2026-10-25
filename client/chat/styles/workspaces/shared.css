@@ -61,6 +61,24 @@
     background: #f8fafc;
 }
 
+/* 多段结果按自然高度排列，由弹窗正文统一滚动，避免表格被纵向压缩。 */
+.workspace-modal .workspace-modal-body.workspace-scroll-content {
+    display: block;
+    padding: 12px 14px 14px;
+}
+.workspace-scroll-content > p,
+.workspace-scroll-content > h4,
+.workspace-scroll-content > label {
+    margin: 12px 0;
+}
+.workspace-scroll-content > label {
+    display: block;
+}
+.workspace-scroll-content > .table-container {
+    flex: none;
+    margin: 8px 0 16px;
+}
+
 .workspace-toolbar {
     display: flex;
     flex-wrap: wrap;

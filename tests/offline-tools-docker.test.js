@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { sanitizeSvg } = require('../server/services/document-rendering/image-renderer');
 
-test('隔离 Docker 内认证 MCP 扫描和真实 Mermaid、Graphviz 生成安全 SVG', { skip: !process.env.PIVOT_OFFLINE_TOOLS_CONTAINER, timeout: 150000 }, async () => {
+test('隔离 Docker 内认证 MCP 扫描和真实 Mermaid、Graphviz 生成安全 SVG', { skip: !process.env.PIVOT_OFFLINE_TOOLS_CONTAINER && '需要鉴权工具与 Kroki/Mermaid 容器；运行 npm run test:offline-tools:integration 补测。', timeout: 150000 }, async () => {
     const script = `
 import asyncio,json
 from pathlib import Path

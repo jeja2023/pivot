@@ -16,7 +16,7 @@ const ALLOWED_WINDOW_PROPERTIES = new Set([
     'localStorage', 'sessionStorage', 'crypto', 'CSS', 'devicePixelRatio',
     'fetch', 'getSelection', 'navigator', 'electronAPI', 'pivotDesktop',
     'isDesktopApp', 'APP_VERSION_TAG', 'echarts', 'open', 'close', 'history',
-    'performance', 'AbortController', 'MutationObserver'
+    'performance', 'AbortController', 'MutationObserver', 'indexedDB', 'btoa'
 ]);
 
 function walk(dir, files = []) {

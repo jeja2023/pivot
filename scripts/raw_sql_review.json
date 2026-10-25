@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/mindmap-previews.js",
+      "count": 2,
+      "rationale": "缩略图只按服务层已复核权限的文档读取，以当前版本条件写入且禁止旧版本覆盖较新缓存；绑定全部参数，缓存内容有 64KiB 数据库约束并随文档级联清理。",
+      "verification": "tests/mindmap-capacity.test.js 验证按版本缓存、更新失效和回收站拒绝读取；权限复用 mindmap-product 和 WebSocket 共享撤权回归。"
+    },
+    {
       "file": "server/repositories/chat-conversation-turns.js",
       "count": 18,
       "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。续跑查询限定父运行、当前用户及未删除的真实续跑关联，等待输入的同一运行通过状态 CAS 只排队一次并保留检查点。任务来源资料读取严格限定在当前运行关联的原始消息与明确登记的后续消息白名单内，按未删除会话与任务隔离复核。",
@@ -175,6 +181,42 @@
       "count": 14,
       "rationale": "演示文稿草稿自动保存与里程碑版本分离机制：在事务内按文稿 ID 与 current_version 执行乐观锁条件更新，仅更新当前文稿草稿内容、验证状态及关联产物，不冗余插入历史版本快照；全部查询均已参数化并按租户和所有者权限隔离。",
       "verification": "tests/presentation-workbench.test.js、tests/presentation-workbench-contract.test.js、tests/presentation-workbench-integration.test.js 覆盖自动保存、乐观锁冲突、草稿与里程碑版本隔离。"
+    },
+    {
+      "file": "server/repositories/mindmaps.js",
+      "count": 33,
+      "rationale": "导图与共享、模板、个人组织信息集中于数据访问层；所有读取按本人或有效授权隔离，编辑权限与共享撤销在产物行锁内复核，CRDT 合并经规范校验后与版本及协作状态同事务提交；参数全部绑定，动态筛选仅拼固定 SQL。",
+      "verification": "tests/mindmap-workbench.test.js、tests/mindmap-product.test.js、tests/mindmap-browser.test.js 验证数据库权限、并发、协作收敛及撤销；tests/e2e/mindmaps.spec.js 验证真实应用链。"
+    },
+    {
+      "file": "server/repositories/mindmap-product.js",
+      "count": 24,
+      "rationale": "导图与共享、模板、个人组织信息集中于数据访问层；所有读取按本人或有效授权隔离，编辑权限与共享撤销在产物行锁内复核，CRDT 合并经规范校验后与版本及协作状态同事务提交；参数全部绑定，动态筛选仅拼固定 SQL。",
+      "verification": "tests/mindmap-workbench.test.js、tests/mindmap-product.test.js、tests/mindmap-browser.test.js 验证数据库权限、并发、协作收敛及撤销；tests/e2e/mindmaps.spec.js 验证真实应用链。"
+    },
+    {
+      "file": "server/repositories/analysis-transactions.js",
+      "count": 9,
+      "rationale": "资金交易任务与交付持久化边界，全部参数绑定；按用户隔离，任务配额与幂等在事务内验证，领取采用行锁和租约，提交使用租约条件；保留期清理仅处理已关联的产物并解除CAS引用，清理不会记录交易明细。",
+      "verification": "tests/analysis-transactions.test.js 覆盖精确金额、真实 PostgreSQL 幂等任务、权限、源数据删除及交付保留期；浏览器和HTTP用例验证同一授权链。"
+    },
+    {
+      "file": "server/repositories/analysis-transaction-outputs.js",
+      "count": 6,
+      "rationale": "资金交易任务与交付持久化边界，全部参数绑定；按用户隔离，任务配额与幂等在事务内验证，领取采用行锁和租约，提交使用租约条件；保留期清理仅处理已关联的产物并解除CAS引用，清理不会记录交易明细。",
+      "verification": "tests/analysis-transactions.test.js 覆盖精确金额、真实 PostgreSQL 幂等任务、权限、源数据删除及交付保留期；浏览器和HTTP用例验证同一授权链。"
+    },
+    {
+      "file": "server/repositories/analysis-transaction-retention.js",
+      "count": 11,
+      "rationale": "资金交易任务与交付持久化边界，全部参数绑定；按用户隔离，任务配额与幂等在事务内验证，领取采用行锁和租约，提交使用租约条件；保留期清理仅处理已关联的产物并解除CAS引用，清理不会记录交易明细。",
+      "verification": "tests/analysis-transactions.test.js 覆盖精确金额、真实 PostgreSQL 幂等任务、权限、源数据删除及交付保留期；浏览器和HTTP用例验证同一授权链。"
+    },
+    {
+      "file": "server/repositories/mindmap-themes.js",
+      "count": 5,
+      "rationale": "按账号隔离个人主题，主题数量与同名更新在事务内校验；仅存储共享 Schema 白名单校验后的样式，无脚本或外部资源。参数全部绑定。",
+      "verification": "tests/mindmap-product.test.js 与 tests/mindmap-capacity.test.js 覆盖样式持久化、账号隔离和主题资源校验。"
     }
   ]
 }

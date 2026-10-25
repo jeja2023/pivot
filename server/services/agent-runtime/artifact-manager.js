@@ -87,6 +87,7 @@ class ArtifactManager {
     if (!current) {
       throw new Error('Artifact 不存在或无权修改');
     }
+    if (current.type === 'mindmap') throw Object.assign(new Error('请通过思维导图应用保存，以保留版本与冲突保护。'), { status: 409 });
 
     // 记录版本历史并更新主记录
     return await transaction(async trx => {
@@ -139,13 +140,13 @@ class ArtifactManager {
       [artifactId]
     );
 
-    if (!artifact) {
+    if (!artifact || (artifact.type === 'mindmap' && artifact.status === 'deleted')) {
       throw new Error('Artifact 不存在');
     }
 
     const uId = String(userId);
     // 检查访问权限（公开或所有者）
-    if (artifact.status !== 'public' && String(artifact.user_id) !== uId) {
+    if ((artifact.status !== 'public' || artifact.type === 'mindmap') && String(artifact.user_id) !== uId) {
       throw new Error('无权访问此 Artifact');
     }
 
@@ -162,7 +163,7 @@ class ArtifactManager {
       [artifactId, uId]
     );
 
-    if (!artifact) {
+    if (!artifact || (artifact.type === 'mindmap' && artifact.status === 'deleted')) {
       throw new Error('Artifact 不存在或无权访问');
     }
 
@@ -190,6 +191,7 @@ class ArtifactManager {
     if (!artifact) {
       throw new Error('Artifact 不存在或无权修改');
     }
+    if (artifact.type === 'mindmap') throw Object.assign(new Error('请在思维导图应用中恢复历史版本。'), { status: 409 });
 
     const targetVersion = await queryOne(
       'SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?',
@@ -300,13 +302,14 @@ class ArtifactManager {
   async delete(artifactId, userId) {
     const uId = String(userId);
     const artifact = await queryOne(
-      'SELECT id FROM agent_artifacts WHERE id = ? AND user_id = ?',
+      'SELECT id,type FROM agent_artifacts WHERE id = ? AND user_id = ?',
       [artifactId, uId]
     );
 
     if (!artifact) {
       throw new Error('Artifact 不存在或无权删除');
     }
+    if (artifact.type === 'mindmap') throw Object.assign(new Error('请在思维导图应用中删除文档，以保留冲突保护。'), { status: 409 });
 
     await execute(
       "UPDATE agent_artifacts SET status = 'deleted', updated_at = NOW() WHERE id = ?",
@@ -324,13 +327,14 @@ class ArtifactManager {
     const uId = String(userId);
 
     const artifact = await queryOne(
-      'SELECT id FROM agent_artifacts WHERE id = ? AND user_id = ?',
+      'SELECT id,type FROM agent_artifacts WHERE id = ? AND user_id = ?',
       [artifactId, uId]
     );
 
     if (!artifact) {
       throw new Error('Artifact 不存在或无权分享');
     }
+    if (artifact.type === 'mindmap') throw Object.assign(new Error('当前思维导图仅支持本人访问。'), { status: 409 });
 
     const expiresAt = expiresIn
       ? new Date(Date.now() + expiresIn * 1000)
@@ -380,7 +384,7 @@ class ArtifactManager {
       [share.artifact_id]
     );
 
-    if (!artifact || artifact.status === 'deleted') {
+    if (!artifact || artifact.status === 'deleted' || artifact.type === 'mindmap') {
       throw new Error('Artifact 不存在或已下架');
     }
 

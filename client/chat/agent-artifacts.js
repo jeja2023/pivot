@@ -312,6 +312,10 @@ async function loadAgentArtifactModal(artifactId) {
     const artifact = data.artifact || {};
     const versions = data.versions || [];
     const isMindmap = artifact.type === 'mindmap';
+    if (isMindmap && window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench) {
+        modal.classList.add('hidden');
+        return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'mindmaps', artifactId });
+    }
 
     modal.dataset.artifactType = artifact.type || 'summary';
     const innerModal = modal.querySelector('.agent-artifact-modal');

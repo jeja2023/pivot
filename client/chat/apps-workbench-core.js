@@ -1,4 +1,5 @@
 const PIVOT_APP_REGISTRY = [
+    { id: 'mindmaps', name: '思维导图', category: '办公创作', description: '通过多种结构梳理思路，支持主题样式、自动保存、版本恢复、AI 生成与导入导出。', icon: 'git-branch', tags: ['多结构编辑', '历史版本', '导入导出'], status: 'available', openMode: 'inline' },
     {
         id: 'presentations',
         name: 'PPT 制作',
@@ -536,6 +537,8 @@ function setStoredAppsActiveApp(appId) {
 }
 
 function showAppsHome() {
+    window.Pivot.moduleApi('apps.mindmaps')?.suspend?.();
+    document.getElementById('mindmaps-view')?.classList.add('hidden');
     setStoredAppsActiveApp('');
     window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.remove('hidden');
@@ -633,6 +636,11 @@ async function showPresentationsAppFromRegistry(options = {}) {
     return await loaded.showPresentationsApp(options);
 }
 
+async function showMindmapsAppFromRegistry(options = {}) {
+    await window.Pivot.loadScriptOnce('/chat/apps-workbench-mindmaps.js');
+    return window.Pivot.moduleApi('apps.mindmaps').show(options);
+}
+
 function openRegisteredApp(appId) {
     const app = PIVOT_APP_REGISTRY.find(item => item.id === appId);
     if (!app || app.status !== 'available') return;
@@ -688,6 +696,7 @@ function openRegisteredApp(appId) {
                 handleFailure(error);
             });
     }
+    if (app.id === 'mindmaps') showMindmapsAppFromRegistry().then(() => setAppsWorkbenchState()).catch(handleFailure);
 }
 
 window.Pivot?.exposeModule?.('workspaces.apps', {
@@ -696,7 +705,8 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     setAppsWorkbenchState,
     setAppsWorkbenchVisibility,
     getStoredAppsActiveApp,
-    setStoredAppsActiveApp
+    setStoredAppsActiveApp,
+    showMindmapsAppFromRegistry
 }, [
     { globalName: 'getAppsSessionValue', exportName: 'getAppsSessionValue' },
     { globalName: 'setAppsSessionValue', exportName: 'setAppsSessionValue' },

@@ -50,7 +50,7 @@ async function listAgentArtifacts(user, limit = 30) {
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.user_id = ?
+        WHERE a.user_id = ? AND (a.type <> 'mindmap' OR a.status <> 'deleted')
         ORDER BY COALESCE(a.updated_at, a.created_at) DESC, a.id DESC
         LIMIT ?
     `, [user.id, normalizePositiveInt(limit, 30, 1, 100)]);
@@ -64,7 +64,7 @@ async function getAgentArtifactForUser(artifactId, user) {
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.id = ? AND a.user_id = ?
+        WHERE a.id = ? AND a.user_id = ? AND (a.type <> 'mindmap' OR a.status <> 'deleted')
     `, [artifactId, user.id]);
 }
 
@@ -86,6 +86,7 @@ async function nextArtifactVersion(artifactId) {
 }
 
 async function createOrUpdateRunArtifact({ runId, user, type = 'summary', title, content, note = '' } = {}) {
+    if (String(type).trim() === 'mindmap') return require('./mindmaps/documents').save(user, { content, requestKey: `agent:${require('crypto').randomUUID()}`, note }, { runId }).then(result => getAgentArtifactForUser(result.id, user));
     const safeRunId = String(runId || '').trim();
     const safeType = String(type || 'summary').trim().slice(0, 40) || 'summary';
     const safeTitle = String(title || '智能体结果').trim().slice(0, 120) || '智能体结果';
@@ -133,6 +134,10 @@ async function createOrUpdateRunArtifact({ runId, user, type = 'summary', title,
  * 不能为了导出而在浏览器或桌面端另起二进制文件通路。
  */
 async function createStandaloneArtifact(user, body = {}) {
+    if (String(body.type || '').trim() === 'mindmap') {
+        const result = await require('./mindmaps/documents').save(user, { ...body, document: body.content, requestKey: body.requestKey || `artifact:${require('crypto').randomUUID()}` });
+        return getAgentArtifactForUser(result.id, user);
+    }
     if (!user?.id) {
         const err = new Error('创建独立产物需要有效用户。');
         err.status = 401;
@@ -178,6 +183,10 @@ async function createAgentArtifactVersion(artifactId, user, body = {}) {
     const artifact = await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
     const content = String(body.content ?? artifact.content ?? '').trim();
+    if (artifact.type === 'mindmap') {
+        const result = await require('./mindmaps/documents').save(user, { ...body, artifactId, document: content });
+        return getAgentArtifactForUser(result.id, user);
+    }
     if (!content) {
         const err = new Error('版本内容不能为空。');
         err.status = 400;
@@ -240,6 +249,7 @@ async function diffAgentArtifactVersions(artifactId, user, fromVersion, toVersio
 async function rollbackAgentArtifactVersion(artifactId, user, version, note = '') {
     const artifact = await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
+    if (artifact.type === 'mindmap') throw require('../../client/common/mindmap-document').error('请在思维导图应用中选择版本恢复，以保留冲突保护。', 'MINDMAP_APP_REQUIRED', 409);
     const target = await queryOne('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? AND version = ?', [artifact.id, Number(version)]);
     if (!target) {
         const err = new Error('回滚版本不存在。');
@@ -253,6 +263,7 @@ async function rollbackAgentArtifactVersion(artifactId, user, version, note = ''
 }
 
 async function saveAgentRunArtifact(runId, user, body = {}) {
+    if (String(body.type || '').trim() === 'mindmap') return createOrUpdateRunArtifact({ runId, user, type: 'mindmap', content: body.content, note: body.note });
     const getRunDetailForUser = ensureGetRunDetailForUser();
     const getAgentRunTitle = ensureGetAgentRunTitle();
     const detail = await getRunDetailForUser(runId, user);

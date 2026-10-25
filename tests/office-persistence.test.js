@@ -8,7 +8,7 @@ test('脑图编辑写入真实版本，拒绝跨用户编辑，比较修订通�
     const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
     const first = await saveMindmap(user, { tree: { id: 'root', text: '计划', children: [] } }, { stepId: 'mindmap-create' });
     assert.equal(first.artifactId, first.mindmapArtifactId);
-    const second = await saveMindmap(user, { artifactId: first.mindmapArtifactId, tree: { id: 'root', text: '新计划', children: [{ id: 'a', text: '执行' }] } }, { stepId: 'mindmap-update' });
+    const second = await saveMindmap(user, { artifactId: first.mindmapArtifactId, expectedVersionId: first.versionId, tree: { id: 'root', text: '新计划', children: [{ id: 'a', text: '执行' }] } }, { stepId: 'mindmap-update' });
     assert.equal(second.mindmapArtifactId, first.mindmapArtifactId);
     const version = await queryOne('SELECT MAX(version) AS version FROM agent_artifact_versions WHERE artifact_id = ?', [first.mindmapArtifactId]);
     assert.equal(Number(version.version), 2);

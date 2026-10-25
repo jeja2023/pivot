@@ -17,6 +17,7 @@
         '/chat/data-analysis/dashboards.js',
         '/chat/data-analysis/scalability.js',
         '/chat/data-analysis/extensions.js',
+        '/chat/data-analysis/transactions.js',
         '/chat/data-analysis/events.js'
     ];
 

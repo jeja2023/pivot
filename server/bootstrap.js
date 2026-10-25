@@ -127,6 +127,8 @@ function startBackgroundServices({
         startDecisionArtifactBreakerRunner: () => createDecisionArtifactBreakerRunner().start(),
         startAnalysisRefreshRunner,
         startAsyncQueryRunner,
+        startMindmapExportRunner: () => require('./services/mindmaps/exports').start(),
+        startTransactionRunner: () => require('./services/data-analysis/transactions').start(),
         startRuntimeDiagnostics
     }
 }) {
@@ -137,6 +139,8 @@ function startBackgroundServices({
         }
     }
     runBackgroundTask(dependencies.startGpuMonitor, logger, 'GPU 监控服务启动失败');
+    runBackgroundTask(dependencies.startMindmapExportRunner, logger, '思维导图导出服务启动失败');
+    runBackgroundTask(dependencies.startTransactionRunner, logger, '资金交易分析服务启动失败');
     runBackgroundTask(dependencies.startModelEndpointMonitor, logger, '模型端点监控服务启动失败');
     setImmediateFn(() => {
         runBackgroundTask(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');

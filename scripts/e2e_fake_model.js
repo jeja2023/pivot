@@ -44,6 +44,12 @@ const server = http.createServer((req, res) => {
         const respond = () => {
         if (payload.stream === false) {
             let content = '真实 E2E 回答';
+            if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('你只解释已计算的资金交易统计'))) content = JSON.stringify({ observations: [{ factId: 'total-0', comment: '请核对原始交易记录并确认统计范围。' }] });
+            if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('总结提供的思维导图分支'))) content = JSON.stringify({ summary: 'AI 分支总结验收' });
+            if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('现有分支展开新的子分支'))) content = JSON.stringify({ id: 'root', text: '展开主题', children: [{ id: 'new-branch', text: 'AI 新增分支', children: [] }] });
+            if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('生成中文思维导图'))) {
+                content = JSON.stringify({ id: 'root', text: 'AI 验收主题', children: [{ id: 'node-1', text: '核对生成结果', children: [] }] });
+            }
             if (payload.messages?.some(message => String(message.content || '').includes('你是对话下一步决策器'))) {
                 const request = JSON.parse(payload.messages.find(message => message.role === 'user').content);
                 const delegated = /汇总.*订单|分析.*附件|修改.*代码|生成.*风险报告/.test(request.prompt);

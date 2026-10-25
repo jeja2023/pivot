@@ -2,6 +2,7 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
+const acorn = require('acorn');
 
 const rootDir = path.resolve(__dirname, '..');
 const includeDirs = ['server', 'client', 'scripts', 'tests'];
@@ -12,7 +13,7 @@ function collectJsFiles(dir, files = []) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             if (!ignoredDirs.has(entry.name)) collectJsFiles(fullPath, files);
-        } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        } else if (entry.isFile() && /\.(?:js|mjs)$/.test(entry.name)) {
             files.push(fullPath);
         }
     }
@@ -31,7 +32,8 @@ files.forEach(filePath => {
     const relativePath = path.relative(rootDir, filePath);
     try {
         const code = fs.readFileSync(filePath, 'utf8');
-        new vm.Script(code, { filename: relativePath });
+        if (filePath.endsWith('.mjs')) acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module' });
+        else new vm.Script(code, { filename: relativePath });
         console.log(`  通过 ${relativePath}`);
     } catch (error) {
         console.error(`  失败 ${relativePath}`);

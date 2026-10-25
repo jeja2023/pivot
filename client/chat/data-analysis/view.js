@@ -709,6 +709,7 @@
         if (!titleEl || !metaEl) return;
 
         const headers = {
+            transactions: { title: '资金交易分析', desc: '确认交易映射与收支口径，查看精确金额、分类及可追溯的规则证据。' },
             overview: {
                 title: '\u6570\u636e\u603b\u89c8',
                 desc: '\u4e0a\u4f20\u8868\u683c\u6570\u636e\uff0c\u5bfc\u5165\u6570\u636e\u96c6\uff0c\u5e76\u5bf9\u6570\u636e\u96c6\u8fdb\u884c\u9884\u89c8\u548c\u7ba1\u7406\u3002'

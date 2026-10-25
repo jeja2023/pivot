@@ -13,6 +13,7 @@ const {
 } = require('../../services/data-analysis');
 
 function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }) {
+    require('./analysis-transactions').registerTransactionRoutes(router, { authMiddleware, logAction });
     router.get('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => res.json({ fields: await listFieldGovernance(req.user, req.params.id) })));
     router.put('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => {
         const result = await updateFieldGovernance({ user: req.user, datasetId: req.params.id, fields: req.body?.fields });

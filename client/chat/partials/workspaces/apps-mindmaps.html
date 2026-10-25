@@ -1,0 +1,80 @@
+<div id="mindmaps-view" class="mindmaps-view hidden">
+    <div id="mindmap-library" class="workspace-panel">
+        <div class="workspace-toolbar mindmap-toolbar">
+            <button type="button" class="btn-primary" data-mm-action="new">新建导图</button>
+            <label>模板<select id="mindmap-template" class="form-input"><option value="blank">空白导图</option><option value="plan">工作计划</option><option value="analysis">分析研判</option><option value="meeting">会议纪要</option></select></label>
+            <button type="button" class="btn-secondary" data-mm-action="import">导入</button>
+            <button type="button" class="btn-secondary" data-mm-action="ai">AI 生成</button>
+            <button type="button" class="btn-secondary" data-mm-action="data-import">数据转导图</button>
+            <button type="button" class="btn-secondary" data-mm-action="dataset-mapping">数据层级映射</button>
+            <label>搜索<input id="mindmap-search" type="search" class="form-input" maxlength="120" placeholder="搜索导图标题"></label>
+            <label>范围<select id="mindmap-library-scope" class="form-input"><option value="all">全部导图</option><option value="owned">我创建的</option><option value="shared">共享给我</option><option value="trash">回收站</option></select></label>
+            <label><input id="mindmap-favorites-only" type="checkbox"> 只看收藏</label><label>标签<input id="mindmap-tag-filter" class="form-input" maxlength="32" placeholder="按标签筛选"></label>
+            <button type="button" class="btn-secondary" data-mm-action="personal-templates">个人模板</button>
+            <button type="button" class="btn-secondary" data-mm-action="refresh">刷新</button>
+        </div>
+        <p id="mindmap-library-status" role="status" aria-live="polite"></p>
+        <div class="table-container workspace-table-wrap"><table class="data-table compact-table"><thead><tr><th>预览</th><th>名称</th><th>来源</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="mindmap-documents"></tbody></table></div>
+        <div class="workspace-pagination mindmap-pagination"><button type="button" class="btn-secondary" data-mm-action="previous">上一页</button><span id="mindmap-page"></span><button type="button" class="btn-secondary" data-mm-action="next">下一页</button></div>
+    </div>
+    <div id="mindmap-editor" class="mindmap-editor hidden">
+        <div class="workspace-toolbar mindmap-toolbar">
+            <button type="button" class="btn-secondary" data-mm-action="library">文档列表</button>
+            <button type="button" class="btn-primary" data-mm-action="save">保存</button>
+            <span id="mindmap-save-status" role="status" aria-live="polite"></span>
+            <span id="mindmap-access-status" role="status"></span><button type="button" class="btn-secondary" data-mm-action="sharing">共享协作</button><button type="button" class="btn-secondary" data-mm-action="template-save">保存为模板</button>
+            <label><input id="mindmap-auto-save" type="checkbox" checked> 自动保存</label>
+            <label><input id="mindmap-local-drafts" type="checkbox" checked> 本地草稿</label>
+            <button type="button" class="btn-secondary" data-mm-action="copy">另存副本</button>
+            <button type="button" class="btn-secondary" data-mm-action="versions">历史版本</button>
+            <button type="button" class="btn-secondary" data-mm-action="refresh-source" id="mindmap-source-refresh" hidden>刷新来源数据</button>
+            <label>导出格式<select id="mindmap-export-format" class="form-input"><option value="json">原生 JSON</option><option value="md">Markdown 文本</option><option value="svg">SVG 矢量图</option><option value="png">PNG 图片</option><option value="pdf">PDF 文档</option><option value="xmind">XMind 文件</option><option value="opml">OPML 大纲</option><option value="mm">FreeMind 文件</option></select></label>
+            <button type="button" class="btn-secondary" data-mm-action="export">导出</button>
+        </div>
+        <div id="mindmap-conflict" class="mindmap-notice hidden" role="alert">服务端已有新版本，本地修改已保留。<button type="button" class="btn-secondary" data-mm-action="reload">重载服务端版本</button><button type="button" class="btn-secondary" data-mm-action="copy">另存本地副本</button></div>
+        <div class="mindmap-toolbar mindmap-edit-toolbar">
+            <button type="button" class="btn-secondary" data-mm-command="INSERT_CHILD_NODE">子节点</button><button type="button" class="btn-secondary" data-mm-command="INSERT_NODE">同级节点</button><button type="button" class="btn-danger" data-mm-command="REMOVE_NODE">删除分支</button>
+            <button type="button" class="btn-secondary" data-mm-command="BACK">撤销</button><button type="button" class="btn-secondary" data-mm-command="FORWARD">重做</button>
+            <button type="button" class="btn-secondary" data-mm-action="fit">适配画布</button>
+            <label>结构<select id="mindmap-layout" class="form-input"></select></label><label>主题<select id="mindmap-theme" class="form-input"></select></label>
+            <button type="button" class="btn-secondary" data-mm-action="theme-library">主题库</button><button type="button" class="btn-secondary" data-mm-action="theme-pack">主题包</button>
+            <button type="button" class="btn-secondary" data-mm-action="fold">折叠分支</button><button type="button" class="btn-secondary" data-mm-action="unfold">展开分支</button>
+            <button type="button" class="btn-secondary" data-mm-action="outline-edit">编辑大纲</button><button type="button" class="btn-secondary" data-mm-action="relations">关联线</button><button type="button" class="btn-secondary" data-mm-action="summaries">概要</button>
+            <button type="button" class="btn-secondary" data-mm-action="minimap">导航图</button><button type="button" class="btn-secondary" data-mm-action="present">演示</button>
+        </div>
+        <div class="mindmap-workbench">
+            <aside class="mindmap-outline"><strong>节点大纲</strong><div id="mindmap-outline" role="tree" aria-label="导图节点"></div></aside>
+            <div id="mindmap-canvas" class="mindmap-canvas" tabindex="0" aria-label="思维导图画布，双击编辑，Tab 添加子节点，Enter 添加同级"></div>
+            <aside class="mindmap-properties">
+                <strong>选中节点</strong><p id="mindmap-selection">请在画布或大纲中选择节点</p>
+                <label>文字<input id="mindmap-node-text" class="form-input" maxlength="120"></label>
+                <label>字号<select id="mindmap-node-size" class="form-input"><option value="12">12</option><option value="14">14</option><option value="16">16</option><option value="18">18</option><option value="24">24</option><option value="32">32</option></select></label>
+                <label>文字颜色<input type="color" id="mindmap-node-color" class="form-input"></label>
+                <label>背景颜色<input type="color" id="mindmap-node-fill" class="form-input"></label>
+                <label>形状<select id="mindmap-node-shape" class="form-input"><option value="roundedRectangle">圆角矩形</option><option value="rectangle">矩形</option><option value="ellipse">椭圆</option><option value="diamond">菱形</option></select></label>
+                <label><input type="checkbox" id="mindmap-node-bold"> 加粗</label>
+                <label><input type="checkbox" id="mindmap-node-italic"> 斜体</label>
+                <label>字体<select id="mindmap-node-font" class="form-input"><option value="sans-serif">系统无衬线</option><option value="serif">系统衬线</option><option value="monospace">等宽</option><option value="Microsoft YaHei">微软雅黑</option><option value="SimSun">宋体</option><option value="Noto Sans SC">思源黑体</option><option value="Arial">西文无衬线</option></select></label>
+                <label>文字对齐<select id="mindmap-node-align" class="form-input"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+                <label>文字装饰<select id="mindmap-node-decoration" class="form-input"><option value="none">无</option><option value="underline">下划线</option><option value="line-through">删除线</option></select></label>
+                <label>边框颜色<input type="color" id="mindmap-node-border" class="form-input"></label>
+                <label>边框宽度<input type="number" id="mindmap-node-border-width" min="0" max="4" class="form-input"></label>
+                <label>边框线型<select id="mindmap-node-dash" class="form-input"><option value="none">实线</option><option value="5,5">虚线</option><option value="2,2">点线</option></select></label>
+                <label>连线颜色<input type="color" id="mindmap-node-line" class="form-input"></label>
+                <label>连线宽度<input type="number" id="mindmap-node-line-width" min="0" max="8" class="form-input"></label>
+                <label>水平内边距<input type="number" id="mindmap-node-padding-x" min="0" max="60" class="form-input"></label>
+                <label>垂直内边距<input type="number" id="mindmap-node-padding-y" min="0" max="60" class="form-input"></label>
+                <label>备注<textarea id="mindmap-node-note" class="form-input" rows="4" maxlength="2000" placeholder="纯文本备注"></textarea></label>
+                <label>超链接<input id="mindmap-node-link" type="url" class="form-input" maxlength="2048" placeholder="https:// 内部或公开网页地址"></label>
+                <button type="button" class="btn-secondary" data-mm-action="apply-node">应用到节点</button>
+                <button type="button" class="btn-secondary" data-mm-action="ai-expand">AI 展开分支</button><button type="button" class="btn-secondary" data-mm-action="ai-summarize">AI 总结分支</button>
+                <p>每图最多 5000 个节点，最大深度 12。主题和结构随版本保存；大图导出的位图最长边适配为 4000 像素，查看细节可导出 SVG。</p>
+            </aside>
+        </div>
+        <div id="mindmap-export-status" role="status" aria-live="polite"></div>
+        <div id="mindmap-minimap" class="mindmap-minimap hidden" aria-label="导图导航"></div>
+        <div id="mindmap-present-controls" class="mindmap-present-controls hidden"><button type="button" class="btn-secondary" data-mm-action="present-prev">上一节点</button><span id="mindmap-present-position" role="status"></span><button type="button" class="btn-secondary" data-mm-action="present-next">下一节点</button><button type="button" class="btn-secondary" data-mm-action="present-close">退出演示</button></div>
+    </div>
+    <input id="mindmap-import-file" type="file" accept=".json,.md,.markdown,.opml,.mm,.xmind" class="hidden">
+    <div id="mindmap-dialog" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mindmap-dialog-title"><div class="workspace-modal mindmap-dialog"><div class="workspace-modal-header"><h3 id="mindmap-dialog-title"></h3><button type="button" class="btn-secondary workspace-modal-close" data-mm-action="dialog-close" aria-label="关闭">关闭</button></div><div id="mindmap-dialog-body" class="workspace-modal-body"></div></div></div>
+</div>

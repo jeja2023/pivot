@@ -1,7 +1,7 @@
 {
   "@xmldom/xmldom": {
-    "reason": "electron-builder 的 plist 解析链需要修复后的 XML 解析器；仅影响桌面构建依赖。",
-    "scope": "dev",
+    "reason": "桌面构建 plist 链与导图 OPML/FreeMind 受控导入共用修复后的 XML 解析器；导入另外禁用 DTD/实体并限制结构大小。",
+    "scope": "production-and-dev",
     "expiresOn": "2026-12-31"
   },
   "fast-uri": {
@@ -37,6 +37,11 @@
   "@azure/msal-node": {
     "reason": "mssql -> tedious -> @azure/identity 的传递依赖；升级至修复授权码流程参数泄露漏洞（GHSA-xcx6-jx8p-x3h5）的 7.1.1 安全版本。",
     "scope": "production",
+    "expiresOn": "2026-12-31"
+  },
+  "uuid": {
+    "reason": "思维导图裁剪构建使用 UUID v4，更新传递依赖至修复缓冲区边界问题的兼容 API 版本；构建与浏览器回归验证 v4 行为。",
+    "scope": "dev",
     "expiresOn": "2026-12-31"
   }
 }

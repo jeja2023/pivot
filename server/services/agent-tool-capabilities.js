@@ -19,6 +19,7 @@ const { normalizeCapabilityList } = require('./agent-capability-registry');
 const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'document.compare': ['document.render'],
     'viz.mindmap': ['viz.render'],
+    'finance.transactionSummary': ['data.dataset.read'],
     'chat.read_source': ['conversation.read_source'],
     'agent.llm': ['model.invoke'],
     'agent.content_review': ['model.invoke', 'agent.review'],

@@ -904,7 +904,7 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
-    if (['document.compare', 'viz.mindmap'].includes(name)) return await require('./agent-tools-offline-office').executeOfflineOffice(name, input, user, context);
+    if (['document.compare', 'viz.mindmap', 'finance.transactionSummary'].includes(name)) return await require('./agent-tools-offline-office').executeOfflineOffice(name, input, user, context);
     if (name === 'chat.read_source') return executeChatSource(input, user, context);
     assertDynamicCodeExecutionIsSandboxed(name, context);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);

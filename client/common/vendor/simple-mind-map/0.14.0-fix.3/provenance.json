@@ -1,0 +1,60 @@
+{
+  "package": "simple-mind-map",
+  "version": "0.14.0-fix.3",
+  "license": "MIT",
+  "source": "https://github.com/wanglin2/mind-map",
+  "bundler": "esbuild@0.28.2",
+  "dependencies": [
+    {
+      "name": "@svgdotjs/svg.js",
+      "version": "3.2.0",
+      "license": "MIT"
+    },
+    {
+      "name": "deepmerge",
+      "version": "1.5.2",
+      "license": "MIT"
+    },
+    {
+      "name": "eventemitter3",
+      "version": "4.0.7",
+      "license": "MIT"
+    },
+    {
+      "name": "lib0",
+      "version": "0.2.119",
+      "license": "MIT"
+    },
+    {
+      "name": "simple-mind-map",
+      "version": "0.14.0-fix.3",
+      "license": "MIT"
+    },
+    {
+      "name": "uuid",
+      "version": "14.0.3",
+      "license": "MIT"
+    },
+    {
+      "name": "yjs",
+      "version": "13.6.33",
+      "license": "MIT"
+    }
+  ],
+  "entrySha256": "d7e61cfad22cf53fd7cefd593a31dce5003b87396e4db8b9777cd7d916e06b61",
+  "files": {
+    "editor.mjs": "1afdb8962bb4bb84b0224cbfea1947d11f5c8c569035f20a6c6fc5b8982e3de5",
+    "editor.mjs.LEGAL.txt": "d49338dc5b4bfa0aa006d5bc0e65c45d85fcbe3e8548916be762e3214faa464e",
+    "collaboration.mjs": "5f7ec469c6785058c622303f0562b1c0ca58cb299f466dea89c1ac79293d33f1",
+    "collaboration.mjs.LEGAL.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "LICENSES.txt": "87b4733db0d31f38e75b76f594279090dfcf5748722d44e38319796d9769b31a"
+  },
+  "collaborationInputs": {
+    "scripts/vendor-mindmap-crdt-entry.mjs": "2363c4ba4489bebf6b0c227c6283c64f61e1e02cbc9738cae7fc96f956eb197d",
+    "client/common/mindmap-crdt.js": "6a5795e1fd6ed5d3ff28c3471128b1a4fe67d8ad98d53d3438474a7ce766de9a",
+    "client/common/mindmap-document.js": "2684f95d4d5c21baada295b825be74bf9f67fdf7b2eaace37ccb463a0d6c0006"
+  },
+  "editorInputs": {
+    "scripts/mindmap-text-layout.mjs": "92979622e583ea9c5c3b8e813256f48ae4d3df3fe456330a2aa31fdcab1e8ede"
+  }
+}

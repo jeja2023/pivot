@@ -781,6 +781,7 @@ window.Pivot.legacy.persistPrintWorkspaceSession = sessionId => { if (!sessionId
 window.Pivot.legacy.getStoredPrintWorkspaceSession = () => getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 
 function showMainWorkspace(view = 'personal') {
+    if (view !== 'apps') window.Pivot.moduleApi('apps.mindmaps').suspend?.();
     const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
     const current = document.body?.dataset.activeWorkspace;
     if (['personal', 'chat'].includes(target)) {

@@ -4,6 +4,11 @@
 // 表结构由 pg-schema.snapshot.json 管理，以下仅保留对已部署 PG 库有效的
 // 约束、数据回填和控制面演进迁移。
 const migrationModules = [
+    require('./mindmap-workbench'),
+    require('./mindmap-product'),
+    require('./mindmap-previews'),
+    require('./analysis-transactions'),
+    require('./mindmap-themes'),
     require('./autonomous-runtime-foundations'),
     require('./workflow-credential-user-visibility'),
     require('./chat-agent-run-message-link'),

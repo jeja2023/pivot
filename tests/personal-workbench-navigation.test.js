@@ -52,8 +52,8 @@ test('继续工作区域各类条目具备精准分流：未命名演示文稿�
     // 3. 公文写作：直达公文单篇编辑
     assert.match(clientCode, /if \(artifactType === 'official_writing'\) \{\s*return window\.Pivot\.moduleApi\('workspaces\.navigation'\)\.openAppsWorkbench\?\.\(\{\s*app:\s*'official-writing',\s*docId:\s*targetId\s*\}\);\s*\}/);
 
-    // 4. 思维导图：直达脑图交互与版本预览，避免误入任务活动抽屉
-    assert.match(clientCode, /if \(artifactType === 'mindmap'\) \{\s*const artifactId = targetId \|\| id;\s*return \(window\.Pivot\.moduleApi\?\.\('workspaces\.navigation'\)\?\.openAgentArtifact/);
+    // 思维导图产物进入独立应用并保留同一产物标识。
+    assert.match(clientCode, /if \(artifactType === 'mindmap'\)[\s\S]*?openAppsWorkbench\?\.\(\{ app: 'mindmaps', artifactId \}\)/);
 
     // 5. 带 runId 或 run 类型：进入任务详情
     assert.match(clientCode, /if \(runId \|\| \(kind === 'run' && id\)\) \{/);

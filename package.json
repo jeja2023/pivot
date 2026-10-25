@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.42",
+  "version": "0.7.43",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -48,7 +48,7 @@
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
     "evaluate:ocr-quality": "node scripts/evaluate_ocr_quality.js",
-    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:mindmap-vendor && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=75 --test-coverage-functions=75 --test-coverage-branches=60",
     "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-model-quality.test.js tests/agent-auto-continuation.test.js tests/agent-planning-lifecycle.test.js tests/agent-lifecycle-hook-packages.test.js tests/agent-lifecycle-dispatcher.test.js tests/agent-runtime-lifecycle.test.js tests/agent-monitoring-slo.test.js tests/agent-domain-acceptance-evidence.test.js tests/agent-acceptance-evidence-ui.test.js tests/agent-capability-worker-grant.test.js tests/capability-worker-preflight.test.js tests/capability-worker-isolation-drill.test.js tests/workspace-recovery-snapshot.test.js tests/agent-code-runtime.test.js tests/agent-terminal-runtime.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js tests/agent-task-resource-multiprocess.test.js tests/agent-checkpoint-boundaries.test.js tests/agent-task-transactions-persistence.test.js tests/agent-control.test.js tests/agent-collaboration-restart.test.js tests/agent-collaboration-resource-conflicts.test.js tests/agent-delegation-role-policies.test.js tests/agent-delegation-role-policies-http.test.js tests/agent-progressive-tool-discovery.test.js tests/agent-browser-sessions.test.js tests/agent-browser-session-leases.test.js tests/workflow-foreach-worker.test.js",
@@ -100,7 +100,10 @@
     "benchmark:decision-providers": "node scripts/benchmark_decision_providers.js",
     "benchmark:decision-resources": "node scripts/benchmark_decision_resource_impact.js",
     "preflight:decision-release": "node scripts/preflight_decision_release.js",
-    "report:decision-release-evidence": "node scripts/collect_decision_release_evidence.js"
+    "report:decision-release-evidence": "node scripts/collect_decision_release_evidence.js",
+    "build:mindmap-vendor": "node scripts/build_mindmap_vendor.js",
+    "check:mindmap-vendor": "node scripts/check_mindmap_vendor.js",
+    "test:offline-tools:integration": "node scripts/run_offline_tools_integration.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",
@@ -110,15 +113,18 @@
     "hono": "^4.13.5",
     "image-size": "^2.0.4",
     "follow-redirects": "^1.16.1",
-    "@azure/msal-node": "^7.1.1"
+    "@azure/msal-node": "^7.1.1",
+    "uuid": "^14.0.2"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",
     "@e965/xlsx": "^0.20.3",
     "@pdf-lib/fontkit": "^1.1.1",
+    "@xmldom/xmldom": "^0.9.12",
     "axios": "^1.20.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.11.1",
+    "body-parser": "^2.4.0",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "diff": "8.0.2",
@@ -154,15 +160,17 @@
     "uuid": "^14.0.2",
     "word-extractor": "^1.0.4",
     "ws": "8.22.0",
-    "body-parser": "^2.4.0"
+    "yjs": "13.6.33"
   },
   "devDependencies": {
     "@modelcontextprotocol/conformance": "0.2.0-alpha.11",
     "@playwright/test": "^1.63.0",
     "electron": "^43.8.3",
     "electron-builder": "^26.15.3",
+    "esbuild": "0.28.2",
     "eslint": "^10.10.0",
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.0",
+    "simple-mind-map": "0.14.0-fix.3"
   },
   "build": {
     "appId": "com.pivot.desktop",

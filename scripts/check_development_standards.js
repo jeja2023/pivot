@@ -373,7 +373,9 @@ function checkFrontendAddedLine(file, item) {
     if (/\sstyle=/.test(text)) {
         addFailure(`${location} 新增内联 style。请抽到全局或模块 CSS，并复用主题变量。`);
     }
-    if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(')) {
+    // 导图主题色属于可导出的文档数据，不是工作台 UI 配色；只允许固定预设声明。
+    const isMindmapPalette = file === 'client/common/mindmap-document.js' && text.trim().startsWith('const THEMES = Object.freeze(');
+    if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(') && !isMindmapPalette) {
         addFailure(`${location} 新增硬编码颜色。请使用全局 CSS 变量或既有样式类。`);
     }
     if (/<button\b/i.test(text) && !/(btn-primary|btn-secondary|btn-danger|btn-danger-outline|workspace-modal-close|data-analysis-tab|admin-tab|settings-subtab|automation-primary-tab)/.test(text)) {

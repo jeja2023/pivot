@@ -436,9 +436,9 @@ async function runSavedView(user, viewId) {
     const owner = await resolveAnalysisUser(row.user_id);
     if (!owner) throw invalid('分析视图所属账号已失效。', 409);
     const config = view.config || {};
-    if (view.viewType === 'query') return { view, result: await require('./query-pivot').runUserQuery(owner.id, row.dataset_id, config) };
-    if (view.viewType === 'pivot') return { view, result: await require('./query-pivot').runPivot(owner.id, row.dataset_id, config) };
-    return { view, result: await require('./chart-summary').buildChart(owner.id, row.dataset_id, config) };
+    if (view.viewType === 'query') return { view, result: await require('./query-pivot').runUserQuery(user.id, row.dataset_id, config) };
+    if (view.viewType === 'pivot') return { view, result: await require('./query-pivot').runPivot(user.id, row.dataset_id, config) };
+    return { view, result: await require('./chart-summary').buildChart(user.id, row.dataset_id, config) };
 }
 
 async function deleteSavedView(user, viewId) {

@@ -15,6 +15,7 @@ const { closeRealtimeEventClients } = require('./services/realtime-events');
 const { shutdownSandboxProcesses } = require('./services/agent-sandbox');
 const { shutdownCapabilityWorkers } = require('./services/agent-capability-worker');
 const { voiceStreaming } = require('./services/speech-recognition/streaming');
+const { mindmapRealtime } = require('./services/mindmaps/realtime');
 const { embeddedSpeech } = require('./services/speech-recognition/embedded');
 const { refreshAppSettingsCache } = require('./services/app-settings');
 
@@ -42,6 +43,7 @@ async function init() {
     });
 
     let closeVoice = () => {};
+    let closeMindmaps = () => {};
     const { server } = startHttpServer({
         app,
         port: appConfig.port,
@@ -50,7 +52,7 @@ async function init() {
         scheduleMaintenanceTasks,
         flushAllWrites,
         closePgPool,
-        closeRealtimeClients: options => { closeRealtimeEventClients(options); closeVoice(); },
+        closeRealtimeClients: options => { closeRealtimeEventClients(options); closeVoice(); closeMindmaps(); },
         terminateSandboxProcesses: shutdownSandboxProcesses,
         terminateCapabilityWorkers: shutdownCapabilityWorkers,
         stopSpeechService: () => embeddedSpeech.stop()
@@ -58,6 +60,8 @@ async function init() {
 
     closeVoice = voiceStreaming.attach(server);
     server.once('close', closeVoice);
+    closeMindmaps = mindmapRealtime.attach(server);
+    server.once('close', closeMindmaps);
     return { server };
 }
 
