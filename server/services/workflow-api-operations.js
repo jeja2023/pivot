@@ -208,6 +208,8 @@ function toToolDefinition(row) {
 }
 
 async function listWorkflowApiOperations(user, options = {}) {
+    // 未配置数据库连接时没有可导入的 API 操作记录，返回空列表而不是抛出连接池错误。
+    if (!process.env.DATABASE_URL) return [];
     const rows = await query(`
         SELECT * FROM workflow_api_operations
         WHERE user_id = ? AND deleted_at IS NULL ${options.includeInactive ? '' : "AND status = 'active'"}

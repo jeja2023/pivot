@@ -36,7 +36,7 @@ function testPresentation() {
 }
 
 test('内置 PPT 模板覆盖标准主题与十个标准布局', () => {
-    assert.equal(listBuiltInTemplates().length, 1);
+    assert.equal(listBuiltInTemplates().length, 2);
     assert.equal(STANDARD_LAYOUTS.length, 10);
     assert.ok(getBuiltInTemplate('business-blue').snapshotDigest);
     assert.equal(getBuiltInTemplate('does-not-exist'), null);
@@ -511,6 +511,105 @@ test('封面模板重排附加说明时避开步骤图形并防止多段文字�
     assert.ok(descriptions[1].y + descriptions[1].height <= stepRow.y || descriptions[1].y >= stepRow.y + stepRow.height);
     assert.ok(descriptions[0].y + descriptions[0].height <= descriptions[1].y || descriptions[1].y + descriptions[1].height <= descriptions[0].y);
     assert.equal(runPresentationValidation(reflowed).issues.some(issue => issue.code === 'ELEMENT_OVERLAP'), false);
+});
+
+test('森林绿简报模板封面重排议程胶囊与说明，避免遮挡侧边装饰并保证边界合规', () => {
+    const template = getBuiltInTemplate('forest-green');
+    const presentation = defaultPresentation({ title: '中秋祝福', template });
+    const slide = presentation.slides[0];
+    slide.type = 'cover';
+    slide.layoutId = 'cover';
+    const text = (id, content, x, y, width, fontSize) => ({
+        id, type: 'text', x, y, width, height: 40, rotation: 0,
+        zIndex: 10, locked: false, visible: true, sourceRefs: [], content: { text: content },
+        style: { fontSize, fontWeight: 400, color: '#1F2937', align: 'left', verticalAlign: 'middle', lineHeight: 1.35, padding: 0 }
+    });
+    const agendaElements = [];
+    for (let i = 1; i <= 5; i++) {
+        const x = 100 + (i - 1) * 214;
+        agendaElements.push({
+            id: `cover_agenda_bg_${i}`, type: 'shape', shapeType: 'roundRect', x, y: 440, width: 198, height: 38,
+            rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [],
+            style: { fill: '#FFFFFF', stroke: '#1C5E3C', strokeWidth: 1, opacity: 1, radius: 19 }
+        });
+        agendaElements.push({
+            id: `cover_agenda_bar_${i}`, type: 'shape', shapeType: 'roundRect', x, y: 440, width: 198, height: 3.5,
+            rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [],
+            style: { fill: '#1C5E3C', stroke: '#1C5E3C', strokeWidth: 0, opacity: 1, radius: 2 }
+        });
+        agendaElements.push({
+            id: `cover_agenda_text_${i}`, type: 'text', x, y: 446, width: 198, height: 28,
+            rotation: 0, zIndex: 10, locked: false, visible: true, sourceRefs: [],
+            content: { text: `0${i}. 议题${i}` },
+            style: { fontSize: 14, fontWeight: 700, color: '#1C3A2A', align: 'center', verticalAlign: 'middle', lineHeight: 1.2 }
+        });
+    }
+    slide.elements = [
+        text('title', '中秋祝福', 100, 200, 780, 48),
+        text('subtitle', '表达关怀 | 传递感谢 | 凝聚团队', 100, 372, 780, 22),
+        ...agendaElements,
+        text('description', '以真诚关怀拉近距离，以切实认可凝聚团队力量', 100, 482, 780, 16)
+    ];
+
+    const reflowed = applyTemplateLayoutLayers(presentation, template, { reflow: true });
+    const output = reflowed.slides[0];
+
+    const titleEl = output.elements.find(el => el.id === 'title');
+    const subtitleEl = output.elements.find(el => el.id === 'subtitle');
+    const descEl = output.elements.find(el => el.id === 'description');
+    assert.ok(titleEl.x >= 420);
+    assert.ok(subtitleEl.x >= 420);
+    assert.ok(descEl.x >= 420);
+
+    const pills = output.elements.filter(el => el.id.startsWith('cover_agenda_'));
+    assert.equal(pills.length, 15);
+    for (const pill of pills) {
+        assert.ok(pill.x >= 420, `${pill.id} x=${pill.x} should be >= 420`);
+        assert.ok(pill.x + pill.width <= 1200, `${pill.id} right=${pill.x + pill.width} should be <= 1200`);
+    }
+
+    const pillMinY = Math.min(...pills.map(p => p.y));
+    const pillMaxY = Math.max(...pills.map(p => p.y + p.height));
+    assert.ok(titleEl.y + titleEl.height <= subtitleEl.y);
+    assert.ok(subtitleEl.y + subtitleEl.height <= pillMinY);
+    assert.ok(pillMaxY <= descEl.y);
+
+    const validation = runPresentationValidation(reflowed);
+    assert.equal(validation.issues.some(issue => issue.slideId === 'slide_1' && issue.code === 'ELEMENT_OVERLAP'), false);
+});
+
+test('森林绿简报模板与商务蓝汇报具备显著的自然杂志化版式区别', () => {
+    const forest = getBuiltInTemplate('forest-green');
+    const business = getBuiltInTemplate('business-blue');
+
+    assert.deepEqual(forest.theme.colors.cardPalette, ['#1E7A4C', '#3FA97C', '#52B788', '#D8A23A', '#C97A56', '#74A892']);
+    assert.notDeepEqual(forest.theme.colors.cardPalette, business.theme.colors.cardPalette);
+
+    const forestMaster = forest.masters.find(m => m.id === 'master_content');
+    const businessMaster = business.masters.find(m => m.id === 'master_content');
+    assert.equal(forestMaster.decorations.some(d => d.id === 'master_header_band'), false);
+    assert.equal(businessMaster.decorations.some(d => d.id === 'master_header_band'), true);
+    assert.ok(forestMaster.decorations.some(d => d.id === 'master_leaf_shadow'));
+    assert.ok(forestMaster.decorations.find(d => d.id === 'master_footer_meta')?.content.text.includes('自然简报'));
+
+    const forestCover = forest.layouts.find(l => l.id === 'cover');
+    const businessCover = business.layouts.find(l => l.id === 'cover');
+    const sideBand = forestCover.decorations.find(d => d.id === 'cover_side_band');
+    assert.ok(sideBand && sideBand.width === 320 && sideBand.style.fill === '#164E33');
+    assert.equal(businessCover.decorations.some(d => d.id === 'cover_side_band'), false);
+    assert.ok(forestCover.decorations.some(d => d.id === 'cover_kicker_badge'));
+
+    const forestSection = forest.layouts.find(l => l.id === 'section');
+    const businessSection = business.layouts.find(l => l.id === 'section');
+    const fullBand = forestSection.decorations.find(d => d.id === 'section_full_band');
+    assert.ok(fullBand && fullBand.width === 1280 && fullBand.style.fill === '#143D28');
+    assert.equal(businessSection.decorations.some(d => d.id === 'section_full_band'), false);
+
+    const forestQuote = forest.layouts.find(l => l.id === 'quote');
+    assert.ok(forestQuote.decorations.some(d => d.id === 'quote_mark' && d.style.fontSize >= 70));
+    const forestSummary = forest.layouts.find(l => l.id === 'summary');
+    assert.ok(forestSummary.decorations.some(d => d.id === 'summary_band_1' && d.style.fill === '#EAF4EE'));
+    assert.ok(forestSummary.decorations.some(d => d.id === 'summary_band_2' && d.style.fill === forest.theme.colors.primary));
 });
 
 

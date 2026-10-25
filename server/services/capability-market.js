@@ -348,6 +348,9 @@ async function setGlobalCapabilityToolGovernance(packageKey, user, toolName, pat
 }
 
 async function filterBuiltInToolsByCapability(tools, user) {
+    // 能力包状态存储在 PostgreSQL 中；未配置数据库连接时不存在任何禁用配置，
+    // 直接按默认（启用）返回，避免工具目录组装在纯单元测试环境下因连接池未初始化而失败。
+    if (!process.env.DATABASE_URL) return tools.map(tool => ({ ...tool, governance: normalizeToolGovernance() }));
     const results = [];
     for (const tool of tools) {
         const enabled = await isCapabilityEnabled('builtin_tool', tool.name, user);
@@ -361,6 +364,7 @@ async function filterBuiltInToolsByCapability(tools, user) {
 }
 
 async function filterMcpToolsByCapability(tools, user) {
+    if (!process.env.DATABASE_URL) return tools.map(tool => ({ ...tool, governance: normalizeToolGovernance() }));
     const results = [];
     for (const tool of tools) {
         const type = tool.serverType === 'database'

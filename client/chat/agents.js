@@ -270,6 +270,10 @@ async function openAgentWorkbench(options = {}) {
     if (tab === 'tasks') {
         await window.Pivot.legacy.loadAgentWorkbench({ skipAutoOpen: options.skipAutoOpen === true });
     }
+    if (options.artifactId) {
+        window.Pivot.moduleApi('agent.artifacts')?.loadAgentArtifactModal?.(options.artifactId)
+            || window.Pivot.legacy?.loadAgentArtifactModal?.(options.artifactId);
+    }
 }
 
 window.Pivot.exposeModule('workspaces.implementations', { openAgentWorkbench });

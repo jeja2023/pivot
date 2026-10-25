@@ -881,6 +881,18 @@ const openAgentDagWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('agent-dag
 const openKnowledgeWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('knowledge', 'openKnowledgeWorkbench');
 const openMcpWorkbenchEntrypoint = createLazyWorkspaceEntrypoint('mcp', 'openMcpWorkbench');
 const openAdminPanelEntrypoint = createLazyWorkspaceEntrypoint('settings', 'openAdminPanel');
+async function openAgentArtifact(artifactId) {
+    await ensureWorkspaceScripts('agent');
+    const artifactApi = window.Pivot.moduleApi?.('agent.artifacts');
+    if (typeof artifactApi?.openVersions === 'function') {
+        return artifactApi.openVersions(artifactId);
+    }
+    if (typeof window.Pivot.legacy?.loadAgentArtifactModal === 'function') {
+        return window.Pivot.legacy.loadAgentArtifactModal(artifactId);
+    }
+    throw new Error('智能体产物模块未就绪');
+}
+
 window.Pivot?.exposeModule?.('workspaces.navigation', {
     showMainWorkspace,
     returnFromWorkspace,
@@ -891,11 +903,13 @@ window.Pivot?.exposeModule?.('workspaces.navigation', {
     openKnowledgeWorkbench: openKnowledgeWorkbenchEntrypoint,
     openMcpWorkbench: openMcpWorkbenchEntrypoint,
     openAdminPanel: openAdminPanelEntrypoint,
+    openAgentArtifact,
     showWorkspaceWithStyleGate,
     prewarmAutomationWorkspaces,
     openManualWorkbench: () => showMainWorkspace('manual'),
     closeManualWorkbench: () => returnFromWorkspace()
 });
+window.Pivot.legacy.openAgentArtifact = openAgentArtifact;
 const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) returnFromWorkspace(); };
 window.Pivot.legacy.closeAgentWorkbench = closeWs('agent');
 window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');

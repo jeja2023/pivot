@@ -34,6 +34,17 @@ function sharedGuardError(message, code = 'TOOL_SHARED_BULKHEAD_FULL', status = 
 }
 
 async function acquireSharedToolLease(input = {}) {
+    // 未配置数据库连接时无法存储分布式租约；退化为一次性令牌，由调用方工具执行结束即释放，
+    // 避免目录/执行运行时在纯单元测试环境下因连接池未初始化而失败。
+    if (!process.env.DATABASE_URL) {
+        const token = `toollease_${crypto.randomUUID()}`;
+        return {
+            token,
+            guardKey: sharedToolGuardKey(input),
+            expiresAt: null,
+            async release() { return false; }
+        };
+    }
     const config = { ...sharedToolGuardConfig(input.env || process.env), ...(input.config || {}) };
     const maxConcurrent = boundedInt(input.maxConcurrent, config.maxConcurrent, 1, 100);
     const leaseMs = boundedInt(input.leaseMs, config.leaseMs, 10_000, 30 * 60 * 1000);

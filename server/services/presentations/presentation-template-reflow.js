@@ -34,12 +34,35 @@ function coverNavigationModel(presentation = {}) {
     return { sections, existingNavigation, visible: Boolean(sections.length || existingNavigation), generated: Boolean(sections.length && !existingNavigation) };
 }
 
+function presentationCanvas(presentation = {}) {
+    const width = Number(presentation?.width);
+    const height = Number(presentation?.height);
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+        return { width, height };
+    }
+    const aspectRatio = String(presentation?.aspectRatio || '16:9');
+    return aspectRatio === '4:3' ? { width: 960, height: 720 } : { width: 1280, height: 720 };
+}
+
 function templateLayerElements(template, layout, slideIndex, presentation = {}) {
     const masters = Array.isArray(template?.definition?.masters) ? template.definition.masters : (Array.isArray(template?.masters) ? template.masters : []);
     const master = masters.find(item => item.id === layout?.masterId) || null;
     const source = [...(master?.decorations || []), ...(layout?.decorations || [])];
     const coverNavigation = layout?.id === 'cover' ? coverNavigationModel(presentation) : { sections: [], visible: false, generated: false };
 
+    const canvas = presentationCanvas(presentation);
+    const scaleX = canvas.width / 1280;
+    const clampIntoCanvas = element => {
+        const width = Math.max(1, Math.min(Number(element.width) || 1, canvas.width));
+        const height = Math.max(1, Math.min(Number(element.height) || 1, canvas.height));
+        return {
+            ...element,
+            x: Math.round(Math.max(0, Math.min(Number(element.x) || 0, canvas.width - width)) * 100) / 100,
+            y: Math.round(Math.max(0, Math.min(Number(element.y) || 0, canvas.height - height)) * 100) / 100,
+            width: Math.round(width * 100) / 100,
+            height: Math.round(height * 100) / 100
+        };
+    };
     return source.filter(element => {
         if (element.id === 'cover_nav_panel' && !coverNavigation.generated) return false;
         const navIndex = String(element.id || '').match(/^cover_nav_(?:pill|label)_(\d+)$/);
@@ -53,6 +76,7 @@ function templateLayerElements(template, layout, slideIndex, presentation = {}) 
         }
         return {
             ...cloned,
+            ...clampIntoCanvas(cloned),
             id: `pivotTemplate_${String(master?.id || 'default').replace(/[^A-Za-z0-9_-]/g, '_')}_${String(layout?.id || 'layout').replace(/[^A-Za-z0-9_-]/g, '_')}_${slideIndex + 1}_${index + 1}`,
             locked: element.locked !== false,
             visible: element.visible !== false,
@@ -67,6 +91,120 @@ function slotForTextElement(element, placeholders, used) {
     const role = isTitle ? 'title' : /副标题|subtitle/i.test(text) ? 'subtitle' : 'body';
     return placeholders.find(slot => slot.kind === 'text' && !used.has(slot.id) && slot.role === role)
         || placeholders.find(slot => slot.kind === 'text' && !used.has(slot.id) && (isTitle ? slot.role === 'title' : slot.role !== 'title'));
+}
+
+function reflowCoverAgendaGroups(elements, placed, layout, template, subSlot) {
+    const titleSlot = (layout.placeholders || []).find(s => s.role === 'title');
+    const contentLeft = titleSlot ? Number(titleSlot.x) : 80;
+    const contentWidth = titleSlot ? Number(titleSlot.width) : 1120;
+
+    const agendaPattern = /(?:agenda|nav|pill|tab|step)[_-]?(?:bg|bar|line|text|label|item)?[_-]?(\d+)/i;
+    const candidates = elements.filter(el => !placed.has(el) && agendaPattern.test(String(el.id || '')));
+    if (candidates.length) {
+        const columnMap = new Map();
+        candidates.forEach(el => {
+            const match = String(el.id || '').match(agendaPattern);
+            if (!match) return;
+            const colIndex = Number(match[1]);
+            if (!columnMap.has(colIndex)) columnMap.set(colIndex, []);
+            columnMap.get(colIndex).push(el);
+        });
+
+        const sortedCols = [...columnMap.keys()].sort((a, b) => a - b);
+        const count = sortedCols.length;
+        if (count >= 2) {
+            const minX = Math.min(...candidates.map(el => Number(el.x) || 0));
+            const maxX = Math.max(...candidates.map(el => (Number(el.x) || 0) + (Number(el.width) || 0)));
+            const needsReflow = minX < contentLeft - 10 || maxX > contentLeft + contentWidth + 10;
+
+            if (needsReflow) {
+                const isForest = template?.id === 'forest-green';
+                const gap = count > 4 ? 14 : count > 3 ? 16 : 20;
+                const itemWidth = Math.floor((contentWidth - (count - 1) * gap) / count);
+                const startY = subSlot ? Math.max(isForest ? 320 : 340, Number(subSlot.y) + Number(subSlot.height) + 16) : 340;
+
+                sortedCols.forEach((colNum, i) => {
+                    const colX = contentLeft + i * (itemWidth + gap);
+                    const colElements = columnMap.get(colNum);
+
+                    const bgEl = colElements.find(el => el.type === 'shape' && !/bar|line/i.test(el.id))
+                        || colElements.find(el => el.type === 'shape');
+                    const barEl = colElements.find(el => el.type === 'shape' && /bar|line/i.test(el.id) && el !== bgEl);
+                    const textEl = colElements.find(el => el.type === 'text');
+
+                    const itemHeight = bgEl ? Math.max(36, Number(bgEl.height) || 42) : 42;
+
+                    if (bgEl) {
+                        bgEl.x = colX;
+                        bgEl.y = startY;
+                        bgEl.width = itemWidth;
+                        bgEl.height = itemHeight;
+                        bgEl.zIndex = 10;
+                        if (bgEl.style) {
+                            bgEl.style.radius = Math.round(itemHeight / 2);
+                            if (isForest) {
+                                bgEl.style.fill = '#F2F8F4';
+                                bgEl.style.stroke = '#C2DCC8';
+                                bgEl.style.strokeWidth = 1.5;
+                            }
+                        }
+                        placed.add(bgEl);
+                    }
+                    if (barEl) {
+                        barEl.x = colX;
+                        barEl.y = startY;
+                        barEl.width = itemWidth;
+                        barEl.height = Math.min(4, Number(barEl.height) || 3.5);
+                        barEl.zIndex = 11;
+                        if (isForest && barEl.style) {
+                            const palette = template.definition?.theme?.colors?.cardPalette || template.theme?.colors?.cardPalette || ['#1E7A4C', '#3FA97C', '#52B788', '#D8A23A', '#C97A56', '#74A892'];
+                            const colColor = palette[i % palette.length];
+                            barEl.style.fill = colColor;
+                            barEl.style.stroke = colColor;
+                            barEl.style.radius = 2;
+                        }
+                        placed.add(barEl);
+                    }
+                    if (textEl) {
+                        textEl.x = colX;
+                        textEl.y = startY + (barEl ? 6 : 4);
+                        textEl.width = itemWidth;
+                        textEl.height = itemHeight - (barEl ? 10 : 8);
+                        textEl.zIndex = 12;
+                        textEl.style = {
+                            ...textEl.style,
+                            fontSize: count > 4 ? 13 : 14,
+                            fontWeight: 700,
+                            color: isForest ? '#1B4A33' : (textEl.style?.color || '#1F2937'),
+                            align: 'center',
+                            verticalAlign: 'middle',
+                            lineHeight: 1.2
+                        };
+                        placed.add(textEl);
+                    }
+                    colElements.forEach(el => {
+                        if (!placed.has(el)) {
+                            el.x = colX;
+                            el.width = itemWidth;
+                            placed.add(el);
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    const panels = elements.filter(el => !placed.has(el) && (
+        (el.type === 'shape' && Number(el.width) > 400 && /panel|steps|box|wrap|frame/i.test(el.id)) ||
+        (el.type === 'diagram' && el.diagramType === 'process')
+    ));
+    panels.forEach(panel => {
+        if (Number(panel.x) < contentLeft || Number(panel.x) + Number(panel.width) > contentLeft + contentWidth) {
+            panel.x = contentLeft;
+            panel.width = contentWidth;
+            placed.add(panel);
+        }
+    });
 }
 
 function reflowCoverDescriptions(elements, placed, layout, template, subtitleSlot, presentation) {
@@ -89,7 +227,9 @@ function reflowCoverDescriptions(elements, placed, layout, template, subtitleSlo
     const footerMeta = (layout.decorations || []).find(element => element.id === 'cover_footer_meta');
     const bottomLimit = Math.min(Number(footerLine?.y || canvas.height), Number(footerMeta?.y || canvas.height));
     const end = Math.min(bottomLimit - 8, canvas.height - 48);
-    const start = subtitleSlot.y + subtitleSlot.height + 4;
+    const agendaPills = elements.filter(el => placed.has(el) && /(?:agenda|nav|pill|tab|step)[_-]?(?:bg|bar|line|text|label|item)?[_-]?(\d+)/i.test(el.id || ''));
+    const maxAgendaY = agendaPills.length ? Math.max(...agendaPills.map(el => (Number(el.y) || 0) + (Number(el.height) || 0))) : 0;
+    const start = Math.max(subtitleSlot.y + subtitleSlot.height + 4, maxAgendaY ? maxAgendaY + 16 : 0);
     const pageArea = canvas.width * canvas.height;
     const coverNavigation = coverNavigationModel(presentation);
     const master = (template.definition?.masters || template.masters || []).find(item => item.id === layout.masterId);
@@ -117,7 +257,7 @@ function reflowCoverDescriptions(elements, placed, layout, template, subtitleSlo
         while (y + height <= end) {
             const collision = obstacles.find(([top, bottom]) => y < bottom && y + height > top);
             if (!collision) return y;
-            y = Math.max(y + 2, collision[1] + 4);
+            y = Math.max(y + 2, collision[1] + 16);
         }
         return null;
     };
@@ -223,6 +363,7 @@ function reflowSlideElements(elements, layout, template, presentation) {
             if (subSlot.style) subEl.style = { ...subEl.style, ...subSlot.style };
             if (layout.slotAnimations?.subtitle) subEl.animation = { ...layout.slotAnimations.subtitle };
         }
+        reflowCoverAgendaGroups(editable, placed, layout, template, subSlot);
         reflowCoverDescriptions(editable, placed, layout, template, subSlot, presentation);
     } else if (layoutId === 'three-card') {
         const cardSlots = [

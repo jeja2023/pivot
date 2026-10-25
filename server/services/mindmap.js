@@ -1,30 +1,208 @@
 'use strict';
 
-function normalizeMindmap(tree) {
+function normalizeMindmap(tree, options = {}) {
+    const allowEmpty = options.allowEmpty === true;
     let count = 0;
     const ids = new Set();
     function normalize(node, depth) {
         if (!node || typeof node !== 'object' || depth > 6 || ++count > 120 || typeof node.text !== 'string' || node.text.length > 120
-            || !node.text.trim() || !/^[\w-]{1,64}$/.test(node.id || '') || ids.has(node.id)) throw Object.assign(new Error('脑图节点、层级或标识无效（最多 120 个节点、6 层）。'), { status: 422 });
+            || (!allowEmpty && !node.text.trim()) || !/^[\w-]{1,64}$/.test(node.id || '') || ids.has(node.id)) throw Object.assign(new Error('脑图节点、层级或标识无效（最多 120 个节点、6 层）。'), { status: 422 });
         ids.add(node.id);
         if (node.children !== undefined && !Array.isArray(node.children)) throw new Error('脑图子节点必须是数组。');
-        return { id: node.id, text: node.text.trim(), children: (node.children || []).map(child => normalize(child, depth + 1)) };
+        const text = node.text.trim() || (allowEmpty ? '新分支' : '');
+        return { id: node.id, text, children: (node.children || []).map(child => normalize(child, depth + 1)) };
     }
     return normalize(tree, 0);
 }
 
-function mindmapSvg(input) {
-    const tree = normalizeMindmap(input), nodes = [], lines = []; let row = 0;
-    const escape = text => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-    function layout(node, depth, parent) {
-        const position = { x: depth * 250 + 10, y: row++ * 150 + 10 };
-        if (parent) lines.push(`<path d="M${parent.x + 220},${parent.y + 20} H${position.x - 10} V${position.y + 20} H${position.x}" fill="none" stroke="#64748b"/>`);
-        const wrapped = Array.from(node.text).join('').match(/[\s\S]{1,16}/gu) || [];
-        nodes.push(`<g><rect x="${position.x}" y="${position.y}" width="220" height="140" rx="6" fill="#f8fafc" stroke="#64748b"/><text x="${position.x + 8}" y="${position.y + 20}" font-size="12">${wrapped.map((line, i) => `<tspan x="${position.x + 8}" dy="${i ? 16 : 0}">${escape(line)}</tspan>`).join('')}</text></g>`);
-        node.children.forEach(child => layout(child, depth + 1, position));
+const THEME_PALETTES = {
+    indigo: { root: '#4338ca', rootStroke: '#3730a3', branches: ['#4f46e5', '#0284c7', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#2563eb'] },
+    forest: { root: '#065f46', rootStroke: '#047857', branches: ['#059669', '#0d9488', '#10b981', '#0284c7', '#0891b2', '#6366f1', '#d97706', '#475569'] },
+    ocean: { root: '#0369a1', rootStroke: '#0284c7', branches: ['#0284c7', '#0ea5e9', '#06b6d4', '#3b82f6', '#6366f1', '#0d9488', '#10b981', '#4f46e5'] },
+    sunset: { root: '#c2410c', rootStroke: '#ea580c', branches: ['#d97706', '#ea580c', '#e11d48', '#b45309', '#ca8a04', '#7c3aed', '#059669', '#2563eb'] }
+};
+
+function estimateTextWidth(text, fontSize) {
+    let w = 0;
+    for (const char of String(text || '')) {
+        if (/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char)) {
+            w += fontSize * 1.05;
+        } else {
+            w += fontSize * 0.62;
+        }
     }
-    layout(tree, 0, null);
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="${Math.max(160, row * 150)}" viewBox="0 0 1760 ${Math.max(160, row * 150)}">${lines.join('')}${nodes.join('')}</svg>`;
+    return Math.round(w);
+}
+
+function mindmapSvg(input, themeName = 'indigo') {
+    const tree = normalizeMindmap(input, { allowEmpty: true });
+    const theme = THEME_PALETTES[themeName] || THEME_PALETTES.indigo;
+    const branchColors = theme.branches;
+    const nodes = [];
+    const lines = [];
+    const escape = text => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+
+    const depthConfig = [
+        { h: 52, fontSize: 15, fontWeight: '700', rx: 12 },
+        { h: 46, fontSize: 13.5, fontWeight: '600', rx: 9 },
+        { h: 40, fontSize: 12.5, fontWeight: '500', rx: 7 }
+    ];
+
+    function getConfig(depth) {
+        if (depth === 0) return depthConfig[0];
+        if (depth === 1) return depthConfig[1];
+        return depthConfig[2];
+    }
+
+    // 1. Measure and auto-fit node width and height based on text content
+    const maxColWidth = {};
+    function computeDimensions(node, depth) {
+        const cfg = getConfig(depth);
+        const textStr = node.text || '';
+        const wrapped = Array.from(textStr).join('').match(/[\s\S]{1,16}/gu) || [textStr];
+        const maxLineW = Math.max(...wrapped.map(l => estimateTextWidth(l, cfg.fontSize)), 20);
+        const padding = depth === 0 ? 44 : depth === 1 ? 40 : 32;
+        const minW = depth === 0 ? 104 : depth === 1 ? 88 : 76;
+        const maxW = depth === 0 ? 320 : depth === 1 ? 280 : 250;
+        
+        node.w = Math.max(minW, Math.min(maxW, maxLineW + padding));
+        node.h = cfg.h + (wrapped.length > 1 ? (wrapped.length - 1) * 16 : 0);
+        node.wrapped = wrapped;
+        maxColWidth[depth] = Math.max(maxColWidth[depth] || 0, node.w);
+
+        (node.children || []).forEach(child => computeDimensions(child, depth + 1));
+    }
+    computeDimensions(tree, 0);
+
+    // Compute column X coordinates based on adaptive widths
+    const colX = { 0: 32 };
+    for (let d = 1; d <= 6; d++) {
+        if (maxColWidth[d - 1]) {
+            const gap = d === 1 ? 54 : 44;
+            colX[d] = colX[d - 1] + maxColWidth[d - 1] + gap;
+        }
+    }
+
+    // 2. Vertical layout
+    let leafY = 28;
+    function layoutNode(node, depth, branchIndex) {
+        const cfg = getConfig(depth);
+        const children = node.children || [];
+        const isLeaf = children.length === 0;
+
+        node.depth = depth;
+        node.branchColor = depth === 0 ? theme.root : branchColors[branchIndex % branchColors.length];
+        node.x = colX[depth] || (32 + depth * 140);
+
+        if (isLeaf) {
+            node.y = leafY;
+            leafY += node.h + 20;
+            node.yCenter = node.y + node.h / 2;
+        } else {
+            children.forEach((child, idx) => {
+                layoutNode(child, depth + 1, depth === 0 ? idx : branchIndex);
+            });
+            const firstCenter = children[0].yCenter;
+            const lastCenter = children[children.length - 1].yCenter;
+            node.yCenter = (firstCenter + lastCenter) / 2;
+            node.y = Math.round(node.yCenter - node.h / 2);
+            if (node.y < 28) {
+                const shift = 28 - node.y;
+                node.y += shift;
+                node.yCenter += shift;
+            }
+        }
+    }
+
+    layoutNode(tree, 0, 0);
+
+    let maxX = 0;
+    let maxY = 0;
+
+    function renderNode(node, parent) {
+        const cfg = getConfig(node.depth);
+        const x = node.x;
+        const y = node.y;
+        const w = node.w;
+        const h = node.h;
+        const color = node.branchColor;
+
+        if (x + w > maxX) maxX = x + w;
+        if (y + h > maxY) maxY = y + h;
+
+        if (parent) {
+            const pX = parent.x + parent.w;
+            const pY = parent.yCenter;
+            const cX = node.x;
+            const cY = node.yCenter;
+            const cpx1 = pX + Math.min(48, Math.max(20, (cX - pX) / 2));
+            const cpx2 = cX - Math.min(48, Math.max(20, (cX - pX) / 2));
+            lines.push(`<path d="M ${pX} ${pY} C ${cpx1} ${pY}, ${cpx2} ${cY}, ${cX} ${cY}" fill="none" stroke="${color}" stroke-width="${node.depth === 1 ? 2.4 : 1.7}" stroke-linecap="round"/>`);
+        }
+
+        let rectFill = '#ffffff';
+        let rectStroke = color;
+        let strokeWidth = 1.5;
+        let textColor = '#0f172a';
+        let indicatorPill = '';
+        const textOffsetX = node.depth === 1 ? 20 : 14;
+
+        if (node.depth === 0) {
+            rectFill = theme.root;
+            rectStroke = theme.rootStroke;
+            strokeWidth = 2;
+            textColor = '#ffffff';
+        } else if (node.depth === 1) {
+            rectFill = '#ffffff';
+            rectStroke = color;
+            strokeWidth = 2;
+            textColor = '#0f172a';
+            indicatorPill = `<rect x="${x + 6}" y="${y + 10}" width="4" height="${h - 20}" rx="2" fill="${color}"/>`;
+        } else {
+            rectFill = '#ffffff';
+            rectStroke = '#cbd5e1';
+            strokeWidth = 1.4;
+            textColor = '#334155';
+        }
+
+        const wrapped = node.wrapped || [node.text];
+        const isRoot = node.depth === 0;
+        const textX = isRoot ? (x + w / 2) : (x + textOffsetX);
+        const textAnchorAttr = isRoot ? ' text-anchor="middle"' : '';
+        const fontStack = "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+        const vOffset = 1.8;
+        let textElements = '';
+        if (wrapped.length === 1) {
+            textElements = `<text x="${textX}" y="${y + h / 2 + vOffset}"${textAnchorAttr} dominant-baseline="central" font-family="${fontStack}" font-size="${cfg.fontSize}" font-weight="${cfg.fontWeight}" fill="${textColor}">${escape(node.text)}</text>`;
+        } else {
+            const startY = y + h / 2 - ((wrapped.length - 1) * 8) + vOffset;
+            textElements = wrapped.map((line, i) =>
+                `<text x="${textX}" y="${startY + i * 16}"${textAnchorAttr} dominant-baseline="central" font-family="${fontStack}" font-size="${cfg.fontSize}" font-weight="${cfg.fontWeight}" fill="${textColor}">${escape(line)}</text>`
+            ).join('');
+        }
+
+        nodes.push(`
+            <g class="mindmap-node depth-${node.depth}" data-node-id="${escape(node.id)}">
+                <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${cfg.rx}" fill="${rectFill}" stroke="${rectStroke}" stroke-width="${strokeWidth}"/>
+                ${indicatorPill}
+                ${textElements}
+            </g>
+        `);
+
+        (node.children || []).forEach(child => renderNode(child, node));
+    }
+
+    renderNode(tree, null);
+
+    const totalWidth = Math.max(760, maxX + 48);
+    const totalHeight = Math.max(280, Math.max(maxY + 44, leafY + 24));
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}" style="background: transparent;">
+        <g class="mindmap-canvas">
+            <g class="mindmap-connections">${lines.join('')}</g>
+            <g class="mindmap-nodes">${nodes.join('')}</g>
+        </g>
+    </svg>`;
 }
 
 async function saveMindmap(user, input, context = {}) {

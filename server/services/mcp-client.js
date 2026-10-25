@@ -725,6 +725,11 @@ async function refreshMcpTools(server, user = null) {
 }
 
 async function listCachedMcpTools(serverId = null, user = null) {
+    // 未配置数据库时没有 MCP 工具缓存可读；仅保留本机直连工具，避免目录组装在
+    // 纯单元测试环境下因 PostgreSQL 连接池未初始化而失败。
+    if (!serverId && !process.env.DATABASE_URL) {
+        return mergeLocalMcpTools(listLocalDeviceMcpTools(user), []).map(presentMcpTool);
+    }
     if (isLocalDeviceMcpServerId(serverId)) {
         const directLocalTools = listLocalDeviceMcpTools(user);
         const persistentTools = await listPersistentLocalConnectorTools(user);

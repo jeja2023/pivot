@@ -8,6 +8,8 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
+    height: 100%;
+    max-height: 100%;
     background: var(--bg-side);
     color: var(--text-main);
 }
@@ -25,6 +27,9 @@
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none;
+    height: 100%;
+    max-height: 100%;
+    box-sizing: border-box;
 }
 
 .personal-rail::-webkit-scrollbar {
@@ -164,6 +169,8 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
+    height: 100%;
+    max-height: 100%;
     flex-direction: column;
 }
 
@@ -1177,6 +1184,7 @@ body.dark-mode .personal-shortcut-add:hover,
     gap: 16px;
     padding: 18px clamp(18px, 2vw, 34px) 30px;
     overflow-y: auto;
+    overflow-x: hidden;
     background:
         radial-gradient(circle at 100% 0, color-mix(in srgb, var(--primary) 7%, transparent), transparent 28%),
         var(--bg-side);

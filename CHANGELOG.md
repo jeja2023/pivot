@@ -1,3 +1,62 @@
+## [v0.7.42] - 2026-10-25
+
+### 个人工作台视口隔离与桌面端高度防溢出修复
+
+- 修复个人工作台页面在用户跳转至其它工作区（如脑图、自动化 DAG 工作流）后再返回时，页面被异常拔高并向下溢出窗口底部的渲染缺陷。
+- 根因排查：桌面端（`pivot-desktop-runtime`）因存在 30px 无边框标题栏，`#app` 容器基准高度为 `calc(100vh - 30px)`；此前 `workflow-product.css`（编排进入 `chat.workspace.agent.css`）中的全局全屏规则误用 `body.is-main-workspace-full #app { height: 100vh !important; }`，在懒加载样式载入后无差别覆盖桌面端容器高度，导致容器叠加 `margin-top: 30px` 后总高达到 `100vh + 30px`，将工作台左侧导轨底部个人头像圆钮及底部卡片推挤出视口外部。
+- 视口隔离加固：
+  - [workflow-product.css](file:///e:/pivot/client/chat/styles/workspaces/agent/workflow-product.css)：解绑 `.chat-container` 写死的 `100vh` 规则，变更为 `height: 100% !important; max-height: 100% !important; min-height: 0 !important;`；针对桌面端明确约束 `#app` 严格遵循 `calc(100vh - 30px) !important;`，杜绝任何纵向溢出。
+  - [modals-forms.css](file:///e:/pivot/client/chat/styles/base/modals-forms.css)：对 `body.pivot-desktop-runtime:not(.auth-active) #app` 增加 `!important` 与 `max-height` 硬性保护，禁止任何业务工作区动态样式表篡改桌面客户端基础视口高度。
+  - [chat-shell.css](file:///e:/pivot/client/chat/styles/base/chat-shell.css)：为 `body.is-main-workspace-full .chat-container` 与 `.main-workspace-view` 补齐 `height: 100%; max-height: 100%; min-height: 0;`。
+  - [personal.css](file:///e:/pivot/client/chat/styles/workspaces/personal.css)：将 `.personal-workbench-shell`、`.personal-workbench-content` 及 `.personal-rail` 设置为严格的 `height: 100%; max-height: 100%; box-sizing: border-box;`，并在 `.personal-workbench-scroll` 上追加 `overflow-x: hidden;`，确保卡片与导轨在视口内平稳自适应流动与纵向滚动。
+- 样式包重新编译：同步更新打包产物 [chat.shell.css](file:///e:/pivot/client/chat/chat.shell.css) 与 [chat.workspace.agent.css](file:///e:/pivot/client/chat/chat.workspace.agent.css)。
+
+详见 [v0.7.42 发布记录](docs/releases/v0.7.42-个人工作台视口隔离与桌面端防溢出修复.md)。
+
+## [v0.7.41] - 2026-10-26
+
+### Agent 工具目录与执行链路无数据库降级加固
+
+- 修复未配置 `DATABASE_URL` 时 Agent 工具目录组装与渐进式发现链路直接抛出“PostgreSQL 连接池未初始化”错误的问题，5 个相关测试套件全部恢复通过。
+- 能力包过滤（`capability-market.js`）：无数据库连接时不存在能力包禁用配置，内置与 MCP 工具直接按默认治理信息（启用）返回，不再查询 `capability_packages` 表。
+- MCP 工具缓存读取（`mcp-client.js`）：`listCachedMcpTools` 无数据库时跳过 `mcp_tool_cache` 查询，仅返回本机直连工具；缓存表在无数据库场景下必然为空。
+- 工作流 API 操作列表（`workflow-api-operations.js`）：`listWorkflowApiOperations` 无数据库时返回空列表，避免目录组装因查询失败而中断。
+- 共享工具并发租约（`agent-shared-tool-guard.js`）：`acquireSharedToolLease` 无数据库时退化为一次性内存令牌，工具执行结束即失效，不依赖分布式咨询锁。
+- 已知环境依赖：`tests/agent-shared-tool-guard.test.js` 需要真实 PostgreSQL 才能验证跨调用方并发限制与过期租约回收，属于环境依赖测试，本次不调整。
+
+详见 [v0.7.41 发布记录](docs/releases/v0.7.41-Agent工具目录无数据库降级加固.md)。
+
+## [v0.7.40] - 2026-10-25
+
+### 思维导图大纲编排折叠展开与沉浸式画布
+
+- 节点大纲面板新增逐级分支折叠/展开功能（含子节点收缩箭头与折叠徽标 `+N 个子分支`），并在大纲头部提供全局一键“折叠分支/展开分支”。
+- 画布预览工具栏新增“折叠大纲/展开大纲”切换按钮，支持收起左侧大纲编排栏，让右侧导图画布独占全屏宽度。
+- 彻底移除导图画布内部额外的卡片投影与独立白色背景图层，使思维导图矢量节点和贝塞尔连线与轻量点阵画布无缝融合。
+
+### 导图节点尺寸自适应与文字光学垂直居中
+
+- 引入字符测宽算法（`estimateTextWidth`），根据中英文字符与数字实际宽度阶梯式自适应计算节点宽高与多行折行，同一层级列宽自适应对齐。
+- 根主题节点全面水平与垂直居中，消除文字靠左挤压及右侧空旷留白。
+- 引入中文字体光学垂直修正量（`+1.8px`），消除 SVG 纯西文 central baseline 导致汉字重心偏上的视觉偏差，与分支指示色条横向严格对称。
+- 优化 SVG 字体族回退序列，显式优先匹配 `'PingFang SC', 'Microsoft YaHei'` 等现代系统中文无衬线体。
+
+### 导图工作台工具栏单行流式排版与对齐
+
+- 重构导图预览顶部工具栏布局，启用 `flex-wrap: nowrap` 单行紧凑排版，彻底解决因宽度不足导致的折行跑位。
+- 统一大纲折叠按钮、配色方案下拉框、缩放工具组（`- / 100% / + / 适应`）、预览导图按钮、下载 SVG 按钮为标准的 28px 高度。
+- 剔除配色下拉框继承的全局表单底部外边距（`margin-bottom: 15px`），解决“商务靛蓝”下拉框向上漂移未水平对齐的问题。
+
+### 渲染产物交付数据表格与批注交互重构
+
+- 渲染产物交付列表全面升级为专业数据表格（`<table class="agent-artifact-data-table">`），包含递增序号、产物格式、文件大小、内容指纹、操作 5 列，全部单元格具备完整网格边框且全列靠左对齐。
+- 内容指纹列展示完整的 64 位 SHA-256 哈希值，采用等宽代码字与全选交互（`user-select: all`），移除易受浏览器权限拦截的复制按钮。
+- 修复修订批注面板的样式覆盖冲突，恢复全宽单行输入框、多行文本域与提交按钮的标准垂直流式卡片排版。
+- 弹窗右上角关闭按钮统一接入系统全局标准（红色字体与红框规范）。
+- 修复公文比对接口中缺失的 `limiter` 变量引用异常。
+
+详见 [v0.7.40 发布记录](docs/releases/v0.7.40-思维导图工作台与产物交互深度优化.md)。
+
 ## [v0.7.39] - 2026-10-23
 
 ### 语义核验缺项反馈与内容补全

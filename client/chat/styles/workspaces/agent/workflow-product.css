@@ -969,11 +969,28 @@ body.is-main-workspace-full {
     overflow: hidden !important;
 }
 
-body.is-main-workspace-full #app,
+body.is-main-workspace-full #app {
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    min-height: 0;
+    overflow: hidden !important;
+}
+
+body.pivot-desktop-runtime:not(.auth-active).is-main-workspace-full #app,
+body.pivot-desktop-runtime:not(.auth-active) #app {
+    height: calc(100vh - 30px) !important;
+    height: calc(100dvh - 30px) !important;
+    max-height: calc(100vh - 30px) !important;
+    max-height: calc(100dvh - 30px) !important;
+    min-height: 0 !important;
+}
+
 body.is-main-workspace-full .chat-container {
-    height: 100vh !important;
-    max-height: 100vh !important;
-    min-height: 100vh !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
     overflow: hidden !important;
 }
 

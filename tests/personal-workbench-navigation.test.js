@@ -52,11 +52,14 @@ test('继续工作区域各类条目具备精准分流：未命名演示文稿�
     // 3. 公文写作：直达公文单篇编辑
     assert.match(clientCode, /if \(artifactType === 'official_writing'\) \{\s*return window\.Pivot\.moduleApi\('workspaces\.navigation'\)\.openAppsWorkbench\?\.\(\{\s*app:\s*'official-writing',\s*docId:\s*targetId\s*\}\);\s*\}/);
 
-    // 4. 带 runId 或 run 类型：进入任务详情
+    // 4. 思维导图：直达脑图交互与版本预览，避免误入任务活动抽屉
+    assert.match(clientCode, /if \(artifactType === 'mindmap'\) \{\s*const artifactId = targetId \|\| id;\s*return \(window\.Pivot\.moduleApi\?\.\('workspaces\.navigation'\)\?\.openAgentArtifact/);
+
+    // 5. 带 runId 或 run 类型：进入任务详情
     assert.match(clientCode, /if \(runId \|\| \(kind === 'run' && id\)\) \{/);
 
-    // 5. 普通 artifact：进入已完成任务
-    assert.match(clientCode, /if \(kind === 'artifact'\) \{\s*return window\.Pivot\.moduleApi\('workspaces\.navigation'\)\.openAgentWorkbench\?\.\(\{\s*tab:\s*'tasks',\s*status:\s*'completed'\s*\}\);\s*\}/);
+    // 6. 普通 artifact：优先通过 openAgentArtifact 唤起产物详情与版本抽屉，无产物 ID 时保底打开已完成任务
+    assert.match(clientCode, /if \(kind === 'artifact'\) \{\s*const artifactId = targetId \|\| id;\s*if \(artifactId\) \{/);
 });
 
 test('应用中心及 PPT 工作台完整透传并响应 presentationId 唤起', () => {

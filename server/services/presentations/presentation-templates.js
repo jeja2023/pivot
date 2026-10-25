@@ -17,17 +17,50 @@ const STANDARD_LAYOUTS = Object.freeze([
 ]);
 
 const THEME_SEEDS = Object.freeze([
-    ['business-blue', '商务蓝汇报', '适用于项目阶段汇报、方案评审与经营复盘', '#1F5EA8', '#17A8C7', '#2E8B57', '#344054', '#F5F8FC', '#FFFFFF', '#D8E2EE', false, ['项目', '阶段汇报', '复盘']]
+    ['business-blue', '商务蓝汇报', '适用于项目阶段汇报、方案评审与经营复盘', '#1F5EA8', '#17A8C7', '#2E8B57', '#344054', '#F5F8FC', '#FFFFFF', '#D8E2EE', false, ['项目', '阶段汇报', '复盘']],
+    ['forest-green', '森林绿简报', '适用于环保、健康与自然主题的内容分享与产品介绍', '#1E7A4C', '#3FA97C', '#D8A23A', '#2B3A31', '#F6FAF7', '#FFFFFF', '#D5E4DA', false, ['环保', '健康', '产品介绍']]
 ]);
 
-function buildThemeMasters(colors, _isDark, useReferenceStyle = false) {
-    const { cardBorder, background } = colors;
+function buildThemeMasters(colors, _isDark, useReferenceStyle = false, useForestStyle = false) {
+    const { cardBorder, background, secondary, primary } = colors;
     return [
         {
             id: 'master_content',
             name: '标准内容母版',
             background: { fill: background },
             decorations: [
+                ...(useForestStyle ? [
+                    {
+                        id: 'master_leaf_shadow',
+                        type: 'shape',
+                        shapeType: 'ellipse',
+                        x: 1080,
+                        y: 640,
+                        width: 260,
+                        height: 160,
+                        rotation: -18,
+                        zIndex: 0,
+                        locked: true,
+                        visible: true,
+                        sourceRefs: [],
+                        style: { fill: secondary, stroke: secondary, strokeWidth: 0, opacity: 0.08, radius: 80 }
+                    },
+                    {
+                        id: 'master_corner_leaf',
+                        type: 'shape',
+                        shapeType: 'ellipse',
+                        x: 1190,
+                        y: 18,
+                        width: 140,
+                        height: 90,
+                        rotation: -28,
+                        zIndex: 0,
+                        locked: true,
+                        visible: true,
+                        sourceRefs: [],
+                        style: { fill: primary, stroke: primary, strokeWidth: 0, opacity: 0.05, radius: 45 }
+                    }
+                ] : []),
                 ...(useReferenceStyle ? [{
                     id: 'master_header_band',
                     type: 'shape',
@@ -58,6 +91,21 @@ function buildThemeMasters(colors, _isDark, useReferenceStyle = false) {
                     sourceRefs: [],
                     style: { stroke: cardBorder, strokeWidth: 1, opacity: 0.7 }
                 },
+                ...(useForestStyle ? [{
+                    id: 'master_footer_meta',
+                    type: 'text',
+                    x: 80,
+                    y: 673,
+                    width: 600,
+                    height: 24,
+                    rotation: 0,
+                    zIndex: 2,
+                    locked: true,
+                    visible: true,
+                    sourceRefs: [],
+                    content: { text: '自然简报 · {{presentationTitle}}' },
+                    style: { fontSize: 12, fontWeight: 500, color: '#7E9285', align: 'left', verticalAlign: 'middle', lineHeight: 1 }
+                }] : []),
                 ...(useReferenceStyle ? [{
                     id: 'master_footer_title',
                     type: 'text',
@@ -93,6 +141,266 @@ function buildThemeMasters(colors, _isDark, useReferenceStyle = false) {
             ] : []
         }
     ];
+}
+
+function applyForestGreenLayoutStyles(layouts, colors) {
+    const { primary, secondary, accent, text, cardBg, cardBorder, background, cardPalette } = colors;
+    const leafShape = (id, bounds, fill, opacity = 1, rotation = 0, zIndex = 2) => ({
+        id, type: 'shape', shapeType: 'ellipse', ...bounds, rotation, zIndex, locked: true, visible: true, sourceRefs: [],
+        style: { fill, stroke: fill, strokeWidth: 0, opacity, radius: Math.round(Math.min(100, Math.min(bounds.width, bounds.height) / 2)) }
+    });
+    const leafMark = (id, x, y) => [
+        leafShape(`${id}_a`, { x, y, width: 16, height: 10 }, secondary, 1, -24, 2),
+        leafShape(`${id}_b`, { x: x + 9, y: y + 6, width: 12, height: 8 }, accent, 1, -24, 2)
+    ];
+    const rule = (id, bounds, color, opacity = 1, strokeWidth = 1) => ({
+        id, type: 'shape', shapeType: 'line', ...bounds, rotation: 0, zIndex: 2, locked: true, visible: true, sourceRefs: [],
+        style: { stroke: color, strokeWidth, opacity }
+    });
+    const pill = (id, bounds, fill, stroke = fill, radius = 14, zIndex = 2, opacity = 1) => ({
+        id, type: 'shape', shapeType: 'roundRect', ...bounds, rotation: 0, zIndex, locked: true, visible: true, sourceRefs: [],
+        style: { fill, stroke, strokeWidth: stroke === fill ? 0 : 1, opacity, radius }
+    });
+    const tagText = (id, bounds, textContent, color, fontSize = 11, align = 'center', zIndex = 3) => ({
+        id, type: 'text', ...bounds, rotation: 0, zIndex, locked: true, visible: true, sourceRefs: [],
+        content: { text: textContent },
+        style: { fontSize, fontWeight: 700, color, align, verticalAlign: 'middle', lineHeight: 1 }
+    });
+    const byId = (layout, slotId) => layout.placeholders.find(slot => slot.id === slotId);
+
+    return layouts.map(layout => {
+        if (layout.id === 'cover') {
+            const palette = cardPalette || [primary, secondary, '#52B788', accent, '#C97A56', '#74A892'];
+            const nav = Array.from({ length: 5 }, (_, index) => {
+                const x = 420 + index * 159;
+                const color = palette[index % palette.length];
+                return [
+                    {
+                        id: `cover_nav_pill_${index + 1}`, type: 'shape', shapeType: 'roundRect', x, y: 326, width: 144, height: 42, rotation: 0,
+                        zIndex: 2, locked: true, visible: true, sourceRefs: [],
+                        style: { fill: '#F2F8F4', stroke: color, strokeWidth: 1.5, opacity: 1, radius: 21 }
+                    },
+                    leafShape(`cover_nav_dot_${index + 1}`, { x: x + 12, y: 342, width: 10, height: 10 }, color, 1, 0, 3),
+                    {
+                        id: `cover_nav_label_${index + 1}`, type: 'text', x: x + 24, y: 332, width: 112, height: 30, rotation: 0,
+                        zIndex: 3, locked: true, visible: true, sourceRefs: [], content: { text: `{{coverSection${index + 1}}}` },
+                        style: { fontSize: 13, fontWeight: 700, color: '#1B4A33', align: 'center', verticalAlign: 'middle', lineHeight: 1.15 }
+                    }
+                ];
+            }).flat();
+            return {
+                ...layout,
+                decorations: [
+                    { id: 'cover_side_band', type: 'shape', shapeType: 'roundRect', x: 0, y: 0, width: 320, height: 720, rotation: 0, zIndex: 1, locked: true, visible: true, sourceRefs: [], style: { fill: '#164E33', stroke: '#164E33', strokeWidth: 0, opacity: 1, radius: 0 } },
+                    leafShape('cover_leaf_big', { x: -20, y: 430, width: 270, height: 210 }, secondary, 0.35, -24, 2),
+                    leafShape('cover_leaf_mid', { x: 140, y: 550, width: 190, height: 130 }, '#F6FAF7', 0.22, -18, 3),
+                    leafShape('cover_leaf_small', { x: 60, y: 80, width: 90, height: 56 }, accent, 0.5, -20, 4),
+
+                    pill('cover_kicker_badge', { x: 420, y: 88, width: 172, height: 30 }, '#EBF5EF', '#C5DFCC', 15, 2),
+                    leafShape('cover_kicker_dot', { x: 434, y: 98, width: 10, height: 10 }, accent, 1, 0, 3),
+                    tagText('cover_kicker_text', { x: 450, y: 90, width: 132, height: 26 }, '专题简报 · BRIEFING', '#1B4A33', 12, 'left', 3),
+
+                    pill('cover_nav_panel', { x: 420, y: 318, width: 780, height: 58 }, '#F6FAF7', cardBorder, 14, 1),
+                    ...nav,
+                    rule('cover_baseline', { x: 420, y: 570, width: 780, height: 1 }, cardBorder, 0.9, 1),
+                    {
+                        id: 'cover_meta', type: 'text', x: 420, y: 588, width: 780, height: 28, rotation: 0,
+                        zIndex: 2, locked: true, visible: true, sourceRefs: [], content: { text: '{{presentationTitle}} · 自然生态特辑 · 绿色主题分享' },
+                        style: { fontSize: 13, fontWeight: 500, color: '#385243', align: 'left', verticalAlign: 'middle', lineHeight: 1 }
+                    }
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 420, y: 142, width: 780, height: 84, style: { ...byId(layout, 'slot_title').style, fontSize: 48, fontWeight: 800, color: '#143826', align: 'left', verticalAlign: 'middle', lineHeight: 1.25 } },
+                    { ...byId(layout, 'slot_subtitle'), x: 420, y: 244, width: 780, height: 48, style: { ...byId(layout, 'slot_subtitle').style, fontSize: 21, fontWeight: 600, color: '#2D6A4F', align: 'left', verticalAlign: 'middle', lineHeight: 1.4 } }
+                ]
+            };
+        }
+
+        if (layout.id === 'section') {
+            return {
+                ...layout,
+                decorations: [
+                    { id: 'section_full_band', type: 'shape', shapeType: 'roundRect', x: 0, y: 0, width: 1280, height: 720, rotation: 0, zIndex: 0, locked: true, visible: true, sourceRefs: [], style: { fill: '#143D28', stroke: '#143D28', strokeWidth: 0, opacity: 1, radius: 0 } },
+                    leafShape('section_leaf_glow', { x: 880, y: 50, width: 400, height: 320 }, secondary, 0.32, -16, 1),
+                    leafShape('section_leaf_deep', { x: 50, y: 510, width: 280, height: 180 }, '#0D2B1B', 0.65, -22, 1),
+                    leafShape('section_leaf_sun', { x: 1060, y: 440, width: 180, height: 120 }, accent, 0.25, 24, 1),
+                    pill('section_badge', { x: 120, y: 180, width: 180, height: 32 }, '#FFFFFF', '#FFFFFF', 16, 2, 0.16),
+                    leafShape('section_badge_dot', { x: 134, y: 191, width: 10, height: 10 }, accent, 1, 0, 3),
+                    tagText('section_kicker', { x: 150, y: 182, width: 140, height: 28 }, 'CHAPTER 专题章节', '#D5EFE0', 12, 'left', 3)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_section'), x: 120, y: 236, width: 950, height: 40, style: { ...byId(layout, 'slot_section').style, fontSize: 17, color: '#9CD7B7', fontWeight: 600 } },
+                    { ...byId(layout, 'slot_title'), x: 120, y: 292, width: 950, height: 190, style: { ...byId(layout, 'slot_title').style, fontSize: 46, fontWeight: 800, color: '#FFFFFF', lineHeight: 1.25 } }
+                ]
+            };
+        }
+
+        if (layout.id === 'title-content') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('content_leaf', 80, 60),
+                    rule('content_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('content_card_frame', { x: 80, y: 145, width: 1120, height: 495 }, cardBg, cardBorder, 18, 1),
+                    pill('content_top_accent', { x: 112, y: 145, width: 72, height: 4 }, primary, primary, 2, 2)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_body'), x: 116, y: 175, width: 1048, height: 435, style: { ...byId(layout, 'slot_body').style, fontSize: 18, lineHeight: 1.8, color: '#2B3A31' } }
+                ]
+            };
+        }
+
+        if (layout.id === 'two-column') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('twocol_leaf', 80, 60),
+                    rule('twocol_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('twocol_card_left', { x: 80, y: 145, width: 544, height: 495 }, '#F8FBF9', cardBorder, 18, 1),
+                    pill('twocol_badge_left', { x: 108, y: 168, width: 110, height: 26 }, '#E0EFE5', '#C5DFCC', 13, 2),
+                    tagText('twocol_badge_text_left', { x: 114, y: 170, width: 98, height: 22 }, '议题洞察 01', primary, 11, 'center', 3),
+
+                    pill('twocol_card_right', { x: 656, y: 145, width: 544, height: 495 }, '#FAFBF8', cardBorder, 18, 1),
+                    pill('twocol_badge_right', { x: 684, y: 168, width: 110, height: 26 }, '#F7EEDC', '#E8D5B5', 13, 2),
+                    tagText('twocol_badge_text_right', { x: 690, y: 170, width: 98, height: 22 }, '实践方案 02', '#B57E1E', 11, 'center', 3)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_left'), x: 108, y: 212, width: 488, height: 400, style: { ...byId(layout, 'slot_left').style, fontSize: 17, lineHeight: 1.8, color: '#2B3A31' } },
+                    { ...byId(layout, 'slot_right'), x: 684, y: 212, width: 488, height: 400, style: { ...byId(layout, 'slot_right').style, fontSize: 17, lineHeight: 1.8, color: '#2B3A31' } }
+                ]
+            };
+        }
+
+        if (layout.id === 'three-card') {
+            const columns = [
+                { x: 80, badgeBg: '#E0EFE5', badgeBorder: '#C5DFCC', dot: primary, badgeText: '核心洞察', textColor: primary },
+                { x: 464, badgeBg: '#E3F3EA', badgeBorder: '#C3E2CF', dot: secondary, badgeText: '策略路径', textColor: '#2D7A54' },
+                { x: 848, badgeBg: '#F7EEDC', badgeBorder: '#E8D5B5', dot: accent, badgeText: '预期成果', textColor: '#B57E1E' }
+            ];
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('threecard_leaf', 80, 60),
+                    rule('threecard_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    ...columns.flatMap((col, index) => [
+                        pill(`threecard_card_${index + 1}`, { x: col.x, y: 145, width: 352, height: 495 }, '#FFFFFF', cardBorder, 18, 1),
+                        pill(`threecard_badge_${index + 1}`, { x: col.x + 24, y: 168, width: 100, height: 26 }, col.badgeBg, col.badgeBorder, 13, 2),
+                        tagText(`threecard_badge_text_${index + 1}`, { x: col.x + 28, y: 170, width: 92, height: 22 }, col.badgeText, col.textColor, 11, 'center', 3)
+                    ])
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    ...['slot_card1', 'slot_card2', 'slot_card3'].map((slotId, index) => ({
+                        ...byId(layout, slotId), x: columns[index].x + 24, y: 212, width: 304, height: 400,
+                        style: { ...byId(layout, slotId).style, fontSize: 16, lineHeight: 1.75, color: '#2B3A31' }
+                    }))
+                ]
+            };
+        }
+
+        if (layout.id === 'image-focus') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('img_leaf', 80, 60),
+                    rule('img_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('img_callout_box', { x: 80, y: 145, width: 440, height: 495 }, '#F6FAF7', cardBorder, 18, 1),
+                    pill('img_callout_badge', { x: 104, y: 168, width: 104, height: 26 }, '#E0EFE5', '#C5DFCC', 13, 2),
+                    tagText('img_callout_tag', { x: 108, y: 170, width: 96, height: 22 }, '图文聚焦', primary, 11, 'center', 3),
+                    pill('img_frame', { x: 550, y: 145, width: 650, height: 495 }, '#EBF3EE', cardBorder, 20, 1),
+                    leafShape('img_leaf_corner', { x: 1140, y: 600, width: 120, height: 80 }, secondary, 0.35, -20, 2)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_caption'), x: 104, y: 212, width: 392, height: 400, style: { ...byId(layout, 'slot_caption').style, fontSize: 17, lineHeight: 1.8, color: '#2B3A31' } },
+                    { ...byId(layout, 'slot_image'), x: 575, y: 170, width: 600, height: 445 }
+                ]
+            };
+        }
+
+        if (layout.id === 'chart') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('chart_leaf', 80, 60),
+                    rule('chart_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('chart_frame', { x: 80, y: 145, width: 1120, height: 395 }, cardBg, cardBorder, 18, 1),
+                    pill('chart_insight_band', { x: 80, y: 556, width: 1120, height: 84 }, '#EAF4EE', cardBorder, 14, 1),
+                    leafShape('chart_band_dot', { x: 104, y: 588, width: 14, height: 14 }, accent, 1, 0, 2),
+                    tagText('chart_band_label', { x: 128, y: 566, width: 120, height: 20 }, '简报洞察结论', primary, 11, 'left', 3)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_chart'), x: 110, y: 165, width: 1060, height: 355 },
+                    { ...byId(layout, 'slot_insight'), x: 128, y: 586, width: 1040, height: 46, style: { ...byId(layout, 'slot_insight').style, fontSize: 15, lineHeight: 1.5, verticalAlign: 'middle', color: '#1E4D34' } }
+                ]
+            };
+        }
+
+        if (layout.id === 'table') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('table_leaf', 80, 60),
+                    rule('table_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('table_header_band', { x: 80, y: 140, width: 1120, height: 54 }, primary, primary, 12, 1),
+                    pill('table_body_frame', { x: 80, y: 202, width: 1120, height: 438 }, cardBg, cardBorder, 14, 1)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_insight'), x: 104, y: 148, width: 1072, height: 38, style: { ...byId(layout, 'slot_insight').style, fontSize: 15, color: '#FFFFFF', verticalAlign: 'middle', fontWeight: 600 } },
+                    { ...byId(layout, 'slot_table'), x: 96, y: 216, width: 1088, height: 410 }
+                ]
+            };
+        }
+
+        if (layout.id === 'quote') {
+            return {
+                ...layout,
+                decorations: [
+                    leafShape('quote_leaf_big', { x: 120, y: 110, width: 150, height: 100 }, secondary, 0.32, -24, 1),
+                    leafShape('quote_leaf_small', { x: 1030, y: 520, width: 130, height: 80 }, accent, 0.35, -18, 1),
+                    {
+                        id: 'quote_mark', type: 'text', x: 150, y: 140, width: 120, height: 90, rotation: 0,
+                        zIndex: 2, locked: true, visible: true, sourceRefs: [], content: { text: '"' },
+                        style: { fontSize: 76, fontWeight: 800, color: '#1E7A4C', align: 'left', verticalAlign: 'top', lineHeight: 1 }
+                    },
+                    pill('quote_attribution_pill', { x: 180, y: 512, width: 920, height: 56 }, '#EAF4EE', cardBorder, 20, 1)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_quote'), x: 180, y: 220, width: 920, height: 260, style: { ...byId(layout, 'slot_quote').style, fontSize: 26, fontWeight: 600, color: '#143826', align: 'center', verticalAlign: 'middle', lineHeight: 1.65 } },
+                    { ...byId(layout, 'slot_attribution'), x: 200, y: 516, width: 880, height: 48, style: { ...byId(layout, 'slot_attribution').style, fontSize: 15, fontWeight: 500, color: '#1B4A33', align: 'center', verticalAlign: 'middle', lineHeight: 1.4 } }
+                ]
+            };
+        }
+
+        if (layout.id === 'summary') {
+            return {
+                ...layout,
+                decorations: [
+                    ...leafMark('summary_leaf', 80, 60),
+                    rule('summary_rule', { x: 80, y: 116, width: 1120, height: 1 }, cardBorder, 1, 2),
+                    pill('summary_band_1', { x: 80, y: 145, width: 1120, height: 235 }, '#EAF4EE', cardBorder, 18, 1),
+                    pill('summary_tag_1', { x: 108, y: 166, width: 110, height: 26 }, '#D2EAD9', '#BFE0C8', 13, 2),
+                    tagText('summary_tag_text_1', { x: 114, y: 168, width: 98, height: 22 }, '核心总结速览', primary, 11, 'center', 3),
+
+                    pill('summary_band_2', { x: 80, y: 400, width: 1120, height: 245 }, primary, primary, 18, 1),
+                    pill('summary_tag_2', { x: 108, y: 420, width: 110, height: 26 }, '#164E33', '#164E33', 13, 2),
+                    tagText('summary_tag_text_2', { x: 114, y: 422, width: 98, height: 22 }, '下一步行动建议', '#C2E8D2', 11, 'center', 3)
+                ],
+                placeholders: [
+                    { ...byId(layout, 'slot_title'), x: 116, y: 48, width: 1084, height: 60, style: { ...byId(layout, 'slot_title').style, fontSize: 32, fontWeight: 700, color: '#143826' } },
+                    { ...byId(layout, 'slot_summary'), x: 116, y: 202, width: 1048, height: 155, style: { ...byId(layout, 'slot_summary').style, fontSize: 17, lineHeight: 1.75, color: '#2B3A31' } },
+                    { ...byId(layout, 'slot_nextSteps'), x: 116, y: 456, width: 1048, height: 165, style: { ...byId(layout, 'slot_nextSteps').style, fontSize: 23, fontWeight: 700, color: '#FFFFFF', lineHeight: 1.5 } }
+                ]
+            };
+        }
+
+        return layout;
+    });
 }
 
 function buildThemeLayouts(colors, _isDark) {
@@ -605,7 +913,15 @@ function applyReferenceLayoutStyles(layouts, colors) {
 
 function makeTemplate(seed) {
     const [id, name, description, primary, secondary, accent, text, background, cardBg, cardBorder, isDark, tags] = seed;
-    const cardPalette = [
+    const isForest = id === 'forest-green';
+    const cardPalette = isForest ? [
+        primary,
+        secondary,
+        '#52B788',
+        accent,
+        '#C97A56',
+        '#74A892'
+    ] : [
         primary,
         secondary,
         accent,
@@ -621,9 +937,12 @@ function makeTemplate(seed) {
         chartPalette: cardPalette
     };
     const useReferenceStyle = id === 'business-blue';
-    const masters = buildThemeMasters(colors, isDark, useReferenceStyle);
+    const useForestStyle = id === 'forest-green';
+    const masters = buildThemeMasters(colors, isDark, useReferenceStyle, useForestStyle);
     const baseLayouts = buildThemeLayouts(colors, isDark);
-    const layouts = useReferenceStyle ? applyReferenceLayoutStyles(baseLayouts, colors) : baseLayouts;
+    const layouts = useReferenceStyle ? applyReferenceLayoutStyles(baseLayouts, colors)
+        : useForestStyle ? applyForestGreenLayoutStyles(baseLayouts, colors)
+            : baseLayouts;
     const snapshotDigest = crypto.createHash('sha256').update(canonicalJson({ id, version: 1, theme, masters, layouts })).digest('hex');
     return Object.freeze({
         id,

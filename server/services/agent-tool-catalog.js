@@ -24,6 +24,34 @@ const KNOWN_MCP_TOOL_TITLES = {
     'filesystem.write_workspace': '写入工作区文件'
 };
 
+// 前端 UI 中文化规范（docs/standards/前端界面中文化规范.md）：
+// 工具目录对外展示的 title 必须是中文；技术标识（name）只能出现在
+// “技术标识”等次要位置，不得作为目录卡片或契约弹窗的标题直接展示。
+const TOOL_DISPLAY_TITLES = {
+    'db.list_tables': '数据库表清单',
+    'db.count_tables': '数据库表数量统计',
+    'db.describe_table': '数据库表结构查看',
+    'db.run_readonly_query': '数据库只读查询',
+    'db.group_count': '数据库分组计数',
+    'db.list_collections': '数据库集合清单',
+    'db.count_collections': '数据库集合数量统计',
+    'db.sample_collection': '数据库集合抽样',
+    'db.aggregate': '数据库聚合分析'
+};
+
+function hasCJK(text) {
+    return /[\u4e00-\u9fff]/.test(String(text || ''));
+}
+
+function localizedToolTitle(tool = {}) {
+    const raw = String(tool.title || '').trim();
+    if (raw && raw !== tool.name && hasCJK(raw)) return raw;
+    const shortName = String(tool.name || '').replace(/^(?:mcp\.\d+\.)?/, '');
+    if (TOOL_DISPLAY_TITLES[shortName]) return TOOL_DISPLAY_TITLES[shortName];
+    if (TOOL_DISPLAY_TITLES[tool.name]) return TOOL_DISPLAY_TITLES[tool.name];
+    return raw || shortName || tool.name || '';
+}
+
 async function formatToolList(user, options = {}) {
     const policy = normalizeToolPolicy(options.toolPolicy);
     const allowlist = normalizeToolAllowlist(options.toolAllowlist);
@@ -79,9 +107,10 @@ async function formatToolList(user, options = {}) {
         .filter(tool => tool.serverType !== 'database')
         .map(tool => {
             const shortName = String(tool.name || '').replace(/^(?:mcp\.\d+\.)?/, '');
-            const title = tool.displayTitle || ((tool.title && tool.title !== tool.name)
+            const title = tool.displayTitle || ((tool.title && tool.title !== tool.name && hasCJK(tool.title))
                 ? tool.title
-                : (KNOWN_MCP_TOOL_TITLES[shortName] || tool.title || tool.name));
+                : (KNOWN_MCP_TOOL_TITLES[shortName] || TOOL_DISPLAY_TITLES[shortName]
+                    || localizedToolTitle(tool)));
             return {
                 name: tool.fullName,
                 title,
@@ -134,17 +163,13 @@ async function formatToolList(user, options = {}) {
             ...(tool.output_schema || tool.outputSchema ? { output_schema: contract.output_schema } : {})
         };
     });
-}
-
-function cloneJson(value, fallback = {}) {
+}function cloneJson(value, fallback = {}) {
     try {
         return JSON.parse(JSON.stringify(value || fallback)) || fallback;
     } catch (e) {
         return fallback;
     }
-}
-
-function buildDatabaseToolSchema(schema, connections) {
+}function buildDatabaseToolSchema(schema, connections) {
     const next = cloneJson(schema, { type: 'object', properties: {} });
     next.type = 'object';
     const properties = next.properties && typeof next.properties === 'object' ? next.properties : {};
@@ -172,9 +197,7 @@ function buildDatabaseToolSchema(schema, connections) {
     required.add('connectionId');
     next.required = [...required];
     return next;
-}
-
-function buildGenericDatabaseTools(tools = []) {
+}function buildGenericDatabaseTools(tools = []) {
     const grouped = new Map();
     tools
         .filter(tool => tool.serverType === 'database' && String(tool.name || '').startsWith('db.'))
@@ -209,7 +232,7 @@ function buildGenericDatabaseTools(tools = []) {
         })).filter(item => item.serverId);
         return {
             name,
-            title: name,
+            title: TOOL_DISPLAY_TITLES[name] || name,
             description: first.description || name,
             input_schema: buildDatabaseToolSchema(first.input_schema, connections),
             source: 'mcp',
@@ -221,9 +244,7 @@ function buildGenericDatabaseTools(tools = []) {
             databaseConnections: connections
         };
     }).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function filterDatabaseToolForPolicy(tool, policy, allowed) {
+}function filterDatabaseToolForPolicy(tool, policy, allowed) {
     if (!tool || policy === 'builtin_only') return null;
     const connections = Array.isArray(tool.databaseConnections) ? tool.databaseConnections : [];
     if (!allowed || allowed.has(tool.name)) return tool;
@@ -234,17 +255,13 @@ function filterDatabaseToolForPolicy(tool, policy, allowed) {
         input_schema: buildDatabaseToolSchema(tool.input_schema, scopedConnections),
         databaseConnections: scopedConnections
     };
-}
-
-function buildAgentToolSchemas(toolList) {
+}function buildAgentToolSchemas(toolList) {
     return (toolList || []).filter(tool => tool && tool.name).map(tool => ({
         name: tool.name,
         description: tool.description || tool.title || '',
         input_schema: tool.input_schema || tool.parameters || { type: 'object', properties: {} }
     }));
-}
-
-module.exports = {
+}module.exports = {
     buildAgentToolSchemas,
     buildGenericDatabaseTools,
     formatToolList

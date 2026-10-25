@@ -70,7 +70,11 @@ let PivotSafeHtml;
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
         if (window.DOMPurify) {
-            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            try {
+                DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            } catch (_) {
+                scratch.innerHTML = DOMPurify.sanitize(raw, sanitizeOptions(options));
+            }
         } else {
             sanitizeDomFallback(scratch);
         }
@@ -83,7 +87,11 @@ let PivotSafeHtml;
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
         if (window.DOMPurify) {
-            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            try {
+                DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            } catch (_) {
+                scratch.innerHTML = DOMPurify.sanitize(raw, sanitizeOptions(options));
+            }
         } else {
             sanitizeDomFallback(scratch);
         }
@@ -96,7 +104,11 @@ let PivotSafeHtml;
         const scratch = createContextElement(element);
         scratch.innerHTML = raw;
         if (window.DOMPurify) {
-            DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            try {
+                DOMPurify.sanitize(scratch, { ...sanitizeOptions(options), IN_PLACE: true });
+            } catch (_) {
+                scratch.innerHTML = DOMPurify.sanitize(raw, sanitizeOptions(options));
+            }
         } else {
             sanitizeDomFallback(scratch);
         }

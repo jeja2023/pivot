@@ -1232,6 +1232,11 @@ body.pivot-desktop-runtime #app {
     margin-top: 30px;
 }
 body.pivot-desktop-runtime:not(.auth-active) #app {
+    height: calc(100vh - 30px) !important;
+    height: calc(100dvh - 30px) !important;
+    max-height: calc(100vh - 30px) !important;
+    max-height: calc(100dvh - 30px) !important;
+    min-height: 0 !important;
     border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 body.pivot-desktop-runtime.auth-active #app {

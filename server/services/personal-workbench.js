@@ -41,6 +41,7 @@ function toRecentWork(kind, record, extra = {}) {
         const artifactType = String(record.type || 'summary');
         const isPresentation = artifactType === 'presentation';
         const isOfficialWriting = artifactType === 'official_writing';
+        const isMindmap = artifactType === 'mindmap';
         const targetId = extra.presentationClientId || record.presentation_client_id || (isPresentation ? record.client_id : null) || record.id;
         return {
             id: record.id,
@@ -52,7 +53,7 @@ function toRecentWork(kind, record, extra = {}) {
             title: record.title || (isPresentation ? '未命名演示文稿' : (isOfficialWriting ? '未命名公文' : '未命名成果')),
             meta: isPresentation
                 ? '演示文稿'
-                : (isOfficialWriting ? '公文' : `${record.type || '成果'}${record.run_title ? ` · ${record.run_title}` : ''}`),
+                : (isOfficialWriting ? '公文' : (isMindmap ? '思维导图' : `${record.type || '成果'}${record.run_title ? ` · ${record.run_title}` : ''}`)),
             updatedAt: record.updated_at || record.created_at || null
         };
     }

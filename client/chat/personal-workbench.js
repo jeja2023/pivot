@@ -17,7 +17,8 @@
         fileText: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></svg>',
         dataset: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>',
         plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
-        presentation: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/><path d="M7 14V10"/><path d="M11 14V7"/><path d="M15 14v-2"/></svg>'
+        presentation: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/><path d="M7 14V10"/><path d="M11 14V7"/><path d="M15 14v-2"/></svg>',
+        mindmap: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="3" cy="6" r="2"/><circle cx="3" cy="18" r="2"/><circle cx="21" cy="6" r="2"/><circle cx="21" cy="18" r="2"/><path d="M5 6h4l3 6-3 6H5"/><path d="M19 6h-4l-3 6 3 6h4"/></svg>'
     };
 
     const shortcutCatalog = {
@@ -293,16 +294,17 @@
             const iconBox = document.createElement('span');
             const isPpt = kind === 'presentation' || artifactType === 'presentation';
             const isDoc = artifactType === 'official_writing';
-            const boxClass = item.iconBoxClass || (isPpt ? 'icon-box-blue' : kind === 'artifact' ? (isDoc ? 'icon-box-blue' : 'icon-box-purple') : kind === 'session' ? 'icon-box-green' : 'icon-box-amber');
+            const isMindmap = artifactType === 'mindmap';
+            const boxClass = item.iconBoxClass || (isPpt ? 'icon-box-blue' : isMindmap ? 'icon-box-purple' : kind === 'artifact' ? (isDoc ? 'icon-box-blue' : 'icon-box-purple') : kind === 'session' ? 'icon-box-green' : 'icon-box-amber');
             iconBox.className = `personal-row-icon-box ${boxClass}`;
-            const iconSvg = item.iconSvg || (isPpt ? ICONS.presentation : (isDoc || kind === 'artifact') ? ICONS.fileText : kind === 'session' ? ICONS.chat : ICONS.dataset);
+            const iconSvg = item.iconSvg || (isPpt ? ICONS.presentation : isMindmap ? (ICONS.mindmap || ICONS.fileText) : (isDoc || kind === 'artifact') ? ICONS.fileText : kind === 'session' ? ICONS.chat : ICONS.dataset);
             PivotSafeHtml.setHtml(iconBox, iconSvg);
             iconBox.setAttribute('aria-hidden', 'true');
 
             const copy = document.createElement('span');
             copy.className = 'personal-row-copy';
-            appendText(copy, 'strong', 'personal-row-title', item.title || (isPpt ? '未命名演示文稿' : (isDoc ? '未命名公文' : '未命名工作')));
-            let metaText = String(item.meta || (isPpt ? '演示文稿' : (isDoc ? '公文' : '最近更新')));
+            appendText(copy, 'strong', 'personal-row-title', item.title || (isPpt ? '未命名演示文稿' : (isDoc ? '未命名公文' : (isMindmap ? '未命名思维导图' : '未命名工作'))));
+            let metaText = String(item.meta || (isPpt ? '演示文稿' : (isDoc ? '公文' : (isMindmap ? '思维导图' : '最近更新'))));
             metaText = metaText.replace(/任务状态：\s*([a-zA-Z_]+)/g, (match, s) => {
                 const statusLabel = window.Pivot?.moduleApi?.('agent.runUtils')?.statusLabel?.(s);
                 return statusLabel ? `任务状态：${statusLabel}` : match;
@@ -617,6 +619,13 @@
                 docId: targetId
             });
         }
+        if (artifactType === 'mindmap') {
+            const artifactId = targetId || id;
+            return (window.Pivot.moduleApi?.('workspaces.navigation')?.openAgentArtifact
+                || window.Pivot.moduleApi?.('agent.artifacts')?.openVersions
+                || window.Pivot.legacy?.openAgentArtifact
+                || window.Pivot.legacy?.loadAgentArtifactModal)?.(artifactId);
+        }
         if (runId || (kind === 'run' && id)) {
             const effectiveRunId = runId || id;
             const openAgentRun = window.Pivot?.legacy?.openAgentRun || (typeof globalThis['openAgentRun'] === 'function' ? globalThis['openAgentRun'] : null);
@@ -626,6 +635,13 @@
             return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', query: effectiveRunId });
         }
         if (kind === 'artifact') {
+            const artifactId = targetId || id;
+            if (artifactId) {
+                return (window.Pivot.moduleApi?.('workspaces.navigation')?.openAgentArtifact
+                    || window.Pivot.moduleApi?.('agent.artifacts')?.openVersions
+                    || window.Pivot.legacy?.openAgentArtifact
+                    || window.Pivot.legacy?.loadAgentArtifactModal)?.(artifactId);
+            }
             return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
         }
         window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);

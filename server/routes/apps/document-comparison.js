@@ -4,17 +4,18 @@ const { compareDocuments, comparisonIr } = require('../../services/document-comp
 const { executeArtifactTool } = require('../../services/agent-tools-artifacts');
 
 function registerDocumentComparisonRoutes(router, { authMiddleware, logAction }) {
-    const limiter = require('express-rate-limit')({ windowMs: 60000, limit: 12, keyGenerator: req => String(req.user.id), message: { error: '文档或脑图处理过于频繁，请稍后重试。' } });
-    router.post('/apps/mindmaps/preview', authMiddleware, limiter, asyncHandler(async (req, res) => {
-        const svg = require('../../services/mindmap').mindmapSvg(req.body?.tree);
+    const saveLimiter = require('express-rate-limit')({ windowMs: 60000, limit: 30, keyGenerator: req => String(req.user.id), message: { error: '文档或脑图处理过于频繁，请稍后重试。' } });
+    const previewLimiter = require('express-rate-limit')({ windowMs: 60000, limit: 300, keyGenerator: req => String(req.user.id), message: { error: '脑图预览请求过于频繁，请稍候。' } });
+    router.post('/apps/mindmaps/preview', authMiddleware, previewLimiter, asyncHandler(async (req, res) => {
+        const svg = require('../../services/mindmap').mindmapSvg(req.body?.tree, req.body?.theme);
         res.json({ success: true, svg });
     }));
-    router.post('/apps/mindmaps', authMiddleware, limiter, asyncHandler(async (req, res) => {
+    router.post('/apps/mindmaps', authMiddleware, saveLimiter, asyncHandler(async (req, res) => {
         const result = await require('../../services/mindmap').saveMindmap(req.user, req.body || {}, { stepId: `mindmap:${require('crypto').randomUUID()}` });
         logAction?.(req, '保存脑图', { artifactId: result.mindmapArtifactId });
         res.json({ success: true, ...result });
     }));
-    router.post('/apps/official-writing/compare', authMiddleware, limiter, asyncHandler(async (req, res) => {
+    router.post('/apps/official-writing/compare', authMiddleware, saveLimiter, asyncHandler(async (req, res) => {
         const comparison = compareDocuments(req.body?.before, req.body?.after, req.body?.mode || 'character');
         let delivery;
         if (req.body?.exportDocx === true) delivery = await executeArtifactTool('artifact.render', {

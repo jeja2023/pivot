@@ -148,9 +148,16 @@ function buildGraphEntityScopeSql(scope) {
     if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
     const mentionDocScope = buildGraphDocScopeClauses(normalized, 'd_scope');
     const sourceDocScope = buildGraphDocScopeClauses(normalized, 'sd_scope');
+    const docPushdownMentions = normalized.docIds.length ? ` AND m_scope.doc_id IN (${normalized.docIds.map(() => '?').join(',')})` : '';
+    const docPushdownSource = normalized.docIds.length ? `e.source_doc_id IN (${normalized.docIds.map(() => '?').join(',')}) AND ` : '';
     return {
-        sql: ` AND (EXISTS (SELECT 1 FROM knowledge_entity_mentions m_scope JOIN knowledge_docs d_scope ON d_scope.id = m_scope.doc_id WHERE m_scope.entity_id = e.id AND COALESCE(m_scope.source_state, 'active') = 'active' AND ${graphDocumentReadySql('d_scope')} AND ${mentionDocScope.clauses.join(' AND ')}) OR EXISTS (SELECT 1 FROM knowledge_docs sd_scope WHERE sd_scope.id = e.source_doc_id AND ${graphDocumentReadySql('sd_scope')} AND ${sourceDocScope.clauses.join(' AND ')}))`,
-        params: [...mentionDocScope.params, ...sourceDocScope.params]
+        sql: ` AND (EXISTS (SELECT 1 FROM knowledge_entity_mentions m_scope JOIN knowledge_docs d_scope ON d_scope.id = m_scope.doc_id WHERE m_scope.entity_id = e.id${docPushdownMentions} AND COALESCE(m_scope.source_state, 'active') = 'active' AND ${graphDocumentReadySql('d_scope')} AND ${mentionDocScope.clauses.join(' AND ')}) OR (${docPushdownSource}EXISTS (SELECT 1 FROM knowledge_docs sd_scope WHERE sd_scope.id = e.source_doc_id AND ${graphDocumentReadySql('sd_scope')} AND ${sourceDocScope.clauses.join(' AND ')})))`,
+        params: [
+            ...(normalized.docIds.length ? normalized.docIds : []),
+            ...mentionDocScope.params,
+            ...(normalized.docIds.length ? normalized.docIds : []),
+            ...sourceDocScope.params
+        ]
     };
 }
 
@@ -165,14 +172,22 @@ function buildGraphRelationRecordScopeSql(scope, relationAlias = 'r') {
     const normalized = normalizeGraphScope(scope);
     if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
     const scoped = buildGraphDocScopeClauses(normalized, 'd_scope', `${relationAlias}.user_id`);
-    return { sql: ` AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${relationAlias}.source_doc_id AND ${scoped.clauses.join(' AND ')})`, params: scoped.params };
+    const docPushdown = normalized.docIds.length ? ` AND ${relationAlias}.source_doc_id IN (${normalized.docIds.map(() => '?').join(',')})` : '';
+    return {
+        sql: `${docPushdown} AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${relationAlias}.source_doc_id AND ${scoped.clauses.join(' AND ')})`,
+        params: [...(normalized.docIds.length ? normalized.docIds : []), ...scoped.params]
+    };
 }
 
 function buildGraphMentionScopeSql(scope, mentionAlias = 'm') {
     const normalized = normalizeGraphScope(scope);
     if (!normalized.docIds.length && !normalized.collectionIds.length && !normalized.tagNames.length) return { sql: '', params: [] };
     const scoped = buildGraphDocScopeClauses(normalized, 'd_scope', `${mentionAlias}.user_id`);
-    return { sql: ` AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${mentionAlias}.doc_id AND ${scoped.clauses.join(' AND ')})`, params: scoped.params };
+    const docPushdown = normalized.docIds.length ? ` AND ${mentionAlias}.doc_id IN (${normalized.docIds.map(() => '?').join(',')})` : '';
+    return {
+        sql: `${docPushdown} AND EXISTS (SELECT 1 FROM knowledge_docs d_scope WHERE d_scope.id = ${mentionAlias}.doc_id AND ${scoped.clauses.join(' AND ')})`,
+        params: [...(normalized.docIds.length ? normalized.docIds : []), ...scoped.params]
+    };
 }
 
 function hasGraphScope(scope) {
@@ -449,13 +464,58 @@ async function listEntities({ userId, user = null, query: queryText = '', type =
     const whereSql = where.join(' AND ');
     const relationAccess1 = buildGraphRelationAccessFilter(user || userId, 'r1'), relationAccess2 = buildGraphRelationAccessFilter(user || userId, 'r2');
     const data = await query(`
-        SELECT e.*, COUNT(DISTINCT m.id) AS mention_count, COUNT(DISTINCT r1.id) + COUNT(DISTINCT r2.id) AS relation_count
-        FROM knowledge_entities e
-        LEFT JOIN knowledge_entity_mentions m ON m.entity_id = e.id AND COALESCE(m.source_state, 'active') = 'active' ${mentionScope.sql}
-        LEFT JOIN knowledge_relations r1 ON r1.source_entity_id = e.id AND r1.status = 'active' AND ${graphRelationEvidenceReadySql('r1')} AND (${relationAccess1.sql}) ${relationScope1.sql}
-        LEFT JOIN knowledge_relations r2 ON r2.target_entity_id = e.id AND r2.status = 'active' AND ${graphRelationEvidenceReadySql('r2')} AND (${relationAccess2.sql}) ${relationScope2.sql}
-        WHERE ${whereSql} GROUP BY e.id ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC LIMIT ? OFFSET ?
-    `, [...mentionScope.params, ...relationAccess1.params, ...relationScope1.params, ...relationAccess2.params, ...relationScope2.params, ...params, safeLimit, safeOffset]);
+        WITH filtered_entities AS (
+            SELECT e.*
+            FROM knowledge_entities e
+            WHERE ${whereSql}
+        ),
+        mention_counts AS (
+            SELECT m.entity_id, COUNT(*) AS count
+            FROM knowledge_entity_mentions m
+            WHERE m.entity_id IN (SELECT id FROM filtered_entities)
+              AND COALESCE(m.source_state, 'active') = 'active'
+              ${mentionScope.sql}
+            GROUP BY m.entity_id
+        ),
+        r1_counts AS (
+            SELECT r1.source_entity_id AS entity_id, COUNT(*) AS count
+            FROM knowledge_relations r1
+            WHERE r1.source_entity_id IN (SELECT id FROM filtered_entities)
+              AND r1.status = 'active'
+              AND ${graphRelationEvidenceReadySql('r1')}
+              AND (${relationAccess1.sql})
+              ${relationScope1.sql}
+            GROUP BY r1.source_entity_id
+        ),
+        r2_counts AS (
+            SELECT r2.target_entity_id AS entity_id, COUNT(*) AS count
+            FROM knowledge_relations r2
+            WHERE r2.target_entity_id IN (SELECT id FROM filtered_entities)
+              AND r2.status = 'active'
+              AND ${graphRelationEvidenceReadySql('r2')}
+              AND (${relationAccess2.sql})
+              ${relationScope2.sql}
+            GROUP BY r2.target_entity_id
+        )
+        SELECT e.*,
+               COALESCE(m.count, 0) AS mention_count,
+               COALESCE(r1.count, 0) + COALESCE(r2.count, 0) AS relation_count
+        FROM filtered_entities e
+        LEFT JOIN mention_counts m ON m.entity_id = e.id
+        LEFT JOIN r1_counts r1 ON r1.entity_id = e.id
+        LEFT JOIN r2_counts r2 ON r2.entity_id = e.id
+        ORDER BY relation_count DESC, mention_count DESC, e.updated_at DESC
+        LIMIT ? OFFSET ?
+    `, [
+        ...params,
+        ...mentionScope.params,
+        ...relationAccess1.params,
+        ...relationScope1.params,
+        ...relationAccess2.params,
+        ...relationScope2.params,
+        safeLimit,
+        safeOffset
+    ]);
     const totalRow = await queryOne(`SELECT COUNT(*) AS count FROM knowledge_entities e WHERE ${whereSql}`, params);
     return { data: data || [], total: Number(totalRow?.count || 0), limit: safeLimit, offset: safeOffset };
 }
