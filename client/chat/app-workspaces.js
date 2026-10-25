@@ -909,7 +909,6 @@ window.Pivot?.exposeModule?.('workspaces.navigation', {
     openManualWorkbench: () => showMainWorkspace('manual'),
     closeManualWorkbench: () => returnFromWorkspace()
 });
-window.Pivot.legacy.openAgentArtifact = openAgentArtifact;
 const closeWs = ws => () => { if (document.body?.dataset.activeWorkspace === ws) returnFromWorkspace(); };
 window.Pivot.legacy.closeAgentWorkbench = closeWs('agent');
 window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');

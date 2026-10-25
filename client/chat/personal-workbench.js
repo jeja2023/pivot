@@ -623,7 +623,6 @@
             const artifactId = targetId || id;
             return (window.Pivot.moduleApi?.('workspaces.navigation')?.openAgentArtifact
                 || window.Pivot.moduleApi?.('agent.artifacts')?.openVersions
-                || window.Pivot.legacy?.openAgentArtifact
                 || window.Pivot.legacy?.loadAgentArtifactModal)?.(artifactId);
         }
         if (runId || (kind === 'run' && id)) {
@@ -639,7 +638,6 @@
             if (artifactId) {
                 return (window.Pivot.moduleApi?.('workspaces.navigation')?.openAgentArtifact
                     || window.Pivot.moduleApi?.('agent.artifacts')?.openVersions
-                    || window.Pivot.legacy?.openAgentArtifact
                     || window.Pivot.legacy?.loadAgentArtifactModal)?.(artifactId);
             }
             return window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.({ tab: 'tasks', status: 'completed' });
