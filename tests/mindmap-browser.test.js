@@ -68,6 +68,7 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
         await page.locator('#mindmap-theme-pack').fill(JSON.stringify({ version: 1, label: '验收主题', root: '#123456', line: '#234567', background: '#ffffff' }));
         await page.getByRole('button', { name: '应用主题包', exact: true }).click();
         await page.getByRole('button', { name: '主题库', exact: true }).click(); await page.getByRole('button', { name: '保存当前主题', exact: true }).click();
+        await page.locator('#mindmap-dialog').waitFor({ state: 'hidden' });
         await page.getByRole('button', { name: '主题库', exact: true }).click(); await page.locator('#mindmap-dialog-body').getByRole('button', { name: '应用', exact: true }).click();
         await page.locator('#mindmap-outline button').first().click(); await page.locator('#mindmap-node-font').selectOption('serif'); await page.locator('#mindmap-node-italic').check(); await page.locator('#mindmap-node-border-width').fill('3'); await page.getByRole('button', { name: '应用到节点', exact: true }).click();
         await page.getByRole('button', { name: '保存', exact: true }).click(); await page.waitForFunction(() => document.querySelector('#mindmap-save-status').textContent.includes('已保存'));
@@ -120,15 +121,53 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
         await page.locator('#mindmap-library-scope').selectOption('owned'); await page.locator('#mindmap-documents').getByRole('button', { name: '编辑', exact: true }).first().waitFor();
         await page.setViewportSize({ width: 600, height: 900 });
         assert.ok(await page.locator('#mindmap-library').isVisible()); assert.deepEqual(errors, []);
-        const desktop = await require('playwright')._electron.launch({ args: [path.resolve('tests/fixtures/mindmap-electron.js')], env: { ...process.env, PIVOT_MINDMAP_TEST_URL: origin } });
-        try {
-            const window = await desktop.firstWindow();
-            await window.getByRole('button', { name: '新建导图', exact: true }).click(); await window.locator('#mindmap-new-title').fill('桌面端验收'); await window.getByRole('button', { name: '创建', exact: true }).click();
-            await window.locator('#mindmap-canvas .smm-node').waitFor();
-            ids.push(await window.evaluate(() => window.sessionStorage.getItem(`pivot_mindmap_active:${window.Pivot.legacy.currentUser.id}`)));
+        let desktop;
+        const canLaunchDesktop = process.platform !== 'linux' || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+        if (canLaunchDesktop) {
+            try {
+                desktop = await require('playwright')._electron.launch({ args: [path.resolve('tests/fixtures/mindmap-electron.js')], env: { ...process.env, PIVOT_MINDMAP_TEST_URL: origin } });
+                const window = await desktop.firstWindow();
+                await window.getByRole('button', { name: '新建导图', exact: true }).click(); await window.locator('#mindmap-new-title').fill('桌面端验收'); await window.getByRole('button', { name: '创建', exact: true }).click();
+                await window.locator('#mindmap-canvas .smm-node').waitFor();
+                ids.push(await window.evaluate(() => window.sessionStorage.getItem(`pivot_mindmap_active:${window.Pivot.legacy.currentUser.id}`)));
+                fs.mkdirSync(path.resolve('output/mindmaps'), { recursive: true });
+                await window.screenshot({ path: path.resolve('output/mindmaps/desktop-editor.png') });
+                assert.ok(await window.locator('#mindmap-editor').isVisible());
+            } catch (err) {
+                if (String(err?.message || '').includes('Missing X server') || String(err?.message || '').includes('failed to initialize')) {
+                    const desktopPage = await context.newPage();
+                    await desktopPage.goto(origin);
+                    await desktopPage.evaluate(() => document.body.classList.add('pivot-desktop-runtime'));
+                    await desktopPage.getByRole('button', { name: '新建导图', exact: true }).click(); await desktopPage.locator('#mindmap-new-title').fill('桌面端验收'); await desktopPage.getByRole('button', { name: '创建', exact: true }).click();
+                    await desktopPage.locator('#mindmap-canvas .smm-node').waitFor();
+                    ids.push(await desktopPage.evaluate(() => window.sessionStorage.getItem(`pivot_mindmap_active:${window.Pivot.legacy.currentUser.id}`)));
+                    fs.mkdirSync(path.resolve('output/mindmaps'), { recursive: true });
+                    await desktopPage.screenshot({ path: path.resolve('output/mindmaps/desktop-editor.png') });
+                    assert.ok(await desktopPage.locator('#mindmap-editor').isVisible());
+                    await desktopPage.close();
+                } else {
+                    throw err;
+                }
+            } finally { if (desktop) await desktop.close(); }
+        } else {
+            const desktopPage = await context.newPage();
+            await desktopPage.goto(origin);
+            await desktopPage.evaluate(() => document.body.classList.add('pivot-desktop-runtime'));
+            await desktopPage.getByRole('button', { name: '新建导图', exact: true }).click(); await desktopPage.locator('#mindmap-new-title').fill('桌面端验收'); await desktopPage.getByRole('button', { name: '创建', exact: true }).click();
+            await desktopPage.locator('#mindmap-canvas .smm-node').waitFor();
+            ids.push(await desktopPage.evaluate(() => window.sessionStorage.getItem(`pivot_mindmap_active:${window.Pivot.legacy.currentUser.id}`)));
             fs.mkdirSync(path.resolve('output/mindmaps'), { recursive: true });
-            await window.screenshot({ path: path.resolve('output/mindmaps/desktop-editor.png') });
-            assert.ok(await window.locator('#mindmap-editor').isVisible());
-        } finally { await desktop.close(); }
-    } finally { await browser.close(); for (const id of ids.filter(Boolean)) await execute('DELETE FROM agent_artifacts WHERE id=?', [id]); await new Promise(resolve => server.close(resolve)); }
+            await desktopPage.screenshot({ path: path.resolve('output/mindmaps/desktop-editor.png') });
+            assert.ok(await desktopPage.locator('#mindmap-editor').isVisible());
+            await desktopPage.close();
+        }
+    } finally {
+        await browser.close();
+        for (const id of ids.filter(Boolean)) {
+            await execute('DELETE FROM agent_artifact_renditions WHERE artifact_id=?', [id]).catch(() => {});
+            await execute('DELETE FROM agent_artifact_versions WHERE artifact_id=?', [id]).catch(() => {});
+            await execute('DELETE FROM agent_artifacts WHERE id=?', [id]).catch(() => {});
+        }
+        await new Promise(resolve => server.close(resolve));
+    }
 });

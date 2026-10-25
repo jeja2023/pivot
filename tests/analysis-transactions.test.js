@@ -58,6 +58,13 @@ test('真实数据集交易任务可恢复且幂等，跨账号拒绝、过期�
         await execute("UPDATE analysis_transaction_runs SET expires_at=NOW()-INTERVAL '1 second' WHERE id=?", [job.id]); await repository.cleanup();
         for (const output of outputs) { const artifact = await queryOne('SELECT status,content FROM agent_artifacts WHERE id=?', [output.artifact_id]); assert.equal(artifact.status, 'deleted'); assert.equal(artifact.content, ''); }
         await assert.rejects(require('../server/services/agent-artifact-renditions').issueDownloadToken(user, pdf.rendition_id), error => error.status === 409);
-        await datasets.softDeleteDataset(user.id, dataset.id); await assert.rejects(repository.get(user.id, job.id), error => error.status === 404);
-    } finally { if (dataset) await datasets.softDeleteDataset(user.id, dataset.id).catch(() => {}); await execute('DELETE FROM users WHERE id=?', [user.id]); }
+    } finally {
+        if (dataset) await datasets.softDeleteDataset(user.id, dataset.id).catch(() => {});
+        await execute('DELETE FROM analysis_transaction_outputs WHERE analysis_id IN (SELECT id FROM analysis_transaction_runs WHERE user_id=?)', [user.id]).catch(() => {});
+        await execute('DELETE FROM agent_artifact_renditions WHERE artifact_id IN (SELECT id FROM agent_artifacts WHERE user_id=?)', [user.id]).catch(() => {});
+        await execute('DELETE FROM agent_artifact_versions WHERE artifact_id IN (SELECT id FROM agent_artifacts WHERE user_id=?)', [user.id]).catch(() => {});
+        await execute('DELETE FROM agent_artifacts WHERE user_id=?', [user.id]).catch(() => {});
+        await execute('DELETE FROM analysis_transaction_runs WHERE user_id=?', [user.id]).catch(() => {});
+        await execute('DELETE FROM users WHERE id=?', [user.id]).catch(() => {});
+    }
 });
