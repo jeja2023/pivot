@@ -82,7 +82,7 @@
         const viewer = state.active?.role === 'viewer' || state.accessRevoked || state.sessionInvalid;
         $('mindmap-access-status').textContent = state.active?.collaboration ? viewer ? '共享查看 · 内容自动同步' : '协作编辑 · 独立修改自动合并' : '个人文档';
         state.editor?.readOnly(viewer);
-        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"]')) button.disabled = viewer;
+        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"],[data-mm-action="outline-edit"]')) button.disabled = viewer;
         $('mindmap-layout').disabled = viewer; $('mindmap-theme').disabled = viewer;
         $('mindmap-editor').querySelector('[data-mm-action="sharing"]').hidden = state.active?.role !== 'owner';
         $('mindmap-editor').querySelector('[data-mm-action="versions"]').disabled = state.active?.role !== 'owner';
@@ -204,15 +204,16 @@
         const fontSize = String(node?.style.fontSize || 14);
         if (!$('mindmap-node-size').querySelector(`option[value="${fontSize}"]`) && /^\d{2}$/.test(fontSize)) { const option = document.createElement('option'); option.value = fontSize; option.textContent = fontSize; $('mindmap-node-size').appendChild(option); }
         $('mindmap-node-size').value = fontSize;
-        $('mindmap-node-color').value = node?.style.color || schema.foreground(defaultFill);
-        $('mindmap-node-fill').value = node?.style.fillColor || defaultFill;
+        $('mindmap-node-color').value = (node?.style.color && node.style.color !== 'transparent') ? node.style.color : schema.foreground(defaultFill);
+        $('mindmap-node-fill').value = (node?.style.fillColor && node.style.fillColor !== 'transparent') ? node.style.fillColor : defaultFill;
         $('mindmap-node-shape').value = node?.style.shape || 'roundedRectangle';
         $('mindmap-node-bold').checked = node?.style.fontWeight === 'bold';
         $('mindmap-node-italic').checked = node?.style.fontStyle === 'italic';
         const styleFields = { font: ['fontFamily', 'sans-serif'], align: ['textAlign', 'left'], decoration: ['textDecoration', 'none'], border: ['borderColor', palette.line], 'border-width': ['borderWidth', 1], dash: ['borderDasharray', 'none'], line: ['lineColor', palette.line], 'line-width': ['lineWidth', 2], 'padding-x': ['paddingX', 12], 'padding-y': ['paddingY', 8] };
         for (const [id, [key, fallback]] of Object.entries(styleFields)) {
             const input = $(`mindmap-node-${id}`); if (!input) continue;
-            const value = node?.style[key] ?? fallback;
+            let value = node?.style[key] ?? fallback;
+            if (input.type === 'color' && value === 'transparent') value = fallback;
             input.value = input.tagName === 'SELECT' && ![...input.options].some(option => option.value === String(value)) ? fallback : value;
         }
         $('mindmap-node-note').value = node?.style.note || '';
@@ -397,15 +398,14 @@
             return;
         }
         if (name === 'apply-node') {
-            const isFillChecked = $('mindmap-fill-check') ? $('mindmap-fill-check').checked : true;
             const isBorderChecked = $('mindmap-border-check') ? $('mindmap-border-check').checked : true;
             return state.editor.apply({
                 fontStyle: $('mindmap-node-italic').checked ? 'italic' : 'normal',
                 fontFamily: $('mindmap-node-font').value,
                 textAlign: $('mindmap-node-align').value,
                 textDecoration: $('mindmap-node-decoration').value,
-                borderColor: isBorderChecked ? $('mindmap-node-border').value : 'transparent',
-                borderWidth: isBorderChecked ? Number($('mindmap-node-border-width').value) : 0,
+                borderColor: $('mindmap-node-border').value,
+                borderWidth: isBorderChecked ? (Number($('mindmap-node-border-width').value) || 1) : 0,
                 borderDasharray: $('mindmap-node-dash').value,
                 lineColor: $('mindmap-node-line').value,
                 lineWidth: Number($('mindmap-node-line-width').value),
@@ -414,7 +414,7 @@
                 text: $('mindmap-node-text').value,
                 fontSize: Number($('mindmap-node-size').value),
                 color: $('mindmap-node-color').value,
-                fillColor: isFillChecked ? $('mindmap-node-fill').value : 'transparent',
+                fillColor: $('mindmap-node-fill').value,
                 shape: $('mindmap-node-shape').value,
                 fontWeight: $('mindmap-node-bold').checked ? 'bold' : 'normal',
                 note: $('mindmap-node-note').value,

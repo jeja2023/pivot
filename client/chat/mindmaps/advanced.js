@@ -82,7 +82,7 @@
             </label>
             <div class="mm-input-action-row">
                 <input id="mindmap-relation-text" class="form-input mm-modal-input" maxlength="120" placeholder="例如：前置条件、衍生推进、论证支持…">
-                <button class="btn-primary mm-modal-submit mm-btn-inline-submit" type="button" data-mm-action="relation-add">
+                <button class="btn-primary mm-modal-submit mm-btn-inline-submit" type="button" data-mm-action="relation-add" aria-label="添加关联线">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                     <span>添加关联</span>
                 </button>
@@ -489,6 +489,13 @@
                         target.children.push(...additions.map(remap));
                     }
                     apply(next); aiResult = null; aiContext = null; closeDialog(); return true;
+                }
+                if (name === 'outline-edit') {
+                    void dialog('编辑节点大纲', `<p>按稳定节点标识修改文字，保留样式、备注和关联关系。</p>${nodes().map(node => `<label>${escape('　'.repeat(node.depth) + '节点')}<input class="form-input" maxlength="120" data-mm-outline-text="${node.id}" value="${escape(node.text)}"></label>`).join('')}<div class="mindmap-toolbar"><button class="btn-primary" type="button" data-mm-action="outline-apply">应用大纲</button></div>`); return true;
+                }
+                if (name === 'outline-apply') {
+                    const next = schema.normalize(state.document); const values = new Map([...$('mindmap-dialog-body').querySelectorAll('[data-mm-outline-text]')].map(input => [input.dataset.mmOutlineText, input.value]));
+                    (function walk(node) { node.text = values.get(node.id); node.children.forEach(walk); })(next.tree); apply(next); closeDialog(); return true;
                 }
                 if (name === 'relations') { relations(); return true; }
                 if (name === 'relation-add' || name === 'relation-remove') {

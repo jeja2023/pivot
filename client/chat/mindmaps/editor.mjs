@@ -167,6 +167,7 @@ export function mount(container, document, { change, select, failure }) {
     map.on('data_change', commit);
     map.on('node_text_edit_change', commit);
     map.on('node_tree_render_end', commit);
+    map.on('hide_text_edit', () => { composing = false; });
     function selectNode(node) {
         const previous = selected?.getData('uid'); selected = node?.isGeneralization ? null : node;
         if (previous === selected?.getData('uid') && selected) return;
@@ -201,9 +202,9 @@ export function mount(container, document, { change, select, failure }) {
         if (!selected) map.renderer.root.active(); map.execCommand(name);
     }
     return {
-        document: () => { map.renderer.textEdit.hideEditTextBox(); commit(); return current; },
-        composing: () => composing,
-        editing: () => map.renderer.textEdit.isShowTextEdit() || composing || presenting || Boolean(globalThis.document.activeElement?.matches('input,textarea,select') && container.closest('.mindmap-workbench')?.querySelector('.mindmap-properties')?.contains(globalThis.document.activeElement)),
+        document: () => { map.renderer.textEdit.hideEditTextBox(); composing = false; commit(); return current; },
+        composing: () => Boolean(composing && map.renderer.textEdit.isShowTextEdit()),
+        editing: () => map.renderer.textEdit.isShowTextEdit() || presenting || Boolean(globalThis.document.activeElement?.matches('input,textarea,select') && container.closest('.mindmap-workbench')?.querySelector('.mindmap-properties')?.contains(globalThis.document.activeElement)),
         readOnly(value) { readonly = value; map.setMode(value || presenting ? 'readonly' : 'edit'); },
         historyActions(actions) { historyActions = actions; },
         receive(document) { replace(document); },

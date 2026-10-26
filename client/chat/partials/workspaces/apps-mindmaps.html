@@ -66,11 +66,11 @@
         <header class="xmind-top-bar">
             <!-- 左侧：返回导图库、标题、状态徽章、思维导图/大纲切换 -->
             <div class="xmind-bar-left">
-                <button type="button" class="xmind-btn xmind-btn-ghost xmind-back-btn" data-mm-action="library" title="返回导图列表">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost xmind-back-btn" data-mm-action="library" title="返回导图列表" aria-label="文档列表">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>导图列表</span>
                 </button>
-                <button type="button" class="xmind-btn xmind-btn-ghost xmind-panel-toggle" id="xmind-toggle-outline" title="展开/收起节点大纲">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost xmind-panel-toggle is-active" id="xmind-toggle-outline" title="展开/收起节点大纲">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
                     <span>大纲</span>
                 </button>
@@ -85,23 +85,23 @@
             <!-- 中间：XMind 经典中心浮动/固定工具栏 -->
             <div class="xmind-bar-center">
                 <div class="xmind-toolbar-group">
-                    <button type="button" class="xmind-tool-btn" data-mm-command="INSERT_CHILD_NODE" title="添加子主题 (Tab)">
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-command="INSERT_CHILD_NODE" title="添加子主题 (Tab)" aria-label="子节点">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="9" width="7" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="5" rx="1.2"/><rect x="14" y="15" width="7" height="5" rx="1.2"/><path d="M10 12h2a2 2 0 0 0 2-2V6.5M12 12a2 2 0 0 1 2 2v3.5"/></svg>
                         <span>子主题</span>
                     </button>
-                    <button type="button" class="xmind-tool-btn" data-mm-command="INSERT_NODE" title="添加同级主题 (Enter)">
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-command="INSERT_NODE" title="添加同级主题 (Enter)">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="7" height="5" rx="1.2"/><rect x="3" y="14" width="7" height="5" rx="1.2"/><line x1="6.5" y1="10" x2="6.5" y2="14"/><polyline points="4.5 12 6.5 14 8.5 12"/><circle cx="17" cy="12" r="3"/><line x1="10" y1="7.5" x2="14" y2="12"/></svg>
                         <span>同级主题</span>
                     </button>
-                    <button type="button" class="xmind-tool-btn" data-mm-action="relations" title="添加或管理联系关联线">
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-action="relations" title="添加或管理联系关联线" aria-label="关联线">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="18" r="3"/><circle cx="19" cy="6" r="3"/><path d="M8 17c4 0 6-6 10-9"/><polyline points="15 6 19 6 19 10"/></svg>
                         <span>联系</span>
                     </button>
-                    <button type="button" class="xmind-tool-btn" data-mm-action="summaries" title="添加或管理概要">
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-action="summaries" title="添加或管理概要">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v6a3 3 0 0 1-3 3 3 3 0 0 1 3 3v6"/><path d="M12 12h9"/></svg>
                         <span>概要</span>
                     </button>
-                    <button type="button" class="xmind-tool-btn is-danger" data-mm-command="REMOVE_NODE" title="删除分支 (Delete)">
+                    <button type="button" class="btn-danger xmind-tool-btn is-danger" data-mm-command="REMOVE_NODE" title="删除分支 (Delete)">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         <span>删除</span>
                     </button>
@@ -110,10 +110,10 @@
                 <div class="xmind-toolbar-divider"></div>
 
                 <div class="xmind-toolbar-group">
-                    <button type="button" class="xmind-tool-btn xmind-icon-only" data-mm-command="BACK" title="撤销 (Ctrl+Z)">
+                    <button type="button" class="btn-secondary xmind-tool-btn xmind-icon-only" data-mm-command="BACK" title="撤销 (Ctrl+Z)" aria-label="撤销">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
                     </button>
-                    <button type="button" class="xmind-tool-btn xmind-icon-only" data-mm-command="FORWARD" title="重做 (Ctrl+Y)">
+                    <button type="button" class="btn-secondary xmind-tool-btn xmind-icon-only" data-mm-command="FORWARD" title="重做 (Ctrl+Y)" aria-label="重做">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
                     </button>
                 </div>
@@ -121,10 +121,23 @@
                 <div class="xmind-toolbar-divider"></div>
 
                 <div class="xmind-toolbar-group">
-                    <button type="button" class="xmind-tool-btn xmind-icon-only" data-mm-action="fold" title="一键折叠分支">
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-action="theme-library" title="主题库">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 10 10 0 0 0 9.5-13.5"/></svg>
+                        <span>主题库</span>
+                    </button>
+                    <button type="button" class="btn-secondary xmind-tool-btn" data-mm-action="theme-pack" title="主题包">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                        <span>主题包</span>
+                    </button>
+                </div>
+
+                <div class="xmind-toolbar-divider"></div>
+
+                <div class="xmind-toolbar-group">
+                    <button type="button" class="btn-secondary xmind-tool-btn xmind-icon-only" data-mm-action="fold" title="一键折叠分支">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                     </button>
-                    <button type="button" class="xmind-tool-btn xmind-icon-only" data-mm-action="unfold" title="一键展开分支">
+                    <button type="button" class="btn-secondary xmind-tool-btn xmind-icon-only" data-mm-action="unfold" title="一键展开分支">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                     </button>
                 </div>
@@ -132,42 +145,35 @@
 
             <!-- 右侧：演说、协作、历史、导出下拉、保存、格式面板开关 -->
             <div class="xmind-bar-right">
-                <button type="button" class="xmind-btn xmind-btn-ghost" data-mm-action="present" title="全屏演示">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="present" title="全屏演示" aria-label="演示">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     <span>演说</span>
                 </button>
-                <button type="button" class="xmind-btn xmind-btn-ghost" data-mm-action="sharing" title="管理共享协作权限">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="sharing" title="管理共享协作权限">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <span>协作</span>
                 </button>
-                <button type="button" class="xmind-btn xmind-btn-ghost" data-mm-action="versions" title="查看历史版本快照">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="versions" title="查看历史版本快照">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>历史</span>
                 </button>
 
-                <!-- 导出下拉组合 -->
-                <div class="xmind-dropdown" id="xmind-export-dropdown">
-                    <button type="button" class="xmind-btn xmind-btn-ghost xmind-export-trigger" id="xmind-export-toggle-btn" title="导出导图文件">
+                <!-- 导出格式选择及导出按钮 -->
+                <div class="xmind-export-group">
+                    <select id="mindmap-export-format" class="form-input xmind-select xmind-export-select-bar" aria-label="导出格式">
+                        <option value="json" selected>原生 JSON</option>
+                        <option value="xmind">XMind 格式文件 (*.xmind)</option>
+                        <option value="svg">SVG 矢量图</option>
+                        <option value="png">PNG 高清图片</option>
+                        <option value="pdf">PDF 打印文档</option>
+                        <option value="md">Markdown 结构大纲</option>
+                        <option value="opml">OPML 大纲</option>
+                        <option value="mm">FreeMind 文件</option>
+                    </select>
+                    <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="export" title="导出导图文件">
                         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         <span>导出</span>
-                        <svg class="xmind-icon-arrow" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
-                    <div class="xmind-dropdown-menu hidden" id="xmind-export-menu" role="menu">
-                        <div class="xmind-export-popover">
-                            <label class="xmind-export-label" for="mindmap-export-format">导出格式</label>
-                            <select id="mindmap-export-format" class="form-input xmind-export-select">
-                                <option value="xmind">XMind 文件 (*.xmind)</option>
-                                <option value="png">PNG 高清图片</option>
-                                <option value="svg">SVG 矢量图</option>
-                                <option value="pdf">PDF 打印文档</option>
-                                <option value="md">Markdown 结构大纲</option>
-                                <option value="json" selected>原生 JSON 备份</option>
-                                <option value="opml">OPML 大纲</option>
-                                <option value="mm">FreeMind 文件</option>
-                            </select>
-                            <button type="button" class="btn-primary xmind-export-submit" data-mm-action="export">立即生成导出</button>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- 保存按钮 -->
@@ -177,7 +183,7 @@
                 </button>
 
                 <!-- 格式面板开关按钮 (像 XMind 右上角面板切换一样) -->
-                <button type="button" class="xmind-btn xmind-btn-ghost xmind-panel-toggle is-active" id="xmind-toggle-inspector" title="展开/收起格式面板">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost xmind-panel-toggle is-active" id="xmind-toggle-inspector" title="展开/收起格式面板">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
                     <span>格式</span>
                 </button>
@@ -193,12 +199,15 @@
 
         <!-- 2. 工作台主体 (三栏：大纲侧边栏 + 画布容器 + XMind 格式检查器) -->
         <div class="mindmap-workbench" id="xmind-workbench">
-            <!-- 左侧：大纲侧边栏 (默认收起，点击顶部 [大纲] 或底部 [大纲] 展开) -->
-            <aside class="mindmap-outline is-collapsed" id="xmind-outline-panel">
+            <!-- 左侧：大纲侧边栏 (点击顶部 [大纲] 展开或收起) -->
+            <aside class="mindmap-outline" id="xmind-outline-panel">
                 <div class="xmind-outline-header">
                     <div class="xmind-outline-title">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
                         <strong>节点大纲</strong>
+                    </div>
+                    <div class="xmind-outline-actions">
+                        <button type="button" class="btn-secondary xmind-tool-btn" data-mm-action="outline-edit" title="批量编辑大纲">编辑大纲</button>
                     </div>
                 </div>
                 <div id="mindmap-outline" class="xmind-outline-tree" role="tree" aria-label="导图节点"></div>
@@ -369,9 +378,6 @@
                                 </button>
                             </div>
 
-                            <!-- 隐藏原生 input 保持兼容 -->
-                            <input type="checkbox" id="mindmap-node-bold" class="hidden">
-                            <input type="checkbox" id="mindmap-node-italic" class="hidden">
                             <select id="mindmap-node-decoration" class="hidden">
                                 <option value="none">无</option>
                                 <option value="underline">下划线</option>
@@ -393,13 +399,23 @@
                                 </button>
                                 <button type="button" class="xmind-align-btn" data-align="right" title="右对齐">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
-                                </button>
                             </div>
                             <select id="mindmap-node-align" class="hidden">
                                 <option value="left">左对齐</option>
                                 <option value="center">居中</option>
                                 <option value="right">右对齐</option>
                             </select>
+                        </div>
+
+                        <div class="xmind-prop-subrow xmind-prop-subrow-gap">
+                            <label class="xmind-checkbox-label">
+                                <input type="checkbox" id="mindmap-node-bold">
+                                <span>加粗</span>
+                            </label>
+                            <label class="xmind-checkbox-label">
+                                <input type="checkbox" id="mindmap-node-italic">
+                                <span>斜体</span>
+                            </label>
                         </div>
 
                         <!-- 节点文字直接编辑 -->
@@ -424,7 +440,7 @@
 
                     <!-- 6. 附加属性 (备注、超链接、AI操作) -->
                     <div class="xmind-prop-section">
-                        <details class="xmind-details">
+                        <details class="xmind-details" open>
                             <summary class="xmind-details-summary">
                                 <span>备注与超链接</span>
                                 <svg class="xmind-arrow" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
@@ -438,7 +454,7 @@
                         </details>
 
                         <div class="xmind-node-actions">
-                            <button type="button" class="btn-primary xmind-apply-btn" data-mm-action="apply-node">应用修改</button>
+                            <button type="button" class="btn-primary xmind-apply-btn" data-mm-action="apply-node" aria-label="应用到节点">应用到节点</button>
                             <div class="xmind-ai-actions">
                                 <button type="button" class="btn-secondary xmind-ai-btn" data-mm-action="ai-expand" title="智能生成子分支">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>

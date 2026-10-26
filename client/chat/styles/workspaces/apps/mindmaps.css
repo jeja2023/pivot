@@ -2048,3 +2048,22 @@ body[data-theme="dark"] .xmind-panel-toggle.is-active,
     color: #38bdf8 !important;
     border-color: rgba(56, 189, 248, 0.35) !important;
 }
+
+.xmind-export-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.xmind-export-select-bar {
+    width: auto !important;
+    height: 32px !important;
+    font-size: 12px !important;
+    padding: 0 6px !important;
+}
+
+.xmind-prop-subrow-gap {
+    margin-top: 6px;
+    display: flex;
+    gap: 12px;
+}
