@@ -1,5 +1,19 @@
 import MindMap from '/common/vendor/simple-mind-map/0.14.0-fix.3/editor.mjs';
 const schema = window.Pivot.moduleApi('mindmaps.document');
+
+if (!MindMap.__pivotPatched) {
+    MindMap.__pivotPatched = true;
+    const origHandleData = MindMap.prototype.handleData;
+    MindMap.prototype.handleData = function (data) {
+        const keepExpand = data?.data && data.data.expand === false;
+        const res = origHandleData.call(this, data);
+        if (keepExpand && res?.data) {
+            res.data.expand = false;
+        }
+        return res;
+    };
+}
+
 export function mount(container, document, { change, select, failure }) {
     let current = schema.normalize(document); let suppressed = false; let selected = null; let destroyed = false; let composing = false; let presenting = false; let presentationSnapshot; let historyActions; let readonly = false;
     let history = [JSON.stringify(current)]; let historyIndex = 0;
@@ -11,6 +25,113 @@ export function mount(container, document, { change, select, failure }) {
     const config = () => ({ backgroundColor: palette().background, lineColor: palette().line, root: { fillColor: palette().root, color: schema.foreground(palette().root), ...palette().styles?.root }, second: { fillColor: palette().background, color: schema.foreground(palette().background), ...palette().styles?.second }, node: { fillColor: palette().background, color: schema.foreground(palette().background), ...palette().styles?.node } });
     const native = schema.toEngine(current);
     const map = new MindMap({ el: container, data: native.root, layout: native.layout, themeConfig: config(), addHistoryTime: 100, enableFreeDrag: false, enableAutoEnterTextEditWhenKeydown: false, customHyperlinkJump: link => { if (/^https?:\/\//i.test(link)) window.open(link, '_blank', 'noopener,noreferrer'); }, beforeShortcutRun: key => { if (['Control+z', 'Control+y'].includes(key)) { command(key.endsWith('+z') ? 'BACK' : 'FORWARD'); return true; } return false; }, customCheckEnableShortcut: event => !event.isComposing && event.keyCode !== 229 && map.keyCommand.defaultEnableCheck(event), errorHandler: () => { if (!destroyed) failure(new Error('画布操作失败，请保存草稿后重新打开。')); } });
+
+    function ensureNodePatched(node) {
+        const proto = Object.getPrototypeOf(node);
+        if (!proto || proto.__pivotPatched) return;
+        proto.__pivotPatched = true;
+
+        const origRenderExpandBtn = proto.renderExpandBtn;
+        proto.renderExpandBtn = function () {
+            if (this.getChildrenLength() <= 0) return;
+            if (this.isRoot) {
+                const wasRoot = this.isRoot;
+                this.isRoot = false;
+                try {
+                    origRenderExpandBtn.call(this);
+                } finally {
+                    this.isRoot = wasRoot;
+                }
+            } else {
+                origRenderExpandBtn.call(this);
+            }
+        };
+
+        const origUpdateExpandBtnPos = proto.updateExpandBtnPos;
+        proto.updateExpandBtnPos = function () {
+            if (!this._expandBtn) return;
+            if (this.isRoot) {
+                const wasRoot = this.isRoot;
+                this.isRoot = false;
+                try {
+                    this.renderer.layout.renderExpandBtn(this, this._expandBtn);
+                } catch (_) {
+                    // Layout-specific translation fallback for root
+                } finally {
+                    this.isRoot = wasRoot;
+                }
+                const transform = this._expandBtn.transform();
+                if (!transform.translateX && !transform.translateY) {
+                    const h = this.mindMap.themeConfig.nodeUseLineStyle ? this.height / 2 : 0;
+                    this._expandBtn.translate(this.width, this.height / 2 + h);
+                }
+            } else {
+                origUpdateExpandBtnPos.call(this);
+            }
+        };
+    }
+
+    function hookLayout() {
+        if (!map.renderer?.layout || map.renderer.layout.__pivotHooked) return;
+        map.renderer.layout.__pivotHooked = true;
+        const origCreateNode = map.renderer.layout.createNode;
+        map.renderer.layout.createNode = function (...args) {
+            const node = origCreateNode.apply(this, args);
+            if (node) ensureNodePatched(node);
+            return node;
+        };
+    }
+
+    hookLayout();
+    map.renderer.unexpandAllNode = function (center = true, targetUid = '') {
+        if (!this.renderTree) return;
+        const isRootTarget = !targetUid || targetUid === this.renderTree.data?.uid;
+        const walk = (node, matched) => {
+            if (!matched && node.data?.uid === targetUid) matched = true;
+            if (matched && node.children?.length > 0 && node.data) {
+                node.data.expand = false;
+            }
+            if (node.children?.length) {
+                node.children.forEach(child => walk(child, matched));
+            }
+        };
+        walk(this.renderTree, isRootTarget);
+        this.mindMap.render(() => {
+            if (center) this.setRootNodeCenter();
+        });
+    };
+    map.renderer.expandAllNode = function (targetUid = '') {
+        if (!this.renderTree) return;
+        const isRootTarget = !targetUid || targetUid === this.renderTree.data?.uid;
+        const walk = (node, matched) => {
+            if (!matched && node.data?.uid === targetUid) matched = true;
+            if (matched && node.data) {
+                node.data.expand = true;
+            }
+            if (node.children?.length) {
+                node.children.forEach(child => walk(child, matched));
+            }
+        };
+        walk(this.renderTree, isRootTarget);
+        this.mindMap.render(() => {
+            if (isRootTarget) this.mindMap.view.fit();
+        });
+    };
+    map.renderer.toggleActiveExpand = function () {
+        this.activeNodeList.forEach(t => {
+            if (t.nodeData?.children?.length > 0) {
+                this.toggleNodeExpand(t);
+            }
+        });
+    };
+    if (map.command?.commands) {
+        map.command.commands['UNEXPAND_ALL'] = [(...args) => map.renderer.unexpandAllNode(...args)];
+        map.command.commands['EXPAND_ALL'] = [(...args) => map.renderer.expandAllNode(...args)];
+    }
+    if (map.keyCommand?.shortcutMap) {
+        map.keyCommand.shortcutMap['/'] = [() => map.renderer.toggleActiveExpand()];
+    }
+
     let resizeTimer;
     let lastWidth = container.clientWidth; let lastHeight = container.clientHeight;
     const observer = new ResizeObserver(() => {
@@ -74,7 +195,7 @@ export function mount(container, document, { change, select, failure }) {
         if (name === 'REMOVE_NODE' && selected?.isRoot) throw schema.error('中心主题不能删除。');
         if (name === 'UNEXPAND_ALL' || name === 'EXPAND_ALL') {
             map.renderer.textEdit.hideEditTextBox();
-            map.execCommand(name);
+            fold(name === 'EXPAND_ALL');
             return;
         }
         if (!selected) map.renderer.root.active(); map.execCommand(name);
@@ -122,7 +243,12 @@ export function mount(container, document, { change, select, failure }) {
         getScale() {
             return Math.round((map.view?.scale || 1) * 100);
         },
-        layout(layout) { current = { ...current, presentation: { ...current.presentation, layout } }; map.setLayout(layout); commit(); },
+        layout(layout) {
+            current = { ...current, presentation: { ...current.presentation, layout } };
+            map.setLayout(layout);
+            hookLayout();
+            commit();
+        },
         theme(themeId) { current = { ...current, presentation: { ...current.presentation, themeId } }; map.setThemeConfig(config()); commit(); },
         apply({ text, ...style }) {
             if (readonly) throw schema.error('当前导图只有查看权限。');
@@ -136,10 +262,11 @@ export function mount(container, document, { change, select, failure }) {
             if (readonly) throw schema.error('当前导图只有查看权限。');
             map.renderer.textEdit.hideEditTextBox();
             if (expand) {
-                map.execCommand('EXPAND_ALL', nodeId);
+                map.renderer.expandAllNode(nodeId);
             } else {
-                map.execCommand('UNEXPAND_ALL', true, nodeId);
+                map.renderer.unexpandAllNode(true, nodeId);
             }
+            commit();
         },
         destroy() { destroyed = true; observer.disconnect(); clearTimeout(resizeTimer); window.removeEventListener('compositionstart', compositionStart); window.removeEventListener('compositionend', compositionEnd); map.destroy(); selected = null; }
     };
