@@ -51,7 +51,6 @@ function templateLayerElements(template, layout, slideIndex, presentation = {}) 
     const coverNavigation = layout?.id === 'cover' ? coverNavigationModel(presentation) : { sections: [], visible: false, generated: false };
 
     const canvas = presentationCanvas(presentation);
-    const scaleX = canvas.width / 1280;
     const clampIntoCanvas = element => {
         const width = Math.max(1, Math.min(Number(element.width) || 1, canvas.width));
         const height = Math.max(1, Math.min(Number(element.height) || 1, canvas.height));

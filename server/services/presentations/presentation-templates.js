@@ -144,7 +144,7 @@ function buildThemeMasters(colors, _isDark, useReferenceStyle = false, useForest
 }
 
 function applyForestGreenLayoutStyles(layouts, colors) {
-    const { primary, secondary, accent, text, cardBg, cardBorder, background, cardPalette } = colors;
+    const { primary, secondary, accent, cardBg, cardBorder, cardPalette } = colors;
     const leafShape = (id, bounds, fill, opacity = 1, rotation = 0, zIndex = 2) => ({
         id, type: 'shape', shapeType: 'ellipse', ...bounds, rotation, zIndex, locked: true, visible: true, sourceRefs: [],
         style: { fill, stroke: fill, strokeWidth: 0, opacity, radius: Math.round(Math.min(100, Math.min(bounds.width, bounds.height) / 2)) }

@@ -281,12 +281,14 @@
             </div>
         `;
 
-        if (typeof root.PivotSafeHtml?.setHtml === 'function') {
+        if (typeof PivotSafeHtml !== 'undefined' && typeof PivotSafeHtml.setHtml === 'function') {
+            PivotSafeHtml.setHtml(modal, modalHtml);
+        } else if (typeof root.PivotSafeHtml?.setHtml === 'function') {
             root.PivotSafeHtml.setHtml(modal, modalHtml);
         } else if (typeof root.Pivot?.safeHtml?.setHtml === 'function') {
             root.Pivot.safeHtml.setHtml(modal, modalHtml);
-        } else {
-            const parser = new DOMParser();
+        } else if (typeof root.DOMParser === 'function') {
+            const parser = new root.DOMParser();
             const doc = parser.parseFromString(modalHtml, 'text/html');
             modal.replaceChildren(...doc.body.childNodes);
         }
