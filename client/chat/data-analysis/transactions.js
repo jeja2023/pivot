@@ -499,11 +499,16 @@
                     </div>
                 </div>
                 <div class="finance-header-actions">
-                    <label class="finance-dataset-picker" for="finance-dataset">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                        <span>分析数据集：</span>
-                        <select class="form-input finance-picker-select" id="finance-dataset"></select>
-                    </label>
+                    <div class="finance-dataset-picker" title="切换分析数据集">
+                        <div class="finance-dataset-prefix">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                            <span>数据集</span>
+                        </div>
+                        <div class="finance-dataset-select-wrap">
+                            <select class="form-input finance-dataset-select" id="finance-dataset" aria-label="分析数据集"></select>
+                            <svg class="finance-dataset-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
                     <button class="btn-primary finance-btn-new" type="button" data-finance="new">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                         新建资金分析
@@ -586,7 +591,15 @@
             }
         });
 
+        const updateDatasetTitle = () => {
+            const selectEl = $('finance-dataset');
+            if (!selectEl) return;
+            const text = selectEl.options[selectEl.selectedIndex]?.text || '';
+            selectEl.title = text ? `当前分析数据集：${text}` : '请选择数据集';
+        };
+
         $('finance-dataset').addEventListener('change', () => {
+            updateDatasetTitle();
             close();
             void refresh().catch(app.toast);
         });
@@ -607,8 +620,18 @@
             return;
         }
         mount();
-        html($('finance-dataset'), app.state.datasets.map(dataset => `<option value="${esc(dataset.id)}">${esc(dataset.name)}</option>`).join(''));
-        $('finance-dataset').value = datasetId || app.state.activeId || app.state.datasets[0]?.id || '';
+        const datasets = app.state.datasets || [];
+        if (datasets.length === 0) {
+            html($('finance-dataset'), '<option value="">暂无可用数据集</option>');
+        } else {
+            html($('finance-dataset'), datasets.map(dataset => `<option value="${esc(dataset.id)}">${esc(dataset.name)}</option>`).join(''));
+        }
+        $('finance-dataset').value = datasetId || app.state.activeId || datasets[0]?.id || '';
+        const selectEl = $('finance-dataset');
+        if (selectEl) {
+            const text = selectEl.options[selectEl.selectedIndex]?.text || '';
+            selectEl.title = text ? `当前分析数据集：${text}` : '请选择数据集';
+        }
         void refresh().catch(app.toast);
     };
 
