@@ -21,32 +21,33 @@
         <span class="mm-version-total-count">共 ${total} 个历史快照</span>
     </div>
     <div class="mm-modal-table-wrap mm-version-table-wrap">
-        <table class="mm-modal-table">
+        <table class="data-table mm-modal-table">
             <thead>
                 <tr>
-                    <th style="width: 16%;">版本</th>
-                    <th style="width: 38%;">说明</th>
-                    <th style="width: 28%;">保存时间</th>
-                    <th style="width: 18%; text-align: center;">操作</th>
+                    <th class="mm-col-version">版本</th>
+                    <th class="mm-col-desc">说明</th>
+                    <th class="mm-col-time">保存时间</th>
+                    <th class="mm-col-action text-center">操作</th>
                 </tr>
             </thead>
             <tbody>
                 ${result.rows.map(row => {
                     const isCurrent = Number(row.version) === Number(state.active.version);
+                    const noteText = escape(row.note || '导图编辑保存');
                     return `<tr>
                         <td>
                             <span class="mm-version-pill${isCurrent ? ' is-current' : ''}">v${row.version}</span>
                         </td>
                         <td>
-                            <span class="mm-desc-text" title="${escape(row.note || '导图编辑保存')}">${escape(row.note || '导图编辑保存')}</span>
+                            <span class="mm-desc-text" title="${noteText}">${noteText}</span>
                         </td>
                         <td>
                             <span class="mm-version-time">${escape(new Date(row.createdAt).toLocaleString())}</span>
                         </td>
-                        <td style="text-align: center;">
+                        <td class="text-center">
                             ${isCurrent
                                 ? '<span class="mm-version-curr-tag">当前版本</span>'
-                                : `<button type="button" class="mm-restore-btn" data-mm-restore="${row.id}">
+                                : `<button type="button" class="btn-secondary mm-restore-btn" data-mm-restore="${row.id}">
                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                                     <span>恢复</span>
                                    </button>`

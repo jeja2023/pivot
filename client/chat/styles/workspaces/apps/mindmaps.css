@@ -1496,6 +1496,27 @@ body[data-theme="dark"] .mindmap-pagination,
     border-bottom: none;
 }
 
+.mm-modal-table .mm-col-version {
+    width: 16%;
+}
+
+.mm-modal-table .mm-col-desc {
+    width: 38%;
+}
+
+.mm-modal-table .mm-col-time {
+    width: 28%;
+}
+
+.mm-modal-table .mm-col-action {
+    width: 18%;
+    text-align: center;
+}
+
+.mm-modal-table .text-center {
+    text-align: center;
+}
+
 .mm-relation-flow {
     display: flex;
     align-items: center;
