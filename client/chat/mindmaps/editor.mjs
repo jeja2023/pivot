@@ -72,6 +72,11 @@ export function mount(container, document, { change, select, failure }) {
         }
         if (['INSERT_CHILD_NODE', 'INSERT_NODE'].includes(name) && schema.count(current) >= schema.LIMITS.nodes) throw schema.error('节点数量已达上限，请先删除不需要的分支。');
         if (name === 'REMOVE_NODE' && selected?.isRoot) throw schema.error('中心主题不能删除。');
+        if (name === 'UNEXPAND_ALL' || name === 'EXPAND_ALL') {
+            map.renderer.textEdit.hideEditTextBox();
+            map.execCommand(name);
+            return;
+        }
         if (!selected) map.renderer.root.active(); map.execCommand(name);
     }
     return {
@@ -99,6 +104,24 @@ export function mount(container, document, { change, select, failure }) {
         command,
         focus(id) { map.execCommand('GO_TARGET_NODE', id, node => selectNode(node)); },
         fit() { map.view.fit(); },
+        zoomIn() {
+            if (typeof map.view?.enlarge === 'function') map.view.enlarge();
+            else if (typeof map.view?.setScale === 'function') map.view.setScale((map.view.scale || 1) + 0.15);
+            return Math.round((map.view?.scale || 1) * 100);
+        },
+        zoomOut() {
+            if (typeof map.view?.narrow === 'function') map.view.narrow();
+            else if (typeof map.view?.setScale === 'function') map.view.setScale(Math.max(0.2, (map.view.scale || 1) - 0.15));
+            return Math.round((map.view?.scale || 1) * 100);
+        },
+        zoomReset() {
+            if (typeof map.view?.reset === 'function') map.view.reset();
+            else map.view.fit();
+            return Math.round((map.view?.scale || 1) * 100);
+        },
+        getScale() {
+            return Math.round((map.view?.scale || 1) * 100);
+        },
         layout(layout) { current = { ...current, presentation: { ...current.presentation, layout } }; map.setLayout(layout); commit(); },
         theme(themeId) { current = { ...current, presentation: { ...current.presentation, themeId } }; map.setThemeConfig(config()); commit(); },
         apply({ text, ...style }) {
@@ -109,7 +132,15 @@ export function mount(container, document, { change, select, failure }) {
             next.presentation.nodes[id] = { ...next.presentation.nodes[id], ...style }; schema.normalize(next);
             map.execCommand('SET_NODE_TEXT', selected, text, false); map.execCommand('SET_NODE_DATA', selected, { ...style, richText: false }); map.render(); commit();
         },
-        fold(expand) { const next = schema.normalize(current); (function visit(node) { if (node.id !== next.tree.id && node.children.length) next.presentation.nodes[node.id] = { ...next.presentation.nodes[node.id], expanded: expand }; node.children.forEach(visit); })(next.tree); replace(next); change(next); },
+        fold(expand, nodeId = '') {
+            if (readonly) throw schema.error('当前导图只有查看权限。');
+            map.renderer.textEdit.hideEditTextBox();
+            if (expand) {
+                map.execCommand('EXPAND_ALL', nodeId);
+            } else {
+                map.execCommand('UNEXPAND_ALL', true, nodeId);
+            }
+        },
         destroy() { destroyed = true; observer.disconnect(); clearTimeout(resizeTimer); window.removeEventListener('compositionstart', compositionStart); window.removeEventListener('compositionend', compositionEnd); map.destroy(); selected = null; }
     };
 }

@@ -12,7 +12,26 @@
     let advanced;
     let collaborationModule;
     const drafts = () => window.Pivot.moduleApi('mindmaps.drafts');
-    const status = message => { $('mindmap-save-status').textContent = message; };
+    const status = message => {
+        const el = $('mindmap-save-status');
+        if (!el) return;
+        el.textContent = message;
+        const isDirty = message.includes('未保存') || message.includes('等待保存') || message.includes('修改');
+        el.classList.toggle('is-dirty', isDirty);
+    };
+    function syncDocumentMeta() {
+        if ($('mindmap-doc-title') && state.document) {
+            $('mindmap-doc-title').textContent = state.document.tree?.text || state.active?.title || '思维导图';
+        }
+        if ($('xmind-topic-stat') && state.document) {
+            $('xmind-topic-stat').textContent = `主题: ${schema.count(state.document)}`;
+        }
+    }
+    function syncZoom() {
+        if ($('xmind-zoom-percent') && state.editor) {
+            $('xmind-zoom-percent').textContent = `${state.editor.getScale?.() || 100}%`;
+        }
+    }
     const fail = error => { status(error.message); window.Pivot.legacy.showToast?.(error.message, 'error'); };
     async function request(path, options = {}) {
         const response = await window.Pivot.legacy.apiFetch(api + path, { ...options, cache: 'no-store' });
@@ -61,7 +80,7 @@
         const viewer = state.active?.role === 'viewer' || state.accessRevoked || state.sessionInvalid;
         $('mindmap-access-status').textContent = state.active?.collaboration ? viewer ? '共享查看 · 内容自动同步' : '协作编辑 · 独立修改自动合并' : '个人文档';
         state.editor?.readOnly(viewer);
-        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="outline-edit"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"]')) button.disabled = viewer;
+        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"]')) button.disabled = viewer;
         $('mindmap-layout').disabled = viewer; $('mindmap-theme').disabled = viewer;
         $('mindmap-editor').querySelector('[data-mm-action="sharing"]').hidden = state.active?.role !== 'owner';
         $('mindmap-editor').querySelector('[data-mm-action="versions"]').disabled = state.active?.role !== 'owner';
@@ -126,7 +145,7 @@
         if (JSON.stringify(document) === JSON.stringify(state.document)) return;
         if (state.collaboration && state.active?.role !== 'viewer') document = state.collaboration.edit(document);
         if (JSON.stringify(document) === JSON.stringify(state.document)) return;
-        state.document = document; state.dirty = true; $('mindmap-layout').value = document.presentation.layout; $('mindmap-theme').value = document.presentation.themeId; status('有未保存修改'); renderOutline(); void keepDraft();
+        state.document = document; state.dirty = true; $('mindmap-layout').value = document.presentation.layout; $('mindmap-theme').value = document.presentation.themeId; status('有未保存修改'); renderOutline(); void keepDraft(); syncDocumentMeta();
         clearTimeout(state.timer);
         if ($('mindmap-auto-save').checked && !state.conflict) {
             state.timer = setTimeout(() => { void save().catch(fail); }, 3000);
@@ -174,15 +193,129 @@
         if (state.dirty && !state.conflict) return save();
         return state.active;
     }
+    function updateOutlineNodeText(nodeId, newText) {
+        const trimmed = (newText || '').trim();
+        if (!trimmed || !state.document?.tree) return;
+        if (trimmed.length > (schema.LIMITS?.text || 120)) {
+            fail(new Error(`节点文字长度不能超过 ${schema.LIMITS?.text || 120} 字符`));
+            return;
+        }
+        const next = schema.normalize(state.document);
+        let target = null;
+        (function walk(n) {
+            if (n.id === nodeId) { target = n; return; }
+            n.children.forEach(walk);
+        })(next.tree);
+        if (!target || target.text === trimmed) return;
+        target.text = trimmed;
+        state.editor.update(next);
+        if (state.editor.selection() === nodeId) {
+            $('mindmap-selection').textContent = trimmed;
+            $('mindmap-node-text').value = trimmed;
+        }
+        if (nodeId === next.tree.id && $('mindmap-doc-title')) {
+            $('mindmap-doc-title').value = trimmed;
+        }
+    }
+
+    function startOutlineInlineEdit(button, node) {
+        if (!button || !button.isConnected) return;
+        const parent = button.parentElement;
+        if (!parent || parent.querySelector('.xmind-outline-input')) return;
+
+        const originalText = node.text;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'xmind-outline-input';
+        input.value = originalText;
+        input.maxLength = schema.LIMITS?.text || 120;
+        input.setAttribute('aria-label', `编辑节点 ${originalText}`);
+
+        let committed = false;
+        const finish = (saveValue) => {
+            if (committed) return;
+            committed = true;
+            input.remove();
+            button.style.display = '';
+            if (saveValue && input.value.trim() && input.value.trim() !== originalText) {
+                updateOutlineNodeText(node.id, input.value.trim());
+            } else {
+                button.focus();
+            }
+        };
+
+        input.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(true);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(false);
+            }
+        });
+        input.addEventListener('blur', () => finish(true));
+
+        button.style.display = 'none';
+        parent.insertBefore(input, button);
+        input.focus();
+        input.select();
+    }
+
     function renderOutline() {
-        const host = $('mindmap-outline'); host.replaceChildren();
+        const host = $('mindmap-outline'); if (!host) return;
+        host.replaceChildren();
+        const selectedId = state.editor?.selection?.() || null;
         function visit(node, parent) {
             const item = document.createElement('li'); item.setAttribute('role', 'treeitem');
-            const button = document.createElement('button'); button.type = 'button'; button.textContent = node.text; button.title = node.text; button.dataset.mmNode = node.id; item.appendChild(button);
-            if (node.children.length) { const list = document.createElement('ul'); list.setAttribute('role', 'group'); node.children.forEach(child => visit(child, list)); item.appendChild(list); }
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'xmind-outline-node-btn';
+            button.title = `${node.text} (双击直接修改名称)`;
+            button.dataset.mmNode = node.id;
+            if (node.id === selectedId) button.classList.add('is-active');
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'xmind-outline-node-text';
+            textSpan.textContent = node.text;
+            button.appendChild(textSpan);
+
+            const editIcon = document.createElement('span');
+            editIcon.className = 'xmind-outline-edit-icon';
+            editIcon.title = '编辑名称';
+            editIcon.setAttribute('aria-label', '编辑名称');
+            window.PivotSafeHtml?.setHtml(editIcon, '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>', { USE_PROFILES: { html: true, svg: true } });
+            editIcon.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                startOutlineInlineEdit(button, node);
+            });
+            button.appendChild(editIcon);
+
+            button.addEventListener('dblclick', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                startOutlineInlineEdit(button, node);
+            });
+            button.addEventListener('keydown', event => {
+                if ((event.key === 'F2' || (event.key === 'Enter' && button.classList.contains('is-active'))) && !event.isComposing) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    startOutlineInlineEdit(button, node);
+                }
+            });
+
+            item.appendChild(button);
+            if (node.children && node.children.length) {
+                const list = document.createElement('ul');
+                list.setAttribute('role', 'group');
+                node.children.forEach(child => visit(child, list));
+                item.appendChild(list);
+            }
             parent.appendChild(item);
         }
-        const list = document.createElement('ul'); visit(state.document.tree, list); host.appendChild(list);
+        if (state.document?.tree) { const list = document.createElement('ul'); visit(state.document.tree, list); host.appendChild(list); }
     }
     function selected(node) {
         const palette = state.document ? schema.palette(state.document) : schema.THEMES.indigo;
@@ -199,11 +332,37 @@
         $('mindmap-node-italic').checked = node?.style.fontStyle === 'italic';
         const styleFields = { font: ['fontFamily', 'sans-serif'], align: ['textAlign', 'left'], decoration: ['textDecoration', 'none'], border: ['borderColor', palette.line], 'border-width': ['borderWidth', 1], dash: ['borderDasharray', 'none'], line: ['lineColor', palette.line], 'line-width': ['lineWidth', 2], 'padding-x': ['paddingX', 12], 'padding-y': ['paddingY', 8] };
         for (const [id, [key, fallback]] of Object.entries(styleFields)) {
-            const input = $(`mindmap-node-${id}`); const value = node?.style[key] ?? fallback;
+            const input = $(`mindmap-node-${id}`); if (!input) continue;
+            const value = node?.style[key] ?? fallback;
             input.value = input.tagName === 'SELECT' && ![...input.options].some(option => option.value === String(value)) ? fallback : value;
         }
         $('mindmap-node-note').value = node?.style.note || '';
         $('mindmap-node-link').value = node?.style.hyperlink || '';
+
+        // XMind 样式控件视觉联动
+        if ($('xmind-btn-bold')) $('xmind-btn-bold').classList.toggle('is-active', node?.style.fontWeight === 'bold');
+        if ($('xmind-btn-italic')) $('xmind-btn-italic').classList.toggle('is-active', node?.style.fontStyle === 'italic');
+        if ($('xmind-btn-strike')) $('xmind-btn-strike').classList.toggle('is-active', Boolean(node?.style.textDecoration && node.style.textDecoration !== 'none'));
+        if ($('xmind-inspector')) {
+            const currentAlign = node?.style.textAlign || 'left';
+            $('xmind-inspector').querySelectorAll('.xmind-align-btn').forEach(btn => {
+                btn.classList.toggle('is-active', btn.dataset.align === currentAlign);
+            });
+            if (node) {
+                $('xmind-prop-tab-style')?.click();
+            }
+        }
+        const hasFill = Boolean(node ? (node.style.fillColor && node.style.fillColor !== 'transparent') : true);
+        if ($('mindmap-fill-check')) $('mindmap-fill-check').checked = hasFill;
+        const hasBorder = Boolean(node ? (Number(node.style.borderWidth) > 0 && node.style.borderColor !== 'transparent') : false);
+        if ($('mindmap-border-check')) $('mindmap-border-check').checked = hasBorder;
+        if ($('mindmap-outline')) {
+            $('mindmap-outline').querySelectorAll('button[data-mm-node]').forEach(btn => {
+                const match = btn.dataset.mmNode === node?.id;
+                btn.classList.toggle('is-active', match);
+                if (match) btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            });
+        }
     }
     async function open(artifactId, { recover = true } = {}) {
         advanced?.stop();
@@ -226,6 +385,8 @@
         }
         updatePermissions(); startSync(); startSourceRefresh();
         renderOutline(); selected(null); status(`已保存 · 版本 ${result.version}`);
+        syncDocumentMeta();
+        syncZoom();
         sessionStorage.setItem(`pivot_mindmap_active:${state.userId}`, result.id);
         if (recover && $('mindmap-local-drafts').checked) {
             const draft = await drafts().read(state.userId, result.id).catch(error => { fail(error); return null; });
@@ -307,7 +468,67 @@
     }
     async function versionDialog(page = 1) {
         const result = await request(`/${state.active.id}/versions?page=${page}&limit=20`);
-        void dialog('历史版本', `<p>恢复会生成新版本，并保留当前版本。当前版本：${state.active.version}</p><div class="table-container"><table class="data-table"><thead><tr><th>版本</th><th>说明</th><th>时间</th><th>操作</th></tr></thead><tbody>${result.rows.map(row => `<tr><td>${row.version}</td><td>${escape(row.note || '')}</td><td>${escape(new Date(row.createdAt).toLocaleString())}</td><td><button type="button" class="btn-secondary" data-mm-restore="${row.id}">恢复</button></td></tr>`).join('')}</tbody></table></div><div class="mindmap-toolbar">${page > 1 ? `<button class="btn-secondary" type="button" data-mm-version-page="${page - 1}">上一页</button>` : ''}<span>第 ${page} 页</span>${page * 20 < result.total ? `<button class="btn-secondary" type="button" data-mm-version-page="${page + 1}">下一页</button>` : ''}</div>`);
+        const total = result.total || result.rows.length;
+        const totalPages = Math.max(1, Math.ceil(total / 20));
+        const modalHtml = `
+<div class="mm-modal-form mm-versions-modal">
+    <div class="mm-modal-subtitle">浏览与回滚历史编辑快照。恢复所选版本将自动保存为最新版本，当前内容完整保留。</div>
+    <div class="mm-version-current-bar">
+        <div class="mm-version-current-left">
+            <span class="mm-version-badge-curr">当前版本</span>
+            <span class="mm-version-number">v${state.active.version}</span>
+        </div>
+        <span class="mm-version-total-count">共 ${total} 个历史快照</span>
+    </div>
+    <div class="mm-modal-table-wrap mm-version-table-wrap">
+        <table class="mm-modal-table">
+            <thead>
+                <tr>
+                    <th style="width: 16%;">版本</th>
+                    <th style="width: 38%;">说明</th>
+                    <th style="width: 28%;">保存时间</th>
+                    <th style="width: 18%; text-align: center;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${result.rows.map(row => {
+                    const isCurrent = Number(row.version) === Number(state.active.version);
+                    return `<tr>
+                        <td>
+                            <span class="mm-version-pill${isCurrent ? ' is-current' : ''}">v${row.version}</span>
+                        </td>
+                        <td>
+                            <span class="mm-desc-text" title="${escape(row.note || '导图编辑保存')}">${escape(row.note || '导图编辑保存')}</span>
+                        </td>
+                        <td>
+                            <span class="mm-version-time">${escape(new Date(row.createdAt).toLocaleString())}</span>
+                        </td>
+                        <td style="text-align: center;">
+                            ${isCurrent
+                                ? '<span class="mm-version-curr-tag">当前版本</span>'
+                                : `<button type="button" class="mm-restore-btn" data-mm-restore="${row.id}">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                                    <span>恢复</span>
+                                   </button>`
+                            }
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    </div>
+    <div class="mm-version-pagination">
+        <span class="mm-version-page-info">第 ${page} 页 / 共 ${totalPages} 页</span>
+        <div class="mm-version-page-btns">
+            ${page > 1 ? `<button class="btn-secondary btn-xs mm-version-page-btn" type="button" data-mm-version-page="${page - 1}">上一页</button>` : ''}
+            ${page < totalPages ? `<button class="btn-secondary btn-xs mm-version-page-btn" type="button" data-mm-version-page="${page + 1}">下一页</button>` : ''}
+        </div>
+    </div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">每次手动保存或自动协作均会生成稳定快照</span>
+    </div>
+</div>`;
+        void dialog('历史版本', modalHtml);
     }
     async function download(job) {
         const userId = state.userId; const title = state.document?.tree.text || '思维导图';
@@ -341,6 +562,8 @@
         if (name === 'refresh') return loadList();
         if (name === 'previous') { state.page--; return loadList(); }
         if (name === 'next') { state.page++; return loadList(); }
+        if (name === 'fold') return state.editor?.fold?.(false);
+        if (name === 'unfold') return state.editor?.fold?.(true);
         if (name === 'new') {
             const personalTpls = state.personalTemplates || [];
             const personalOptionsHtml = personalTpls.length > 0
@@ -499,11 +722,40 @@
         if (name === 'reload') {
             if (await confirm('重载服务端版本', '本地草稿将被清除，是否重载？')) { const id = state.active.id; await drafts().remove(state.userId, id); state.dirty = false; state.conflict = false; await open(id, { recover: false }); } return;
         }
-        if (name === 'fit') return state.editor.fit();
-        if (name === 'fold' || name === 'unfold') return state.editor.fold(name === 'unfold');
-        if (name === 'apply-node') return state.editor.apply({ fontStyle: $('mindmap-node-italic').checked ? 'italic' : 'normal', fontFamily: $('mindmap-node-font').value, textAlign: $('mindmap-node-align').value, textDecoration: $('mindmap-node-decoration').value, borderColor: $('mindmap-node-border').value, borderWidth: Number($('mindmap-node-border-width').value), borderDasharray: $('mindmap-node-dash').value, lineColor: $('mindmap-node-line').value, lineWidth: Number($('mindmap-node-line-width').value), paddingX: Number($('mindmap-node-padding-x').value), paddingY: Number($('mindmap-node-padding-y').value), text: $('mindmap-node-text').value, fontSize: Number($('mindmap-node-size').value), color: $('mindmap-node-color').value, fillColor: $('mindmap-node-fill').value, shape: $('mindmap-node-shape').value, fontWeight: $('mindmap-node-bold').checked ? 'bold' : 'normal', note: $('mindmap-node-note').value, hyperlink: $('mindmap-node-link').value });
+        if (name === 'fit') {
+            state.editor.fit();
+            setTimeout(syncZoom, 60);
+            return;
+        }
+        if (name === 'apply-node') {
+            const isFillChecked = $('mindmap-fill-check') ? $('mindmap-fill-check').checked : true;
+            const isBorderChecked = $('mindmap-border-check') ? $('mindmap-border-check').checked : true;
+            return state.editor.apply({
+                fontStyle: $('mindmap-node-italic').checked ? 'italic' : 'normal',
+                fontFamily: $('mindmap-node-font').value,
+                textAlign: $('mindmap-node-align').value,
+                textDecoration: $('mindmap-node-decoration').value,
+                borderColor: isBorderChecked ? $('mindmap-node-border').value : 'transparent',
+                borderWidth: isBorderChecked ? Number($('mindmap-node-border-width').value) : 0,
+                borderDasharray: $('mindmap-node-dash').value,
+                lineColor: $('mindmap-node-line').value,
+                lineWidth: Number($('mindmap-node-line-width').value),
+                paddingX: Number($('mindmap-node-padding-x').value),
+                paddingY: Number($('mindmap-node-padding-y').value),
+                text: $('mindmap-node-text').value,
+                fontSize: Number($('mindmap-node-size').value),
+                color: $('mindmap-node-color').value,
+                fillColor: isFillChecked ? $('mindmap-node-fill').value : 'transparent',
+                shape: $('mindmap-node-shape').value,
+                fontWeight: $('mindmap-node-bold').checked ? 'bold' : 'normal',
+                note: $('mindmap-node-note').value,
+                hyperlink: $('mindmap-node-link').value
+            });
+        }
         if (name === 'versions') { await save(); return versionDialog(); }
         if (name === 'export') {
+            $('xmind-export-menu')?.classList.add('hidden');
+            $('xmind-export-dropdown')?.classList.remove('is-open');
             const sequence = state.exportSequence = (state.exportSequence || 0) + 1; const userId = state.userId;
             clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
             await save(); const result = await request(`/${state.active.id}/exports`, json({ format: $('mindmap-export-format').value, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
@@ -669,6 +921,201 @@
                 if (await confirm('导入思维导图', `将导入“${result.document.tree.text}”，共 ${schema.count(result.document)} 个节点。跨格式只保留支持的字段；原生 JSON 可完整备份。`)) await create(result.document);
             } catch (error) { fail(error); }
         });
+
+        // XMind 交互组件绑定
+        const docTitleInput = $('mindmap-doc-title');
+        if (docTitleInput) {
+            const handleTitleCommit = () => {
+                const newTitle = docTitleInput.value.trim();
+                if (!newTitle || !state.document?.tree || state.document.tree.text === newTitle) return;
+                state.document.tree.text = newTitle;
+                state.editor?.receive?.(state.document);
+                changed(state.document);
+                renderOutline();
+                if (state.editor?.selection?.() === state.document.tree.id) {
+                    selected(state.document.tree);
+                }
+            };
+            docTitleInput.addEventListener('blur', handleTitleCommit);
+            docTitleInput.addEventListener('keydown', event => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    docTitleInput.blur();
+                }
+            });
+        }
+
+        const exportBtn = $('xmind-export-toggle-btn');
+        const exportMenu = $('xmind-export-menu');
+        if (exportBtn && exportMenu) {
+            exportBtn.addEventListener('click', event => {
+                event.stopPropagation();
+                exportMenu.classList.toggle('hidden');
+            });
+            document.addEventListener('click', event => {
+                if (!exportMenu.contains(event.target) && event.target !== exportBtn) {
+                    exportMenu.classList.add('hidden');
+                }
+            });
+        }
+
+        const outlineToggle = $('xmind-toggle-outline');
+        const outlinePanel = $('xmind-outline-panel');
+        if (outlineToggle && outlinePanel) {
+            outlineToggle.addEventListener('click', () => {
+                const isCollapsed = outlinePanel.classList.toggle('is-collapsed');
+                outlineToggle.classList.toggle('is-active', !isCollapsed);
+            });
+        }
+
+        const inspectorToggle = $('xmind-toggle-inspector');
+        const inspector = $('xmind-inspector');
+        if (inspectorToggle && inspector) {
+            inspectorToggle.addEventListener('click', () => {
+                const isCollapsed = inspector.classList.toggle('is-collapsed');
+                inspectorToggle.classList.toggle('is-active', !isCollapsed);
+            });
+        }
+        const propTabStyle = $('xmind-prop-tab-style');
+        const propTabCanvas = $('xmind-prop-tab-canvas');
+        const paneStyle = $('xmind-pane-style');
+        const paneCanvas = $('xmind-pane-canvas');
+        if (propTabStyle && propTabCanvas && paneStyle && paneCanvas) {
+            propTabStyle.addEventListener('click', () => {
+                propTabStyle.classList.add('is-active');
+                propTabCanvas.classList.remove('is-active');
+                paneStyle.classList.remove('hidden');
+                paneCanvas.classList.add('hidden');
+            });
+            propTabCanvas.addEventListener('click', () => {
+                propTabCanvas.classList.add('is-active');
+                propTabStyle.classList.remove('is-active');
+                paneCanvas.classList.remove('hidden');
+                paneStyle.classList.add('hidden');
+            });
+        }
+
+        const zoomInBtn = $('xmind-zoom-in');
+        if (zoomInBtn) {
+            zoomInBtn.addEventListener('click', () => {
+                state.editor?.zoomIn?.();
+                syncZoom();
+            });
+        }
+        const zoomOutBtn = $('xmind-zoom-out');
+        if (zoomOutBtn) {
+            zoomOutBtn.addEventListener('click', () => {
+                state.editor?.zoomOut?.();
+                syncZoom();
+            });
+        }
+        const zoomPercentBtn = $('xmind-zoom-percent');
+        if (zoomPercentBtn) {
+            zoomPercentBtn.addEventListener('click', () => {
+                state.editor?.zoomReset?.();
+                syncZoom();
+            });
+        }
+
+        const boldBtn = $('xmind-btn-bold');
+        if (boldBtn) {
+            boldBtn.addEventListener('click', () => {
+                const input = $('mindmap-node-bold');
+                if (input) {
+                    input.checked = !input.checked;
+                    boldBtn.classList.toggle('is-active', input.checked);
+                    if (state.editor?.selection?.()) void action('apply-node');
+                }
+            });
+        }
+        const italicBtn = $('xmind-btn-italic');
+        if (italicBtn) {
+            italicBtn.addEventListener('click', () => {
+                const input = $('mindmap-node-italic');
+                if (input) {
+                    input.checked = !input.checked;
+                    italicBtn.classList.toggle('is-active', input.checked);
+                    if (state.editor?.selection?.()) void action('apply-node');
+                }
+            });
+        }
+        const strikeBtn = $('xmind-btn-strike');
+        if (strikeBtn) {
+            strikeBtn.addEventListener('click', () => {
+                const input = $('mindmap-node-decoration');
+                if (input) {
+                    const next = input.value === 'line-through' ? 'none' : 'line-through';
+                    input.value = next;
+                    strikeBtn.classList.toggle('is-active', next === 'line-through');
+                    if (state.editor?.selection?.()) void action('apply-node');
+                }
+            });
+        }
+        if (inspector) {
+            inspector.querySelectorAll('.xmind-align-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const align = btn.dataset.align;
+                    const input = $('mindmap-node-align');
+                    if (input && align) {
+                        input.value = align;
+                        inspector.querySelectorAll('.xmind-align-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+                        if (state.editor?.selection?.()) void action('apply-node');
+                    }
+                });
+            });
+        }
+
+        const autoApplyIds = [
+            'mindmap-node-shape',
+            'mindmap-node-fill',
+            'mindmap-node-border',
+            'mindmap-node-border-width',
+            'mindmap-node-dash',
+            'mindmap-node-font',
+            'mindmap-node-size',
+            'mindmap-node-color',
+            'mindmap-node-line',
+            'mindmap-node-line-width',
+            'mindmap-node-padding-x',
+            'mindmap-node-padding-y',
+            'mindmap-node-note',
+            'mindmap-node-link'
+        ];
+        autoApplyIds.forEach(id => {
+            const el = $(id);
+            if (!el) return;
+            el.addEventListener('change', () => {
+                if (id === 'mindmap-node-fill' && $('mindmap-fill-check')) $('mindmap-fill-check').checked = true;
+                if ((id === 'mindmap-node-border' || id === 'mindmap-node-dash') && $('mindmap-border-check')) $('mindmap-border-check').checked = true;
+                if (id === 'mindmap-node-border-width' && $('mindmap-border-check')) $('mindmap-border-check').checked = Number(el.value) > 0;
+                if (state.editor?.selection?.()) void action('apply-node');
+            });
+        });
+        const fillCheck = $('mindmap-fill-check');
+        if (fillCheck) {
+            fillCheck.addEventListener('change', () => {
+                if (state.editor?.selection?.()) void action('apply-node');
+            });
+        }
+        const borderCheck = $('mindmap-border-check');
+        if (borderCheck) {
+            borderCheck.addEventListener('change', () => {
+                if (borderCheck.checked && Number($('mindmap-node-border-width').value) <= 0) {
+                    $('mindmap-node-border-width').value = 1;
+                }
+                if (state.editor?.selection?.()) void action('apply-node');
+            });
+        }
+        const nodeTextInput = $('mindmap-node-text');
+        if (nodeTextInput) {
+            nodeTextInput.addEventListener('keydown', event => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (state.editor?.selection?.()) void action('apply-node');
+                }
+            });
+        }
+
         window.addEventListener('beforeunload', event => { if (state.dirty) { void keepDraft(); event.preventDefault(); event.returnValue = ''; } });
         window.addEventListener('online', () => { if (state.dirty && !state.conflict && $('mindmap-auto-save').checked) void save().catch(fail); });
         window.addEventListener('pagehide', () => { void keepDraft(); });

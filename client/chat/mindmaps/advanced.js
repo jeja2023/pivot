@@ -11,11 +11,199 @@
         function apply(document) { const next = schema.normalize(document); state.editor.update(next); changed(next); }
         function fieldOptions() { return nodes().map(node => `<option value="${escape(node.id)}">${escape('　'.repeat(node.depth) + node.text)}</option>`).join(''); }
         function relations() {
-            void dialog('管理关联线', `<p>连接两个不同节点；关联线和说明随历史版本保存。</p><label>起点<select id="mindmap-relation-from" class="form-input">${fieldOptions()}</select></label><label>终点<select id="mindmap-relation-to" class="form-input">${fieldOptions()}</select></label><label>说明<input id="mindmap-relation-text" class="form-input" maxlength="120"></label><button class="btn-primary" type="button" data-mm-action="relation-add">添加关联线</button><div class="table-container"><table class="data-table"><thead><tr><th>起点</th><th>终点</th><th>说明</th><th>操作</th></tr></thead><tbody>${state.document.relations.map((line, index) => `<tr><td>${escape(nodes().find(node => node.id === line.from)?.text)}</td><td>${escape(nodes().find(node => node.id === line.to)?.text)}</td><td>${escape(line.text)}</td><td><button class="btn-danger" type="button" data-mm-action="relation-remove" data-mm-index="${index}">删除</button></td></tr>`).join('')}</tbody></table></div>`);
-            if (state.editor.selection()) $('mindmap-relation-from').value = state.editor.selection();
+            const relList = state.document.relations || [];
+            const relationsListHtml = relList.length === 0
+                ? `<div class="mm-empty-box">
+                    <svg class="mm-empty-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5l7 7"/></svg>
+                    <span class="mm-empty-text">当前暂未建立关联线</span>
+                    <span class="mm-empty-hint">在上方选择起点与终点节点，点击“添加关联”即可创建</span>
+                   </div>`
+                : `<div class="mm-modal-table-wrap">
+                    <table class="mm-modal-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 46%;">关联节点</th>
+                                <th style="width: 38%;">说明</th>
+                                <th style="width: 16%; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${relList.map((line, index) => {
+                                const fromNode = nodes().find(node => node.id === line.from);
+                                const toNode = nodes().find(node => node.id === line.to);
+                                const fromText = fromNode?.text || '未知节点';
+                                const toText = toNode?.text || '未知节点';
+                                return `<tr>
+                                    <td>
+                                        <div class="mm-relation-flow">
+                                            <span class="mm-node-badge" title="${escape(fromText)}">${escape(fromText)}</span>
+                                            <svg class="mm-flow-arrow" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                            <span class="mm-node-badge" title="${escape(toText)}">${escape(toText)}</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        ${line.text ? `<span class="mm-desc-text" title="${escape(line.text)}">${escape(line.text)}</span>` : '<span class="mm-empty-dash">—</span>'}
+                                    </td>
+                                    <td style="text-align: center;">
+                                        <button class="mm-btn-danger" type="button" data-mm-action="relation-remove" data-mm-index="${index}">删除</button>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                   </div>`;
+
+            const relationsHtml = `
+<div class="mm-modal-form mm-relations-modal">
+    <div class="mm-modal-subtitle">在导图的任意两个主题节点之间建立逻辑连接线，支持标注关系说明。</div>
+    <div class="mm-section-card">
+        <div class="mm-section-title">添加新关联线</div>
+        <div class="mm-form-grid-2">
+            <div class="mm-form-field">
+                <label class="mm-field-label" for="mindmap-relation-from">
+                    <span class="mm-label-text">起点节点</span>
+                </label>
+                <select id="mindmap-relation-from" class="form-input mm-modal-select">
+                    ${fieldOptions()}
+                </select>
+            </div>
+            <div class="mm-form-field">
+                <label class="mm-field-label" for="mindmap-relation-to">
+                    <span class="mm-label-text">终点节点</span>
+                </label>
+                <select id="mindmap-relation-to" class="form-input mm-modal-select">
+                    ${fieldOptions()}
+                </select>
+            </div>
+        </div>
+        <div class="mm-form-field">
+            <label class="mm-field-label" for="mindmap-relation-text">
+                <span class="mm-label-text">关联说明（可选）</span>
+            </label>
+            <div class="mm-input-action-row">
+                <input id="mindmap-relation-text" class="form-input mm-modal-input" maxlength="120" placeholder="例如：前置条件、衍生推进、论证支持…">
+                <button class="btn-primary mm-modal-submit mm-btn-inline-submit" type="button" data-mm-action="relation-add">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span>添加关联</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="mm-section-block">
+        <div class="mm-section-header">
+            <span class="mm-section-title">已建立关联 (${relList.length})</span>
+        </div>
+        ${relationsListHtml}
+    </div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">关联线可在画布中双击直接编辑文字或拖拽端点</span>
+    </div>
+</div>`;
+            void dialog('管理关联线', relationsHtml);
+            if (state.editor.selection()) {
+                const sel = state.editor.selection();
+                const fromEl = $('mindmap-relation-from');
+                if (fromEl) fromEl.value = sel;
+            }
         }
         function summaries() {
-            void dialog('管理概要', `<p>选定父节点下连续分支，概要文字可在画布中双击修改。</p><label>父节点<select id="mindmap-summary-parent" class="form-input">${nodes().filter(node => node.children.length).map(node => `<option value="${node.id}">${escape(node.text)}</option>`).join('')}</select></label><label>起始分支序号<input id="mindmap-summary-start" class="form-input" type="number" min="1" value="1"></label><label>结束分支序号<input id="mindmap-summary-end" class="form-input" type="number" min="1" value="1"></label><label>概要文字<input id="mindmap-summary-text" class="form-input" maxlength="120"></label><button class="btn-primary" type="button" data-mm-action="summary-add">添加概要</button><ul>${state.document.summaries.map((summary, index) => `<li>${escape(summary.text)}（分支 ${summary.start + 1}–${summary.end + 1}）<button class="btn-danger" type="button" data-mm-action="summary-remove" data-mm-index="${index}">删除</button></li>`).join('')}</ul>`);
+            const sumList = state.document.summaries || [];
+            const parentNodes = nodes().filter(node => node.children.length);
+            const summariesListHtml = sumList.length === 0
+                ? `<div class="mm-empty-box">
+                    <svg class="mm-empty-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    <span class="mm-empty-text">当前暂未建立概要</span>
+                    <span class="mm-empty-hint">在上方选择父节点与分支序号范围，点击“添加概要”即可创建</span>
+                   </div>`
+                : `<div class="mm-modal-table-wrap">
+                    <table class="mm-modal-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 32%;">所属父节点</th>
+                                <th style="width: 24%;">分支跨度</th>
+                                <th style="width: 28%;">概要文字</th>
+                                <th style="width: 16%; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sumList.map((summary, index) => {
+                                const parentNode = nodes().find(node => node.id === summary.parentId);
+                                const parentText = parentNode?.text || '未知父节点';
+                                return `<tr>
+                                    <td>
+                                        <span class="mm-node-badge" title="${escape(parentText)}">${escape(parentText)}</span>
+                                    </td>
+                                    <td>
+                                        <span class="mm-range-badge">分支 ${summary.start + 1} – ${summary.end + 1}</span>
+                                    </td>
+                                    <td>
+                                        <span class="mm-desc-text" title="${escape(summary.text)}">${escape(summary.text)}</span>
+                                    </td>
+                                    <td style="text-align: center;">
+                                        <button class="mm-btn-danger" type="button" data-mm-action="summary-remove" data-mm-index="${index}">删除</button>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                   </div>`;
+
+            const summariesHtml = `
+<div class="mm-modal-form mm-summaries-modal">
+    <div class="mm-modal-subtitle">选定某一父主题下的连续子分支范围生成大括号概要，归纳提炼阶段性总结。</div>
+    <div class="mm-section-card">
+        <div class="mm-section-title">添加新概要</div>
+        <div class="mm-form-field">
+            <label class="mm-field-label" for="mindmap-summary-parent">
+                <span class="mm-label-text">父主题节点</span>
+            </label>
+            <select id="mindmap-summary-parent" class="form-input mm-modal-select">
+                ${parentNodes.length ? parentNodes.map(node => `<option value="${node.id}">${escape(node.text)} (${node.children.length} 个子分支)</option>`).join('') : '<option value="">暂无包含子分支的节点</option>'}
+            </select>
+        </div>
+        <div class="mm-form-grid-2">
+            <div class="mm-form-field">
+                <label class="mm-field-label" for="mindmap-summary-start">
+                    <span class="mm-label-text">起始分支序号</span>
+                </label>
+                <input id="mindmap-summary-start" class="form-input mm-modal-input" type="number" min="1" value="1">
+            </div>
+            <div class="mm-form-field">
+                <label class="mm-field-label" for="mindmap-summary-end">
+                    <span class="mm-label-text">结束分支序号</span>
+                </label>
+                <input id="mindmap-summary-end" class="form-input mm-modal-input" type="number" min="1" value="1">
+            </div>
+        </div>
+        <div class="mm-form-field">
+            <label class="mm-field-label" for="mindmap-summary-text">
+                <span class="mm-label-text">概要文字</span>
+            </label>
+            <div class="mm-input-action-row">
+                <input id="mindmap-summary-text" class="form-input mm-modal-input" maxlength="120" placeholder="例如：关键产出、第一阶段总结、核心论点…">
+                <button class="btn-primary mm-modal-submit mm-btn-inline-submit" type="button" data-mm-action="summary-add"${parentNodes.length ? '' : ' disabled'}>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    <span>添加概要</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="mm-section-block">
+        <div class="mm-section-header">
+            <span class="mm-section-title">已建立概要 (${sumList.length})</span>
+        </div>
+        ${summariesListHtml}
+    </div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">概要可在画布中双击就地修改文字</span>
+    </div>
+</div>`;
+            void dialog('管理概要', summariesHtml);
+            if (state.editor.selection()) {
+                const sel = state.editor.selection();
+                const parentEl = $('mindmap-summary-parent');
+                if (parentEl && parentNodes.some(n => n.id === sel)) parentEl.value = sel;
+            }
         }
         function presentFocus() {
             const node = sequence[position]; if (!node) return;
@@ -100,17 +288,153 @@
                 if (name === 'data-save') { if (!dataResult) throw new Error('请先生成数据预览。'); await context.create(dataResult); dataResult = null; closeDialog(); return true; }
                 if (name === 'ai-expand' || name === 'ai-summarize') {
                     const nodeId = state.editor.selection(); if (!nodeId) throw new Error('请先选择一个节点。');
-                    await context.save(); aiContext = { artifactId: state.active.id, nodeId, versionId: state.active.versionId, signature: JSON.stringify(state.document), mode: name === 'ai-expand' ? 'expand' : 'summarize' };
-                    void dialog(name === 'ai-expand' ? 'AI 展开分支' : 'AI 总结分支', '<label>补充要求<textarea id="mindmap-branch-prompt" class="form-input" rows="4" maxlength="12000" placeholder="可留空，按当前分支生成"></textarea></label><p>生成结果会先预览，核对后再应用。</p><button class="btn-primary" type="button" data-mm-action="ai-branch-generate">生成预览</button>'); return true;
+                    await context.save();
+                    const targetNode = nodes().find(node => node.id === nodeId);
+                    const nodeTitle = targetNode?.text || '选中节点';
+                    const nodeDepth = (targetNode?.depth ?? 0) + 1;
+                    aiContext = {
+                        artifactId: state.active.id,
+                        nodeId,
+                        nodeTitle,
+                        nodeDepth,
+                        versionId: state.active.versionId,
+                        signature: JSON.stringify(state.document),
+                        mode: name === 'ai-expand' ? 'expand' : 'summarize'
+                    };
+                    const isExpand = name === 'ai-expand';
+                    const dialogTitle = isExpand ? 'AI 展开分支' : 'AI 总结分支';
+                    const subtitle = isExpand
+                        ? '输入扩充方向与要求，AI 将结合当前分支上下文智能生成下级多维度子分支'
+                        : '输入提炼重点与摘要要求，AI 将汇总该分支及其下属子节点并生成精炼结论';
+                    const placeholder = isExpand
+                        ? '可留空直接生成；或输入具体要求，如：“从实施步骤、资源投入与潜在风险细化展开”、“增加 3 个创新解决方案”…'
+                        : '可留空直接生成；或输入具体要求，如：“精炼成 3 句核心论点与后续行动项”、“概括主要观点，语言精炼简短”…';
+                    const noticeText = isExpand
+                        ? '生成结果会先展示结构化大纲预览，经核对确认后才会应用合并至当前分支。'
+                        : '生成结果会先展示摘要预览，经核对确认后将自动写入该节点的“备注”中。';
+                    const branchHtml = `
+<div class="mm-modal-form mm-ai-modal">
+    <div class="mm-modal-subtitle">${subtitle}</div>
+    <div class="mm-target-branch-card">
+        <div class="mm-target-branch-header">
+            <span class="mm-target-branch-tag">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 3v6m0 6v6m9-9h-6m-6 0H3"/></svg>
+                <span>目标分支</span>
+            </span>
+            <span class="mm-target-branch-depth">层级: L${nodeDepth}</span>
+        </div>
+        <div class="mm-target-branch-name" title="${escape(nodeTitle)}">${escape(nodeTitle)}</div>
+    </div>
+    <div class="mm-form-field">
+        <div class="mm-field-label-row">
+            <label class="mm-field-label" for="mindmap-branch-prompt">
+                <span class="mm-label-text">补充要求与重点（可选）</span>
+            </label>
+            <span class="mm-label-hint">按 Ctrl + Enter 快速提交</span>
+        </div>
+        <div class="mm-textarea-wrap">
+            <textarea id="mindmap-branch-prompt" class="form-input mm-ai-textarea" rows="4" maxlength="12000" placeholder="${placeholder}"></textarea>
+        </div>
+    </div>
+    <div class="mm-ai-notice">
+        <svg class="mm-notice-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span class="mm-notice-text">${noticeText}</span>
+    </div>
+    <div id="mindmap-branch-status" class="mm-status-bar" role="status"></div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">支持空要求智能推导</span>
+        <div class="mm-footer-btns">
+            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">取消</button>
+            <button type="button" class="btn-primary mm-modal-submit" data-mm-action="ai-branch-generate">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                <span>生成预览</span>
+            </button>
+        </div>
+    </div>
+</div>`;
+                    void dialog(dialogTitle, branchHtml, { hideClose: true });
+                    const promptInput = $('mindmap-branch-prompt');
+                    if (promptInput) {
+                        promptInput.focus();
+                        promptInput.addEventListener('keydown', e => {
+                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                e.preventDefault();
+                                const btn = $('mindmap-dialog-body')?.querySelector('[data-mm-action="ai-branch-generate"]');
+                                if (btn && !btn.disabled) btn.click();
+                            }
+                        });
+                    }
+                    return true;
                 }
                 if (name === 'ai-branch-generate') {
-                    const sequence = state.dialogSequence; state.aiController = new AbortController();
+                    const btn = $('mindmap-dialog-body')?.querySelector('[data-mm-action="ai-branch-generate"]');
+                    if (btn) btn.disabled = true;
+                    const statusBar = $('mindmap-branch-status');
+                    if (statusBar) statusBar.textContent = aiContext?.mode === 'summarize' ? '正在分析分支内容并提炼核心摘要…' : '正在分析分支上下文并生成子分支…';
+                    const sequence = state.dialogSequence;
+                    state.aiController = new AbortController();
                     let result;
-                    try { result = await context.request('/ai', { ...context.json({ mode: aiContext.mode, artifactId: aiContext.artifactId, nodeId: aiContext.nodeId, expectedVersionId: aiContext.versionId, prompt: $('mindmap-branch-prompt').value }), signal: state.aiController.signal }); }
-                    catch (error) { if (error.name === 'AbortError') return true; throw error; }
+                    try {
+                        result = await context.request('/ai', {
+                            ...context.json({
+                                mode: aiContext.mode,
+                                artifactId: aiContext.artifactId,
+                                nodeId: aiContext.nodeId,
+                                expectedVersionId: aiContext.versionId,
+                                prompt: $('mindmap-branch-prompt')?.value || ''
+                            }),
+                            signal: state.aiController.signal
+                        });
+                    } catch (error) {
+                        if (error.name === 'AbortError') return true;
+                        if (statusBar) statusBar.textContent = error.message;
+                        throw error;
+                    } finally {
+                        if (btn && btn.isConnected) btn.disabled = false;
+                    }
                     if (sequence !== state.dialogSequence || $('mindmap-dialog').classList.contains('hidden')) return true;
                     aiResult = result;
-                    void dialog('检查分支结果', `<pre>${escape(result.summary || schema.markdown(result.document))}</pre><button class="btn-primary" type="button" data-mm-action="ai-branch-apply">应用到原分支</button>`); return true;
+                    const isSummarize = aiContext.mode === 'summarize';
+                    const previewText = isSummarize ? result.summary : schema.markdown(result.document);
+                    const previewTitle = isSummarize ? '检查分支总结结果' : '检查分支扩展结果';
+                    const previewSubtitle = isSummarize
+                        ? '已成功提炼所选分支的要点摘要，确认后将自动写入该节点的备注中：'
+                        : '已成功生成下级子分支大纲，确认后将合并追加到当前分支结构中：';
+                    const previewHtml = `
+<div class="mm-modal-form mm-ai-preview-modal">
+    <div class="mm-modal-subtitle">${previewSubtitle}</div>
+    <div class="mm-target-branch-card">
+        <div class="mm-target-branch-header">
+            <span class="mm-target-branch-tag">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 3v6m0 6v6m9-9h-6m-6 0H3"/></svg>
+                <span>目标分支</span>
+            </span>
+            <span class="mm-target-branch-depth">操作: ${isSummarize ? '写入节点备注' : '新增子分支'}</span>
+        </div>
+        <div class="mm-target-branch-name" title="${escape(aiContext.nodeTitle || '')}">${escape(aiContext.nodeTitle || '')}</div>
+    </div>
+    <div class="mm-form-field">
+        <div class="mm-field-label-row">
+            <label class="mm-field-label">
+                <span class="mm-label-text">${isSummarize ? '提炼摘要预览' : '生成子分支大纲预览'}</span>
+            </label>
+            <span class="mm-label-hint">结构化 Markdown 预览</span>
+        </div>
+        <pre class="mm-ai-preview-pre">${escape(previewText)}</pre>
+    </div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">${isSummarize ? '可在属性面板中随时修改该节点的备注' : '应用后可在画布中继续编辑与调整位置'}</span>
+        <div class="mm-footer-btns">
+            <button class="btn-secondary mm-modal-cancel" type="button" data-mm-action="dialog-close">返回重试</button>
+            <button class="btn-primary mm-modal-submit" type="button" data-mm-action="ai-branch-apply">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>${isSummarize ? '应用到节点备注' : '应用到原分支'}</span>
+            </button>
+        </div>
+    </div>
+</div>`;
+                    void dialog(previewTitle, previewHtml, { hideClose: true });
+                    return true;
                 }
                 if (name === 'ai-branch-apply') {
                     if (!aiContext || !aiResult || state.active.id !== aiContext.artifactId || JSON.stringify(state.document) !== aiContext.signature) throw new Error('生成期间导图已变化，请重新生成，或复制预览内容后手动编辑。');
@@ -122,13 +446,6 @@
                         target.children.push(...additions.map(remap));
                     }
                     apply(next); aiResult = null; aiContext = null; closeDialog(); return true;
-                }
-                if (name === 'outline-edit') {
-                    void dialog('编辑节点大纲', `<p>按稳定节点标识修改文字，保留样式、备注和关联关系。</p>${nodes().map(node => `<label>${escape('　'.repeat(node.depth) + '节点')}<input class="form-input" maxlength="120" data-mm-outline-text="${node.id}" value="${escape(node.text)}"></label>`).join('')}<div class="mindmap-toolbar"><button class="btn-primary" type="button" data-mm-action="outline-apply">应用大纲</button></div>`); return true;
-                }
-                if (name === 'outline-apply') {
-                    const next = schema.normalize(state.document); const values = new Map([...$('mindmap-dialog-body').querySelectorAll('[data-mm-outline-text]')].map(input => [input.dataset.mmOutlineText, input.value]));
-                    (function walk(node) { node.text = values.get(node.id); node.children.forEach(walk); })(next.tree); apply(next); closeDialog(); return true;
                 }
                 if (name === 'relations') { relations(); return true; }
                 if (name === 'relation-add' || name === 'relation-remove') {
