@@ -10,6 +10,8 @@
     const state = { active: null, document: null, editor: null, page: 1, total: 0, rows: [], dirty: false, saving: null, pending: null, conflict: false, userId: '', loadSequence: 0, timer: null, maxTimer: null, pollTimer: null, dialogResolve: null, started: false, personalTemplates: [] };
     let editorModule;
     let advanced;
+    let outline;
+    let dialogs;
     let collaborationModule;
     const drafts = () => window.Pivot.moduleApi('mindmaps.drafts');
     const status = message => {
@@ -193,130 +195,7 @@
         if (state.dirty && !state.conflict) return save();
         return state.active;
     }
-    function updateOutlineNodeText(nodeId, newText) {
-        const trimmed = (newText || '').trim();
-        if (!trimmed || !state.document?.tree) return;
-        if (trimmed.length > (schema.LIMITS?.text || 120)) {
-            fail(new Error(`节点文字长度不能超过 ${schema.LIMITS?.text || 120} 字符`));
-            return;
-        }
-        const next = schema.normalize(state.document);
-        let target = null;
-        (function walk(n) {
-            if (n.id === nodeId) { target = n; return; }
-            n.children.forEach(walk);
-        })(next.tree);
-        if (!target || target.text === trimmed) return;
-        target.text = trimmed;
-        state.editor.update(next);
-        if (state.editor.selection() === nodeId) {
-            $('mindmap-selection').textContent = trimmed;
-            $('mindmap-node-text').value = trimmed;
-        }
-        if (nodeId === next.tree.id && $('mindmap-doc-title')) {
-            $('mindmap-doc-title').value = trimmed;
-        }
-    }
-
-    function startOutlineInlineEdit(button, node) {
-        if (!button || !button.isConnected) return;
-        const parent = button.parentElement;
-        if (!parent || parent.querySelector('.xmind-outline-input')) return;
-
-        const originalText = node.text;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'xmind-outline-input';
-        input.value = originalText;
-        input.maxLength = schema.LIMITS?.text || 120;
-        input.setAttribute('aria-label', `编辑节点 ${originalText}`);
-
-        let committed = false;
-        const finish = (saveValue) => {
-            if (committed) return;
-            committed = true;
-            input.remove();
-            button.style.display = '';
-            if (saveValue && input.value.trim() && input.value.trim() !== originalText) {
-                updateOutlineNodeText(node.id, input.value.trim());
-            } else {
-                button.focus();
-            }
-        };
-
-        input.addEventListener('keydown', event => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                event.stopPropagation();
-                finish(true);
-            } else if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                finish(false);
-            }
-        });
-        input.addEventListener('blur', () => finish(true));
-
-        button.style.display = 'none';
-        parent.insertBefore(input, button);
-        input.focus();
-        input.select();
-    }
-
-    function renderOutline() {
-        const host = $('mindmap-outline'); if (!host) return;
-        host.replaceChildren();
-        const selectedId = state.editor?.selection?.() || null;
-        function visit(node, parent) {
-            const item = document.createElement('li'); item.setAttribute('role', 'treeitem');
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'xmind-outline-node-btn';
-            button.title = `${node.text} (双击直接修改名称)`;
-            button.dataset.mmNode = node.id;
-            if (node.id === selectedId) button.classList.add('is-active');
-
-            const textSpan = document.createElement('span');
-            textSpan.className = 'xmind-outline-node-text';
-            textSpan.textContent = node.text;
-            button.appendChild(textSpan);
-
-            const editIcon = document.createElement('span');
-            editIcon.className = 'xmind-outline-edit-icon';
-            editIcon.title = '编辑名称';
-            editIcon.setAttribute('aria-label', '编辑名称');
-            window.PivotSafeHtml?.setHtml(editIcon, '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>', { USE_PROFILES: { html: true, svg: true } });
-            editIcon.addEventListener('click', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                startOutlineInlineEdit(button, node);
-            });
-            button.appendChild(editIcon);
-
-            button.addEventListener('dblclick', event => {
-                event.preventDefault();
-                event.stopPropagation();
-                startOutlineInlineEdit(button, node);
-            });
-            button.addEventListener('keydown', event => {
-                if ((event.key === 'F2' || (event.key === 'Enter' && button.classList.contains('is-active'))) && !event.isComposing) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    startOutlineInlineEdit(button, node);
-                }
-            });
-
-            item.appendChild(button);
-            if (node.children && node.children.length) {
-                const list = document.createElement('ul');
-                list.setAttribute('role', 'group');
-                node.children.forEach(child => visit(child, list));
-                item.appendChild(list);
-            }
-            parent.appendChild(item);
-        }
-        if (state.document?.tree) { const list = document.createElement('ul'); visit(state.document.tree, list); host.appendChild(list); }
-    }
+    const renderOutline = () => outline?.renderOutline();
     function selected(node) {
         const palette = state.document ? schema.palette(state.document) : schema.THEMES.indigo;
         const defaultFill = node?.id === state.document?.tree.id ? palette.root : palette.background;
@@ -466,70 +345,6 @@
         if (state.createPending?.signature !== signature) state.createPending = { signature, requestKey: key() };
         const result = await request('', json({ document, requestKey: state.createPending.requestKey })); state.createPending = null; return result;
     }
-    async function versionDialog(page = 1) {
-        const result = await request(`/${state.active.id}/versions?page=${page}&limit=20`);
-        const total = result.total || result.rows.length;
-        const totalPages = Math.max(1, Math.ceil(total / 20));
-        const modalHtml = `
-<div class="mm-modal-form mm-versions-modal">
-    <div class="mm-modal-subtitle">浏览与回滚历史编辑快照。恢复所选版本将自动保存为最新版本，当前内容完整保留。</div>
-    <div class="mm-version-current-bar">
-        <div class="mm-version-current-left">
-            <span class="mm-version-badge-curr">当前版本</span>
-            <span class="mm-version-number">v${state.active.version}</span>
-        </div>
-        <span class="mm-version-total-count">共 ${total} 个历史快照</span>
-    </div>
-    <div class="mm-modal-table-wrap mm-version-table-wrap">
-        <table class="mm-modal-table">
-            <thead>
-                <tr>
-                    <th style="width: 16%;">版本</th>
-                    <th style="width: 38%;">说明</th>
-                    <th style="width: 28%;">保存时间</th>
-                    <th style="width: 18%; text-align: center;">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${result.rows.map(row => {
-                    const isCurrent = Number(row.version) === Number(state.active.version);
-                    return `<tr>
-                        <td>
-                            <span class="mm-version-pill${isCurrent ? ' is-current' : ''}">v${row.version}</span>
-                        </td>
-                        <td>
-                            <span class="mm-desc-text" title="${escape(row.note || '导图编辑保存')}">${escape(row.note || '导图编辑保存')}</span>
-                        </td>
-                        <td>
-                            <span class="mm-version-time">${escape(new Date(row.createdAt).toLocaleString())}</span>
-                        </td>
-                        <td style="text-align: center;">
-                            ${isCurrent
-                                ? '<span class="mm-version-curr-tag">当前版本</span>'
-                                : `<button type="button" class="mm-restore-btn" data-mm-restore="${row.id}">
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-                                    <span>恢复</span>
-                                   </button>`
-                            }
-                        </td>
-                    </tr>`;
-                }).join('')}
-            </tbody>
-        </table>
-    </div>
-    <div class="mm-version-pagination">
-        <span class="mm-version-page-info">第 ${page} 页 / 共 ${totalPages} 页</span>
-        <div class="mm-version-page-btns">
-            ${page > 1 ? `<button class="btn-secondary btn-xs mm-version-page-btn" type="button" data-mm-version-page="${page - 1}">上一页</button>` : ''}
-            ${page < totalPages ? `<button class="btn-secondary btn-xs mm-version-page-btn" type="button" data-mm-version-page="${page + 1}">下一页</button>` : ''}
-        </div>
-    </div>
-    <div class="mm-modal-footer">
-        <span class="mm-footer-hint">每次手动保存或自动协作均会生成稳定快照</span>
-    </div>
-</div>`;
-        void dialog('历史版本', modalHtml);
-    }
     async function download(job) {
         const userId = state.userId; const title = state.document?.tree.text || '思维导图';
         const fetch = window.Pivot.legacy.apiFetch;
@@ -554,6 +369,7 @@
     }
     async function action(name) {
         if (await advanced?.action(name, state.actionButton)) return;
+        if (await dialogs?.action(name, state.actionButton)) return;
         if (name === 'dialog-close') return closeDialog();
         if (name === 'dialog-confirm') return closeDialog(true);
         if (name === 'save') return save();
@@ -564,153 +380,6 @@
         if (name === 'next') { state.page++; return loadList(); }
         if (name === 'fold') return state.editor?.fold?.(false);
         if (name === 'unfold') return state.editor?.fold?.(true);
-        if (name === 'new') {
-            const personalTpls = state.personalTemplates || [];
-            const personalOptionsHtml = personalTpls.length > 0
-                ? `<optgroup label="个人模板" id="mm-personal-template-group">${personalTpls.map(t => `<option value="personal:${escape(t.id)}" data-personal-template="true">${escape(t.name)}</option>`).join('')}</optgroup>`
-                : '<optgroup label="个人模板" id="mm-personal-template-group" hidden></optgroup>';
-
-            const modalHtml = `
-<div class="mm-modal-form mm-create-modal">
-    <div class="mm-modal-subtitle">选择适合的结构模板并设定导图名称，即刻开始梳理思路</div>
-    <div class="mm-form-field">
-        <div class="mm-field-label-row">
-            <label class="mm-field-label" for="mindmap-new-title">
-                <span class="mm-label-text">导图名称</span>
-            </label>
-            <span class="mm-label-hint">按 Enter 键可直接创建</span>
-        </div>
-        <input id="mindmap-new-title" class="form-input mm-modal-input" maxlength="120" value="中心主题" placeholder="请输入导图名称或中心主题…">
-    </div>
-    <div class="mm-form-field">
-        <div class="mm-field-label-row">
-            <span class="mm-field-label">
-                <span class="mm-label-text">选择结构模板</span>
-            </span>
-            <span class="mm-label-hint">双击卡片快速创建</span>
-        </div>
-        <div class="mm-tpl-cards" role="radiogroup" aria-label="导图模板">
-            <div class="mm-tpl-card is-selected" data-template="blank" tabindex="0" role="radio" aria-checked="true">
-                <div class="mm-tpl-badge"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-                <div class="mm-tpl-icon mm-icon-blank">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/><line x1="2" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="22" y2="12"/></svg>
-                </div>
-                <div class="mm-tpl-content">
-                    <div class="mm-tpl-name">空白导图</div>
-                    <div class="mm-tpl-brief">仅包含中心主题，自由发散扩展</div>
-                </div>
-            </div>
-            <div class="mm-tpl-card" data-template="plan" tabindex="0" role="radio" aria-checked="false">
-                <div class="mm-tpl-badge"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-                <div class="mm-tpl-icon mm-icon-plan">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                </div>
-                <div class="mm-tpl-content">
-                    <div class="mm-tpl-name">工作计划</div>
-                    <div class="mm-tpl-brief">目标、里程碑、具体行动与资源</div>
-                </div>
-            </div>
-            <div class="mm-tpl-card" data-template="analysis" tabindex="0" role="radio" aria-checked="false">
-                <div class="mm-tpl-badge"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-                <div class="mm-tpl-icon mm-icon-analysis">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-                </div>
-                <div class="mm-tpl-content">
-                    <div class="mm-tpl-name">分析研判</div>
-                    <div class="mm-tpl-brief">态势研判、因果溯源与结论推演</div>
-                </div>
-            </div>
-            <div class="mm-tpl-card" data-template="meeting" tabindex="0" role="radio" aria-checked="false">
-                <div class="mm-tpl-badge"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-                <div class="mm-tpl-icon mm-icon-meeting">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                </div>
-                <div class="mm-tpl-content">
-                    <div class="mm-tpl-name">会议纪要</div>
-                    <div class="mm-tpl-brief">会议议题、决议事项与待办跟进</div>
-                </div>
-            </div>
-        </div>
-        <select id="mindmap-template" class="form-input hidden" tabindex="-1" aria-hidden="true">
-            <option value="blank" selected>空白导图</option>
-            <option value="plan">工作计划</option>
-            <option value="analysis">分析研判</option>
-            <option value="meeting">会议纪要</option>
-            ${personalOptionsHtml}
-        </select>
-    </div>
-    <div class="mm-modal-footer">
-        <span class="mm-footer-hint">支持回车快速创建</span>
-        <div class="mm-footer-btns">
-            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">取消</button>
-            <button type="button" class="btn-primary mm-modal-submit" data-mm-action="create-confirm">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>创建</span>
-            </button>
-        </div>
-    </div>
-</div>`;
-            void dialog('新建思维导图', modalHtml, { hideClose: true });
-            const dialogBody = $('mindmap-dialog-body');
-            const selectEl = $('mindmap-template');
-            const cards = dialogBody.querySelectorAll('.mm-tpl-card');
-            const titleInput = $('mindmap-new-title');
-
-            const syncActiveCard = val => {
-                cards.forEach(card => {
-                    const match = card.dataset.template === val;
-                    card.classList.toggle('is-selected', match);
-                    card.setAttribute('aria-checked', String(match));
-                });
-            };
-
-            cards.forEach(card => {
-                card.addEventListener('click', () => {
-                    const tpl = card.dataset.template;
-                    if (selectEl) selectEl.value = tpl;
-                    syncActiveCard(tpl);
-                });
-                card.addEventListener('dblclick', () => {
-                    const tpl = card.dataset.template;
-                    if (selectEl) selectEl.value = tpl;
-                    syncActiveCard(tpl);
-                    void action('create-confirm');
-                });
-                card.addEventListener('keydown', e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        const tpl = card.dataset.template;
-                        if (selectEl) selectEl.value = tpl;
-                        syncActiveCard(tpl);
-                    }
-                });
-            });
-
-            if (selectEl) {
-                selectEl.addEventListener('change', () => {
-                    syncActiveCard(selectEl.value);
-                });
-            }
-
-            if (titleInput) {
-                titleInput.focus();
-                titleInput.select();
-                titleInput.addEventListener('keydown', e => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void action('create-confirm');
-                    }
-                });
-            }
-            return;
-        }
-        if (name === 'create-confirm') {
-            const templateValue = $('mindmap-template')?.value || 'blank';
-            const titleValue = $('mindmap-new-title')?.value.trim() || '中心主题';
-            if (templateValue.startsWith('personal:')) { const result = await request(`/personal-templates/${encodeURIComponent(templateValue.slice(9))}`); result.document.tree.text = titleValue; await create(result.document); closeDialog(); return; }
-            const template = await request('/templates', json({ template: templateValue, title: titleValue }));
-            await create(template.document); closeDialog(); return;
-        }
         if (name === 'import') return $('mindmap-import-file').click();
         if (name === 'copy') {
             const local = schema.normalize(state.document); local.tree.text = local.tree.text.slice(0, 116) + ' 副本';
@@ -752,7 +421,6 @@
                 hyperlink: $('mindmap-node-link').value
             });
         }
-        if (name === 'versions') { await save(); return versionDialog(); }
         if (name === 'export') {
             $('xmind-export-menu')?.classList.add('hidden');
             $('xmind-export-dropdown')?.classList.remove('is-open');
@@ -760,92 +428,6 @@
             clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
             await save(); const result = await request(`/${state.active.id}/exports`, json({ format: $('mindmap-export-format').value, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
         }
-        if (name === 'ai') {
-            const aiHtml = `
-<div class="mm-modal-form mm-ai-modal">
-    <div class="mm-modal-subtitle">输入核心主题或粘贴长文大纲，AI 模型将智能解析并构建思维导图层级结构</div>
-    <div class="mm-form-field">
-        <div class="mm-field-label-row">
-            <label class="mm-field-label" for="mindmap-ai-prompt">
-                <span class="mm-label-text">主题或材料内容</span>
-            </label>
-            <span class="mm-label-hint">支持大纲草案、会议材料或方案文本</span>
-        </div>
-        <div class="mm-textarea-wrap">
-            <textarea id="mindmap-ai-prompt" class="form-input mm-ai-textarea" rows="5" maxlength="12000" placeholder="请输入导图主题，或粘贴方案材料、研判分析要点等内容…"></textarea>
-        </div>
-    </div>
-    <div class="mm-form-field">
-        <div class="mm-field-label-row">
-            <label class="mm-field-label" for="mindmap-ai-model">
-                <span class="mm-label-text">分析推理模型</span>
-            </label>
-            <span class="mm-label-hint">选择用于生成导图的模型</span>
-        </div>
-        <select id="mindmap-ai-model" class="form-input mm-ai-model-select" data-pivot-app-model="mindmaps">
-            <option value="">使用默认模型</option>
-        </select>
-    </div>
-    <div class="mm-ai-notice">
-        <svg class="mm-notice-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <span class="mm-notice-text">生成结果将先以大纲树形预览展示，经确认后才保存为正式导图。</span>
-    </div>
-    <div id="mindmap-ai-status" class="mm-status-bar" role="status"></div>
-    <div class="mm-modal-footer">
-        <span class="mm-footer-hint">支持按 Ctrl + Enter 快捷生成</span>
-        <div class="mm-footer-btns">
-            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">取消</button>
-            <button type="button" class="btn-primary mm-modal-submit" data-mm-action="ai-generate">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                <span>生成预览</span>
-            </button>
-        </div>
-    </div>
-</div>`;
-            void dialog('AI 生成导图', aiHtml, { hideClose: true });
-            window.Pivot.moduleApi('apps.modelSelector').refresh?.('mindmaps', 'mindmap-ai-model');
-            const promptInput = $('mindmap-ai-prompt');
-            if (promptInput) {
-                promptInput.focus();
-                promptInput.addEventListener('keydown', e => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                        e.preventDefault();
-                        void action('ai-generate');
-                    }
-                });
-            }
-            return;
-        }
-        if (name === 'ai-generate') {
-            const button = $('mindmap-dialog-body').querySelector('[data-mm-action="ai-generate"]'); button.disabled = true;
-            if ($('mindmap-ai-status')) $('mindmap-ai-status').textContent = '正在分析材料并生成结构化导图…';
-            const sequence = state.dialogSequence; state.aiController = new AbortController();
-            try {
-                const result = await request('/ai', { ...json({ prompt: $('mindmap-ai-prompt').value, model: $('mindmap-ai-model').value }), signal: state.aiController.signal });
-                if (sequence !== state.dialogSequence) return;
-                const generated = result.document; if (!generated) throw new Error('未收到有效导图，请重试。');
-                state.aiGenerated = generated;
-                const preview = schema.markdown(generated);
-                const previewHtml = `
-<div class="mm-modal-form mm-ai-preview-modal">
-    <div class="mm-modal-subtitle">已成功解析生成导图大纲结构，请检查各分支层级与节点内容：</div>
-    <pre class="mm-ai-preview-pre">${escape(preview)}</pre>
-    <div class="mm-modal-footer">
-        <span class="mm-footer-hint">确认无误后即可保存到导图库并开启可视化编辑</span>
-        <div class="mm-footer-btns">
-            <button class="btn-secondary mm-modal-cancel" type="button" data-mm-action="dialog-close">返回重试</button>
-            <button class="btn-primary mm-modal-submit" type="button" data-mm-action="ai-save">保存为新导图</button>
-        </div>
-    </div>
-</div>`;
-                void dialog('检查生成结果', previewHtml);
-            } catch (error) {
-                if (error.name === 'AbortError') return;
-                if ($('mindmap-ai-status')) $('mindmap-ai-status').textContent = error.message;
-                throw error;
-            } finally { if (button.isConnected) button.disabled = false; }
-        }
-        if (name === 'ai-save' && state.aiGenerated) { await create(state.aiGenerated); state.aiGenerated = null; closeDialog(); }
     }
     function bind() {
         if (state.started) return; state.started = true;
@@ -879,7 +461,7 @@
                 if (button.dataset.mmRecover) { if (await confirm('恢复导图', '恢复会生成新版本并清除之前的共享授权；版本配额已满时恢复为个人副本。是否继续？')) { const result = await request(`/${button.dataset.mmRecover}/recover`, json({})); await loadList(); if (result.recoveredAsCopy) window.Pivot.legacy.showToast?.('已恢复为个人副本，原记录仍保留在回收站。', 'success'); } return; }
                 if (button.dataset.mmOrganize) return advanced.action('organize', button);
                 if (button.dataset.mmNode) return state.editor.focus(button.dataset.mmNode);
-                if (button.dataset.mmVersionPage) return versionDialog(Number(button.dataset.mmVersionPage));
+                if (button.dataset.mmVersionPage) return dialogs?.versionDialog(Number(button.dataset.mmVersionPage));
                 if (button.dataset.mmRestore) {
                     const versionId = button.dataset.mmRestore;
                     if (await confirm('恢复历史版本', '当前内容会保留为历史版本，是否恢复所选快照？')) {
@@ -1137,7 +719,11 @@
         let activation = state.activationSequence = (state.activationSequence || 0) + 1;
         await window.Pivot.loadScriptOnce('/chat/mindmaps/drafts.js');
         await window.Pivot.loadScriptOnce('/chat/mindmaps/advanced.js');
+        await window.Pivot.loadScriptOnce('/chat/mindmaps/outline.js');
+        await window.Pivot.loadScriptOnce('/chat/mindmaps/dialogs.js');
         advanced ||= window.Pivot.moduleApi('mindmaps.advanced').create({ state, dialog, closeDialog, escape, changed, save, request, json, create, open, loadList });
+        outline ||= window.Pivot.moduleApi('mindmaps.outline').create({ state, fail });
+        dialogs ||= window.Pivot.moduleApi('mindmaps.dialogs').create({ state, dialog, closeDialog, escape, request, json, create, open, save });
         editorModule ||= await import('/chat/mindmaps/editor.mjs');
         const userId = String(window.Pivot.legacy.currentUser?.id || ''); if (!userId) throw new Error('请登录后打开思维导图。');
         if (state.userId && state.userId !== userId) { await logout(); activation = state.activationSequence = (state.activationSequence || 0) + 1; }
