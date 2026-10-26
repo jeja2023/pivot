@@ -315,140 +315,6 @@ async function saveAgentWorkflowMetadata() {
     }
 }
 
-let agentWorkflowShareState = { workflowId: '', options: null };
-
-function setAgentWorkflowShareError(message = '') {
-    const error = document.getElementById('agent-workflow-share-error');
-    if (!error) return;
-    error.textContent = message;
-    error.hidden = !message;
-}
-
-function setAgentWorkflowShareUnitsEnabled(enabled) {
-    const all = document.getElementById('agent-workflow-share-all');
-    const allChecked = all?.checked === true && all?.disabled !== true;
-    document.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit], #agent-workflow-share-units-list input[data-agent-share-user]').forEach(input => {
-        input.disabled = !enabled || allChecked;
-    });
-    document.querySelectorAll('[data-agent-share-select], [data-agent-share-clear]').forEach(button => {
-        button.disabled = !enabled || allChecked;
-    });
-}
-
-function renderAgentWorkflowShareUnits(workflow, options) {
-    const section = document.getElementById('agent-workflow-share-units-section');
-    const list = document.getElementById('agent-workflow-share-units-list');
-    const allLabel = document.getElementById('agent-workflow-share-all-label');
-    const all = document.getElementById('agent-workflow-share-all');
-    const hint = document.getElementById('agent-workflow-share-units-hint');
-    if (!section || !list || !allLabel || !all || !hint) return;
-    const selectedScope = document.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value;
-    const isShared = (selectedScope || workflow?.scope) === 'shared';
-    const availableUnits = Array.isArray(options?.units) ? options.units.filter(Boolean) : [];
-    const allowedUnits = Array.isArray(workflow?.allowed_units) ? workflow.allowed_units.filter(Boolean) : [];
-    const availableUsers = Array.isArray(options?.users) ? options.users.filter(item => Number(item?.id) > 0) : [];
-    const allowedUserIds = new Set((Array.isArray(workflow?.allowed_user_ids)
-        ? workflow.allowed_user_ids
-        : String(workflow?.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
-    const selectableUnits = new Set([...availableUnits, ...allowedUnits]);
-    const unassignedUnit = '未设置单位';
-    const usersByUnit = new Map();
-    availableUsers.forEach(target => {
-        const unit = String(target.unit || '').trim() || unassignedUnit;
-        if (!usersByUnit.has(unit)) usersByUnit.set(unit, []);
-        usersByUnit.get(unit).push(target);
-    });
-    const units = [...new Set([...availableUnits, ...allowedUnits, ...usersByUnit.keys()])]
-        .sort((left, right) => {
-            if (left === unassignedUnit) return 1;
-            if (right === unassignedUnit) return -1;
-            return left.localeCompare(right, 'zh-CN');
-        });
-    const canShareAll = options?.canShareAll === true;
-    const existingShared = String(workflow?.scope || '') === 'shared';
-    const isAll = isShared && existingShared && canShareAll && allowedUnits.length === 0 && allowedUserIds.size === 0;
-    section.classList.toggle('hidden', !isShared);
-    allLabel.classList.toggle('hidden', !canShareAll);
-    all.checked = isAll;
-    all.disabled = !canShareAll;
-    hint.textContent = canShareAll
-        ? '勾选单位可共享给该单位全体成员，也可展开到单位下精确选择用户。'
-        : (options?.currentUnit ? `可共享给本单位 ${options.currentUnit}，其他单位只能精确选择用户。` : '当前账号未设置所属单位，只能精确选择用户。');
-    if (!units.length) {
-        PivotSafeHtml.setHtml(list, '<div class="agent-workflow-share-empty">暂无可共享的单位或用户。</div>');
-    } else {
-        PivotSafeHtml.setHtml(list, units.map(unit => {
-            const unitUsers = usersByUnit.get(unit) || [];
-            const selectable = unit !== unassignedUnit && selectableUnits.has(unit);
-            const checked = selectable && isShared && !isAll && allowedUnits.includes(unit);
-            const meta = [
-                unit === options.currentUnit ? '本单位' : '',
-                unitUsers.length ? `${unitUsers.length} 名用户` : '暂无用户',
-                selectable ? '' : '仅可选择个人'
-            ].filter(Boolean).join(' · ');
-            return `
-                <section class="agent-workflow-share-tree-unit" role="treeitem" aria-expanded="true">
-                    <div class="agent-workflow-share-tree-unit-head">
-                        ${selectable ? `<label class="agent-workflow-share-tree-unit-label"><input type="checkbox" data-agent-share-unit="${agentEscapeAttr(unit)}" ${checked ? 'checked' : ''}><span><strong>${agentEscape(unit)}</strong><small>${agentEscape(meta)}</small></span></label>` : `<span class="agent-workflow-share-tree-unit-label"><span><strong>${agentEscape(unit)}</strong><small>${agentEscape(meta)}</small></span></span>`}
-                    </div>
-                    <div class="agent-workflow-share-tree-users" role="group">
-                        ${unitUsers.length ? unitUsers.map(target => {
-        const id = Number(target.id);
-        const displayName = target.nickname || target.username || `用户 ${id}`;
-        const detail = target.nickname && target.username ? target.username : `用户 ${id}`;
-        const userChecked = isShared && !isAll && (checked || allowedUserIds.has(id));
-        return `<label class="agent-workflow-share-tree-user" role="treeitem"><input type="checkbox" data-agent-share-user="${id}" data-agent-share-user-unit="${agentEscapeAttr(unit === unassignedUnit ? '' : unit)}" ${userChecked ? 'checked' : ''}><span><strong>${agentEscape(displayName)}</strong><small>${agentEscape(detail)}</small></span></label>`;
-    }).join('') : '<span class="agent-workflow-share-tree-empty">该单位暂无其他可共享用户</span>'}
-                    </div>
-                </section>`;
-        }).join(''));
-    }
-    list.querySelectorAll('input[data-agent-share-unit]').forEach(input => {
-        input.addEventListener('change', () => {
-            const unit = input.dataset.agentShareUnit;
-            list.querySelectorAll('input[data-agent-share-user]').forEach(userInput => {
-                if (userInput.dataset.agentShareUserUnit === unit && !userInput.disabled) userInput.checked = input.checked;
-            });
-            setAgentWorkflowShareError('');
-        });
-    });
-    setAgentWorkflowShareUnitsEnabled(isShared);
-}
-
-function bindAgentWorkflowShareModal() {
-    const modal = document.getElementById('agent-workflow-share-modal');
-    if (!modal || modal.dataset.boundAgentWorkflowShareModal === '1') return;
-    modal.dataset.boundAgentWorkflowShareModal = '1';
-    const close = () => setAgentWorkflowLibraryModalVisibility(modal, false);
-    document.getElementById('agent-workflow-share-close-btn')?.addEventListener('click', close);
-    document.getElementById('agent-workflow-share-cancel-btn')?.addEventListener('click', close);
-    modal.querySelectorAll('input[name="agent-workflow-share-scope"]').forEach(input => {
-        input.addEventListener('change', () => {
-            const workflow = agentWorkflowsCache.find(item => String(item.id) === String(agentWorkflowShareState.workflowId));
-            renderAgentWorkflowShareUnits(workflow, agentWorkflowShareState.options || {});
-            setAgentWorkflowShareError('');
-        });
-    });
-    document.getElementById('agent-workflow-share-all')?.addEventListener('change', () => {
-        const scope = modal.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value;
-        setAgentWorkflowShareUnitsEnabled(scope === 'shared');
-    });
-    modal.querySelectorAll('[data-agent-share-select], [data-agent-share-clear]').forEach(button => {
-        button.addEventListener('click', () => {
-            const group = button.dataset.agentShareSelect || button.dataset.agentShareClear;
-            const checked = Boolean(button.dataset.agentShareSelect);
-            const selector = group === 'tree'
-                ? '#agent-workflow-share-units-list input[data-agent-share-unit], #agent-workflow-share-units-list input[data-agent-share-user]'
-                : '#agent-workflow-share-units-list input[data-agent-share-unit]';
-            modal.querySelectorAll(selector).forEach(input => {
-                if (!input.disabled) input.checked = checked;
-            });
-            setAgentWorkflowShareError('');
-        });
-    });
-    document.getElementById('agent-workflow-share-save-btn')?.addEventListener('click', saveAgentWorkflowSharing);
-}
-
 async function loadAgentWorkflowShareOptions() {
     const res = await apiFetch(`${API_BASE}/agents/workflows/share-options`);
     const data = await res.json().catch(() => ({}));
@@ -457,80 +323,88 @@ async function loadAgentWorkflowShareOptions() {
 }
 
 async function openAgentWorkflowShare(workflowId) {
-    bindAgentWorkflowShareModal();
     const workflow = agentWorkflowsCache.find(item => String(item.id) === String(workflowId));
-    const modal = document.getElementById('agent-workflow-share-modal');
-    const summary = document.getElementById('agent-workflow-share-summary');
-    const save = document.getElementById('agent-workflow-share-save-btn');
-    if (!workflow || !workflow.can_edit || !modal || !summary || !save) {
+    if (!workflow || !workflow.can_edit) {
         showToast('只有工作流所有者可以修改共享设置', 'warning');
         return;
     }
-    agentWorkflowShareState = { workflowId: String(workflow.id), options: null };
-    setAgentWorkflowShareError('');
+
+    let options = {};
+    try {
+        options = await loadAgentWorkflowShareOptions();
+    } catch (error) {
+        showToast(error.message || '共享范围加载失败', 'error');
+        return;
+    }
+
+    const users = Array.isArray(options.users) ? options.users : [];
+    const units = Array.isArray(options.units) ? options.units : [];
+    const allowedUserIds = new Set((Array.isArray(workflow.allowed_user_ids)
+        ? workflow.allowed_user_ids
+        : String(workflow.allowed_user_ids || '').split(',')).map(Number).filter(Number.isSafeInteger));
+
+    const allowedUnits = Array.isArray(workflow.allowed_units)
+        ? workflow.allowed_units
+        : String(workflow.allowed_units || '').split(',').map(s => s.trim()).filter(Boolean);
+    const allowedUnitsSet = new Set(allowedUnits);
+    if (allowedUnitsSet.size > 0) {
+        users.forEach(u => {
+            if (u && allowedUnitsSet.has(u.unit)) {
+                allowedUserIds.add(Number(u.id));
+            }
+        });
+    }
+
+    const initialCollaborators = Array.from(allowedUserIds).map(id => ({ id, role: 'viewer' }));
+
+    const ownerId = Number(workflow.user_id);
+    const ownerUser = ownerId ? users.find(u => Number(u.id) === ownerId) : null;
+    const owner = ownerUser || {
+        id: ownerId || 1,
+        username: workflow.user_name || '所有者',
+        nickname: workflow.user_name || '所有者',
+        unit: '未分配单位'
+    };
+
+    const modalEngine = window.Pivot?.modules?.['share.collaborators'] || window.Pivot?.legacy?.PivotShareCollabModal;
+    if (!modalEngine) {
+        showToast('共享面板组件尚未加载，请刷新页面后重试。', 'error');
+        return;
+    }
+
     const publishHint = workflow.published_version
         ? '共享后，接收方只能查看并运行已发布版本。'
         : '当前尚未发布，保存共享设置后接收方仍不可见；发布后才会生效。';
-    PivotSafeHtml.setHtml(summary, `<strong>${agentEscape(workflow.name || '未命名工作流')}</strong><span>${publishHint}</span>`);
-    const scope = modal.querySelector(`input[name="agent-workflow-share-scope"][value="${workflow.scope === 'shared' ? 'shared' : 'personal'}"]`);
-    if (scope) scope.checked = true;
-    save.disabled = true;
-    setAgentWorkflowLibraryModalVisibility(modal, true, save);
-    try {
-        const options = await loadAgentWorkflowShareOptions();
-        agentWorkflowShareState.options = options;
-        renderAgentWorkflowShareUnits(workflow, options);
-    } catch (error) {
-        setAgentWorkflowShareError(error.message || '共享范围加载失败');
-    } finally {
-        save.disabled = false;
-    }
-}
 
-async function saveAgentWorkflowSharing() {
-    const modal = document.getElementById('agent-workflow-share-modal');
-    const save = document.getElementById('agent-workflow-share-save-btn');
-    const workflow = agentWorkflowsCache.find(item => String(item.id) === String(agentWorkflowShareState.workflowId));
-    if (!modal || !save || !workflow) return;
-    const scope = modal.querySelector('input[name="agent-workflow-share-scope"]:checked')?.value || 'personal';
-    const all = document.getElementById('agent-workflow-share-all');
-    const allChecked = all?.checked === true && all?.disabled !== true;
-    const allowedUnits = scope === 'shared' && !allChecked
-        ? [...modal.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-unit]:checked')]
-            .map(input => input.dataset.agentShareUnit)
-            .filter(Boolean)
-        : [];
-    const allowedUserIds = scope === 'shared' && !allChecked
-        ? [...modal.querySelectorAll('#agent-workflow-share-units-list input[data-agent-share-user]:checked')]
-            .filter(input => !allowedUnits.includes(input.dataset.agentShareUserUnit || ''))
-            .map(input => Number(input.dataset.agentShareUser))
-            .filter(Number.isSafeInteger)
-        : [];
-    if (scope === 'shared' && !allChecked && !allowedUnits.length && !allowedUserIds.length) {
-        setAgentWorkflowShareError('共享时至少选择一个单位或一个个人，也可以由管理员共享给全体成员。');
-        return;
-    }
-    setAgentWorkflowShareError('');
-    save.disabled = true;
-    try {
-        const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/sharing`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scope, allowedUnits, allowedUserIds })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || '共享设置保存失败');
-        const index = agentWorkflowsCache.findIndex(item => String(item.id) === String(workflow.id));
-        if (index >= 0 && data.workflow) agentWorkflowsCache[index] = data.workflow;
-        setAgentWorkflowLibraryModalVisibility(modal, false);
-        renderAgentWorkflowLibrary();
-        renderAutomationAssetCenter();
-        showToast(scope === 'shared' ? '工作流共享设置已保存' : '已取消工作流共享', 'success');
-    } catch (error) {
-        setAgentWorkflowShareError(error.message || '共享设置保存失败');
-    } finally {
-        save.disabled = false;
-    }
+    modalEngine.open({
+        modalId: 'agent-workflow-share-modal',
+        title: '工作流协作者与共享',
+        subtitle: '管理共同查看与运行该工作流的成员与单位协作权限。',
+        summaryTitle: workflow.name || '工作流',
+        summaryDesc: publishHint,
+        owner,
+        users,
+        units,
+        initialCollaborators,
+        roles: [{ value: 'viewer', label: '查看与运行（可查看及运行发布版）', shortLabel: '查看与运行' }],
+        defaultRole: 'viewer',
+        onSave: async ({ collaborators }) => {
+            const finalUserIds = collaborators.map(c => Number(c.id)).filter(Number.isSafeInteger);
+            const scope = finalUserIds.length > 0 ? 'shared' : 'personal';
+            const res = await apiFetch(`${API_BASE}/agents/workflows/${encodeURIComponent(workflow.id)}/sharing`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope, allowedUnits: [], allowedUserIds: finalUserIds })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || '共享设置保存失败');
+            const index = agentWorkflowsCache.findIndex(item => String(item.id) === String(workflow.id));
+            if (index >= 0 && data.workflow) agentWorkflowsCache[index] = data.workflow;
+            renderAgentWorkflowLibrary();
+            const successText = finalUserIds.length > 0 ? '工作流共享设置已保存' : '已取消工作流共享';
+            showToast(successText, 'success');
+        }
+    });
 }
 
 let agentWorkflowDependencyState = { workflowId: '', configuration: null };

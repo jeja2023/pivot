@@ -152,6 +152,7 @@ async function getKnowledgeCollectionShareOptions({ collectionId, user }) {
     return {
         collection: {
             id: collection.id,
+            user_id: collection.user_id,
             name: collection.name,
             scope: collection.scope || 'personal',
             allowed_units: collection.allowed_units || '',

@@ -261,13 +261,56 @@
                     closeDialog(); return true;
                 }
                 if (name === 'sharing') {
-                    await context.save(); const [config, targets] = await Promise.all([context.request(`/${state.active.id}/sharing`), context.request('/share-targets')]); sharingConfig = config;
-                    void dialog('共享与协作权限', `<p>仅所有者可以设置权限、恢复历史和删除；查看者可阅读并另存个人副本，编辑者可协作修改。共享文件导出需先另存为个人副本。</p><label><input id="mindmap-sharing-enabled" type="checkbox"${config.enabled ? ' checked' : ''}> 开启共享与协作</label><div class="table-container"><table class="data-table"><thead><tr><th>账号</th><th>单位</th><th>权限</th></tr></thead><tbody>${targets.users.map(user => `<tr><td>${escape(user.nickname || user.username)}</td><td>${escape(user.unit)}</td><td><select class="form-input" data-mm-member="${user.id}"><option value="">不共享</option><option value="viewer"${config.members.find(member => member.userId === String(user.id))?.role === 'viewer' ? ' selected' : ''}>查看</option><option value="editor"${config.members.find(member => member.userId === String(user.id))?.role === 'editor' ? ' selected' : ''}>编辑</option></select></td></tr>`).join('')}</tbody></table></div><button class="btn-primary" type="button" data-mm-action="sharing-save">保存权限</button>`); return true;
-                }
-                if (name === 'sharing-save') {
-                    const members = [...$('mindmap-dialog-body').querySelectorAll('[data-mm-member]')].filter(select => select.value).map(select => ({ userId: select.dataset.mmMember, role: select.value }));
-                    await context.request(`/${state.active.id}/sharing`, { ...context.json({ enabled: $('mindmap-sharing-enabled').checked, members, expectedRevision: sharingConfig.revision, expectedVersionId: state.active.versionId }), method: 'PUT' });
-                    closeDialog(); await context.open(state.active.id); return true;
+                    await context.save();
+                    const [config, targets] = await Promise.all([context.request(`/${state.active.id}/sharing`), context.request('/share-targets')]);
+                    sharingConfig = config;
+                    const curUser = (typeof currentUser !== 'undefined' && currentUser) || window.Pivot?.legacy?.currentUser || null;
+                    const owner = curUser ? {
+                        id: Number(curUser.id),
+                        username: curUser.username,
+                        nickname: curUser.nickname || curUser.username,
+                        unit: curUser.unit || '未分配单位'
+                    } : null;
+                    const modalEngine = window.Pivot?.modules?.['share.collaborators'] || window.Pivot?.legacy?.PivotShareCollabModal;
+                    if (modalEngine) {
+                        modalEngine.open({
+                            modalId: 'mindmap-share-modal',
+                            title: '思维导图协作者与共享',
+                            subtitle: '管理共同审阅、协作编辑与查看该思维导图的成员与单位协作权限。',
+                            summaryTitle: state.active?.title || '思维导图',
+                            summaryDesc: '仅所有者可恢复历史快照与彻底删除；编辑者可实时协作修改，查看者仅可浏览及另存副本。',
+                            owner,
+                            users: Array.isArray(targets.users) ? targets.users : [],
+                            units: Array.isArray(targets.units) ? targets.units : [],
+                            initialCollaborators: (config.members || []).map(m => ({
+                                id: Number(m.userId),
+                                role: m.role || 'editor'
+                            })),
+                            roles: [
+                                { value: 'editor', label: '编辑者（可协作编辑）', shortLabel: '编辑者' },
+                                { value: 'viewer', label: '查看者（仅浏览及另存副本）', shortLabel: '查看者' }
+                            ],
+                            defaultRole: 'editor',
+                            onSave: async ({ collaborators }) => {
+                                const members = collaborators.map(c => ({
+                                    userId: String(c.id),
+                                    role: c.role || 'editor'
+                                }));
+                                const enabled = members.length > 0;
+                                await context.request(`/${state.active.id}/sharing`, {
+                                    ...context.json({
+                                        enabled,
+                                        members,
+                                        expectedRevision: sharingConfig.revision,
+                                        expectedVersionId: state.active.versionId
+                                    }),
+                                    method: 'PUT'
+                                });
+                                await context.open(state.active.id);
+                            }
+                        });
+                    }
+                    return true;
                 }
                 if (name === 'theme-pack') {
                     const current = schema.palette(state.document); const pack = { version: 1, label: current.label, root: current.root, line: current.line, background: current.background, ...(current.styles ? { styles: current.styles } : {}) };

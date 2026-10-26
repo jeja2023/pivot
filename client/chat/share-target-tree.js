@@ -89,10 +89,20 @@
         });
     }
 
-    root.PivotShareTargetTree = Object.freeze({
+    const shareTargetTree = Object.freeze({
         UNASSIGNED_UNIT,
         render,
         bind,
         setChecked
     });
+
+    root.PivotShareTargetTree = shareTargetTree;
+    if (root.Pivot) {
+        if (typeof root.Pivot.registerModule === 'function') {
+            root.Pivot.registerModule('share.targetTree', shareTargetTree);
+        }
+        if (root.Pivot.legacy) {
+            root.Pivot.legacy.PivotShareTargetTree = shareTargetTree;
+        }
+    }
 }(window));

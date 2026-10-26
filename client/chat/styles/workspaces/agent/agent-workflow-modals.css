@@ -20,6 +20,10 @@
 
 @import url("../shared-target-tree.css");
 
+.agent-workflow-share-modal-overlay {
+    z-index: 1940;
+}
+
 .agent-workflow-dependency-modal-overlay {
     align-items: center;
     justify-content: center;
