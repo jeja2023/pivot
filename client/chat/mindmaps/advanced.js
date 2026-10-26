@@ -55,13 +55,21 @@
                     void dialog('个人模板', `<p>模板保存完整导图结构与样式，只对当前账号可见；每账号最多 100 份。</p><ul>${result.rows.map(template => `<li>${escape(template.name)} <button class="btn-secondary" type="button" data-mm-action="template-use" data-mm-template="${template.id}">使用</button> <button class="btn-danger" type="button" data-mm-action="template-delete" data-mm-template="${template.id}">删除模板</button></li>`).join('')}</ul>`); return true;
                 }
                 if (name === 'template-use') { const result = await context.request(`/personal-templates/${button.dataset.mmTemplate}`); await context.create(result.document); closeDialog(); return true; }
-                if (name === 'template-delete') { await context.request(`/personal-templates/${button.dataset.mmTemplate}`, { method: 'DELETE' }); $('mindmap-template').querySelector(`option[value="personal:${button.dataset.mmTemplate}"]`)?.remove(); return this.action('personal-templates'); }
+                if (name === 'template-delete') {
+                    await context.request(`/personal-templates/${button.dataset.mmTemplate}`, { method: 'DELETE' });
+                    state.personalTemplates = (state.personalTemplates || []).filter(t => String(t.id) !== String(button.dataset.mmTemplate));
+                    $('mindmap-template')?.querySelector(`option[value="personal:${button.dataset.mmTemplate}"]`)?.remove();
+                    return this.action('personal-templates');
+                }
                 if (name === 'template-save') {
                     await context.save(); void dialog('保存为个人模板', '<label>模板名称<input id="mindmap-template-name" class="form-input" maxlength="80" placeholder="例如：项目复盘结构"></label><button class="btn-primary" type="button" data-mm-action="template-save-confirm">保存模板</button>'); return true;
                 }
                 if (name === 'template-save-confirm') {
                     const result = await context.request('/personal-templates', context.json({ artifactId: state.active.id, name: $('mindmap-template-name').value }));
-                    if (!$('mindmap-template').querySelector(`option[value="personal:${result.template.id}"]`)) { const option = document.createElement('option'); option.value = `personal:${result.template.id}`; option.textContent = result.template.name; option.dataset.personalTemplate = 'true'; $('mindmap-template').appendChild(option); }
+                    state.personalTemplates = [...(state.personalTemplates || []).filter(t => String(t.id) !== String(result.template.id)), result.template];
+                    if ($('mindmap-template') && !$('mindmap-template').querySelector(`option[value="personal:${result.template.id}"]`)) {
+                        const option = document.createElement('option'); option.value = `personal:${result.template.id}`; option.textContent = result.template.name; option.dataset.personalTemplate = 'true'; $('mindmap-template').appendChild(option);
+                    }
                     closeDialog(); return true;
                 }
                 if (name === 'sharing') {

@@ -1,21 +1,65 @@
 <div id="mindmaps-view" class="mindmaps-view hidden">
-    <div id="mindmap-library" class="workspace-panel">
-        <div class="workspace-toolbar mindmap-toolbar">
-            <button type="button" class="btn-primary" data-mm-action="new">新建导图</button>
-            <label>模板<select id="mindmap-template" class="form-input"><option value="blank">空白导图</option><option value="plan">工作计划</option><option value="analysis">分析研判</option><option value="meeting">会议纪要</option></select></label>
-            <button type="button" class="btn-secondary" data-mm-action="import">导入</button>
-            <button type="button" class="btn-secondary" data-mm-action="ai">AI 生成</button>
-            <button type="button" class="btn-secondary" data-mm-action="data-import">数据转导图</button>
-            <button type="button" class="btn-secondary" data-mm-action="dataset-mapping">数据层级映射</button>
-            <label>搜索<input id="mindmap-search" type="search" class="form-input" maxlength="120" placeholder="搜索导图标题"></label>
-            <label>范围<select id="mindmap-library-scope" class="form-input"><option value="all">全部导图</option><option value="owned">我创建的</option><option value="shared">共享给我</option><option value="trash">回收站</option></select></label>
-            <label><input id="mindmap-favorites-only" type="checkbox"> 只看收藏</label><label>标签<input id="mindmap-tag-filter" class="form-input" maxlength="32" placeholder="按标签筛选"></label>
-            <button type="button" class="btn-secondary" data-mm-action="personal-templates">个人模板</button>
-            <button type="button" class="btn-secondary" data-mm-action="refresh">刷新</button>
+    <div id="mindmap-library" class="workspace-panel mm-library-panel">
+        <div class="workspace-toolbar mindmap-toolbar mindmap-lib-toolbar">
+            <div class="mm-lib-primary-actions">
+                <button type="button" class="btn-primary mm-new-btn" data-mm-action="new"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>新建导图</span></button>
+                <button type="button" class="btn-secondary mm-lib-btn mm-ai-btn" data-mm-action="ai"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span>AI 生成</span></button>
+                <div class="mm-dropdown" id="mindmap-more-dropdown">
+                    <button type="button" class="btn-secondary mm-dropdown-toggle" id="mindmap-more-btn" aria-haspopup="true" aria-expanded="false" title="更多创建与导入选项">
+                        <span>更多操作</span>
+                        <svg class="mm-icon-chevron" aria-hidden="true" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="mm-dropdown-menu hidden" id="mindmap-more-menu" role="menu">
+                        <button type="button" class="btn-secondary mm-dropdown-item" data-mm-action="import" role="menuitem"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>导入导图文件 (XMind/MD/JSON)</span></button>
+                        <button type="button" class="btn-secondary mm-dropdown-item" data-mm-action="data-import" role="menuitem"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg><span>数据转导图</span></button>
+                        <button type="button" class="btn-secondary mm-dropdown-item" data-mm-action="dataset-mapping" role="menuitem"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>数据层级映射</span></button>
+                        <div class="mm-dropdown-divider" role="separator"></div>
+                        <button type="button" class="btn-secondary mm-dropdown-item" data-mm-action="personal-templates" role="menuitem"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>个人模板管理</span></button>
+                    </div>
+                </div>
+            </div>
+            <div class="mm-lib-filter-actions">
+                <div class="mm-filter-bar" role="search" aria-label="导图筛选与搜索">
+                    <select id="mindmap-library-scope" class="form-input mm-scope-select" title="按归属范围筛选">
+                        <option value="all">全部导图</option>
+                        <option value="owned">我创建的</option>
+                        <option value="shared">共享给我</option>
+                        <option value="trash">回收站</option>
+                    </select>
+                    <div class="mm-search-box">
+                        <svg class="mm-search-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input id="mindmap-search" type="search" class="form-input mm-search-input" maxlength="120" placeholder="搜索导图标题…">
+                    </div>
+                    <div class="mm-tag-box">
+                        <svg class="mm-tag-icon" aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                        <input id="mindmap-tag-filter" class="form-input mm-tag-input" maxlength="32" placeholder="按标签筛选…">
+                    </div>
+                    <label class="mm-fav-toggle" title="仅查看已加星标的导图">
+                        <input id="mindmap-favorites-only" type="checkbox">
+                        <svg class="mm-fav-icon" aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        <span class="mm-fav-text">只看收藏</span>
+                    </label>
+                </div>
+                <button type="button" class="btn-secondary mm-lib-btn mm-refresh-btn" data-mm-action="refresh" title="刷新列表"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>刷新</span></button>
+            </div>
         </div>
-        <p id="mindmap-library-status" role="status" aria-live="polite"></p>
-        <div class="table-container workspace-table-wrap"><table class="data-table compact-table"><thead><tr><th>预览</th><th>名称</th><th>来源</th><th>版本</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="mindmap-documents"></tbody></table></div>
-        <div class="workspace-pagination mindmap-pagination"><button type="button" class="btn-secondary" data-mm-action="previous">上一页</button><span id="mindmap-page"></span><button type="button" class="btn-secondary" data-mm-action="next">下一页</button></div>
+        <p id="mindmap-library-status" role="status" aria-live="polite" class="sr-only"></p>
+        <div class="table-container workspace-table-wrap mm-table-wrap">
+            <table class="data-table compact-table mm-data-table">
+                <thead>
+                    <tr>
+                        <th class="text-center mm-th-idx">序号</th>
+                        <th class="mm-th-title">名称</th>
+                        <th class="text-center mm-th-source">来源</th>
+                        <th class="text-center mm-th-version">版本</th>
+                        <th class="text-center mm-th-time">更新时间</th>
+                        <th class="text-center mm-th-actions">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="mindmap-documents"></tbody>
+            </table>
+        </div>
+        <div id="mindmap-pagination" class="pagination workspace-pagination mindmap-pagination"></div>
     </div>
     <div id="mindmap-editor" class="mindmap-editor hidden">
         <div class="workspace-toolbar mindmap-toolbar">

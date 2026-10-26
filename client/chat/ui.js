@@ -31,7 +31,7 @@ function renderWorkspacePagination(containerOrId, options = {}) {
     const page = Math.min(Math.max(Number.isFinite(suppliedPage) ? suppliedPage : 1, 1), totalPages);
     const onPageChange = typeof options.onPageChange === 'function' ? options.onPageChange : null;
     container.replaceChildren();
-    if (totalPages <= 1) return;
+    if (totalPages <= 1 && !options.alwaysShow) return;
 
     const createButton = (label, targetPage, disabled) => {
         const button = document.createElement('button');

@@ -29,7 +29,7 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
     try {
         const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
         const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(error.stack || error.message));
-        await page.goto(origin); await page.locator('#mindmap-template').selectOption('plan'); await page.getByRole('button', { name: '新建导图', exact: true }).click();
+        await page.goto(origin); await page.getByRole('button', { name: '新建导图', exact: true }).click(); await page.locator('.mm-tpl-card[data-template="plan"]').click();
         await page.locator('#mindmap-new-title').fill('浏览器验收图');
         await page.getByRole('button', { name: '创建', exact: true }).click();
         await page.waitForFunction(() => document.querySelectorAll('#mindmap-canvas .smm-node').length > 0);
