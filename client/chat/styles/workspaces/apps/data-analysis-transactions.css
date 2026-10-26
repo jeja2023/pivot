@@ -625,6 +625,15 @@
     padding: 10px 0 6px;
 }
 
+.finance-modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 0 4px;
+    margin-top: 4px;
+}
+
 /* ==========================================================================
    6. 暗黑模式适配 (Dark Mode)
    ========================================================================== */

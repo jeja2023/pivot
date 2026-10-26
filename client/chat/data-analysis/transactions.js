@@ -52,7 +52,7 @@
         job = null;
     }
 
-    function modal(title, body) {
+    function modal(title, body, options = {}) {
         close();
         dialog = document.createElement('div');
         dialog.id = 'finance-dialog';
@@ -60,7 +60,8 @@
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
         dialog.setAttribute('aria-label', title);
-        html(dialog, `<div class="workspace-modal finance-modal-dialog"><div class="workspace-modal-header"><h3>${esc(title)}</h3><button class="btn-secondary" type="button" data-finance="close">关闭</button></div><div class="workspace-modal-body workspace-scroll-content">${body}<p id="finance-dialog-status" role="status"></p></div></div>`);
+        const closeBtn = options.hideClose ? '' : '<button class="btn-secondary" type="button" data-finance="close">关闭</button>';
+        html(dialog, `<div class="workspace-modal finance-modal-dialog"><div class="workspace-modal-header"><h3>${esc(title)}</h3>${closeBtn}</div><div class="workspace-modal-body workspace-scroll-content">${body}<p id="finance-dialog-status" role="status"></p></div></div>`);
         $('data-analysis-view').appendChild(dialog);
         dialog.querySelector('input,select,button')?.focus();
     }
@@ -187,12 +188,12 @@
             </div>
         </div>
 
-        <div class="finance-toolbar-row">
-            <button class="btn-primary finance-btn-new" type="button" data-finance="create">确认配置并开始分析</button>
+        <div class="finance-modal-actions">
             <button class="btn-secondary" type="button" data-finance="close">取消</button>
+            <button class="btn-primary finance-btn-new" type="button" data-finance="create">确认配置并开始分析</button>
         </div>`;
 
-        modal('确认资金分析映射与审计规则', content);
+        modal('确认资金分析映射与审计规则', content, { hideClose: true });
         for (const [key, value] of Object.entries(config.mapping || {})) {
             if ($(`finance-field-${key}`)) $(`finance-field-${key}`).value = value;
         }
