@@ -11,9 +11,13 @@ const {
     createAsyncQueryJob, getAsyncQueryJob, listAsyncQueryJobs, cancelAsyncQueryJob,
     getScalabilityState, createDatasetPartitions, listMaterializations, saveMaterialization
 } = require('../../services/data-analysis');
+const { listShareTargets } = require('../../services/share-targets');
 
 function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }) {
     require('./analysis-transactions').registerTransactionRoutes(router, { authMiddleware, logAction });
+    router.get('/apps/data-analysis/share-targets', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ success: true, ...await listShareTargets(req.user) });
+    }));
     router.get('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => res.json({ fields: await listFieldGovernance(req.user, req.params.id) })));
     router.put('/apps/data-analysis/datasets/:id/fields', authMiddleware, asyncHandler(async (req, res) => {
         const result = await updateFieldGovernance({ user: req.user, datasetId: req.params.id, fields: req.body?.fields });

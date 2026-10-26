@@ -621,6 +621,10 @@
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     <span>添加组件</span>
                 </button>
+                <button id="data-analysis-dashboard-share" class="btn-secondary btn-sm" type="button" title="管理协作者与单位共享权限">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+                    <span>共享协作</span>
+                </button>
                 <button id="data-analysis-dashboard-refresh" class="btn-primary btn-sm" type="button">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
                     <span>立即刷新</span>
@@ -653,11 +657,20 @@
                     <span class="data-analysis-label-title">用途说明</span>
                     <input id="data-analysis-dashboard-description" class="form-input" maxlength="500" placeholder="大盘目标、受众与业务说明（可选）">
                 </label>
-                <div class="grid-span-full data-analysis-modal-dept-stack">
-                    <label class="data-analysis-share-toggle data-analysis-modal-checkbox-row">
-                        <input id="data-analysis-dashboard-shared" type="checkbox"> 共享给本部门
+                <div class="grid-span-full data-analysis-share-card">
+                    <label class="data-analysis-share-card-header" for="data-analysis-dashboard-shared">
+                        <input id="data-analysis-dashboard-shared" type="checkbox">
+                        <div>
+                            <div class="data-analysis-share-card-title">共享给本部门</div>
+                            <div class="data-analysis-share-card-hint">勾选后同部门成员可协同查看此仪表盘，创建后也可在操作栏设置精细协作者。</div>
+                        </div>
                     </label>
-                    <input id="data-analysis-dashboard-shared-units" class="form-input" maxlength="500" placeholder="共享部门，例如：管理层, 销售部">
+                    <div id="data-analysis-dashboard-shared-details" class="data-analysis-share-card-details hidden">
+                        <label>
+                            <span class="data-analysis-label-title">细分共享部门（可选）</span>
+                            <input id="data-analysis-dashboard-shared-units" class="form-input" maxlength="500" placeholder="多个部门以逗号分隔，如：管理层, 销售部（留空则默认本部门）">
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>

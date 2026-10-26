@@ -883,10 +883,10 @@ input[type="file"].form-input::-webkit-file-upload-button {
     display: flex;
     flex-direction: column;
     padding: 22px 24px;
-    border-radius: 14px;
-    background: var(--surface, #ffffff);
-    box-shadow: 0 24px 48px var(--shadow-modal, rgba(15, 23, 42, 0.22));
-    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
+    border-radius: var(--radius-lg, 16px);
+    background: var(--surface);
+    box-shadow: 0 24px 48px var(--shadow-modal);
+    border: 1px solid var(--border-color);
     text-align: left !important;
     animation: dataAnalysisModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -1025,9 +1025,12 @@ input[type="file"].form-input::-webkit-file-upload-button {
     display: flex !important;
     align-items: center !important;
     text-align: left !important;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
 }
 
-.data-analysis-modal-form-grid input,
+.data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]),
 .data-analysis-modal-form-grid select {
     width: 100% !important;
     height: 34px;
@@ -1035,14 +1038,81 @@ input[type="file"].form-input::-webkit-file-upload-button {
     font-size: 0.8rem;
     font-weight: 400;
     line-height: 32px;
-    border-radius: 7px;
-    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.22));
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--border-color);
     padding: 0 10px;
-    background-color: var(--surface, #ffffff);
+    background-color: var(--surface);
     color: var(--text-main);
     text-align: left !important;
     transition: all 0.15s ease;
     box-sizing: border-box;
+}
+
+.data-analysis-modal-form-grid input[type="checkbox"],
+.data-analysis-modal-form-grid input[type="radio"],
+.data-analysis-dialog-modal input[type="checkbox"] {
+    width: 16px !important;
+    min-width: 16px !important;
+    max-width: 16px !important;
+    height: 16px !important;
+    min-height: 16px !important;
+    max-height: 16px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: var(--primary);
+    vertical-align: middle;
+}
+
+/* 共享配置卡片 */
+.data-analysis-share-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--bg-hover, var(--surface));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 10px);
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.data-analysis-share-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    margin: 0;
+}
+
+.data-analysis-share-card-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.data-analysis-share-card-hint {
+    font-size: 0.73rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.data-analysis-share-card-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.data-analysis-share-card-details.hidden {
+    display: none !important;
 }
 
 .data-analysis-modal-form-grid select {

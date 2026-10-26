@@ -509,16 +509,36 @@
 /* ==========================================================================
    5. 配置弹窗与结果弹窗优化 (Dialogs)
    ========================================================================== */
+#finance-dialog.modal-overlay {
+    z-index: 8000;
+}
+
+.workspace-modal.finance-modal-dialog,
 .finance-modal-dialog {
-    width: min(860px, calc(100vw - 32px));
-    max-height: min(840px, calc(100vh - 40px));
+    width: min(1080px, calc(100vw - 32px));
+    height: auto;
+    max-height: min(88vh, 880px);
+    border-radius: var(--radius-lg, 16px);
+    overflow: hidden;
+    border: 1px solid var(--border, #e2e8f0);
+    box-shadow: 0 24px 60px var(--shadow-modal, rgba(15, 23, 42, 0.22));
+    background: var(--surface, #ffffff);
+}
+
+.finance-modal-dialog .workspace-modal-header {
+    flex-shrink: 0;
+}
+
+.workspace-modal.finance-modal-dialog .workspace-modal-body,
+.finance-modal-dialog .workspace-modal-body {
+    padding: 16px 20px 20px;
 }
 
 .finance-section-card {
     padding: 12px 14px;
     margin-bottom: 12px;
     border: 1px solid var(--border, #e2e8f0);
-    border-radius: 9px;
+    border-radius: var(--radius-md, 10px);
     background: var(--bg-card-soft, rgba(248, 250, 252, 0.6));
 }
 
@@ -725,6 +745,29 @@ body.dark-mode .finance-id-pill,
 .dark-mode .finance-id-pill {
     background: var(--bg-dark-pill, rgba(148, 163, 184, 0.2));
     color: var(--text-dark, #e2e8f0);
+}
+
+body.dark-mode .finance-modal-dialog,
+.dark-mode .finance-modal-dialog {
+    background: var(--surface, #1e293b);
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.2));
+    box-shadow: 0 24px 60px var(--shadow-modal-dark, rgba(0, 0, 0, 0.55));
+}
+
+body.dark-mode .finance-modal-dialog .workspace-modal-header,
+.dark-mode .finance-modal-dialog .workspace-modal-header {
+    background: var(--surface, #1e293b);
+    border-bottom-color: var(--border-dark, rgba(148, 163, 184, 0.2));
+}
+
+body.dark-mode .finance-modal-dialog .workspace-modal-header h3,
+.dark-mode .finance-modal-dialog .workspace-modal-header h3 {
+    color: var(--text-dark, #f1f5f9);
+}
+
+body.dark-mode .finance-modal-dialog .workspace-modal-body,
+.dark-mode .finance-modal-dialog .workspace-modal-body {
+    background: var(--bg-dark-card, #0f172a);
 }
 
 body.dark-mode .finance-section-card,

@@ -171,10 +171,106 @@
         });
         ['data-analysis-dashboard-name', 'data-analysis-dashboard-description', 'data-analysis-dashboard-shared-units'].forEach(id => { if (byId(id)) byId(id).value = ''; });
         if (byId('data-analysis-dashboard-shared')) byId('data-analysis-dashboard-shared').checked = false;
+        byId('data-analysis-dashboard-shared-details')?.classList.add('hidden');
         state.activeDashboardId = data.dashboard?.id || '';
         app.closeModal?.('data-analysis-create-dashboard-modal');
         await loadDashboards({ keepActive: true, silent: true });
         toast('仪表盘已创建。', 'success');
+    }
+
+    async function openDashboardShareModal() {
+        const dashboard = activeDashboard();
+        if (!dashboard) {
+            toast('请先从左侧选择需要共享的仪表盘。', 'warning');
+            return;
+        }
+        const curUser = (typeof currentUser !== 'undefined' && currentUser) || window.Pivot?.legacy?.currentUser || null;
+        const isOwner = !dashboard.userId || !curUser?.id || String(dashboard.userId) === String(curUser.id);
+        if (!isOwner) {
+            toast('只有仪表盘所有者可以修改共享与协作者设置。', 'warning');
+            return;
+        }
+
+        const modalEngine = window.Pivot?.modules?.['share.collaborators'] || window.Pivot?.legacy?.PivotShareCollabModal;
+        if (!modalEngine) {
+            toast('共享协作组件尚未就绪，请刷新重试。', 'error');
+            return;
+        }
+
+        let targets = { units: [], users: [] };
+        try {
+            targets = await fetchJson(`${API}/share-targets`);
+        } catch (_e) {
+            targets = { units: [], users: [] };
+        }
+
+        const owner = curUser ? {
+            id: curUser.id,
+            username: curUser.username,
+            nickname: curUser.nickname || curUser.username,
+            unit: curUser.unit || '未分配单位'
+        } : null;
+
+        const existingUserIds = String(dashboard.allowedUserIds || '')
+            .split(',')
+            .map(s => Number(s.trim()))
+            .filter(Number.isSafeInteger);
+
+        const initialCollaborators = existingUserIds.map(id => {
+            const found = (targets.users || []).find(u => Number(u.id) === id);
+            return {
+                id,
+                username: found?.username || `用户${id}`,
+                nickname: found?.nickname || found?.username || `用户${id}`,
+                unit: found?.unit || '未分配单位',
+                role: 'viewer'
+            };
+        });
+
+        const existingUnits = String(dashboard.allowedUnits || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        modalEngine.open({
+            modalId: 'data-analysis-dashboard-share-modal',
+            title: '仪表盘协作者与共享',
+            subtitle: '管理协同审阅、查看与共享该仪表盘的成员与部门协作范围。',
+            summaryTitle: dashboard.name || '仪表盘',
+            summaryDesc: '所有者可管理看板组件与告警；被授权的协作者可协同查看大盘、分析图表与快照数据。',
+            owner,
+            users: Array.isArray(targets.users) ? targets.users : [],
+            units: Array.isArray(targets.units) ? targets.units : [],
+            initialCollaborators,
+            roles: [
+                { value: 'viewer', label: '查看者（可浏览看板与数据快照）', shortLabel: '查看者' }
+            ],
+            defaultRole: 'viewer',
+            onSave: async ({ collaborators, selectedBatchUnits }) => {
+                const finalUserIds = (collaborators || []).map(c => Number(c.id)).filter(Number.isSafeInteger);
+                const batchUnits = Array.isArray(selectedBatchUnits) && selectedBatchUnits.length
+                    ? selectedBatchUnits
+                    : existingUnits;
+                const willShare = finalUserIds.length > 0 || batchUnits.length > 0;
+                const scope = willShare ? app.SHARED_SCOPE : 'personal';
+
+                await fetchJson(`${API}/dashboards/${encodeURIComponent(dashboard.id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: dashboard.name,
+                        description: dashboard.description,
+                        scope,
+                        allowedUnits: batchUnits.join(','),
+                        allowedUserIds: finalUserIds.join(',')
+                    })
+                });
+
+                await loadDashboard(dashboard.id, { silent: true });
+                await loadDashboards({ keepActive: true, silent: true });
+                toast(willShare ? '仪表盘共享与协作者设置已保存。' : '已取消仪表盘共享（已设为私有）。', 'success');
+            }
+        });
     }
 
     async function addSavedViewToDashboard() {
@@ -250,12 +346,26 @@
     function bindDashboardEvents(root) {
         if (!root || root.dataset.dashboardEventsBound === 'true') return;
         root.dataset.dashboardEventsBound = 'true';
+
+        const sharedCheckbox = byId('data-analysis-dashboard-shared');
+        const sharedDetails = byId('data-analysis-dashboard-shared-details');
+        if (sharedCheckbox && sharedDetails) {
+            sharedCheckbox.addEventListener('change', () => {
+                if (sharedCheckbox.checked) {
+                    sharedDetails.classList.remove('hidden');
+                } else {
+                    sharedDetails.classList.add('hidden');
+                }
+            });
+        }
+
         root.addEventListener('click', async event => {
             try {
                 const select = event.target.closest('[data-analysis-dashboard-select]');
                 if (select) { await loadDashboard(select.dataset.analysisDashboardSelect); return; }
                 if (event.target.closest('#data-analysis-dashboard-create')) { await guardButton('data-analysis-dashboard-create', '创建中…', createDashboard); return; }
                 if (event.target.closest('#data-analysis-dashboard-add-view')) { await guardButton('data-analysis-dashboard-add-view', '添加中…', addSavedViewToDashboard); return; }
+                if (event.target.closest('#data-analysis-dashboard-share')) { await openDashboardShareModal(); return; }
                 if (event.target.closest('#data-analysis-dashboard-refresh')) { await guardButton('data-analysis-dashboard-refresh', '刷新中…', refreshActiveDashboard); return; }
                 const remove = event.target.closest('[data-analysis-dashboard-item-delete]');
                 if (remove) { await deleteDashboardItem(remove.dataset.analysisDashboardItemDelete); return; }
