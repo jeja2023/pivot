@@ -65,7 +65,7 @@ test('应用中心打开导图，真实保存与版本恢复、刷新和受控�
     const organized = page.locator('#mindmap-documents tr').filter({ hasText: 'AI 验收主题' }).first(); await organized.getByRole('button', { name: '收藏标签', exact: true }).click();
     await page.locator('#mindmap-organize-favorite').check(); await page.locator('#mindmap-organize-tags').fill('验收，工作'); await page.getByRole('button', { name: '保存设置', exact: true }).click();
     await page.locator('#mindmap-favorites-only').check(); await expect(page.locator('#mindmap-documents tr')).toHaveCount(1);
-    await page.getByRole('button', { name: '个人模板', exact: true }).click(); await expect(page.locator('#mindmap-dialog-body')).toContainText('应用验收模板'); await page.locator('#mindmap-dialog-body').getByRole('button', { name: '使用', exact: true }).click();
+    await page.locator('#mindmap-more-btn').click(); await page.locator('#mindmap-more-menu [data-mm-action="personal-templates"]').click(); await expect(page.locator('#mindmap-dialog-body')).toContainText('应用验收模板'); await page.locator('#mindmap-dialog-body').getByRole('button', { name: '使用', exact: true }).click();
     await expect(page.locator('#mindmap-outline')).toContainText('AI 验收主题');
     const username = `mm_peer_${Date.now()}`; const password = 'MindmapPeer123';
     const accountResponse = await page.request.post('/api/admin/users', { headers: { 'x-csrf-token': csrf }, data: { username, password, nickname: '协作验收成员', unit: 'QA', role: 'user' } }); expect(accountResponse.ok()).toBeTruthy(); const member = (await accountResponse.json()).user;

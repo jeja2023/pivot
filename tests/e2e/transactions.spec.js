@@ -30,7 +30,7 @@ test('资金分析真实应用完成映射、精确统计、分类修正、报�
     await page.getByRole('button', { name: '生成导图', exact: true }).click(); await expect(page.locator('[data-finance="open-map"]')).toBeVisible({ timeout: 15000 });
     fs.mkdirSync(path.resolve('output/mindmaps'), { recursive: true }); await page.screenshot({ path: path.resolve('output/mindmaps/transaction-report.png'), fullPage: true });
     await page.locator('[data-finance="open-map"]').click(); await expect(page.locator('#mindmap-outline')).toContainText('资金交易分析'); await expect(page.locator('#mindmap-outline')).toContainText('0.30');
-    await page.getByRole('button', { name: '文档列表', exact: true }).click(); await page.getByRole('button', { name: '数据层级映射', exact: true }).click();
+    await page.getByRole('button', { name: '文档列表', exact: true }).click(); await page.locator('#mindmap-more-btn').click(); await page.locator('#mindmap-more-menu [data-mm-action="dataset-mapping"]').click();
     await page.locator('#mindmap-source-dataset').selectOption(dataset.id); await page.getByRole('button', { name: '配置层级', exact: true }).click();
     await page.locator('#mindmap-source-level-1').selectOption(key('account')); await page.locator('#mindmap-source-level-2').selectOption(key('peer')); await page.locator('#mindmap-source-aggregation').selectOption('sum'); await page.locator('#mindmap-source-metric').selectOption(key('amount'));
     await page.getByRole('button', { name: '生成预览', exact: true }).click(); await expect(page.locator('#mindmap-dialog-body')).toContainText('0.30000000'); await page.getByRole('button', { name: '保存为个人导图', exact: true }).click();

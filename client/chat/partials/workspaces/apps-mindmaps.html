@@ -4,8 +4,6 @@
             <div class="mm-lib-primary-actions">
                 <button type="button" class="btn-primary mm-new-btn" data-mm-action="new"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>新建导图</span></button>
                 <button type="button" class="btn-secondary mm-lib-btn mm-ai-btn" data-mm-action="ai"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span>AI 生成</span></button>
-                <button type="button" class="btn-secondary mm-lib-btn mm-tpl-btn" data-mm-action="personal-templates" aria-label="个人模板"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>个人模板</span></button>
-                <button type="button" class="btn-secondary mm-lib-btn" data-mm-action="dataset-mapping" aria-label="数据层级映射"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>数据层级映射</span></button>
                 <div class="mm-dropdown" id="mindmap-more-dropdown">
                     <button type="button" class="btn-secondary mm-dropdown-toggle" id="mindmap-more-btn" aria-haspopup="true" aria-expanded="false" title="更多创建与导入选项">
                         <span>更多操作</span>
@@ -73,6 +71,10 @@
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
                     <span>导图列表</span>
                 </button>
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="refresh-source" id="mindmap-source-refresh" aria-label="刷新来源数据" title="刷新来源数据映射" hidden>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <span>刷新来源数据</span>
+                </button>
                 <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost xmind-panel-toggle is-active" id="xmind-toggle-outline" title="展开/收起节点大纲">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
                     <span>大纲</span>
@@ -83,10 +85,6 @@
                     <span id="mindmap-save-status" class="xmind-badge xmind-save-badge" role="status" aria-live="polite">已保存</span>
                     <span id="mindmap-access-status" class="xmind-badge xmind-access-badge" role="status">个人文档</span>
                 </div>
-                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="refresh-source" id="mindmap-source-refresh" aria-label="刷新来源数据" title="刷新来源数据映射" hidden>
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                    <span>刷新来源数据</span>
-                </button>
             </div>
 
             <!-- 中间：XMind 经典中心浮动/固定工具栏 -->
