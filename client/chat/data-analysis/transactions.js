@@ -190,7 +190,7 @@
 
         <div class="finance-modal-actions">
             <button class="btn-secondary" type="button" data-finance="close">取消</button>
-            <button class="btn-primary finance-btn-new" type="button" data-finance="create">确认配置并开始分析</button>
+            <button class="btn-primary finance-btn-new" type="button" data-finance="create" aria-label="确认并运行分析">确认并运行分析</button>
         </div>`;
 
         modal('确认资金分析映射与审计规则', content, { hideClose: true });
@@ -360,10 +360,10 @@
 
                 <div class="finance-toolbar-row mindmap-toolbar">
                     <button class="btn-secondary" type="button" data-finance="rerun">修正映射重算</button>
-                    <button class="btn-secondary" type="button" data-finance="docx">生成 Word 报告</button>
-                    <button class="btn-secondary" type="button" data-finance="pdf">生成 PDF 报告</button>
-                    <button class="btn-secondary" type="button" data-finance="mindmap">生成思维导图</button>
-                    <button class="btn-secondary" type="button" data-finance="ai">AI 深度解读</button>
+                    <button class="btn-secondary" type="button" data-finance="docx" aria-label="生成 Word">生成 Word</button>
+                    <button class="btn-secondary" type="button" data-finance="pdf" aria-label="生成 PDF">生成 PDF</button>
+                    <button class="btn-secondary" type="button" data-finance="mindmap" aria-label="生成导图">生成导图</button>
+                    <button class="btn-secondary" type="button" data-finance="ai" aria-label="AI 解读">AI 解读</button>
                 </div>
                 <div id="finance-outputs"></div>
                 <div id="finance-ai" role="status"></div>

@@ -425,7 +425,17 @@
                 hyperlink: $('mindmap-node-link').value
             });
         }
-        if (name === 'export') {
+        if (name === 'export' || name === 'export-format') {
+            const format = (name === 'export-format' ? state.actionButton?.dataset.format : null) || $('mindmap-export-format')?.value || 'json';
+            if ($('mindmap-export-format')) $('mindmap-export-format').value = format;
+            $('xmind-export-menu')?.classList.add('hidden');
+            $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
+            $('xmind-export-dropdown')?.classList.remove('is-open');
+            const sequence = state.exportSequence = (state.exportSequence || 0) + 1; const userId = state.userId;
+            clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
+            await save(); const result = await request(`/${state.active.id}/exports`, json({ format, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
+        }
+        if (name === 'export-menu') {
             const exportMenu = $('xmind-export-menu');
             const exportBtn = $('xmind-export-btn');
             if (exportMenu && exportBtn) {
@@ -434,16 +444,6 @@
                 exportBtn.setAttribute('aria-expanded', String(willOpen));
             }
             return;
-        }
-        if (name === 'export-format') {
-            const format = state.actionButton?.dataset.format || $('mindmap-export-format')?.value || 'json';
-            if ($('mindmap-export-format')) $('mindmap-export-format').value = format;
-            $('xmind-export-menu')?.classList.add('hidden');
-            $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
-            $('xmind-export-dropdown')?.classList.remove('is-open');
-            const sequence = state.exportSequence = (state.exportSequence || 0) + 1; const userId = state.userId;
-            clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
-            await save(); const result = await request(`/${state.active.id}/exports`, json({ format, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
         }
     }
     function bind() {
