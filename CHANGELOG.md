@@ -2,6 +2,11 @@
 
 ### 思维导图大纲交互防晃动、节点文字居中与格式面板深度优化
 
+- **思维导图导出 PNG/SVG 背景色渲染优化（Mindmap Export Solid Background Fix）**：
+  - **解决透明底导致暗黑背景问题**：原导图引擎导出 SVG 时仅设置了容器样式 `style="background-color: ..."`，未生成底层矢量矩形，经由 Sharp 栅格化为 PNG 时透明通道为 0，导致系统图片查看器、深色主题或社交软件预览时底层透出黑色/深灰底色；
+  - **SVG 注入规范底层矩形**：在 `normalizeSvg` 中自动为 SVG 根节点头部植入匹配主题的 `<rect class="smm-background" width="100%" height="100%" fill="${backgroundColor}">` 实体背景矩形；
+  - **PNG 栅格化强力拍平底色**：通过 `image-renderer` 的 `pipeline.flatten({ background })` 消除透明 Alpha 通道，生成完整的全不透明实体白色（或主题设定色）PNG 图像，确保在任何看图软件及深色模式下背景均显示为清晰正确的白色。
+
 - **思维导图导出按钮整合为直接下拉菜单（Unified Export Dropdown Button）**：
   - **合并拆分按钮**：取消原先“默认点击导出 + 右侧小三角下拉”的拆分按钮形式，合并为单个统一的“导出”按钮；
   - **移除右侧小三角**：去除右侧的独立箭头小三角图标及分割线，与顶栏其他工具按钮保持高度一致的视觉风格；

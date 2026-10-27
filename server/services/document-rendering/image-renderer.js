@@ -45,7 +45,8 @@ async function renderImage(ir, format, options) {
     if (format === 'svg') return Buffer.from(sanitizeSvg(bytes.toString('utf8'), options.svgLimits));
     const input = bytes.toString('utf8').trimStart().startsWith('<')
         ? Buffer.from(sanitizeSvg(bytes.toString('utf8'), options.svgLimits)) : bytes;
-    return sharp(input, { limitInputPixels: 16000000 }).png().toBuffer();
+    const pipeline = sharp(input, { limitInputPixels: 16000000 });
+    return (options.background ? pipeline.flatten({ background: options.background }) : pipeline).png().toBuffer();
 }
 
 module.exports = { sanitizeSvg, renderImage };
