@@ -245,6 +245,8 @@
     box-sizing: border-box;
     overflow: hidden;
     flex-shrink: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -253,12 +255,22 @@
     box-shadow: var(--focus-ring, 0 0 0 2px rgba(16, 163, 127, 0.15));
 }
 
+.mm-filter-bar input,
+.mm-filter-bar select,
+.mm-filter-bar label,
+.mm-filter-bar span {
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
 /* 胶囊内部分隔细线 */
 .mm-filter-divider {
     width: 1px;
     height: 18px;
     background: var(--border, #e2e8f0);
     flex-shrink: 0;
+    align-self: center;
+    margin: 0 !important;
 }
 
 /* 范围下拉选择区 */
@@ -267,11 +279,18 @@
     display: inline-flex;
     align-items: center;
     height: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
     flex-shrink: 0;
 }
 
 .mm-scope-select {
+    display: inline-flex;
+    align-items: center;
     height: 100% !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    margin: 0 !important;
     border: none !important;
     border-radius: 0 !important;
     background: var(--bg-side, #f8fafc) !important;
@@ -285,6 +304,8 @@
     -webkit-appearance: none;
     box-shadow: none !important;
     line-height: 30px !important;
+    box-sizing: border-box !important;
+    vertical-align: middle;
     transition: background-color 0.15s ease;
 }
 
@@ -310,6 +331,8 @@
     width: 185px;
     min-width: 165px;
     flex-shrink: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
     background: transparent;
     border: none !important;
@@ -339,18 +362,31 @@
 .mm-search-input {
     width: 100% !important;
     height: 100% !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    margin: 0 !important;
     border: none !important;
     border-radius: 0 !important;
     background: transparent !important;
     padding: 0 8px 0 27px !important;
     font-size: 12.5px !important;
+    line-height: 30px !important;
     color: var(--text-main, #334155);
     outline: none !important;
     box-shadow: none !important;
+    box-sizing: border-box !important;
+    vertical-align: middle;
+}
+
+.mm-search-input::-webkit-search-cancel-button,
+.mm-search-input::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
 }
 
 .mm-search-input::placeholder {
     color: var(--text-muted, #94a3b8);
+    line-height: 30px;
 }
 
 /* 标签筛选输入区 */
@@ -362,6 +398,8 @@
     width: 145px;
     min-width: 135px;
     flex-shrink: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
     background: transparent;
     border: none !important;
@@ -391,18 +429,25 @@
 .mm-tag-input {
     width: 100% !important;
     height: 100% !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    margin: 0 !important;
     border: none !important;
     border-radius: 0 !important;
     background: transparent !important;
     padding: 0 8px 0 26px !important;
     font-size: 12.5px !important;
+    line-height: 30px !important;
     color: var(--text-main, #334155);
     outline: none !important;
     box-shadow: none !important;
+    box-sizing: border-box !important;
+    vertical-align: middle;
 }
 
 .mm-tag-input::placeholder {
     color: var(--text-muted, #94a3b8);
+    line-height: 30px;
 }
 
 /* 星标收藏切换区 */
@@ -411,6 +456,8 @@
     align-items: center !important;
     gap: 5px !important;
     height: 100% !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
     padding: 0 10px !important;
     cursor: pointer;
     user-select: none;
@@ -420,11 +467,13 @@
     color: var(--text-muted, #64748b);
     font-size: 12px;
     font-weight: 500;
+    line-height: 30px !important;
     white-space: nowrap !important;
     margin: 0 !important;
     flex-shrink: 0;
     transition: background-color 0.15s ease, color 0.15s ease;
-    box-sizing: border-box;
+    box-sizing: border-box !important;
+    vertical-align: middle;
 }
 
 .mm-fav-toggle:hover {
@@ -433,18 +482,28 @@
 }
 
 .mm-fav-toggle input[type="checkbox"] {
-    margin: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     cursor: pointer;
     accent-color: var(--warning, #f59e0b);
     width: 13px;
     height: 13px;
     vertical-align: middle;
+    flex-shrink: 0;
 }
 
 .mm-fav-icon {
     flex-shrink: 0;
     color: var(--text-muted, #94a3b8);
     transition: all 0.15s ease;
+    vertical-align: middle;
+}
+
+.mm-fav-text {
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
 }
 
 .mm-fav-toggle:has(input:checked) {
