@@ -18,29 +18,34 @@
                     </div>
                 </div>
             </div>
-            <div class="mm-lib-filter-actions mm-filter-bar" role="search" aria-label="导图筛选与搜索">
-                <div class="mm-scope-wrap">
-                    <select id="mindmap-library-scope" class="form-input mm-scope-select" title="按归属范围筛选">
-                        <option value="all">全部导图</option>
-                        <option value="owned">我创建的</option>
-                        <option value="shared">共享给我</option>
-                        <option value="trash">回收站</option>
-                    </select>
-                    <svg class="mm-scope-arrow" aria-hidden="true" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <div class="mm-lib-filter-actions">
+                <div class="mm-filter-bar" role="search" aria-label="导图筛选与搜索">
+                    <div class="mm-scope-wrap">
+                        <select id="mindmap-library-scope" class="form-input mm-scope-select" title="按归属范围筛选">
+                            <option value="all">全部导图</option>
+                            <option value="owned">我创建的</option>
+                            <option value="shared">共享给我</option>
+                            <option value="trash">回收站</option>
+                        </select>
+                        <svg class="mm-scope-arrow" aria-hidden="true" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </div>
+                    <div class="mm-filter-divider" aria-hidden="true"></div>
+                    <div class="mm-search-box">
+                        <svg class="mm-search-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input id="mindmap-search" type="search" class="form-input mm-search-input" maxlength="120" placeholder="搜索导图标题…">
+                    </div>
+                    <div class="mm-filter-divider" aria-hidden="true"></div>
+                    <div class="mm-tag-box">
+                        <svg class="mm-tag-icon" aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                        <input id="mindmap-tag-filter" class="form-input mm-tag-input" maxlength="32" placeholder="按标签筛选…">
+                    </div>
+                    <div class="mm-filter-divider" aria-hidden="true"></div>
+                    <label class="mm-fav-toggle" for="mindmap-favorites-only" title="仅查看已加星标的导图">
+                        <input id="mindmap-favorites-only" type="checkbox">
+                        <svg class="mm-fav-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        <span class="mm-fav-text">只看收藏</span>
+                    </label>
                 </div>
-                <div class="mm-search-box">
-                    <svg class="mm-search-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <input id="mindmap-search" type="search" class="form-input mm-search-input" maxlength="120" placeholder="搜索导图标题…">
-                </div>
-                <div class="mm-tag-box">
-                    <svg class="mm-tag-icon" aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                    <input id="mindmap-tag-filter" class="form-input mm-tag-input" maxlength="32" placeholder="按标签筛选…">
-                </div>
-                <label class="mm-fav-chip mm-fav-toggle" for="mindmap-favorites-only" title="仅查看已加星标的导图">
-                    <input id="mindmap-favorites-only" type="checkbox">
-                    <svg class="mm-fav-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    <span class="mm-fav-text">只看收藏</span>
-                </label>
                 <button type="button" class="btn-secondary mm-lib-btn mm-refresh-btn" data-mm-action="refresh" title="刷新导图列表"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>刷新</span></button>
             </div>
         </div>
