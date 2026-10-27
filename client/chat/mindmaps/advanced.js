@@ -323,9 +323,9 @@
             <span class="mm-badge-theme">JSON 规范</span>
             <span class="mm-theme-pack-label">${escape(pack.label || '自定义主题')}</span>
             <div class="mm-theme-color-chips">
-                <span class="mm-color-dot" data-color="${pack.root || '#4338ca'}" title="根节点 root: ${pack.root}"></span>
-                <span class="mm-color-dot" data-color="${pack.line || '#6366f1'}" title="分支连线 line: ${pack.line}"></span>
-                <span class="mm-color-dot mm-dot-bordered" data-color="${pack.background || '#ffffff'}" title="背景 background: ${pack.background || '#ffffff'}"></span>
+                <span class="mm-color-dot" data-color="${pack.root || 'var(--primary, #4338ca)'}" title="根节点 root: ${pack.root}"></span>
+                <span class="mm-color-dot" data-color="${pack.line || 'var(--primary-light, #6366f1)'}" title="分支连线 line: ${pack.line}"></span>
+                <span class="mm-color-dot mm-dot-bordered" data-color="${pack.background || 'var(--surface, #ffffff)'}" title="背景 background: ${pack.background || 'var(--surface, #ffffff)'}"></span>
             </div>
         </div>
         <div class="mm-theme-pack-helpers">
@@ -345,7 +345,7 @@
     </div>
     <div class="mm-theme-pack-guide">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        <span>说明：支持定义 <code>root</code>、<code>line</code>、<code>background</code> 以及 <code>styles</code>（分级设定各层级节点文字、形状与线条属性）。</span>
+        <span>说明：支持配置 <code>根节点(root)</code>、<code>分支线(line)</code>、<code>背景色(background)</code> 及 <code>层级样式(styles)</code>（分级设定各层级节点文字、形状与线条属性）。</span>
     </div>
     <div class="mm-modal-footer">
         <span class="mm-footer-hint">原生 JSON 导出将包含完整自定义主题参数</span>

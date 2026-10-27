@@ -39,9 +39,9 @@
                         if (typeof c === 'string') {
                             try { c = JSON.parse(c); } catch (_) { c = {}; }
                         }
-                        const root = c?.root || '#4338ca';
-                        const line = c?.line || '#6366f1';
-                        const bg = c?.background || '#ffffff';
+                        const root = c?.root || 'var(--primary, #4338ca)';
+                        const line = c?.line || 'var(--primary-light, #6366f1)';
+                        const bg = c?.background || 'var(--surface, #ffffff)';
                         return `<tr>
                             <td class="mm-col-theme-name">
                                 <div class="mm-theme-name-cell">
@@ -86,7 +86,7 @@
             <div class="mm-theme-color-chips">
                 <span class="mm-color-dot" data-color="${curr.root}" title="中心节点: ${curr.root}"></span>
                 <span class="mm-color-dot" data-color="${curr.line}" title="分支线条: ${curr.line}"></span>
-                <span class="mm-color-dot mm-dot-bordered" data-color="${curr.background || '#ffffff'}" title="画布背景: ${curr.background || '#ffffff'}"></span>
+                <span class="mm-color-dot mm-dot-bordered" data-color="${curr.background || 'var(--surface, #ffffff)'}" title="画布背景: ${curr.background || 'var(--surface, #ffffff)'}"></span>
             </div>
         </div>
         <div class="mm-theme-current-btns">
