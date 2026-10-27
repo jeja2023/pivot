@@ -35,7 +35,9 @@ test('应用中心打开导图，真实保存与版本恢复、刷新和受控�
     await page.getByRole('button', { name: '历史版本', exact: true }).click(); await expect(page.locator('#mindmap-dialog')).toBeVisible();
     await page.locator('#mindmap-dialog-body').getByRole('button', { name: '恢复', exact: true }).last().click();
     await page.getByRole('button', { name: '确认', exact: true }).click(); await expect(page.locator('#mindmap-canvas .smm-node')).toHaveCount(1);
-    await page.getByRole('button', { name: '导出', exact: true }).click(); await expect(page.getByRole('button', { name: '下载文件', exact: true })).toBeVisible({ timeout: 20000 });
+    await page.getByRole('button', { name: '导出', exact: true }).click();
+    await page.locator('#xmind-export-menu [data-mm-action="export-format"]').first().click();
+    await expect(page.getByRole('button', { name: '下载文件', exact: true })).toBeVisible({ timeout: 20000 });
     await expect(page.locator('#mindmap-save-status')).toContainText('已保存');
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('personal'));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'mindmaps' }));

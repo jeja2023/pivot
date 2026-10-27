@@ -2672,6 +2672,20 @@ body[data-theme="dark"] .xmind-panel-toggle.is-active,
     border-radius: var(--radius-sm, 6px);
 }
 
+.xmind-export-btn[aria-expanded="true"],
+.xmind-export-dropdown.is-open .xmind-export-btn {
+    background: var(--bg-hover, #f1f5f9);
+    color: var(--primary, #007aff);
+}
+
+body.dark-mode .xmind-export-btn[aria-expanded="true"],
+.dark-mode .xmind-export-btn[aria-expanded="true"],
+body.dark-mode .xmind-export-dropdown.is-open .xmind-export-btn,
+.dark-mode .xmind-export-dropdown.is-open .xmind-export-btn {
+    background: var(--bg-hover-dark, var(--bg-hover));
+    color: var(--primary-light, var(--primary));
+}
+
 .xmind-export-menu {
     left: auto !important;
     right: 0 !important;
@@ -3330,47 +3344,6 @@ body[data-theme="dark"] .mm-theme-pack-guide code,
     color: var(--primary-light, #38bdf8);
 }
 
-/* 导出拆分组合按钮样式 */
-.xmind-split-btn-group {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--border, #e2e8f0);
-    border-radius: var(--radius-sm, 6px);
-    background: transparent;
-    overflow: hidden;
-}
-
-.xmind-split-btn-group .xmind-btn {
-    border: none;
-    border-radius: 0;
-    height: 30px;
-}
-
-.xmind-split-btn-group .xmind-export-action-btn {
-    padding: 0 8px;
-    gap: 4px;
-}
-
-.xmind-split-btn-group .xmind-export-toggle-btn {
-    padding: 0 5px;
-    border-left: 1px solid var(--border, #e2e8f0);
-}
-
-.xmind-split-btn-group .xmind-btn:hover {
-    background: var(--bg-hover, #f1f5f9);
-    color: var(--primary, #007aff);
-}
-
-body.dark-mode .xmind-split-btn-group,
-.dark-mode .xmind-split-btn-group {
-    border-color: var(--border-dark, rgba(148, 163, 184, 0.2));
-}
-
-body.dark-mode .xmind-split-btn-group .xmind-export-toggle-btn,
-.dark-mode .xmind-split-btn-group .xmind-export-toggle-btn {
-    border-left-color: var(--border-dark, rgba(148, 163, 184, 0.2));
-}
-
 /* 移动端与窄屏响应式适配（适配 600px 及常见移动视口） */
 @media (max-width: 768px) {
     .mindmap-outline {
@@ -3379,10 +3352,10 @@ body.dark-mode .xmind-split-btn-group .xmind-export-toggle-btn,
     .mindmap-properties.xmind-inspector {
         display: none !important;
     }
-    .xmind-split-btn-group .xmind-export-action-btn span {
+    .xmind-export-btn span {
         display: none !important;
     }
-    .xmind-split-btn-group .xmind-export-action-btn {
+    .xmind-export-btn {
         padding: 0 6px !important;
     }
     .xmind-top-bar {

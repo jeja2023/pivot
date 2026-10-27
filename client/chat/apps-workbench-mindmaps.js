@@ -339,6 +339,7 @@
         state.exportSequence = (state.exportSequence || 0) + 1; clearTimeout(state.pollTimer);
         $('xmind-export-menu')?.classList.add('hidden');
         $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
+        $('xmind-export-dropdown')?.classList.remove('is-open');
         state.editor?.destroy(); state.editor = null; state.active = null; state.document = null;
         sessionStorage.removeItem(`pivot_mindmap_active:${state.userId}`);
         $('mindmap-editor').classList.add('hidden'); $('mindmap-library').classList.remove('hidden'); await loadList();
@@ -448,10 +449,12 @@
         if (name === 'export-menu') {
             const exportMenu = $('xmind-export-menu');
             const exportBtn = $('xmind-export-btn');
+            const exportDropdown = $('xmind-export-dropdown');
             if (exportMenu && exportBtn) {
                 const willOpen = exportMenu.classList.contains('hidden');
                 exportMenu.classList.toggle('hidden', !willOpen);
                 exportBtn.setAttribute('aria-expanded', String(willOpen));
+                exportDropdown?.classList.toggle('is-open', willOpen);
             }
             return;
         }
@@ -481,16 +484,19 @@
         }
         const exportBtn = $('xmind-export-btn');
         const exportMenu = $('xmind-export-menu');
+        const exportDropdown = $('xmind-export-dropdown');
         if (exportBtn && exportMenu) {
             document.addEventListener('click', event => {
                 if (!exportMenu.contains(event.target) && !exportBtn.contains(event.target)) {
                     exportMenu.classList.add('hidden');
                     exportBtn.setAttribute('aria-expanded', 'false');
+                    exportDropdown?.classList.remove('is-open');
                 }
             });
             exportMenu.addEventListener('click', () => {
                 exportMenu.classList.add('hidden');
                 exportBtn.setAttribute('aria-expanded', 'false');
+                exportDropdown?.classList.remove('is-open');
             });
         }
         $('mindmaps-view').addEventListener('click', event => {
