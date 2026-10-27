@@ -240,7 +240,83 @@
                 }
                 if (name === 'personal-templates') {
                     const result = await context.request('/personal-templates');
-                    void dialog('个人模板', `<p>模板保存完整导图结构与样式，只对当前账号可见；每账号最多 100 份。</p><ul>${result.rows.map(template => `<li>${escape(template.name)} <button class="btn-secondary" type="button" data-mm-action="template-use" data-mm-template="${template.id}">使用</button> <button class="btn-danger" type="button" data-mm-action="template-delete" data-mm-template="${template.id}">删除模板</button></li>`).join('')}</ul>`); return true;
+                    const templates = result.rows || [];
+                    const rowsHtml = templates.length ? templates.map(template => {
+                        const time = template.updated_at || template.updatedAt;
+                        const timeStr = time ? new Date(time).toLocaleString() : '-';
+                        return `<tr>
+                            <td class="mm-col-tpl-name">
+                                <div class="mm-tpl-cell-name">
+                                    <svg class="mm-tpl-cell-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                        <line x1="3" y1="9" x2="21" y2="9"/>
+                                        <line x1="9" y1="21" x2="9" y2="9"/>
+                                    </svg>
+                                    <span class="mm-tpl-title" title="${escape(template.name)}">${escape(template.name)}</span>
+                                </div>
+                            </td>
+                            <td class="mm-col-tpl-scope">
+                                <span class="mm-tpl-scope-pill">个人专属</span>
+                            </td>
+                            <td class="mm-col-tpl-time">
+                                <span class="mm-tpl-time-text">${escape(timeStr)}</span>
+                            </td>
+                            <td class="mm-col-tpl-actions text-center">
+                                <div class="mm-table-actions">
+                                    <button class="btn-secondary mm-action-btn mm-btn-use" type="button" data-mm-action="template-use" data-mm-template="${template.id}" title="基于此模板创建新思维导图">
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                        <span>使用</span>
+                                    </button>
+                                    <button class="btn-danger mm-action-btn mm-btn-del" type="button" data-mm-action="template-delete" data-mm-template="${template.id}" title="删除此模板">
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        <span>删除模板</span>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>`;
+                    }).join('') : `<tr><td colspan="4"><div class="mm-empty-box"><span class="mm-empty-icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg></span><span class="mm-empty-text">暂无已保存的个人模板</span><span class="mm-empty-hint">在导图编辑时点击右上角【保存为模板】，即可将排版与结构沉淀至此</span></div></td></tr>`;
+
+                    const modalHtml = `
+<div class="mm-modal-form mm-personal-templates-modal">
+    <div class="mm-config-notice">
+        <svg class="mm-config-notice-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        <div class="mm-config-notice-text">
+            个人模板保存完整导图节点骨架、层级关系与排版样式，只对当前账号可见，每账号上限 100 份。
+        </div>
+    </div>
+
+    <div class="mm-theme-list-section">
+        <div class="mm-section-header">
+            <span class="mm-section-title">已保存模板 (${templates.length})</span>
+            <span class="mm-section-hint">点击【使用】即时以此模板创建新思维导图</span>
+        </div>
+        <div class="mm-modal-table-wrap mm-template-table-wrap">
+            <table class="data-table mm-modal-table">
+                <thead>
+                    <tr>
+                        <th class="mm-col-tpl-name">模板名称</th>
+                        <th class="mm-col-tpl-scope">范围</th>
+                        <th class="mm-col-tpl-time">更新时间</th>
+                        <th class="mm-col-tpl-actions text-center">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">已存 ${templates.length} / 100 份模板配额</span>
+        <div class="mm-footer-btns">
+            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">关闭</button>
+        </div>
+    </div>
+</div>`;
+                    void dialog('个人模板', modalHtml, { hideClose: true }); return true;
                 }
                 if (name === 'template-use') { const result = await context.request(`/personal-templates/${button.dataset.mmTemplate}`); await context.create(result.document); closeDialog(); return true; }
                 if (name === 'template-delete') {
@@ -250,10 +326,74 @@
                     return this.action('personal-templates');
                 }
                 if (name === 'template-save') {
-                    await context.save(); void dialog('保存为个人模板', '<label>模板名称<input id="mindmap-template-name" class="form-input" maxlength="80" placeholder="例如：项目复盘结构"></label><button class="btn-primary" type="button" data-mm-action="template-save-confirm">保存模板</button>'); return true;
+                    await context.save();
+                    const activeDoc = state.active || {};
+                    const activeTitle = escape(activeDoc.title || '当前思维导图');
+                    const modalHtml = `
+<div class="mm-modal-form mm-template-save-modal">
+    <div class="mm-config-notice">
+        <svg class="mm-config-notice-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        <div class="mm-config-notice-text">
+            将当前导图的完整骨架、层级分支与排版样式保存为个人专属模板，仅对当前账号可见，每账号上限 100 份。
+        </div>
+    </div>
+
+    <div class="mm-template-source-card">
+        <div class="mm-template-source-header">
+            <span class="mm-template-source-tag">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                <span>当前导图来源</span>
+            </span>
+            <span class="mm-template-limit-badge">上限 100 份</span>
+        </div>
+        <div class="mm-template-source-name" title="${activeTitle}">
+            ${activeTitle}
+        </div>
+    </div>
+
+    <div class="mm-form-field">
+        <div class="mm-field-label-row">
+            <label class="mm-field-label" for="mindmap-template-name">
+                <span class="mm-label-text">模板名称</span>
+            </label>
+            <span class="mm-badge-req">必填</span>
+        </div>
+        <div class="mm-input-wrap">
+            <span class="mm-input-icon">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+            </span>
+            <input id="mindmap-template-name" class="form-input mm-modal-input mm-input-has-icon" maxlength="80" placeholder="例如：项目复盘结构">
+        </div>
+        <div class="mm-dimension-hint-box">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <span>提示：重名模板将自动覆盖更新已有同名快照。</span>
+        </div>
+    </div>
+
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">保存后可在新建导图或模板库中随时调用</span>
+        <div class="mm-footer-btns">
+            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">取消</button>
+            <button class="btn-primary mm-modal-submit" type="button" data-mm-action="template-save-confirm">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <span>保存模板</span>
+            </button>
+        </div>
+    </div>
+</div>`;
+                    void dialog('保存为个人模板', modalHtml, { hideClose: true }); return true;
                 }
                 if (name === 'template-save-confirm') {
-                    const result = await context.request('/personal-templates', context.json({ artifactId: state.active.id, name: $('mindmap-template-name').value }));
+                    const templateName = $('mindmap-template-name')?.value?.trim();
+                    if (!templateName) throw new Error('请输入模板名称。');
+                    const result = await context.request('/personal-templates', context.json({ artifactId: state.active.id, name: templateName }));
                     state.personalTemplates = [...(state.personalTemplates || []).filter(t => String(t.id) !== String(result.template.id)), result.template];
                     if ($('mindmap-template') && !$('mindmap-template').querySelector(`option[value="personal:${result.template.id}"]`)) {
                         const option = document.createElement('option'); option.value = `personal:${result.template.id}`; option.textContent = result.template.name; option.dataset.personalTemplate = 'true'; $('mindmap-template').appendChild(option);
