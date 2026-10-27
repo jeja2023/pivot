@@ -28,6 +28,7 @@
             }
             if (nodeId === next.tree.id && $('mindmap-doc-title')) {
                 $('mindmap-doc-title').textContent = trimmed;
+                $('mindmap-doc-title').title = trimmed;
             }
         }
 

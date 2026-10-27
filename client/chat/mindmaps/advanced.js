@@ -313,8 +313,79 @@
                     return true;
                 }
                 if (name === 'theme-pack') {
-                    const current = schema.palette(state.document); const pack = { version: 1, label: current.label, root: current.root, line: current.line, background: current.background, ...(current.styles ? { styles: current.styles } : {}) };
-                    void dialog('自定义主题包', `<p>可修改并粘贴主题配置。主题包允许颜色与 root/second/node 三组 styles 节点样式；应用后随导图版本保存，原生 JSON 导出包含完整配置。</p><label>主题配置<textarea id="mindmap-theme-pack" class="form-input" rows="10" maxlength="16000">${escape(JSON.stringify(pack, null, 2))}</textarea></label><button class="btn-primary" type="button" data-mm-action="theme-pack-apply">应用主题包</button>`); return true;
+                    const current = schema.palette(state.document);
+                    const pack = { version: 1, label: current.label, root: current.root, line: current.line, background: current.background, ...(current.styles ? { styles: current.styles } : {}) };
+                    const modalHtml = `
+<div class="mm-modal-form mm-theme-pack-modal">
+    <div class="mm-modal-subtitle">以结构化 JSON 定义主题色板与节点层级样式规范，配置随当前导图版本持久化保存。</div>
+    <div class="mm-section-card mm-theme-pack-meta-card">
+        <div class="mm-theme-pack-left">
+            <span class="mm-badge-theme">JSON 规范</span>
+            <span class="mm-theme-pack-label">${escape(pack.label || '自定义主题')}</span>
+            <div class="mm-theme-color-chips">
+                <span class="mm-color-dot" data-color="${pack.root || '#4338ca'}" title="根节点 root: ${pack.root}"></span>
+                <span class="mm-color-dot" data-color="${pack.line || '#6366f1'}" title="分支连线 line: ${pack.line}"></span>
+                <span class="mm-color-dot mm-dot-bordered" data-color="${pack.background || '#ffffff'}" title="背景 background: ${pack.background || '#ffffff'}"></span>
+            </div>
+        </div>
+        <div class="mm-theme-pack-helpers">
+            <button type="button" class="btn-secondary mm-btn-xs" id="mm-pack-format-btn" title="格式化 JSON 缩进">格式化</button>
+            <button type="button" class="btn-secondary mm-btn-xs" id="mm-pack-copy-btn" title="复制完整配置">复制配置</button>
+        </div>
+    </div>
+    <div class="mm-code-editor-card">
+        <div class="mm-code-editor-header">
+            <div class="mm-code-title">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                <span>theme.json</span>
+            </div>
+            <span class="mm-code-hint">最大 16KB · 支持 root / line / background / styles</span>
+        </div>
+        <textarea id="mindmap-theme-pack" class="form-input mm-code-textarea" rows="11" spellcheck="false" maxlength="16000">${escape(JSON.stringify(pack, null, 2))}</textarea>
+    </div>
+    <div class="mm-theme-pack-guide">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <span>说明：支持定义 <code>root</code>、<code>line</code>、<code>background</code> 以及 <code>styles</code>（分级设定各层级节点文字、形状与线条属性）。</span>
+    </div>
+    <div class="mm-modal-footer">
+        <span class="mm-footer-hint">原生 JSON 导出将包含完整自定义主题参数</span>
+        <div class="mm-footer-btns">
+            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">取消</button>
+            <button type="button" class="btn-primary mm-modal-submit" data-mm-action="theme-pack-apply">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>应用主题包</span>
+            </button>
+        </div>
+    </div>
+</div>`;
+                    void dialog('自定义主题包', modalHtml);
+                    setTimeout(() => {
+                        const body = $('mindmap-dialog-body');
+                        if (body) {
+                            body.querySelectorAll('.mm-color-dot[data-color]').forEach(dot => {
+                                dot.style.backgroundColor = dot.getAttribute('data-color');
+                            });
+                        }
+                        const formatBtn = $('mm-pack-format-btn');
+                        const copyBtn = $('mm-pack-copy-btn');
+                        const textarea = $('mindmap-theme-pack');
+                        if (formatBtn && textarea) {
+                            formatBtn.addEventListener('click', () => {
+                                try { textarea.value = JSON.stringify(JSON.parse(textarea.value), null, 2); } catch (_) {}
+                            });
+                        }
+                        if (copyBtn && textarea) {
+                            copyBtn.addEventListener('click', async () => {
+                                try {
+                                    await navigator.clipboard.writeText(textarea.value);
+                                    const old = copyBtn.textContent;
+                                    copyBtn.textContent = '已复制';
+                                    setTimeout(() => { copyBtn.textContent = old; }, 1500);
+                                } catch (_) {}
+                            });
+                        }
+                    }, 0);
+                    return true;
                 }
                 if (name === 'theme-pack-apply') {
                     let parsed; try { parsed = JSON.parse($('mindmap-theme-pack').value); } catch (_) { throw new Error('主题配置不是有效 JSON，请检查后重试。'); }

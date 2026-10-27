@@ -22,7 +22,7 @@ export function mount(container, document, { change, select, failure }) {
         history = history.slice(0, historyIndex + 1); history.push(snapshot); if (history.length > 50) history.shift(); historyIndex = history.length - 1;
     }
     const palette = () => schema.palette(current);
-    const config = () => ({ backgroundColor: palette().background, lineColor: palette().line, root: { fillColor: palette().root, color: schema.foreground(palette().root), ...palette().styles?.root }, second: { fillColor: palette().background, color: schema.foreground(palette().background), ...palette().styles?.second }, node: { fillColor: palette().background, color: schema.foreground(palette().background), ...palette().styles?.node } });
+    const config = () => ({ backgroundColor: palette().background, lineColor: palette().line, textAlign: 'center', root: { fillColor: palette().root, color: schema.foreground(palette().root), textAlign: 'center', ...palette().styles?.root }, second: { fillColor: palette().background, color: schema.foreground(palette().background), textAlign: 'center', ...palette().styles?.second }, node: { fillColor: palette().background, color: schema.foreground(palette().background), textAlign: 'center', ...palette().styles?.node } });
     const native = schema.toEngine(current);
     const map = new MindMap({ el: container, data: native.root, layout: native.layout, themeConfig: config(), addHistoryTime: 100, enableFreeDrag: false, enableAutoEnterTextEditWhenKeydown: false, customHyperlinkJump: link => { if (/^https?:\/\//i.test(link)) window.open(link, '_blank', 'noopener,noreferrer'); }, beforeShortcutRun: key => { if (['Control+z', 'Control+y'].includes(key)) { command(key.endsWith('+z') ? 'BACK' : 'FORWARD'); return true; } return false; }, customCheckEnableShortcut: event => !event.isComposing && event.keyCode !== 229 && map.keyCommand.defaultEnableCheck(event), errorHandler: () => { if (!destroyed) failure(new Error('画布操作失败，请保存草稿后重新打开。')); } });
 
@@ -201,6 +201,30 @@ export function mount(container, document, { change, select, failure }) {
         }
         if (!selected) map.renderer.root.active(); map.execCommand(name);
     }
+    function activateNodeWithoutCentering(id) {
+        if (!id) return;
+        const activate = () => {
+            const targetNode = map.renderer?.findNodeByUid?.(id);
+            if (targetNode) {
+                if (map.opt?.readonly) {
+                    map.renderer?.clearActiveNodeList?.();
+                    map.renderer?.addNodeToActiveList?.(targetNode, true);
+                    map.renderer?.emitNodeActiveEvent?.(targetNode);
+                } else {
+                    targetNode.active?.();
+                }
+                selectNode(targetNode);
+            }
+        };
+        const existing = map.renderer?.findNodeByUid?.(id);
+        if (existing) {
+            activate();
+        } else if (typeof map.renderer?.expandToNodeUid === 'function') {
+            map.renderer.expandToNodeUid(id, activate);
+        } else {
+            activate();
+        }
+    }
     return {
         document: () => { map.renderer.textEdit.hideEditTextBox(); composing = false; commit(); return current; },
         composing: () => Boolean(composing && map.renderer.textEdit.isShowTextEdit()),
@@ -224,7 +248,18 @@ export function mount(container, document, { change, select, failure }) {
         minimap() { return map.miniMap.calculationMiniMap(220, 140).svgHTML; },
         pan(dx, dy) { map.view.translateXY(dx, dy); },
         command,
-        focus(id) { map.execCommand('GO_TARGET_NODE', id, node => selectNode(node)); },
+        focus(id, center = true) {
+            if (!id) return;
+            const shouldCenter = typeof center === 'object' ? center.center !== false : Boolean(center);
+            if (shouldCenter) {
+                map.execCommand('GO_TARGET_NODE', id, node => selectNode(node));
+            } else {
+                activateNodeWithoutCentering(id);
+            }
+        },
+        selectNodeById(id) {
+            activateNodeWithoutCentering(id);
+        },
         fit() { map.view.fit(); },
         zoomIn() {
             if (typeof map.view?.enlarge === 'function') map.view.enlarge();

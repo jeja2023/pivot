@@ -43,7 +43,7 @@
   ],
   "entrySha256": "d7e61cfad22cf53fd7cefd593a31dce5003b87396e4db8b9777cd7d916e06b61",
   "files": {
-    "editor.mjs": "1afdb8962bb4bb84b0224cbfea1947d11f5c8c569035f20a6c6fc5b8982e3de5",
+    "editor.mjs": "d956d17e4ff37cb0b6cebcc109505e1863926b6e6967d6783c770c154dc881be",
     "editor.mjs.LEGAL.txt": "d49338dc5b4bfa0aa006d5bc0e65c45d85fcbe3e8548916be762e3214faa464e",
     "collaboration.mjs": "5f7ec469c6785058c622303f0562b1c0ca58cb299f466dea89c1ac79293d33f1",
     "collaboration.mjs.LEGAL.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -55,6 +55,6 @@
     "client/common/mindmap-document.js": "2684f95d4d5c21baada295b825be74bf9f67fdf7b2eaace37ccb463a0d6c0006"
   },
   "editorInputs": {
-    "scripts/mindmap-text-layout.mjs": "92979622e583ea9c5c3b8e813256f48ae4d3df3fe456330a2aa31fdcab1e8ede"
+    "scripts/mindmap-text-layout.mjs": "a65737268b61a6f0563a48ca5cff68dd8a92dbec5f96874dd03811c01a8b537a"
   }
 }

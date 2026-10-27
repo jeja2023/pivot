@@ -7,7 +7,7 @@ contents.createTextNode = function createMeasuredText(specifyText) {
     delete this.nodeData.data.needUpdate; delete this.nodeData.data.resetRichText;
     const value = String(typeof specifyText === 'string' ? specifyText : this.getData('text') || '');
     const size = Number(this.getStyle('fontSize', false)) || 16;
-    const align = this.getStyle('textAlign', false) || 'left';
+    const align = this.getStyle('textAlign', false) || 'center';
     const family = this.getStyle('fontFamily', false) || 'sans-serif';
     const weight = this.getStyle('fontWeight', false) || 'normal';
     const italic = this.getStyle('fontStyle', false) || 'normal';
@@ -26,20 +26,31 @@ contents.createTextNode = function createMeasuredText(specifyText) {
         lines.push(line);
     }
     let width = 0;
-    const group = new G();
+    for (const line of lines) {
+        width = Math.max(width, context.measureText(line).width);
+    }
+    const customWidth = (typeof this.hasCustomWidth === 'function' && this.hasCustomWidth()) ? this.customTextWidth : 0;
+    width = Math.max(width, customWidth);
+    width = Math.min(Math.ceil(width), maxWidth);
     const metrics = context.measureText('国Ag');
     const ascent = Math.max(metrics.actualBoundingBoxAscent || 0, size * 0.85);
     const descent = Math.max(metrics.actualBoundingBoxDescent || 0, size * 0.2);
     const lineHeight = Math.max(size * 1.2, ascent + descent);
+    const height = Math.ceil(lines.length * lineHeight);
+    const anchor = { left: 'start', center: 'middle', right: 'end' }[align] || 'middle';
+    const x = align === 'left' ? 0 : (align === 'right' ? width : width / 2);
+    const group = new G();
     lines.forEach((line, index) => {
-        width = Math.max(width, context.measureText(line).width);
         const node = new Text().text(line || '\ufeff').addClass('smm-text-node-wrap');
         this.style.text(node);
-        node.attr({ 'text-anchor': { left: 'start', center: 'middle', right: 'end' }[align] || 'start', y: ascent + index * lineHeight });
+        node.attr({
+            'text-anchor': anchor,
+            'dominant-baseline': 'central',
+            x,
+            y: (index + 0.5) * lineHeight
+        });
         group.add(node);
     });
-    width = Math.min(Math.ceil(width), maxWidth);
-    const height = Math.ceil(lines.length * lineHeight);
     group.attr({ 'data-width': width, 'data-height': height, 'data-ismultiLine': lines.length > 1 });
     return { node: group, width, height };
 };

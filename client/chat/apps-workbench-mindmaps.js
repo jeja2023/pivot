@@ -23,7 +23,9 @@
     };
     function syncDocumentMeta() {
         if ($('mindmap-doc-title') && state.document) {
-            $('mindmap-doc-title').textContent = state.document.tree?.text || state.active?.title || '思维导图';
+            const title = state.document.tree?.text || state.active?.title || '思维导图';
+            $('mindmap-doc-title').textContent = title;
+            $('mindmap-doc-title').title = title;
         }
         if ($('xmind-topic-stat') && state.document) {
             $('xmind-topic-stat').textContent = `主题: ${schema.count(state.document)}`;
@@ -82,7 +84,7 @@
         const viewer = state.active?.role === 'viewer' || state.accessRevoked || state.sessionInvalid;
         $('mindmap-access-status').textContent = state.active?.collaboration ? viewer ? '共享查看 · 内容自动同步' : '协作编辑 · 独立修改自动合并' : '个人文档';
         state.editor?.readOnly(viewer);
-        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"],[data-mm-action="outline-edit"]')) button.disabled = viewer;
+        for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"]')) button.disabled = viewer;
         $('mindmap-layout').disabled = viewer; $('mindmap-theme').disabled = viewer;
         $('mindmap-editor').querySelector('[data-mm-action="sharing"]').hidden = state.active?.role !== 'owner';
         $('mindmap-editor').querySelector('[data-mm-action="versions"]').disabled = state.active?.role !== 'owner';
@@ -209,7 +211,7 @@
         $('mindmap-node-shape').value = node?.style.shape || 'roundedRectangle';
         $('mindmap-node-bold').checked = node?.style.fontWeight === 'bold';
         $('mindmap-node-italic').checked = node?.style.fontStyle === 'italic';
-        const styleFields = { font: ['fontFamily', 'sans-serif'], align: ['textAlign', 'left'], decoration: ['textDecoration', 'none'], border: ['borderColor', palette.line], 'border-width': ['borderWidth', 1], dash: ['borderDasharray', 'none'], line: ['lineColor', palette.line], 'line-width': ['lineWidth', 2], 'padding-x': ['paddingX', 12], 'padding-y': ['paddingY', 8] };
+        const styleFields = { font: ['fontFamily', 'sans-serif'], align: ['textAlign', 'center'], decoration: ['textDecoration', 'none'], border: ['borderColor', palette.line], 'border-width': ['borderWidth', 1], dash: ['borderDasharray', 'none'], line: ['lineColor', palette.line], 'line-width': ['lineWidth', 2], 'padding-x': ['paddingX', 12], 'padding-y': ['paddingY', 8] };
         for (const [id, [key, fallback]] of Object.entries(styleFields)) {
             const input = $(`mindmap-node-${id}`); if (!input) continue;
             let value = node?.style[key] ?? fallback;
@@ -224,7 +226,7 @@
         if ($('xmind-btn-italic')) $('xmind-btn-italic').classList.toggle('is-active', node?.style.fontStyle === 'italic');
         if ($('xmind-btn-strike')) $('xmind-btn-strike').classList.toggle('is-active', Boolean(node?.style.textDecoration && node.style.textDecoration !== 'none'));
         if ($('xmind-inspector')) {
-            const currentAlign = node?.style.textAlign || 'left';
+            const currentAlign = node?.style.textAlign || 'center';
             $('xmind-inspector').querySelectorAll('.xmind-align-btn').forEach(btn => {
                 btn.classList.toggle('is-active', btn.dataset.align === currentAlign);
             });
@@ -333,6 +335,8 @@
         if (state.active && state.dirty) await save();
         stopSync();
         state.exportSequence = (state.exportSequence || 0) + 1; clearTimeout(state.pollTimer);
+        $('xmind-export-menu')?.classList.add('hidden');
+        $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
         state.editor?.destroy(); state.editor = null; state.active = null; state.document = null;
         sessionStorage.removeItem(`pivot_mindmap_active:${state.userId}`);
         $('mindmap-editor').classList.add('hidden'); $('mindmap-library').classList.remove('hidden'); await loadList();
@@ -422,11 +426,24 @@
             });
         }
         if (name === 'export') {
+            const exportMenu = $('xmind-export-menu');
+            const exportBtn = $('xmind-export-btn');
+            if (exportMenu && exportBtn) {
+                const willOpen = exportMenu.classList.contains('hidden');
+                exportMenu.classList.toggle('hidden', !willOpen);
+                exportBtn.setAttribute('aria-expanded', String(willOpen));
+            }
+            return;
+        }
+        if (name === 'export-format') {
+            const format = state.actionButton?.dataset.format || $('mindmap-export-format')?.value || 'json';
+            if ($('mindmap-export-format')) $('mindmap-export-format').value = format;
             $('xmind-export-menu')?.classList.add('hidden');
+            $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
             $('xmind-export-dropdown')?.classList.remove('is-open');
             const sequence = state.exportSequence = (state.exportSequence || 0) + 1; const userId = state.userId;
             clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
-            await save(); const result = await request(`/${state.active.id}/exports`, json({ format: $('mindmap-export-format').value, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
+            await save(); const result = await request(`/${state.active.id}/exports`, json({ format, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
         }
     }
     function bind() {
@@ -452,6 +469,20 @@
                 moreBtn.setAttribute('aria-expanded', 'false');
             });
         }
+        const exportBtn = $('xmind-export-btn');
+        const exportMenu = $('xmind-export-menu');
+        if (exportBtn && exportMenu) {
+            document.addEventListener('click', event => {
+                if (!exportMenu.contains(event.target) && !exportBtn.contains(event.target)) {
+                    exportMenu.classList.add('hidden');
+                    exportBtn.setAttribute('aria-expanded', 'false');
+                }
+            });
+            exportMenu.addEventListener('click', () => {
+                exportMenu.classList.add('hidden');
+                exportBtn.setAttribute('aria-expanded', 'false');
+            });
+        }
         $('mindmaps-view').addEventListener('click', event => {
             const button = event.target.closest('button'); if (!button) return;
             const run = async () => {
@@ -460,7 +491,7 @@
                 if (button.dataset.mmOpen) return open(button.dataset.mmOpen);
                 if (button.dataset.mmRecover) { if (await confirm('恢复导图', '恢复会生成新版本并清除之前的共享授权；版本配额已满时恢复为个人副本。是否继续？')) { const result = await request(`/${button.dataset.mmRecover}/recover`, json({})); await loadList(); if (result.recoveredAsCopy) window.Pivot.legacy.showToast?.('已恢复为个人副本，原记录仍保留在回收站。', 'success'); } return; }
                 if (button.dataset.mmOrganize) return advanced.action('organize', button);
-                if (button.dataset.mmNode) return state.editor.focus(button.dataset.mmNode);
+                if (button.dataset.mmNode) return state.editor?.selectNodeById ? state.editor.selectNodeById(button.dataset.mmNode) : state.editor?.focus?.(button.dataset.mmNode, false);
                 if (button.dataset.mmVersionPage) return dialogs?.versionDialog(Number(button.dataset.mmVersionPage));
                 if (button.dataset.mmRestore) {
                     const versionId = button.dataset.mmRestore;
@@ -523,20 +554,6 @@
                 if (event.key === 'Enter') {
                     event.preventDefault();
                     docTitleInput.blur();
-                }
-            });
-        }
-
-        const exportBtn = $('xmind-export-toggle-btn');
-        const exportMenu = $('xmind-export-menu');
-        if (exportBtn && exportMenu) {
-            exportBtn.addEventListener('click', event => {
-                event.stopPropagation();
-                exportMenu.classList.toggle('hidden');
-            });
-            document.addEventListener('click', event => {
-                if (!exportMenu.contains(event.target) && event.target !== exportBtn) {
-                    exportMenu.classList.add('hidden');
                 }
             });
         }
