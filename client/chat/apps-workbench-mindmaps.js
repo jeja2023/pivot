@@ -362,6 +362,13 @@
         if (!result.ok) throw new Error('下载失败，请重新导出。');
         const blob = await result.blob(); if (state.userId !== userId) return;
         const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${title}.${job.format}`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+        const host = $('mindmap-export-status');
+        if (host && host.textContent.includes('导出完成')) {
+            host.textContent = '导出完成，已自动保存文件。';
+            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job).catch(fail); host.appendChild(button);
+            clearTimeout(state.exportToastTimer);
+            state.exportToastTimer = setTimeout(() => { if (host.textContent.includes('导出完成')) host.textContent = ''; }, 6000);
+        }
     }
     async function poll(jobId, sequence = state.exportSequence, userId = state.userId) {
         clearTimeout(state.pollTimer);
@@ -370,7 +377,8 @@
         const host = $('mindmap-export-status'); host.replaceChildren();
         if (job.status === 'ready') {
             host.textContent = '导出完成，文件绑定所选历史版本。';
-            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.onclick = () => download(job).catch(fail); host.appendChild(button);
+            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job).catch(fail); host.appendChild(button);
+            void download(job).catch(fail);
         } else if (job.status === 'failed') { host.textContent = `导出失败：${job.error}。可点击导出重试。`; }
         else { host.textContent = job.status === 'pending' ? '导出已排队…' : '正在生成导出文件…'; state.pollTimer = setTimeout(() => { void poll(jobId, sequence, userId).catch(fail); }, 2000); }
     }
