@@ -41,6 +41,11 @@
   - **AI 总结分支弹窗应用按钮契约修复**：将 AI 总结分支预览弹窗底部的应用按键文案及 `aria-label` 统一还原为“应用到原分支”，保持与 E2E 测试及大纲展开模式的文案契约完全一致。
   - **导图数据来源刷新与模板保存按键前置**：在顶部操作栏新增“刷新来源数据”与“保存为模板”按钮，由 `updatePermissions` 在映射导图中直接解除 `hidden` 状态，解决因右侧格式检查器默认停留在“样式”Tab 导致“画布”Tab 内按钮被隐藏而超时的问题；同时在移动端媒体查询中紧凑收拢，避免视口横向滚动溢出。
 
+- **知识库共享专题库管理菜单静态化与权限时序加固（Knowledge Shared Collection Menu Fix）**：
+  - **模板声明静态化**：将“内容管理”下拉面板中的“管理共享专题库”按钮（`#rag-share-collection-btn`）正式沉淀入静态模板 `knowledge.html`，标注标准 `.admin-root-only.hidden`，消除旧版纯依靠 JS 运行时 `createElement` 与 DOM 动态追加的时序竞争缺陷；
+  - **登录与工作台状态同步**：在 `auth.js` 的 `showApp()` 中补齐全文档 `.admin-root-only` 元素的可见性自动同步；在 `rag-documents.js` 中保留安全绑定防重机制与向后兼容回退，即使生产环境刷新直接停留在知识库页面或异步认证网络延迟，系统管理员登录后菜单均能精准呈现；
+  - **支持环境变量自定义超管账号**：在 `server/permissions.js` 中让 `SUPER_ADMIN_USERNAME` 优先读取 `process.env.SUPER_ADMIN_USERNAME || 'admin'`，支持生产环境通过环境变量指定自定义系统管理员账号，并联动对齐用户管理角色筛选逻辑与测试套件。
+
 详见 [v0.7.46 发布记录](docs/releases/v0.7.46-思维导图大纲交互与节点文本居中及格式面板优化.md)。
 
 ## [v0.7.45] - 2026-10-26

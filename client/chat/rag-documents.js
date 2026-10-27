@@ -596,16 +596,21 @@ async function openKnowledgeWorkbench() {
     panel.setAttribute('aria-hidden', 'false');
     document.dispatchEvent(new CustomEvent('pivot:knowledge-opened'));
     const toolbar = panel.querySelector('.knowledge-toolbar');
+    const existingShareBtn = toolbar?.querySelector('#rag-share-collection-btn');
+    if (existingShareBtn && !existingShareBtn.dataset.bound) {
+        existingShareBtn.dataset.bound = '1';
+        existingShareBtn.addEventListener('click', () => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.());
+    }
     if (toolbar && isSuperAdminUser() && !toolbar.querySelector('#rag-share-collection-btn')) {
         const button = document.createElement('button');
-        button.id = 'rag-share-collection-btn'; button.className = 'btn-secondary'; button.type = 'button'; button.setAttribute('role', 'menuitem');
+        button.id = 'rag-share-collection-btn'; button.className = 'btn-secondary admin-root-only'; button.type = 'button'; button.setAttribute('role', 'menuitem');
         button.textContent = '管理共享专题库';
+        button.dataset.bound = '1';
         button.addEventListener('click', () => window.Pivot.modules?.['rag.panels']?.openKnowledgeCollectionShareModal?.());
         const contentMenu = toolbar.querySelector('.knowledge-action-menu:first-of-type .knowledge-action-menu-panel');
         if (contentMenu) contentMenu.appendChild(button);
         else toolbar.querySelector('.knowledge-toolbar-actions')?.appendChild(button);
     }
-    if (toolbar && !isSuperAdminUser()) toolbar.querySelector('#rag-share-collection-btn')?.remove();
     const settingsPromise = Promise.resolve()
         .then(() => window.Pivot.legacy.ensureAdminSettingsScript?.())
         .then(() => {

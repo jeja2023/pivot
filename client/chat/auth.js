@@ -119,6 +119,9 @@ window.Pivot.legacy.showApp = (options = {}) => {
         const btn = document.getElementById('admin-panel-btn');
         if (btn) btn.classList.remove('hidden');
     }
+    document.querySelectorAll('.admin-root-only').forEach(el => {
+        el.classList.toggle('hidden', !isSuperAdmin);
+    });
 
     // 登录成功后加载必要数据
     if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();

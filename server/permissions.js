@@ -1,6 +1,6 @@
 const ADMIN_ROLE = 'admin';
 const USER_ROLE = 'user';
-const SUPER_ADMIN_USERNAME = 'admin';
+const SUPER_ADMIN_USERNAME = String(process.env.SUPER_ADMIN_USERNAME || 'admin').trim();
 const ADMIN_TIER = 'admin';
 const MANAGER_TIER = 'manager';
 const USER_TIER = 'user';

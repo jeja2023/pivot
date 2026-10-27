@@ -102,6 +102,7 @@ test('知识库全局治理能力只授予系统 admin，不授予普通管理�
     const ragDocuments = fs.readFileSync(path.join(root, 'server/services/rag-documents.js'), 'utf8');
     const ragClient = fs.readFileSync(path.join(root, 'client/chat/rag-documents.js'), 'utf8');
     const ragPanels = fs.readFileSync(path.join(root, 'client/chat/rag-documents-panels.js'), 'utf8');
+    const knowledgeWorkspace = fs.readFileSync(path.join(root, 'client/chat/partials/workspaces/knowledge.html'), 'utf8');
 
     assert.equal(isSuperAdmin(admin), true);
     assert.equal(isSuperAdmin(regularAdmin), false);
@@ -112,6 +113,7 @@ test('知识库全局治理能力只授予系统 admin，不授予普通管理�
     assert.match(ragDocuments, /if \(!isSuperAdmin\(user\)\) return null;/);
     assert.match(ragClient, /toolbar && isSuperAdminUser\(\) && !toolbar\.querySelector\('#rag-share-collection-btn'\)/);
     assert.match(ragPanels, /if \(!isSuperAdminUser\(\)\) \{/);
+    assert.match(knowledgeWorkspace, /id="rag-share-collection-btn"[^>]*admin-root-only/);
 });
 
 test('系统 admin 查看全库知识文档时可看到上传用户，其他用户不接收上传者资料', () => {

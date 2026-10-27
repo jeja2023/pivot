@@ -145,9 +145,11 @@ function createAdminUsersRouter({
         }
         if (role) {
             if (role === 'super_admin') {
-                conditions.push("COALESCE(NULLIF(deleted_username, ''), username) = 'admin'");
+                conditions.push("COALESCE(NULLIF(deleted_username, ''), username) = ?");
+                params.push(SUPER_ADMIN_USERNAME);
             } else if (role === 'manager') {
-                conditions.push("(role = 'admin' AND COALESCE(NULLIF(deleted_username, ''), username) != 'admin')");
+                conditions.push("(role = 'admin' AND COALESCE(NULLIF(deleted_username, ''), username) != ?)");
+                params.push(SUPER_ADMIN_USERNAME);
             } else if (role === 'admin') {
                 conditions.push("role = 'admin'");
             } else if (role === 'user') {
