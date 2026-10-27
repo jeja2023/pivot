@@ -280,7 +280,7 @@
                         <p>当前数据集尚未运行资金分析。点击右上角“新建资金分析”，确认借贷与映射后将自动计算净流量与异动线索。</p>
                         <button class="btn-primary finance-btn-new" type="button" data-finance="new">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            新建资金分析
+                            立即新建资金分析
                         </button>
                     </div>
                 </td>

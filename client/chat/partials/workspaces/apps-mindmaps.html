@@ -4,6 +4,8 @@
             <div class="mm-lib-primary-actions">
                 <button type="button" class="btn-primary mm-new-btn" data-mm-action="new"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>新建导图</span></button>
                 <button type="button" class="btn-secondary mm-lib-btn mm-ai-btn" data-mm-action="ai"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span>AI 生成</span></button>
+                <button type="button" class="btn-secondary mm-lib-btn mm-tpl-btn" data-mm-action="personal-templates" aria-label="个人模板"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>个人模板</span></button>
+                <button type="button" class="btn-secondary mm-lib-btn" data-mm-action="dataset-mapping" aria-label="数据层级映射"><svg class="mm-icon" aria-hidden="true" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>数据层级映射</span></button>
                 <div class="mm-dropdown" id="mindmap-more-dropdown">
                     <button type="button" class="btn-secondary mm-dropdown-toggle" id="mindmap-more-btn" aria-haspopup="true" aria-expanded="false" title="更多创建与导入选项">
                         <span>更多操作</span>
@@ -136,11 +138,11 @@
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     <span>演说</span>
                 </button>
-                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="sharing" title="管理共享协作权限">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="sharing" title="管理共享协作权限" aria-label="共享协作">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <span>协作</span>
                 </button>
-                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="versions" title="查看历史版本快照">
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="versions" title="查看历史版本快照" aria-label="历史版本">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>历史</span>
                 </button>
@@ -477,11 +479,11 @@
                         <div class="xmind-node-actions">
                             <button type="button" class="btn-primary xmind-apply-btn" data-mm-action="apply-node" aria-label="应用到节点">应用到节点</button>
                             <div class="xmind-ai-actions">
-                                <button type="button" class="btn-secondary xmind-ai-btn" data-mm-action="ai-expand" title="智能生成子分支">
+                                <button type="button" class="btn-secondary xmind-ai-btn" data-mm-action="ai-expand" title="智能生成子分支" aria-label="AI 展开分支">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                                     <span>AI 扩展分支</span>
                                 </button>
-                                <button type="button" class="btn-secondary xmind-ai-btn" data-mm-action="ai-summarize" title="提炼归纳此分支">
+                                <button type="button" class="btn-secondary xmind-ai-btn" data-mm-action="ai-summarize" title="提炼归纳此分支" aria-label="AI 总结分支">
                                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>
                                     <span>AI 总结</span>
                                 </button>
@@ -519,7 +521,7 @@
                             <button type="button" class="btn-secondary xmind-theme-btn" data-mm-action="template-save">保存为模板</button>
                             <button type="button" class="btn-secondary xmind-theme-btn" data-mm-action="copy">另存副本</button>
                         </div>
-                        <button type="button" class="btn-secondary xmind-refresh-source-btn" data-mm-action="refresh-source" id="mindmap-source-refresh" hidden>刷新来源数据映射</button>
+                        <button type="button" class="btn-secondary xmind-refresh-source-btn" data-mm-action="refresh-source" id="mindmap-source-refresh" aria-label="刷新来源数据" hidden>刷新来源数据映射</button>
                     </div>
 
                     <div class="xmind-prop-section">

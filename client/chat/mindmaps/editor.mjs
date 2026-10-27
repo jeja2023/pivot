@@ -134,13 +134,15 @@ export function mount(container, document, { change, select, failure }) {
 
     let resizeTimer;
     let lastWidth = container.clientWidth; let lastHeight = container.clientHeight;
-    const observer = new ResizeObserver(() => {
+    const handleResize = () => {
         if (container.clientWidth === lastWidth && container.clientHeight === lastHeight) return;
         lastWidth = container.clientWidth; lastHeight = container.clientHeight;
         clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => { if (!destroyed && container.clientWidth && container.clientHeight) { map.resize(); map.render(() => { if (!destroyed && container.isConnected && container.clientWidth && container.clientHeight) map.view.fit(); }); } }, 100);
-    });
+        resizeTimer = setTimeout(() => { if (!destroyed && container.clientWidth && container.clientHeight) { map.resize(); map.render(() => { if (!destroyed && container.isConnected && container.clientWidth && container.clientHeight) map.view.fit(); }); } }, 40);
+    };
+    const observer = new ResizeObserver(handleResize);
     observer.observe(container);
+    window.addEventListener('resize', handleResize);
     const compositionStart = () => { composing = true; };
     const compositionEnd = () => { composing = false; commit(); };
     window.addEventListener('compositionstart', compositionStart);
@@ -304,6 +306,6 @@ export function mount(container, document, { change, select, failure }) {
             }
             commit();
         },
-        destroy() { destroyed = true; observer.disconnect(); clearTimeout(resizeTimer); window.removeEventListener('compositionstart', compositionStart); window.removeEventListener('compositionend', compositionEnd); map.destroy(); selected = null; }
+        destroy() { destroyed = true; observer.disconnect(); clearTimeout(resizeTimer); window.removeEventListener('resize', handleResize); window.removeEventListener('compositionstart', compositionStart); window.removeEventListener('compositionend', compositionEnd); map.destroy(); selected = null; }
     };
 }

@@ -2723,3 +2723,59 @@ body[data-theme="dark"] .mm-theme-pack-guide code,
     background: var(--code-bg-dark, rgba(255, 255, 255, 0.08));
     color: var(--primary-light, #38bdf8);
 }
+
+/* 移动端与窄屏响应式适配（适配 600px 及常见移动视口） */
+@media (max-width: 768px) {
+    .mindmap-outline {
+        display: none !important;
+    }
+    .mindmap-properties.xmind-inspector {
+        display: none !important;
+    }
+    .xmind-top-bar {
+        padding: 0 8px;
+        gap: 6px;
+        overflow-x: hidden;
+        max-width: 100vw;
+        box-sizing: border-box;
+    }
+    .xmind-bar-left {
+        gap: 4px;
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
+    }
+    .xmind-doc-title {
+        max-width: 100px !important;
+    }
+    .xmind-access-badge {
+        display: none !important;
+    }
+    .xmind-bar-center {
+        display: none !important;
+    }
+    .xmind-bar-right {
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    .xmind-bar-right .xmind-btn:not(.xmind-save-btn) span {
+        display: none;
+    }
+    .xmind-bar-right .xmind-btn:not(.xmind-save-btn) {
+        padding: 0 6px;
+    }
+    .xmind-export-group select {
+        max-width: 65px;
+    }
+    .xmind-canvas-footer {
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+    }
+    .xmind-node-stat {
+        display: none;
+    }
+    .mindmap-dialog {
+        width: calc(100vw - 16px) !important;
+    }
+}

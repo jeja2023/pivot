@@ -17,7 +17,7 @@ test('资金分析真实应用完成映射、精确统计、分类修正、报�
     });
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'data-analysis' }));
     await page.waitForFunction(id => window.Pivot.legacy.PivotDataAnalysis?.state.datasets.some(row => row.id === id), dataset.id);
-    await page.locator('[data-data-analysis-tab="transactions"]').click(); await page.locator('#finance-dataset').selectOption(dataset.id); await page.getByRole('button', { name: '新建资金分析', exact: true }).click();
+    await page.locator('[data-data-analysis-tab="transactions"]').click(); await page.locator('#finance-dataset').selectOption(dataset.id); await page.getByRole('button', { name: '新建资金分析', exact: true }).first().click();
     const key = name => dataset.columns.find(column => column.name === name).key;
     for (const [field, name] of Object.entries({ account: 'account', counterpartyAccount: 'peer', time: 'time', amount: 'amount', memo: 'memo' })) await page.locator(`#finance-field-${field}`).selectOption(key(name));
     await page.locator('#finance-categories').fill('工资=工资收入'); await page.getByRole('button', { name: '确认并运行分析', exact: true }).click(); await page.locator('[data-finance="close"]').click();
