@@ -69,7 +69,7 @@ test('应用中心打开导图，真实保存与版本恢复、刷新和受控�
     await expect(page.locator('#mindmap-outline')).toContainText('AI 验收主题');
     const username = `mm_peer_${Date.now()}`; const password = 'MindmapPeer123';
     const accountResponse = await page.request.post('/api/admin/users', { headers: { 'x-csrf-token': csrf }, data: { username, password, nickname: '协作验收成员', unit: 'QA', role: 'user' } }); expect(accountResponse.ok()).toBeTruthy(); const member = (await accountResponse.json()).user;
-    await page.getByRole('button', { name: '共享协作', exact: true }).click(); await page.locator('#mindmap-sharing-enabled').check(); await page.locator(`[data-mm-member="${member.id}"]`).selectOption('viewer'); await page.getByRole('button', { name: '保存权限', exact: true }).click();
+    await page.getByRole('button', { name: '共享协作', exact: true }).click(); await expect(page.locator('#mindmap-share-modal')).toBeVisible(); await page.locator('#mindmap-share-modal-unit-user-select').selectOption(String(member.id)); await page.locator('#mindmap-share-modal-unit-user-role').selectOption('viewer'); await page.locator('#mindmap-share-modal-unit-user-submit-btn').click(); await page.locator('#mindmap-share-modal-save-btn').click();
     await expect(page.locator('#mindmap-access-status')).toContainText('协作编辑');
     const artifactId = await page.evaluate(() => window.sessionStorage.getItem(`pivot_mindmap_active:${window.Pivot.legacy.currentUser.id}`));
     const peerContext = await page.context().browser().newContext({ baseURL: new URL(page.url()).origin });
@@ -77,7 +77,7 @@ test('应用中心打开导图，真实保存与版本恢复、刷新和受控�
         expect((await peerContext.request.post('/api/auth/login', { data: { username, password } })).ok()).toBeTruthy(); const peer = await peerContext.newPage(); peer.on('pageerror', error => errors.push(error.message));
         await peer.goto('/chat'); await expect(peer.locator('#app')).toBeVisible(); await peer.evaluate(id => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'mindmaps', artifactId: id }), artifactId);
         await expect(peer.locator('#mindmap-access-status')).toContainText('共享查看'); await expect(peer.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
-        await page.getByRole('button', { name: '共享协作', exact: true }).click(); await page.locator(`[data-mm-member="${member.id}"]`).selectOption('editor'); await page.getByRole('button', { name: '保存权限', exact: true }).click();
+        await page.getByRole('button', { name: '共享协作', exact: true }).click(); await expect(page.locator('#mindmap-share-modal')).toBeVisible(); await page.locator('#mindmap-share-modal-collab-list select').first().selectOption('editor'); await page.locator('#mindmap-share-modal-save-btn').click();
         await expect(peer.getByRole('button', { name: '保存', exact: true })).toBeEnabled({ timeout: 10000 });
         await peer.locator('#mindmap-outline button').first().click(); await expect(peer.locator('#mindmap-node-text')).toHaveValue('AI 验收主题'); await peer.locator('#mindmap-node-text').fill('团队协作已同步'); await peer.getByRole('button', { name: '应用到节点', exact: true }).click(); await peer.getByRole('button', { name: '保存', exact: true }).click();
         await expect(page.locator('#mindmap-outline')).toContainText('团队协作已同步', { timeout: 15000 });
