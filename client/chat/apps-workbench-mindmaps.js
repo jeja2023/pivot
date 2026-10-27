@@ -88,8 +88,10 @@
         $('mindmap-layout').disabled = viewer; $('mindmap-theme').disabled = viewer;
         $('mindmap-editor').querySelector('[data-mm-action="sharing"]').hidden = state.active?.role !== 'owner';
         $('mindmap-editor').querySelector('[data-mm-action="versions"]').disabled = state.active?.role !== 'owner';
-        $('mindmap-editor').querySelector('[data-mm-action="export"]').disabled = state.active?.role !== 'owner';
-        $('mindmap-source-refresh').hidden = state.active?.role !== 'owner' || !state.document?.source?.mapping;
+        const refreshBtn = $('mindmap-source-refresh');
+        if (refreshBtn) refreshBtn.hidden = state.active?.role !== 'owner' || !state.document?.source?.mapping;
+        const sideRefresh = $('mindmap-source-refresh-side');
+        if (sideRefresh) sideRefresh.hidden = state.active?.role !== 'owner' || !state.document?.source?.mapping;
     }
     function stopSync() { state.syncSequence = (state.syncSequence || 0) + 1; clearTimeout(state.syncTimer); clearTimeout(state.sourceTimer); state.syncTimer = null; state.realtime?.close(); state.realtime = null; state.realtimeLoading = false; state.deferredRemote = null; state.collaboration?.destroy(); state.collaboration = null; }
     async function refreshSource(manual = true) {

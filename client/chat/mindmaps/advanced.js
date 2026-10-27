@@ -540,9 +540,9 @@
         <span class="mm-footer-hint">${isSummarize ? '可在属性面板中随时修改该节点的备注' : '应用后可在画布中继续编辑与调整位置'}</span>
         <div class="mm-footer-btns">
             <button class="btn-secondary mm-modal-cancel" type="button" data-mm-action="dialog-close">返回重试</button>
-            <button class="btn-primary mm-modal-submit" type="button" data-mm-action="ai-branch-apply">
+            <button class="btn-primary mm-modal-submit" type="button" data-mm-action="ai-branch-apply" aria-label="应用到原分支">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>${isSummarize ? '应用到节点备注' : '应用到原分支'}</span>
+                <span>应用到原分支</span>
             </button>
         </div>
     </div>

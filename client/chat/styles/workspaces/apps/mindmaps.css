@@ -2805,9 +2805,11 @@ body.dark-mode .xmind-split-btn-group .xmind-export-toggle-btn,
         gap: 4px;
         flex-shrink: 0;
     }
+    .xmind-bar-left .xmind-btn:not(.xmind-back-btn) span,
     .xmind-bar-right .xmind-btn:not(.xmind-save-btn) span {
         display: none;
     }
+    .xmind-bar-left .xmind-btn:not(.xmind-back-btn),
     .xmind-bar-right .xmind-btn:not(.xmind-save-btn) {
         padding: 0 6px;
     }

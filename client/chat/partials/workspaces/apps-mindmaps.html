@@ -82,6 +82,10 @@
                     <span id="mindmap-save-status" class="xmind-badge xmind-save-badge" role="status" aria-live="polite">已保存</span>
                     <span id="mindmap-access-status" class="xmind-badge xmind-access-badge" role="status">个人文档</span>
                 </div>
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="refresh-source" id="mindmap-source-refresh" aria-label="刷新来源数据" title="刷新来源数据映射" hidden>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <span>刷新来源数据</span>
+                </button>
             </div>
 
             <!-- 中间：XMind 经典中心浮动/固定工具栏 -->
@@ -145,6 +149,10 @@
                 <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="versions" title="查看历史版本快照" aria-label="历史版本">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>历史</span>
+                </button>
+                <button type="button" class="btn-secondary xmind-btn xmind-btn-ghost" data-mm-action="template-save" title="将当前导图保存为个人复用模板" aria-label="保存为模板">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <span>保存为模板</span>
                 </button>
 
                 <!-- 导出格式组合下拉按钮 -->
@@ -522,10 +530,10 @@
                             </label>
                         </div>
                         <div class="xmind-theme-actions">
-                            <button type="button" class="btn-secondary xmind-theme-btn" data-mm-action="template-save">保存为模板</button>
+                            <button type="button" class="btn-secondary xmind-theme-btn" data-mm-action="template-save" aria-label="设为模板">设为模板</button>
                             <button type="button" class="btn-secondary xmind-theme-btn" data-mm-action="copy">另存副本</button>
                         </div>
-                        <button type="button" class="btn-secondary xmind-refresh-source-btn" data-mm-action="refresh-source" id="mindmap-source-refresh" aria-label="刷新来源数据" hidden>刷新来源数据映射</button>
+                        <button type="button" class="btn-secondary xmind-refresh-source-btn" data-mm-action="refresh-source" id="mindmap-source-refresh-side" title="刷新来源数据映射" hidden>刷新来源数据映射</button>
                     </div>
 
                     <div class="xmind-prop-section">
