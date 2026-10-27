@@ -311,12 +311,9 @@
 
     <div class="mm-modal-footer">
         <span class="mm-footer-hint">已存 ${templates.length} / 100 份模板配额</span>
-        <div class="mm-footer-btns">
-            <button type="button" class="btn-secondary mm-modal-cancel" data-mm-action="dialog-close">关闭</button>
-        </div>
     </div>
 </div>`;
-                    void dialog('个人模板', modalHtml, { hideClose: true }); return true;
+                    void dialog('个人模板', modalHtml); return true;
                 }
                 if (name === 'template-use') { const result = await context.request(`/personal-templates/${button.dataset.mmTemplate}`); await context.create(result.document); closeDialog(); return true; }
                 if (name === 'template-delete') {

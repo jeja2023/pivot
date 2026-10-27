@@ -954,8 +954,7 @@ body[data-theme="dark"] .mindmap-pagination,
 .workspace-modal.mindmap-dialog:has(.mm-dataset-modal) .workspace-modal-close,
 .workspace-modal.mindmap-dialog:has(.mm-levels-modal) .workspace-modal-close,
 .workspace-modal.mindmap-dialog:has(.mm-dataset-preview-modal) .workspace-modal-close,
-.workspace-modal.mindmap-dialog:has(.mm-template-save-modal) .workspace-modal-close,
-.workspace-modal.mindmap-dialog:has(.mm-personal-templates-modal) .workspace-modal-close {
+.workspace-modal.mindmap-dialog:has(.mm-template-save-modal) .workspace-modal-close {
     display: none !important;
 }
 
@@ -1784,20 +1783,28 @@ body[data-theme="dark"] .mindmap-pagination,
 }
 
 .mm-col-tpl-name {
-    width: 44%;
+    width: 36%;
 }
 
 .mm-col-tpl-scope {
-    width: 14%;
+    width: 12%;
+    min-width: 80px;
 }
 
 .mm-col-tpl-time {
-    width: 22%;
+    width: 24%;
+    min-width: 155px;
 }
 
 .mm-col-tpl-actions {
-    width: 20%;
-    min-width: 130px;
+    width: 28%;
+    min-width: 210px;
+    white-space: nowrap;
+}
+
+td.mm-col-tpl-actions {
+    padding: 8px 6px !important;
+    overflow: visible !important;
 }
 
 .mm-tpl-cell-name {
@@ -1840,12 +1847,14 @@ body[data-theme="dark"] .mindmap-pagination,
 .mm-table-actions {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     justify-content: center;
+    white-space: nowrap;
+    overflow: visible;
 }
 
 .mm-btn-use {
-    height: 25px;
+    height: 26px;
     padding: 0 10px;
     font-size: 11.5px;
     font-weight: 500;
@@ -1853,6 +1862,15 @@ body[data-theme="dark"] .mindmap-pagination,
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.mm-table-actions .mm-btn-del {
+    height: 26px;
+    padding: 0 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* 左侧大纲树节点交互与就地直接编辑样式 */
