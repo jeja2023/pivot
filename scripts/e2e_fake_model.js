@@ -44,6 +44,9 @@ const server = http.createServer((req, res) => {
         const respond = () => {
         if (payload.stream === false) {
             let content = '真实 E2E 回答';
+            if (JSON.stringify(payload.messages || []).includes('E2E_KNOWLEDGE_刑事案件') && payload.messages?.some(message => String(message.content || '').includes('知识库证据蕴含核验器'))) {
+                content = JSON.stringify({ claims: [{ index: 1, supported: true, sourceIds: [1] }] });
+            }
             if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('你只解释已计算的资金交易统计'))) content = JSON.stringify({ observations: [{ factId: 'total-0', comment: '请核对原始交易记录并确认统计范围。' }] });
             if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('总结提供的思维导图分支'))) content = JSON.stringify({ summary: 'AI 分支总结验收' });
             if (payload.messages?.some(message => message.role === 'system' && String(message.content || '').includes('现有分支展开新的子分支'))) content = JSON.stringify({ id: 'root', text: '展开主题', children: [{ id: 'new-branch', text: 'AI 新增分支', children: [] }] });
@@ -67,8 +70,10 @@ const server = http.createServer((req, res) => {
             return;
         }
         log(`streaming ${Buffer.concat(chunks).length} bytes`);
+        const knowledgeFixture = payload.messages?.some(message => String(message.content || '').includes('E2E_KNOWLEDGE_刑事案件'));
+        const streamContent = knowledgeFixture ? '刑事案件应依照法律规定办理。[引用 1]' : '真实 E2E 流式回答';
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive' });
-        res.write('data: {"id":"e2e-completion","choices":[{"index":0,"delta":{"role":"assistant","content":"真实 E2E 流式回答"},"finish_reason":null}]}\n\n');
+        res.write(`data: ${JSON.stringify({ id: 'e2e-completion', choices: [{ index: 0, delta: { role: 'assistant', content: streamContent }, finish_reason: null }] })}\n\n`);
         res.write('data: {"id":"e2e-completion","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":5,"total_tokens":10}}\n\n');
         res.end('data: [DONE]\n\n');
         };

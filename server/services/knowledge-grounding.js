@@ -107,6 +107,7 @@ async function verifyKnowledgeAnswerSemantics({
     maxTokens = readTypedEnv('PIVOT_KNOWLEDGE_SEMANTIC_VERIFIER_MAX_TOKENS')
 } = {}) {
     const deterministic = validateKnowledgeAnswer({ answer, ragContext, strict: true });
+    if (deterministic.grounding.status === 'insufficient_evidence') return deterministic;
     if (!deterministic.grounding.accepted || enabled !== true) {
         return {
             ...deterministic,
@@ -234,12 +235,16 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
     const validKeys = new Set(sources.map(source => source.citationKey).filter(Boolean));
     const invalidIndexes = citations.indexes.filter(index => !validIndexes.has(index));
     const invalidKeys = citations.keys.filter(key => !validKeys.has(key));
+    const sourceKeys = new Map(sources.map(source => [source.index, source.citationKey]));
+    const mismatchedCitations = [...text.matchAll(/\[(?:引用\s*)?(\d{1,3})\s*\|\s*citation:\s*([^|\]\s]+)(?:\s*\|[^\]\n]*)?\s*\]/gi)]
+        .filter(match => sourceKeys.get(Number(match[1])) !== match[2])
+        .map(match => ({ index: Number(match[1]), key: match[2] }));
     const refusal = /知识库中未找到足够依据|未检索到足够相关内容|依据不足/.test(text);
     const unsupportedClaims = strict && !refusal
         ? findUnsupportedClaims(text, sources, validIndexes)
         : [];
     const hasMissingClaimCitation = unsupportedClaims.some(claim => claim.reason === 'missing_citation');
-    const accepted = Boolean(text) && (!strict || refusal || (sources.length > 0 && citations.indexes.length > 0 && invalidIndexes.length === 0 && invalidKeys.length === 0 && unsupportedClaims.length === 0));
+    const accepted = Boolean(text) && (!strict || refusal || (sources.length > 0 && citations.indexes.length > 0 && invalidIndexes.length === 0 && invalidKeys.length === 0 && mismatchedCitations.length === 0 && unsupportedClaims.length === 0));
     const grounding = {
         status: accepted ? (refusal ? 'insufficient_evidence' : 'verified') : (sources.length ? (hasMissingClaimCitation || !citations.indexes.length ? 'citation_required' : (unsupportedClaims.length ? 'claim_not_supported' : 'citation_required')) : 'no_sources'),
         accepted,
@@ -249,10 +254,11 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
         citedCitationKeys: citations.keys.filter(key => validKeys.has(key)),
         invalidSourceIndexes: invalidIndexes,
         invalidCitationKeys: invalidKeys,
+        mismatchedCitations,
         unsupportedClaims
     };
     return {
-        answer: accepted ? text : buildKnowledgeInsufficientAnswer(sources.length ? 'missing_citation' : 'no_sources'),
+        answer: strict && refusal ? buildKnowledgeInsufficientAnswer('no_sources') : accepted ? text : buildKnowledgeInsufficientAnswer(sources.length ? 'missing_citation' : 'no_sources'),
         grounding,
         sources
     };

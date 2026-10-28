@@ -190,6 +190,7 @@ const renderRagSummary = (summary, quality = null, graphSummary = null) => {
     const docItems = [
         ['文档', summary.total || 0],
         ['就绪', summary.ready || 0],
+        ['部分就绪', summary.partial || 0],
         ['处理中', summary.processing || 0],
         ['失败', summary.error || 0]
     ];

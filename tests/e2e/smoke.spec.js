@@ -765,6 +765,169 @@ test.describe('Pivot browser smoke', () => {
         await expect(state).toContainText('文档已加载，正在补充统计信息');
     });
 
+    test('知识库首次打开时独立加载检索模型，失败后重新打开可恢复', async ({ page }) => {
+        await ensureBrowserSession(page);
+        let failSettings = true;
+        let settingsCalls = 0;
+        await page.route('**/api/settings', route => {
+            settingsCalls++;
+            return failSettings
+                ? route.fulfill({ status: 503, json: { error: '暂不可用' } })
+                : route.fulfill({ json: { retrievalModelConfig: { model: 'test-embedding' }, rerankConfig: { enabled: true, model: 'test-rerank' } } });
+        });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        const summary = page.locator('#knowledge-retrieval-model-summary');
+        await expect(summary).toContainText('加载失败');
+        expect(settingsCalls).toBe(1);
+        await page.locator('#knowledge-modal-close').click();
+        failSettings = false;
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await expect(summary).toContainText('test-embedding');
+        await expect(summary).toContainText('test-rerank');
+        expect(settingsCalls).toBe(2);
+    });
+
+    test('普通用户在文档处理中可保持专题筛选和勾选并批量重建', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => { window.Pivot.legacy.currentUser = { ...window.Pivot.legacy.currentUser, role: 'user', permissionTier: 'user' }; });
+        await page.route('**/api/rag/collections', route => route.fulfill({ json: { data: [{ id: 42, name: '测试专题', can_edit: true }] } }));
+        await page.route('**/api/rag/tags**', route => route.fulfill({ json: { data: [] } }));
+        let docsCalls = 0;
+        await page.route('**/api/rag/docs?**', route => {
+            docsCalls++;
+            return route.fulfill({ json: { data: [{ id: 123, name: '测试文档', status: 'processing', progress: docsCalls, can_edit: true, collection_name: '测试专题' }], total: 1, page: 1, limit: 15 } });
+        });
+        await page.route('**/api/rag/quality-report', async route => {
+            await new Promise(resolve => setTimeout(resolve, 4_000));
+            await route.fulfill({ json: {} });
+        });
+        await page.route('**/api/rag/summary**', route => route.fulfill({ json: {} }));
+        await page.route('**/api/rag/graph/summary', route => route.fulfill({ json: {} }));
+        let submittedIds;
+        await page.route('**/api/rag/docs/batch-reindex', route => {
+            submittedIds = route.request().postDataJSON().docIds;
+            return route.fulfill({ json: { scheduled: 1 } });
+        });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        const filter = page.locator('#rag-collection-filter');
+        await expect(filter.locator('option[value="42"]')).toHaveCount(1);
+        await filter.selectOption('42');
+        await expect.poll(() => docsCalls).toBeGreaterThanOrEqual(2);
+        const checkbox = page.locator('.rag-doc-check[value="123"]');
+        await checkbox.check();
+        await checkbox.focus();
+        await checkbox.evaluate(node => { window.__knowledgeCheckedNode = node; });
+        const callsBeforePoll = docsCalls;
+        await expect.poll(() => docsCalls, { timeout: 8_000 }).toBeGreaterThan(callsBeforePoll);
+        await expect(checkbox.locator('xpath=../..')).toContainText(`${callsBeforePoll + 1}%`);
+        await expect(checkbox).toBeChecked();
+        await expect(checkbox).toBeFocused();
+        expect(await checkbox.evaluate(node => node === window.__knowledgeCheckedNode)).toBe(true);
+        await expect(filter).toHaveValue('42');
+        await expect(page.locator('#rag-workbench-state')).toBeHidden({ timeout: 8_000 });
+        await page.locator('.knowledge-action-menu summary').filter({ hasText: '批量治理' }).click();
+        await page.locator('#rag-batch-reindex-btn').click();
+        await expect.poll(() => submittedIds).toEqual([123]);
+    });
+
+    test('管理员核对删除清单后提交一次性审批并重新同步', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/knowledge/sources?kind=lan', route => route.fulfill({ json: { data: [{ id: 41, name: '测试来源', kind: 'local_dir', status: 'active' }] } }));
+        await page.route('**/api/knowledge/sources/41/runs?limit=1', route => route.fulfill({ json: { data: [{ id: 9, status: 'partial', summary: { scanComplete: true, deletionBlocked: true, deletionPreview: { count: 2, documents: [{ title: '制度甲' }, { title: '制度乙' }] } } }] } }));
+        let approvedBody;
+        let syncBody;
+        await page.route('**/api/knowledge/sources/41/deletion-approvals', route => { approvedBody = route.request().postDataJSON(); return route.fulfill({ json: { approval: { id: 21 } } }); });
+        await page.route('**/api/knowledge/sources/41/sync', route => { syncBody = route.request().postDataJSON(); return route.fulfill({ json: { result: { archived: 2 } } }); });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await page.locator('#knowledge-product-open').click();
+        await page.locator('[data-knowledge-product-tab="sources"]').click();
+        await page.locator('[data-knowledge-source-review-deletion="41"]').click();
+        await expect(page.locator('#confirm-message')).toContainText('制度甲');
+        await expect(page.locator('#confirm-message')).toContainText('制度乙');
+        await page.locator('#confirm-ok-btn').click();
+        await expect.poll(() => syncBody).toEqual({ approvalId: 21 });
+        expect(approvedBody).toEqual({ runId: 9 });
+    });
+
+    test('已识别扫描文档可通过列表补充旧版引用坐标', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.route('**/api/rag/docs?**', route => route.fulfill({ json: {
+            data: [{ id: 456, name: '旧扫描.pdf', status: 'ready', can_edit: true,
+                extraction_coverage_json: { processedPages: 12, complete: true } }],
+            total: 1, page: 1, limit: 15
+        } }));
+        let calls = 0;
+        await page.route('**/api/rag/docs/456/refresh-ocr-locations', route => {
+            calls++;
+            return route.fulfill({ json: { success: true, pendingPages: 12, message: '已加入坐标补充队列，本轮最多处理 10 页。' } });
+        });
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await page.locator('.rag-refresh-ocr-location-btn[data-rag-id="456"]').click();
+        await expect.poll(() => calls).toBe(1);
+        await expect(page.locator('body')).toContainText('已加入坐标补充队列');
+    });
+
+    test('知识库状态变化后刷新统计，旧统计响应不能覆盖新结果', async ({ page }) => {
+        await ensureBrowserSession(page);
+        let docsCalls = 0;
+        let summaryCalls = 0;
+        await page.route('**/api/rag/docs?**', route => {
+            docsCalls++;
+            return route.fulfill({ json: { data: [{ id: 5, name: '文档', status: docsCalls > 1 ? 'ready' : 'processing', can_edit: true }], total: 1, page: 1, limit: 15 } });
+        });
+        await page.route('**/api/rag/summary**', async route => {
+            const request = ++summaryCalls;
+            if (request === 1) await new Promise(resolve => setTimeout(resolve, 5_000));
+            await route.fulfill({ json: { total: 1, ready: request === 1 ? 0 : 1 } });
+        });
+        await page.route('**/api/rag/quality-report', route => route.fulfill({ json: {} }));
+        await page.route('**/api/rag/graph/summary', route => route.fulfill({ json: {} }));
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await expect.poll(() => summaryCalls, { timeout: 12_000 }).toBeGreaterThanOrEqual(2);
+        await expect(page.locator('#rag-summary')).toContainText('1就绪');
+        await page.waitForTimeout(2_500);
+        await expect(page.locator('#rag-summary')).toContainText('1就绪');
+        await expect(page.locator('#rag-workbench-state')).toBeHidden();
+    });
+
+    test('知识库专题和标签旧请求不会覆盖新数据，标签缓存过期后更新', async ({ page }) => {
+        await ensureBrowserSession(page);
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await expect(page.locator('#rag-docs-body')).toHaveAttribute('data-loaded', '1');
+        let collectionCalls = 0;
+        let tagCalls = 0;
+        await page.route('**/api/rag/collections', async route => {
+            const call = ++collectionCalls;
+            if (call === 1) await new Promise(resolve => setTimeout(resolve, 500));
+            await route.fulfill({ json: { data: [{ id: call === 1 ? 1 : 2, name: call === 1 ? '旧专题' : '新专题', can_edit: true }] } });
+        });
+        await page.evaluate(async () => {
+            const old = window.Pivot.legacy.loadKnowledgeCollections();
+            await new Promise(resolve => setTimeout(resolve, 50));
+            await Promise.all([old, window.Pivot.legacy.loadKnowledgeCollections()]);
+        });
+        await expect(page.locator('#rag-collection-filter')).toContainText('新专题');
+        await expect(page.locator('#rag-collection-filter')).not.toContainText('旧专题');
+        await page.route('**/api/rag/tags**', async route => {
+            const call = ++tagCalls;
+            if (call === 1) await new Promise(resolve => setTimeout(resolve, 500));
+            await route.fulfill({ json: { data: [{ tag: call === 1 ? '旧标签' : `新标签${call}` }] } });
+        });
+        const result = await page.evaluate(async () => {
+            const old = window.Pivot.legacy.loadKnowledgeTags('2', { force: true });
+            await new Promise(resolve => setTimeout(resolve, 50));
+            await Promise.all([old, window.Pivot.legacy.loadKnowledgeTags('2', { force: true })]);
+            const fresh = await window.Pivot.legacy.loadKnowledgeTags('2');
+            const now = Date.now;
+            Date.now = () => now() + 61_000;
+            try { return { fresh, expired: await window.Pivot.legacy.loadKnowledgeTags('2') }; }
+            finally { Date.now = now; }
+        });
+        expect(result.fresh[0].tag).toBe('新标签2');
+        expect(result.expired[0].tag).toBe('新标签3');
+        expect(tagCalls).toBe(3);
+    });
+
     test('工具库请求较慢或部分失败时显示可恢复状态，不显示空白页', async ({ page }) => {
         await ensureBrowserSession(page);
         await page.route('**/api/mcp/governance', async route => {
@@ -1775,6 +1938,61 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#message-container')).toContainText('真实 E2E 流式回答', { timeout: 20_000 });
     });
 
+    test('对话可概述指定专题并在追问中列出真实文档目录', async ({ page }) => {
+        test.setTimeout(90_000);
+        test.skip(process.env.PIVOT_E2E_ISOLATED !== 'true', '需要隔离 PostgreSQL 测试库');
+        const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } });
+        expect(login.ok()).toBeTruthy();
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const modelName = `知识库对话 ${Date.now()}`;
+        expect((await page.request.post('/api/models', { headers: { 'x-csrf-token': csrf }, data: { name: modelName, url: process.env.E2E_MODEL_URL, model_name: 'e2e-knowledge-chat' } })).ok()).toBeTruthy();
+        const model = ((await (await page.request.get('/api/models?limit=100')).json()).data || []).find(item => item.name === modelName);
+        expect(model).toBeTruthy();
+        expect((await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: model.id } })).ok()).toBeTruthy();
+        await ensureBrowserSession(page);
+        const userId = await page.evaluate(() => window.Pivot.legacy.currentUser.id);
+        const currentCsrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const created = await page.request.post('/api/rag/collections', { headers: { 'x-csrf-token': currentCsrf }, data: { name: '法律' } });
+        expect(created.ok()).toBeTruthy();
+        const collectionId = (await created.json()).collection.id;
+        const { Client } = require('pg');
+        const client = new Client({ connectionString: process.env.DATABASE_URL });
+        await client.connect();
+        try {
+            const schema = String(process.env.PG_TEST_SCHEMA || '');
+            expect(schema).toMatch(/^pivot_e2e_[a-z0-9_]+$/);
+            await client.query(`SET search_path TO "${schema}", public`);
+            const inserted = await client.query("INSERT INTO knowledge_docs (user_id, collection_id, name, status, is_enabled, chunk_count, created_at, updated_at) VALUES ($1, $2, '刑法测试.md', 'ready', 1, 1, NOW(), NOW()) RETURNING id", [userId, collectionId]);
+            await client.query("INSERT INTO knowledge_chunks (doc_id, content, chunk_index) VALUES ($1, 'E2E_KNOWLEDGE_刑事案件：刑事案件应依照法律规定办理。', 0)", [inserted.rows[0].id]);
+        } finally { await client.end(); }
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+        await expect(page.locator('#model-selector')).toHaveValue(String(model.id));
+        await page.locator('#user-input').fill('@法律 文档内有哪些内容');
+        const firstResponse = page.waitForResponse(response => response.url().endsWith('/api/chat') && response.request().method() === 'POST');
+        await page.locator('#send-btn').click();
+        const firstStream = await (await firstResponse).text();
+        expect(firstStream).toContain('"status":"hit"');
+        expect(firstStream).toContain('刑事案件应依照法律规定办理');
+        expect(firstStream).toContain('不能代表文档或专题的全部内容');
+        await expect(page.locator('#send-btn')).toBeVisible();
+        await page.locator('#user-input').fill('这个知识库专题有哪些文档，文档的名称是什么？');
+        const secondResponse = page.waitForResponse(response => response.url().endsWith('/api/chat') && response.request().method() === 'POST');
+        await page.locator('#send-btn').click();
+        const secondStream = await (await secondResponse).text();
+        expect(secondStream).toContain('刑法测试.md');
+        expect(secondStream).toContain('"type":"message_saved"');
+        await expect(page.locator('#message-container')).toContainText('刑法测试.md');
+        const emptyCollection = await page.request.post('/api/rag/collections', { headers: { 'x-csrf-token': currentCsrf }, data: { name: '空专题' } });
+        expect(emptyCollection.ok()).toBeTruthy();
+        await expect(page.locator('#send-btn')).toBeVisible();
+        await page.locator('#user-input').fill('@空专题 规定是什么？');
+        const thirdResponse = page.waitForResponse(response => response.url().endsWith('/api/chat') && response.request().method() === 'POST');
+        await page.locator('#send-btn').click();
+        const thirdStream = await (await thirdResponse).text();
+        expect(thirdStream).toContain('知识库中未找到足够依据');
+        expect(thirdStream).not.toContain('真实 E2E 流式回答');
+    });
+
     test('knowledge upload queue accepts a selected file and sends it through the guarded upload route', async ({ page }) => {
         const login = await page.request.post('/api/auth/login', {
             data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' }
@@ -1799,6 +2017,57 @@ test.describe('Pivot browser smoke', () => {
         const uploadBody = await uploadResponse.json();
         expect(Number(uploadBody.docId)).toBeGreaterThan(0);
         await expect(page.locator('#knowledge-upload-modal')).toBeHidden();
+    });
+
+    test('真实 PDF 引用高亮可访问且跨用户被拒绝', async ({ page, browser }) => {
+        test.setTimeout(90_000);
+        test.skip(process.env.PIVOT_E2E_ISOLATED !== 'true', '需要隔离 PostgreSQL 测试库');
+        await ensureBrowserSession(page);
+        const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+        const pdf = await require('pdf-lib').PDFDocument.create();
+        pdf.addPage([320, 240]).drawText('The policy applies to all staff.', { x: 30, y: 180, size: 16 });
+        const upload = await page.request.post('/api/rag/upload', { headers: { 'x-csrf-token': csrf }, multipart: { file: { name: 'citation.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) } } });
+        expect(upload.ok()).toBeTruthy();
+        const docId = (await upload.json()).docId;
+        let chunkId;
+        await expect.poll(async () => {
+            const response = await page.request.get(`/api/rag/docs/${docId}`);
+            if (!response.ok()) return false;
+            const result = await response.json();
+            chunkId = result.chunks?.[0]?.id;
+            return Boolean(chunkId);
+        }, { timeout: 30_000 }).toBe(true);
+        let citationKey;
+        await expect.poll(async () => {
+            const response = await page.request.get(`/api/knowledge/citations/by-chunk/${chunkId}`);
+            if (!response.ok()) return false;
+            citationKey = (await response.json()).citation?.citationKey;
+            return Boolean(citationKey);
+        }, { timeout: 20_000 }).toBe(true);
+        const highlighted = await page.request.get(`/api/knowledge/citations/${encodeURIComponent(citationKey)}/highlight`);
+        expect(highlighted.ok()).toBeTruthy();
+        expect(highlighted.headers()['content-type']).toContain('image/png');
+        await page.evaluate(() => { void window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.(); });
+        await page.locator('#knowledge-product-open').click();
+        await page.evaluate(key => {
+            window.Pivot.legacy.showConfirm = async () => true;
+            window.open = url => { window.__knowledgeHighlightOpened = String(url); return null; };
+            const button = document.createElement('button');
+            button.dataset.knowledgeCitation = key;
+            button.textContent = '测试引用高亮';
+            document.getElementById('knowledge-product-panel-search').appendChild(button);
+        }, citationKey);
+        await page.getByRole('button', { name: '测试引用高亮' }).click();
+        await expect.poll(() => page.evaluate(() => window.__knowledgeHighlightOpened)).toMatch(/^blob:/);
+        const userName = `highlight_${Date.now()}`;
+        const created = await page.request.post('/api/admin/users', { headers: { 'x-csrf-token': csrf }, data: { username: userName, password: 'HighlightTest123!', nickname: '隔离测试', unit: 'QA', role: 'user' } });
+        expect(created.ok()).toBeTruthy();
+        const other = await browser.newContext();
+        try {
+            expect((await other.request.post(`${process.env.PIVOT_E2E_BASE_URL}/api/auth/login`, { data: { username: userName, password: 'HighlightTest123!' } })).ok()).toBeTruthy();
+            const denied = await other.request.get(`${process.env.PIVOT_E2E_BASE_URL}/api/knowledge/citations/${encodeURIComponent(citationKey)}/highlight`);
+            expect(denied.status()).toBe(404);
+        } finally { await other.close(); }
     });
 
     test('数据分析侧边菜单保持等宽左对齐的导航布局', async ({ page }) => {

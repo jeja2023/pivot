@@ -85,11 +85,18 @@ const renderRagActions = (doc) => {
     if (Number(doc.chunk_count || 0) > 0) {
         buttons.push(`<button type="button" class="btn-secondary rag-doc-graph-btn" data-rag-id="${doc.id}" title="查看文档知识图谱">图谱</button>`);
     }
+    const coverage = doc.extraction_coverage_json && typeof doc.extraction_coverage_json === 'object' ? doc.extraction_coverage_json : {};
+    if (coverage.truncated || coverage.omittedPages?.length || coverage.failedPages?.length) {
+        buttons.push(`<button type="button" class="btn-secondary rag-resume-ocr-btn" data-rag-id="${doc.id}" title="继续处理未完成的文档内容">续处理</button>`);
+    }
+    if (/\.pdf$/i.test(String(doc.name || '')) && Number(coverage.processedPages || 0) > 0) {
+        buttons.push(`<button type="button" class="btn-secondary rag-refresh-ocr-location-btn" data-rag-id="${doc.id}" title="为旧扫描页补充引用定位坐标">补充定位</button>`);
+    }
     if (doc.status === 'error' && doc.source_path) {
         buttons.push(`<button type="button" class="btn-secondary rag-reindex-btn" data-rag-id="${doc.id}" title="重新建立文档索引">重试</button>`);
     }
     buttons.push(`<button type="button" class="btn-danger rag-delete-btn" data-rag-id="${doc.id}" title="从知识库移除文档">删除</button>`);
-    return (canEdit ? buttons : buttons.filter(button => !/rag-doc-meta-btn|rag-reindex-btn|rag-delete-btn/.test(button))).join('');
+    return (canEdit ? buttons : buttons.filter(button => !/rag-doc-meta-btn|rag-reindex-btn|rag-resume-ocr-btn|rag-refresh-ocr-location-btn|rag-delete-btn/.test(button))).join('');
 };
 
 let ragStatusRefreshTimer = null;
@@ -111,7 +118,8 @@ const scheduleRagStatusRefresh = (docs) => {
     if (!Array.isArray(docs) || !docs.some(doc => doc.status === 'processing')) return;
     if (!shouldAutoRefreshRagDocs()) return;
     ragStatusRefreshTimer = setTimeout(() => {
-        if (shouldAutoRefreshRagDocs()) window.Pivot.legacy.loadKnowledgeDocs();
+        ragStatusRefreshTimer = null;
+        if (shouldAutoRefreshRagDocs()) window.Pivot.legacy.loadKnowledgeDocs(ragDocsPage, { background: true });
     }, 3000);
 };
 
@@ -175,6 +183,16 @@ document.addEventListener('click', async (event) => {
     const reindexBtn = event.target.closest('.rag-reindex-btn');
     if (reindexBtn) {
         window.Pivot.legacy.reindexKnowledgeDoc(reindexBtn.dataset.ragId);
+        return;
+    }
+    const resumeOcrBtn = event.target.closest('.rag-resume-ocr-btn');
+    if (resumeOcrBtn) {
+        (window.Pivot.modules?.['rag.documents']?.resumeKnowledgeOcr || window.Pivot.legacy.resumeKnowledgeOcr)?.(resumeOcrBtn.dataset.ragId);
+        return;
+    }
+    const refreshLocationBtn = event.target.closest('.rag-refresh-ocr-location-btn');
+    if (refreshLocationBtn) {
+        (window.Pivot.modules?.['rag.documents']?.resumeKnowledgeOcr || window.Pivot.legacy.resumeKnowledgeOcr)?.(refreshLocationBtn.dataset.ragId, { locations: true });
         return;
     }
 

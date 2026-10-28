@@ -12,7 +12,7 @@ const { getRequestOrigin, resolveRagQueryContent } = require('./chat-route-helpe
 const {
     buildRagInsufficientContextMessage,
     injectRagContextBeforeLatestUser,
-    mergeRagContexts,
+    retrieveChatKnowledgeQueries,
     summarizeRagContextSources
 } = require('./chat-rag-context');
 const { saveUserMessage } = require('./chat-messages');
@@ -26,6 +26,7 @@ const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require(
 const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
 const { retrieveWikiContext } = require('./knowledge-wiki');
 const { buildKnowledgeRetrievalPlan } = require('./knowledge-query-planner');
+const { buildKnowledgeCatalogAnswer, buildKnowledgeOverviewContext, isKnowledgeCatalogQuestion, isKnowledgeOverviewQuestion, resolveConversationKnowledgeScope } = require('./chat-knowledge-catalog');
 const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
@@ -127,10 +128,35 @@ async function assembleChatContext({
     persistOnError = false,
     signal = null
 }) {
-    const { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
+    let { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
     // 临时语音的本轮文本未落库，必须显式加入请求；也不能进入持久任务上下文和路由审计正文。
     if (state.ephemeralVoice) return require('./chat-voice-context').buildEphemeralVoiceContext(state, history, modelCfg);
+    const catalogQuestion = isKnowledgeCatalogQuestion(modelContent);
+    const overviewQuestion = isKnowledgeOverviewQuestion(modelContent);
+    const hasKnowledgeReference = /知识库|专题库|专题|资料库/u.test(modelContent) || /^\s*@/u.test(modelContent)
+        || hasRagScopeFilter(ragScope) || Boolean(state.routeOverrides?.collections?.length);
+    if (ragEnabled && state.routeOverrides?.excludeRag !== true && (hasKnowledgeReference || catalogQuestion || overviewQuestion)) {
+        try {
+            const resolved = await resolveConversationKnowledgeScope({ question: modelContent, history, state, user: req.user });
+            if (resolved.scope.collectionIds.length && !hasRagScopeFilter(ragScope) && !state.routeOverrides?.collections?.length) {
+                ragScope = resolved.scope;
+                state = { ...state, ragScope, routeOverrides: { ...state.routeOverrides, collections: ragScope.collectionIds, forceRag: true } };
+            }
+            const canUseKnowledge = typeof isRagEnabled === 'function' && isRagEnabled();
+            if (resolved.unresolvedReference && (resolved.unresolvedMention || catalogQuestion || overviewQuestion)) {
+                return { catalogAnswer: '无法确定所指的知识库专题，请通过 @ 选择一个当前账号可访问的专题后重试。', routePlan: null };
+            }
+            if (catalogQuestion && (hasKnowledgeReference || resolved.scope.collectionIds.length) && canUseKnowledge && !state.routeOverrides?.tools?.length) {
+                const catalogAnswer = await buildKnowledgeCatalogAnswer({ user: req.user, scope: resolved.scope });
+                writeSse(JSON.stringify({ type: 'rag', status: 'hit', message: '已读取当前权限范围内的知识库文档目录。' }));
+                return { catalogAnswer, routePlan: null };
+            }
+        } catch (error) {
+            req.log.warn({ sessionId, userId, err: error.message }, '读取知识库专题或目录失败');
+            if (catalogQuestion || overviewQuestion || /^\s*@/u.test(modelContent)) return { catalogAnswer: '知识库专题或文档目录暂时无法读取，请稍后重试。', routePlan: null };
+        }
+    }
     let agentProfile = null;
     try {
         const { getAgentProfile, buildAgentProfileContext } = require('./agent-profile');
@@ -277,13 +303,22 @@ async function assembleChatContext({
         && typeof isRagEnabled === 'function'
         && isRagEnabled()
         && Boolean(retrievalQuery);
-    const ragPromise = shouldRetrieveRag
-        ? Promise.all(retrievalPlan.retrievalQueries.slice(0, 3).map(query => retrieveContext(userId, query, null, {
+    const ragPromise = (async () => {
+        if (!shouldRetrieveRag) return null;
+        if (overviewQuestion && hasRagScopeFilter(effectiveRagScope)) {
+            return await buildKnowledgeOverviewContext({ user: req.user, scope: effectiveRagScope });
+        }
+        return await retrieveChatKnowledgeQueries({
+            queries: retrievalPlan.retrievalQueries,
+            queryVector: routeQueryVector,
+            vectorQuery: retrievalQuery,
+            retrieve: retrieveContext,
+            userId,
             user: req.user,
             scope: effectiveRagScope,
-            ...(routeQueryVector?.length ? { queryVector: routeQueryVector } : {})
-        }))).then(contexts => mergeRagContexts(contexts, { maxCitations: Math.max(8, (getModelContextBudget(modelCfg).inputBudget > 0 ? 12 : 8)) }))
-        : Promise.resolve(null);
+            maxCitations: Math.max(8, (getModelContextBudget(modelCfg).inputBudget > 0 ? 12 : 8))
+        });
+    })();
     const [memoryResult, ragResult] = await Promise.allSettled([
         !shouldClarify && memoryQuery ? retrieveLongTermMemories(userId, memoryQuery, { user: req.user, sessionId, projectId: state.projectId }) : Promise.resolve([]),
         ragPromise
@@ -315,6 +350,7 @@ async function assembleChatContext({
             message: '本轮问题需要知识库依据，但当前没有可用的知识库检索结果，将拒绝无来源补答。',
             reason: ragEnabled ? 'rag_not_selected' : 'rag_disabled'
         }));
+        return { catalogAnswer: '知识库当前不可用或未选择可用的检索范围，无法核实本次问题。请检查知识库设置后重试。', routePlan };
     }
 
     if (memoryQuery) {
@@ -398,6 +434,11 @@ async function assembleChatContext({
                 reason: requiresKnowledgeEvidence ? 'insufficient_evidence' : 'no_reliable_match',
                 scoped: ragScoped
             }));
+            if (requiresKnowledgeEvidence || explicitRagScope || state.routeOverrides?.forceRag === true) {
+                return { catalogAnswer: ragResult.status === 'rejected'
+                    ? '知识库检索暂时不可用，请稍后重试。'
+                    : '知识库中未找到足够依据，请检查所选专题、文档索引状态或补充具体问题后重试。', routePlan };
+            }
         }
     }
 
@@ -620,6 +661,7 @@ async function assembleChatContext({
                 && ragResult?.status === 'fulfilled'
                 && ragResult.value
             ),
+            overview: Boolean(overviewQuestion && hasRagScopeFilter(effectiveRagScope)),
             query: retrievalQuery,
             followUpResolved: retrievalPlan.followUpResolved
         },

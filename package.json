@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.46",
+  "version": "0.7.54",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -24,6 +24,8 @@
     "verify:knowledge-migration": "node scripts/verify_knowledge_product_migration.js",
     "verify:knowledge-ai-readiness": "node scripts/verify_knowledge_ai_readiness.js",
     "verify:knowledge-derived-governance": "node scripts/verify_knowledge_derived_governance.js",
+    "benchmark:knowledge": "node scripts/benchmark_knowledge.js",
+    "verify:knowledge-restore": "node scripts/knowledge_restore_check.js",
     "check:secrets": "node scripts/check_tracked_secrets.js",
     "check:governance": "node scripts/check_governance_metrics.js",
     "report:governance": "node scripts/check_governance_metrics.js --report",
@@ -146,6 +148,7 @@
     "parse5": "^6.0.1",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "5.4.296",
     "pg": "^8.23.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",

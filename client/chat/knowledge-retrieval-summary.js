@@ -2,6 +2,30 @@
 /* eslint-disable no-undef */
 
 (function() {
+    let summaryLoadSequence = 0;
+
+    async function loadKnowledgeRetrievalModelSummary() {
+        const requestId = ++summaryLoadSequence;
+        const label = document.querySelector('#knowledge-retrieval-model-summary span');
+        if (label) label.textContent = '检索模型服务：正在加载…';
+        try {
+            const response = await apiFetch(`${API_BASE}/settings`, { headers: authHeaders(), timeoutMs: 30000 });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+            if (requestId === summaryLoadSequence) {
+                window.Pivot.legacy.applyUploadRuntimeLimits?.(data.uploadLimits);
+                renderKnowledgeRetrievalModelSummary(data.retrievalModelConfig || data.embeddingConfig, data.rerankConfig);
+            }
+        } catch (error) {
+            if (requestId !== summaryLoadSequence) return;
+            console.error('加载检索模型服务失败', error);
+            if (label) {
+                label.textContent = '检索模型服务：加载失败，请重新打开知识库重试';
+                label.title = '';
+            }
+        }
+    }
+
     function renderKnowledgeRetrievalModelSummary(embeddingConfig = {}, rerankConfig = {}) {
         const target = document.getElementById('knowledge-retrieval-model-summary');
         if (!target) return;
@@ -61,6 +85,7 @@
     });
 
     window.Pivot?.exposeModule?.('knowledge.retrievalSummary', {
+        loadKnowledgeRetrievalModelSummary,
         renderKnowledgeRetrievalModelSummary,
         openRetrievalModelServices,
         reindexAllKnowledgeDocs

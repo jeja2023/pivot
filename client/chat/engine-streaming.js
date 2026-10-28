@@ -276,7 +276,23 @@ async function handleAssistantTraceAction(event) {
             .then(({ response, data }) => {
                 if (!response.ok || data.error) throw new Error(data.error || '来源预览失败');
                 const detail = data.citation || {};
-                const copy = `${detail.document?.title || '知识来源'}\n${detail.locator?.headingPath || ''}\n\n${detail.quotedText || ''}`;
+                const page = Number(detail.locator?.page || 0), versionId = Number(detail.document?.versionId || 0);
+                const copy = `${detail.document?.title || '知识来源'}\n${detail.locator?.headingPath || ''}${page > 0 ? ` · 第 ${page} 页` : ''}\n\n${detail.quotedText || ''}`;
+                const sourceUrl = String(detail.sourceUrl || '');
+                if (/^\/api\/knowledge\/documents\/\d+\/source$/.test(sourceUrl) && page > 0 && Number.isSafeInteger(versionId) && versionId > 0 && window.Pivot.legacy.showConfirm) {
+                    return window.Pivot.legacy.showConfirm('知识来源', `${copy}\n\n确定后查看原文高亮预览；无法定位时可打开原文页码。`).then(async open => {
+                        if (!open) return;
+                        const response = await apiFetch(`${API_BASE}/knowledge/citations/${encodeURIComponent(citationKey)}/highlight`, { headers: authHeaders() });
+                        if (response.ok) {
+                            const url = URL.createObjectURL(await response.blob());
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                            window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+                        } else {
+                            showToast('无法精确高亮，已打开原文页码。', 'info');
+                            window.open(`${sourceUrl}?inline=1&versionId=${versionId}#page=${page}`, '_blank', 'noopener,noreferrer');
+                        }
+                    });
+                }
                 if (window.Pivot?.legacy?.showAlert) return window.Pivot.legacy.showAlert('知识来源', copy);
                 showToast(copy.slice(0, 300), 'info');
             })

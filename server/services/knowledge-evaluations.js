@@ -66,32 +66,45 @@ function dcg(relevances = []) {
 function computeRetrievalMetrics({ expectedDocumentIds = [], expectedChunkIds = [], retrievedDocumentIds = [], retrievedChunkIds = [] } = {}) {
     const expectedDocs = new Set(uniqueNumbers(expectedDocumentIds));
     const expectedChunks = new Set(uniqueNumbers(expectedChunkIds));
-    const retrievedDocs = uniqueNumbers(retrievedDocumentIds);
-    const retrievedChunks = uniqueNumbers(retrievedChunkIds);
+    const retrievedChunks = (Array.isArray(retrievedChunkIds) ? retrievedChunkIds : []).map(normalizeId);
+    const retrievedDocs = (Array.isArray(retrievedDocumentIds) ? retrievedDocumentIds : []).map(normalizeId);
     const hasExpected = expectedDocs.size > 0 || expectedChunks.size > 0;
     const relevantAt = index => {
         const chunk = retrievedChunks[index];
         const document = retrievedDocs[index];
-        return expectedChunks.has(chunk) || expectedDocs.has(document);
+        return expectedChunks.size ? expectedChunks.has(chunk) : expectedDocs.has(document);
     };
     const ranks = retrievedChunks.map((_, index) => index).filter(relevantAt);
     const firstRank = ranks.length ? ranks[0] + 1 : null;
-    const relevance5 = Array.from({ length: Math.min(5, retrievedChunks.length) }, (_, index) => relevantAt(index));
+    const seenRelevant = new Set();
+    const relevance5 = Array.from({ length: Math.min(5, retrievedChunks.length) }, (_, index) => {
+        const key = expectedChunks.size ? retrievedChunks[index] : retrievedDocs[index];
+        if (!relevantAt(index) || seenRelevant.has(key)) return false;
+        seenRelevant.add(key);
+        return true;
+    });
     const idealRelevantCount = expectedChunks.size || expectedDocs.size;
     const ideal5 = Array.from({ length: Math.min(5, idealRelevantCount) }, () => true);
     const precisionAt = limit => {
         const slice = Array.from({ length: Math.min(limit, retrievedChunks.length) }, (_, index) => relevantAt(index));
         return slice.length ? slice.filter(Boolean).length / slice.length : 0;
     };
+    const recallAt = limit => {
+        const matched = new Set();
+        for (let index = 0; index < Math.min(limit, retrievedChunks.length); index++) {
+            if (relevantAt(index)) matched.add(expectedChunks.size ? retrievedChunks[index] : retrievedDocs[index]);
+        }
+        return matched.size / idealRelevantCount;
+    };
     return {
         hasExpected,
-        recallAt1: hasExpected ? (relevance5[0] ? 1 : 0) : null,
-        recallAt3: hasExpected ? (relevance5.slice(0, 3).some(Boolean) ? 1 : 0) : null,
-        recallAt5: hasExpected ? (relevance5.some(Boolean) ? 1 : 0) : null,
+        recallAt1: hasExpected ? recallAt(1) : null,
+        recallAt3: hasExpected ? recallAt(3) : null,
+        recallAt5: hasExpected ? recallAt(5) : null,
         precisionAt1: hasExpected ? precisionAt(1) : null,
         precisionAt3: hasExpected ? precisionAt(3) : null,
         precisionAt5: hasExpected ? precisionAt(5) : null,
-        mrr: hasExpected && firstRank ? 1 / firstRank : 0,
+        mrr: hasExpected ? (firstRank ? 1 / firstRank : 0) : null,
         ndcgAt5: hasExpected ? (dcg(relevance5) / (dcg(ideal5) || 1)) : null,
         firstRelevantRank: firstRank,
         relevantRetrieved: ranks.length,
@@ -252,7 +265,7 @@ async function resolveSelectedDocumentIds(selectedChunkIds) {
         SELECT id, doc_id FROM knowledge_chunks WHERE id IN (${ids.map(() => '?').join(',')})
     `, ids);
     const byChunk = new Map(rows.map(row => [Number(row.id), Number(row.doc_id)]));
-    return ids.map(id => byChunk.get(id)).filter(Boolean);
+    return ids.map(id => byChunk.get(id) || null);
 }
 
 async function resolveExpectedLegacyDocumentIds(expectedProductDocumentIds) {

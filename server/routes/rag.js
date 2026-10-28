@@ -492,7 +492,7 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
         return res.status(409).json({ error: '原始文件不存在，无法重新索引，请重新上传文档' });
     }
 
-    const result = await scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user });
+    const result = await scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user, force: true });
     if (!result.started && result.reason === 'already_processing') {
         return res.status(409).json({ error: '文档正在处理中，请稍后再试' });
     }
@@ -500,6 +500,35 @@ ragRouter.post('/docs/:id/reindex', authMiddleware, asyncHandler(async (req, res
     auditRagAction(req, '知识库文档重新索引', { docId: doc.id });
     req.log?.info({ docId: doc.id }, 'RAG 文档重新索引');
     return res.json({ success: true, docId: doc.id, message: '已加入重新索引队列' });
+}));
+
+ragRouter.post('/docs/:id/resume-ocr', authMiddleware, asyncHandler(async (req, res) => {
+    const doc = await getKnowledgeDocumentForUser(req.params.id, req.user.id);
+    if (!doc) return res.status(404).json({ error: '文档不存在或无权处理。' });
+    let coverage = doc.extraction_coverage_json || {};
+    if (typeof coverage === 'string') {
+        try { coverage = JSON.parse(coverage); } catch (_) { coverage = {}; }
+    }
+    if (!doc.source_path || !(coverage.truncated || coverage.omittedPages?.length || coverage.failedPages?.length)) {
+        return res.status(409).json({ error: '文档没有待续处理的内容。' });
+    }
+    if (coverage.truncated && Number(coverage.indexedChars) >= 10000000 && !(coverage.omittedPages?.length || coverage.failedPages?.length)) return res.status(409).json({ error: '已达到单文档安全索引上限，请拆分文档后处理。' });
+    const result = await scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user, force: true, resumeCoverage: true });
+    if (!result.started) return res.status(409).json({ error: '文档正在处理中或暂时无法加入队列。' });
+    auditRagAction(req, '知识库文档续处理', { docId: doc.id });
+    return res.json({ success: true, docId: doc.id, message: '已加入文档续处理队列。' });
+}));
+
+ragRouter.post('/docs/:id/refresh-ocr-locations', authMiddleware, asyncHandler(async (req, res) => {
+    const doc = await getKnowledgeDocumentForUser(req.params.id, req.user.id);
+    if (!doc) return res.status(404).json({ error: '文档不存在或无权处理。' });
+    if (!doc.source_path || !/\.pdf$/i.test(String(doc.name || ''))) return res.status(409).json({ error: '该文档没有可处理的 PDF 原文件。' });
+    const missing = await require('../repositories/knowledge-ocr-pages').listPagesWithoutLocations(doc.id, req.user.id, doc.source_hash);
+    if (!missing.length) return res.status(409).json({ error: '没有需要补充坐标的已识别扫描页。' });
+    const result = await scheduleKnowledgeDocumentIndexing({ docId: doc.id, userId: req.user.id, user: req.user, force: true, refreshOcrLocations: true });
+    if (!result.started) return res.status(409).json({ error: '文档正在处理中或暂时无法加入队列。' });
+    auditRagAction(req, '知识库扫描页坐标补充', { docId: doc.id, pendingPages: missing.length });
+    return res.json({ success: true, pendingPages: missing.length, message: '已加入坐标补充队列，本轮最多处理 10 页。' });
 }));
 
 ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, res) => {

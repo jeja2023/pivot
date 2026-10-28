@@ -42,7 +42,7 @@ function normalizeRetrievalScope(scope = {}) {
     const tagNames = normalizeScopeTagList(raw.tagNames ?? raw.tagName ?? raw.tag);
     const verifiedStatuses = normalizeScopeEnumList(filters.verifiedStatus ?? filters.verifiedStatuses ?? (filters.verified === true ? 'verified' : ''), new Set(['verified', 'unverified', 'expired']), 3);
     const lifecycleStatuses = normalizeScopeEnumList(filters.lifecycleStatus ?? filters.lifecycleStatuses, new Set(['draft', 'review', 'published', 'expired', 'archived']), 5);
-    const sourceKinds = normalizeScopeEnumList(filters.sourceKind ?? filters.sourceKinds, new Set(['upload', 'local_dir', 'lan_http', 'database', 'internal_api', 'manual']), 6);
+    const sourceKinds = normalizeScopeEnumList(filters.sourceKind ?? filters.sourceKinds, new Set(['upload', 'local_dir', 'lan_http', 'database', 'internal_api', 'webdav', 'manual']), 7);
     const ownerUnits = normalizeScopeTagList(filters.ownerUnit ?? filters.ownerUnits, 20);
     const updatedAfter = normalizeScopeDate(filters.updatedAfter);
     const parts = [];

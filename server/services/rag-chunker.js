@@ -21,6 +21,7 @@ const ARTICLE_LABEL_RE = new RegExp(`^第\\s*[${CN_NUM}]+\\s*条`);
 const ARTICLE_GLOBAL_RE = new RegExp(`第\\s*[${CN_NUM}]+\\s*条`, 'g');
 const LEGAL_NAME_RE = /(办法|条例|规定|细则|规范|标准|准则|政策|法)(?:$|[\s（()）])/;
 const MARKDOWN_HEADING_RE = /^#{1,6}\s+\S/;
+const CHINESE_SECTION_RE = /^[一二三四五六七八九十百]+、[^\n。！？；]{2,60}$/u;
 
 // ---------- 通用滑窗（原 rag-index.chunkText 迁移至此，行为保持一致） ----------
 
@@ -107,7 +108,27 @@ function detectDocType(docName, text) {
     const headingLines = (body.split(/\r\n?|\n/).filter(line => MARKDOWN_HEADING_RE.test(line)) || []).length;
     if (headingLines >= 2) return 'markdown';
 
+    if (body.split(/\r?\n/).filter(line => CHINESE_SECTION_RE.test(line.trim())).length >= 2) return 'structured_prose';
+
     return 'prose';
+}
+
+function chunkStructuredProse(text, { docTitle, chunkSize, overlap }) {
+    const out = [];
+    let heading = '', buffer = [];
+    const flush = () => {
+        emitUnit(out, buffer.join('\n'), joinHeadingPath([docTitle, heading]), chunkSize, overlap);
+        buffer = [];
+    };
+    for (const line of String(text || '').split('\n')) {
+        if (CHINESE_SECTION_RE.test(line.trim())) {
+            flush();
+            heading = line.trim();
+        }
+        buffer.push(line);
+    }
+    flush();
+    return out;
 }
 
 // 单元过长时二次切分，复用通用滑窗并保留同一 headingPath。
@@ -322,6 +343,8 @@ function chunkDocument(text, options = {}) {
         result = chunkMarkdown(normalized, { docTitle, chunkSize, overlap });
     } else if (docType === 'table') {
         result = chunkTable(normalized, { docTitle, chunkSize, overlap });
+    } else if (docType === 'structured_prose') {
+        result = chunkStructuredProse(normalized, { docTitle, chunkSize, overlap });
     } else {
         result = chunkText(normalized, chunkSize, overlap).map(content => ({
             content,

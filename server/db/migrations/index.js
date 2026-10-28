@@ -165,7 +165,11 @@ const migrationModules = [
     require('./workflow-editor-drafts'),
     require('./chat-task-feed-index'),
     require('./audit-logs-timestamp-repair'),
-    require('./knowledge-claim-evidence-relation-index')
+    require('./knowledge-claim-evidence-relation-index'),
+    require('./knowledge-index-coverage'),
+    require('./knowledge-ocr-resume'),
+    require('./knowledge-source-deletion-approval'),
+    require('./knowledge-ocr-location')
 ];
 
 module.exports = migrationModules

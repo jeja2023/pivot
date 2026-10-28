@@ -1,5 +1,7 @@
 'use strict';
 
+const { pagesForChunk } = require('./knowledge-page-locator');
+
 // 知识内容产品层：在不破坏既有 knowledge_docs / knowledge_chunks 的前提下，
 // 为上传型 RAG 建立稳定文档、版本、块与引用投影。旧表继续服务现有聊天和
 // 管理接口，新表为审核、来源、精确引用和后续局域网连接器提供统一模型。
@@ -179,6 +181,10 @@ async function submitDocumentVersionForReview({ versionId, actor, reviewerUserId
     const detail = await getVersionForUser(versionId, actor);
     const reviewer = normalizeId(reviewerUserId);
     if (!detail || !reviewer || !canEditDocument(detail.document, actor) || detail.version.status !== 'draft') return null;
+    if (reviewer !== Number(detail.document.owner_user_id)) {
+        const reviewerUser = await queryOne('SELECT id, username, role FROM users WHERE id = ? AND deleted_at IS NULL', [reviewer]);
+        if (!isSuperAdmin(reviewerUser)) return null;
+    }
     const timestamp = getBeijingTimestamp();
     await transaction(async trx => {
         await trx.execute(`
@@ -195,9 +201,7 @@ async function submitDocumentVersionForReview({ versionId, actor, reviewerUserId
 async function reviewDocumentVersion({ versionId, actor, approved, note = '' }) {
     const safeVersionId = normalizeId(versionId);
     if (!safeVersionId || !actor?.id) return null;
-    // 审核人不必拥有阅读整篇私有文档的普通 viewer 权限；其可操作范围仅限
-    // 被显式分配的 pending review。不能先走 getVersionForUser，否则审核人会
-    // 因尚未获得阅读权限而无法完成审核。
+    // 严格所有者隔离下，审核动作也只能由所有者或系统管理员执行。
     const version = await queryOne('SELECT * FROM knowledge_document_versions WHERE id = ?', [safeVersionId]);
     if (!version || version.status !== 'review') return null;
     const review = await queryOne(`
@@ -207,7 +211,7 @@ async function reviewDocumentVersion({ versionId, actor, approved, note = '' }) 
     `, [version.id, actor.id]);
     if (!review && !isSuperAdmin(actor)) return null;
     const document = await queryOne('SELECT * FROM knowledge_documents WHERE id = ? AND deleted_at IS NULL', [version.document_id]);
-    if (!document) return null;
+    if (!document || (!isSuperAdmin(actor) && Number(document.owner_user_id) !== Number(actor.id))) return null;
     const timestamp = getBeijingTimestamp();
     const nextStatus = approved === true ? 'draft' : 'draft';
     await transaction(async trx => {
@@ -512,12 +516,17 @@ async function publishLegacyDocumentProjection({ legacyDocId, userId, indexStatu
             FROM knowledge_chunks WHERE doc_id = ? ORDER BY chunk_index ASC, id ASC
         `, [legacy.id]);
         const timestamp = getBeijingTimestamp();
+        const pageSpans = normalizeJson(legacy.extraction_coverage_json, {}).pageSpans || [];
         for (const chunk of chunks) {
+            const start = chunk.char_start == null ? null : Number(chunk.char_start);
+            const end = chunk.char_end == null ? null : Number(chunk.char_end);
+            const pages = pagesForChunk(pageSpans, start, end);
             const locator = {
                 headingPath: String(chunk.heading_path || ''),
                 chunkIndex: Number(chunk.chunk_index || 0),
-                charStart: chunk.char_start == null ? null : Number(chunk.char_start),
-                charEnd: chunk.char_end == null ? null : Number(chunk.char_end)
+                charStart: start,
+                charEnd: end,
+                ...(pages.length ? { page: pages[0], pageEnd: pages[pages.length - 1], pages } : {})
             };
             const block = await trx.queryOne(`
                 INSERT INTO knowledge_blocks (
@@ -582,24 +591,7 @@ async function getProductDocumentForUser(documentId, user) {
         LEFT JOIN knowledge_collections kc ON kc.id = kd.collection_id AND kc.deleted_at IS NULL
         WHERE kd.id = ? AND kd.deleted_at IS NULL
     `, [id]);
-    if (!row) return null;
-    if (isSuperAdmin(user) || Number(row.owner_user_id) === Number(user.id)
-        || Number(row.content_owner_user_id) === Number(user.id)
-        || Number(row.verifier_user_id) === Number(user.id)) return row;
-    const permission = await queryOne(`
-        SELECT 1 AS allowed
-        FROM knowledge_permissions
-        WHERE resource_type = 'document' AND resource_id = ?
-          AND permission IN ('viewer', 'commenter', 'editor', 'manager', 'owner')
-          AND (expires_at IS NULL OR expires_at > ?)
-          AND (
-            (principal_type = 'user' AND principal_id = ?)
-            OR (principal_type = 'unit' AND principal_id = ?)
-            OR (principal_type = 'role' AND principal_id = ?)
-          )
-        LIMIT 1
-    `, [id, getBeijingTimestamp(), String(user.id), String(user.unit || ''), String(user.role || 'user')]);
-    return permission?.allowed ? row : null;
+    return row && (isSuperAdmin(user) || Number(row.owner_user_id) === Number(user.id)) ? row : null;
 }
 
 async function getCitationForUser(citationKey, user) {
@@ -618,6 +610,7 @@ async function getCitationForUser(citationKey, user) {
             id: Number(document.id),
             title: document.title,
             versionId: normalizeId(citation.version_id),
+            isCurrentVersion: Number(document.current_version_id) === Number(citation.version_id),
             lifecycleStatus: document.lifecycle_status,
             verifiedStatus: document.verified_status
         },
@@ -722,6 +715,11 @@ async function updateDocumentGovernance({ documentId, actor, contentOwnerUserId,
     if (!document || !canEditDocument(document, actor)) return null;
     const contentOwner = contentOwnerUserId === undefined ? normalizeId(document.content_owner_user_id) : normalizeId(contentOwnerUserId);
     const verifier = verifierUserId === undefined ? normalizeId(document.verifier_user_id) : normalizeId(verifierUserId);
+    for (const candidate of [contentOwnerUserId === undefined ? null : contentOwner, verifierUserId === undefined ? null : verifier]) {
+        if (!candidate || candidate === Number(document.owner_user_id)) continue;
+        const target = await queryOne('SELECT id, username, role FROM users WHERE id = ? AND deleted_at IS NULL', [candidate]);
+        if (!isSuperAdmin(target)) return null;
+    }
     const policy = freshnessPolicy === undefined
         ? normalizeStatus(document.freshness_policy, FRESHNESS_POLICIES, 'manual')
         : normalizeStatus(freshnessPolicy, FRESHNESS_POLICIES, 'manual');
@@ -756,7 +754,7 @@ async function verifyKnowledgeDocument({ documentId, actor, status = 'verified' 
     const id = normalizeId(documentId);
     const document = id ? await queryOne('SELECT * FROM knowledge_documents WHERE id = ? AND deleted_at IS NULL', [id]) : null;
     const nextStatus = normalizeStatus(status, VERIFIED_STATUSES, 'verified');
-    if (!document || !actor?.id || (!isSuperAdmin(actor) && Number(document.owner_user_id) !== Number(actor.id) && Number(document.verifier_user_id) !== Number(actor.id))) return null;
+    if (!document || !actor?.id || (!isSuperAdmin(actor) && Number(document.owner_user_id) !== Number(actor.id))) return null;
     const timestamp = getBeijingTimestamp();
     const legacyDocId = normalizeId(document.legacy_doc_id);
     let indexStatus = 'ready';
@@ -956,6 +954,7 @@ async function setProductDocumentPermission({ documentId, actor, principalType, 
     if (!document || (Number(document.owner_user_id) !== Number(actor?.id) && !isSuperAdmin(actor))) return null;
     const type = ['user', 'unit', 'role', 'group'].includes(String(principalType || '')) ? String(principalType) : '';
     const subject = normalizeText(principalId, 180);
+    if (type !== 'user' || subject !== String(document.owner_user_id)) return null;
     const level = normalizeStatus(permission, PERMISSIONS, 'viewer');
     if (!type || !subject) return null;
     const timestamp = getBeijingTimestamp();

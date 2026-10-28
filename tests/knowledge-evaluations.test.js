@@ -39,6 +39,17 @@ test('知识库评测对无答案问题单独评估拒答准确率', () => {
     assert.equal(summary.recallAt1, 1);
 });
 
+test('重复文档保持分块排名对齐，多个期望文档计算真实召回比例', () => {
+    const metrics = computeRetrievalMetrics({ expectedDocumentIds: [10, 20], retrievedDocumentIds: [9, 9, 10, 20], retrievedChunkIds: [1, 2, 3, 4] });
+    assert.equal(metrics.firstRelevantRank, 3);
+    assert.equal(metrics.recallAt3, 0.5);
+    assert.equal(metrics.recallAt5, 1);
+    assert.equal(metrics.precisionAt3, 1 / 3);
+    assert.ok(metrics.ndcgAt5 <= 1);
+    assert.ok(computeRetrievalMetrics({ expectedDocumentIds: [10], retrievedDocumentIds: [10, 10], retrievedChunkIds: [1, 2] }).ndcgAt5 <= 1);
+    assert.equal(computeRetrievalMetrics({}).mrr, null);
+});
+
 test('知识库评测单独衡量引用精度召回与答案关键点覆盖，避免把空期望误计为满分', () => {
     assert.deepEqual(computeCitationMetrics({
         expectedCitationKeys: ['kb:1:v1:c10', 'kb:1:v1:c11'],

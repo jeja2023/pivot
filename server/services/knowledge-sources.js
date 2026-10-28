@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const deletionApprovals = require('../repositories/knowledge-source-deletion-approvals');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getKnowledgeLimits } = require('./resource-limits');
@@ -26,10 +27,12 @@ const {
 } = require('./knowledge-content');
 const { getApprovedKnowledgeDatabaseQueryTemplate } = require('./knowledge-database-templates');
 const {
-    archiveMissingExternalWikiPages,
+    archiveSelectedExternalWikiPages,
+    listActiveExternalWikiPages,
     upsertExternalWikiMarkdownPage
 } = require('./knowledge-wiki-markdown');
 const { enqueueKnowledgeSourceLifecycleEvent } = require('./knowledge-source-lifecycle');
+const { verifyUploadedMagic } = require('../upload');
 
 const SUPPORTED_EXTENSIONS = new Set([
     '.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.json', '.html', '.htm'
@@ -103,6 +106,7 @@ function normalizeLocalDirectoryConfig(config = {}, options = {}) {
 }
 
 function normalizeSourceConfig(kind, config = {}, options = {}) {
+    if (kind === 'webdav') return require('./knowledge-webdav').normalizeWebdavConfig(config);
     if (kind === 'local_dir' || kind === 'wiki_markdown') return normalizeLocalDirectoryConfig({
         ...config,
         // 外部 Wiki 仅接受 Markdown，避免把目录内其他资料误标为派生综合页。
@@ -147,14 +151,15 @@ async function hashFile(filePath) {
 
 async function walkDirectory(rootPath, config, { fsPromises = fs.promises } = {}) {
     const files = [];
+    let complete = true;
     const visit = async directory => {
-        if (files.length >= config.maxFiles) return;
+        if (files.length >= config.maxFiles) { complete = false; return; }
         const entries = await fsPromises.readdir(directory, { withFileTypes: true });
         for (const entry of entries) {
-            if (files.length >= config.maxFiles) break;
+            if (files.length >= config.maxFiles) { complete = false; break; }
             const fullPath = path.join(directory, entry.name);
             // 不跟随符号链接，防止后续扫描越出白名单根目录。
-            if (entry.isSymbolicLink()) continue;
+            if (entry.isSymbolicLink()) { complete = false; continue; }
             if (entry.isDirectory()) {
                 if (config.recursive) await visit(fullPath);
                 continue;
@@ -163,7 +168,7 @@ async function walkDirectory(rootPath, config, { fsPromises = fs.promises } = {}
             const ext = path.extname(entry.name).toLowerCase();
             if (!config.extensions.includes(ext)) continue;
             const stat = await fsPromises.stat(fullPath);
-            if (stat.size > getKnowledgeLimits().uploadMaxBytes) continue;
+            if (stat.size > getKnowledgeLimits().uploadMaxBytes) { complete = false; continue; }
             files.push({
                 absolutePath: fullPath,
                 canonicalUri: fullPath.replace(/\\/g, '/'),
@@ -174,6 +179,7 @@ async function walkDirectory(rootPath, config, { fsPromises = fs.promises } = {}
         }
     };
     await visit(rootPath);
+    Object.defineProperty(files, 'scanComplete', { value: complete, enumerable: false });
     return files;
 }
 
@@ -203,9 +209,10 @@ async function stageSourceText({ name, content }, { fsPromises = fs.promises } =
 
 async function listSourceDocuments(sourceId) {
     return await query(`
-        SELECT kd.*, kv.source_hash AS current_source_hash
+        SELECT kd.*, kd.updated_at::text AS stable_updated_at, kv.source_hash AS current_source_hash, COALESCE(version_count.count, 0) AS version_count
         FROM knowledge_documents kd
         LEFT JOIN knowledge_document_versions kv ON kv.id = kd.current_version_id
+        LEFT JOIN LATERAL (SELECT COUNT(*) AS count FROM knowledge_document_versions v WHERE v.document_id = kd.id) version_count ON TRUE
         WHERE kd.source_id = ? AND kd.deleted_at IS NULL
     `, [sourceId]);
 }
@@ -280,9 +287,9 @@ async function importSourceItem({
     return { action: existing ? 'changed' : 'created', queued: Boolean(enqueueResult.started), product, imported };
 }
 
-async function archiveMissingSourceDocuments(source, seenUris, { enabled = false } = {}) {
+async function archiveMissingSourceDocuments(source, seenUris, { enabled = false, expectedDocuments = null } = {}) {
     if (!enabled) return 0;
-    const existing = await listSourceDocuments(source.id);
+    const existing = expectedDocuments || await listSourceDocuments(source.id);
     let archived = 0;
     const timestamp = getBeijingTimestamp();
     for (const document of existing) {
@@ -293,7 +300,9 @@ async function archiveMissingSourceDocuments(source, seenUris, { enabled = false
             const changed = await trx.execute(`
                 UPDATE knowledge_documents SET lifecycle_status = 'archived', updated_at = ?
                 WHERE id = ? AND source_id = ? AND deleted_at IS NULL AND lifecycle_status != 'archived'
-            `, [timestamp, document.id, source.id]);
+                  AND updated_at IS NOT DISTINCT FROM ? AND current_version_id IS NOT DISTINCT FROM ?
+                  AND (SELECT COUNT(*) FROM knowledge_document_versions v WHERE v.document_id = knowledge_documents.id) = ?
+            `, [timestamp, document.id, source.id, document.stable_updated_at, document.current_version_id || null, Number(document.version_count || 0)]);
             if (Number(changed || 0) <= 0) return 0;
             await trx.execute(`
                 UPDATE knowledge_document_versions
@@ -318,7 +327,56 @@ async function archiveMissingSourceDocuments(source, seenUris, { enabled = false
     return archived;
 }
 
-async function syncLocalDirectorySource(source, actor, deps = {}) {
+function canArchiveMissing(existing, seen, complete, enabled) {
+    if (!enabled || !complete) return false;
+    const total = existing.length;
+    const missing = existing.filter(document => !seen.has(String(document.canonical_uri || ''))).length;
+    return missing < 5 || missing / Math.max(total, 1) <= 0.2;
+}
+
+function buildDeletionPreview(source, existing, seen, externalPages = []) {
+    const missing = existing.filter(item => item.lifecycle_status !== 'archived' && !seen.has(String(item.canonical_uri || '')))
+        .sort((a, b) => Number(a.id) - Number(b.id));
+    const missingPages = externalPages.filter(item => !seen.has(String(item.canonical_uri || ''))).sort((a, b) => Number(a.id) - Number(b.id));
+    const snapshot = missing.map(item => ({ id: Number(item.id), uri: String(item.canonical_uri || ''), updatedAt: item.stable_updated_at ?? item.updated_at, versionId: item.current_version_id || null, versionCount: Number(item.version_count || 0) }));
+    const pageSnapshot = missingPages.map(item => ({ id: Number(item.id), uri: String(item.canonical_uri || ''), updatedAt: item.stable_updated_at ?? item.updated_at, hash: item.content_hash }));
+    const items = [...missing.map(item => ({ id: Number(item.id), title: String(item.title || '未命名').slice(0, 255), type: 'document' })), ...missingPages.map(item => ({ id: Number(item.id), title: String(item.title || '未命名').slice(0, 255), type: 'wiki' }))];
+    return {
+        snapshotHash: crypto.createHash('sha256').update(JSON.stringify({ sourceId: Number(source.id), config: source.config_json, missing: snapshot, pages: pageSnapshot })).digest('hex'),
+        count: items.length, documentCount: missing.length, wikiPageCount: missingPages.length,
+        documents: items.slice(0, 50), truncated: items.length > 50
+    };
+}
+
+async function resolveDeletionProtection({ source, existing, seen, scanComplete, enabled, approvalId, actor, externalPages = [] }) {
+    const active = existing.filter(item => item.lifecycle_status !== 'archived');
+    const allowed = canArchiveMissing(active, seen, scanComplete, enabled) && canArchiveMissing(externalPages, seen, scanComplete, enabled);
+    if (!enabled || !scanComplete) return { allowed: false, preview: null, approvalRejected: Boolean(approvalId) };
+    if (allowed && !approvalId) return { allowed: true, preview: null };
+    const preview = buildDeletionPreview(source, active, seen, externalPages);
+    if (approvalId && isSuperAdmin(actor)) {
+        const consumed = await deletionApprovals.claim({ id: normalizeId(approvalId), sourceId: source.id, snapshotHash: preview.snapshotHash, userId: actor.id });
+        if (consumed) return { allowed: true, preview, approved: true };
+    }
+    return { allowed: false, preview, approvalRejected: Boolean(approvalId) };
+}
+
+async function approveKnowledgeSourceDeletion({ sourceId, runId, user }) {
+    if (!isSuperAdmin(user)) { const error = new Error('仅系统管理员可审批数据源删除。'); error.status = 403; throw error; }
+    const source = await findSourceForUser(sourceId, user);
+    if (!source) return null;
+    const run = await queryOne('SELECT * FROM knowledge_source_sync_runs WHERE id = ? AND source_id = ?', [normalizeId(runId), source.id]);
+    const result = parseJson(run?.summary_json, {});
+    const preview = result.deletionPreview;
+    if (run?.status !== 'partial' || result.scanComplete !== true || !result.deletionBlocked || !preview || preview.truncated || !preview.count || !/^[a-f0-9]{64}$/.test(String(preview.snapshotHash || ''))) {
+        const error = new Error('删除预览不完整、已失效或超过可审批范围，请重新同步并核对。'); error.status = 409; throw error;
+    }
+    const approval = await deletionApprovals.approve({ sourceId: source.id, runId: run.id, snapshotHash: preview.snapshotHash, userId: user.id });
+    if (!approval) { const error = new Error('该同步记录已有审批，请重新同步并生成新预览。'); error.status = 409; throw error; }
+    return { id: Number(approval.id), expiresAt: approval.expires_at, count: preview.count };
+}
+
+async function syncLocalDirectorySource(source, actor, deps = {}, approvalId = null) {
     const config = normalizeLocalDirectoryConfig(parseJson(source.config_json), { env: deps.env || process.env });
     const fsPromises = deps.fsPromises || fs.promises;
     const files = await walkDirectory(config.rootPath, config, { fsPromises });
@@ -371,11 +429,16 @@ async function syncLocalDirectorySource(source, actor, deps = {}) {
         }
     }
 
-    const archived = await archiveMissingSourceDocuments(source, seen, { enabled: config.syncDeletes });
-    const archivedWikiPages = source.kind === 'wiki_markdown'
-        ? await (deps.archiveMissingExternalWikiPages || archiveMissingExternalWikiPages)({ sourceId: source.id, seenUris: [...seen] }, deps)
+    const scanComplete = files.scanComplete && failures.length === 0;
+    const externalPages = source.kind === 'wiki_markdown' ? await (deps.listActiveExternalWikiPages || listActiveExternalWikiPages)(source.id) : [];
+    const decision = await resolveDeletionProtection({ source, existing, seen, scanComplete, enabled: config.syncDeletes, approvalId, actor, externalPages });
+    const deletionAllowed = decision.allowed;
+    const archived = await archiveMissingSourceDocuments(source, seen, { enabled: deletionAllowed, expectedDocuments: existing });
+    const missingPages = externalPages.filter(page => !seen.has(String(page.canonical_uri || '')));
+    const archivedWikiPages = source.kind === 'wiki_markdown' && deletionAllowed
+        ? await (deps.archiveSelectedExternalWikiPages || archiveSelectedExternalWikiPages)(source.id, missingPages, deps)
         : 0;
-    return { kind: source.kind, scanned: files.length, created, changed, skipped, queued, archived, archivedWikiPages, failures: failures.slice(0, 50), cursor: JSON.stringify({ scannedAt: getBeijingTimestamp(), files: files.length }) };
+    return { kind: source.kind, scanned: files.length, scanComplete, deletionBlocked: config.syncDeletes && (!deletionAllowed || (decision.approved && (archived !== decision.preview.documentCount || archivedWikiPages !== decision.preview.wikiPageCount))), deletionPreview: decision.preview, approvalRejected: decision.approvalRejected, created, changed, skipped, queued, archived, archivedWikiPages, failures: failures.slice(0, 50), cursor: JSON.stringify({ scannedAt: getBeijingTimestamp(), files: files.length }) };
 }
 
 function resolveManifestUrl(config) {
@@ -406,6 +469,7 @@ async function stageRemoteFile(item, actor, deps = {}) {
     const response = await get(item.downloadUrl, {
         user: actor,
         assertUrl: assertSafeMcpOutboundUrl,
+        headers: item.headers || {},
         createAgents: targetUser => createSafeHttpAgentsForUser(targetUser, { allowPrivateEnv: 'ALLOW_PRIVATE_MCP_URLS', allowExplicitLoopbackForAdmin: true }),
         responseType: 'arraybuffer',
         timeout: 30000,
@@ -433,11 +497,55 @@ async function stageRemoteFile(item, actor, deps = {}) {
     };
 }
 
-async function syncHttpManifestSource(source, actor, deps = {}) {
+async function syncWebdavSource(source, actor, deps = {}, approvalId = null) {
+    if (!isAdmin(actor)) throw Object.assign(new Error('WebDAV 数据源仅管理员可执行同步。'), { status: 403 });
+    const config = normalizeSourceConfig('webdav', parseJson(source.config_json));
+    const previousCursor = parseJson(source.sync_cursor, {});
+    const scopeHash = require('./knowledge-webdav').webdavScopeFingerprint(config);
+    const sameScope = previousCursor.webdavScopeHash === scopeHash;
+    const list = deps.listWebdavFiles || require('./knowledge-webdav').listWebdavFiles;
+    const result = await list(config, actor, deps);
+    const existing = new Map((await listSourceDocuments(source.id)).map(document => [String(document.canonical_uri || ''), document]));
+    const stats = { kind: 'webdav', scanned: result.items.length, scanComplete: result.complete, created: 0, changed: 0, skipped: 0, queued: 0, archived: 0, failures: [] };
+    const seen = new Set(result.items.map(item => item.canonicalUri));
+    const isWithinScope = require('./knowledge-webdav').isWithinWebdavScope;
+    const scopedExisting = [...existing.values()].filter(item => isWithinScope(item.canonical_uri, config));
+    for (const item of result.items) {
+        let staged = null;
+        try {
+            const remote = await stageRemoteFile(item, actor, deps);
+            staged = remote.staged;
+            if (!await verifyUploadedMagic(staged)) throw new Error('WebDAV 文件格式与内容不匹配。');
+            const imported = await importSourceItem({ source, actor, canonicalUri: item.canonicalUri, sourceHash: remote.hash, staged, existing: existing.get(item.canonicalUri), deps });
+            if (imported.action === 'created') stats.created++;
+            if (imported.action === 'changed') stats.changed++;
+            if (imported.action === 'skipped') stats.skipped++;
+            if (imported.queued) stats.queued++;
+        } catch (error) {
+            stats.failures.push({ path: item.canonicalUri, error: String(error.message || error).slice(0, 500) });
+        } finally {
+            if (staged?.path) await fs.promises.rm(staged.path, { force: true }).catch(() => {});
+        }
+    }
+    stats.scanComplete = stats.scanComplete && stats.failures.length === 0;
+    const decision = await resolveDeletionProtection({ source, existing: scopedExisting, seen, scanComplete: stats.scanComplete && sameScope, enabled: config.syncDeletes, approvalId, actor });
+    stats.deletionPreview = decision.preview;
+    stats.approvalRejected = decision.approvalRejected;
+    stats.deletionBlocked = config.syncDeletes && !decision.allowed;
+    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: decision.allowed, expectedDocuments: scopedExisting });
+    if (decision.approved && stats.archived !== decision.preview.documentCount) stats.deletionBlocked = true;
+    stats.scopeChanged = !sameScope;
+    stats.outsideScope = existing.size - scopedExisting.length;
+    stats.cursor = JSON.stringify({ syncedAt: getBeijingTimestamp(), files: result.items.length,
+        webdavScopeHash: stats.scanComplete ? scopeHash : previousCursor.webdavScopeHash || '' });
+    return stats;
+}
+
+async function syncHttpManifestSource(source, actor, deps = {}, approvalId = null) {
     const config = normalizeSourceConfig(source.kind, parseJson(source.config_json));
     await assertSafeMcpOutboundUrl(config.url, actor);
     const cursor = parseJson(source.sync_cursor, {});
-    const headers = cursor.etag ? { 'If-None-Match': String(cursor.etag).slice(0, 500) } : {};
+    const headers = cursor.etag && !approvalId ? { 'If-None-Match': String(cursor.etag).slice(0, 500) } : {};
     if (config.credentialRef) {
         const credential = await resolveCredentialSecret(config.credentialRef, actor);
         if (!credential) {
@@ -459,9 +567,14 @@ async function syncHttpManifestSource(source, actor, deps = {}) {
         validateStatus: status => (status >= 200 && status < 300) || status === 304
     });
     if (response.status === 304) {
-        return { kind: source.kind, scanned: 0, created: 0, changed: 0, skipped: 0, queued: 0, archived: 0, failures: [], cursor: JSON.stringify({ ...cursor, syncedAt: getBeijingTimestamp(), notModified: true }) };
+        return { kind: source.kind, scanned: 0, created: 0, changed: 0, skipped: 0, queued: 0, archived: 0, approvalRejected: Boolean(approvalId), deletionBlocked: Boolean(approvalId), failures: [], cursor: JSON.stringify({ ...cursor, syncedAt: getBeijingTimestamp(), notModified: true }) };
     }
     const items = normalizeRemoteManifestItems(response.data, url);
+    const rawItems = Array.isArray(response.data) ? response.data : response.data?.items;
+    const manifestComplete = response.data?.complete === true && Array.isArray(rawItems) && rawItems.length === items.length
+        && rawItems.length <= readTypedEnv('KNOWLEDGE_SOURCE_MAX_FILES')
+        && !response.data?.next && !response.data?.nextPage && !response.data?.nextCursor
+        && response.data?.truncated !== true && response.data?.complete !== false;
     const existing = new Map((await listSourceDocuments(source.id)).map(document => [String(document.canonical_uri || ''), document]));
     const seen = new Set();
     const stats = { kind: source.kind, scanned: items.length, created: 0, changed: 0, skipped: 0, queued: 0, archived: 0, failures: [] };
@@ -483,12 +596,19 @@ async function syncHttpManifestSource(source, actor, deps = {}) {
         }
     }
     // 网页分页、登录状态或页面额度不代表完整目录，抓取来源不能据此自动删除原知识。
-    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: !config.crawl && normalizeBool(config.syncDeletes, false) });
+    stats.scanComplete = !config.crawl && manifestComplete && stats.failures.length === 0;
+    const decision = await resolveDeletionProtection({ source, existing: [...existing.values()], seen, scanComplete: stats.scanComplete, enabled: normalizeBool(config.syncDeletes, false), approvalId, actor });
+    const deletionAllowed = decision.allowed;
+    stats.deletionPreview = decision.preview;
+    stats.approvalRejected = decision.approvalRejected;
+    stats.deletionBlocked = normalizeBool(config.syncDeletes, false) && !deletionAllowed;
+    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: deletionAllowed, expectedDocuments: [...existing.values()] });
+    if (decision.approved && stats.archived !== decision.preview.count) stats.deletionBlocked = true;
     stats.cursor = JSON.stringify({ syncedAt: getBeijingTimestamp(), items: items.length, etag: String(response.headers?.etag || '').slice(0, 500), target: new URL(url).origin });
     return stats;
 }
 
-async function syncDatabaseSource(source, actor, deps = {}) {
+async function syncDatabaseSource(source, actor, deps = {}, approvalId = null) {
     if (!isAdmin(actor)) {
         const error = new Error('数据库知识来源仅管理员可执行同步。');
         error.status = 403;
@@ -540,12 +660,20 @@ async function syncDatabaseSource(source, actor, deps = {}) {
             if (staged?.path) await fs.promises.rm(staged.path, { force: true }).catch(() => {});
         }
     }
-    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: normalizeBool(config.syncDeletes, false) });
+    stats.scanComplete = result?.complete === true && rows.length < 1000 && result?.truncated !== true && stats.failures.length === 0
+        && rows.every(row => row?.id != null) && items.length === rows.length && new Set(items.map(item => item.canonicalUri)).size === items.length;
+    const decision = await resolveDeletionProtection({ source, existing: [...existing.values()], seen, scanComplete: stats.scanComplete, enabled: normalizeBool(config.syncDeletes, false), approvalId, actor });
+    const deletionAllowed = decision.allowed;
+    stats.deletionPreview = decision.preview;
+    stats.approvalRejected = decision.approvalRejected;
+    stats.deletionBlocked = normalizeBool(config.syncDeletes, false) && !deletionAllowed;
+    stats.archived = await archiveMissingSourceDocuments(source, seen, { enabled: deletionAllowed, expectedDocuments: [...existing.values()] });
+    if (decision.approved && stats.archived !== decision.preview.count) stats.deletionBlocked = true;
     stats.cursor = JSON.stringify({ syncedAt: getBeijingTimestamp(), rows: items.length, queryTemplateId: queryTemplate.id });
     return stats;
 }
 
-async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', deps = {} }) {
+async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', approvalId = null, deps = {} }) {
     const source = await findSourceForUser(sourceId, user);
     if (!source) return null;
     if (source.status !== 'active') {
@@ -553,6 +681,7 @@ async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', dep
         error.status = 409;
         throw error;
     }
+    if (approvalId && !isSuperAdmin(user)) { const error = new Error('仅系统管理员可使用删除审批。'); error.status = 403; throw error; }
     const timestamp = getBeijingTimestamp();
     const running = await queryOne(`
         SELECT id FROM knowledge_source_sync_runs
@@ -572,9 +701,10 @@ async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', dep
     `, [source.id, user?.id || null, String(triggerType || 'manual').slice(0, 32), timestamp, timestamp, timestamp]);
     try {
         let result;
-        if (source.kind === 'local_dir' || source.kind === 'wiki_markdown') result = await syncLocalDirectorySource(source, user, deps);
-        else if (source.kind === 'lan_http' || source.kind === 'internal_api') result = await syncHttpManifestSource(source, user, deps);
-        else if (source.kind === 'database') result = await syncDatabaseSource(source, user, deps);
+        if (source.kind === 'local_dir' || source.kind === 'wiki_markdown') result = await syncLocalDirectorySource(source, user, deps, approvalId);
+        else if (source.kind === 'lan_http' || source.kind === 'internal_api') result = await syncHttpManifestSource(source, user, deps, approvalId);
+        else if (source.kind === 'database') result = await syncDatabaseSource(source, user, deps, approvalId);
+        else if (source.kind === 'webdav') result = await syncWebdavSource(source, user, deps, approvalId);
         else {
             const error = new Error(`数据源类型 ${source.kind} 不支持主动同步。`);
             error.code = 'KNOWLEDGE_SOURCE_EXECUTOR_UNAVAILABLE';
@@ -583,12 +713,12 @@ async function syncKnowledgeSource({ sourceId, user, triggerType = 'manual', dep
         }
         await execute(`
             UPDATE knowledge_sources
-            SET sync_cursor = ?, last_sync_at = ?, last_error = '', updated_at = ? WHERE id = ?
-        `, [result.cursor || '', timestamp, timestamp, source.id]);
+            SET sync_cursor = ?, last_sync_at = ?, last_error = ?, updated_at = ? WHERE id = ?
+        `, [result.cursor || '', timestamp, result.failures?.length || result.scanComplete === false || result.deletionBlocked ? '同步不完整或删除同步被保护，请检查扫描范围和失败项。' : '', timestamp, source.id]);
         await execute(`
             UPDATE knowledge_source_sync_runs
-            SET status = 'completed', summary_json = ?, completed_at = ?, updated_at = ? WHERE id = ?
-        `, [JSON.stringify(result), getBeijingTimestamp(), getBeijingTimestamp(), run.id]);
+            SET status = ?, summary_json = ?, completed_at = ?, updated_at = ? WHERE id = ?
+        `, [result.failures?.length || result.scanComplete === false || result.deletionBlocked ? 'partial' : 'completed', JSON.stringify(result), getBeijingTimestamp(), getBeijingTimestamp(), run.id]);
         return { sourceId: Number(source.id), runId: Number(run.id), ...result };
     } catch (error) {
         await execute(`
@@ -610,7 +740,7 @@ async function syncScheduledKnowledgeSources({ limit = 20, deps = {} } = {}) {
         JOIN users owner ON owner.id = source.user_id AND owner.deleted_at IS NULL
         WHERE source.deleted_at IS NULL AND source.status = 'active'
           AND source.sync_mode IN ('scheduled', 'watch')
-          AND source.kind IN ('local_dir', 'wiki_markdown', 'lan_http', 'internal_api', 'database')
+          AND source.kind IN ('local_dir', 'wiki_markdown', 'lan_http', 'internal_api', 'database', 'webdav')
         ORDER BY COALESCE(source.last_sync_at, source.created_at) ASC, source.id ASC
         LIMIT ?
     `, [safeLimit]);
@@ -680,5 +810,9 @@ module.exports = {
     syncKnowledgeSource,
     createKnowledgeSourceSyncScheduler,
     archiveMissingSourceDocuments,
+    canArchiveMissing,
+    buildDeletionPreview,
+    resolveDeletionProtection,
+    approveKnowledgeSourceDeletion,
     walkDirectory
 };

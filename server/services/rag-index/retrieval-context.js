@@ -52,13 +52,16 @@ function formatInjectedContext(topChunks, scoreThreshold = 0) {
         const offset = chunk.charStart != null && chunk.charEnd != null && Number.isInteger(Number(chunk.charStart)) && Number.isInteger(Number(chunk.charEnd))
             ? `字符 ${Number(chunk.charStart)}-${Number(chunk.charEnd)}`
             : `片段 ${Number(chunk.chunkIndex || index) + 1}`;
-        const location = [String(chunk.headingPath || '').trim() || chunk.source, offset].filter(Boolean).join(' · ');
+        const location = [String(chunk.headingPath || '').trim() || chunk.source, offset].filter(Boolean).join(' · ')
+            .replace(/[\r\n\[\]|]+/g, ' ').slice(0, 500);
         const confidence = Number.isFinite(Number(chunk.citationConfidence))
             ? Number(chunk.citationConfidence)
             : calculateCitationConfidence(chunk, scoreThreshold, maxRankScore);
         const citationKey = String(chunk.citationKey || '').trim();
         const keySegment = citationKey ? ` | citation: ${citationKey}` : '';
-        injectedContext += `[引用 ${index + 1}${keySegment} | 来源: ${location} | 检索可信度: ${Math.round(confidence * 100)}%]: ${chunk.text}\n`;
+        const text = String(chunk.text || '').replace(/\[(?=引用\s*\d)/gu, '［')
+            .replace(/PIVOT_(?:RAG|WIKI)_[A-Z_]+/g, '[文档中的标记]');
+        injectedContext += `[引用 ${index + 1}${keySegment} | 来源: ${location} | 检索可信度: ${Math.round(confidence * 100)}%]: ${text}\n`;
     });
     injectedContext += '请基于上述参考信息回答我的问题。如果参考信息中没有答案，请告知无法在知识库中查阅到该信息。\n';
     return injectedContext;

@@ -3,12 +3,14 @@
   "largeFileThreshold": 1000,
   "legacyWindowGlobalBudget": 276,
   "files": {
-    "client/chat/rag-documents.js": 1479,
+    "client/chat/rag-documents.js": 1573,
+    "client/chat/apps-workbench-editor.js": 1417,
     "client/chat/mcp-workbench-main.js": 1398,
-    "client/chat/apps-workbench-editor.js": 1419,
-    "client/chat/agent-harness.js": 1123,
-    "client/chat/dag-inspector.js": 1144,
+    "client/chat/dag-inspector.js": 1139,
+    "client/chat/agent-harness.js": 1106,
     "server/services/agent-tools.js": 1084,
-    "client/chat/agents-dag-editor.js": 1023
+    "server/services/rag-documents.js": 1045,
+    "server/routes/chat/index.js": 1021,
+    "client/chat/agents-dag-editor.js": 1011
   }
 }

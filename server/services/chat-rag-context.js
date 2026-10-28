@@ -10,6 +10,15 @@ function buildRagInsufficientContextMessage(reason = 'no_reliable_match') {
     ].join('\n');
 }
 
+async function retrieveChatKnowledgeQueries({ queries = [], queryVector = null, vectorQuery = '', retrieve, userId, user, scope, maxCitations = 12 } = {}) {
+    const results = await Promise.allSettled(queries.slice(0, 3).map(query => retrieve(userId, query, null, {
+        user, scope, ...(Array.isArray(queryVector) && queryVector.length && query === vectorQuery ? { queryVector } : {})
+    })));
+    const contexts = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+    if (!contexts.length) throw results[0]?.reason || new Error('知识库检索不可用');
+    return mergeRagContexts(contexts, { maxCitations });
+}
+
 function buildRagContextMessage(ragContext) {
     return [
         'PIVOT_RAG_CONTEXT_BEGIN',
@@ -149,5 +158,6 @@ module.exports = {
     buildChatRagEvidenceObservation,
     injectRagContextBeforeLatestUser,
     mergeRagContexts,
+    retrieveChatKnowledgeQueries,
     summarizeRagContextSources
 };

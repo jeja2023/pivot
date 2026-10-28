@@ -312,5 +312,6 @@ module.exports = {
     createUploadMiddleware,
     normalizeUploadedOriginalName,
     removeUploadedFile,
+    verifyUploadedMagic,
     uploadSecurityMiddleware
 };

@@ -22,9 +22,11 @@ async function discardKnowledgeIndexStage(stageId) {
     await execute('DELETE FROM knowledge_docs WHERE id = ?', [stageId]);
 }
 
-async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready', enqueueLifecycle = null }) {
+async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready', coverageWarning = '', extractionCoverage = {}, indexFingerprint = '', enqueueLifecycle = null }) {
     const now = getBeijingTimestamp();
     await transaction(async trx => {
+        const target = await trx.query('SELECT id FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [docId, userId]);
+        if (!target.length) throw new Error('文档已删除或无权访问，无法切换索引');
         const oldChunks = await trx.query('SELECT id FROM knowledge_chunks WHERE doc_id = ?', [docId]);
         const oldIds = oldChunks.map(row => row.id).filter(Boolean);
         if (oldIds.length) {
@@ -40,10 +42,10 @@ async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sou
         await trx.execute('UPDATE knowledge_entities SET source_doc_id = ? WHERE source_doc_id = ?', [docId, stageId]);
         await trx.execute(`
             UPDATE knowledge_docs
-            SET status = ?, is_enabled = 1, chunk_count = ?, indexed_chunks = ?, progress = 100,
-                error_message = '', source_hash = ?, processed_at = ?, updated_at = ?
+            SET status = ?, chunk_count = ?, indexed_chunks = ?, progress = 100,
+                error_message = ?, source_hash = ?, extraction_coverage_json = ?::jsonb, index_fingerprint = ?, processed_at = ?, updated_at = ?
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-        `, [indexStatus === 'lexical_ready' ? 'lexical_ready' : 'ready', chunkCount, chunkCount, sourceHash || '', now, now, docId, userId]);
+        `, [indexStatus === 'lexical_ready' ? 'lexical_ready' : 'ready', chunkCount, chunkCount, String(coverageWarning).slice(0, 1000), sourceHash || '', JSON.stringify(extractionCoverage || {}), indexFingerprint, now, now, docId, userId]);
         await trx.execute('DELETE FROM knowledge_docs WHERE id = ?', [stageId]);
         if (typeof enqueueLifecycle === 'function') await enqueueLifecycle(trx);
     });

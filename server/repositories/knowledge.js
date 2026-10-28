@@ -119,6 +119,43 @@ function listCollectionResourceDocuments(collectionId, user, limit = 100) {
     `, [normalizedId, ...access.params, safeLimit]);
 }
 
+// 聊天目录与概览均复用检索范围和文档访问控制，不能因指定专题而扩大权限。
+function listChatKnowledgeCatalog(user, scope = {}, limit = 101) {
+    if (!normalizeKnowledgeUser(user).id) return Promise.resolve([]);
+    const { buildRetrievalScopeSql } = require('../services/rag-index/retrieval-scope-builder');
+    const filter = buildRetrievalScopeSql(scope, 'd', user);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 101, 1), 101);
+    return query(`
+        SELECT d.id, d.name, d.status, d.is_enabled, c_access.name AS collection_name
+        FROM knowledge_docs d
+        ${filter.accessJoin}
+        WHERE d.deleted_at IS NULL ${filter.accessSql} ${filter.sql}
+        ORDER BY d.updated_at DESC, d.id DESC
+        LIMIT ?
+    `, [...filter.accessParams, ...filter.params, safeLimit]);
+}
+
+function listChatKnowledgeOverviewChunks(user, scope = {}, limit = 12) {
+    if (!normalizeKnowledgeUser(user).id) return Promise.resolve([]);
+    const { buildRetrievalScopeSql } = require('../services/rag-index/retrieval-scope-builder');
+    const filter = buildRetrievalScopeSql(scope, 'd', user);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 12, 1), 12);
+    return query(`
+        SELECT d.id AS doc_id, d.name, ch.id AS chunk_id, ch.content, ch.chunk_index, ch.heading_path, ch.char_start, ch.char_end
+        FROM knowledge_docs d
+        ${filter.accessJoin}
+        JOIN LATERAL (
+            SELECT id, content, chunk_index, heading_path, char_start, char_end
+            FROM knowledge_chunks WHERE doc_id = d.id
+            ORDER BY chunk_index ASC, id ASC LIMIT 2
+        ) ch ON TRUE
+        WHERE d.deleted_at IS NULL AND d.status IN ('ready', 'lexical_ready')
+          AND COALESCE(d.is_enabled, 1) != 0 ${filter.accessSql} ${filter.sql}
+        ORDER BY ch.chunk_index ASC, d.updated_at DESC, d.id DESC
+        LIMIT ?
+    `, [...filter.accessParams, ...filter.params, safeLimit]);
+}
+
 function listDocumentChunks(docId, limit, offset) {
     return query(`
         SELECT id, content, chunk_index, char_start, char_end, LENGTH(content) AS length
@@ -309,6 +346,8 @@ module.exports = {
     getDocumentForUser,
     listDocumentTags,
     listCollectionResourceDocuments,
+    listChatKnowledgeCatalog,
+    listChatKnowledgeOverviewChunks,
     listDocumentChunks,
     countDocumentChunks,
     listAllDocumentChunks,

@@ -3,6 +3,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const { asyncHandler, normalizeLimit } = require('../http');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
@@ -21,6 +22,7 @@ const {
 const { getKnowledgeSourcePath } = require('../services/rag-documents');
 const {
     listKnowledgeSourceSyncRuns,
+    approveKnowledgeSourceDeletion,
     normalizeSourceConfig,
     syncKnowledgeSource
 } = require('../services/knowledge-sources');
@@ -82,8 +84,10 @@ const {
     updateWikiSpace
 } = require('../services/knowledge-wiki');
 const { getKnowledgeSourceLifecycleMetrics } = require('../services/knowledge-source-lifecycle');
+const { renderCitationHighlight } = require('../services/knowledge-pdf-highlight');
+const knowledgeOcrPages = require('../repositories/knowledge-ocr-pages');
 
-const SOURCE_KINDS = new Set(['upload', 'local_dir', 'wiki_markdown', 'lan_http', 'database', 'internal_api', 'manual']);
+const SOURCE_KINDS = new Set(['upload', 'local_dir', 'wiki_markdown', 'lan_http', 'database', 'internal_api', 'webdav', 'manual']);
 const SOURCE_SYNC_MODES = new Set(['manual', 'scheduled', 'watch']);
 const WIKI_COMPILE_ERROR_MESSAGES = Object.freeze({
     wiki_disabled: '知识 Wiki 当前已关闭。',
@@ -172,6 +176,7 @@ async function resolveCitations(matches, user) {
 
 function createKnowledgeRouter({ authMiddleware, logAction }) {
     const router = express.Router();
+    const citationHighlightLimiter = rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: '来源预览请求过于频繁，请稍后重试。' } });
     const recordKnowledgeAudit = async (req, payload) => {
         try {
             return await recordKnowledgeAiAnswer(payload);
@@ -355,8 +360,32 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         const citation = await getCitationForUser(req.params.citationKey, req.user);
         if (!citation) return res.status(404).json({ error: '引用不存在或无权查看。' });
         await recordCitationEvent({ citationKey: req.params.citationKey, user: req.user, eventType: 'open' });
-        citation.sourceUrl = citation.document?.id ? `/api/knowledge/documents/${citation.document.id}/source` : null;
+        citation.sourceUrl = citation.document?.id && citation.document.isCurrentVersion ? `/api/knowledge/documents/${citation.document.id}/source` : null;
         return res.json({ success: true, citation });
+    }));
+
+    router.get('/knowledge/citations/:citationKey/highlight', authMiddleware, citationHighlightLimiter, asyncHandler(async (req, res) => {
+        const citation = await getCitationForUser(req.params.citationKey, req.user);
+        if (!citation || !citation.document?.isCurrentVersion) return res.status(404).json({ error: '引用不存在、已过期或无权查看。' });
+        const page = Number(citation.locator?.page);
+        const version = await queryOne(`
+            SELECT v.source_hash, d.id AS legacy_doc_id, d.user_id, d.source_path, d.name FROM knowledge_document_versions v
+            JOIN knowledge_documents kd ON kd.id = v.document_id AND kd.current_version_id = v.id AND kd.deleted_at IS NULL
+            JOIN knowledge_docs d ON d.id = kd.legacy_doc_id AND d.user_id = kd.owner_user_id AND d.deleted_at IS NULL
+            WHERE v.id = ? AND kd.id = ?
+        `, [citation.document.versionId, citation.document.id]);
+        const sourcePath = getKnowledgeSourcePath(version?.source_path);
+        if (!sourcePath || !/\.pdf$/i.test(String(version?.name || '')) || !Number.isSafeInteger(page)) return res.status(422).json({ error: '该引用没有可用的 PDF 页码定位。' });
+        try {
+            const location = await knowledgeOcrPages.loadLocation(version.legacy_doc_id, version.user_id, version.source_hash, page);
+            const image = await renderCitationHighlight({ filePath: sourcePath, page, quote: citation.quotedText, expectedHash: version.source_hash, ocrLocation: location });
+            logAction?.(req, '知识引用高亮预览', { documentId: citation.document.id, versionId: citation.document.versionId, page });
+            res.setHeader('Cache-Control', 'private, no-store');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            return res.type('png').send(image);
+        } catch (error) {
+            return res.status(error.status || 422).json({ error: error.message || '无法生成来源高亮预览。' });
+        }
     }));
 
     router.get('/knowledge/citations/by-chunk/:chunkId', authMiddleware, asyncHandler(async (req, res) => {
@@ -387,6 +416,10 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         const detail = await listProductDocumentVersions(req.params.id, req.user);
         const document = detail?.document;
         if (!document) return res.status(404).json({ error: '知识文档不存在或无权访问原始资料。' });
+        const requestedVersion = normalizeId(req.query.versionId);
+        if (req.query.inline === '1' && (!requestedVersion || requestedVersion !== Number(document.current_version_id))) {
+            return res.status(409).json({ error: '引用版本已变化，请重新打开来源。' });
+        }
         const legacyDocId = normalizeId(document.legacy_doc_id);
         if (!legacyDocId) return res.status(404).json({ error: '该知识文章没有关联的原始文件。' });
         const legacy = await queryOne(`
@@ -398,6 +431,11 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
             return res.status(404).json({ error: '原始文件已不存在或不在受控存储目录。' });
         }
         logAction?.(req, '知识文档原始文件访问', { documentId: document.id, legacyDocId });
+        if (req.query.inline === '1' && /\.pdf$/i.test(String(legacy.name || ''))) {
+            res.setHeader('Content-Disposition', 'inline');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            return res.sendFile(sourcePath);
+        }
         return res.download(sourcePath, path.basename(String(legacy.name || sourcePath)));
     }));
 
@@ -623,7 +661,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
             permission: req.body?.permission,
             expiresAt: req.body?.expiresAt
         });
-        if (!result) return res.status(403).json({ error: '无权更新文档权限，或授权参数无效。' });
+        if (!result) return res.status(403).json({ error: '当前知识库采用严格所有者隔离，不能授权其他用户、单位或角色。' });
         logAction?.(req, '知识文档权限更新', result);
         return res.json({ success: true, permission: result });
     }));
@@ -631,7 +669,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
     router.get('/knowledge/sources', authMiddleware, asyncHandler(async (req, res) => {
         const isLan = req.query.kind === 'lan';
         const kindCondition = isLan
-            ? "AND kind IN ('local_dir', 'wiki_markdown', 'lan_http', 'internal_api', 'database')"
+            ? "AND kind IN ('local_dir', 'wiki_markdown', 'lan_http', 'internal_api', 'database', 'webdav')"
             : (req.query.kind ? "AND kind = ?" : "");
         const params = isSuperAdmin(req.user) ? [] : [req.user.id];
         if (req.query.kind && !isLan) params.push(req.query.kind);
@@ -679,7 +717,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
         })) {
             return res.status(400).json({ error: '数据源配置不得保存明文凭据，请使用受控凭据引用。' });
         }
-        if (!isAdmin(req.user) && ['lan_http', 'database', 'internal_api'].includes(kind)) {
+        if (!isAdmin(req.user) && ['lan_http', 'database', 'internal_api', 'webdav'].includes(kind)) {
             return res.status(403).json({ error: '局域网 HTTP、内部 API 与数据库数据源仅管理员可配置。' });
         }
         const config = normalizeSourceConfig(kind, rawConfig);
@@ -694,10 +732,17 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
     }));
 
     router.post('/knowledge/sources/:id/sync', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await syncKnowledgeSource({ sourceId: req.params.id, user: req.user });
+        const result = await syncKnowledgeSource({ sourceId: req.params.id, user: req.user, approvalId: req.body?.approvalId });
         if (!result) return res.status(404).json({ error: '数据源不存在或无权同步。' });
         logAction?.(req, '知识库数据源同步', { sourceId: result.sourceId, kind: result.kind, scanned: result.scanned, queued: result.queued });
         return res.json({ success: true, result });
+    }));
+
+    router.post('/knowledge/sources/:id/deletion-approvals', authMiddleware, asyncHandler(async (req, res) => {
+        const approval = await approveKnowledgeSourceDeletion({ sourceId: req.params.id, runId: req.body?.runId, user: req.user });
+        if (!approval) return res.status(404).json({ error: '数据源不存在或无权管理。' });
+        logAction?.(req, '知识库数据源删除审批', { sourceId: Number(req.params.id), runId: Number(req.body?.runId), approvalId: approval.id, count: approval.count });
+        return res.status(201).json({ success: true, approval });
     }));
 
     router.post('/knowledge/sources/:id/pause', authMiddleware, asyncHandler(async (req, res) => {

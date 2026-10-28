@@ -51,7 +51,7 @@ function createEmbeddingProfileMismatchScheduler({ query, scheduleKnowledgeDocum
                 upToDate += 1;
                 continue;
             }
-            const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -20 });
+            const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -20, force: true });
             if (result.started) scheduled += 1;
         }
         return { scanned: rows.length, scheduled, upToDate };
@@ -110,7 +110,7 @@ function createAllKnowledgeDocumentsReindexScheduler({ query, scheduleKnowledgeD
         let scheduled = 0;
         let alreadyProcessing = 0;
         for (const row of selected) {
-            const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -5 });
+            const result = await scheduleKnowledgeDocumentIndexing({ docId: row.id, userId: row.user_id, priority: -5, force: true });
             if (result.started) scheduled += 1;
             if (result.reason === 'already_processing') alreadyProcessing += 1;
         }

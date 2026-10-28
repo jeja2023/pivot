@@ -13,13 +13,16 @@ function isLikelyKnowledgeFollowUp(value) {
     return text.length > 0 && (text.length <= 18 || FOLLOW_UP_RE.test(text));
 }
 
-function getPreviousUserQuestion(history = []) {
+function getPreviousUserQuestion(history = [], currentQuestion = '') {
     const messages = Array.isArray(history) ? history : [];
+    let skipCurrent = true;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
         if (message?.role !== 'user') continue;
         const text = normalizeKnowledgeQuestion(message.content, 1200);
         if (!text || text.includes('PIVOT_RAG_CONTEXT_BEGIN') || text.includes('PIVOT_RAG_INSUFFICIENT_BEGIN')) continue;
+        if (skipCurrent && text === normalizeKnowledgeQuestion(currentQuestion, 1200)) { skipCurrent = false; continue; }
+        skipCurrent = false;
         return text;
     }
     return '';
@@ -27,7 +30,7 @@ function getPreviousUserQuestion(history = []) {
 
 function buildKnowledgeRetrievalPlan({ question = '', history = [] } = {}) {
     const currentQuestion = normalizeKnowledgeQuestion(question);
-    const previousQuestion = getPreviousUserQuestion(history);
+    const previousQuestion = getPreviousUserQuestion(history, currentQuestion);
     const followUp = isLikelyKnowledgeFollowUp(currentQuestion) && Boolean(previousQuestion);
     const rewrittenQuery = followUp
         ? normalizeKnowledgeQuestion(`${previousQuestion}；追问：${currentQuestion}`, 4000)

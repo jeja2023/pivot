@@ -27,7 +27,9 @@ async function groundChatRagAnswer({
         user,
         callModel: callModelTextWithBudget
     });
-    const groundedAnswer = ragGrounding.answer;
+    const groundedAnswer = contextResult.ragGrounding.overview && ragGrounding.grounding.accepted && ragGrounding.grounding.status !== 'insufficient_evidence'
+        ? `以下内容基于部分文档的开头片段，不能代表文档或专题的全部内容。\n\n${ragGrounding.answer}`
+        : ragGrounding.answer;
     emitContentSse?.(groundedAnswer);
     writeSse?.(JSON.stringify({
         type: 'rag_grounding',

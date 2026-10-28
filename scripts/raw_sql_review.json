@@ -6,6 +6,48 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/routes/knowledge.js",
+      "count": 9,
+      "rationale": "引用高亮仅在已有引用授权校验后查询当前文档版本及所有者一致的原文件，以参数绑定限定版本和文档；渲染前再次校验文件哈希。",
+      "verification": "tests/knowledge-pdf-highlight.test.js 验证真实 PDF 的唯一文本定位与文件哈希变更拒绝；知识库权限回归覆盖跨用户引用访问。"
+    },
+    {
+      "file": "server/services/knowledge-content.js",
+      "count": 101,
+      "rationale": "严格所有者隔离下仅允许所有者或系统管理员承担审核和内容治理角色；新增参数化查询用于校验被指派用户的管理员身份。",
+      "verification": "tests/knowledge-content.test.js 和 tests/knowledge-wiki.integration.test.js 在隔离 PostgreSQL 中验证历史授权、审核及引用访问边界。"
+    },
+    {
+      "file": "server/repositories/knowledge-source-deletion-approvals.js",
+      "count": 2,
+      "rationale": "删除审批只保存预览哈希、来源、审批人和期限；领取使用原子条件更新，绑定同一管理员、来源、精确快照及有效期，并确保一次性使用。",
+      "verification": "tests/knowledge-sources.test.js 在隔离 PostgreSQL 验证权限、范围变更、扫描不完整和重复领取。"
+    },
+    {
+      "file": "server/services/knowledge-sources.js",
+      "count": 16,
+      "rationale": "审批只读取指定数据源与同步运行的持久化预览，管理员授权后再次完整扫描并对每条记录执行版本条件更新，避免范围变更导致误归档。",
+      "verification": "tests/knowledge-sources.test.js 覆盖删除快照、管理员限制及不完整扫描拒绝；资料生命周期测试覆盖归档传播。"
+    },
+    {
+      "file": "server/repositories/knowledge-ocr-pages.js",
+      "count": 5,
+      "rationale": "OCR 缓存及定位信息读写通过文档 ID 和所有者双重过滤，按源文件 SHA-256 与页码隔离，并随文档删除级联清理。",
+      "verification": "tests/knowledge-pdf-coverage.test.js 验证跨用户和跨文件哈希隔离、分批续处理及 PostgreSQL 持久化。"
+    },
+    {
+      "file": "server/services/rag-index-staging.js",
+      "count": 14,
+      "rationale": "索引暂存切换前使用参数化用户及文档条件锁定未删除目标，避免并发删除或撤权时替换错误数据；切换保留原启用状态并在事务内写入解析覆盖率和索引配置指纹。",
+      "verification": "tests/knowledge-pdf-coverage.test.js 在隔离 PostgreSQL 中验证覆盖率、配置指纹及停用状态；知识库索引测试验证切换与重建。"
+    },
+    {
+      "file": "server/repositories/knowledge.js",
+      "count": 17,
+      "rationale": "聊天文档目录和概览使用参数化范围条件及现有文档访问过滤，目录最多读取 101 条并标记截断，正文仅取启用且已就绪文档的有限片段。",
+      "verification": "tests/chat-knowledge-catalog.test.js 使用隔离 PostgreSQL 验证跨用户、删除、停用、处理中及来源片段过滤。"
+    },
+    {
       "file": "server/repositories/mindmap-previews.js",
       "count": 2,
       "rationale": "缩略图只按服务层已复核权限的文档读取，以当前版本条件写入且禁止旧版本覆盖较新缓存；绑定全部参数，缓存内容有 64KiB 数据库约束并随文档级联清理。",

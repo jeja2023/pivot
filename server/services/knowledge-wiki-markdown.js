@@ -92,17 +92,22 @@ async function upsertExternalWikiMarkdownPage({ sourceId, documentId = null, can
     });
 }
 
-async function archiveMissingExternalWikiPages({ sourceId, seenUris = [] } = {}, deps = {}) {
-    const safeSourceId = Number.parseInt(sourceId, 10);
-    if (!Number.isSafeInteger(safeSourceId) || safeSourceId <= 0) return 0;
-    const seen = [...new Set((Array.isArray(seenUris) ? seenUris : []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 100000);
-    const now = getBeijingTimestamp();
-    const sql = `
-        UPDATE knowledge_wiki_external_pages SET status = 'archived', updated_at = ?
-        WHERE source_id = ? AND status = 'active'
-          ${seen.length ? `AND canonical_uri NOT IN (${seen.map(() => '?').join(',')})` : ''}
-    `;
-    return Number(await (deps.execute || execute)(sql, [now, safeSourceId, ...seen]) || 0);
+async function listActiveExternalWikiPages(sourceId, deps = {}) {
+    const id = Number.parseInt(sourceId, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) return [];
+    return await (deps.query || query)(`SELECT id, canonical_uri, title, content_hash, updated_at::text AS stable_updated_at
+        FROM knowledge_wiki_external_pages WHERE source_id = ? AND status = 'active' ORDER BY id`, [id]);
+}
+
+async function archiveSelectedExternalWikiPages(sourceId, pages = [], deps = {}) {
+    let archived = 0;
+    const executeFn = deps.execute || execute;
+    for (const page of pages) {
+        archived += Number(await executeFn(`UPDATE knowledge_wiki_external_pages SET status = 'archived', updated_at = ?
+            WHERE id = ? AND source_id = ? AND status = 'active' AND content_hash = ? AND updated_at IS NOT DISTINCT FROM ?`,
+        [getBeijingTimestamp(), page.id, sourceId, page.content_hash, page.stable_updated_at]) || 0);
+    }
+    return archived;
 }
 
 async function listExternalWikiPages({ sourceId, user, limit = 100 } = {}, deps = {}) {
@@ -117,7 +122,8 @@ async function listExternalWikiPages({ sourceId, user, limit = 100 } = {}, deps 
 }
 
 module.exports = {
-    archiveMissingExternalWikiPages,
+    archiveSelectedExternalWikiPages,
+    listActiveExternalWikiPages,
     listExternalWikiPages,
     parseMarkdownFrontmatter,
     parseMarkdownLinks,

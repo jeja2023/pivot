@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { db } = require('../server/db');
+const { getProductDocumentsForUser } = require('../server/services/knowledge-product-access');
 const {
     archiveDocument,
     createArticleDraftVersion,
@@ -15,6 +16,7 @@ const {
     getProductDocumentForUser,
     listKnowledgeComments,
     publishDocumentVersion,
+    publishLegacyDocumentProjection,
     refreshKnowledgeFreshness,
     recordCitationEvent,
     reviewDocumentVersion,
@@ -54,9 +56,10 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
         assert.equal(db.prepare('SELECT is_enabled FROM knowledge_docs WHERE id = ?').get(article.document.legacy_doc_id).is_enabled, 0);
 
         assert.equal(await publishDocumentVersion({ versionId: article.version.id, actor: owner }), null, '首版草稿不应跳过审核');
-        const firstSubmitted = await submitDocumentVersionForReview({ versionId: article.version.id, actor: owner, reviewerUserId: reviewer.id });
+        assert.equal(await submitDocumentVersionForReview({ versionId: article.version.id, actor: owner, reviewerUserId: reviewer.id }), null);
+        const firstSubmitted = await submitDocumentVersionForReview({ versionId: article.version.id, actor: owner, reviewerUserId: owner.id });
         assert.equal(firstSubmitted.status, 'review');
-        const firstReviewed = await reviewDocumentVersion({ versionId: article.version.id, actor: reviewer, approved: true, note: '首版准确' });
+        const firstReviewed = await reviewDocumentVersion({ versionId: article.version.id, actor: owner, approved: true, note: '首版准确' });
         assert.equal(firstReviewed.approved, true);
         const firstPublication = await publishDocumentVersion({ versionId: article.version.id, actor: owner });
         assert.equal(firstPublication.status, 'published');
@@ -72,9 +75,9 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
         assert.equal(db.prepare('SELECT status FROM knowledge_docs WHERE id = ?').get(draft.version.legacy_doc_id).status, 'draft');
         assert.equal(await publishDocumentVersion({ versionId: draft.version.id, actor: owner }), null, '已提交审核前的草稿不应绕过审核发布');
 
-        const submitted = await submitDocumentVersionForReview({ versionId: draft.version.id, actor: owner, reviewerUserId: reviewer.id });
+        const submitted = await submitDocumentVersionForReview({ versionId: draft.version.id, actor: owner, reviewerUserId: owner.id });
         assert.equal(submitted.status, 'review');
-        const reviewed = await reviewDocumentVersion({ versionId: draft.version.id, actor: reviewer, approved: true, note: '内容准确' });
+        const reviewed = await reviewDocumentVersion({ versionId: draft.version.id, actor: owner, approved: true, note: '内容准确' });
         assert.equal(reviewed.approved, true);
         const published = await publishDocumentVersion({ versionId: draft.version.id, actor: owner });
         assert.equal(published.status, 'published');
@@ -89,8 +92,11 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
             principalId: reader.id,
             permission: 'viewer'
         });
-        assert.equal(permission.permission, 'viewer');
-        assert.ok(await getProductDocumentForUser(article.document.id, reader), '文档级 viewer 授权后可读取');
+        assert.equal(permission, null);
+        db.prepare("INSERT INTO knowledge_permissions (resource_type, resource_id, principal_type, principal_id, permission, created_by, created_at, updated_at) VALUES ('document', ?, 'user', ?, 'viewer', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))").run(article.document.id, String(reader.id), owner.id);
+        assert.equal(await getProductDocumentForUser(article.document.id, reader), null, '历史授权不应突破严格隔离');
+        assert.equal((await getProductDocumentsForUser([article.document.id], reader)).size, 0);
+        assert.equal((await getProductDocumentsForUser([article.document.id], owner)).size, 1);
         const citation = await getCitationForChunkForUser(draft.chunk.id, owner);
         assert.equal(citation.document.id, article.document.id);
         assert.match(citation.quotedText, /风险评估/);
@@ -101,14 +107,14 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
             blockId: draft.block.id,
             user: reader
         });
-        assert.match(block.content, /风险评估/);
-        assert.ok(await getCitationForChunkForUser(draft.chunk.id, reader), '文档级 viewer 授权后也可预览引用');
-        assert.equal((await recordCitationEvent({ citationKey: citation.citationKey, user: reader, eventType: 'open' })).eventType, 'open');
-        assert.equal((await recordCitationEvent({ citationKey: citation.citationKey, user: reader, eventType: 'helpful' })).eventType, 'helpful');
-        assert.deepEqual(await getKnowledgeCitationSummary(reader.id), {
+        assert.equal(block, null);
+        assert.equal(await getCitationForChunkForUser(draft.chunk.id, reader), null);
+        assert.equal((await recordCitationEvent({ citationKey: citation.citationKey, user: owner, eventType: 'open' })).eventType, 'open');
+        assert.equal((await recordCitationEvent({ citationKey: citation.citationKey, user: owner, eventType: 'helpful' })).eventType, 'helpful');
+        assert.deepEqual(await getKnowledgeCitationSummary(owner.id), {
             opens: 1, helpful: 1, unhelpful: 0, incorrect: 0, feedbackTotal: 1, helpfulRate: 1
         });
-        const comment = await createKnowledgeComment({ documentId: article.document.id, versionId: draft.version.id, user: reader, kind: 'correction', content: '建议补充风险评估模板。' });
+        const comment = await createKnowledgeComment({ documentId: article.document.id, versionId: draft.version.id, user: owner, kind: 'correction', content: '建议补充风险评估模板。' });
         assert.equal(comment.status, 'open');
         assert.equal((await listKnowledgeComments({ documentId: article.document.id, user: owner })).length, 1);
         assert.deepEqual(await resolveKnowledgeComment({ commentId: comment.id, actor: owner }), { id: Number(comment.id), status: 'resolved' });
@@ -119,7 +125,7 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
             documentId: article.document.id,
             actor: owner,
             contentOwnerUserId: owner.id,
-            verifierUserId: reviewer.id,
+            verifierUserId: owner.id,
             verifiedStatus: 'verified',
             freshnessPolicy: '30d'
         });
@@ -129,7 +135,8 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
         assert.deepEqual(await refreshKnowledgeFreshness(), { scanned: 1, expired: 1 });
         assert.equal(db.prepare('SELECT lifecycle_status FROM knowledge_documents WHERE id = ?').get(article.document.id).lifecycle_status, 'expired');
         assert.equal(db.prepare('SELECT is_enabled FROM knowledge_docs WHERE id = ?').get(draft.version.legacy_doc_id).is_enabled, 0);
-        const verification = await verifyKnowledgeDocument({ documentId: article.document.id, actor: reviewer });
+        assert.equal(await verifyKnowledgeDocument({ documentId: article.document.id, actor: reviewer }), null);
+        const verification = await verifyKnowledgeDocument({ documentId: article.document.id, actor: owner });
         assert.equal(verification.verifiedStatus, 'verified');
         assert.equal(db.prepare('SELECT lifecycle_status FROM knowledge_documents WHERE id = ?').get(article.document.id).lifecycle_status, 'published');
         assert.equal(db.prepare('SELECT is_enabled FROM knowledge_docs WHERE id = ?').get(draft.version.legacy_doc_id).is_enabled, 1);
@@ -152,4 +159,18 @@ test('知识文章遵循草稿、审核、发布、原子切换、引用授权�
         [ownerId, reviewerId, readerId].forEach(id => db.prepare('DELETE FROM knowledge_sources WHERE user_id = ?').run(id));
         [ownerId, reviewerId, readerId].forEach(id => db.prepare('DELETE FROM users WHERE id = ?').run(id));
     }
+});
+
+test('PDF 索引投影将分块字符范围映射为真实页码', async () => {
+    const name = `pdf_locator_${Date.now()}`;
+    const userId = Number(insertUser(name));
+    const user = { id: userId, role: 'user' };
+    const docId = Number(db.prepare("INSERT INTO knowledge_docs (user_id, name, status, is_enabled, chunk_count, source_hash, extraction_coverage_json, created_at, updated_at) VALUES (?, '资料.pdf', 'ready', 1, 1, 'fixture', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))").run(userId, JSON.stringify({ pageSpans: [{ page: 1, start: 0, end: 3 }, { page: 2, start: 5, end: 8 }] })).lastInsertRowid);
+    const chunkId = Number(db.prepare("INSERT INTO knowledge_chunks (doc_id, content, chunk_index, char_start, char_end) VALUES (?, '甲乙\n\n丁戊', 0, 1, 7)").run(docId).lastInsertRowid);
+    await publishLegacyDocumentProjection({ legacyDocId: docId, userId });
+    const citation = await getCitationForChunkForUser(chunkId, user);
+    assert.equal(citation.locator.page, 1);
+    assert.equal(citation.locator.pageEnd, 2);
+    assert.deepEqual(citation.locator.pages, [1, 2]);
+    assert.equal(citation.document.isCurrentVersion, true);
 });

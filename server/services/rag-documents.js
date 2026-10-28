@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('./document-processing/text-extraction');
+const { extractDocumentTextWithOcrFallback } = require('./document-processing/text-extraction');
 const { getKnowledgeLimits } = require('./resource-limits');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { orderNocase } = require('../db/dialect');
@@ -15,6 +15,8 @@ const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeInde
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
 const knowledgeRepository = require('../repositories/knowledge');
+const knowledgeOcrPages = require('../repositories/knowledge-ocr-pages');
+const { buildPdfPageSpans } = require('./knowledge-page-locator');
 const { listDuplicateKnowledgeDocuments, buildKnowledgeQualitySignals } = require('./rag-document-quality');
 const {
     buildDocumentAccessFilter,
@@ -351,9 +353,19 @@ async function persistUploadedKnowledgeFile(file, userId, docId) {
     };
 }
 
-async function readKnowledgeDocumentFromPath(filePath, originalName = '') {
-    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10, maxChars: getKnowledgeLimits().extractMaxChars });
-    return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
+async function readKnowledgeDocumentFromPath(filePath, originalName = '', { onCoverage = null, cachedOcrPages = null, onOcrPage = null, maxIndexChars = null, refreshOcrPages = null } = {}) {
+    let pageCoverage = null;
+    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10, cachedOcrPages, refreshOcrPages, onOcrPage, onCoverage: result => { pageCoverage = result; } });
+    const maxChars = Math.min(Math.max(Number(maxIndexChars) || getKnowledgeLimits().extractMaxChars, getKnowledgeLimits().extractMaxChars), 10000000);
+    const truncated = text.length > maxChars;
+    const pageSpans = buildPdfPageSpans(pageCoverage?.pages, maxChars);
+    onCoverage?.({ sourcePageCount: pageCoverage?.sourcePageCount ?? null,
+        processedPages: pageCoverage?.pages?.filter(page => page.source === 'native' || page.source === 'ocr').length ?? null,
+        omittedPages: pageCoverage?.omittedPages || [],
+        failedPages: pageCoverage?.pages?.filter(page => page.source === 'unavailable').map(page => page.pageNumber) || [],
+        originalChars: text.length, indexedChars: Math.min(text.length, maxChars), truncated, pageSpans,
+        complete: !truncated && (pageCoverage?.coverageComplete ?? true) });
+    return text.slice(0, maxChars);
 }
 
 async function createKnowledgeDocumentFromUpload({ userId, file, collectionId = null, tags = [] }) {
@@ -462,7 +474,7 @@ async function markKnowledgeDocumentRebuildError({ docId, userId, error }) {
     `, [`重建失败，继续使用旧索引：${String(error?.message || error || '知识库索引失败').slice(0, 900)}`, now, now, docId, userId]);
     return Number(result || 0) > 0;
 }
-async function processKnowledgeDocument({ docId, userId, user = null }) {
+async function processKnowledgeDocument({ docId, userId, user = null, force = false, resumeCoverage = false, refreshOcrLocations = false }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     const doc = normalizedDocId ? await getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
     if (!doc) {
@@ -478,14 +490,29 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         throw error;
     }
 
-    let sourceHash = String(doc.source_hash || '').trim();
+    const ragConfig = getRagConfig({}, userId);
+    const embeddingConfig = getSystemEmbeddingConfig();
+    let previousCoverage = doc.extraction_coverage_json || {};
+    if (typeof previousCoverage === 'string') { try { previousCoverage = JSON.parse(previousCoverage); } catch (_) { previousCoverage = {}; } }
+    const defaultMaxChars = getKnowledgeLimits().extractMaxChars;
+    const maxIndexChars = Math.min(10000000, Math.max(defaultMaxChars, Number(previousCoverage.indexedChars || 0) + (resumeCoverage && previousCoverage.truncated ? defaultMaxChars : 0)));
+    const indexFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+        version: 3, parser: 'pdf-page-coverage-v2', chunker: 'structured-prose-v1', ocrPages: 10,
+        extractMaxChars: maxIndexChars,
+        chunkSize: ragConfig.chunkSize, chunkOverlap: ragConfig.chunkOverlap,
+        embeddingProfile: getEmbeddingProfile(embeddingConfig), embeddingUrl: String(embeddingConfig?.http?.url || '').trim()
+    })).digest('hex');
+    let sourceHash = '';
     try {
         sourceHash = await hashFileSha256(sourcePath);
-        if (sourceHash === String(doc.source_hash || '').trim() && doc.status === 'ready' && Number(doc.chunk_count || 0) > 0) {
+        if (!force && indexFingerprint === doc.index_fingerprint && sourceHash === String(doc.source_hash || '').trim() && doc.status === 'ready' && Number(doc.chunk_count || 0) > 0) {
             return { docId: normalizedDocId, chunkCount: Number(doc.chunk_count), skipped: true };
         }
     } catch (error) {
         logger.warn({ err: error.message, docId: normalizedDocId }, '知识库重建时指纹计算失败');
+        const failure = new Error('无法校验原文件指纹，请检查文件后重试。');
+        failure.cause = error;
+        throw failure;
     }
 
     const stage = await createKnowledgeIndexStage({ doc, userId });
@@ -493,7 +520,19 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
     if (!stageId) throw new Error('无法创建知识库索引暂存记录');
     const keepOldIndex = doc.status === 'ready' && Number(doc.chunk_count || 0) > 0;
     try {
-        const text = await readKnowledgeDocumentFromPath(sourcePath, doc.name);
+        let extractionCoverage = null;
+        const cachedOcrPages = await knowledgeOcrPages.loadPages(normalizedDocId, userId, sourceHash);
+        const refreshOcrPages = refreshOcrLocations
+            ? new Set(await knowledgeOcrPages.listPagesWithoutLocations(normalizedDocId, userId, sourceHash))
+            : null;
+        const text = await readKnowledgeDocumentFromPath(sourcePath, doc.name, {
+            cachedOcrPages,
+            refreshOcrPages,
+            maxIndexChars,
+            onOcrPage: (pageNo, content, location) => knowledgeOcrPages.savePage(normalizedDocId, userId, sourceHash, pageNo, content, location),
+            onCoverage: result => { extractionCoverage = result; }
+        });
+        if (!text.trim()) throw new Error('文档没有可索引的正文，请检查解析或 OCR 服务。');
         const chunkCount = await indexDocumentChunks(stageId, text, {
             userId,
             user,
@@ -513,7 +552,10 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
         `, [stageId]);
         const missingEmbeddings = Number(coverage?.missing || 0);
         const indexStatus = missingEmbeddings > 0 ? 'lexical_ready' : 'ready';
-        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus });
+        const coverageWarning = extractionCoverage?.complete === false
+            ? `正文未完整索引：已处理 ${extractionCoverage.processedPages ?? '-'} / ${extractionCoverage.sourcePageCount ?? '-'} 页，未处理页 ${extractionCoverage.omittedPages.join(',') || '无'}，失败页 ${extractionCoverage.failedPages.join(',') || '无'}${extractionCoverage.truncated ? '，正文超过字符上限' : ''}` : '';
+        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus, coverageWarning, extractionCoverage, indexFingerprint });
+        await knowledgeOcrPages.clearOtherVersions(normalizedDocId, userId, sourceHash).catch(error => logger.warn({ err: error.message, docId: normalizedDocId }, '清理旧版 OCR 页面失败'));
         await refreshGraphEntityEvidenceForDocument(normalizedDocId).catch(error => {
             logger.warn({ err: error.message, docId: normalizedDocId }, '知识图谱实体证据计数刷新失败');
         });
@@ -536,6 +578,8 @@ async function processKnowledgeDocument({ docId, userId, user = null }) {
             chunkCount,
             indexStatus,
             missingEmbeddings,
+            extractionCoverage,
+            indexFingerprint,
             degraded: indexStatus === 'lexical_ready',
             projection
         };
@@ -613,7 +657,7 @@ async function batchReindexKnowledgeDocuments({ userId, docIds, user = null }) {
             items.push({ docId: id, status: 'skipped', reason: 'source_missing' });
             continue;
         }
-        const result = await scheduleKnowledgeDocumentIndexing({ docId: id, userId, user });
+        const result = await scheduleKnowledgeDocumentIndexing({ docId: id, userId, user, force: true });
         if (result.started) {
             scheduled += 1;
             items.push({ docId: id, status: 'queued' });
@@ -716,7 +760,7 @@ function getKnowledgeIngestionWorker() {
         getConcurrency: getMaxConcurrentIndexes,
         logger,
         processJob: async job => {
-            const result = await processKnowledgeDocument({ docId: job.docId, userId: job.userId });
+            const result = await processKnowledgeDocument({ docId: job.docId, userId: job.userId, force: job.payload?.force === true, resumeCoverage: job.payload?.resumeCoverage === true, refreshOcrLocations: job.payload?.refreshOcrLocations === true });
             return { ...result, stage: result?.indexStatus === 'lexical_ready' ? 'lexical_indexed' : 'published' };
         }
     });
@@ -727,7 +771,7 @@ async function startKnowledgeIngestionWorker() {
     return await getKnowledgeIngestionWorker().start();
 }
 
-async function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null, priority = 0 }) {
+async function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null, priority = 0, force = false, resumeCoverage = false, refreshOcrLocations = false }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     if (!normalizedDocId) return { started: false, reason: 'invalid_doc_id' };
     const result = await knowledgeIngestionQueue.enqueue({
@@ -736,7 +780,8 @@ async function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null, p
         priority,
         payload: {
             // 不持久化完整用户对象；任务执行时按 user_id 读取当前 Embedding 配置。
-            requestedBy: normalizeKnowledgeUser(user || userId).id || Number(userId) || null
+            requestedBy: normalizeKnowledgeUser(user || userId).id || Number(userId) || null,
+            force: force === true, resumeCoverage: resumeCoverage === true, refreshOcrLocations: refreshOcrLocations === true
         }
     });
     if (result.started) {
@@ -776,6 +821,7 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         SELECT
             d.status,
             COUNT(*) AS count,
+            SUM(CASE WHEN d.extraction_coverage_json->>'complete' = 'false' THEN 1 ELSE 0 END) AS partial_count,
             COALESCE(SUM(d.chunk_count), 0) AS chunks,
             COALESCE(SUM(d.source_size), 0) AS source_size
         ${fromSql}
@@ -820,6 +866,7 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
     const summary = {
         total: 0,
         ready: 0,
+        partial: 0,
         readyEnabled,
         processing: 0,
         error: 0,
@@ -834,7 +881,11 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
     for (const row of rows) {
         const count = Number(row.count || 0);
         summary.total += count;
-        if (row.status === 'ready' || row.status === 'lexical_ready') summary.ready += count;
+        if (row.status === 'ready' || row.status === 'lexical_ready') {
+            const partial = Number(row.partial_count || 0);
+            summary.ready += count - partial;
+            summary.partial += partial;
+        }
         if (row.status === 'processing') summary.processing = count;
         if (row.status === 'error') summary.error = count;
         summary.chunks += Number(row.chunks || 0);

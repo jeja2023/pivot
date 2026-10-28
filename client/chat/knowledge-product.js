@@ -202,6 +202,7 @@
             lan_http: '内网 HTTP',
             database: '只读数据库',
             internal_api: '内部 API',
+            webdav: 'WebDAV 目录',
             upload: '本地上传',
             manual: '知识文章'
         })[kind] || kind || '-';
@@ -229,6 +230,7 @@
                 <div class="knowledge-product-row-actions">
                     <button type="button" class="btn-primary" data-knowledge-sync-source="${item.id}" ${item.status !== 'active' ? 'disabled' : ''}>立即同步</button>
                     <button type="button" class="btn-secondary" data-knowledge-source-runs="${item.id}">记录</button>
+                    ${isSuperAdminUser() ? `<button type="button" class="btn-secondary" data-knowledge-source-review-deletion="${item.id}">审核删除</button>` : ''}
                     <button type="button" class="btn-secondary" data-knowledge-toggle-source="${item.id}" data-source-status="${escapeAttr(item.status)}">${item.status === 'active' ? '暂停' : '恢复'}</button>
                 </div>
             </article>`).join(''));
@@ -448,7 +450,25 @@
         try {
             const data = await fetchKnowledge(`/knowledge/citations/${encodeURIComponent(key)}`);
             const citation = data.citation || {};
-            await window.Pivot.legacy.showAlert?.('知识来源', `${citation.document?.title || '来源'}\n${citation.locator?.headingPath || ''}\n\n${citation.quotedText || ''}`);
+            const page = Number(citation.locator?.page || 0);
+            const pageText = page > 0 ? `第 ${page}${Number(citation.locator?.pageEnd) > page ? `–${Number(citation.locator.pageEnd)}` : ''} 页` : '未记录页码';
+            const copy = `${citation.document?.title || '来源'}\n${citation.locator?.headingPath || ''} ${pageText}\n\n${citation.quotedText || ''}`;
+            const sourceUrl = String(citation.sourceUrl || '');
+            const versionId = Number(citation.document?.versionId || 0);
+            if (/^\/api\/knowledge\/documents\/\d+\/source$/.test(sourceUrl) && page > 0 && Number.isSafeInteger(versionId) && versionId > 0) {
+                const open = await window.Pivot.legacy.showConfirm?.('知识来源', `${copy}\n\n确定后查看原文高亮预览；无法定位时可打开原文页码。`);
+                if (open) {
+                    const response = await apiFetch(`${API_BASE}/knowledge/citations/${encodeURIComponent(key)}/highlight`, { headers: authHeaders() });
+                    if (response.ok) {
+                        const url = URL.createObjectURL(await response.blob());
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+                    } else {
+                        showToast('无法精确高亮，已打开原文页码。', 'info');
+                        window.open(`${sourceUrl}?inline=1&versionId=${versionId}#page=${page}`, '_blank', 'noopener,noreferrer');
+                    }
+                }
+            } else await window.Pivot.legacy.showAlert?.('知识来源', copy);
         } catch (error) {
             showToast(error.message || '引用预览失败', 'error');
         }
@@ -554,6 +574,10 @@
     }
 
     const SOURCE_CONFIG_TEMPLATES = {
+        webdav: {
+            template: JSON.stringify({ url: 'https://example.invalid/documents/', credentialRef: 'WEBDAV_TOKEN', maxFiles: 100, recursive: false, maxDepth: 3, syncDeletes: false }, null, 2),
+            tip: '可启用受限子目录遍历和删除同步保护；不继承源端 ACL。凭据引用须为 Bearer 令牌。'
+        },
         local_dir: {
             template: JSON.stringify({ rootPath: "D:/knowledge", recursive: true }, null, 2),
             tip: '目录需在环境变量白名单 KNOWLEDGE_LOCAL_SOURCE_ROOTS 内。'
@@ -624,7 +648,8 @@
         try {
             const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(id)}/sync`, { method: 'POST' });
             const result = data.result || {};
-            showToast(`同步完成：新增 ${Number(result.created || 0)}，更新 ${Number(result.changed || 0)}，入队 ${Number(result.queued || 0)}。`);
+            const partial = result.scanComplete === false || result.deletionBlocked || result.failures?.length;
+            showToast(`${partial ? '同步部分完成，请检查扫描范围、失败项或删除保护' : '同步完成'}：新增 ${Number(result.created || 0)}，更新 ${Number(result.changed || 0)}，入队 ${Number(result.queued || 0)}。`, partial ? 'info' : 'success');
             await Promise.all([loadSources(), loadJobs()]);
         } catch (error) {
             showToast(error.message || '同步失败', 'error');
@@ -651,11 +676,31 @@
                 await window.Pivot.legacy.showAlert?.('数据源同步记录', '暂无同步记录。可点击“立即同步”发起首次抓取。');
                 return;
             }
-            const copy = runs.map(item => `${item.status === 'completed' ? '成功' : item.status === 'failed' ? '失败' : item.status} · ${item.triggerType === 'manual' ? '手动触发' : item.triggerType} · 新增 ${Number(item.summary?.created || 0)} / 更新 ${Number(item.summary?.changed || 0)} / 入队 ${Number(item.summary?.queued || 0)} · ${item.completedAt || item.startedAt || ''}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n\n');
+            const copy = runs.map(item => `${item.status === 'completed' ? '成功' : item.status === 'failed' ? '失败' : item.status === 'partial' ? '部分完成' : item.status} · ${item.triggerType === 'manual' ? '手动触发' : item.triggerType} · 新增 ${Number(item.summary?.created || 0)} / 更新 ${Number(item.summary?.changed || 0)} / 入队 ${Number(item.summary?.queued || 0)}${item.summary?.deletionBlocked ? ' · 删除同步已受保护' : ''}${item.summary?.failures?.length ? ` · 失败 ${item.summary.failures.length} 项` : ''} · ${item.completedAt || item.startedAt || ''}${item.errorMessage ? ` · ${item.errorMessage}` : ''}`).join('\n\n');
             await window.Pivot.legacy.showAlert?.('数据源同步记录', copy);
         } catch (error) {
             showToast(error.message || '加载同步记录失败', 'error');
         }
+    }
+
+    async function reviewSourceDeletion(sourceId) {
+        const data = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(sourceId)}/runs?limit=1`);
+        const run = data.data?.[0];
+        const preview = run?.summary?.deletionPreview;
+        if (!preview || !run.summary?.scanComplete || !run.summary?.deletionBlocked) return showToast('最近一次同步没有可审批的完整删除预览。', 'info');
+        if (preview.truncated) return showToast('删除预览超过 50 项，请先缩小范围后重新同步。', 'error');
+        const names = (preview.documents || []).map(item => `• ${item.type === 'wiki' ? 'Wiki 页面' : '文档'}：${item.title}`).join('\n');
+        const confirmed = await window.Pivot.legacy.showConfirm?.('审批数据源删除', `完整扫描发现 ${preview.count} 份资料在源端缺失：\n${names}\n\n确认审批并立即重新扫描？仅在范围完全一致时归档，审批 30 分钟内有效且只能使用一次。`);
+        if (!confirmed) return;
+        const dataApproval = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(sourceId)}/deletion-approvals`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: run.id })
+        });
+        const dataSync = await fetchKnowledge(`/knowledge/sources/${encodeURIComponent(sourceId)}/sync`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approvalId: dataApproval.approval.id })
+        });
+        if (dataSync.result?.approvalRejected || dataSync.result?.deletionBlocked) showToast('删除范围已变化或扫描不完整，未执行审批删除；请重新核对。', 'error');
+        else showToast(`已重新同步，归档 ${Number(dataSync.result?.archived || 0)} 份资料。`, 'success');
+        await Promise.all([loadSources(), loadJobs()]);
     }
 
     async function showVersionDiff(button) {
@@ -666,8 +711,8 @@
     }
 
     async function configureGovernance(documentId) {
-        const contentOwnerUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '责任人用户 ID（留空保持当前）', placeholder: '例如：12', required: false });
-        const verifierUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '验证人用户 ID（留空保持当前）', placeholder: '例如：15', required: false });
+        const contentOwnerUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '责任人用户 ID（留空保持当前）', message: '仅支持文档所有者或系统管理员。', placeholder: '例如：12', required: false });
+        const verifierUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '验证人用户 ID（留空保持当前）', message: '仅支持文档所有者或系统管理员。', placeholder: '例如：15', required: false });
         const freshnessPolicy = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '复核策略', placeholder: 'manual / 30d / 90d / 180d / 365d', value: '90d' });
         if (!freshnessPolicy) return;
         const verifiedStatus = await window.Pivot.legacy.showInputPrompt?.({ title: '文档治理', label: '验证状态', placeholder: 'verified / unverified / expired', value: 'unverified' });
@@ -712,7 +757,7 @@
         const action = button.dataset.knowledgeVersionAction;
         if (!versionId || !action) return;
         if (action === 'submit') {
-            const reviewerUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '提交审核', label: '审核人用户 ID', placeholder: '输入审核人账号 ID' });
+            const reviewerUserId = await window.Pivot.legacy.showInputPrompt?.({ title: '提交审核', label: '审核人用户 ID', message: '严格所有者隔离下，仅可选择文档所有者或系统管理员。', placeholder: '输入所有者或系统管理员账号 ID' });
             if (!reviewerUserId) return;
             await fetchKnowledge(`/knowledge/versions/${encodeURIComponent(versionId)}/submit-review`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewerUserId: Number(reviewerUserId) })
@@ -806,6 +851,8 @@
         if (toggle) return void toggleSource(toggle.dataset.knowledgeToggleSource, toggle.dataset.sourceStatus).catch(error => showToast(error.message || '更新来源失败', 'error'));
         const sourceRuns = event.target.closest('[data-knowledge-source-runs]');
         if (sourceRuns) return void showSourceRuns(sourceRuns.dataset.knowledgeSourceRuns).catch(error => showToast(error.message || '加载同步记录失败', 'error'));
+        const sourceDeletionReview = event.target.closest('[data-knowledge-source-review-deletion]');
+        if (sourceDeletionReview) return void reviewSourceDeletion(sourceDeletionReview.dataset.knowledgeSourceReviewDeletion).catch(error => showToast(error.message || '审核数据源删除失败', 'error'));
         const governance = event.target.closest('[data-knowledge-governance]');
         if (governance) return void configureGovernance(governance.dataset.knowledgeGovernance).catch(error => showToast(error.message || '更新治理信息失败', 'error'));
         const verify = event.target.closest('[data-knowledge-verify]');

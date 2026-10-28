@@ -30,7 +30,6 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
     const ownerId = insertUser(`wiki_owner_${suffix}`);
     const reviewerId = insertUser(`wiki_reviewer_${suffix}`);
     const owner = { id: ownerId, role: 'user', unit: 'Wiki 集成测试部' };
-    const reviewer = { id: reviewerId, role: 'user', unit: 'Wiki 集成测试部' };
     const collectionId = Number(db.prepare(`
         INSERT INTO knowledge_collections (user_id, name, description, scope, allowed_units, allowed_user_ids, created_at, updated_at)
         VALUES (?, ?, '', 'personal', '', '', datetime('now', '+8 hours'), datetime('now', '+8 hours'))
@@ -42,8 +41,8 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
             user: owner, collectionId, title: '差旅报销规则',
             content: '差旅报销需要保留发票，并在出差结束后五个工作日内提交审批。', summary: '差旅制度'
         });
-        await submitDocumentVersionForReview({ versionId: article.version.id, actor: owner, reviewerUserId: reviewer.id });
-        await reviewDocumentVersion({ versionId: article.version.id, actor: reviewer, approved: true, note: '可发布' });
+        await submitDocumentVersionForReview({ versionId: article.version.id, actor: owner, reviewerUserId: owner.id });
+        await reviewDocumentVersion({ versionId: article.version.id, actor: owner, approved: true, note: '可发布' });
         await publishDocumentVersion({ versionId: article.version.id, actor: owner });
 
         space = await createWikiSpace({ user: owner, collectionId, name: `差旅 Wiki ${suffix}` });
