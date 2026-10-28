@@ -54,7 +54,7 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
             } catch (_) {
                 await page.evaluate(() => {
                     const el = document.querySelector('#mindmap-canvas .smm-node');
-                    if (el) el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+                    if (el) el.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
                 }).catch(() => {});
                 try {
                     await editable.waitFor({ state: 'visible', timeout: 2000 });
