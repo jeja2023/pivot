@@ -259,7 +259,13 @@ test('版本对比保留重复条号的变化，引用图返回实际关系类�
 test('AI 依据上下文保留后半段命中规则，并限制在可见当前版本', async () => {
     const documentId = createDocument('问答依据法规');
     addVersion(documentId, '旧版', [{ content: '第一条 旧版期限：十日。' }]);
-    addVersion(documentId, '新版', [{ content: `第一条 ${'前置说明。'.repeat(100)}关键期限审查：应在三十日内完成。` }]);
+    const newVersion = addVersion(documentId, '新版', [{ content: `第一条 ${'前置说明。'.repeat(100)}关键期限审查：应在三十日内完成。` }]);
+    await updateRegulationVersionGovernance({
+        documentId,
+        versionId: newVersion.versionId,
+        userId: 1,
+        patch: { effectStatus: 'effective', effectiveFrom: '2024-01-01', reviewStatus: 'approved' }
+    });
     const built = await buildRegulationAiContext({ query: '关键期限审查', documentId, userId: 1, expandLinks: false });
     assert.ok(built.context.includes('关键期限审查'));
     assert.ok(built.context.includes('三十日'));
