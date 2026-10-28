@@ -54,7 +54,7 @@ function agentStepRowsMarkup(structured) {
                                 const display = agentResultIsScalar(value)
                                     ? agentResultDisplayValue(column, value)
                                     : agentReadableCell(value);
-                                return `<td>${agentEscape(display)}</td>`;
+                                return `<td title="${agentEscapeAttr(display)}">${agentEscape(display)}</td>`;
                             }).join('')}</tr>
                         `).join('')}
                     </tbody>
@@ -78,10 +78,27 @@ const AGENT_RESULT_ENVELOPE_FIELDS = new Set([
 
 function agentResultObjectSummary(value, maxFields = 3) {
     const parsed = agentParsePayload(value);
-    if (agentResultIsScalar(parsed)) return agentShortText(agentResultScalarText(parsed), 120);
+    if (agentResultIsScalar(parsed)) {
+        if (typeof parsed === 'string' && /^[a-f0-9]{64}$/i.test(parsed)) {
+            return `${parsed.slice(0, 10)}…`;
+        }
+        return agentShortText(agentResultScalarText(parsed), 120);
+    }
     if (Array.isArray(parsed)) {
+        if (!parsed.length) return '-';
+        if (parsed.every(item => typeof item === 'string' || typeof item === 'number')) {
+            const preview = parsed.slice(0, 4).join('、');
+            return parsed.length > 4 ? `${preview} 等 ${parsed.length} 项` : preview;
+        }
         const preview = parsed.slice(0, maxFields).map(item => agentResultObjectSummary(item, 2)).filter(Boolean);
         return `${preview.join('、')}${parsed.length > preview.length ? ` 等 ${parsed.length} 项` : ''}` || `${parsed.length} 项`;
+    }
+    if (parsed && typeof parsed === 'object') {
+        const toolName = parsed.toolName || (parsed.name && parsed.definitionDigest ? parsed.name : '');
+        if (toolName) {
+            const digest = parsed.definitionDigest ? `#${String(parsed.definitionDigest).slice(0, 8)}` : '';
+            return digest ? `${toolName} (${digest})` : toolName;
+        }
     }
     const preferred = agentLlmOutputText(parsed);
     if (preferred) {
@@ -93,7 +110,13 @@ function agentResultObjectSummary(value, maxFields = 3) {
     const parts = Object.entries(parsed || {})
         .filter(([, item]) => agentResultIsScalar(item) && item !== '' && item !== null && item !== undefined)
         .slice(0, maxFields)
-        .map(([key, item]) => `${agentResultFieldLabel(key)}：${agentShortText(agentResultScalarText(item), 48)}`);
+        .map(([key, item]) => {
+            const valStr = agentResultScalarText(item);
+            const displayStr = (typeof item === 'string' && /^[a-f0-9]{64}$/i.test(item))
+                ? `${item.slice(0, 10)}…`
+                : agentShortText(valStr, 48);
+            return `${agentResultFieldLabel(key)}：${displayStr}`;
+        });
     return parts.join(' · ') || `${Object.keys(parsed || {}).length} 项信息`;
 }
 
@@ -119,10 +142,15 @@ function agentResultTableMarkup(rows, options = {}) {
                     ${previewRows.map(row => `
                         <tr>${columns.map(column => {
                             const value = agentParsePayload(row?.[column]);
-                            const text = agentResultIsScalar(value)
-                                ? agentResultDisplayValue(column, value)
-                                : agentResultObjectSummary(value, 2);
-                            return `<td>${agentEscape(text)}</td>`;
+                            let text;
+                            if (Array.isArray(value) && value.every(item => typeof item === 'string' || typeof item === 'number')) {
+                                text = value.length ? value.join('、') : '-';
+                            } else if (agentResultIsScalar(value)) {
+                                text = agentResultDisplayValue(column, value);
+                            } else {
+                                text = agentResultObjectSummary(value, 2);
+                            }
+                            return `<td title="${agentEscapeAttr(text)}">${agentEscape(text)}</td>`;
                         }).join('')}</tr>
                     `).join('')}
                 </tbody>
@@ -141,7 +169,10 @@ function agentWorkflowTableMarkup(table = {}) {
             ${table.title ? `<div class="agent-result-table-title">${agentEscape(table.title)}</div>` : ''}
             <table class="agent-result-table">
                 <thead><tr>${columns.map(column => `<th>${agentEscape(agentResultFieldLabel(column))}</th>`).join('')}</tr></thead>
-                <tbody>${rows.slice(0, 20).map(row => `<tr>${columns.map(column => `<td>${agentEscape(agentResultDisplayValue(column, agentParsePayload(row?.[column])))}</td>`).join('')}</tr>`).join('')}</tbody>
+                <tbody>${rows.slice(0, 20).map(row => `<tr>${columns.map(column => {
+                    const text = agentResultDisplayValue(column, agentParsePayload(row?.[column]));
+                    return `<td title="${agentEscapeAttr(text)}">${agentEscape(text)}</td>`;
+                }).join('')}</tr>`).join('')}</tbody>
             </table>
             ${Number(table.rowCount || rows.length) > rows.slice(0, 20).length ? `<div class="agent-result-note">已展示前 20 行，共 ${Number(table.rowCount || rows.length)} 行。</div>` : ''}
         </div>

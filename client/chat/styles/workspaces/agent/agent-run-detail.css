@@ -437,20 +437,30 @@
     text-indent: 0;
 }
 
-.agent-final h1,
+.agent-final h1 {
+    margin: 0 0 0.45em;
+    color: var(--text-main, #0f172a);
+    font-size: 1.02rem;
+    font-weight: 800;
+    line-height: 1.35;
+    letter-spacing: 0;
+}
+
 .agent-final h2 {
-    margin: 0 0 0.75em;
-    color: #0f172a;
-    font-size: clamp(1.22rem, 1.6vw, 1.55rem);
-    line-height: 1.25;
+    margin: 0.75em 0 0.35em;
+    color: var(--text-main, #0f172a);
+    font-size: 0.92rem;
+    font-weight: 750;
+    line-height: 1.35;
     letter-spacing: 0;
 }
 
 .agent-final h3,
 .agent-final h4 {
-    margin: 1.05em 0 0.45em;
-    color: #0f172a;
-    font-size: 0.92rem;
+    margin: 0.65em 0 0.3em;
+    color: var(--text-main, #0f172a);
+    font-size: 0.84rem;
+    font-weight: 700;
     line-height: 1.35;
 }
 
@@ -465,39 +475,52 @@
 .agent-final code {
     padding: 1px 5px;
     border-radius: 5px;
-    background: rgba(15, 23, 42, 0.05);
-    color: #0f172a;
+    background: var(--bg-code, rgba(15, 23, 42, 0.05));
+    color: var(--text-code, #0f172a);
     font-size: 0.86em;
 }
 
 .agent-final .table-wrapper {
-    margin: 14px 0;
-    border: 1px solid rgba(226, 232, 240, 0.9);
+    margin: 10px 0;
+    border: 1px solid var(--border-subtle, rgba(226, 232, 240, 0.9));
     border-radius: 8px;
-    overflow: hidden;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    max-height: 520px;
+    box-shadow: 0 1px 3px var(--shadow-sm, rgba(15, 23, 42, 0.03));
+    scrollbar-width: thin;
 }
 
 .agent-final table {
-    width: 100%;
+    width: max-content !important;
+    min-width: 100%;
     border-collapse: collapse;
-    font-size: 0.78rem;
+    font-size: 0.74rem;
+    line-height: 1.5;
 }
 
 .agent-final th {
-    background: #f8fafc;
-    color: #475569;
+    background: var(--bg-header, #f8fafc);
+    color: var(--text-main, #334155);
     font-weight: 700;
-    padding: 9px 12px;
-    border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--border-subtle, rgba(226, 232, 240, 0.9));
     text-align: left;
+    white-space: nowrap !important;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .agent-final td {
-    padding: 9px 12px;
-    color: #1e293b;
-    border-bottom: 1px solid rgba(241, 245, 249, 0.8);
+    padding: 8px 12px;
+    color: var(--text-main, #1e293b);
+    border-bottom: 1px solid var(--border-subtle, rgba(241, 245, 249, 0.8));
     line-height: 1.5;
+    min-width: 80px;
+    max-width: 380px;
+    word-break: normal;
+    overflow-wrap: break-word;
 }
 
 .agent-final tr:last-child td {

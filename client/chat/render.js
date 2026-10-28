@@ -407,10 +407,24 @@ function normalizeIndentedOfficialSignoff(content) {
     return lines.join('\n');
 }
 
+function preventAccidentalSetextHeadings(content) {
+    return String(content || '').replace(/([^\r\n]+)\r?\n[ \t]*([-=_*]{3,})[ \t]*(?=\r?\n|$)/g, (match, line, divider) => {
+        const trimmed = line.trim();
+        if (/[\u3000-\u303F\uFF00-\uFFEF。，、；：？！…—～“”‘’（）《》【】)\]}>.?!,;:]/.test(trimmed)
+            || trimmed.length > 36
+            || trimmed.startsWith('【')
+            || trimmed.startsWith('#')
+            || trimmed.includes('\t')) {
+            return `${line}\n\n${divider}`;
+        }
+        return match;
+    });
+}
+
 function normalizeMarkdown(content) {
     return String(content).split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map((block) => {
         if (/^(```|~~~)/.test(block)) return block;
-        return normalizeIndentedOfficialSignoff(block);
+        return preventAccidentalSetextHeadings(normalizeIndentedOfficialSignoff(block));
     }).join('');
 }
 

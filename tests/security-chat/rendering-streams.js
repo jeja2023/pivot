@@ -177,13 +177,18 @@ test('知识库和工具库工作台入口保持可点击', () => {
     const mcpCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'mcp', 'mcp-forms.css'), 'utf8');
     const mcpGovernanceCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'workspaces', 'mcp', 'mcp-governance.css'), 'utf8');
 
+    const retrievalSummary = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'knowledge-retrieval-summary.js'), 'utf8');
+
     assert.match(ragPanels, /pivot_chat_rag_enabled/);
     assert.match(ragDocs, /bindKnowledgeUploadZone/);
     assert.match(ragDocs, /openKnowledgeUploadModal/);
     assert.match(ragDocs, /event\.dataTransfer\?\.files/);
     assert.match(ragDocs, /updateRagDebugSamples/);
     assert.match(ragDocs, /getRagDocDisplayName/);
-    assert.match(ragDocs, /ensureAdminSettingsScript/);
+    assert.match(ragDocs, /\/chat\/knowledge-retrieval-summary\.js/);
+    assert.match(ragDocs, /loadKnowledgeRetrievalModelSummary/);
+    assert.match(retrievalSummary, /openRetrievalModelServices/);
+    assert.match(retrievalSummary, /knowledge-retrieval-model-settings-btn/);
     assert.match(adminCore, /window\.Pivot\.legacy\.ensureAdminSettingsScript/);
     assert.match(adminCore, /'tool-policy'/);
     assert.match(adminCore, /window\.Pivot\.legacy\.loadToolPolicy/);
