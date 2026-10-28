@@ -183,7 +183,9 @@ function registerDocumentRoutes(router, deps) {
                 jurisdiction: req.query.jurisdiction || '',
                 status: req.query.status || '',
                 limit: req.query.limit,
-                includeArchived
+                includeArchived,
+                effectiveOnly: req.query.effectiveOnly !== 'false' && req.query.effective_only !== 'false'
+                , effectiveAt: req.query.effectiveAt || req.query.effective_at || ''
             });
             await recordRegulationAccess({ userId: req.user.id, documentId, action: 'search', detail: query.slice(0, 200) });
             if (res.headersSent || res.writableEnded) return;
@@ -307,7 +309,9 @@ function registerDocumentRoutes(router, deps) {
             const detail = await getRegulationDocumentDetail(req.params.id, {
                 versionId: req.query.versionId || req.query.version_id,
                 effectiveAt: req.query.effectiveAt || req.query.effective_at || '',
-                includeArchived
+                includeArchived,
+                articleLimit: req.query.articleLimit || req.query.article_limit,
+                articleOffset: req.query.articleOffset || req.query.article_offset
             });
             if (!detail || (!includeArchived && detail.document.status === 'archived')) {
                 return res.status(404).json({ error: { message: '法规文档不存在或已归档', type: 'invalid_request_error' } });

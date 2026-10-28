@@ -454,8 +454,11 @@
                                 <small>核对原文后再确认标题、层级、发布机构、效力日期与权威来源。</small>
                             </div>
                         ` : '';
+                        const moreArticles = detail.articlesTruncated && articles.length
+                            ? `<button type="button" class="btn-secondary regulations-load-more-articles" data-regulation-load-more="${esc(doc.id)}" data-regulation-load-more-offset="${articles.length}">加载更多条文</button>`
+                            : '';
                         PivotSafeHtml.setHtml(target, bodyHtml
-                            ? `${reviewEvidenceHeader}${indexNotice}${supersedeBanner}${bodyHtml}`
+                            ? `${reviewEvidenceHeader}${indexNotice}${supersedeBanner}${bodyHtml}${moreArticles}`
                             : `${reviewEvidenceHeader}${indexNotice}${supersedeBanner}<div class="regulations-empty compact">${esc(title)} 暂无可查看的法规原文</div>`);
                         if (metadataReviewMode) {
                             target.scrollTop = Math.max(0, Number(state.metadataReviewEvidenceScrollTop) || 0);

@@ -278,6 +278,11 @@
                         loadDetail(docOpener.dataset.regulationOpenDoc).catch(e => toast(e.message || '加载法规详情失败', 'error'));
                         return;
                     }
+                    const loadMoreArticles = event.target.closest('[data-regulation-load-more]');
+                    if (loadMoreArticles) {
+                        loadDetail(loadMoreArticles.dataset.regulationLoadMore, state.detail?.currentVersion?.id || '', state.effectiveAt || '', Number(loadMoreArticles.dataset.regulationLoadMoreOffset || 0)).catch(e => toast(e.message || '加载更多条文失败', 'error'));
+                        return;
+                    }
                     if (event.target.closest('[data-regulation-governance-worklist]')) {
                         openGovernanceWorklist(event.target.closest('[data-regulation-governance-worklist]').dataset.regulationGovernanceWorklist);
                         return;

@@ -58,6 +58,11 @@ test('个人工作台使用不重复的行动优先 Hero 和内容自适应卡�
     assert.match(template, /id="personal-quick-task-form"/);
     assert.match(template, /class="personal-command-row"/);
     assert.match(template, /personal-command-submit/);
+    assert.match(template, /id="personal-search-shortcut"/);
+    assert.match(client, /function getSearchShortcutLabel\(\)/);
+    assert.match(client, /Mac\|iPhone\|iPad\|iPod/);
+    assert.match(client, /把目标交给 Agent，逐步完成/);
+    assert.match(template, /输入目标进入任务设置；普通对话使用左侧「对话」/);
     assert.doesNotMatch(template, /personal-hero-pulse|personal-workbench-stats/);
     assert.doesNotMatch(styles, /\.personal-top-icon/);
     assert.doesNotMatch(client, /function renderStats|function renderHeroPulse|personal-stat-attention/);

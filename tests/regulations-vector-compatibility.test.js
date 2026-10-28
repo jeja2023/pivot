@@ -19,8 +19,8 @@ test('法规向量兼容迁移不会重写旧 text 列，并会重排当前版�
     assert.match(migration, /rag_rerank_candidate_limit/);
     assert.match(migration, /rag_rerank_timeout_ms/);
     assert.match(index, /regulations-vector-column-compatibility/);
-    assert.match(search, /a\.embedding::vector <=> \?::vector/);
-    assert.match(search, /vector_dims\(a\.embedding::vector\)/);
+    assert.match(search, /const vectorExpression = `a\.embedding::vector\(\$\{queryVector\.length\}\)`/);
+    assert.match(search, /vector_dims\(\$\{vectorExpression\}\)/);
     assert.match(config, /RAG_CONFIG_KEYS\.rerankCandidateLimit[\s\S]*?\n\s*20,/);
     assert.match(config, /RAG_CONFIG_KEYS\.rerankTimeoutMs[\s\S]*?\n\s*5000,/);
 });

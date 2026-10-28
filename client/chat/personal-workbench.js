@@ -62,6 +62,17 @@
         return `今天是${now.getFullYear()}年 ${now.getMonth() + 1} 月 ${now.getDate()} 日，${weekdays[now.getDay()]}`;
     }
 
+    function getSearchShortcutLabel() {
+        if (typeof navigator === 'undefined') return 'Ctrl K';
+        const platform = String(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+        return /Mac|iPhone|iPad|iPod/i.test(platform) ? '⌘ K' : 'Ctrl K';
+    }
+
+    function renderSearchShortcutLabel() {
+        const shortcut = document.getElementById('personal-search-shortcut');
+        if (shortcut) shortcut.textContent = getSearchShortcutLabel();
+    }
+
     function createEmpty(message, options = {}) {
         const node = document.createElement('div');
         node.className = 'personal-empty';
@@ -387,7 +398,7 @@
         const initial = String(userName).trim().slice(0, 1) || '我';
 
         const greetingEl = document.getElementById('personal-workbench-greeting');
-        if (greetingEl) greetingEl.textContent = '把分散的对话、任务、资料和自动化，收拢成一条清晰的工作流。';
+        if (greetingEl) greetingEl.textContent = '把目标交给 Agent，逐步完成。';
 
         const heroTitle = document.getElementById('personal-hero-title');
         if (heroTitle) heroTitle.textContent = `${greeting}，${userName}。今天想先处理什么？`;
@@ -429,6 +440,7 @@
 
     async function openPersonalWorkbench() {
         window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('personal');
+        renderSearchShortcutLabel();
         await loadPersonalWorkbench({ silent: Boolean(state.dashboard) });
     }
 
@@ -676,7 +688,6 @@
                 window.Pivot.legacy.setChatSidebarDrawerOpen?.(true);
                 return openShortcut('chat');
             }
-            if (action === 'quick-chat') return openQuickTask('chat');
             if (action === 'open-knowledge') return window.Pivot.moduleApi('workspaces.navigation').openKnowledgeWorkbench?.();
             if (action === 'new-document') {
                 await openShortcut('official-writing');
@@ -787,11 +798,7 @@
     document.getElementById('personal-shortcuts-save')?.addEventListener('click', () => {
         saveShortcuts().catch(error => window.Pivot.legacy.showToast?.(error.message || '常用入口保存失败', 'error'));
     });
-    document.getElementById('personal-quick-task-form')?.addEventListener('submit', event => {
-        event.preventDefault();
-        openQuickTask('agent');
-    });
-
+    renderSearchShortcutLabel();
     window.Pivot?.exposeModule?.('workspaces.personal', { loadPersonalWorkbench });
     window.Pivot?.exposeModule?.('workspaces.implementations', { openPersonalWorkbench });
 })();

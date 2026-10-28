@@ -325,7 +325,7 @@
                         renderDetail();
                         state.loaded = true;
                     }
-                    async function loadDetail(id, versionId = '', effectiveAt = '') {
+                    async function loadDetail(id, versionId = '', effectiveAt = '', articleOffset = 0) {
                         if (!id) return;
                         openDetailDialog();
                         const detailEl = document.getElementById('regulations-detail-body');
@@ -333,10 +333,18 @@
                         const params = new URLSearchParams();
                         if (versionId) params.set('versionId', versionId);
                         if (effectiveAt) params.set('effectiveAt', effectiveAt);
+                        params.set('articleLimit', '50');
+                        params.set('articleOffset', String(Math.max(Number.parseInt(articleOffset, 10) || 0, 0)));
                         const url = `${API}/documents/${encodeURIComponent(id)}${params.toString() ? `?${params.toString()}` : ''}`;
                         const data = await fetchJson(url);
                         state.activeId = data.detail?.document?.id || id;
+                        if (articleOffset === 0) state.detailArticlesBeforeLoad = [];
                         state.detail = data.detail || null;
+                        if (articleOffset > 0 && state.detail && state.detail.articles?.length) {
+                            const previous = state.detailArticlesBeforeLoad || [];
+                            state.detail.articles = [...previous, ...state.detail.articles];
+                        }
+                        state.detailArticlesBeforeLoad = state.detail?.articles || [];
                         state.effectiveAt = effectiveAt || '';
                         renderDocuments();
                         renderDetail();

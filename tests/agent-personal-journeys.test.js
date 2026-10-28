@@ -13,7 +13,10 @@ test('个人助手直接可用，档案可选管理，不自动弹出首次设�
     const service = read('server/services/agent-experience-events.js');
     assert.doesNotMatch(partial, /id="personal-agent-onboarding"/);
     assert.match(partial, /id="personal-quick-task-form"/);
-    assert.match(partial, /type="submit">交给 Agent/);
+    assert.match(partial, /type="submit">开始处理/);
+    assert.doesNotMatch(partial, /data-personal-action="quick-chat"/);
+    assert.doesNotMatch(client, /action === 'quick-chat'/);
+    assert.equal((client.match(/personal-quick-task-form[^\n]*addEventListener\('submit'/g) || []).length, 0);
     assert.doesNotMatch(client, /agentOnboarding|resume-onboarding|完成 3 分钟/);
     assert.match(client, /无需预先配置即可使用/);
     assert.match(routes, /\/agents\/experience\/events/);

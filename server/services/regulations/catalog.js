@@ -69,6 +69,7 @@ async function findRegulationVersionEffectiveOn(documentId, effectiveAt) {
         FROM regulation_versions
         WHERE document_id = ?
           AND effect_status = 'effective'
+          AND COALESCE(review_status, 'pending') = 'approved'
           AND effective_from IS NOT NULL AND effective_from <= ?::date
           AND (effective_to IS NULL OR effective_to >= ?::date)
         ORDER BY effective_from DESC, id DESC
@@ -472,7 +473,7 @@ async function listRegulationFacets({ includeArchived = false } = {}) {
     };
 }
 
-async function getRegulationDocumentDetail(docId, { versionId = null, effectiveAt = '', includeArchived = false, includeDeleted = false } = {}) {
+async function getRegulationDocumentDetail(docId, { versionId = null, effectiveAt = '', includeArchived = false, includeDeleted = false, articleLimit = null, articleOffset = 0 } = {}) {
     const normalizedDocId = normalizeRegulationId(docId);
     if (!normalizedDocId) return null;
     const doc = await getRegulationDocumentById(normalizedDocId, { includeArchived, includeDeleted });
@@ -503,13 +504,17 @@ async function getRegulationDocumentDetail(docId, { versionId = null, effectiveA
     const selectedVersionId = requestedVersionId || effectiveVersion?.id || doc.current_version_id || versions[0].id;
     const selectedVersion = versions.find(row => Number(row.id) === Number(selectedVersionId));
     if (!selectedVersion) return null;
+    const hasArticleLimit = Number.isSafeInteger(Number(articleLimit)) && Number(articleLimit) > 0;
+    const safeArticleLimit = hasArticleLimit ? Math.min(Number(articleLimit), 500) : null;
+    const safeArticleOffset = Math.max(Number.parseInt(articleOffset, 10) || 0, 0);
     const rawArticles = await query(`
         SELECT id, document_id, version_id, sort_order, article_label, article_title,
                content, heading_path, status, amended_date, created_at
         FROM regulation_articles
         WHERE document_id = ? AND version_id = ?
         ORDER BY sort_order ASC, id ASC
-    `, [normalizedDocId, selectedVersion.id]);
+        ${hasArticleLimit ? 'LIMIT ? OFFSET ?' : ''}
+    `, hasArticleLimit ? [normalizedDocId, selectedVersion.id, safeArticleLimit, safeArticleOffset] : [normalizedDocId, selectedVersion.id]);
     const articles = rawArticles.map(row => ({
         ...row,
         sort_order: Number(row.sort_order || 0)
@@ -557,6 +562,7 @@ async function getRegulationDocumentDetail(docId, { versionId = null, effectiveA
         })),
         currentVersion: selectedVersion,
         articles: articlesWithNotice,
+        ...(hasArticleLimit ? { articleLimit: safeArticleLimit, articleOffset: safeArticleOffset, articlesTruncated: articles.length === safeArticleLimit } : {}),
         download: selectedVersion.source_name ? { fileName: selectedVersion.source_name } : null
     };
 }

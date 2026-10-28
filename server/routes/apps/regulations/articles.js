@@ -155,6 +155,8 @@ function registerArticleRoutes(router, deps) {
             status: req.query.status || '',
             limit: req.query.limit,
             includeArchived: isAdmin(req.user) && req.query.includeArchived === 'true',
+            effectiveOnly: req.query.effectiveOnly !== 'false' && req.query.effective_only !== 'false',
+            effectiveAt: req.query.effectiveAt || req.query.effective_at || '',
             userId: req.user.id
         });
         await recordRegulationAccess({

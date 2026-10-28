@@ -50,7 +50,7 @@ test('法规混合检索预算独立限制词法与语义数据库调用', async
     assert.deepEqual(semantic, []);
     assert.equal(semanticCalls.length, 1);
     assert.equal(semanticCalls[0][2], 1200);
-    assert.match(semanticCalls[0][0], /ORDER BY a\.embedding::vector <=>/);
+    assert.match(semanticCalls[0][0], /ORDER BY a\.embedding::vector\(2\) <=>/);
 });
 
 test('asyncHandler 在 res.headersSent 为 true 或捕获 ERR_HTTP_HEADERS_SENT 时静默结束流且不调用 next(err)', async () => {

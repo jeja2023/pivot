@@ -7,6 +7,7 @@ const {
     generateEmbeddings,
     formatEmbeddingQuery,
     normalizeRegulationField,
+    normalizeRegulationDateValue,
     normalizeRegulationId,
     normalizeRegulationAlias,
     normalizeSearchText
@@ -37,7 +38,7 @@ function normalizeSearchStatus(value) {
     return ['active', 'archived'].includes(status) ? status : '';
 }
 
-function buildArticleFilters({ documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', includeArchived = false } = {}) {
+function buildArticleFilters({ documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', includeArchived = false, effectiveOnly = false, effectiveAt = '' } = {}) {
     const normalizedVersionId = normalizeRegulationId(versionId);
     const filters = [normalizedVersionId ? 'a.version_id = ?' : 'a.version_id = d.current_version_id', 'd.deleted_at IS NULL'];
     const params = [];
@@ -48,6 +49,12 @@ function buildArticleFilters({ documentId = null, versionId = null, category = '
     const normalizedJurisdiction = normalizeRegulationField(jurisdiction, 120);
     const normalizedStatus = normalizeSearchStatus(status);
     if (!includeArchived) filters.push("d.status <> 'archived'");
+    if (effectiveOnly && !normalizedVersionId) {
+        const asOf = normalizeRegulationDateValue(effectiveAt);
+        filters.push("v.effect_status = 'effective' AND COALESCE(v.review_status, 'pending') = 'approved'");
+        if (asOf) { filters.push('(v.effective_from IS NULL OR v.effective_from <= ?::date) AND (v.effective_to IS NULL OR v.effective_to >= ?::date)'); params.push(asOf, asOf); }
+        else filters.push('(v.effective_from IS NULL OR v.effective_from <= CURRENT_DATE) AND (v.effective_to IS NULL OR v.effective_to >= CURRENT_DATE)');
+    }
     if (normalizedDocId) {
         filters.push('d.id = ?');
         params.push(normalizedDocId);
@@ -136,13 +143,15 @@ async function searchRegulationArticles({
     status = '',
     limit = 8,
     includeArchived = false,
+    effectiveOnly = false,
+    effectiveAt = '',
     candidateMode = false,
     queryFn = query,
     statementTimeoutMs = 0
 } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit, 8, candidateMode ? MAX_REGULATION_RETRIEVAL_CANDIDATES : MAX_REGULATION_SEARCH_RESULTS);
-    const { filters, params } = buildArticleFilters({ documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived });
+    const { filters, params } = buildArticleFilters({ documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived, effectiveOnly, effectiveAt });
     const whereBase = `WHERE ${filters.join(' AND ')}`;
     if (!normalizedQuery) {
         const rows = await queryFn(`
@@ -232,17 +241,20 @@ async function searchRegulationArticlesByVector(queryVector, options = {}) {
     if (!embeddingProfile) return [];
     const queryFn = typeof options.queryFn === 'function' ? options.queryFn : queryWithStatementTimeout;
     const statementTimeoutMs = Number(options.statementTimeoutMs) || regulationHybridSearchBudget().semanticTimeoutMs;
+    const vectorTextPattern = "'^\\s*\\[\\s*-?(?:[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?:\\s*,\\s*-?(?:[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?))*\\s*\\]\\s*$'";
+    const vectorExpression = `a.embedding::vector(${queryVector.length})`;
     try {
         const rows = await queryFn(`
-            SELECT ${buildArticleSelect('1 - (a.embedding::vector <=> ?::vector) AS vector_score')}
+            SELECT ${buildArticleSelect(`1 - (${vectorExpression} <=> ?::vector) AS vector_score`)}
             FROM regulation_documents d
             JOIN regulation_articles a ON a.document_id = d.id
             JOIN regulation_versions v ON v.id = a.version_id
             WHERE ${filters.join(' AND ')}
               AND a.embedding IS NOT NULL
+              AND trim(a.embedding::text) ~ ${vectorTextPattern}
               AND a.embedding_profile = ?
-              AND vector_dims(a.embedding::vector) = ?
-            ORDER BY a.embedding::vector <=> ?::vector ASC, a.id ASC
+              AND vector_dims(${vectorExpression}) = ?
+            ORDER BY ${vectorExpression} <=> ?::vector ASC, a.id ASC
             LIMIT ?
         `, [JSON.stringify(queryVector), ...params, embeddingProfile, queryVector.length, JSON.stringify(queryVector), safeLimit], statementTimeoutMs);
         return formatSearchRows(rows, options.query, 'semantic');
@@ -308,10 +320,10 @@ async function rerankRegulationCandidates(query, candidates) {
 
 // 混合检索采用“词法、向量独立召回 + 倒数排名融合”。词法命中没有向量时仍会保留，
 // 语义候选也不要求先通过词面包含匹配，避免长尾别名和同义提问全部落空。
-async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false } = {}) {
+async function searchRegulationArticlesHybrid({ query: searchQuery, documentId = null, versionId = null, category = '', issuingBody = '', jurisdiction = '', status = '', limit = 8, includeArchived = false, effectiveOnly = false, effectiveAt = '' } = {}) {
     const normalizedQuery = normalizeSearchText(searchQuery);
     const safeLimit = normalizeSearchLimit(limit, 8, MAX_REGULATION_RETRIEVAL_CANDIDATES);
-    const sharedOptions = { query: normalizedQuery, documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived };
+    const sharedOptions = { query: normalizedQuery, documentId, versionId, category, issuingBody, jurisdiction, status, includeArchived, effectiveOnly, effectiveAt };
     const budget = regulationHybridSearchBudget();
 
     if (!normalizedQuery) {

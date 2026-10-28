@@ -48,7 +48,9 @@ function computeLineDiff(textA, textB) {
 function groupArticlesByLabel(articles = []) {
     const groups = new Map();
     for (const article of articles) {
-        const label = String(article?.article_label || '').trim() || `条目 ${article?.sort_order || article?.id || 0}`;
+        const label = String(article?.stable_key || '').trim()
+            || `${String(article?.heading_path || '').trim()}\u001f${String(article?.article_label || '').trim()}`
+            || `条目 ${article?.sort_order || article?.id || 0}`;
         const list = groups.get(label) || [];
         list.push(article);
         groups.set(label, list);
@@ -214,7 +216,7 @@ function selectDiverseEvidenceCandidates(candidates, { limit = 10, selectedArtic
     return result;
 }
 
-async function getSelectedRegulationArticles(articleIds, { documentId = null, versionId = null, includeArchived = false } = {}) {
+async function getSelectedRegulationArticles(articleIds, { documentId = null, versionId = null, includeArchived = false, effectiveOnly = false } = {}) {
     const ids = normalizeArticleIds(articleIds);
     if (!ids.length) return [];
     const clauses = [`a.id IN (${ids.map(() => '?').join(',')})`, 'd.deleted_at IS NULL'];
@@ -222,6 +224,7 @@ async function getSelectedRegulationArticles(articleIds, { documentId = null, ve
     const docId = normalizeRegulationId(documentId);
     const version = normalizeRegulationId(versionId);
     if (!includeArchived) clauses.push("d.status <> 'archived'");
+    if (effectiveOnly && !version) clauses.push("v.effect_status = 'effective' AND COALESCE(v.review_status, 'pending') = 'approved' AND (v.effective_from IS NULL OR v.effective_from <= CURRENT_DATE) AND (v.effective_to IS NULL OR v.effective_to >= CURRENT_DATE)");
     if (docId) {
         clauses.push('d.id = ?');
         params.push(docId);
@@ -267,9 +270,9 @@ async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVers
             FROM regulation_article_links l
             JOIN regulation_articles sa ON sa.id = l.source_article_id
             WHERE l.target_document_id = ? AND l.target_article_id IN (
-                SELECT id FROM regulation_articles WHERE document_id = ? AND article_label = ?
+                SELECT id FROM regulation_articles WHERE document_id = ? AND article_label = ? AND version_id = ?
             )
-        `, [docId, docId, label]);
+        `, [docId, docId, label, toVerId]);
         // 跨文档：其它法律引用了本文档（通过 target_document_id 对齐）
         const crossReferers = await query(`
             SELECT DISTINCT sa.id AS article_id, sa.article_label, sa.article_title,
@@ -278,7 +281,7 @@ async function analyzeRegulationChangeImpact({ documentId, fromVersionId, toVers
             JOIN regulation_articles sa ON sa.id = l.source_article_id
             JOIN regulation_documents d ON d.id = sa.document_id
             WHERE l.target_document_id = ? AND d.id != ? AND d.deleted_at IS NULL
-              AND l.target_label LIKE ?
+              AND l.version_id = sa.version_id AND l.target_label LIKE ?
         `, [docId, docId, `%${label}%`]);
         if (referers.length || crossReferers.length) {
             impacts.push({ label, internalReferers: referers, crossReferers });
@@ -370,7 +373,8 @@ async function buildRegulationAiContext({
     effectiveAt = '',
     expandLinks = true,
     relatedLimit = 5,
-    includeArchived = false
+    includeArchived = false,
+    effectiveOnly = true
 } = {}) {
     const plan = buildRegulationAiQueryPlan({ question: searchQuery, history, effectiveAt });
     const aiLimits = regulationAiLimits();
@@ -384,13 +388,14 @@ async function buildRegulationAiContext({
               AND effective_from IS NOT NULL
               AND effective_from <= ?
               AND (effective_to IS NULL OR effective_to >= ?)
-              AND COALESCE(effect_status, 'unverified') IN ('effective', 'unverified')
+              AND effect_status = 'effective'
+              AND COALESCE(review_status, 'pending') = 'approved'
             ORDER BY effective_from DESC, id DESC
             LIMIT 1
         `, [normalizeRegulationId(documentId), plan.effectiveAt, plan.effectiveAt]);
         effectiveVersionId = normalizeRegulationId(effectiveVersion?.id);
     }
-    const selectedRows = await getSelectedRegulationArticles(selectedArticleIds, { documentId, versionId: effectiveVersionId, includeArchived });
+    const selectedRows = await getSelectedRegulationArticles(selectedArticleIds, { documentId, versionId: effectiveVersionId, includeArchived, effectiveOnly });
     const retrievalResults = restrictToSelected && selectedRows.length
         ? []
         : await Promise.allSettled(plan.retrievalQueries.map(queryText => searchRegulationArticlesHybrid({
@@ -403,7 +408,9 @@ async function buildRegulationAiContext({
             status,
             userId,
             limit: Math.min(Math.max(Number(candidateLimit) || 120, 20), 150),
-            includeArchived
+            includeArchived,
+            effectiveOnly,
+            effectiveAt: plan.effectiveAt || effectiveAt
         })));
     const retrieved = retrievalResults
         .filter(result => result.status === 'fulfilled')

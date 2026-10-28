@@ -57,7 +57,8 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             history,
             userId: req.user.id,
             expandLinks: body.expandLinks !== false,
-            includeArchived: isAdmin(req.user) && (body.includeArchived === true || body.include_archived === true)
+            includeArchived: isAdmin(req.user) && (body.includeArchived === true || body.include_archived === true),
+            effectiveOnly: body.effectiveOnly !== false && body.effective_only !== false
         });
         await recordRegulationAccess({ userId: req.user.id, documentId, action: 'ai_query', detail: query.slice(0, 200) });
         const context = built.context || '当前检索没有命中条文。';
@@ -103,8 +104,9 @@ router.post('/ai', authMiddleware, asyncHandler(async (req, res) => {
             extraPayload: { sources, diagnostics: built.diagnostics || {}, queryPlan: built.plan || {} },
             transformCompletion: async answer => {
                 if (!hasArticleEvidence) {
+                    const unavailable = validateRegulationAiGrounding({ answer: '', sources: [], question: query });
                     return {
-                        content: buildRegulationUnverifiedModelAnswer(answer, { indexStatus: built.diagnostics?.indexStatus }),
+                        content: unavailable.answer,
                         metadata: { grounding: { status: 'model_general_unverified', accepted: false, candidateCount: 0, reasonCodes: ['no_candidates'] } },
                         extraPayload: { grounding: { status: 'model_general_unverified', accepted: false, candidateCount: 0, reasonCodes: ['no_candidates'] } }
                     };
