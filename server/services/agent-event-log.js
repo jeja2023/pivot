@@ -24,6 +24,15 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
     }, { entrypoint: entrypoint || stepContext?.entrypoint || payload?.entrypoint || 'agent', purpose: type });
     const requestId = getRequestId();
     const safePayload = redactTraceValue({ ...payload, ...auditContext, ...(requestId ? { requestId } : {}) });
+    // 仅恢复压缩审计中明确的非敏感整数计数，令牌、密钥和任意字符串仍由通用脱敏规则保护。
+    if (type === 'context.compacted' && safePayload?.compaction && payload?.compaction) {
+        for (const key of ['targetTokens', 'inputTokensBefore', 'inputTokensAfter']) {
+            const value = payload.compaction[key];
+            if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 999999999999) {
+                safePayload.compaction[key] = value;
+            }
+        }
+    }
     const hash = payloadHash(safePayload);
     const now = getBeijingTimestamp();
     const safeEventKey = String(eventKey || '').slice(0, 255);

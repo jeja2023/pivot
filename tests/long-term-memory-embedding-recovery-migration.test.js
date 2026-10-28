@@ -2,6 +2,15 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const [migration] = require('../server/db/migrations/long-term-memory-embedding-recovery');
+const fs = require('node:fs');
+const path = require('node:path');
+
+test('长期记忆检索将历史 TEXT embedding 显式转换为 pgvector，并过滤非法文本', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'long-term-memory', 'memory-retrieval-query.js'), 'utf8');
+    assert.match(source, /embedding::vector\(\$\{queryVector\.length\}\)/);
+    assert.match(source, /trim\(embedding::text\) ~/);
+    assert.doesNotMatch(source, /SELECT \*, 1 - \(embedding <=> \?::vector\)/);
+});
 
 test('长期记忆向量维度迁移兼容 TEXT 与 pgvector 表示', async () => {
     const calls = [];

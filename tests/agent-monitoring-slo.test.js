@@ -4,8 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { queryOne } = require('../server/db/client');
-const { assessAgentRuntimeSlo, getAgentMetrics, runAgentRuntimeSloMonitor } = require('../server/services/agent-monitoring');
+const { queryOne, execute } = require('../server/db/client');
+const { recordAgentEvent } = require('../server/services/agent-event-log');
+const { assessAgentRuntimeSlo, getAgentContextCompactionMetrics, getAgentMetrics, runAgentRuntimeSloMonitor } = require('../server/services/agent-monitoring');
 
 test('Agent runtime SLO never treats an undersampled period as passing', () => {
     const result = assessAgentRuntimeSlo({ total: 29, completed: 29, p95DurationMs: 1000 });
@@ -35,6 +36,37 @@ test('Agent runtime SLO metrics execute the JSONB compaction filter without trea
     const metrics = await getAgentMetrics(admin, 7);
     assert.equal(metrics.days, 7);
     assert.ok(metrics.runtimeSlo && typeof metrics.runtimeSlo.status === 'string');
+});
+
+test('压缩事件保留安全计数，旧脱敏或异常数据不会中断 SLO 或污染统计', async () => {
+    const admin = await queryOne("SELECT id, username, role FROM users WHERE username = 'admin' ORDER BY id LIMIT 1");
+    const runId = `slo-compaction-${process.pid}-${Date.now()}`;
+    await execute("INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES (?, ?, '测试', '测试', 'queued', '{}', NOW(), NOW())", [runId, admin.id]);
+    try {
+        const good = await recordAgentEvent({ runId, userId: admin.id, type: 'context.compacted', payload: { compaction: {
+            inputTokensBefore: 1200, inputTokensAfter: 300, targetTokens: 500, accessToken: '秘密', retained: { hardFieldLoss: false }
+        } } });
+        const saved = await queryOne('SELECT payload FROM agent_events WHERE id = ?', [good.id]);
+        const data = typeof saved.payload === 'string' ? JSON.parse(saved.payload) : saved.payload;
+        assert.equal(data.compaction.inputTokensBefore, 1200);
+        assert.equal(data.compaction.inputTokensAfter, 300);
+        assert.equal(data.compaction.accessToken, '[已脱敏]');
+        const old = await recordAgentEvent({ runId, userId: admin.id, type: 'context.compacted', payload: { compaction: { inputTokensBefore: 'secret-value', inputTokensAfter: 'secret-value', retained: { hardFieldLoss: 'invalid' } } } });
+        const oldSaved = await queryOne('SELECT payload FROM agent_events WHERE id = ?', [old.id]);
+        const oldData = typeof oldSaved.payload === 'string' ? JSON.parse(oldSaved.payload) : oldSaved.payload;
+        assert.equal(oldData.compaction.inputTokensBefore, '[已脱敏]');
+        await recordAgentEvent({ runId, userId: admin.id, type: 'context.compacted', payload: { compaction: { inputTokensBefore: 9999999999999, inputTokensAfter: 20, retained: { hardFieldLoss: true } } } });
+        const metrics = await getAgentContextCompactionMetrics({ id: admin.id, tenant_id: 123, role: 'user' }, 7);
+        assert.equal(metrics.eventCount, 3);
+        assert.equal(metrics.tokenSampleCount, 1);
+        assert.equal(metrics.unavailableTokenSamples, 2);
+        assert.equal(metrics.savingsRate, 0.75);
+        assert.equal(metrics.lossSampleCount, 2);
+        assert.equal(metrics.hardFieldLosses, 1);
+        assert.ok((await getAgentMetrics(admin, 7)).runtimeSlo);
+    } finally {
+        await execute('DELETE FROM agent_runs WHERE id = ?', [runId]);
+    }
 });
 
 test('Agent runtime SLO monitor alerts administrators only for actionable threshold breaches', async () => {

@@ -160,28 +160,44 @@ async function getAgentContextCompactionMetrics(user, days = 7, deps = {}) {
         : `e.user_id = ? AND (r.tenant_id IS NULL OR r.tenant_id = ?) AND e.created_at >= ${timeFilter}`;
     const params = superAdmin ? [] : [user.id, tenantId];
     const summary = await runQueryOne(`
-        SELECT
-            COUNT(*) AS event_count,
-            COUNT(DISTINCT e.run_id) AS run_count,
-            COALESCE(SUM((e.payload #>> '{compaction,inputTokensBefore}')::bigint), 0) AS input_tokens_before,
-            COALESCE(SUM((e.payload #>> '{compaction,inputTokensAfter}')::bigint), 0) AS input_tokens_after,
-            SUM(CASE WHEN COALESCE((e.payload #>> '{compaction,retained,hardFieldLoss}')::boolean, false) THEN 1 ELSE 0 END) AS hard_field_losses
-        FROM agent_events e
-        JOIN agent_runs r ON r.id = e.run_id
-        WHERE e.event_type = 'context.compacted'
-          AND jsonb_exists(e.payload, 'compaction')
-          AND ${baseWhere}
+        WITH raw_events AS (
+            SELECT e.run_id, e.payload #>> '{compaction,inputTokensBefore}' AS before_text,
+                   e.payload #>> '{compaction,inputTokensAfter}' AS after_text,
+                   e.payload #>> '{compaction,retained,hardFieldLoss}' AS loss_text
+            FROM agent_events e
+            JOIN agent_runs r ON r.id = e.run_id
+            WHERE e.event_type = 'context.compacted'
+              AND jsonb_exists(e.payload, 'compaction') AND ${baseWhere}
+        ), validated AS (
+            SELECT run_id,
+                   CASE WHEN before_text ~ '^[0-9]{1,12}$' THEN before_text::bigint END AS before_count,
+                   CASE WHEN after_text ~ '^[0-9]{1,12}$' THEN after_text::bigint END AS after_count,
+                   CASE WHEN loss_text = 'true' THEN true WHEN loss_text = 'false' THEN false END AS loss
+            FROM raw_events
+        )
+        SELECT COUNT(*) AS event_count, COUNT(DISTINCT run_id) AS run_count,
+            COUNT(*) FILTER (WHERE before_count IS NOT NULL AND after_count IS NOT NULL) AS token_sample_count,
+            COALESCE(SUM(before_count) FILTER (WHERE before_count IS NOT NULL AND after_count IS NOT NULL), 0) AS input_tokens_before,
+            COALESCE(SUM(after_count) FILTER (WHERE before_count IS NOT NULL AND after_count IS NOT NULL), 0) AS input_tokens_after,
+            COUNT(*) FILTER (WHERE loss IS NOT NULL) AS loss_sample_count,
+            COUNT(*) FILTER (WHERE loss = true) AS hard_field_losses
+        FROM validated
     `, params);
     const inputTokensBefore = Number(summary?.input_tokens_before || 0);
     const inputTokensAfter = Number(summary?.input_tokens_after || 0);
+    const tokenSampleCount = Number(summary?.token_sample_count || 0);
+    const lossSampleCount = Number(summary?.loss_sample_count || 0);
     return {
         days: safeDays,
         eventCount: Number(summary?.event_count || 0),
         runCount: Number(summary?.run_count || 0),
+        tokenSampleCount,
+        unavailableTokenSamples: Math.max(0, Number(summary?.event_count || 0) - tokenSampleCount),
+        lossSampleCount,
         inputTokensBefore,
         inputTokensAfter,
-        savingsRate: inputTokensBefore > 0 ? Math.max(0, (inputTokensBefore - inputTokensAfter) / inputTokensBefore) : null,
-        hardFieldLosses: Number(summary?.hard_field_losses || 0)
+        savingsRate: tokenSampleCount > 0 && inputTokensBefore > 0 ? Math.max(0, (inputTokensBefore - inputTokensAfter) / inputTokensBefore) : null,
+        hardFieldLosses: lossSampleCount ? Number(summary?.hard_field_losses || 0) : null
     };
 }
 

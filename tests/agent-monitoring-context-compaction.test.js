@@ -11,7 +11,7 @@ test('context compaction metrics aggregate only redacted numeric audit fields', 
             captured = { sql, params };
             return {
                 event_count: '5', run_count: '3', input_tokens_before: '12000',
-                input_tokens_after: '4500', hard_field_losses: '0'
+                input_tokens_after: '4500', hard_field_losses: '0', token_sample_count: '5', loss_sample_count: '5'
             };
         }
     });

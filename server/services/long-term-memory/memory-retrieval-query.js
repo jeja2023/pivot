@@ -89,15 +89,19 @@ async function selectLexicalMemoryCandidates(userId, queryText, now, scopeFilter
 async function selectDenseMemoryCandidates(userId, queryVector, now, scopeFilter, limit) {
     if (!Array.isArray(queryVector) || queryVector.length === 0) return [];
     const baseParams = [Number(userId), MEMORY_STATUS.active, now, now, ...scopeFilter.scopeParams];
+    const vectorTextPattern = "'^\\s*\\[\\s*-?(?:[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?:\\s*,\\s*-?(?:[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?))*\\s*\\]\\s*$'";
+    const vectorExpression = `embedding::vector(${queryVector.length})`;
     try {
         const rows = await query(`
-            SELECT *, 1 - (embedding <=> ?::vector) AS dense_score
+            SELECT *, 1 - (${vectorExpression} <=> ?::vector) AS dense_score
             FROM memories
             WHERE user_id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)
               AND (valid_from IS NULL OR valid_from <= ?)
               AND ${scopeFilter.scopeSql}
-              AND embedding IS NOT NULL AND embedding_dimensions = ?
-            ORDER BY embedding <=> ?::vector ASC, id ASC
+              AND embedding IS NOT NULL
+              AND trim(embedding::text) ~ ${vectorTextPattern}
+              AND embedding_dimensions = ?
+            ORDER BY ${vectorExpression} <=> ?::vector ASC, id ASC
             LIMIT ?
         `, [JSON.stringify(queryVector), ...baseParams, queryVector.length, JSON.stringify(queryVector), limit]);
         return rows.map((row, index) => ({ ...row, __semantic: Math.max(0, Number(row.dense_score || 0)), __semanticRank: index + 1 }));

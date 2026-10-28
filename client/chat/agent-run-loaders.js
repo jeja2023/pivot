@@ -247,7 +247,7 @@ async function loadAgentMetrics() {
     }
     const compression = data.contextCompaction || {};
     const compressionText = Number(compression.eventCount || 0) > 0
-        ? `节省 ${Math.round(Number(compression.savingsRate || 0) * 100)}% · 硬丢失 ${Number(compression.hardFieldLosses || 0)}`
+        ? `节省 ${compression.savingsRate == null ? '暂无数据' : `${Math.round(Number(compression.savingsRate) * 100)}%`} · 硬丢失 ${compression.hardFieldLosses == null ? '暂无数据' : Number(compression.hardFieldLosses)}${Number(compression.unavailableTokenSamples || 0) ? ` · ${Number(compression.unavailableTokenSamples)} 条计数不可用` : ''}`
         : '暂无样本';
     const slo = data.runtimeSlo || {};
     const sloLabel = slo.status === 'passing' ? '通过' : slo.status === 'attention' ? '关注' : '证据不足';
