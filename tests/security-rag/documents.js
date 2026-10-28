@@ -246,6 +246,7 @@ test('RAG 文档删除为软删除并保持可审计', async () => {
 });
 
 test('软删除存储清理会清除过期文件和 RAG 分块', async () => {
+    await cleanupSoftDeletedStorage({ retentionDays: 0, limit: 100 });
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)

@@ -46,23 +46,34 @@ test('PostgreSQL 目录与概览仅返回授权范围，目录包括未就绪资
     const disabled = addDoc(owner, collection, '已停用.md', 'ready', 0);
     const deleted = addDoc(owner, collection, '已删除.md', 'ready', 1, '2026-01-01');
     const secret = addDoc(other, otherCollection, '机密.md', 'ready');
-    for (const [id, text] of [[ready, '刑法规定应当依法处理。'], [pending, '未就绪内容'], [disabled, '停用内容'], [deleted, '删除内容'], [secret, '秘密正文']]) {
-        db.prepare('INSERT INTO knowledge_chunks (doc_id, content, chunk_index) VALUES (?, ?, 0)').run(id, text);
+    const docIds = [ready, pending, disabled, deleted, secret];
+
+    try {
+        for (const [id, text] of [[ready, '刑法规定应当依法处理。'], [pending, '未就绪内容'], [disabled, '停用内容'], [deleted, '删除内容'], [secret, '秘密正文']]) {
+            db.prepare('INSERT INTO knowledge_chunks (doc_id, content, chunk_index) VALUES (?, ?, 0)').run(id, text);
+        }
+        const scope = { collectionIds: [collection] };
+        const answer = await buildKnowledgeCatalogAnswer({ user: owner, scope });
+        assert.match(answer, /刑法\.md/);
+        assert.match(answer, /待索引\.pdf.*处理中/);
+        assert.match(answer, /已停用\.md.*已停用/);
+        assert.doesNotMatch(answer, /已删除|机密/);
+        const overview = await buildKnowledgeOverviewContext({ user: owner, scope });
+        assert.match(overview, /刑法规定应当依法处理/);
+        assert.doesNotMatch(overview, /未就绪内容|停用内容|删除内容|秘密正文/);
+        assert.equal(extractKnowledgeSources(overview).length, 1);
+        assert.match(await buildKnowledgeCatalogAnswer({ user: other, scope }), /无权访问/);
+        assert.equal(await buildKnowledgeOverviewContext({ user: other, scope }), '');
+        assert.deepEqual(await repository.listChatKnowledgeCatalog(other, scope), []);
+        assert.doesNotMatch(await buildKnowledgeCatalogAnswer({ user: owner }), /机密/);
+    } finally {
+        for (const docId of docIds) {
+            db.prepare('DELETE FROM knowledge_chunks WHERE doc_id = ?').run(docId);
+            db.prepare('DELETE FROM knowledge_docs WHERE id = ?').run(docId);
+        }
+        db.prepare('DELETE FROM knowledge_collections WHERE id IN (?, ?)').run(collection, otherCollection);
+        db.prepare('DELETE FROM users WHERE id IN (?, ?)').run(owner.id, other.id);
     }
-    const scope = { collectionIds: [collection] };
-    const answer = await buildKnowledgeCatalogAnswer({ user: owner, scope });
-    assert.match(answer, /刑法\.md/);
-    assert.match(answer, /待索引\.pdf.*处理中/);
-    assert.match(answer, /已停用\.md.*已停用/);
-    assert.doesNotMatch(answer, /已删除|机密/);
-    const overview = await buildKnowledgeOverviewContext({ user: owner, scope });
-    assert.match(overview, /刑法规定应当依法处理/);
-    assert.doesNotMatch(overview, /未就绪内容|停用内容|删除内容|秘密正文/);
-    assert.equal(extractKnowledgeSources(overview).length, 1);
-    assert.match(await buildKnowledgeCatalogAnswer({ user: other, scope }), /无权访问/);
-    assert.equal(await buildKnowledgeOverviewContext({ user: other, scope }), '');
-    assert.deepEqual(await repository.listChatKnowledgeCatalog(other, scope), []);
-    assert.doesNotMatch(await buildKnowledgeCatalogAnswer({ user: owner }), /机密/);
 });
 
 test('目录结果超过上限时明确标记截断', async () => {
