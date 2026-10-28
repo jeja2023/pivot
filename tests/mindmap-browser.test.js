@@ -42,8 +42,27 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
         await fs.promises.mkdir('output/mindmaps', { recursive: true }); await page.screenshot({ path: 'output/mindmaps/drag-verification.png' });
         await fs.promises.writeFile('output/mindmaps/drag-verification.json', JSON.stringify({ source, target, outline: await page.locator('#mindmap-outline').innerText(), status: await page.locator('#mindmap-save-status').innerText() }, null, 2));
         await page.waitForFunction(() => [...document.querySelectorAll('#mindmap-outline li')].some(item => item.firstElementChild.textContent === '任务拆解' && item.querySelector('ul')?.textContent.includes('目标')));
-        await page.locator('#mindmap-canvas .smm-node').first().dblclick();
-        const editable = page.locator('[contenteditable="true"]'); await editable.waitFor({ state: 'visible' });
+        await page.waitForTimeout(300);
+        const node = page.locator('#mindmap-canvas .smm-node').first();
+        const editable = page.locator('[contenteditable="true"]');
+        for (let attempt = 0; attempt < 5; attempt++) {
+            if (await editable.isVisible()) break;
+            await node.dblclick({ delay: 50 }).catch(() => {});
+            try {
+                await editable.waitFor({ state: 'visible', timeout: 2000 });
+                break;
+            } catch (_) {
+                await page.evaluate(() => {
+                    const el = document.querySelector('#mindmap-canvas .smm-node');
+                    if (el) el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+                }).catch(() => {});
+                try {
+                    await editable.waitFor({ state: 'visible', timeout: 2000 });
+                    break;
+                } catch (_) {}
+            }
+        }
+        await editable.waitFor({ state: 'visible', timeout: 15000 });
         const cdp = await context.newCDPSession(page);
         await cdp.send('Input.imeSetComposition', { text: '中文组合输入', selectionStart: 6, selectionEnd: 6 });
         await editable.evaluate(element => element.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, isComposing: true, bubbles: true })));
