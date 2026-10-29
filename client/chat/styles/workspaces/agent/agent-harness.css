@@ -2685,7 +2685,7 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
 }
 .agent-skill-tool-card-desc {
     font-size: 0.72rem; color: var(--text-muted); line-height: 1.45;
-    margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    margin: 0; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden; text-overflow: ellipsis; word-break: break-word;
 }
 .agent-skill-tools-modal-empty {
