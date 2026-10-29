@@ -131,6 +131,7 @@ module.exports = {
     MAX_FRONTMATTER_BYTES,
     MAX_INSTRUCTIONS_BYTES,
     REJECTED_FRONTMATTER_FIELDS,
+    assertNoYamlIndirection,
     buildSkillSourceMarkdown,
     isSkillSourceMarkdown,
     parseSkillSourceMarkdown,

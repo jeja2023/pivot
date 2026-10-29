@@ -567,10 +567,6 @@ function bindMountedWorkspaceControls(name) {
     bind('observability-webhook-save', () => window.Pivot.legacy.saveObservabilityWebhook?.());
     bind('rag-system-reindex-btn', () => (window.Pivot.getModule?.('knowledge.retrievalSummary')?.reindexAllKnowledgeDocs || window.Pivot.legacy.reindexAllKnowledgeDocs)?.());
     bind('model-add-btn', () => window.Pivot.legacy.openModelModal());
-    bind('modal-model-cancel', () => window.Pivot.legacy.closeModelModal());
-    bind('modal-model-test', () => window.Pivot.legacy.testModelConfig());
-    bind('m-submit-btn', () => window.Pivot.legacy.addModel());
-    bind('m-scope', () => window.Pivot.legacy.updateModelScopeControls?.(), 'change');
     bind('user-add-btn', () => window.Pivot.legacy.openUserModal());
     bind('modal-user-cancel', () => window.Pivot.legacy.closeUserModal());
     bind('modal-user-save', () => window.Pivot.legacy.saveUser());

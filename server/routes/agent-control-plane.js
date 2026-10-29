@@ -43,6 +43,8 @@ const {
 } = require('../services/agent-learning');
 const { listKnowledgeCollections } = require('../services/rag-documents');
 const { getAgentExperienceSummary, recordAgentExperienceEvent } = require('../services/agent-experience-events');
+const { importTools, prepareSkillImport } = require('../services/agent-skill-import-assistant');
+const { formatToolList } = require('../services/agent-tool-catalog');
 
 function allowedSkillPermissions() {
     const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -425,6 +427,12 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
             tools: []
         }));
         res.json({ success: true, data: [...skills, ...capabilities].slice(0, limit) });
+    }));
+    router.get('/agents/skills/import/tools', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ tools: importTools(await formatToolList(req.user)) });
+    }));
+    router.post('/agents/skills/import/preview', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ proposal: prepareSkillImport(req.body || {}, await formatToolList(req.user)) });
     }));
     router.post('/agents/skills/source/preview', authMiddleware, asyncHandler(async (req, res) => {
         // 预览只做解析与严格校验，不落库；错误清单直接回传给编辑器。

@@ -247,7 +247,7 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
             <td title="${displayUrl}">${displayUrl}</td>
             <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens / ${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}">${formatTokenAmount(m.daily_token_limit)} / <small>${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
             <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
-            <td title="${escapeHtml(m.allowed_units || '')}">${escapeHtml(m.allowed_units || '全部')}</td>
+            <td title="${escapeHtml(m.user_id ? '仅本人' : (m.allowed_units || '全部'))}">${escapeHtml(m.user_id ? '仅本人' : (m.allowed_units || '全部'))}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
                 <span class="status-dot status-unknown" id="status-${m.id}" title="未检测"></span>
@@ -400,11 +400,15 @@ window.Pivot.legacy.testExistingModel = async (model) => {
 };
 
 window.Pivot.legacy.testModelConfig = async () => {
+    const button = document.getElementById('modal-model-test');
+    if (button?.disabled) return;
     const id = document.getElementById('m-id').value;
     const url = document.getElementById('m-url').value;
     const api_key = document.getElementById('m-key').value;
     const model_name = document.getElementById('m-model').value;
-    await testConnection(url, api_key, model_name, id);
+    if (button) button.disabled = true;
+    try { await testConnection(url, api_key, model_name, id); }
+    finally { if (button) button.disabled = false; }
 };
 
 async function testConnection(url, api_key, model_name, id = null) {
@@ -465,7 +469,7 @@ window.Pivot.legacy.resetModelForm = () => {
     if (keyInput) keyInput.type = 'password';
 };
 
-window.Pivot.legacy.updateModelScopeControls = (model = null) => {
+window.Pivot.legacy.updateModelScopeControls = () => {
     const isSuperAdmin = isSuperAdminUser();
     const scopeWrap = document.getElementById('m-scope-wrap');
     const scopeUnitsRow = scopeWrap?.closest('.model-scope-units-row');
@@ -474,13 +478,12 @@ window.Pivot.legacy.updateModelScopeControls = (model = null) => {
     if (scopeWrap) scopeWrap.classList.toggle('hidden', !isSuperAdmin);
     if (scopeUnitsRow) scopeUnitsRow.classList.toggle('scope-hidden', !isSuperAdmin);
     if (scopeEl) {
-        scopeEl.disabled = Boolean(model?.id);
+        scopeEl.disabled = !isSuperAdmin;
         if (!isSuperAdmin) scopeEl.value = 'personal';
     }
-    const isGlobal = isSuperAdmin && (scopeEl?.value === 'global' || (model && !model.user_id));
+    const isGlobal = isSuperAdmin && scopeEl?.value === 'global';
     if (unitsEl) {
         unitsEl.disabled = !isGlobal;
         unitsEl.placeholder = isGlobal ? '多个部门用逗号分隔，留空表示全部可见' : '个人模型不需要设置可见部门';
-        if (!isGlobal) unitsEl.value = '';
     }
 };

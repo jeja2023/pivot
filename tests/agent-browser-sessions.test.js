@@ -109,7 +109,7 @@ test('browser sessions preserve an authorized page across sequential Agent actio
         assert.equal(created.session.status, 'active');
         assert.equal(JSON.stringify(created.session).includes(created.live.leaseToken), false);
         const worker = path.join(__dirname, 'helpers', 'agent-browser-session-action-worker.js');
-        const { stdout } = await execFileAsync(process.execPath, [worker, sessionId, String(user.id), profileRoot], {
+        const { stdout } = await execFileAsync(process.execPath, [worker, sessionId, String(user.id), profileRoot, 'inspect', run.id], {
             cwd: path.join(__dirname, '..'), env: process.env, windowsHide: true, timeout: 20000
         });
         const workerResult = stdout.match(/RESULT:(\{[^\r\n]+\})/);
@@ -130,6 +130,14 @@ test('browser sessions preserve an authorized page across sequential Agent actio
             context: { profileRoot }
         }));
         assert.match(inspected.text, /ready/);
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { id: 'other-run' }, input: { action: 'inspect' }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_RUN_MISMATCH');
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { ...run, network_policy: { ...policy, allowed_origins: [] } }, input: { action: 'inspect' }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_POLICY_CHANGED');
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { ...run, network_policy: 'invalid' }, input: { action: 'inspect' }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_POLICY_INVALID');
+        const samePolicy = await executeAgentBrowserSessionAction({ sessionId, user, run: { ...run, network_policy: policy }, input: { action: 'inspect' }, context: { profileRoot } });
+        assert.match(samePolicy.text, /ready/);
+        const serializedPolicy = await executeAgentBrowserSessionAction({ sessionId, user, run: { ...run, network_policy: JSON.stringify(policy) }, input: { action: 'inspect' }, context: { profileRoot } });
+        assert.match(serializedPolicy.text, /ready/);
+
         const originalWait = created.live.page.waitForTimeout;
         let markWaiting;
         let releaseWaiting;
@@ -411,7 +419,7 @@ test('a persisted mutation intent requires explicit recovery even without action
         await execute("INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES (?, ?, '浏览器写入边界', '验证写入屏障', 'running', '{}', NOW(), NOW())", [runId, user.id]);
         await execute(`INSERT INTO agent_browser_sessions (id, run_id, user_id, tenant_id, status, network_policy, current_url, last_action, mutation_pending_recovery, expires_at, created_at, updated_at)
             VALUES (?, ?, ?, 1, 'active', '{}', 'https://example.invalid/', 'mutation_intent', TRUE, NOW() + INTERVAL '1 hour', NOW(), NOW())`, [sessionId, runId, user.id]);
-        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, input: { action: 'inspect' } }), error => error.code === 'AGENT_BROWSER_RECOVERY_REQUIRED');
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { id: runId }, input: { action: 'inspect' } }), error => error.code === 'AGENT_BROWSER_RECOVERY_REQUIRED');
         const stored = await queryOne('SELECT status, mutation_pending_recovery FROM agent_browser_sessions WHERE id = ?', [sessionId]);
         assert.equal(stored.status, 'needs_user_recovery');
         assert.equal(stored.mutation_pending_recovery, true);
@@ -447,7 +455,7 @@ test('a browser action cannot use an old lease after another process takes owner
         const result = stdout.match(/RESULT:(\{[^\r\n]+\})/);
         assert.ok(result);
         assert.equal(JSON.parse(result[1]).acquired, true);
-        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, input: { action: 'click', target: { selector: '#run' } }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_LEASE_LOST');
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { id: runId }, input: { action: 'click', target: { selector: '#run' } }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_LEASE_LOST');
         assert.equal(clicks, 0);
     } finally {
         if (ownedLive?.closePromise) await browserTestStep('等待失效浏览器关闭', () => ownedLive.closePromise, 10000).catch(() => {});
@@ -489,7 +497,7 @@ test('lease loss after the mutation barrier prevents the pending click', { skip:
         const reached = new Promise(resolve => { reachedScreenshot = resolve; });
         const screenshotGate = new Promise(resolve => { releaseScreenshot = resolve; });
         ownedLive.page.screenshot = async (...args) => { reachedScreenshot(); await screenshotGate; return await originalScreenshot(...args); };
-        const pending = browserTestStep('等待动作前观察', () => executeAgentBrowserSessionAction({ sessionId, user, input: { action: 'click', target: { selector: '#run' } }, context: { profileRoot } }));
+        const pending = browserTestStep('等待动作前观察', () => executeAgentBrowserSessionAction({ sessionId, user, run: { id: runId }, input: { action: 'click', target: { selector: '#run' } }, context: { profileRoot } }));
         pending.catch(() => {});
         await browserTestStep('等待屏障后的截图', () => reached);
         assert.equal((await queryOne('SELECT mutation_pending_recovery FROM agent_browser_sessions WHERE id = ?', [sessionId])).mutation_pending_recovery, true);
@@ -537,7 +545,7 @@ test('an external write received before context failure is not automatically rep
         sessionId = created.session.id;
         live = created.live;
         let settled = false;
-        const pending = browserTestStep('派发外部写入', () => executeAgentBrowserSessionAction({ sessionId, user, input: { action: 'click', target: { selector: '#submit' } }, context: { profileRoot } }));
+        const pending = browserTestStep('派发外部写入', () => executeAgentBrowserSessionAction({ sessionId, user, run: { id: runId }, input: { action: 'click', target: { selector: '#submit' } }, context: { profileRoot } }));
         pending.then(() => { settled = true; }, () => { settled = true; });
         await browserTestStep('等待外部服务接收写入', () => fixture.received);
         assert.equal(settled, false);
@@ -545,7 +553,7 @@ test('an external write received before context failure is not automatically rep
         assert.equal((await queryOne('SELECT mutation_pending_recovery FROM agent_browser_sessions WHERE id = ?', [sessionId])).mutation_pending_recovery, true);
         await browserTestStep('中断浏览器上下文', () => live.context.close());
         await assert.rejects(() => pending);
-        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, input: { action: 'inspect' }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_RECOVERY_REQUIRED');
+        await assert.rejects(() => executeAgentBrowserSessionAction({ sessionId, user, run: { id: runId }, input: { action: 'inspect' }, context: { profileRoot } }), error => error.code === 'AGENT_BROWSER_RECOVERY_REQUIRED');
         assert.equal(fixture.count(), 1);
         assert.equal((await queryOne('SELECT status FROM agent_browser_sessions WHERE id = ?', [sessionId])).status, 'needs_user_recovery');
     } finally {

@@ -467,12 +467,11 @@
     const loadLifecycleHooks = () => lifecycleHookPackages.load();
 
     function renderSkills() {
-        const list = document.getElementById('agent-harness-skill-list');
-        const paginationContainer = document.getElementById('agent-harness-skill-pagination');
-        if (!list) return;
+        const list = document.getElementById('agent-harness-skill-list'), paginationContainer = document.getElementById('agent-harness-skill-pagination');
+        const countBadge = document.getElementById('agent-harness-skill-count-badge'); if (countBadge) { countBadge.textContent = state.skills.length ? `${state.skills.length} 个技能` : '暂无技能'; countBadge.classList.toggle('has-skills', state.skills.length > 0); }
         if (!state.skills.length) {
             if (paginationContainer) paginationContainer.replaceChildren();
-            setMarkup(list, '<div class="agent-harness-empty-card"><svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg><strong>暂无已安装技能包</strong><span>可通过右侧表单填入清单或导入 .skill.zip 离线包</span></div>');
+            setMarkup(list, '<div class="agent-harness-empty-card"><div class="agent-harness-empty-icon-wrap"><svg class="agent-harness-empty-svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></div><strong>暂无已安装技能</strong><span>智能体可通过预装技能扩展工作指引与专用工具。您可通过右侧表单快速导入 SKILL.md，或导入已签名的技能包。</span><div class="agent-empty-actions"><button type="button" class="btn-secondary btn-xs" onclick="document.getElementById(\'agent-open-capability-catalog-btn\')?.click()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg><span>浏览可用技能与能力目录</span></button></div></div>');
             return;
         }
         const page = Math.max(1, Number(state.skillsPage || 1)), limit = Math.max(1, Number(state.skillsLimit || 8)), total = state.skills.length;
@@ -489,11 +488,7 @@
             return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(description)}">${escape(shortText(description, 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
         }).join('')}</tbody></table></div>`);
 
-        if (paginationContainer) {
-            if (window.Pivot.legacy.renderWorkspacePagination) {
-                window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } });
-            } else { paginationContainer.replaceChildren(); }
-        }
+        if (paginationContainer) { if (window.Pivot.legacy.renderWorkspacePagination) window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } }); else paginationContainer.replaceChildren(); }
     }
 
     function populateSkillSelect() {
@@ -516,7 +511,7 @@
             .filter(item => item.scope === 'organization_candidate' && item.artifactType === 'skill')
             .map(item => [String(item.artifactVersionId || ''), item]));
         const published = Array.isArray(data.data) ? data.data : [];
-        const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.name) === String(version.name) && String(skill.version) === String(version.version))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'enabled' : 'draft', user_id: getCurrentUser()?.id }));
+        const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.name) === String(version.name) && String(skill.version) === String(version.version))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'enabled' : version.status === 'validated' ? 'validated' : 'draft', user_id: getCurrentUser()?.id }));
         const releaseMap = new Map((Array.isArray(releases.data) ? releases.data : []).map(release => [`${release.name}@${release.version}`, release]));
         state.skills = [...published, ...drafts].map(skill => {
             const release = releaseMap.get(`${skill.name}@${skill.version}`) || null;
@@ -527,6 +522,8 @@
         personalExperience.loadCapabilityCatalog().catch(error => setNotice(error.message || '能力目录加载失败。', 'error'));
         return state.skills;
     }
+
+    const setSkillAdvancedModalVisibility = (v = true) => { const m = document.getElementById("agent-skill-advanced-modal"); if (m) { m.classList.toggle("hidden", !v); m.setAttribute("aria-hidden", v ? "false" : "true"); if (v) document.getElementById("agent-harness-skill-manifest")?.focus(); } };
 
     async function registerSkill() {
         const manifest = document.getElementById('agent-harness-skill-manifest')?.value.trim();
@@ -541,6 +538,7 @@
             setNotice('SKILL.md 已创建为个人草稿。', 'success');
             document.getElementById('agent-harness-skill-manifest').value = '';
             document.getElementById('agent-harness-skill-instructions').value = '';
+            setSkillAdvancedModalVisibility(false);
             await loadSkills();
         } catch (error) { setNotice(error.message || '技能包注册失败。', 'error'); }
         finally { if (button) button.disabled = false; }
@@ -555,6 +553,7 @@
         try {
             await apiJson(`${API_BASE}/agents/skills/package`, { method: 'POST', body: formData });
             setNotice('技能包导入并校验成功。', 'success');
+            setSkillAdvancedModalVisibility(false);
             await loadSkills();
         } catch (error) { setNotice(error.message || '技能包导入失败。', 'error'); }
         finally { if (input) { input.disabled = false; input.value = ''; } }
@@ -928,6 +927,7 @@
         document.getElementById('agent-harness-residency-sweep')?.addEventListener('click', () => sweepResidents());
         document.getElementById('agent-harness-skill-register')?.addEventListener('click', registerSkill);
         document.getElementById('agent-harness-skill-file')?.addEventListener('change', event => uploadSkillPackage(event.target.files?.[0]));
+        ['agent-skill-advanced-modal-close-btn', 'agent-skill-advanced-modal-cancel'].forEach(id => document.getElementById(id)?.addEventListener('click', () => setSkillAdvancedModalVisibility(false))); document.getElementById('agent-skill-advanced-open-btn')?.addEventListener('click', () => setSkillAdvancedModalVisibility(true)); document.getElementById('agent-skill-advanced-modal')?.addEventListener('click', e => { if (e.target === e.currentTarget) setSkillAdvancedModalVisibility(false); });
         document.getElementById('agent-harness-skill-list')?.addEventListener('click', event => {
             const button = event.target.closest('[data-agent-harness-disable-skill]');
             if (button) disableSkill(button.dataset.agentHarnessDisableSkill);

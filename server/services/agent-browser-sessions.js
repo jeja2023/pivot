@@ -410,7 +410,11 @@ async function createAgentBrowserSession({ user, run = null, networkPolicy = {},
     if (!user?.id) throw browserError('浏览器会话需要有效用户。', 'AGENT_BROWSER_SESSION_USER_REQUIRED', 401);
     const tenant = await assertTenantContext(user);
     const id = sessionId();
-    const policy = normalizeNetworkPolicy(networkPolicy);
+    const rawPolicy = typeof networkPolicy === 'string' ? parseJson(networkPolicy, null) : networkPolicy;
+    if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) {
+        throw browserError('当前任务网络策略无效，不能创建浏览器会话。', 'AGENT_BROWSER_POLICY_INVALID', 409);
+    }
+    const policy = normalizeNetworkPolicy(rawPolicy);
     const row = await queryOne(`
         INSERT INTO agent_browser_sessions (
             id, run_id, user_id, tenant_id, status, network_policy, current_url, page_title,
@@ -550,6 +554,33 @@ async function recoverAgentBrowserSession(id, user, { confirmed = false, options
 async function executeAgentBrowserSessionActionUnlocked({ sessionId: requestedSessionId, user, run = null, input = {}, context = {} } = {}) {
     let session = requestedSessionId ? await loadBrowserSession(requestedSessionId, user) : null;
     let created = false;
+    if (session && requestedSessionId) {
+        const currentRun = run || context.run || null;
+        const currentRunId = String(currentRun?.id || currentRun?.run_id || '');
+        if (String(session.run_id || '') !== currentRunId) {
+            throw browserError('浏览器会话属于其他任务，请为当前任务创建新会话。', 'AGENT_BROWSER_RUN_MISMATCH', 403);
+        }
+        const currentPolicy = currentRun?.network_policy ?? currentRun?.networkPolicy ?? context.run?.network_policy ?? context.run?.networkPolicy;
+        if (currentPolicy !== undefined && currentPolicy !== null) {
+            const rawPolicy = typeof currentPolicy === 'string' ? parseJson(currentPolicy, null) : currentPolicy;
+            if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) {
+                throw browserError('当前任务网络策略无效，不能复用浏览器会话。', 'AGENT_BROWSER_POLICY_INVALID', 409);
+            }
+            const policyFingerprint = value => {
+                const policy = normalizeNetworkPolicy(value);
+                return JSON.stringify({
+                    enabled: policy.enabled !== false,
+                    origins: [...policy.allowed_origins].sort(), ports: [...policy.allowed_ports].sort((a, b) => a - b),
+                    redirects: [...policy.allowed_redirect_origins].sort(), allowRedirect: policy.allow_redirect,
+                    privateRanges: policy.block_private_ranges, loopback: policy.block_loopback, linkLocal: policy.block_link_local,
+                    maxDownload: policy.max_download_size_bytes, maxUpload: policy.max_upload_size_bytes
+                });
+            };
+            if (policyFingerprint(rawPolicy) !== policyFingerprint(session.network_policy)) {
+                throw browserError('任务网络策略已变化，请创建新的浏览器会话。', 'AGENT_BROWSER_POLICY_CHANGED', 409);
+            }
+        }
+    }
     if (!session) {
         if (requestedSessionId) {
             const previous = await loadBrowserSession(requestedSessionId, user, { includeClosed: true });
@@ -608,7 +639,8 @@ async function executeAgentBrowserSessionActionUnlocked({ sessionId: requestedSe
     else if (action === 'upload') target = await triggerControlledBrowserUpload(page, input, user, normalizeNetworkPolicy(session.network_policy || {}), context);
     else if (action === 'scroll') {
         const deltaX = Math.max(-5000, Math.min(Number(input.deltaX ?? input.delta_x) || 0, 5000));
-        const deltaY = Math.max(-5000, Math.min(Number(input.deltaY ?? input.delta_y) || 800, 5000));
+        const rawDeltaY = input.deltaY ?? input.delta_y;
+        const deltaY = Math.max(-5000, Math.min(rawDeltaY == null ? 800 : Number(rawDeltaY) || 0, 5000));
         await page.mouse.wheel(deltaX, deltaY);
         target = { method: 'mouse', deltaX, deltaY };
     } else if (action === 'wait') {

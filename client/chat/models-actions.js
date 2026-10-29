@@ -51,6 +51,8 @@ window.Pivot.legacy.toggleKeyVisibility = async () => {
 };
 
 window.Pivot.legacy.addModel = async () => {
+    const btn = document.getElementById('m-submit-btn');
+    if (btn.disabled) return;
     const id = document.getElementById('m-id').value;
     const payload = {
         name: document.getElementById('m-name').value,
@@ -83,7 +85,6 @@ window.Pivot.legacy.addModel = async () => {
             return showToast('输出 Token 上限应小于上下文窗口', 'error');
         }
     }
-    const btn = document.getElementById('m-submit-btn');
     const oldText = btn.innerText;
     btn.disabled = true;
     btn.innerText = '正在保存...';

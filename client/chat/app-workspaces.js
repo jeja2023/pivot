@@ -648,7 +648,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-timeline-source.js', '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
         '/chat/agent-run-utils.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
         '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-status-views.js', '/chat/agent-run-trace-view.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-profile-preferences.js', '/chat/agent-run-diagnostics.js', '/chat/agent-delegation-role-policies-ui.js', '/chat/agent-lifecycle-hook-packages-ui.js', '/chat/agent-acceptance-evidence-ui.js', '/chat/agent-harness.js',
-        '/chat/agent-skill-management.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
+        '/chat/agent-skill-management.js', '/chat/agent-skill-import.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
         '/chat/agent-workflow-editor.js', '/chat/agent-workflow-core.js', '/chat/agent-workflow-runners.js', '/chat/agent-workflows.js',
         '/chat/agent-templates.js', '/chat/agent-schedules.js', '/chat/agent-workflow-schedules.js', '/chat/agent-artifacts.js',

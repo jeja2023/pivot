@@ -278,14 +278,14 @@ function getBuiltInToolDefinitions(user) {
         {
             name: 'agent.browser',
             title: '浏览器自动化',
-            description: '在独立浏览器 Profile 中访问白名单页面并执行受控 DOM/视觉定位操作；上传只接受已登记 rendition，禁止读取凭证。',
+            description: '在独立浏览器 Profile 中访问白名单页面并执行受控页面元素定位操作；上传只接受已登记 rendition，禁止读取凭证。',
             alwaysRequiresApproval: true,
             network: true,
             input_schema: asJsonSchema({
                 url: { type: 'string', description: '新建或导航浏览器会话时必须位于任务网络白名单中的 HTTP/HTTPS 地址。' },
                 sessionId: { type: 'string', maxLength: 128, description: '可选的已授权浏览器会话标识，用于连续浏览任务。' },
                 action: { type: 'string', enum: ['open', 'new_tab', 'switch_tab', 'navigate', 'inspect', 'snapshot', 'click', 'fill', 'select', 'download', 'upload', 'scroll', 'wait', 'screenshot', 'close_tab', 'close'], default: 'inspect' },
-                target: { type: 'object', description: 'DOM/视觉目标，支持 selector、role/name 或 text。' },
+                target: { type: 'object', description: '页面元素目标，支持 selector、role/name 或 text。' },
                 renditionId: { type: 'string', maxLength: 128, description: 'upload 时必填：当前用户可访问且状态为 ready 的已登记渲染产物 ID；不接受路径、文件名或 Base64 正文。' },
                 tabId: { type: 'string', maxLength: 80, description: '可选的浏览器标签标识；省略时使用当前标签。' },
                 newTab: { type: 'boolean', default: false, description: '导航时是否新建标签页；不适用于写入操作。' },

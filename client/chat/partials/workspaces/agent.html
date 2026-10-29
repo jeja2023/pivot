@@ -1078,48 +1078,102 @@
                     </section>
                     <div class="agent-harness-skill-layout">
                         <div class="agent-harness-skill-list-wrap">
-                            <div class="agent-harness-subhead"><strong>已安装技能</strong><span>已注册或导入的技能清单</span></div>
-                            <div id="agent-harness-skill-list" class="agent-harness-list"></div>
+                            <div class="agent-harness-skill-card-head">
+                                <div class="agent-harness-skill-head-main">
+                                    <span class="agent-harness-skill-head-icon">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                                    </span>
+                                    <div class="agent-harness-skill-head-titles">
+                                        <strong>已安装技能</strong>
+                                        <span>已注册或导入的技能清单与运行状态</span>
+                                    </div>
+                                </div>
+                                <div class="agent-harness-skill-head-meta">
+                                    <span id="agent-harness-skill-count-badge" class="agent-harness-badge-pill">已就绪</span>
+                                </div>
+                            </div>
+                            <div id="agent-harness-skill-list" class="agent-harness-list agent-harness-skill-table-container"></div>
                             <div id="agent-harness-skill-pagination" class="pagination workspace-pagination agent-harness-skill-pagination"></div>
                         </div>
                         <div class="agent-harness-skill-form-wrap">
-                            <div class="agent-harness-subhead"><strong>创建 / 导入技能</strong><span>通过单文件 SKILL.md 创建个人草稿，或导入受控兼容包</span></div>
-                            <div class="agent-harness-form-grid">
-                                <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                    <span>SKILL.md（Frontmatter + 工作指引）</span>
-                                    <textarea id="agent-harness-skill-manifest" class="form-input" rows="12"
-                                        placeholder="---
-schemaVersion: 1
-id: project-review
-name: project-review
-version: 1.0.0
-title: 项目审查
-description: 检查项目资料并输出风险摘要。
-tools:
-  - rag.search
-capabilities:
-  - knowledge.search
-inputs: {}
-outputs: {}
----
-
-# 工作指引
-
-仅基于用户提供的数据进行审查。"></textarea>
-                                </label>
-                                <label class="agent-harness-form-field agent-harness-form-field-wide">
-                                    <span>补充说明（可选，追加到工作指引）</span>
-                                    <textarea id="agent-harness-skill-instructions" class="form-input" rows="3"
-                                        placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
-                                </label>
+                            <div class="agent-harness-skill-card-head">
+                                <div class="agent-harness-skill-head-main">
+                                    <span class="agent-harness-skill-head-icon accent">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                    </span>
+                                    <div class="agent-harness-skill-head-titles">
+                                        <strong>创建 / 导入技能</strong>
+                                        <span>上传 SKILL.md 指引并绑定工具，快速生效个人技能</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="agent-harness-form-actions">
-                                <button id="agent-harness-skill-register" class="btn-primary"
-                                    type="button">创建技能草稿</button>
-                                <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
-                                    <span>导入技能包</span>
-                                    <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>
-                                </label>
+                            <div class="agent-harness-skill-form-body">
+                                <div class="agent-harness-form-grid">
+                                    <div class="agent-harness-form-field agent-harness-form-field-wide">
+                                        <span class="agent-field-label">技能文件（SKILL.md）<em class="required-star">*</em></span>
+                                        <div class="agent-skill-file-dropzone" id="agent-skill-file-dropzone">
+                                            <input id="agent-skill-import-source" class="agent-skill-file-input" type="file" accept=".md,text/markdown,text/plain" title="选择或拖拽技能文件">
+                                            <div class="agent-skill-file-dropzone-inner">
+                                                <div class="agent-skill-file-icon-wrap">
+                                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><polyline points="9 15 12 12 15 15"></polyline></svg>
+                                                </div>
+                                                <div class="agent-skill-file-text-content">
+                                                    <div class="agent-skill-file-main-title" id="agent-skill-file-title">点击或拖拽上传 <strong>SKILL.md</strong></div>
+                                                    <div class="agent-skill-file-sub-desc" id="agent-skill-file-desc">标准 Markdown 指引，大小不超过 272 KB</div>
+                                                </div>
+                                                <button type="button" class="btn-secondary btn-xs agent-skill-file-browse-btn" tabindex="-1">选择文件</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="agent-skill-form-row">
+                                        <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                            <span class="agent-field-label">技能名称 <em class="required-star">*</em></span>
+                                            <input id="agent-skill-import-title" class="form-input" maxlength="120" placeholder="例如：制度资料摘要">
+                                        </label>
+                                        <label class="agent-harness-form-field agent-harness-form-field-wide">
+                                            <span class="agent-field-label">技能用途 <small class="text-muted">（可选）</small></span>
+                                            <input id="agent-skill-import-description" class="form-input" maxlength="800" placeholder="简要说明技能用途与适用场景">
+                                        </label>
+                                    </div>
+                                    <div class="agent-harness-form-field agent-harness-form-field-wide agent-skill-tools-field">
+                                        <div class="agent-skill-tools-field-head">
+                                            <span class="agent-field-label">选择当前账号可用的工具</span>
+                                            <span id="agent-skill-tools-count-badge" class="agent-skill-tools-badge">未选择工具</span>
+                                        </div>
+                                        <div class="agent-skill-tools-trigger-row">
+                                            <button id="agent-skill-tools-picker-open-btn" class="btn-secondary agent-skill-tools-picker-btn" type="button">
+                                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                                <span>选择工具...</span>
+                                            </button>
+                                            <div id="agent-skill-tools-tags-preview" class="agent-skill-tools-tags-preview">
+                                                <span class="agent-skill-tools-empty-hint">暂未选择工具（点击左侧按钮配置）</span>
+                                            </div>
+                                        </div>
+                                        <select id="agent-skill-import-tools" class="form-input agent-skill-import-tools-hidden" multiple size="5" aria-describedby="agent-skill-import-help"></select>
+                                    </div>
+                                    <div id="agent-skill-import-help" class="agent-skill-import-tip">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                        <span>只转换单个文件的工作指引；其他脚本和附件不会自动导入或执行。</span>
+                                    </div>
+                                    <div class="agent-harness-form-actions agent-skill-form-actions">
+                                        <button id="agent-skill-import-preview" class="btn-secondary" type="button">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                            <span>预览导入</span>
+                                        </button>
+                                        <button id="agent-skill-import-submit" class="btn-primary" type="button" disabled>
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                            <span>确认并添加个人技能</span>
+                                        </button>
+                                    </div>
+                                    <div id="agent-skill-import-status" class="agent-skill-import-status" role="status" aria-live="polite"></div>
+                                    <pre id="agent-skill-import-review" class="agent-artifact-diff" aria-label="技能导入预览"></pre>
+                                </div>
+                            </div>
+                            <div class="agent-skill-advanced-trigger-wrap">
+                                <button id="agent-skill-advanced-open-btn" class="btn-secondary agent-skill-advanced-btn" type="button">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                    <span>高级：手动创建或导入签名技能包...</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1239,7 +1293,10 @@ outputs: {}
                         <label><span>关键词</span><input id="agent-skill-discovery-query" class="form-input" type="search" maxlength="200" placeholder="名称或用途"></label>
                         <label><span>领域标签</span><input id="agent-skill-discovery-domain" class="form-input" type="text" maxlength="100" placeholder="精确标签"></label>
                         <label><span>声明能力</span><input id="agent-skill-discovery-capability" class="form-input" type="text" maxlength="100" placeholder="能力标识"></label>
-                        <button class="btn-secondary" type="submit">查找技能</button>
+                        <button class="btn-primary agent-skill-discovery-submit" type="submit">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                            <span>查找技能</span>
+                        </button>
                     </form>
                     <div id="agent-skill-discovery-results" aria-live="polite"></div>
                     <div id="agent-skill-discovery-detail" aria-live="polite"></div>
@@ -1277,6 +1334,98 @@ outputs: {}
             <div class="agent-task-editor-footer" style="justify-content: flex-end; gap: 8px;">
                 <button id="agent-lifecycle-hook-package-import-cancel-btn" class="btn-secondary" type="button">取消</button>
                 <button id="agent-lifecycle-hook-package-import-submit" class="btn-primary" type="button">验证并导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 技能工具选择弹窗 -->
+    <div id="agent-skill-tools-modal" class="modal-overlay hidden" style="z-index: 1910;" role="dialog" aria-modal="true"
+        aria-labelledby="agent-skill-tools-modal-title" aria-hidden="true">
+        <div class="modal agent-skill-tools-modal-dialog">
+            <div class="agent-config-modal-head">
+                <div>
+                    <h3 id="agent-skill-tools-modal-title">选择可用工具</h3>
+                    <p>勾选当前技能需要使用的工具能力，支持按名称、标识或用途快速筛选。</p>
+                </div>
+            </div>
+            <div class="agent-skill-tools-modal-toolbar">
+                <div class="agent-skill-tools-search-box">
+                    <input id="agent-skill-tools-filter" class="form-input" type="search" placeholder="搜索工具名称、标识或用途..." aria-label="搜索工具">
+                </div>
+                <div class="agent-skill-tools-quick-actions">
+                    <button id="agent-skill-tools-select-all" class="btn-secondary btn-xs" type="button">全选</button>
+                    <button id="agent-skill-tools-clear-all" class="btn-secondary btn-xs" type="button">清空</button>
+                    <span id="agent-skill-tools-modal-count" class="mcp-count-pill">已选 0 / 0</span>
+                </div>
+            </div>
+            <div class="agent-skill-tools-modal-body">
+                <div id="agent-skill-tools-grid" class="agent-skill-tools-grid" role="group" aria-label="工具列表"></div>
+            </div>
+            <div class="agent-task-editor-footer" style="justify-content: flex-end; align-items: center;">
+                <div style="display: flex; gap: 8px;">
+                    <button id="agent-skill-tools-modal-cancel" class="btn-secondary" type="button">取消</button>
+                    <button id="agent-skill-tools-modal-confirm" class="btn-primary" type="button">确认选择</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 高级技能创建与导入弹窗 -->
+    <div id="agent-skill-advanced-modal" class="modal-overlay hidden" style="z-index: 1910;" role="dialog" aria-modal="true"
+        aria-labelledby="agent-skill-advanced-modal-title" aria-hidden="true">
+        <div class="modal agent-skill-advanced-modal-dialog">
+            <div class="agent-config-modal-head">
+                <div>
+                    <h3 id="agent-skill-advanced-modal-title">高级：手动创建或导入签名技能包</h3>
+                    <p>直接编辑完整 YAML Frontmatter 工作指引清单，或导入经过系统校验的 .skill.zip 技能包。</p>
+                </div>
+                <button id="agent-skill-advanced-modal-close-btn" class="btn-secondary workspace-modal-close" type="button" aria-label="关闭高级技能弹窗">关闭</button>
+            </div>
+            <div class="agent-config-modal-body agent-skill-advanced-modal-body">
+                <div class="agent-skill-advanced-fields">
+                    <div class="agent-skill-advanced-field">
+                        <div class="agent-skill-field-header">
+                            <label for="agent-harness-skill-manifest">SKILL.md（Frontmatter + 工作指引）</label>
+                            <span class="agent-skill-field-hint">支持完整 YAML Frontmatter 元数据及后续 Markdown 工作指引</span>
+                        </div>
+                        <textarea id="agent-harness-skill-manifest" class="form-input form-input-mono agent-skill-manifest-editor" rows="14" spellcheck="false"
+                            placeholder="---
+schemaVersion: 1
+id: project-review
+name: project-review
+version: 1.0.0
+title: 项目审查
+description: 检查项目资料并输出风险摘要。
+tools:
+  - rag.search
+capabilities:
+  - knowledge.search
+inputs: {}
+outputs: {}
+---
+
+# 工作指引
+
+仅基于用户提供的数据进行审查。"></textarea>
+                    </div>
+                    <div class="agent-skill-advanced-field">
+                        <div class="agent-skill-field-header">
+                            <label for="agent-harness-skill-instructions">补充说明（可选，追加到工作指引）</label>
+                            <span class="agent-skill-field-hint">如有执行注意事项或额外上下文，在此补充</span>
+                        </div>
+                        <textarea id="agent-harness-skill-instructions" class="form-input agent-skill-instructions-editor" rows="3"
+                            placeholder="填写技能执行时需要遵守的补充说明。"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="agent-task-editor-footer" style="justify-content: flex-end; align-items: center;">
+                <div style="display: flex; gap: 8px;">
+                    <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
+                        <span>导入技能包</span>
+                        <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>
+                    </label>
+                    <button id="agent-harness-skill-register" class="btn-primary" type="button">创建技能草稿</button>
+                </div>
             </div>
         </div>
     </div>

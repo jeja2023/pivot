@@ -271,6 +271,12 @@
       "count": 52,
       "rationale": "对已通过可见性检查的数据集分批绑定参数查询字段敏感性，保持共享字段过滤规则。",
       "verification": "tests/data-analysis-list-visibility.test.js 与 tests/data-analysis.test.js 覆盖权限、统计和共享字段过滤。"
+    },
+    {
+      "file": "server/routes/models.js",
+      "count": 15,
+      "rationale": "最高管理员变更模型可用范围时在同一事务中更新模型归属并清除不再有权访问的默认模型引用，条件更新限制被修改对象。",
+      "verification": "tests/model-scope-edit.test.js 覆盖范围切换、默认引用清理、部门范围及非最高管理员权限。"
     }
   ]
 }

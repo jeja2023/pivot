@@ -1,7 +1,7 @@
 /* 模型管理路由 */
 const express = require('express');
 const crypto = require('crypto');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { asyncHandler } = require('../http');
 const {
     assertSafeOutboundUrl,
@@ -385,10 +385,16 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const nextApiKey = (api_key === undefined || api_key === '********')
             ? require('../security').preserveEncryptedSecret(existing.api_key, 'models.api_key')
             : encryptSecret(api_key, 'models.api_key');
+        const requestedScope = req.body.scope;
+        if (requestedScope !== undefined && !['personal', 'global'].includes(requestedScope)) return res.status(400).json({ error: '可用范围无效' });
+        if (!isSuperAdmin(req.user) && requestedScope === 'global') return res.status(403).json({ error: '只有系统最高管理员可以设置全局可用范围' });
+        const currentScope = existing.user_id === null ? 'global' : 'personal';
+        const nextScope = isSuperAdmin(req.user) && requestedScope !== undefined ? requestedScope : currentScope;
+        const nextUserId = nextScope === 'global' ? null : req.user.id;
         const dailyLimit = Math.max(parseInt(req.body.daily_token_limit, 10) || 0, 0);
-        const allowedUnits = isSuperAdmin(req.user) && existing.user_id === null
-            ? normalizeTags(req.body.allowed_units)
-            : (existing.allowed_units || '');
+        const allowedUnits = nextScope === 'global' && isSuperAdmin(req.user)
+            ? (req.body.allowed_units === undefined ? (existing.allowed_units || '') : normalizeTags(req.body.allowed_units))
+            : '';
 
         const temp = temperature !== undefined && temperature !== '' ? parseFloat(temperature) : null;
         const tokenSettings = validateModelTokenSettings({ max_input_tokens, max_tokens, context_window_tokens });
@@ -404,11 +410,22 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
 
         let changed;
-        if (isSuperAdmin(req.user) && existing.user_id === null) {
-            changed = await execute(
-                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ?',
-                [name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id]
-            );
+        if (isSuperAdmin(req.user)) {
+            changed = await transaction(async trx => {
+                const updated = await trx.execute(
+                    'UPDATE models SET user_id = ?, is_default = CASE WHEN ? = \'personal\' THEN 0 ELSE is_default END, name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id IS NOT DISTINCT FROM ?',
+                    [nextUserId, nextScope, name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, existing.user_id]
+                );
+                if (!updated) return 0;
+                if (nextScope === 'personal' && currentScope === 'global') {
+                    await trx.execute("UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'default_model_id' AND value = ?", [getBeijingTimestamp(), String(req.params.id)]);
+                    await trx.execute('UPDATE users SET default_model_id = NULL WHERE default_model_id = ? AND id <> ?', [req.params.id, req.user.id]);
+                } else if (nextScope === 'global' && allowedUnits) {
+                    await trx.execute('UPDATE users SET default_model_id = NULL WHERE default_model_id = ? AND NOT (TRIM(COALESCE(unit, \'\')) = ANY(?::text[]))', [req.params.id, allowedUnits.split(',')]);
+                }
+                return updated;
+            });
+            if (changed && nextScope === 'personal' && currentScope === 'global') await require('../services/app-settings').refreshAppSettingsCache().catch(() => {});
         } else {
             changed = await execute(
                 'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
@@ -417,7 +434,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         }
 
         if (changed > 0) {
-            logAction(req, '修改模型', `更新模型: ${name} (ID: ${req.params.id})`);
+            logAction(req, '修改模型', `更新模型: ${name} (ID: ${req.params.id})，可用范围: ${currentScope === 'global' ? '全局' : '个人'} → ${nextScope === 'global' ? '全局' : '个人'}`);
             res.json({ success: true });
         } else {
             res.status(403).json({ error: '无权修改或模型不存在' });

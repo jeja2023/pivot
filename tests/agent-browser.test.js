@@ -1,3 +1,4 @@
+/* global document, WebSocket, Worker, Blob */
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
@@ -5,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { chromium } = require('playwright');
+const { WebSocketServer } = require('ws');
 const {
     assertSafeBrowserEvaluation,
     buildBrowserContextOptions,
@@ -16,6 +18,7 @@ const {
     isHeadlessEnvironment,
     locateBrowserTarget,
     resolveChromiumExecutable,
+    waitForBrowserTarget,
     isAgentBrowserRuntimeAvailable
 } = require('../server/services/agent-browser');
 
@@ -107,5 +110,83 @@ test('controlled login flow waits for user readiness without exposing credential
         else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previous;
         fs.rmSync(root, { recursive: true, force: true });
         await new Promise(resolve => fixture.server.close(resolve));
+    }
+});
+
+
+test('等待目标支持延迟出现、隐藏、移除和超时', { skip: !hasChromium && '未检测到可用的 Chromium' }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage();
+        await page.setContent('<div id="hidden" hidden>目标</div>');
+        await page.evaluate(() => { setTimeout(() => { document.querySelector('#hidden').hidden = false; }, 200); });
+        await waitForBrowserTarget(page, { selector: '#hidden' }, { state: 'visible', timeoutMs: 3000 });
+        await page.evaluate(() => { setTimeout(() => { document.querySelector('#hidden').hidden = true; }, 150); });
+        await waitForBrowserTarget(page, { selector: '#hidden' }, { state: 'hidden', timeoutMs: 3000 });
+        await page.evaluate(() => { setTimeout(() => { document.querySelector('#hidden').remove(); }, 150); });
+        await waitForBrowserTarget(page, { selector: '#hidden' }, { state: 'detached', timeoutMs: 3000 });
+        await assert.rejects(() => waitForBrowserTarget(page, { selector: '#missing' }, { state: 'visible', timeoutMs: 200 }), /Timeout/);
+    } finally { await browser.close(); }
+});
+
+test('受控浏览器允许授权站点 WebSocket，拒绝未授权端口', { skip: !hasChromium && '未检测到可用的 Chromium' }, async () => {
+    const allowed = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html><body>已授权</body></html>'); });
+    let forbiddenHttpCount = 0;
+    const forbidden = http.createServer((_req, res) => { forbiddenHttpCount++; res.end('forbidden'); });
+    const allowedWs = new WebSocketServer({ server: allowed });
+    const forbiddenWs = new WebSocketServer({ server: forbidden });
+    let allowedCount = 0;
+    let forbiddenCount = 0;
+    allowedWs.on('connection', socket => { allowedCount++; socket.close(); });
+    forbiddenWs.on('connection', socket => { forbiddenCount++; socket.close(); });
+    await new Promise(resolve => allowed.listen(0, '127.0.0.1', resolve));
+    await new Promise(resolve => forbidden.listen(0, '127.0.0.1', resolve));
+    const port = allowed.address().port;
+    const origin = `http://127.0.0.1:${port}`;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-browser-ws-test-'));
+    const previous = process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
+    process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = 'true';
+    let context;
+    try {
+        context = await createAgentBrowserContext({ profileRoot: root, taskId: 'ws', networkPolicy: { allowed_origins: [origin], allowed_ports: [port], block_private_ranges: false, block_loopback: false, block_link_local: false } });
+        const page = context.pages()[0] || await context.newPage();
+        await page.goto(origin);
+        await page.evaluate(async ([a, b]) => {
+            await Promise.all([a, b].map(url => new Promise(resolve => {
+                const socket = new WebSocket(url);
+                const timer = setTimeout(resolve, 2000);
+                socket.onclose = () => { clearTimeout(timer); resolve(); };
+                socket.onerror = () => { clearTimeout(timer); resolve(); };
+            })));
+        }, [`ws://127.0.0.1:${port}/ws`, `ws://127.0.0.1:${forbidden.address().port}/ws`]);
+        await page.evaluate(async url => {
+            const code = `const socket = new WebSocket(${JSON.stringify(url)}); socket.onclose = socket.onerror = () => postMessage('done');`;
+            const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+            await new Promise(resolve => { worker.onmessage = resolve; setTimeout(resolve, 2000); });
+            worker.terminate();
+        }, `ws://127.0.0.1:${forbidden.address().port}/worker`);
+        await page.evaluate(async url => {
+            const code = `const socket = new WebSocket(${JSON.stringify(url)}); socket.onclose = socket.onerror = () => postMessage('done');`;
+            const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+            await new Promise(resolve => { worker.onmessage = resolve; setTimeout(resolve, 2000); });
+            worker.terminate();
+        }, `ws://127.0.0.1:${port}/worker`);
+        await page.evaluate(async url => {
+            const code = `fetch(${JSON.stringify(url)}).then(() => postMessage('done'), () => postMessage('done'));`;
+            const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+            await new Promise(resolve => { worker.onmessage = resolve; setTimeout(resolve, 2000); });
+            worker.terminate();
+        }, `http://127.0.0.1:${forbidden.address().port}/worker`);
+        assert.equal(await page.evaluate(() => typeof globalThis.RTCPeerConnection), 'undefined');
+        assert.equal(allowedCount, 2);
+        assert.equal(forbiddenCount, 0);
+        assert.equal(forbiddenHttpCount, 0);
+    } finally {
+        await closeAgentBrowserContext(context);
+        if (previous === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS; else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previous;
+        allowedWs.close(); forbiddenWs.close();
+        await new Promise(resolve => allowed.close(resolve));
+        await new Promise(resolve => forbidden.close(resolve));
+        fs.rmSync(root, { recursive: true, force: true });
     }
 });

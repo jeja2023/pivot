@@ -141,7 +141,7 @@ const TOOL_POLICY_KNOWN_DESCRIPTIONS = {
     'agent.handoff': '把已有结论、证据、风险和待决问题整理为结构化 Handoff。',
     'agent.code': '需要独立受控 Worker 沙箱；服务端不会直接执行 JavaScript。',
     'agent.http': '调用外部 REST API 并返回状态码与响应数据。',
-    'agent.browser': '在独立浏览器 Profile 中访问白名单页面并执行受控 DOM/视觉定位操作，禁止读取凭证。',
+    'agent.browser': '在独立浏览器 Profile 中访问白名单页面并执行受控页面元素定位操作，禁止读取凭证。',
     'agent.merge': '把多个上游节点的输出合并成一个对象，便于下游统一引用。',
     'workflow.input': '声明并读取运行参数，支持必填校验、默认值和基础类型转换。',
     'workflow.template': '使用工作流变量拼接确定性文本，不调用模型、不执行代码。',

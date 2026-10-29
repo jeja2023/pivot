@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { assertNetworkPolicyUrl, assertRedirectAllowed, normalizeNetworkPolicy } = require('./agent-network-policy');
+const { startBrowserNetworkProxy } = require('./agent-browser-network-proxy');
 
 const SENSITIVE_EVALUATION_RE = /(?:document\s*\.\s*cookie|localStorage|sessionStorage|password|authorization|token)/i;
 
@@ -78,6 +79,27 @@ function loadPlaywrightBrowser(engine = 'chromium') {
 }
 
 async function attachBrowserNetworkGuards(context, policy, options = {}) {
+    // WebRTC 不经过 HTTP 代理或 Playwright 请求路由，受控会话不提供该出站通道。
+    await context.addInitScript(() => {
+        for (const key of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) {
+            try { Object.defineProperty(globalThis, key, { value: undefined, writable: false, configurable: false }); } catch (_) {}
+        }
+    });
+    // WebSocket 不经过普通 HTTP 路由；映射到同源 HTTP 策略后单独校验。
+    if (typeof context.routeWebSocket !== 'function') {
+        throw Object.assign(new Error('浏览器运行时不支持 WebSocket 网络防护。'), { code: 'AGENT_BROWSER_NETWORK_GUARD_UNAVAILABLE' });
+    }
+    await context.routeWebSocket(/.*/, async socket => {
+        try {
+            const target = new URL(socket.url());
+            if (!['ws:', 'wss:'].includes(target.protocol) || target.username || target.password) throw new Error('WebSocket 地址无效');
+            target.protocol = target.protocol === 'wss:' ? 'https:' : 'http:';
+            await assertNetworkPolicyUrl(target.href, policy, { requireAllowlist: true });
+            socket.connectToServer();
+        } catch (_) {
+            await socket.close({ code: 1008, reason: '网络策略拒绝连接' }).catch(() => {});
+        }
+    });
     await context.route('**/*', async route => {
         try {
             const request = route.request();
@@ -142,9 +164,24 @@ async function createManagedBrowserContext(options = {}) {
     const contextOptions = buildBrowserContextOptions({ ...options, executablePath });
     const profile = path.resolve(String(contextOptions.userDataDir));
     delete contextOptions.userDataDir;
-    const context = await browser.launchPersistentContext(profile, contextOptions);
-    await attachBrowserNetworkGuards(context, policy, { isDownloadAllowed: options.isDownloadAllowed });
-    return context;
+    const proxy = await startBrowserNetworkProxy(policy);
+    let context;
+    try {
+        contextOptions.proxy = { server: proxy.server };
+        if (engine === 'chromium') {
+            contextOptions.args = [...(contextOptions.args || []), '--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'];
+        } else if (engine === 'firefox') {
+            contextOptions.firefoxUserPrefs = { 'media.peerconnection.enabled': false, 'network.proxy.allow_hijacking_localhost': true };
+        }
+        context = await browser.launchPersistentContext(profile, contextOptions);
+        context.once('close', () => proxy.close());
+        await attachBrowserNetworkGuards(context, policy, { isDownloadAllowed: options.isDownloadAllowed });
+        return context;
+    } catch (error) {
+        if (context) await context.close().catch(() => {});
+        proxy.close();
+        throw error;
+    }
 }
 
 async function createAgentBrowserContext(options = {}) {
@@ -313,7 +350,16 @@ async function waitForBrowserTarget(page, target, options = {}) {
         await page.waitForTimeout(timeoutMs);
         return { method: 'timer', timeoutMs };
     }
-    const locator = await requireDomBrowserTarget(page, target, options);
+    const spec = target || {};
+    let locator;
+    if (spec.selector) locator = page.locator(String(spec.selector)).first();
+    else if (spec.role && spec.name) locator = page.getByRole(String(spec.role), { name: String(spec.name) }).first();
+    else if (spec.text) locator = page.getByText(String(spec.text), { exact: spec.exact === true }).first();
+    else {
+        const error = new Error('等待操作必须指定有效的页面元素。');
+        error.code = 'AGENT_BROWSER_TARGET_REQUIRED';
+        throw error;
+    }
     await locator.waitFor({ state: options.state || 'visible', timeout: timeoutMs });
     return { method: 'dom', timeoutMs };
 }

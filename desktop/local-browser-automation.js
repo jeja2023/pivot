@@ -19,6 +19,7 @@ const {
 
 const MAX_TEXT_CHARS = 12000;
 const MAX_SCREENSHOT_BYTES = 1024 * 1024;
+const activeProfiles = new Set();
 
 function browserExecutionError(message, code = 'LOCAL_BROWSER_EXECUTION_FAILED', status = 400) {
     const error = new Error(message);
@@ -70,15 +71,18 @@ async function runLocalBrowserTask({ toolName, input, grant, profileRoot, confir
     const browser = resolveGrantedBrowser(grant, task.browserId);
     const policy = browserNetworkPolicy(normalizedGrant);
     const profile = profileDirectory(profileRoot, browser.id);
-    const context = await createManagedBrowserContext({
-        engine: browser.engine,
-        executablePath: browser.executablePath,
-        userDataDir: profile,
-        headless: false,
-        networkPolicy: policy,
-        viewport: { width: 1440, height: 900 }
-    });
+    if (activeProfiles.has(profile)) throw browserExecutionError('该浏览器正在执行其他本机操作，请稍后重试。', 'LOCAL_BROWSER_BUSY', 409);
+    activeProfiles.add(profile);
+    let context;
     try {
+        context = await createManagedBrowserContext({
+            engine: browser.engine,
+            executablePath: browser.executablePath,
+            userDataDir: profile,
+            headless: false,
+            networkPolicy: policy,
+            viewport: { width: 1440, height: 900 }
+        });
         const page = context.pages()[0] || await context.newPage();
         let navigationError = null;
         try {
@@ -149,7 +153,7 @@ async function runLocalBrowserTask({ toolName, input, grant, profileRoot, confir
         const bodyText = await page.locator('body').innerText().catch(() => '');
         return { ...base, action: 'inspected', text: String(bodyText).slice(0, MAX_TEXT_CHARS) };
     } finally {
-        await closeAgentBrowserContext(context);
+        try { await closeAgentBrowserContext(context); } finally { activeProfiles.delete(profile); }
     }
 }
 
