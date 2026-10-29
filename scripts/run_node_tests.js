@@ -26,6 +26,13 @@ const testFiles = requestedTestFiles.length
     )))
     : availableTestFiles;
 
+const missingTestFiles = requestedTestFiles.filter(requested => !testFiles.some(file => (
+    file.replace(/\\/g, '/') === requested.replace(/\\/g, '/') || path.basename(file) === requested
+)));
+if (missingTestFiles.length) {
+    throw new Error(`以下测试文件未找到：${missingTestFiles.join(', ')}`);
+}
+
 if (!testFiles.length) {
     throw new Error(`No matching test files. Available files: ${availableTestFiles.join(', ')}`);
 }

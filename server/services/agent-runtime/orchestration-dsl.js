@@ -80,7 +80,7 @@ class OrchestrationDSLParser {
       }
 
       // 解析 agent 块
-      if (trimmed.startsWith('agent')) {
+      if (trimmed.startsWith('agent') && !currentBlock?.currentStep) {
         const match = trimmed.match(/agent\s+"([^"]+)"\s*{/);
         if (match) {
           currentSection = 'agent';
@@ -131,6 +131,11 @@ class OrchestrationDSLParser {
       // 解析块结束
       if (trimmed === '}') {
         if (currentBlock) {
+          if (currentSection === 'workflow' && currentBlock.currentStep) {
+            currentBlock.steps.push(currentBlock.currentStep);
+            delete currentBlock.currentStep;
+            continue;
+          }
           if (currentSection === 'agent') {
             ast.agents.push(currentBlock);
           } else if (currentSection === 'workflow') {
@@ -172,7 +177,7 @@ class OrchestrationDSLParser {
       if (match) {
         block.capabilities = match[1]
           .split(',')
-          .map(c => c.trim().replace(/"/g, ''));
+          .map(c => c.trim().replace(/"/g, '')).filter(Boolean);
       }
       return;
     }
@@ -225,7 +230,7 @@ class OrchestrationDSLParser {
       if (match && block.currentStep) {
         block.currentStep.dependsOn = match[1]
           .split(',')
-          .map(d => d.trim().replace(/"/g, ''));
+          .map(d => d.trim().replace(/"/g, '')).filter(Boolean);
       }
       return;
     }
@@ -329,24 +334,10 @@ class OrchestrationExecutor {
   /**
    * 执行 DSL 定义的编排
    */
-  async execute(dslCode, context = {}) {
-    // 解析 DSL
-    const ast = this.parser.parse(dslCode);
-
-    // 初始化 agents
-    const agents = await this.initializeAgents(ast.agents);
-
-    // 执行 workflows
-    const results = [];
-    for (const workflow of ast.workflows) {
-      const result = await this.executeWorkflow(workflow, agents, context);
-      results.push(result);
-    }
-
-    return {
-      orchestration: ast.name,
-      results
-    };
+  async execute() {
+    const error = new Error('编排执行器尚未接入真实运行时');
+    error.code = 'ORCHESTRATION_RUNTIME_UNAVAILABLE';
+    throw error;
   }
 
   /**
@@ -366,26 +357,10 @@ class OrchestrationExecutor {
   /**
    * 创建 agent
    */
-  async createAgent(def) {
-    return {
-      name: def.name,
-      role: def.role,
-      capabilities: def.capabilities,
-      model: def.model || 'gpt-4',
-      config: def.config,
-
-      async execute(task, context) {
-        // 实际执行逻辑应该调用真实的 agent 运行时
-        console.log(`Agent ${this.name} 执行任务:`, task);
-
-        // 模拟执行
-        return {
-          success: true,
-          output: `Agent ${this.name} 完成任务: ${task}`,
-          context
-        };
-      }
-    };
+  async createAgent() {
+    const error = new Error('编排执行器尚未接入真实运行时');
+    error.code = 'ORCHESTRATION_RUNTIME_UNAVAILABLE';
+    throw error;
   }
 
   /**

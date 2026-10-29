@@ -25,16 +25,21 @@ async def render_diagram(source: str, diagram_type: str = "mermaid") -> dict[str
     """将 Mermaid、PlantUML 或 Graphviz 文本转换成受控矢量图产物。"""
     if diagram_type not in {"mermaid", "plantuml", "graphviz"} or not source.strip() or len(source.encode()) > 65536:
         raise ValueError("图形类型不支持、源码为空或超过 64 KiB。")
-    async with slots, httpx.AsyncClient(timeout=45, trust_env=False, follow_redirects=False) as client:
-        async with client.stream("POST", f"http://kroki:8000/{diagram_type}/svg", params={"flowchart_html-labels": "false", "html-labels": "false"}, content=source.encode(),
-                                 headers={"Content-Type": "text/plain", "Accept": "image/svg+xml"}) as response:
-            if response.status_code != 200 or not response.headers.get("content-type", "").startswith("image/svg+xml"):
-                raise ValueError("离线绘图引擎返回失败或不支持的内容类型。")
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) > 1048576:
-                    raise ValueError("图形输出超过 1 MiB。")
+    try:
+        async with slots, httpx.AsyncClient(timeout=45, trust_env=False, follow_redirects=False) as client:
+            async with client.stream("POST", f"http://kroki:8000/{diagram_type}/svg", params={"flowchart_html-labels": "false", "html-labels": "false"}, content=source.encode(),
+                                     headers={"Content-Type": "text/plain", "Accept": "image/svg+xml"}) as response:
+                if response.status_code != 200 or not response.headers.get("content-type", "").startswith("image/svg+xml"):
+                    raise ValueError("离线绘图引擎返回失败或不支持的内容类型。")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 1048576:
+                        raise ValueError("图形输出超过 1 MiB。")
+    except httpx.TimeoutException as error:
+        raise ValueError("离线绘图引擎响应超时，请检查绘图服务是否就绪。") from error
+    except httpx.RequestError as error:
+        raise ValueError("无法连接离线绘图引擎，请检查服务和内部网络。") from error
     return {"pivotArtifact": {"kind": "diagram", "svg": body.decode("utf-8")}}
 
 

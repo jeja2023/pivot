@@ -24,11 +24,11 @@ async function pythonRuntime() {
     }
     throw new Error('未找到含 mcp、httpx、uvicorn 的 Python 环境。请按 docker/offline-tools/requirements.lock 创建虚拟环境，并设置 PIVOT_OFFLINE_TOOLS_PYTHON。');
 }
-async function waitReady(container, url) {
-    const script = `import urllib.request; response=urllib.request.urlopen(${JSON.stringify(url)},timeout=3); assert response.status==200`;
-    const deadline = Date.now() + 90000;
+async function waitReady(container, url, requestTimeoutMs = 3000) {
+    const script = `import urllib.request; response=urllib.request.urlopen(${JSON.stringify(url)},timeout=${requestTimeoutMs / 1000}); assert response.status==200`;
+    const deadline = Date.now() + 150000;
     while (Date.now() < deadline) {
-        try { await docker(['exec', container, 'python', '-c', script], { timeout: 5000 }); return; }
+        try { await docker(['exec', container, 'python', '-c', script], { timeout: requestTimeoutMs + 10000 }); return; }
         catch (_) {
             const state = await docker(['inspect', '--format', '{{.State.Running}}', container]);
             if (state !== 'true') throw new Error(`隔离服务已退出：${container}，请检查容器日志。`);
@@ -39,7 +39,13 @@ async function waitReady(container, url) {
 }
 async function main() {
     const args = process.argv.slice(2);
-    if (args.some(arg => arg !== '--all')) throw new Error('仅支持 --all 参数；默认补测两项离线集成测试。');
+    const imageArgs = args.filter(arg => arg.startsWith('--tools-image='));
+    if (imageArgs.length > 1 || args.some(arg => arg !== '--all' && !arg.startsWith('--tools-image='))) {
+        throw new Error('仅支持 --all 和 --tools-image=<本地镜像> 参数。');
+    }
+    const selectedImage = imageArgs[0]?.slice('--tools-image='.length);
+    if (imageArgs.length && !selectedImage) throw new Error('必须提供本地工具镜像名称。');
+    const selectedImages = { ...images, ...(selectedImage ? { tools: selectedImage } : {}) };
     const all = args.includes('--all');
     const prefix = `pivot-offline-test-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     const network = `${prefix}-network`;
@@ -49,7 +55,9 @@ async function main() {
     try {
         await docker(['info', '--format', '{{.OSType}}']).then(type => { if (type !== 'linux') throw new Error('离线绘图集成测试需要 Docker Linux 容器模式。'); });
         const python = await pythonRuntime(); report.python = python;
-        for (const [name, reference] of Object.entries(images)) report.images[name] = { reference, id: await docker(['image', 'inspect', '--format', '{{.Id}}', reference]) };
+        await command(python.executable, ['-m', 'unittest', 'discover', '-s', 'tests/offline_tools', '-p', 'test_*.py']);
+        console.log('离线工具 Python 回归通过。');
+        for (const [name, reference] of Object.entries(selectedImages)) report.images[name] = { reference, id: await docker(['image', 'inspect', '--format', '{{.Id}}', reference]) };
         fs.mkdirSync(path.join(root, '.tmp'), { recursive: true });
         temporary = fs.mkdtempSync(path.join(root, '.tmp/offline-integration-'));
         const tokenFile = path.join(temporary, 'token'); fs.writeFileSync(tokenFile, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
@@ -64,10 +72,12 @@ async function main() {
         await start('mermaid', 'kroki-mermaid', report.images.mermaid.id);
         await start('kroki', 'kroki', report.images.kroki.id, ['--env', 'KROKI_MERMAID_HOST=kroki-mermaid', '--env', 'KROKI_SAFE_MODE=secure', '--env', 'KROKI_COMMAND_TIMEOUT=30s']);
         const tools = await start('tools', 'offline-tools', report.images.tools.id, ['--user', '1000:1000', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m',
-            '--mount', `type=bind,src=${path.join(root, 'docker/offline-tools')},dst=/opt/pivot-tools,readonly`,
+            ...(!selectedImage ? ['--mount', `type=bind,src=${path.join(root, 'docker/offline-tools')},dst=/opt/pivot-tools,readonly`] : []),
             '--mount', `type=bind,src=${tokenFile},dst=/run/secrets/offline_tools_token,readonly`]);
         await waitReady(tools, 'http://127.0.0.1:8501/health');
         await waitReady(tools, 'http://kroki:8000/health');
+        // Mermaid 的健康端点会实际渲染样例并等待 Chromium，而 Kroki 自身的健康端点不会。
+        await waitReady(tools, 'http://kroki-mermaid:8002/health', 60000);
         report.containerPython = JSON.parse(await docker(['exec', tools, 'python', '-c', 'import json,importlib.metadata as m; print(json.dumps({p:m.version(p) for p in ("mcp","httpx","uvicorn")}))']));
         report.container = tools; report.readyAt = new Date().toISOString();
         const files = all ? [] : ['tests/offline-tools-live.test.js', 'tests/offline-tools-docker.test.js'];
@@ -83,7 +93,7 @@ async function main() {
             try {
                 const owner = await docker(['inspect', '--format', '{{index .Config.Labels "pivot.test.owner"}}', container]);
                 if (owner !== prefix) throw new Error('容器归属校验失败，未执行移除。');
-                await docker(['rm', '--force', container]); report.cleanup[container] = true;
+                await docker(['rm', '--force', container], { timeout: 90000 }); report.cleanup[container] = true;
             } catch (error) { report.cleanup[container] = false; report.cleanupError = error.message; exitCode = 1; }
         }
         if (networkCreated) {

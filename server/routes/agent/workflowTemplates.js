@@ -132,13 +132,14 @@ function createWorkflowTemplatesRouter({ authMiddleware, logAction }) {
         const { id } = req.params;
         const { rating, comment } = req.body;
 
-        if (!rating || rating < 1 || rating > 5) {
+        const parsedRating = typeof rating === 'number' ? rating : (typeof rating === 'string' && /^[1-5]$/.test(rating) ? Number(rating) : NaN);
+        if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
             throw new WorkflowTemplateError('评分必须在 1-5 之间', 400);
         }
 
         const result = await WorkflowTemplateService.rateTemplate(
             parseInt(id, 10),
-            parseInt(rating, 10),
+            parsedRating,
             comment || '',
             req.user.id
         );

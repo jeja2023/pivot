@@ -97,6 +97,7 @@ const {
 } = require('./services/runtime-diagnostics');
 const { getChatAgentRuntimeConfig } = require('./services/runtime-settings');
 const { stealthAccessGuard } = require('./middleware/stealth-guard');
+const { createExperimentalApiGuard } = require('./middleware/experimental-api-guard');
 
 // 移除冗余的 getClientIp 定义，已由 http.js 提供
 
@@ -686,19 +687,26 @@ app.use('/api', createWorkflowTemplatesRouter({
 
 // 评测系统路由
 const evaluationRouter = require('./routes/api/evaluation');
-app.use('/api/evaluation', evaluationRouter);
+app.use('/api/evaluation', createExperimentalApiGuard(authMiddleware), evaluationRouter);
 
 // 流式交互路由
 const streamingRouter = require('./routes/api/streaming');
-app.use('/api/streaming', streamingRouter);
+app.use('/api/streaming', createExperimentalApiGuard(authMiddleware), streamingRouter);
 
 // 工具推荐路由
 const toolRecommendationRouter = require('./routes/api/tool-recommendation');
-app.use('/api/tools', toolRecommendationRouter);
+app.use('/api/tools', createExperimentalApiGuard(authMiddleware, { block: [
+    { method: 'POST', path: '/recommend' },
+    { method: 'POST', path: '/feedback' },
+    { method: 'GET', path: '/stats' },
+    { method: 'GET', path: '/trending' },
+    { method: 'GET', path: '/recommendation-effectiveness' },
+    { method: 'POST', path: '/reinitialize' }
+] }), toolRecommendationRouter);
 
 // 自主规划路由
 const planningRouter = require('./routes/api/planning');
-app.use('/api/planning', planningRouter);
+app.use('/api/planning', createExperimentalApiGuard(authMiddleware), planningRouter);
 
 // Artifacts 交互空间路由
 const artifactsRouter = require('./routes/api/artifacts');
@@ -706,7 +714,11 @@ app.use('/api/artifacts', artifactsRouter);
 
 // 编排语言路由
 const orchestrationRouter = require('./routes/api/orchestration');
-app.use('/api/orchestration', orchestrationRouter);
+app.use('/api/orchestration', createExperimentalApiGuard(authMiddleware, { allow: [
+    { method: 'POST', path: '/parse' },
+    { method: 'POST', path: '/validate' },
+    { method: 'GET', path: '/example' }
+] }), orchestrationRouter);
 
 // 入站触发挂在 /hooks 下：令牌即凭证，不参与浏览器会话鉴权和 CSRF 校验
 app.use('/hooks', createTriggersRouter({

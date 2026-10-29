@@ -7,11 +7,12 @@ const router = express.Router();
 const { BenchmarkManager } = require('../../services/agent-evaluation/evaluation-framework');
 const { getAllTestSuites } = require('../../services/agent-evaluation/test-suites');
 const { authMiddleware } = require('../../auth');
+const { isAdmin } = require('../../permissions');
 
 // 简单的认证中间件包装
 const requireAuth = authMiddleware;
 const requireAdmin = (req, res, next) => {
-    if (!req.user || req.user.role !== 'admin') {
+    if (!isAdmin(req.user)) {
         return res.status(403).json({ error: '需要管理员权限' });
     }
     next();
@@ -87,7 +88,7 @@ router.get('/suites/:id', requireAuth, async (req, res) => {
  * 创建评测套件
  * POST /api/evaluation/suites
  */
-router.post('/suites', requireAdmin, async (req, res) => {
+router.post('/suites', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { name, description, category, version, metadata, cases } = req.body;
 

@@ -91,7 +91,7 @@ test('窄屏引用中的代码工具栏可操作，长代码和公式的首尾�
                 });
                 const pre = document.querySelector('pre');
                 const formula = document.querySelector('.math-block');
-                const first = formula.querySelector('.katex-html .base').getBoundingClientRect();
+                const first = formula.querySelector('.katex-html .katex-base').getBoundingClientRect();
                 const firstLeft = first.left;
                 formula.scrollLeft = formula.scrollWidth;
                 return {

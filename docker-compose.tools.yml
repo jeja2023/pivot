@@ -10,6 +10,11 @@ services:
     pids_limit: 64
     mem_limit: 512m
     cpus: 2
+    depends_on:
+      kroki:
+        condition: service_started
+      kroki-mermaid:
+        condition: service_healthy
     secrets: [offline_tools_token]
     networks: [ai-bridge, renderer]
     tmpfs:
@@ -34,6 +39,12 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 768m
     cpus: 2
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8002/health', { signal: AbortSignal.timeout(60000) }).then(r => { if (!r.ok) process.exitCode = 1; }).catch(() => { process.exitCode = 1; })"]
+      interval: 30s
+      timeout: 65s
+      start_period: 120s
+      retries: 3
 networks:
   ai-bridge:
     external: true

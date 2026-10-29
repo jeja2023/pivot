@@ -11,6 +11,25 @@ const { sanitizeSvg } = require('../server/services/document-rendering/image-ren
 const { renderDocumentIr } = require('../server/services/document-rendering');
 const { auditReportIr } = require('../server/services/tool-result-artifacts');
 const { previewSkillSource } = require('../server/services/agent-skill-authoring');
+const { main: exportOfflineTools, renderComposeForToolsImage } = require('../scripts/offline_tools_release');
+
+test('离线包使用指定镜像并拒绝注入或不匹配的 Compose 配置', () => {
+    const compose = 'services:\n  offline-tools:\n    image: pivot-offline-tools:1.0.0\n';
+    assert.match(renderComposeForToolsImage(compose, 'pivot-offline-tools:review-20261029'), /image: pivot-offline-tools:review-20261029/);
+    assert.throws(() => renderComposeForToolsImage(compose, 'bad:tag\n    privileged: true'), /镜像/);
+    assert.throws(() => renderComposeForToolsImage('services: {}', 'pivot-offline-tools:review-20261029'), /Compose/);
+});
+
+test('无效镜像标签在创建离线包之前被拒绝', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-offline-export-test-'));
+    const output = path.join(root, 'bundle');
+    try {
+        await assert.rejects(exportOfflineTools(['--export', output, '--tools-image=bad:tag\n    privileged: true']), /镜像/);
+        await assert.rejects(fs.access(output), error => error.code === 'ENOENT');
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
+});
 
 test('技能不得把能力登记裸名误认为连接器执行入口', () => {
     const markdown = '---\nid: read-source\nname: read-source\nversion: 1.0.0\nschemaVersion: 1\ncapabilities: [filesystem.read_workspace]\ntools: [workspace.read]\ninputs: {}\noutputs: {}\n---\n只读授权源码。';

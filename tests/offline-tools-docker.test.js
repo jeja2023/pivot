@@ -36,7 +36,7 @@ asyncio.run(main())`;
     assert.equal(lines[0].anonymous, 401);
     assert.equal(lines.length, 4);
     for (const result of lines.slice(1)) {
-        assert.equal(result.isError, false, JSON.stringify(result.error));
+        assert.equal(result.isError, false, JSON.stringify({ tool: result.name, type: result.type, error: result.error }));
         const artifact = result.data.pivotArtifact;
         if (artifact.kind === 'audit') assert.equal(artifact.data.issues_count, 1);
         else assert.match(sanitizeSvg(artifact.svg), /<svg/);

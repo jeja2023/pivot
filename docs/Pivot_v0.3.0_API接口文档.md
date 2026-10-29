@@ -1,5 +1,7 @@
 # Pivot v0.3.0 RESTful API 接口规范
 
+> 本文为 v0.3.0 历史设计资料，并非当前版本的接口可用性承诺。当前 `/api/evaluation`、`/api/streaming`、本文所列工具推荐接口、`/api/planning` 及编排执行和存储接口尚未完成接入，经过认证后返回 `503 EXPERIMENTAL_API_UNAVAILABLE`。当前工作流及任务请使用产品工作台及 `/api/agents` 路由；接口行为以当前代码和测试为准。不要通过解除门禁启用模拟执行逻辑。
+
 > **认证方式**：Cookie 会话 / JWT Bearer Token / Stealth Access Token  
 > **数据格式**：`application/json`
 
@@ -11,8 +13,6 @@
 - `GET /api/agent/workflow-templates` - 查询模板列表（支持 category, difficulty, search, page, limit）
 - `GET /api/agent/workflow-templates/:id` - 获取模板详情
 - `POST /api/agent/workflow-templates` - 创建新模板
-- `PUT /api/agent/workflow-templates/:id` - 更新模板定义
-- `DELETE /api/agent/workflow-templates/:id` - 删除模板
 - `POST /api/agent/workflow-templates/:id/apply` - 传入变量并一键实例化工作流
 - `POST /api/agent/workflow-templates/:id/rate` - 模板评分
 
@@ -57,6 +57,6 @@
 - `DELETE /api/artifacts/:id/comments/:commentId` - 删除评论
 
 ### 1.7 编排 DSL 声明式语言 (`/api/orchestration`)
-- `POST /api/orchestration/parse` - 解析 YAML/JSON 为执行 AST
-- `POST /api/orchestration/validate` - 拓扑循环检测与模式验证
-- `POST /api/orchestration/execute` - 调度多智能体协作执行
+- `POST /api/orchestration/parse` - 解析实验性的自定义 DSL 文本，需登录
+- `POST /api/orchestration/validate` - 执行基础结构和 Agent 引用检查，需登录；不提供完整拓扑循环验证
+- `POST /api/orchestration/execute` - 当前不可用，不会执行模拟任务

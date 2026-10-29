@@ -69,7 +69,7 @@ class WorkflowTemplateService {
         const params = [];
 
         // 权限过滤
-        if (!includePrivate) {
+        if (!includePrivate || !userId) {
             whereClauses.push('t.is_public = TRUE');
         } else if (userId) {
             whereClauses.push('(t.is_public = TRUE OR t.created_by = ?)');
@@ -353,18 +353,11 @@ class WorkflowTemplateService {
      * @param {number} userId - 用户 ID
      */
     async rateTemplate(templateId, rating, comment, userId) {
-        if (rating < 1 || rating > 5) {
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
             throw new WorkflowTemplateError('评分必须在 1-5 之间', 400);
         }
 
-        const template = await queryOne(`
-            SELECT id FROM agent_workflow_templates
-            WHERE id = ? AND is_active = TRUE AND deleted_at IS NULL
-        `, [templateId]);
-
-        if (!template) {
-            throw new WorkflowTemplateError('模板不存在', 404);
-        }
+        await this.getTemplateDetail(templateId, userId);
 
         return await transaction(async (trx) => {
             const existingRating = await trx.queryOne(`
