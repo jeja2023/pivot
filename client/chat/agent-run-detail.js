@@ -818,7 +818,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
     // --- 2. 渲染独立弹窗 (Modal Fallback) ---
     if (detail && (!isWorkbenchLayout || options.workflowPreview)) {
         captureAgentRunDisclosureState(detail, runId);
-        const isProcessOpen = isAgentRunDisclosureOpen(run.id, 'process', true);
+        const isProcessOpen = isAgentRunDisclosureOpen(run.id, 'process', false);
         const isDiagnosticsOpen = isAgentRunDisclosureOpen(run.id, 'technical-diagnostics', false);
         const emptyStepsHtml = '<div class="empty-state agent-empty-state">任务还没有执行步骤。</div>';
         const renderedSteps = steps.map(function (step) { return agentStepMarkup(step, run.id); }).join('');

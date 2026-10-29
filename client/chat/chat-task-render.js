@@ -95,15 +95,26 @@
         }
         const rows = model().records(state);
         const terminal = model().isTerminal(state.run.status);
-        const expanded = state.expanded ?? !terminal;
+        const hasError = ['error', 'failed', 'completed_with_errors'].includes(state.run.status)
+            || Boolean(state.run.error_message && ['partial', 'error', 'failed', 'cancelled'].includes(state.run.status));
+        const waitingAction = ['needs_input', 'approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit'].includes(state.run.status)
+            || Boolean(state.approval);
+        const completedCleanly = terminal && !hasError && !waitingAction;
+
+        // 执行过程默认保持折叠，由用户主动展开查看；出错时通过红色原因卡片与操作按钮清晰外显
+        const defaultExpanded = false;
+        const expanded = Boolean(state.expanded ?? defaultExpanded);
+
         const tools = rows.filter(row => row.kind === 'tool').length;
         const summary = model().summary(state);
         const connectionProblem = state.connection === 'unavailable' && !terminal;
         const tone = connectionProblem ? 'warning' : ['error', 'failed'].includes(state.run.status) ? 'error' : terminal ? 'complete' : 'active';
         panel.dataset.tone = tone;
+        panel.dataset.taskCompleted = completedCleanly ? 'true' : 'false';
+        panel.dataset.processExpanded = expanded ? 'true' : 'false';
         const verification = state.run.status === 'verifying'
             ? { status: 'verifying', label: '正在核验本次结果', missing: [] } : state.verification;
-        const showVerification = verification && ((terminal && state.run.status !== 'cancelled') || state.run.status === 'verifying' || state.run.status === 'awaiting_commit');
+        const showVerification = !hasError && verification && ((terminal && state.run.status !== 'cancelled') || state.run.status === 'verifying' || state.run.status === 'awaiting_commit');
         const statusLabel = connectionProblem ? '读取异常' : state.run.statusText || model().labels[state.run.status] || '正在确认';
         const emptyText = connectionProblem ? '执行记录暂时无法读取。可以重新连接，或直接停止此任务。'
             : terminal ? '当前任务暂无执行记录。' : state.run.status === 'queued' ? '任务正在排队，开始后将显示操作记录。' : '正在等待第一条执行记录…';
@@ -112,7 +123,7 @@
             : tools > 0 ? `${tools} 项操作`
             : `${rows.length} 步记录`;
         const html = `<header class="chat-task-status" role="status" aria-live="polite" aria-atomic="true">
-                <div class="chat-task-heading"><strong>${escape(state.run.title || '对话任务')}</strong><span class="chat-task-status-summary chat-task-status-badge">${escape(statusLabel)}</span></div>
+                <div class="chat-task-heading"><span class="chat-task-sparkle" aria-hidden="true">✦</span><strong>${escape(state.run.title || '对话任务')}</strong><span class="chat-task-status-summary chat-task-status-badge">${escape(statusLabel)}</span></div>
                 ${summary !== statusLabel ? `<span class="chat-task-current-action">${escape(summary)}</span>` : ''}
                 ${connectionProblem && state.highWater >= 0 ? `<small>最后确认：${escape(state.run.statusText || model().labels[state.run.status] || '')}</small>` : ''}
             </header>
@@ -120,21 +131,26 @@
             <details class="chat-task-process"${expanded ? ' open' : ''}><summary tabindex="0"><span>执行过程</span><span>${escape(countText)}</span></summary>
                 ${rows.length ? `<ol class="chat-task-records">${rows.map(row => recordMarkup(row, state)).join('')}</ol>` : `<p class="chat-task-empty">${escape(emptyText)}</p>`}
                 ${state.older?.hasMore ? button('older', '加载更早记录', '加载更早的执行记录') : ''}
+                ${completedCleanly ? controlsMarkup(entry) : ''}
             </details>
             ${approvalMarkup(state)}
             ${['waiting_approval', 'awaiting_approval'].includes(state.run.status) && !state.approval ? '<p class="chat-task-empty">审批已发起，可在任务详情查看审批对象与处理进度。</p>' : ''}
             ${showVerification ? `<div class="chat-task-verification" data-verification-status="${attr(verification.status)}">${escape(verification.label || '暂无独立核验记录')}${verification.missing?.length ? `<p>待补齐：${verification.missing.map(escape).join('；')}</p>` : ''}</div>` : ''}
-            ${state.run.error_message && state.run.final_answer && ['partial', 'error', 'failed', 'completed_with_errors', 'cancelled'].includes(state.run.status) ? `<p class="chat-task-result-note">${escape(state.run.error_message)}</p>` : ''}
+            ${state.run.error_message && (hasError || ['partial', 'cancelled'].includes(state.run.status)) ? `<p class="chat-task-result-note chat-task-error-note">${escape(state.run.error_message)}</p>` : ''}
             ${state.artifacts.length ? `<section class="chat-task-artifacts" aria-label="结果文件"><strong>结果文件</strong><ul>${state.artifacts.map(artifactMarkup).join('')}</ul></section>` : ''}
             ${state.warnings?.length ? `<p class="chat-task-result-note">${state.warnings.map(item => escape(item.message)).join('；')}</p>` : ''}
-            ${controlsMarkup(entry)}`;
+            ${!completedCleanly ? controlsMarkup(entry) : ''}`;
         if (entry.renderedHtml === html) return;
         const focused = document.activeElement?.closest?.('[data-task-action]');
         const focusAction = panel.contains(focused) ? focused?.dataset.taskAction : '';
         PivotSafeHtml.setHtml(panel, html);
         entry.renderedHtml = html;
         panel.querySelector('.chat-task-process')?.addEventListener('click', event => {
-            if (event.target.closest('summary')?.parentElement?.classList.contains('chat-task-process')) state.expanded = !panel.querySelector('.chat-task-process').open;
+            if (event.target.closest('summary')?.parentElement?.classList.contains('chat-task-process')) {
+                const nextOpen = !panel.querySelector('.chat-task-process').open;
+                state.expanded = nextOpen;
+                panel.dataset.processExpanded = nextOpen ? 'true' : 'false';
+            }
         });
         panel.querySelectorAll('[data-task-disclosure]').forEach(details => {
             details.addEventListener('click', event => {
