@@ -99,10 +99,16 @@
             || Boolean(state.run.error_message && ['partial', 'error', 'failed', 'cancelled'].includes(state.run.status));
         const waitingAction = ['needs_input', 'approval_required', 'waiting_approval', 'awaiting_approval', 'awaiting_commit'].includes(state.run.status)
             || Boolean(state.approval);
+        const hasAnswer = Boolean(state.run.final_answer)
+            || Boolean(entry.renderedAnswer)
+            || Boolean(window.Pivot?.legacy?.chatAgentResultText?.(state.run))
+            || Boolean(element.querySelector('.text-body')?.textContent?.trim());
         const completedCleanly = terminal && !hasError && !waitingAction;
 
-        // 执行过程默认保持折叠，由用户主动展开查看；出错时通过红色原因卡片与操作按钮清晰外显
-        const defaultExpanded = false;
+        // 执行过程折叠策略：
+        // 1. 任务已终态 (terminal)、已生成回答 (hasAnswer) 或中途出错 (hasError)：默认自动折叠，聚焦结果或错误原因与操作；
+        // 2. 初始运行中且无错误无回答：默认展开展示执行进度与实时步骤。
+        const defaultExpanded = (terminal || hasAnswer || hasError) ? false : true;
         const expanded = Boolean(state.expanded ?? defaultExpanded);
 
         const tools = rows.filter(row => row.kind === 'tool').length;
@@ -145,13 +151,19 @@
         const focusAction = panel.contains(focused) ? focused?.dataset.taskAction : '';
         PivotSafeHtml.setHtml(panel, html);
         entry.renderedHtml = html;
-        panel.querySelector('.chat-task-process')?.addEventListener('click', event => {
-            if (event.target.closest('summary')?.parentElement?.classList.contains('chat-task-process')) {
-                const nextOpen = !panel.querySelector('.chat-task-process').open;
-                state.expanded = nextOpen;
-                panel.dataset.processExpanded = nextOpen ? 'true' : 'false';
-            }
-        });
+        const processDetails = panel.querySelector('.chat-task-process');
+        if (processDetails) {
+            processDetails.addEventListener('toggle', () => {
+                state.expanded = processDetails.open;
+                panel.dataset.processExpanded = processDetails.open ? 'true' : 'false';
+            });
+            processDetails.addEventListener('click', event => {
+                if (event.target.closest('summary')?.parentElement === processDetails) {
+                    state.expanded = !processDetails.open;
+                    panel.dataset.processExpanded = state.expanded ? 'true' : 'false';
+                }
+            });
+        }
         panel.querySelectorAll('[data-task-disclosure]').forEach(details => {
             details.addEventListener('click', event => {
                 if (event.target.closest('summary')?.parentElement !== details) return;
