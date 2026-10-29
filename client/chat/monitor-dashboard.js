@@ -74,7 +74,52 @@
         ]));
     }
     let executionController = null;
-    function cancelQualityLoad() { executionController?.abort(); executionController = null; }
+    let decisionController = null;
+    function cancelQualityLoad() {
+        executionController?.abort(); executionController = null;
+        decisionController?.abort(); decisionController = null;
+    }
+    function failureReasonLabel(code) {
+        const labels = {
+            delivery_not_verified: '任务交付未通过核验',
+            unspecified: '未记录具体原因'
+        };
+        return Object.hasOwn(labels, code) ? labels[code] : '其他未识别原因';
+    }
+    async function loadDecisionFailures() {
+        decisionController?.abort();
+        const controller = new AbortController();
+        decisionController = controller;
+        const element = document.getElementById('monitor-decision-failures');
+        if (!element) { decisionController = null; return; }
+        set('monitor-decision-failures', '<tr><td colspan="3" class="text-center">正在加载失败原因…</td></tr>');
+        try {
+            const response = await apiFetch(`${API_BASE}/stats/observability/decision-maintenance?lookbackDays=30`, { signal: controller.signal, timeoutMs: 30000 });
+            if (!response.ok) throw new Error('失败原因暂时不可用');
+            const body = await response.json();
+            if (controller.signal.aborted) return;
+            if (body.unavailable || !Array.isArray(body.errorBreakdown)) throw new Error('失败原因暂时不可用');
+            const counts = new Map();
+            for (const item of body.errorBreakdown) {
+                if (item.scenario !== 'chat.execution' || item.eventType !== 'execution' || item.status !== 'failure') continue;
+                const code = String(item.reasonCode || 'unspecified');
+                counts.set(code, (counts.get(code) || 0) + (Number(item.count) || 0));
+            }
+            const sorted = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+            const emptyMessage = body.errorBreakdown.length >= 500
+                ? '返回的结果中没有对话任务执行失败；由于结果达到上限，可能存在未显示的记录。'
+                : '最近 30 天没有记录对话任务执行失败。';
+            const content = sorted.length
+                ? sorted.map(([code, count], index) => `<tr><td class="text-center">${index + 1}</td><td title="${escapeHtml(code)}">${escapeHtml(failureReasonLabel(code))}</td><td class="text-center">${escapeHtml(number(count))} 条</td></tr>`).join('')
+                : `<tr><td colspan="3" class="text-center">${escapeHtml(emptyMessage)}</td></tr>`;
+            set('monitor-decision-failures', content);
+        } catch (error) {
+            if (!controller.signal.aborted) set('monitor-decision-failures', '<tr><td colspan="3" class="text-center">失败原因暂时不可用，请点击“刷新指标”重试。</td></tr>');
+        } finally {
+            if (decisionController === controller) decisionController = null;
+            api.legacy.scheduleSettingsWorkspaceScale?.();
+        }
+    }
     async function loadQuality() {
         cancelQualityLoad();
         const controller = new AbortController();
@@ -103,5 +148,5 @@
             api.legacy.scheduleSettingsWorkspaceScale?.();
         }
     }
-    api.exposeModule('settings.monitorDashboard', { render, loadQuality, cancelQualityLoad });
+    api.exposeModule('settings.monitorDashboard', { render, loadQuality, loadDecisionFailures, cancelQualityLoad });
 }());

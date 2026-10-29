@@ -48,8 +48,10 @@ async function main() {
     ];
     for (const entry of evaluationSet.cases || []) {
         const result = results.get(String(entry.id || '')) || {};
-        const allowed = (entry.candidates || []).filter(item => item?.allowed !== false).map(item => item.id).join('、');
-        lines.push(`| ${escapeCell(entry.id)} | ${escapeCell(entry.scenario)} | ${escapeCell(entry.providerInput?.routingText)} | ${escapeCell(allowed)} | ${escapeCell(result.selectedActionId || '无结果')} | 待业务管理员填写 | 待业务管理员填写 |`);
+        const allowedIds = (entry.candidates || []).filter(item => item?.allowed !== false).map(item => item.id);
+        const allowed = allowedIds.join('、');
+        const candidate = result.error ? '预审核失败' : allowedIds.includes(result.selectedActionId) ? result.selectedActionId : '无有效结果';
+        lines.push(`| ${escapeCell(entry.id)} | ${escapeCell(entry.scenario)} | ${escapeCell(entry.providerInput?.routingText)} | ${escapeCell(allowed)} | ${escapeCell(candidate)} | 待业务管理员填写 | 待业务管理员填写 |`);
     }
     lines.push('', '审阅完成后，每条案例应由有权限的管理员提交对应的人工预期动作。系统会拒绝不在“允许动作”范围内的标签，且在全部 15 条完成前保持主动灰度关闭。', '');
     const target = path.resolve(outputPath);

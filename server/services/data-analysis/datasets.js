@@ -40,6 +40,8 @@ const {
 const { profileViaSql } = require('./profile');
 const { normalizeShareSettings } = require('../unit-visibility');
 const { filterExistingShareUserIds } = require('../share-targets');
+const { importSpreadsheetInWorker } = require('./spreadsheet-import');
+const { canAccessSharedResource } = require('../unit-visibility');
 
 function sanitizeRows(rows) {
     const sourceRows = Array.isArray(rows) ? rows : [];
@@ -327,17 +329,15 @@ async function ingestUpload({ datasetDir, file, ext }) {
         sheetName = meta.tableName || '';
         sourceType = 'sqlite';
     } else {
-        const parsed = await readSpreadsheet(sourcePath, sourceName);
-        await createParquetFromRows(parsed.columns, parsed.rows, parquetPath);
+        const parsed = await importSpreadsheetInWorker(sourcePath, sourceName, parquetPath);
         columns = parsed.columns;
-        rowCount = parsed.rows.length;
+        rowCount = parsed.rowCount;
         sourceRowCount = parsed.sourceRowCount;
         sourceColumnCount = parsed.sourceColumnCount;
         truncated = parsed.truncated;
         truncationReason = parsed.truncationReason;
         sheetName = parsed.sheetName || '';
         sourceType = parsed.sourceType;
-        parsed.rows = null; // 释放整表行数组，降低后续内存峰值。
     }
     const profile = await profileViaSql(parquetPath, columns, rowCount);
     const previewRows = await parquetToRows(parquetPath, { limit: MAX_PREVIEW_ROWS });
@@ -411,31 +411,44 @@ async function importDataset({ user, file, name }) {
 async function listDatasets(userOrId) {
     const user = await resolveAnalysisUser(userOrId);
     if (!user) return [];
+    // SQL 只做保守预筛选；最终可见性仍由共享资源的统一规则判定。
     const rows = await query(`
         SELECT datasets.*, cleaning.source_dataset_id AS derived_from_dataset_id, cleaning.id AS cleaning_run_id
         FROM analysis_datasets datasets
         LEFT JOIN analysis_cleaning_runs cleaning ON cleaning.output_dataset_id = datasets.id
         WHERE datasets.deleted_at IS NULL
+          AND (datasets.user_id IS NULL OR datasets.user_id = ? OR LOWER(TRIM(COALESCE(datasets.scope, 'personal'))) <> 'personal')
         ORDER BY datasets.updated_at DESC, datasets.created_at DESC
-    `);
-    const visibleRows = rows.filter(row => Number(row.user_id) === Number(user.id) || require('../unit-visibility').canAccessSharedResource(row, user, false));
-    return await Promise.all(visibleRows.map(async row => {
+    `, [user.id]);
+    const visibleRows = rows.filter(row => canAccessSharedResource(row, user, false));
+    const sharedIds = visibleRows.filter(row => Number(row.user_id) !== Number(user.id)).map(row => row.id);
+    const governance = await require('./governance').getFieldGovernanceForDatasets(sharedIds);
+    return visibleRows.map(row => {
         const dataset = serializeDataset(row);
-        const allowedColumns = await require('./governance').getAccessibleDatasetColumns(user, row);
+        const fields = governance.get(String(row.id));
+        const allowedColumns = Number(row.user_id) === Number(user.id) ? dataset.columns : dataset.columns.filter(column => {
+            const sensitivity = fields?.get(column.key) || 'internal';
+            return !['confidential', 'restricted'].includes(sensitivity);
+        });
         const allowedKeys = new Set(allowedColumns.map(column => column.key));
         dataset.columns = allowedColumns;
         dataset.profile = dataset.profile.filter(column => allowedKeys.has(column.key));
         dataset.previewRows = dataset.previewRows.map(item => Object.fromEntries(Object.entries(item).filter(([key]) => allowedKeys.has(key))));
         return dataset;
-    }));
+    });
 }
 
 async function getDatasetSummary(userOrId) {
-    const datasets = await listDatasets(userOrId);
-    return {
-        count: datasets.length,
-        rowCount: datasets.reduce((sum, dataset) => sum + (Number(dataset.rowCount) || 0), 0)
-    };
+    const user = await resolveAnalysisUser(userOrId);
+    if (!user) return { count: 0, rowCount: 0 };
+    const rows = await query(`
+        SELECT user_id, scope, allowed_units, allowed_user_ids, row_count
+        FROM analysis_datasets
+        WHERE deleted_at IS NULL
+          AND (user_id IS NULL OR user_id = ? OR LOWER(TRIM(COALESCE(scope, 'personal'))) <> 'personal')
+    `, [user.id]);
+    const visible = rows.filter(row => canAccessSharedResource(row, user, false));
+    return { count: visible.length, rowCount: visible.reduce((sum, row) => sum + (Number(row.row_count) || 0), 0) };
 }
 
 async function getDatasetDetail(userId, datasetId, options = {}) {

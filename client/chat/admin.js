@@ -386,6 +386,7 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         window.Pivot.legacy.cancelSettingsLoad?.();
     }
     if (tab !== 'monitor') {
+        window.Pivot.moduleApi('settings.monitorDashboard')?.cancelQualityLoad?.();
         window.Pivot.legacy.cancelMonitorSummaryLoad?.();
         window.Pivot.legacy.clearMonitorRefreshTimer?.();
     }

@@ -6,10 +6,14 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const root = path.resolve(__dirname, '..');
 const testsDir = path.join(root, 'tests');
-const availableTestFiles = fs.readdirSync(testsDir, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.endsWith('.test.js'))
-    .map(entry => path.join('tests', entry.name))
-    .sort();
+function collectTestFiles(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+        const fullPath = path.join(directory, entry.name);
+        if (entry.isDirectory() && entry.name !== 'e2e') return collectTestFiles(fullPath);
+        return entry.isFile() && entry.name.endsWith('.test.js') ? [path.relative(root, fullPath)] : [];
+    });
+}
+const availableTestFiles = collectTestFiles(testsDir).sort();
 // 保留 Node 原生 test 过滤选项，方便在完整 PostgreSQL 隔离装置内稳定复现单个用例。
 // 其它参数仍按测试文件名处理，避免静默把拼写错误的文件当作 Node 参数忽略。
 const requestedArgs = process.argv.slice(2);

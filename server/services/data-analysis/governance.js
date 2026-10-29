@@ -161,6 +161,24 @@ async function fieldGovernanceMap(datasetId) {
     return new Map(rows.map(row => [row.field_key, fieldRecord(row)]));
 }
 
+async function getFieldGovernanceForDatasets(datasetIds) {
+    const ids = [...new Set(datasetIds.map(String))];
+    const result = new Map();
+    // 限制单次绑定数量，避免共享数据集较多时触及数据库参数上限。
+    for (let offset = 0; offset < ids.length; offset += 500) {
+        const batch = ids.slice(offset, offset + 500);
+        const placeholders = batch.map(() => '?').join(', ');
+        const rows = await query(`SELECT dataset_id, field_key, sensitivity FROM analysis_field_governance
+            WHERE status = 'active' AND dataset_id IN (${placeholders})`, batch);
+        for (const row of rows) {
+            const key = String(row.dataset_id);
+            if (!result.has(key)) result.set(key, new Map());
+            result.get(key).set(row.field_key, row.sensitivity);
+        }
+    }
+    return result;
+}
+
 async function getAccessibleDatasetColumns(user, dataset) {
     const actor = await resolveAnalysisUser(user);
     const columns = parseJson(dataset?.columns_json, []);
@@ -859,6 +877,7 @@ async function getDatasetSourceState(user, datasetId) {
 module.exports = {
     listFieldGovernance,
     getAccessibleDatasetColumns,
+    getFieldGovernanceForDatasets,
     assertDatasetFieldsAccessible,
     updateFieldGovernance,
     previewCalculatedField,

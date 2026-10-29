@@ -592,7 +592,7 @@ function cancelMonitorSummaryLoad() {
 
 const refreshMonitorSummary = function(options = {}) {
     const quality = window.Pivot.moduleApi('settings.quality')?.getSection?.('monitor') === 'quality';
-    return Promise.all([loadMonitorSummary({ ...options, force: true }), quality ? window.Pivot.moduleApi('settings.monitorDashboard').loadQuality() : null]);
+    return Promise.all([loadMonitorSummary({ ...options, force: true }), quality ? window.Pivot.moduleApi('settings.monitorDashboard').loadQuality() : null, quality ? window.Pivot.moduleApi('settings.monitorDashboard').loadDecisionFailures() : null]);
 };
 
 function scheduleMonitorRefresh() {

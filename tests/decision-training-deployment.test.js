@@ -228,13 +228,13 @@ test('工作流决策只缩减已发布且可访问的候选，建议不会自�
 
 test('决策学习维护报告只读汇总样本、故障与提供器运行状态', async () => {
     const report = await getDecisionMaintenanceReport({ lookbackDays: 14, minimumVerifiedSamples: 5 }, {
-        query: async sql => sql.includes('FROM decision_outcomes o JOIN decision_records') ? [{ tenant_id: 3, scenario: 'chat.rag', status: 'failure', reason_code: 'retrieval_failed', count: 2 }] : [{ tenant_id: 3, scenario: 'chat.rag', verified_samples: 6, user_feedback_events: 2, execution_failures: 1, last_outcome_at: '2026-01-01' }],
+        query: async sql => sql.includes('FROM decision_outcomes o JOIN decision_records') ? [{ tenant_id: 3, scenario: 'chat.rag', event_type: 'execution', status: 'failure', reason_code: 'retrieval_failed', count: 2 }] : [{ tenant_id: 3, scenario: 'chat.rag', verified_samples: 6, user_feedback_events: 2, execution_failures: 1, last_outcome_at: '2026-01-01' }],
         getDecisionOperationalMetrics: async () => ({ providers: [{ providerId: 'qwen' }], unavailable: false })
     });
     assert.equal(report.unavailable, false);
     assert.equal(report.readiness[0].readyForTraining, true);
     assert.equal(report.readiness[0].executionFailures, 1);
-    assert.deepEqual(report.errorBreakdown, [{ tenantId: 3, scenario: 'chat.rag', status: 'failure', reasonCode: 'retrieval_failed', count: 2 }]);
+    assert.deepEqual(report.errorBreakdown, [{ tenantId: 3, scenario: 'chat.rag', eventType: 'execution', status: 'failure', reasonCode: 'retrieval_failed', count: 2 }]);
     const unavailable = await getDecisionMaintenanceReport({}, {
         query: async () => { throw Object.assign(new Error('missing'), { code: '42P01' }); }
     });

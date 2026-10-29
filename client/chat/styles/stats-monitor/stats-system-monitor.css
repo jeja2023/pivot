@@ -309,6 +309,9 @@
     line-height: 1.35;
 }
 
+#tab-content-monitor .monitor-decision-failures-table .col-index { width: 56px; }
+#tab-content-monitor .monitor-decision-failures-table .col-count { width: 90px; }
+
 /* 键值行排版 */
 #tab-content-monitor .monitor-list {
     display: flex;

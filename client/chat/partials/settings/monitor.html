@@ -168,6 +168,21 @@
                 <div id="monitor-routing-quality" class="monitor-list"></div>
             </div>
         </div>
+        <div class="stat-card monitor-panel-card">
+            <div class="monitor-panel-head">
+                <h4>对话任务失败原因</h4>
+                <span class="monitor-badge-subtle">全局 · 最近 30 天</span>
+            </div>
+            <p class="monitor-panel-description">按执行失败发生时间统计；统计口径与决策学习巡检中的失败数可能不同。</p>
+            <div class="table-container">
+                <table class="data-table compact-table monitor-decision-failures-table" aria-label="对话任务失败原因">
+                    <colgroup><col class="col-index"><col><col class="col-count"></colgroup>
+                    <thead><tr><th scope="col" class="text-center">序号</th><th scope="col">失败原因</th><th scope="col" class="text-center">数量</th></tr></thead>
+                    <tbody id="monitor-decision-failures" aria-live="polite"><tr><td colspan="3" class="text-center">等待加载</td></tr></tbody>
+                </table>
+            </div>
+            <p class="monitor-panel-description">报告最多返回 500 组结果；超过上限时汇总可能不完整。</p>
+        </div>
         <div class="settings-page-head quality-feedback-head">
             <div>
                 <h4>对话质量异常处理</h4>

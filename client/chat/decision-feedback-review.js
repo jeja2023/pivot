@@ -176,7 +176,7 @@
                 row.appendChild(reasonCell);
 
                 const statusCell = document.createElement('td');
-                statusCell.className = 'text-center';
+                statusCell.className = 'route-feedback-status-cell';
                 const status = document.createElement('span');
                 const normalizedStatus = String(item.review_status || '').toLowerCase();
                 status.className = `route-feedback-status is-${normalizedStatus || 'pending'}`;
@@ -185,7 +185,7 @@
                 row.appendChild(statusCell);
 
                 const actionCell = document.createElement('td');
-                actionCell.className = 'text-center route-feedback-actions-cell';
+                actionCell.className = 'route-feedback-actions-cell';
                 const detailBtn = document.createElement('button');
                 detailBtn.type = 'button';
                 detailBtn.className = 'btn-secondary route-feedback-detail-btn';
@@ -206,16 +206,13 @@
                         actionCell.appendChild(button);
                     });
                 } else {
-                    if (item.reviewed_at) {
+                    if (normalizedStatus === 'not_required') {
                         const reviewedSpan = document.createElement('span');
                         reviewedSpan.className = 'route-feedback-reviewed-time';
-                        reviewedSpan.textContent = `已于 ${formatTime(item.reviewed_at)} 复核`;
+                        reviewedSpan.textContent = '无需逐条复核';
                         actionCell.appendChild(reviewedSpan);
-                    } else {
-                        const reviewedSpan = document.createElement('span');
-                        reviewedSpan.className = 'route-feedback-reviewed-time';
-                        reviewedSpan.textContent = normalizedStatus === 'not_required' ? '无需逐条复核' : '已复核';
-                        actionCell.appendChild(reviewedSpan);
+                    } else if (item.reviewed_at) {
+                        detailBtn.title = `已于 ${formatTime(item.reviewed_at)} 完成复核 · 点击查看详情`;
                     }
                 }
                 row.appendChild(actionCell);
@@ -373,10 +370,7 @@
             ` : `
                 <div class="route-feedback-detail-section">
                     <div class="route-feedback-detail-label">复核记录</div>
-                    <div class="route-feedback-note-card">
-                        ${item.review_status === 'not_required' ? '常规纠正已自动归档，尚未转为训练标签' : item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成复核` : '已复核'}
-                        ${item.review_note ? ` · 备注：${escapeHtml(item.review_note)}` : ''}
-                    </div>
+                    <div class="route-feedback-note-card">${item.review_status === 'not_required' ? '常规纠正已自动归档，尚未转为训练标签' : item.reviewed_at ? `已于 ${escapeHtml(formatTime(item.reviewed_at))} 完成复核` : '已复核'}${item.review_note ? ` · 备注：${escapeHtml(item.review_note)}` : ''}</div>
                 </div>
             `}
             ${evidenceText ? `<div class="route-feedback-detail-section"><div class="route-feedback-detail-label">纠正来源、即时约束及执行证据</div><pre class="route-feedback-note-card">${escapeHtml(evidenceText)}</pre></div>` : ''}
@@ -404,7 +398,8 @@
 
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.className = 'btn-secondary';
+            cancelBtn.id = 'route-feedback-detail-close-btn';
+            cancelBtn.className = 'btn-danger-outline';
             cancelBtn.textContent = '关闭';
             cancelBtn.addEventListener('click', closeDetailModal);
 
@@ -414,7 +409,8 @@
         } else {
             const closeBtn = document.createElement('button');
             closeBtn.type = 'button';
-            closeBtn.className = 'btn-secondary';
+            closeBtn.id = 'route-feedback-detail-close-btn';
+            closeBtn.className = 'btn-danger-outline';
             closeBtn.textContent = '关闭';
             closeBtn.addEventListener('click', closeDetailModal);
             footer.appendChild(closeBtn);

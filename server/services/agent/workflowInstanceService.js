@@ -5,7 +5,7 @@
  */
 
 const { query, queryOne } = require('../../db/client');
-const { workflowTemplateService } = require('./workflowTemplateService');
+const { WorkflowTemplateService } = require('./workflowTemplateService');
 
 class WorkflowInstanceService {
   /**
@@ -13,7 +13,7 @@ class WorkflowInstanceService {
    */
   async createInstance(data) {
     const { template_id, variables = {}, created_by, name } = data;
-    return await workflowTemplateService.applyTemplate(template_id, variables, created_by, name);
+    return await WorkflowTemplateService.applyTemplate(template_id, variables, created_by, name);
   }
 
   /**

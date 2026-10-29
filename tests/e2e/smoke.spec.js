@@ -943,6 +943,37 @@ test.describe('Pivot browser smoke', () => {
         await expect(state.getByRole('button', { name: '重试' })).toBeVisible();
     });
 
+    test('对话质量展示执行失败原因，空结果与请求失败可区分', async ({ page }) => {
+        let state = 'data';
+        await page.route('**/api/stats/observability/decision-maintenance?*', async route => {
+            if (state === 'error') return route.fulfill({ status: 503, json: { error: '暂不可用' } });
+            const errorBreakdown = state === 'empty' ? [] : [
+                { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 35 },
+                { scenario: 'chat.execution', eventType: 'feedback', status: 'failure', reasonCode: 'feedback', count: 6 }
+            ];
+            return route.fulfill({ status: 200, json: { unavailable: false, errorBreakdown } });
+        });
+        await ensureBrowserSession(page);
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
+        await page.locator('#tab-monitor').click();
+        await page.locator('#monitor-quality-tab').click();
+        const failures = page.locator('#monitor-decision-failures');
+        const table = page.getByRole('table', { name: '对话任务失败原因' });
+        await expect(table.getByRole('columnheader', { name: '序号' })).toBeVisible();
+        await expect(table.getByRole('columnheader', { name: '失败原因' })).toBeVisible();
+        await expect(table.getByRole('columnheader', { name: '数量' })).toBeVisible();
+        await expect(failures).toContainText('任务交付未通过核验');
+        await expect(failures.locator('tr').first().locator('td').first()).toHaveText('1');
+        await expect(failures).toContainText('35 条');
+        await expect(failures).not.toContainText('feedback');
+        state = 'empty';
+        await page.locator('#monitor-refresh-btn').click();
+        await expect(failures).toContainText('没有记录对话任务执行失败');
+        state = 'error';
+        await page.locator('#monitor-refresh-btn').click();
+        await expect(failures).toContainText('暂时不可用');
+    });
+
     test('系统监控按概览、服务和质量分区，桌面与移动端内容可完整访问', async ({ page }) => {
         test.setTimeout(90_000);
         let executionCalls = 0;

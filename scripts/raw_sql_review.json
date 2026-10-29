@@ -259,6 +259,18 @@
       "count": 5,
       "rationale": "按账号隔离个人主题，主题数量与同名更新在事务内校验；仅存储共享 Schema 白名单校验后的样式，无脚本或外部资源。参数全部绑定。",
       "verification": "tests/mindmap-product.test.js 与 tests/mindmap-capacity.test.js 覆盖样式持久化、账号隔离和主题资源校验。"
+    },
+    {
+      "file": "server/services/data-analysis/datasets.js",
+      "count": 12,
+      "rationale": "数据集列表和统计先按所有者及共享状态保守预筛选，再复用统一单位和个人可见性规则，避免读取无关私有数据。",
+      "verification": "tests/data-analysis-list-visibility.test.js 与 tests/data-analysis.test.js 覆盖权限、统计和共享字段过滤。"
+    },
+    {
+      "file": "server/services/data-analysis/governance.js",
+      "count": 52,
+      "rationale": "对已通过可见性检查的数据集分批绑定参数查询字段敏感性，保持共享字段过滤规则。",
+      "verification": "tests/data-analysis-list-visibility.test.js 与 tests/data-analysis.test.js 覆盖权限、统计和共享字段过滤。"
     }
   ]
 }

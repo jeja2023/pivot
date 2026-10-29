@@ -20,12 +20,12 @@ const READINESS_SQL = [
 ].join(' ');
 
 const ERROR_BREAKDOWN_SQL = [
-    'SELECT d.tenant_id, d.scenario, o.status,',
+    'SELECT d.tenant_id, d.scenario, o.event_type, o.status,',
     "COALESCE(NULLIF(o.reason_code, ''), 'unspecified') AS reason_code, COUNT(*) AS count",
     'FROM decision_outcomes o JOIN decision_records d ON d.decision_id = o.decision_id',
     "WHERE o.occurred_at >= CURRENT_TIMESTAMP - (?::integer * INTERVAL '1 day')",
     "AND ((o.event_type = 'execution' AND o.status IN ('failure', 'partial')) OR o.event_type = 'feedback')",
-    "GROUP BY d.tenant_id, d.scenario, o.status, COALESCE(NULLIF(o.reason_code, ''), 'unspecified')",
+    "GROUP BY d.tenant_id, d.scenario, o.event_type, o.status, COALESCE(NULLIF(o.reason_code, ''), 'unspecified')",
     'ORDER BY count DESC, d.tenant_id NULLS LAST, d.scenario, reason_code LIMIT 500'
 ].join(' ');
 
@@ -68,7 +68,7 @@ async function getDecisionMaintenanceReport(options = {}, deps = {}) {
             readyForTraining: Number(row.verified_samples || 0) >= minimumVerifiedSamples,
             lastOutcomeAt: row.last_outcome_at || null
         }));
-        return { unavailable: false, lookbackDays, minimumVerifiedSamples, readiness, errorBreakdown: (errorRows || []).map(row => ({ tenantId: row.tenant_id ? Number(row.tenant_id) : null, scenario: row.scenario, status: row.status, reasonCode: row.reason_code, count: Number(row.count || 0) })), operations };
+        return { unavailable: false, lookbackDays, minimumVerifiedSamples, readiness, errorBreakdown: (errorRows || []).map(row => ({ tenantId: row.tenant_id ? Number(row.tenant_id) : null, scenario: row.scenario, eventType: row.event_type, status: row.status, reasonCode: row.reason_code, count: Number(row.count || 0) })), operations };
     } catch (error) {
         return { unavailable: true, lookbackDays, minimumVerifiedSamples, readiness: [], operations: null, errorCode: String(error?.code || 'maintenance_unavailable').slice(0, 80) };
     }

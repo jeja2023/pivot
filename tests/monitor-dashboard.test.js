@@ -62,3 +62,40 @@ test('刷新重叠时取消旧统计请求，旧响应不能覆盖最新结果',
     assert.equal(elements.get('monitor-chat-execution').html, latest);
     assert.match(latest, /请求数<\/span><strong>2/);
 });
+
+
+test('决策失败原因只汇总对话执行失败并安全展示原因代码', async () => {
+    const { api, elements } = fixture(async () => ({ ok: true, json: async () => ({ unavailable: false, errorBreakdown: [
+        { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 3 },
+        { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 2 },
+        { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: '<script>', count: 1 },
+        { scenario: 'chat.execution', eventType: 'feedback', status: 'failure', reasonCode: 'feedback', count: 9 },
+        { scenario: 'chat.rag', eventType: 'execution', status: 'failure', reasonCode: 'rag', count: 8 },
+        { scenario: 'chat.execution', eventType: 'execution', status: 'partial', reasonCode: 'partial', count: 7 }
+    ] }) }));
+    await api.loadDecisionFailures();
+    const html = elements.get('monitor-decision-failures').html;
+    assert.match(html, /<tr><td class="text-center">1<\/td><td title="delivery_not_verified">任务交付未通过核验<\/td><td class="text-center">5 条<\/td><\/tr>/);
+    assert.match(html, /title="&lt;script>">其他未识别原因/);
+    assert.doesNotMatch(html, /feedback|partial|>rag</);
+});
+
+test('决策失败原因空数据与接口不可用分别提示', async () => {
+    const empty = fixture(async () => ({ ok: true, json: async () => ({ errorBreakdown: [] }) }));
+    await empty.api.loadDecisionFailures();
+    assert.match(empty.elements.get('monitor-decision-failures').html, /没有记录对话任务执行失败/);
+    const failed = fixture(async () => ({ ok: true, json: async () => ({ unavailable: true }) }));
+    await failed.api.loadDecisionFailures();
+    assert.match(failed.elements.get('monitor-decision-failures').html, /暂时不可用/);
+});
+
+test('切换页面时取消失败原因请求，迟到响应不能覆盖页面', async () => {
+    let pending;
+    const { api, elements } = fixture((_url, options) => new Promise(resolve => { pending = { resolve, signal: options.signal }; }));
+    const request = api.loadDecisionFailures();
+    api.cancelQualityLoad();
+    assert.equal(pending.signal.aborted, true);
+    pending.resolve({ ok: true, json: async () => ({ errorBreakdown: [{ scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'old', count: 9 }] }) });
+    await request;
+    assert.match(elements.get('monitor-decision-failures').html, /正在加载失败原因/);
+});

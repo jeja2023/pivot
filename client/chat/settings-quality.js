@@ -67,6 +67,7 @@
         if (tab === 'monitor' && section === 'quality' && admin()) return Promise.all([
             window.Pivot.moduleApi('decision.feedbackReview').loadRouteFeedbackReviewQueue(page),
             window.Pivot.moduleApi('settings.monitorDashboard')?.loadQuality?.(),
+            window.Pivot.moduleApi('settings.monitorDashboard')?.loadDecisionFailures?.(),
             window.Pivot.legacy.loadMonitorSummary?.({ propagateErrors: true })
         ]);
         if (tab === 'evaluation-review' && admin()) return window.Pivot.moduleApi('decision.goldReview').loadDecisionGoldReviewQueue();
