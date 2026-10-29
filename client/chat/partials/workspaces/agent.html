@@ -1339,7 +1339,7 @@
     </div>
 
     <!-- 技能工具选择弹窗 -->
-    <div id="agent-skill-tools-modal" class="modal-overlay hidden" style="z-index: 1910;" role="dialog" aria-modal="true"
+    <div id="agent-skill-tools-modal" class="modal-overlay hidden" role="dialog" aria-modal="true"
         aria-labelledby="agent-skill-tools-modal-title" aria-hidden="true">
         <div class="modal agent-skill-tools-modal-dialog">
             <div class="agent-config-modal-head">
@@ -1353,16 +1353,16 @@
                     <input id="agent-skill-tools-filter" class="form-input" type="search" placeholder="搜索工具名称、标识或用途..." aria-label="搜索工具">
                 </div>
                 <div class="agent-skill-tools-quick-actions">
-                    <button id="agent-skill-tools-select-all" class="btn-secondary btn-xs" type="button">全选</button>
-                    <button id="agent-skill-tools-clear-all" class="btn-secondary btn-xs" type="button">清空</button>
+                    <button id="agent-skill-tools-select-all" class="btn-secondary" type="button">全选</button>
+                    <button id="agent-skill-tools-clear-all" class="btn-secondary" type="button">清空</button>
                     <span id="agent-skill-tools-modal-count" class="mcp-count-pill">已选 0 / 0</span>
                 </div>
             </div>
             <div class="agent-skill-tools-modal-body">
                 <div id="agent-skill-tools-grid" class="agent-skill-tools-grid" role="group" aria-label="工具列表"></div>
             </div>
-            <div class="agent-task-editor-footer" style="justify-content: flex-end; align-items: center;">
-                <div style="display: flex; gap: 8px;">
+            <div class="agent-task-editor-footer agent-skill-modal-footer">
+                <div class="agent-skill-modal-actions">
                     <button id="agent-skill-tools-modal-cancel" class="btn-secondary" type="button">取消</button>
                     <button id="agent-skill-tools-modal-confirm" class="btn-primary" type="button">确认选择</button>
                 </div>
@@ -1371,7 +1371,7 @@
     </div>
 
     <!-- 高级技能创建与导入弹窗 -->
-    <div id="agent-skill-advanced-modal" class="modal-overlay hidden" style="z-index: 1910;" role="dialog" aria-modal="true"
+    <div id="agent-skill-advanced-modal" class="modal-overlay hidden" role="dialog" aria-modal="true"
         aria-labelledby="agent-skill-advanced-modal-title" aria-hidden="true">
         <div class="modal agent-skill-advanced-modal-dialog">
             <div class="agent-config-modal-head">
@@ -1418,8 +1418,8 @@ outputs: {}
                     </div>
                 </div>
             </div>
-            <div class="agent-task-editor-footer" style="justify-content: flex-end; align-items: center;">
-                <div style="display: flex; gap: 8px;">
+            <div class="agent-task-editor-footer agent-skill-modal-footer">
+                <div class="agent-skill-modal-actions">
                     <label class="btn-secondary agent-harness-file-button" title="导入经过校验的 .skill.zip 包">
                         <span>导入技能包</span>
                         <input id="agent-harness-skill-file" type="file" accept=".skill.zip,.zip" hidden>

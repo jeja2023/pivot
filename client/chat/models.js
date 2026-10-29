@@ -235,6 +235,8 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
 
         const capabilityBadge = renderModelCapabilityBadges(m);
         const priceCurrency = formatModelPriceCurrency(m.price_currency);
+        const scopeText = m.user_id ? '仅本人' : (m.allowed_units || '全部');
+        const safeScope = escapeHtml(scopeText);
 
         return `
         <tr id="model-row-${m.id}">
@@ -247,7 +249,7 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
             <td title="${displayUrl}">${displayUrl}</td>
             <td title="${Number(m.daily_token_limit || 0).toLocaleString()} Tokens / ${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}">${formatTokenAmount(m.daily_token_limit)} / <small>${escapeHtml(priceCurrency)} ${Number(m.input_price_per_million || 0)}/${Number(m.output_price_per_million || 0)}</small></td>
             <td class="model-capability-cell"><div class="model-capability-icons">${capabilityBadge}</div></td>
-            <td title="${escapeHtml(m.user_id ? '仅本人' : (m.allowed_units || '全部'))}">${escapeHtml(m.user_id ? '仅本人' : (m.allowed_units || '全部'))}</td>
+            <td title="${safeScope}">${safeScope}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
                 <span class="status-dot status-unknown" id="status-${m.id}" title="未检测"></span>

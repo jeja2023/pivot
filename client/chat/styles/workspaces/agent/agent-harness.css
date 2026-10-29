@@ -218,13 +218,13 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-side);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    box-shadow: 0 1px 3px var(--agent-harness-shadow-subtle, rgba(15, 23, 42, 0.03));
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .agent-skill-discovery:focus-within {
-    border-color: rgba(16, 163, 127, 0.35);
-    box-shadow: 0 2px 8px rgba(16, 163, 127, 0.06);
+    border-color: var(--primary-border-focus, rgba(16, 163, 127, 0.35));
+    box-shadow: 0 2px 8px var(--primary-shadow-focus, rgba(16, 163, 127, 0.06));
 }
 
 .agent-skill-discovery .agent-harness-subhead {
@@ -338,14 +338,14 @@
     font-size: 0.78rem;
     font-weight: 600;
     line-height: normal;
-    color: #ffffff !important;
+    color: var(--text-white, #ffffff) !important;
     background: var(--primary, #10a37f) !important;
     border: 1px solid var(--primary, #10a37f) !important;
     border-radius: var(--radius-sm, 6px);
     cursor: pointer;
     white-space: nowrap;
     box-sizing: border-box;
-    box-shadow: 0 1px 2px rgba(16, 163, 127, 0.18);
+    box-shadow: 0 1px 2px var(--primary-shadow-sm, rgba(16, 163, 127, 0.18));
     transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -353,13 +353,13 @@
 .agent-skill-discovery-form .agent-skill-discovery-submit:hover {
     background: var(--primary-hover, #0e8c6d) !important;
     border-color: var(--primary-hover, #0e8c6d) !important;
-    box-shadow: 0 2px 5px rgba(16, 163, 127, 0.25);
+    box-shadow: 0 2px 5px var(--primary-shadow-md, rgba(16, 163, 127, 0.25));
 }
 
 .agent-skill-discovery-form button[type="submit"]:active,
 .agent-skill-discovery-form .agent-skill-discovery-submit:active {
     transform: translateY(1px);
-    box-shadow: 0 1px 2px rgba(16, 163, 127, 0.15);
+    box-shadow: 0 1px 2px var(--primary-shadow-xs, rgba(16, 163, 127, 0.15));
 }
 
 .agent-skill-discovery-form button[type="submit"] svg {
@@ -445,7 +445,7 @@
 
 body.dark-mode .agent-skill-discovery,
 .dark-mode .agent-skill-discovery {
-    background: rgba(30, 41, 59, 0.45);
+    background: var(--bg-dark-discovery, rgba(30, 41, 59, 0.45));
     border-color: var(--border);
 }
 
@@ -465,7 +465,7 @@ body.dark-mode .agent-skill-discovery-form .form-input:focus,
 .dark-mode .agent-skill-discovery-form .form-input:focus {
     background: var(--surface, #1e293b);
     border-color: var(--primary);
-    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.25);
+    box-shadow: 0 0 0 2px var(--primary-focus-ring, rgba(16, 163, 127, 0.25));
 }
 
 @media (max-width: 680px) {
@@ -1834,8 +1834,8 @@ body.dark-mode .aht tbody tr:hover,
     padding: 12px 16px 14px;
     border: 1px solid var(--border, rgba(148, 163, 184, 0.22));
     border-radius: 12px;
-    background: #ffffff;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+    background: var(--surface, #ffffff);
+    box-shadow: 0 1px 4px var(--shadow-subtle, rgba(15, 23, 42, 0.04));
     box-sizing: border-box;
     overflow: hidden;
 }
@@ -1895,8 +1895,8 @@ body.dark-mode .aht tbody tr:hover,
     padding: 0;
     border: 1px solid var(--border, #e2e8f0);
     border-radius: 10px;
-    background: #ffffff;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    background: var(--surface, #ffffff);
+    box-shadow: 0 1px 3px var(--shadow-subtle, rgba(15, 23, 42, 0.03));
     overflow: hidden;
     box-sizing: border-box;
     transition: border-color 0.18s ease, box-shadow 0.18s ease;
@@ -1904,8 +1904,8 @@ body.dark-mode .aht tbody tr:hover,
 
 .agent-harness-skill-list-wrap:hover,
 .agent-harness-skill-form-wrap:hover {
-    border-color: rgba(148, 163, 184, 0.35);
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);
+    border-color: var(--border-hover, rgba(148, 163, 184, 0.35));
+    box-shadow: 0 3px 10px var(--shadow-hover, rgba(15, 23, 42, 0.05));
 }
 
 /* 卡片标题栏 */
@@ -1934,16 +1934,16 @@ body.dark-mode .aht tbody tr:hover,
     width: 26px;
     height: 26px;
     border-radius: 7px;
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--primary-badge-bg, rgba(16, 185, 129, 0.1));
     color: var(--primary, #10b981);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+    border: 1px solid var(--primary-badge-border, rgba(16, 185, 129, 0.2));
     flex-shrink: 0;
 }
 
 .agent-harness-skill-head-icon.accent {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
-    border-color: rgba(59, 130, 246, 0.2);
+    background: var(--info-badge-bg, rgba(59, 130, 246, 0.1));
+    color: var(--info, #3b82f6);
+    border-color: var(--info-badge-border, rgba(59, 130, 246, 0.2));
 }
 
 .agent-harness-skill-head-titles {
@@ -1980,9 +1980,9 @@ body.dark-mode .aht tbody tr:hover,
 }
 
 .agent-harness-badge-pill.has-skills {
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--primary-badge-bg, rgba(16, 185, 129, 0.1));
     color: var(--primary, #059669);
-    border-color: rgba(16, 185, 129, 0.25);
+    border-color: var(--primary-badge-border, rgba(16, 185, 129, 0.25));
 }
 
 /* 左侧卡片主体：列表与空状态自适应 */
@@ -1995,7 +1995,7 @@ body.dark-mode .aht tbody tr:hover,
     padding: 12px;
     display: flex;
     flex-direction: column;
-    background: #ffffff;
+    background: var(--surface, #ffffff);
     box-sizing: border-box;
 }
 
@@ -2020,7 +2020,7 @@ body.dark-mode .aht tbody tr:hover,
     padding: 32px 24px;
     border: 1.5px dashed var(--border, #cbd5e1);
     border-radius: 10px;
-    background: linear-gradient(180deg, #fbfcfe 0%, #f8fafc 100%);
+    background: linear-gradient(180deg, var(--bg-card-gradient-start, #fbfcfe) 0%, var(--bg-card-gradient-end, #f8fafc) 100%);
     text-align: center;
     margin: 0;
     box-sizing: border-box;
@@ -2033,9 +2033,9 @@ body.dark-mode .aht tbody tr:hover,
     width: 52px;
     height: 52px;
     border-radius: 14px;
-    background: rgba(16, 185, 129, 0.08);
+    background: var(--primary-icon-bg, rgba(16, 185, 129, 0.08));
     color: var(--primary, #10b981);
-    border: 1px solid rgba(16, 185, 129, 0.18);
+    border: 1px solid var(--primary-icon-border, rgba(16, 185, 129, 0.18));
     margin-bottom: 2px;
 }
 
@@ -2077,12 +2077,12 @@ body.dark-mode .aht tbody tr:hover,
     font-weight: 600;
     border-radius: 6px;
     color: var(--primary, #059669);
-    border-color: rgba(16, 185, 129, 0.3);
-    background: rgba(16, 185, 129, 0.04);
+    border-color: var(--primary-border-light, rgba(16, 185, 129, 0.3));
+    background: var(--primary-bg-subtle, rgba(16, 185, 129, 0.04));
 }
 
 .agent-harness-panel[data-agent-harness-section="skills"] .agent-empty-actions .btn-secondary:hover {
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--primary-badge-bg, rgba(16, 185, 129, 0.1));
     border-color: var(--primary, #10b981);
 }
 
@@ -2132,13 +2132,13 @@ body.dark-mode .aht tbody tr:hover,
 .agent-skill-file-dropzone:hover,
 .agent-skill-file-dropzone.is-dragover {
     border-color: var(--primary, #10b981);
-    background: rgba(16, 185, 129, 0.04);
+    background: var(--primary-bg-subtle, rgba(16, 185, 129, 0.04));
 }
 
 .agent-skill-file-dropzone.has-file {
     border-style: solid;
-    border-color: rgba(16, 185, 129, 0.4);
-    background: rgba(16, 185, 129, 0.03);
+    border-color: var(--primary-border-medium, rgba(16, 185, 129, 0.4));
+    background: var(--primary-bg-lightest, rgba(16, 185, 129, 0.03));
 }
 
 .agent-skill-file-input {
@@ -2167,11 +2167,11 @@ body.dark-mode .aht tbody tr:hover,
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: #ffffff;
+    background: var(--surface, #ffffff);
     border: 1px solid var(--border, #e2e8f0);
     color: var(--primary, #10b981);
     flex-shrink: 0;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-shadow: 0 1px 2px var(--shadow-subtle, rgba(15, 23, 42, 0.04));
 }
 
 .agent-skill-file-text-content {
@@ -2277,8 +2277,8 @@ body.dark-mode .aht tbody tr:hover,
 }
 
 .agent-skill-tools-badge.has-selection {
-    background: rgba(16, 185, 129, 0.08);
-    border-color: rgba(16, 185, 129, 0.3);
+    background: var(--primary-bg-selection, rgba(16, 185, 129, 0.08));
+    border-color: var(--primary-border-light, rgba(16, 185, 129, 0.3));
     color: var(--primary, #059669);
 }
 
@@ -2329,8 +2329,8 @@ body.dark-mode .aht tbody tr:hover,
     gap: 4px;
     padding: 2px 7px;
     border-radius: 8px;
-    background: rgba(16, 185, 129, 0.1);
-    border: 1px solid rgba(16, 185, 129, 0.25);
+    background: var(--primary-badge-bg, rgba(16, 185, 129, 0.1));
+    border: 1px solid var(--primary-badge-border, rgba(16, 185, 129, 0.25));
     font-size: 0.71rem;
     color: var(--text-main, #1e293b);
     max-width: 200px;
@@ -2354,7 +2354,7 @@ body.dark-mode .aht tbody tr:hover,
 }
 
 .agent-skill-tool-tag-remove:hover {
-    color: #ef4444;
+    color: var(--danger, #ef4444);
 }
 
 /* 隐藏原生底层工具多选器（实际交互已收敛至弹窗与标签预览） */
@@ -2379,16 +2379,16 @@ body.dark-mode .aht tbody tr:hover,
     gap: 8px;
     padding: 8px 12px;
     border-radius: 7px;
-    background: rgba(59, 130, 246, 0.05);
-    border: 1px solid rgba(59, 130, 246, 0.15);
-    color: #1e40af;
+    background: var(--info-bg-subtle, rgba(59, 130, 246, 0.05));
+    border: 1px solid var(--info-border-subtle, rgba(59, 130, 246, 0.15));
+    color: var(--info-text-dark, #1e40af);
     font-size: 0.7rem;
     line-height: 1.4;
 }
 
 .agent-skill-import-tip svg {
     flex-shrink: 0;
-    color: #3b82f6;
+    color: var(--info, #3b82f6);
 }
 
 /* 操作按钮 */
@@ -2435,9 +2435,9 @@ body.dark-mode .aht tbody tr:hover,
     line-height: 1.45;
     padding: 10px 12px;
     border-radius: 8px;
-    background: #0f172a;
-    color: #f1f5f9;
-    border: 1px solid rgba(15, 23, 42, 0.15);
+    background: var(--code-bg-dark, #0f172a);
+    color: var(--code-text-light, #f1f5f9);
+    border: 1px solid var(--border-dark, rgba(15, 23, 42, 0.15));
     white-space: pre-wrap;
     word-break: break-all;
 }
@@ -2499,39 +2499,39 @@ body.dark-mode .agent-skill-advanced-trigger-wrap,
 .dark-mode .agent-skill-advanced-trigger-wrap,
 body.dark-mode .agent-harness-skill-pagination,
 .dark-mode .agent-harness-skill-pagination {
-    background: rgba(15, 23, 42, 0.4);
-    border-color: rgba(148, 163, 184, 0.16);
+    background: var(--dark-panel-bg, rgba(15, 23, 42, 0.4));
+    border-color: var(--dark-panel-border, rgba(148, 163, 184, 0.16));
 }
 
 body.dark-mode .agent-skill-file-dropzone,
 .dark-mode .agent-skill-file-dropzone {
-    background: rgba(15, 23, 42, 0.3);
-    border-color: rgba(148, 163, 184, 0.2);
+    background: var(--dark-dropzone-bg, rgba(15, 23, 42, 0.3));
+    border-color: var(--dark-dropzone-border, rgba(148, 163, 184, 0.2));
 }
 
 body.dark-mode .agent-skill-file-icon-wrap,
 .dark-mode .agent-skill-file-icon-wrap {
     background: var(--surface, #1e293b);
-    border-color: rgba(148, 163, 184, 0.2);
+    border-color: var(--dark-icon-border, rgba(148, 163, 184, 0.2));
 }
 
 body.dark-mode .agent-skill-import-tip,
 .dark-mode .agent-skill-import-tip {
-    background: rgba(59, 130, 246, 0.1);
-    border-color: rgba(59, 130, 246, 0.25);
-    color: #93c5fd;
+    background: var(--info-dark-bg, rgba(59, 130, 246, 0.1));
+    border-color: var(--info-dark-border, rgba(59, 130, 246, 0.25));
+    color: var(--info-light, #93c5fd);
 }
 
 body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-empty-card,
 .dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-harness-empty-card {
-    background: rgba(15, 23, 42, 0.3);
-    border-color: rgba(148, 163, 184, 0.2);
+    background: var(--dark-empty-bg, rgba(15, 23, 42, 0.3));
+    border-color: var(--dark-empty-border, rgba(148, 163, 184, 0.2));
 }
 
 /* ── 工具选择弹窗 ── */
 #agent-skill-tools-modal.modal-overlay {
-    position: fixed; inset: 0; z-index: 9000;
-    background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(3px);
+    position: fixed; inset: 0; z-index: 1910;
+    background: var(--agent-modal-overlay-bg, rgba(15, 23, 42, 0.45)); backdrop-filter: blur(3px);
     display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 #agent-skill-tools-modal.modal-overlay.hidden { display: none !important; }
@@ -2542,8 +2542,8 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
     display: flex; flex-direction: column;
     padding: 0 !important;
     text-align: left !important;
-    background: #fff; border-radius: 12px;
-    box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.25);
+    background: var(--surface, #fff); border-radius: 12px;
+    box-shadow: 0 20px 50px -10px var(--modal-shadow-color, rgba(15, 23, 42, 0.25));
     border: 1px solid var(--border);
     overflow: hidden;
 }
@@ -2575,8 +2575,8 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
     border-radius: 8px;
     font-size: 0.8rem;
     font-weight: 700;
-    border: 1px solid rgba(239, 68, 68, 0.38) !important;
-    background: #fff !important;
+    border: 1px solid var(--danger-border-subtle, rgba(239, 68, 68, 0.38)) !important;
+    background: var(--surface, #fff) !important;
     color: var(--danger, #ef4444) !important;
     box-shadow: none !important;
     cursor: pointer;
@@ -2587,7 +2587,7 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
 }
 .agent-skill-advanced-modal-dialog .workspace-modal-close:hover {
     border-color: var(--danger, #ef4444) !important;
-    background: rgba(254, 226, 226, 0.75) !important;
+    background: var(--danger-hover-bg, rgba(254, 226, 226, 0.75)) !important;
     color: var(--danger, #ef4444) !important;
 }
 
@@ -2607,13 +2607,13 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
 .agent-skill-tools-quick-actions {
     display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
-.agent-skill-tools-quick-actions .btn-secondary.btn-xs {
+.agent-skill-tools-quick-actions .btn-secondary {
     height: 28px; padding: 0 10px; font-size: 0.76rem; border-radius: 6px;
     font-weight: 500;
 }
 .agent-skill-tools-quick-actions .mcp-count-pill {
     font-size: 0.74rem; font-weight: 600; color: var(--text-muted);
-    background: rgba(148, 163, 184, 0.15); padding: 4px 10px;
+    background: var(--badge-muted-bg, rgba(148, 163, 184, 0.15)); padding: 4px 10px;
     border-radius: 12px; line-height: 1;
 }
 
@@ -2645,19 +2645,19 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
     text-align: left;
 }
 .agent-skill-tool-card:hover {
-    border-color: #10a37f;
-    background: rgba(16, 163, 127, 0.04);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+    border-color: var(--primary, #10a37f);
+    background: var(--primary-card-hover, rgba(16, 163, 127, 0.04));
+    box-shadow: 0 4px 12px var(--shadow-subtle, rgba(15, 23, 42, 0.05));
 }
 .agent-skill-tool-card.is-selected {
-    border-color: #10a37f;
-    background: rgba(16, 163, 127, 0.07);
-    box-shadow: 0 0 0 1px #10a37f, 0 4px 12px rgba(16, 163, 127, 0.08);
+    border-color: var(--primary, #10a37f);
+    background: var(--primary-card-selected, rgba(16, 163, 127, 0.07));
+    box-shadow: 0 0 0 1px var(--primary, #10a37f), 0 4px 12px var(--primary-shadow-card, rgba(16, 163, 127, 0.08));
 }
 .agent-skill-tool-checkbox {
     flex-shrink: 0; margin-top: 2px;
     width: 16px; height: 16px;
-    accent-color: #10a37f; cursor: pointer;
+    accent-color: var(--primary, #10a37f); cursor: pointer;
 }
 .agent-skill-tool-card-content {
     flex: 1 1 auto; min-width: 0; overflow: hidden;
@@ -2672,14 +2672,14 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
 }
 .agent-skill-tool-badge-approval {
     font-size: 0.62rem; font-weight: 600; padding: 1px 6px; border-radius: 4px;
-    background: rgba(245, 158, 11, 0.12); color: #b45309;
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: var(--warning-badge-bg, rgba(245, 158, 11, 0.12)); color: var(--warning-dark, #b45309);
+    border: 1px solid var(--warning-badge-border, rgba(245, 158, 11, 0.3));
     white-space: nowrap; flex-shrink: 0;
 }
 .agent-skill-tool-card-name {
     display: inline-block;
     font-size: 0.68rem; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    color: #475569; background: #f1f5f9;
+    color: var(--text-code-name, #475569); background: var(--bg-code-name, #f1f5f9);
     padding: 1px 6px; border-radius: 4px; margin-bottom: 6px;
     word-break: break-all; max-width: 100%;
 }
@@ -2698,8 +2698,8 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
 
 /* ── 高级技能弹窗 ── */
 #agent-skill-advanced-modal.modal-overlay {
-    position: fixed; inset: 0; z-index: 9000;
-    background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(3px);
+    position: fixed; inset: 0; z-index: 1910;
+    background: var(--agent-modal-overlay-bg, rgba(15, 23, 42, 0.45)); backdrop-filter: blur(3px);
     display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 #agent-skill-advanced-modal.modal-overlay.hidden { display: none !important; }
@@ -2710,8 +2710,8 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
     display: flex; flex-direction: column;
     padding: 0 !important;
     text-align: left !important;
-    background: #fff; border-radius: 12px;
-    box-shadow: 0 20px 50px -10px rgba(15, 23, 42, 0.25);
+    background: var(--surface, #fff); border-radius: 12px;
+    box-shadow: 0 20px 50px -10px var(--modal-shadow-color, rgba(15, 23, 42, 0.25));
     border: 1px solid var(--border);
     overflow: hidden;
 }
@@ -2765,82 +2765,93 @@ body.dark-mode .agent-harness-panel[data-agent-harness-section="skills"] .agent-
     flex-shrink: 0;
 }
 
-/* dark mode for both modals */
+.agent-skill-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.agent-skill-modal-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* 深色模式适配（工具选择与高级技能弹窗） */
 body.dark-mode .agent-skill-tools-modal-dialog,
 .dark-mode .agent-skill-tools-modal-dialog,
 body.dark-mode .agent-skill-advanced-modal-dialog,
 .dark-mode .agent-skill-advanced-modal-dialog {
-    background: #1e293b; border-color: rgba(51, 65, 85, 0.7);
+    background: var(--surface, #1e293b); border-color: var(--border-dark-modal, rgba(51, 65, 85, 0.7));
 }
 body.dark-mode .agent-skill-tools-modal-dialog .agent-config-modal-head,
 .dark-mode .agent-skill-tools-modal-dialog .agent-config-modal-head,
 body.dark-mode .agent-skill-advanced-modal-dialog .agent-config-modal-head,
 .dark-mode .agent-skill-advanced-modal-dialog .agent-config-modal-head {
-    background: #1e293b; border-color: rgba(51, 65, 85, 0.6);
+    background: var(--surface, #1e293b); border-color: var(--border-dark-head, rgba(51, 65, 85, 0.6));
 }
 body.dark-mode .agent-skill-advanced-modal-dialog .workspace-modal-close,
 .dark-mode .agent-skill-advanced-modal-dialog .workspace-modal-close {
-    background: rgba(239, 68, 68, 0.08) !important;
-    border-color: rgba(239, 68, 68, 0.45) !important;
-    color: #f87171 !important;
+    background: var(--danger-subtle-bg, rgba(239, 68, 68, 0.08)) !important;
+    border-color: var(--danger-subtle-border, rgba(239, 68, 68, 0.45)) !important;
+    color: var(--danger-light, #f87171) !important;
 }
 body.dark-mode .agent-skill-advanced-modal-dialog .workspace-modal-close:hover,
 .dark-mode .agent-skill-advanced-modal-dialog .workspace-modal-close:hover {
-    background: rgba(239, 68, 68, 0.22) !important;
-    border-color: #ef4444 !important;
-    color: #fca5a5 !important;
+    background: var(--danger-hover-bg-dark, rgba(239, 68, 68, 0.22)) !important;
+    border-color: var(--danger, #ef4444) !important;
+    color: var(--danger-lighter, #fca5a5) !important;
 }
 body.dark-mode .agent-skill-tools-modal-toolbar,
 .dark-mode .agent-skill-tools-modal-toolbar {
-    background: rgba(15, 23, 42, 0.6); border-color: rgba(51, 65, 85, 0.6);
+    background: var(--dark-toolbar-bg, rgba(15, 23, 42, 0.6)); border-color: var(--border-dark-head, rgba(51, 65, 85, 0.6));
 }
 body.dark-mode .agent-skill-tools-search-box .form-input,
 .dark-mode .agent-skill-tools-search-box .form-input {
-    background: #1e293b !important; border-color: rgba(51, 65, 85, 0.8) !important;
-    color: #f1f5f9 !important;
+    background: var(--surface, #1e293b) !important; border-color: var(--border-dark-input, rgba(51, 65, 85, 0.8)) !important;
+    color: var(--text-main, #f1f5f9) !important;
 }
 body.dark-mode .agent-skill-tools-modal-body,
 .dark-mode .agent-skill-tools-modal-body,
 body.dark-mode .agent-skill-advanced-modal-body,
 .dark-mode .agent-skill-advanced-modal-body {
-    background: #0f172a;
+    background: var(--bg-dark-body, #0f172a);
 }
 body.dark-mode .agent-skill-tool-card,
 .dark-mode .agent-skill-tool-card {
-    background: #1e293b; border-color: rgba(51, 65, 85, 0.7);
+    background: var(--surface, #1e293b); border-color: var(--border-dark-modal, rgba(51, 65, 85, 0.7));
 }
 body.dark-mode .agent-skill-tool-card:hover,
 .dark-mode .agent-skill-tool-card:hover {
-    background: rgba(16, 163, 127, 0.1); border-color: #10a37f;
+    background: var(--primary-card-hover-dark, rgba(16, 163, 127, 0.1)); border-color: var(--primary, #10a37f);
 }
 body.dark-mode .agent-skill-tool-card.is-selected,
 .dark-mode .agent-skill-tool-card.is-selected {
-    background: rgba(16, 163, 127, 0.16); border-color: #10a37f;
+    background: var(--primary-card-selected-dark, rgba(16, 163, 127, 0.16)); border-color: var(--primary, #10a37f);
 }
 body.dark-mode .agent-skill-tool-card-head strong,
 .dark-mode .agent-skill-tool-card-head strong {
-    color: #f1f5f9;
+    color: var(--text-main, #f1f5f9);
 }
 body.dark-mode .agent-skill-tool-card-name,
 .dark-mode .agent-skill-tool-card-name {
-    background: rgba(51, 65, 85, 0.6); color: #94a3b8;
+    background: var(--dark-code-name-bg, rgba(51, 65, 85, 0.6)); color: var(--text-muted, #94a3b8);
 }
 body.dark-mode .agent-skill-manifest-editor,
 .dark-mode .agent-skill-manifest-editor,
 body.dark-mode .agent-skill-instructions-editor,
 .dark-mode .agent-skill-instructions-editor {
-    background: #1e293b !important; border-color: rgba(51, 65, 85, 0.8) !important;
-    color: #f1f5f9 !important;
+    background: var(--surface, #1e293b) !important; border-color: var(--border-dark-input, rgba(51, 65, 85, 0.8)) !important;
+    color: var(--text-main, #f1f5f9) !important;
 }
 body.dark-mode .agent-skill-tools-modal-dialog .agent-task-editor-footer,
 .dark-mode .agent-skill-tools-modal-dialog .agent-task-editor-footer,
 body.dark-mode .agent-skill-advanced-modal-dialog .agent-task-editor-footer,
 .dark-mode .agent-skill-advanced-modal-dialog .agent-task-editor-footer {
-    background: #1e293b; border-color: rgba(51, 65, 85, 0.6);
+    background: var(--surface, #1e293b); border-color: var(--border-dark-head, rgba(51, 65, 85, 0.6));
 }
 
 body.dark-mode .agent-skill-tools-tags-preview,
-.dark-mode .agent-skill-tools-tags-preview { background: rgba(15,23,42,0.4); border-color: rgba(51,65,85,0.6); }
+.dark-mode .agent-skill-tools-tags-preview { background: var(--dark-preview-bg, rgba(15,23,42,0.4)); border-color: var(--border-dark-head, rgba(51,65,85,0.6)); }
 
 #agent-skill-import-review:not(:empty) {
     max-height: 320px;

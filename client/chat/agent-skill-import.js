@@ -24,7 +24,11 @@
         const selected = sel ? [...sel.selectedOptions].map(o => o.value) : [];
         if (badge) { badge.textContent = selected.length ? `已选 ${selected.length}` : ''; badge.className = 'agent-skill-tools-badge' + (selected.length ? ' has-selection' : ''); }
         if (!selected.length) { PivotSafeHtml.setHtml(preview, '<span class="agent-skill-tools-empty-hint">暂未选择工具（点击左侧按钮配置）</span>'); return; }
-        PivotSafeHtml.setHtml(preview, selected.map(name => { const tool = cachedTools.find(t => t.name === name); const label = tool ? (tool.title || tool.name) : name; return `<span class="agent-skill-tool-tag" title="${name}"><span>${label}</span><button type="button" class="agent-skill-tool-tag-remove" data-tool-name="${name}" aria-label="移除 ${label}">×</button></span>`; }).join(''));
+        PivotSafeHtml.setHtml(preview, selected.map(function(name) {
+            const tool = cachedTools.find(function(t) { return t.name === name; });
+            const label = tool ? (tool.title || tool.name) : name;
+            return `<span class="agent-skill-tool-tag" title="${name}"><span>${label}</span><button type="button" class="btn-secondary agent-skill-tool-tag-remove" data-tool-name="${name}" aria-label="移除 ${label}">×</button></span>`;
+        }).join(''));
         preview.querySelectorAll('.agent-skill-tool-tag-remove').forEach(btn => { btn.addEventListener('click', e => { e.stopPropagation(); const sel2 = document.getElementById('agent-skill-import-tools'); if (sel2) { const opt = sel2.querySelector(`option[value="${btn.dataset.toolName}"]`); if (opt) opt.selected = false; } modalSelected.delete(btn.dataset.toolName); updateToolsPreview(); invalidate(); }); });
     }
     function updateModalSummary() {
@@ -209,7 +213,8 @@
                 creationAttempted = true;
                 try { if (!result) result = await post(`${API_BASE}/agents/skills/source`, { markdown: proposal.markdown }); }
                 catch (error) {
-                    if (error.status >= 400 && error.status < 500 && error.status !== 408) {
+                    const statusVal = Number(error.status) || 0;
+                    if (Math.floor(statusVal / 100) === 4 && statusVal !== 408) {
                         creationAttempted = false;
                         throw error;
                     }
@@ -240,7 +245,11 @@
                 stage = '发布'; status('正在发布个人技能…');
                 publishAttempted = true;
                 try { await post(`${API_BASE}/agents/skills/versions/${encodeURIComponent(draftId)}/publish`, { scope: 'personal' }); }
-                catch (error) { if (error.status >= 400 && error.status < 500 && error.status !== 408) publishAttempted = false; throw error; }
+                catch (error) {
+                    const statusVal = Number(error.status) || 0;
+                    if (Math.floor(statusVal / 100) === 4 && statusVal !== 408) publishAttempted = false;
+                    throw error;
+                }
             }
             draftId = ''; proposal = null; sourceText = ''; preparedSnapshot = '';
             publishAttempted = false;
