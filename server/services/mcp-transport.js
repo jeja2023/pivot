@@ -24,7 +24,6 @@ function createMcpIdleTimer(idleTimeoutMs, onIdle) {
             error.code = 'MCP_STREAM_IDLE_TIMEOUT';
             onIdle(error);
         }, timeout);
-        timer.unref?.();
     };
     touch();
     return { touch, stop };
