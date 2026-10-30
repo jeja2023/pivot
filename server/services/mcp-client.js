@@ -62,7 +62,7 @@ const { getConnectionAuthorization } = require('./connection-accounts');
 
 const MCP_TIMEOUT_MS = 20000;
 const PREVIEW_LIMIT = 1800;
-const externalMcpSessions = new Map();
+const { keyForMcpSession, getMcpSession, setMcpSession, clearMcpSessions } = require('./mcp-session-cache');
 const { mcpOutboundOptions } = require('./mcp-managed-outbound');
 const SHARED_READONLY_DATABASE_TOOLS = new Set([
     'db.list_tables',
@@ -539,7 +539,8 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
             headers['x-api-key'] = server.api_key;
         }
     }
-    const sessionKey = String(server.id || url);
+    const sessionKey = keyForMcpSession({ serverId: server.id, url, userId: user?.id,
+        accountId: options.connectionAccountId, authorization: headers.Authorization || headers['x-api-key'], protocolVersion });
     const outbound = await mcpOutboundOptions(server, user, options, getAccessibleMcpServer);
     const statelessTransport = protocolMode === 'standard' && usesStatelessMcpTransport(protocolVersion);
     const send = async (requestMethod, requestParams, requestHeaders, notification = false) => {
@@ -593,7 +594,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
                         responseType: 'stream'
                     });
                     const reconnectSessionId = headerValue(reconnectResponse.headers, 'mcp-session-id');
-                    if (reconnectSessionId) externalMcpSessions.set(sessionKey, String(reconnectSessionId));
+                    if (reconnectSessionId) setMcpSession(sessionKey, reconnectSessionId);
                     return readStream(reconnectResponse, attempt + 1, reconnectHeaders);
                 }
                 : null
@@ -612,7 +613,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
         return data.result;
     };
-    if (protocolMode === 'standard' && !statelessTransport && method !== 'initialize' && !externalMcpSessions.has(sessionKey)) {
+    if (protocolMode === 'standard' && !statelessTransport && method !== 'initialize' && !getMcpSession(sessionKey)) {
         const initResponse = await send('initialize', {
             protocolVersion,
             capabilities: { tools: {} },
@@ -621,13 +622,13 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         parseResponse(initResponse, true);
         const initHeaders = initResponse.headers || {};
         const sessionId = headerValue(initHeaders, 'mcp-session-id');
-        if (sessionId) externalMcpSessions.set(sessionKey, String(sessionId));
+        if (sessionId) setMcpSession(sessionKey, sessionId);
         const sessionHeaders = { ...headers };
         if (sessionId) sessionHeaders['Mcp-Session-Id'] = String(sessionId);
         await send('notifications/initialized', {}, sessionHeaders, true);
     }
     if (protocolMode === 'standard' && !statelessTransport) {
-        const sessionId = externalMcpSessions.get(sessionKey);
+        const sessionId = getMcpSession(sessionKey);
         if (sessionId) headers['Mcp-Session-Id'] = sessionId;
     }
     const response = await send(method, params, headers);
@@ -636,7 +637,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         const sessionId = response.headers?.['mcp-session-id'] || response.headers?.['Mcp-Session-Id'];
         const initializedHeaders = { ...headers };
         if (sessionId) {
-            externalMcpSessions.set(sessionKey, String(sessionId));
+            setMcpSession(sessionKey, sessionId);
             initializedHeaders['Mcp-Session-Id'] = String(sessionId);
         }
         await send('notifications/initialized', {}, initializedHeaders, true);
@@ -755,7 +756,7 @@ async function listCachedMcpTools(serverId = null, user = null) {
         const visibleRows = rows
             .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
             .filter(row => isSharedMcpToolAllowed(row, row.name));
-        return await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
+        return await formatMcpTools(visibleRows, user);
     }
     const rows = await query(`
         SELECT t.*, s.user_id, s.name AS server_name, s.base_url AS server_base_url, s.config AS server_config,
@@ -774,35 +775,52 @@ async function listCachedMcpTools(serverId = null, user = null) {
     const visibleRows = rows
         .filter(row => isSuperAdmin(user) || canAccessSharedResource(row, user))
         .filter(row => isSharedMcpToolAllowed(row, row.name));
-    const formattedRows = await Promise.all(visibleRows.map(row => formatMcpTool(row, user)));
+    const formattedRows = await formatMcpTools(visibleRows, user);
     return [
         ...mergeLocalMcpTools(directLocalTools, bridgeLocalTools),
         ...formattedRows
     ].map(presentMcpTool);
 }
 
-async function formatMcpTool(row, user = null) {
+function mcpServerType(row) {
+    const serverBaseUrl = String(row.server_base_url || row.base_url || '');
+    return serverBaseUrl.startsWith('pivot-db://') ? 'database' : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
+}
+
+async function formatMcpTools(rows, user = null, deps = {}) {
+    const getGovernance = deps.getGovernance || require('./capability-market').getCapabilityToolGovernanceBatch;
+    const governance = await getGovernance(rows.map(row => ({
+        type: mcpServerType(row) === 'database' ? 'database_connection' : 'mcp_server',
+        sourceRef: String(row.server_id ?? ''), toolName: row.name
+    })), user);
+    const snapshots = new Map();
+    const loadSnapshot = serverId => {
+        const key = String(serverId);
+        if (!snapshots.has(key)) snapshots.set(key, (async () => {
+            let release = null;
+            let items = [];
+            try {
+                release = await (deps.activeRelease || activeRelease)(serverId);
+                if (release?.id) items = await (deps.releaseItems || releaseItems)(release.id);
+            } catch (_) {}
+            return { release, items: new Map(items.map(item => [String(item.tool_name || item.toolName), item])) };
+        })());
+        return snapshots.get(key);
+    };
+    return await Promise.all(rows.map(async (row, index) => {
+        const snapshot = await loadSnapshot(row.server_id);
+        return formatMcpTool(row, governance[index], snapshot);
+    }));
+}
+
+function formatMcpTool(row, governance, { release, items }) {
     let schema = { type: 'object' };
     try {
         schema = JSON.parse(row.input_schema || '{}') || schema;
     } catch (e) {}
-    const serverBaseUrl = String(row.server_base_url || row.base_url || '');
-    const serverType = serverBaseUrl.startsWith('pivot-db://')
-        ? 'database'
-        : getBuiltinServiceTypeFromUrl(serverBaseUrl) || 'external';
-    const packageType = serverType === 'database' ? 'database_connection' : 'mcp_server';
-    const { getCapabilityToolGovernance } = require('./capability-market');
-    const governance = await getCapabilityToolGovernance(packageType, String(row.server_id ?? ''), row.name, user);
-    // Active catalog release is the authoritative contract. mcp_tool_cache is
-    // intentionally retained as a compatibility projection for historical
-    // servers and first-run upgrades, but must not discard output schemas or
-    // definition digests once a release exists.
-    let release = null;
-    let releaseItem = null;
-    try {
-        release = await activeRelease(row.server_id);
-        if (release?.id) releaseItem = (await releaseItems(release.id)).find(item => String(item.tool_name || item.toolName) === String(row.name));
-    } catch (_) {}
+    const serverType = mcpServerType(row);
+    // 已发布目录是权威契约；旧缓存仅作兼容投影，不能覆盖输出结构和定义摘要。
+    const releaseItem = items.get(String(row.name));
     return presentMcpTool({
         serverId: row.server_id,
         serverName: row.server_name,
@@ -946,7 +964,8 @@ async function executeMcpTool(fullName, input, user, options = {}) {
 
 module.exports = {
     callMcpJsonRpc,
-    clearMcpSessions() { externalMcpSessions.clear(); },
+    clearMcpSessions,
+    formatMcpTools,
     executeMcpTool,
     getAccessibleMcpServer,
     localConnectorInputSchema,

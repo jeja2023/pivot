@@ -4,8 +4,17 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
+const fs = require('node:fs');
 
 const runner = path.resolve(__dirname, '..', 'docker', 'capability-workers', 'code-runner', 'runner.js');
+
+test('纯 Node 能力执行器使用独立轻量底座，终端保留完整工具底座', () => {
+    const root = path.resolve(__dirname, '..', 'docker', 'capability-workers');
+    for (const name of ['code-runner', 'foreach-runner']) {
+        assert.match(fs.readFileSync(path.join(root, name, 'Dockerfile'), 'utf8'), /^ARG BASE_IMAGE=node:22-bookworm-slim$/m);
+    }
+    assert.match(fs.readFileSync(path.join(root, 'terminal-runner', 'Dockerfile'), 'utf8'), /^ARG BASE_IMAGE=pivot:latest$/m);
+});
 
 function runCodeWorker(input) {
     return new Promise((resolve, reject) => {
@@ -36,6 +45,15 @@ test('code runner does not expose Node host globals to evaluated code', async ()
         timeoutMs: 1000
     });
     assert.deepEqual(result, { ok: true, result: 'undefined:undefined:undefined' });
+});
+
+test('code runner input and nested objects cannot reach host Function constructor', async () => {
+    for (const expression of ['vars.constructor.constructor', 'vars.nested.constructor.constructor']) {
+        const result = await runCodeWorker({ version: 1, action: 'code',
+            code: `return ${expression}('return process')();`, vars: { nested: {} }, timeoutMs: 1000 });
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, /Code generation from strings disallowed/);
+    }
 });
 
 test('code runner reports unsupported async code as a structured failure', async () => {

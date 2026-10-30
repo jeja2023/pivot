@@ -479,11 +479,8 @@ async function runDueAgentSchedules(limit = 20) {
 }
 
 function startAgentScheduleRunner() {
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
-        try {
+    const runner = require('./periodic-runner').createPeriodicRunner({ intervalMs: 60 * 1000, initialDelayMs: 5000,
+        async run() {
             const jobs = [
                 ['智能体计划调度失败', () => runDueAgentSchedules()],
                 ['触发器轮询执行失败', () => pollingTriggerRunner?.()],
@@ -499,15 +496,10 @@ function startAgentScheduleRunner() {
                     logger.error({ err: result.reason?.message || String(result.reason) }, jobs[index][0]);
                 }
             });
-        } finally {
-            running = false;
         }
-    };
-    const initial = setTimeout(() => { void tick(); }, 5000);
-    initial.unref?.();
-    const timer = setInterval(tick, 60 * 1000);
-    timer.unref?.();
-    return timer;
+    });
+    runner.start();
+    return runner;
 }
 
 module.exports = {

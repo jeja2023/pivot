@@ -88,24 +88,29 @@ async function syncRuntimePack(manifest, options = {}) {
         validateStatus: status => status >= 200 && status < 300,
         signal: options.signal,
         proxy: false,
+        maxRedirects: 0,
         ...createSafeHttpAgents({
             blockPrivate: false,
             allowExplicitLoopback: policy.block_loopback === false && isLoopbackHost(parsed.hostname)
         })
     });
     const temp = path.join(options.tempRoot || os.tmpdir(), `pivot-pack-${crypto.randomUUID()}.bundle`);
-    await fsp.mkdir(path.dirname(temp), { recursive: true });
-    const file = await fsp.open(temp, 'w');
-    let size = 0;
     try {
-        for await (const chunk of response.data) {
-            size += chunk.length;
-            if (size > MAX_PACK_BYTES) throw new Error('运行时资源包超过下载大小限制。');
-            await file.write(chunk);
-        }
-    } finally { await file.close(); }
-    try { return await installRuntimePack(temp, normalized, options); }
-    finally { await fsp.rm(temp, { force: true }); }
+        await fsp.mkdir(path.dirname(temp), { recursive: true });
+        const file = await fsp.open(temp, 'w');
+        let size = 0;
+        try {
+            for await (const chunk of response.data) {
+                size += chunk.length;
+                if (size > MAX_PACK_BYTES) throw new Error('运行时资源包超过下载大小限制。');
+                await file.write(chunk);
+            }
+        } finally { await file.close(); }
+        return await installRuntimePack(temp, normalized, options);
+    } finally {
+        response.data.destroy();
+        await fsp.rm(temp, { force: true });
+    }
 }
 
 async function listRuntimePacks(options = {}) {

@@ -464,13 +464,15 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
     const assistantModelName = model?.name || model?.model_name || '';
 
-    window.Pivot?.modules?.['chat.messageVirtualizer']?.prepareForLiveAppend?.();
+    const messageVirtualizer = window.Pivot?.modules?.['chat.messageVirtualizer'];
+    const resumeVirtualizerAfterReply = Boolean(messageVirtualizer?.isActive?.());
+    messageVirtualizer?.prepareForLiveAppend?.();
 
     let userMsgEl = null;
     if (!shouldRegenerate) {
         userMsgEl = appendMessage('user', displayContent, null, { createdAt: new Date(), attachments: sentAttachments });
     }
-    const aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date(), modelName: assistantModelName });
+    let aiMsgEl = appendMessage('assistant', '...', null, { createdAt: new Date(), modelName: assistantModelName });
     const textBody = aiMsgEl.querySelector('.text-body');
     let serverPlanOnly = false;
     const showTaskPromotionForResponse = () => {
@@ -496,6 +498,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     let pendingStreamChunks = [];
     let reader = null;
     let hasServerFinalStats = false;
+    let savedAssistantMessageId = null;
     let agentRunId = '';
     let agentTrackingPromise = null;
     let awaitingMcpConsent = false;
@@ -816,6 +819,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                         window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                     }
                     if (data.role === 'assistant') {
+                        savedAssistantMessageId = Number.parseInt(data.messageId, 10) || null;
                         window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
                         window.Pivot.legacy.setMessageModelName?.(aiMsgEl, data.modelName || data.model_name || '');
                         renderPersistedAssistantContent(data.content);
@@ -922,8 +926,10 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             console.warn('更新会话统计失败', statsError);
         }
 
-        if (isViewingRequestSession() && (!isMessageContentInDocument(aiMsgEl) || (!shouldRegenerate && !isMessageContentInDocument(userMsgEl)))) {
+        const shouldRestoreVirtualizer = resumeVirtualizerAfterReply && savedAssistantMessageId && !ephemeralVoice && document.body?.dataset.activeWorkspace === 'chat' && isMessageContainerNearBottom(260);
+        if (isViewingRequestSession() && (shouldRestoreVirtualizer || !isMessageContentInDocument(aiMsgEl) || (!shouldRegenerate && !isMessageContentInDocument(userMsgEl)))) {
             await selectSession(requestSessionId);
+            if (isViewingRequestSession() && savedAssistantMessageId) aiMsgEl = document.querySelector(`.message.assistant[data-message-id="${savedAssistantMessageId}"] .message-content`) || aiMsgEl;
         } else if (!isViewingRequestSession()) {
             showToast('原会话的回答已生成完成，可切回查看。', 'info');
         }

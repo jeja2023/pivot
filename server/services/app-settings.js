@@ -106,6 +106,15 @@ async function setAppSettingAsync(key, value, options = {}) {
     return row || null;
 }
 
+async function replaceAppSettingValueIfUnchanged(key, oldValue, newValue) {
+    const row = await queryOne(`
+        UPDATE app_settings SET value = ? WHERE key = ? AND value = ?
+        RETURNING key, value, updated_at, updated_by
+    `, [String(newValue), key, String(oldValue)]);
+    if (row && settingsCache.get(key)?.value === String(oldValue)) settingsCache.set(key, row);
+    return Boolean(row);
+}
+
 function setAppSetting(key, value, options = {}) {
     const updatedAt = options.updatedAt || getBeijingTimestamp();
     const row = { key, value: String(value), updated_at: updatedAt, updated_by: options.updatedBy || null };
@@ -148,6 +157,7 @@ module.exports = {
     getAppSettingValue,
     isAppSettingsConflictTargetError,
     refreshAppSettingsCache,
+    replaceAppSettingValueIfUnchanged,
     setAppSetting,
     setAppSettingAsync
 };

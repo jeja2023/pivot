@@ -1,3 +1,4 @@
+// @ts-check
 const dns = require('dns').promises;
 const fs = require('fs');
 const net = require('net');
@@ -17,6 +18,7 @@ async function lookupWithTimeout(host, options = {}) {
     const lookup = dns.lookup(host, options);
     const timeout = new Promise((_, reject) => {
         timer = setTimeout(() => {
+            /** @type {NodeJS.ErrnoException} */
             const error = new Error(`DNS lookup timeout for ${host}`);
             error.code = 'DNS_LOOKUP_TIMEOUT';
             reject(error);
@@ -155,24 +157,33 @@ async function addResolvedHostAliases(names) {
 }
 
 const HOST_RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000;
+const HOST_CACHE_MAX = 1000;
 const hostResolutionCache = new Map();
+
+function cacheHostResult(cache, key, value) {
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > HOST_CACHE_MAX) cache.delete(cache.keys().next().value);
+}
 
 async function isLocalModelHostAsync(host, localNames) {
     if (isLocalModelHost(host, localNames)) return true;
     const normalized = normalizeHostAlias(host);
     if (!shouldResolveHostAlias(normalized)) return false;
     const now = Date.now();
-    const cached = hostResolutionCache.get(normalized);
+    const key = JSON.stringify([normalized, [...localNames].sort()]);
+    const cached = hostResolutionCache.get(key);
     if (cached && cached.expires > now) {
+        cacheHostResult(hostResolutionCache, key, cached);
         return cached.value;
     }
     try {
         const records = await lookupWithTimeout(normalized, { all: true, verbatim: true });
         const result = records.some(record => localNames.has(String(record.address || '').toLowerCase()));
-        hostResolutionCache.set(normalized, { value: result, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
+        cacheHostResult(hostResolutionCache, key, { value: result, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
         return result;
     } catch (_err) {
-        hostResolutionCache.set(normalized, { value: false, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
+        cacheHostResult(hostResolutionCache, key, { value: false, expires: now + HOST_RESOLUTION_CACHE_TTL_MS });
         return false;
     }
 }
@@ -217,11 +228,12 @@ async function getResolvedLocalHostnames(options = {}) {
     const now = Date.now();
     const cached = resolvedHostnamesCache.get(cacheKey);
     if (cached && cached.expires > now) {
+        cacheHostResult(resolvedHostnamesCache, cacheKey, cached);
         return cached.value;
     }
     const names = getLocalHostnames(options);
     const resolved = await addResolvedHostAliases(names);
-    resolvedHostnamesCache.set(cacheKey, { value: resolved, expires: now + RESOLVED_HOSTNAMES_TTL_MS });
+    cacheHostResult(resolvedHostnamesCache, cacheKey, { value: resolved, expires: now + RESOLVED_HOSTNAMES_TTL_MS });
     return resolved;
 }
 

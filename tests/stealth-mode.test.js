@@ -82,10 +82,45 @@ test('Stealth Service: 环境变量覆盖与配置管理', async () => {
     delete process.env.PIVOT_STEALTH_MODE;
 });
 
+test('隐身签名绑定目标 Host，保留旧协议开关和旧服务兼容头', async () => {
+    const { createStealthHeaders, stripStealthHeaders } = require('../desktop/stealth-policy');
+    const secret = 'stealth-host-binding-test-secret';
+    const now = Date.now();
+    const oldMode = process.env.PIVOT_STEALTH_MODE;
+    const oldSecret = process.env.PIVOT_STEALTH_SECRET;
+    const oldLegacy = process.env.PIVOT_STEALTH_ALLOW_LEGACY;
+    const settings = require('../server/services/app-settings');
+    const original = process.env.DATABASE_URL ? await require('../server/db/client').queryOne('SELECT value FROM app_settings WHERE key = ?', ['stealth_secret']) : null;
+    process.env.PIVOT_STEALTH_MODE = 'true';
+    process.env.PIVOT_STEALTH_SECRET = secret;
+    try {
+        if (process.env.DATABASE_URL) await require('../server/services/stealth-service').setStealthConfigAsync({ secret });
+        const generated = createStealthHeaders(secret, 'https://pivot.example:8443/chat', now);
+        const headers = Object.fromEntries(Object.entries(generated).map(([key, value]) => [key.toLowerCase(), value]));
+        assert.equal(headers['x-pivot-stealth-token'], generateStealthSignature(now, secret));
+        assert.equal(verifyStealthRequest({ headers: { ...headers, host: 'pivot.example:8443' } }), true);
+        assert.equal(verifyStealthRequest({ headers: { ...headers, host: 'other.example:8443' } }), false);
+        process.env.PIVOT_STEALTH_ALLOW_LEGACY = 'false';
+        assert.equal(verifyStealthRequest({ headers: { 'x-pivot-stealth-time': String(now), 'x-pivot-stealth-token': headers['x-pivot-stealth-token'] } }), false);
+        assert.deepEqual(stripStealthHeaders({ ...generated, Accept: 'text/html' }), { Accept: 'text/html' });
+    } finally {
+        if (process.env.DATABASE_URL) {
+            if (original) await settings.setAppSettingAsync('stealth_secret', original.value);
+            else await settings.deleteAppSettingAsync('stealth_secret');
+        }
+        if (oldMode === undefined) delete process.env.PIVOT_STEALTH_MODE; else process.env.PIVOT_STEALTH_MODE = oldMode;
+        if (oldSecret === undefined) delete process.env.PIVOT_STEALTH_SECRET; else process.env.PIVOT_STEALTH_SECRET = oldSecret;
+        if (oldLegacy === undefined) delete process.env.PIVOT_STEALTH_ALLOW_LEGACY; else process.env.PIVOT_STEALTH_ALLOW_LEGACY = oldLegacy;
+    }
+});
+
 test('Stealth Middleware: 未授权连接物理掐断 (Socket Destroy)', async () => {
     const secret = 'stealth-test-secret-9876543210fedcba';
+    const settings = require('../server/services/app-settings');
+    const original = process.env.DATABASE_URL ? await require('../server/db/client').queryOne('SELECT value FROM app_settings WHERE key = ?', ['stealth_secret']) : null;
     process.env.PIVOT_STEALTH_SECRET = secret;
     process.env.PIVOT_STEALTH_MODE = 'true';
+    if (process.env.DATABASE_URL) await require('../server/services/stealth-service').setStealthConfigAsync({ secret });
 
     const app = express();
     app.use(stealthAccessGuard);
@@ -135,6 +170,10 @@ test('Stealth Middleware: 未授权连接物理掐断 (Socket Destroy)', async (
 
         assert.deepEqual(responseData, { ok: true }, '携带合法桌面端签名的请求应放行');
     } finally {
+        if (process.env.DATABASE_URL) {
+            if (original) await settings.setAppSettingAsync('stealth_secret', original.value);
+            else await settings.deleteAppSettingAsync('stealth_secret');
+        }
         delete process.env.PIVOT_STEALTH_MODE;
         delete process.env.PIVOT_STEALTH_SECRET;
         server.close();

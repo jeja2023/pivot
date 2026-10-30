@@ -50,7 +50,12 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
     const describeToolForUser = deps.toolDiscovery?.describeToolForUser || discovery.describeToolForUser;
     const executeDiscoveredTool = deps.toolDiscovery?.executeDiscoveredTool || discovery.executeDiscoveredTool;
     const listTools = deps.toolDiscovery?.formatToolList || require('./agent-tool-catalog').formatToolList;
-    const scopedCatalog = { formatToolList: async (actor, options) => require('./agent-tool-discovery-scope').filterRunToolCatalog(await listTools(actor, options), context.run || {}, actor) };
+    let catalogSnapshot = null;
+    const scopedCatalog = { formatToolList: (actor, options) => {
+        if (!catalogSnapshot) catalogSnapshot = Promise.resolve(listTools(actor, options))
+            .then(tools => require('./agent-tool-discovery-scope').filterRunToolCatalog(tools, context.run || {}, actor));
+        return catalogSnapshot;
+    } };
     const descriptions = [];
     for (const item of items) {
         const reference = normalizeToolReference(item);

@@ -1041,6 +1041,7 @@ test.describe('Pivot browser smoke', () => {
 
         for (const width of [1280, 390]) {
             await page.setViewportSize({ width, height: 844 });
+            await expect.poll(() => page.evaluate(() => Number(window.getComputedStyle(document.querySelector('#settings-scale-canvas')).getPropertyValue('--settings-scale')))).toBe(1);
             for (const section of ['overview', 'services', 'quality']) {
                 await page.locator('#monitor-' + section + '-tab').click();
                 const panel = page.locator('[data-quality-panels="monitor"][data-quality-panel="' + section + '"]');
@@ -2009,6 +2010,15 @@ test.describe('Pivot browser smoke', () => {
         const chatResponse = await chatResponsePromise;
         expect(chatResponse.ok()).toBeTruthy();
         await expect(page.locator('#message-container')).toContainText('真实 E2E 流式回答', { timeout: 20_000 });
+        await expect(page.locator('#send-btn')).toBeVisible();
+        await page.evaluate(async () => window.Pivot.legacy.selectSession(window.Pivot.legacy.getStoredActiveChatSession()));
+        await expect.poll(() => page.evaluate(() => window.Pivot.moduleApi('chat.messageVirtualizer').isActive())).toBe(true);
+        await page.locator('#user-input').fill('再次返回 E2E 流式文本');
+        const secondResponse = page.waitForResponse(response => response.url().endsWith('/api/chat'));
+        await page.locator('#send-btn').click();
+        expect((await secondResponse).ok()).toBeTruthy();
+        await expect(page.locator('#send-btn')).toBeVisible({ timeout: 20_000 });
+        await expect.poll(() => page.evaluate(() => window.Pivot.moduleApi('chat.messageVirtualizer').isActive())).toBe(true);
     });
 
     test('对话可概述指定专题并在追问中列出真实文档目录', async ({ page }) => {

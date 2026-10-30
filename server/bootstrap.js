@@ -56,11 +56,17 @@ function registerProcessErrorHandlers({ logger, flushAllWrites, processRef = pro
     return { fatalExit };
 }
 
-function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, setTimeoutFn = setTimeout }) {
-    return function scheduleMaintenanceTasks() {
+function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout }) {
+    let timer = null;
+    let cancelled = false;
+    let stopMaintenance = null;
+    function scheduleMaintenanceTasks() {
+        if (cancelled || timer) return;
         const start = () => {
+            timer = null;
+            if (cancelled) return;
             try {
-                startMaintenanceTasks();
+                stopMaintenance = startMaintenanceTasks();
             } catch (err) {
                 logger.error({ err }, '后台维护服务启动失败');
             }
@@ -70,8 +76,16 @@ function createMaintenanceScheduler({ delayMs, logger, startMaintenanceTasks, se
             return;
         }
         logger.info({ delayMs }, '后台维护服务将在服务就绪后启动');
-        setTimeoutFn(start, delayMs).unref();
+        timer = setTimeoutFn(start, delayMs);
+        timer?.unref?.();
+    }
+    scheduleMaintenanceTasks.cancel = () => {
+        cancelled = true;
+        if (timer) clearTimeoutFn(timer);
+        timer = null;
+        return typeof stopMaintenance === 'function' ? stopMaintenance() : undefined;
     };
+    return scheduleMaintenanceTasks;
 }
 
 function runBackgroundTask(task, logger, failureMessage) {
@@ -83,9 +97,21 @@ function runBackgroundTask(task, logger, failureMessage) {
         });
 }
 
+async function startManagedRunner(factory) {
+    const runner = factory();
+    if (!runner || typeof runner.start !== 'function') return null;
+    try { await runner.start(); }
+    catch (error) {
+        try { await runner.stop?.(); } catch (_) {}
+        throw error;
+    }
+    return runner;
+}
+
 function startBackgroundServices({
     logger,
     setImmediateFn = setImmediate,
+    agentEventDispatcher = createAgentEventOutboxDispatcher({ logger }),
     dependencies = {
         startGpuMonitor,
         startModelEndpointMonitor,
@@ -97,14 +123,11 @@ function startBackgroundServices({
         refreshKnowledgeFreshness,
         backfillKnowledgeProductProjections,
         recoverManualKnowledgeArticleEmbeddings,
-        startKnowledgeWikiCompileWorker: () => {
-            const worker = createKnowledgeWikiCompileWorker({ logger });
-            return worker?.start?.() || null;
-        },
-        startKnowledgeSourceLifecycleWorker: () => createKnowledgeSourceLifecycleWorker({ logger }).start(),
-        startWorkspaceMemorySourceLifecycleWorker: () => createWorkspaceMemorySourceLifecycleWorker({ logger }).start(),
-        startKnowledgeGraphMaintenanceRunner: () => createKnowledgeGraphMaintenanceRunner({ logger }).start(),
-        startKnowledgeEmbeddingRecoveryRunner: () => createKnowledgeEmbeddingRecoveryRunner({
+        startKnowledgeWikiCompileWorker: () => startManagedRunner(() => createKnowledgeWikiCompileWorker({ logger })),
+        startKnowledgeSourceLifecycleWorker: () => startManagedRunner(() => createKnowledgeSourceLifecycleWorker({ logger })),
+        startWorkspaceMemorySourceLifecycleWorker: () => startManagedRunner(() => createWorkspaceMemorySourceLifecycleWorker({ logger })),
+        startKnowledgeGraphMaintenanceRunner: () => startManagedRunner(() => createKnowledgeGraphMaintenanceRunner({ logger })),
+        startKnowledgeEmbeddingRecoveryRunner: () => startManagedRunner(() => createKnowledgeEmbeddingRecoveryRunner({
             recover: async () => {
                 const [lexical, mismatched, manual] = await Promise.all([
                     require('./services/rag-documents').scheduleLexicalReadyKnowledgeDocuments(),
@@ -113,18 +136,18 @@ function startBackgroundServices({
                 ]);
                 return { scheduled: Number(lexical.scheduled || 0) + Number(mismatched.scheduled || 0) + Number(manual.ready || 0), lexical, mismatched, manual };
             }
-        }).start(),
-        startKnowledgeSourceSyncScheduler: () => createKnowledgeSourceSyncScheduler().start(),
+        })),
+        startKnowledgeSourceSyncScheduler: () => startManagedRunner(() => createKnowledgeSourceSyncScheduler()),
         recoverAgentRuns,
         startAgentRecoveryRunner,
         startAgentScheduleRunner,
-        startAgentEventOutboxDispatcher: () => createAgentEventOutboxDispatcher({ logger }).start(),
-        startSkillReleaseBreakerRunner: () => createSkillReleaseBreakerRunner().start(),
-        startWorkflowReleaseBreakerRunner: () => createWorkflowReleaseBreakerRunner().start(),
+        startAgentEventOutboxDispatcher: () => agentEventDispatcher.start(),
+        startSkillReleaseBreakerRunner: () => startManagedRunner(() => createSkillReleaseBreakerRunner()),
+        startWorkflowReleaseBreakerRunner: () => startManagedRunner(() => createWorkflowReleaseBreakerRunner()),
         startLongTermMemoryMaintenanceRunner,
-        startMemoryOutcomeMetricsRunner: () => createMemoryOutcomeMetricsRunner({ logger }).start(),
+        startMemoryOutcomeMetricsRunner: () => startManagedRunner(() => createMemoryOutcomeMetricsRunner({ logger })),
         startDecisionLearningMaintenanceRunner,
-        startDecisionArtifactBreakerRunner: () => createDecisionArtifactBreakerRunner().start(),
+        startDecisionArtifactBreakerRunner: () => startManagedRunner(() => createDecisionArtifactBreakerRunner()),
         startAnalysisRefreshRunner,
         startAsyncQueryRunner,
         startMindmapExportRunner: () => require('./services/mindmaps/exports').start(),
@@ -132,67 +155,97 @@ function startBackgroundServices({
         startRuntimeDiagnostics
     }
 }) {
+    let stopping = false;
+    const managedRunners = new Set();
+    const managedStarts = new Set();
+    const runWhileRunning = (task, taskLogger, message) => runBackgroundTask(() => {
+        if (!stopping && typeof task === 'function') return task();
+    }, taskLogger, message);
+    const startManaged = (task, message) => {
+        if (typeof task !== 'function') return;
+        const starting = runBackgroundTask(async () => {
+            if (stopping) return;
+            const runner = await task();
+            if (typeof runner?.stop !== 'function') return;
+            if (stopping) await runner.stop();
+            else managedRunners.add(runner);
+        }, logger, message);
+        managedStarts.add(starting);
+        void starting.finally(() => managedStarts.delete(starting));
+    };
     // 运行时压力采样必须最先起来：故障往往在数小时后才发作，届时需要有历史序列可查。
     if (typeof dependencies.startRuntimeDiagnostics === 'function') {
         try { dependencies.startRuntimeDiagnostics(); } catch (err) {
             logger.warn({ err: err && err.message ? err.message : err }, '运行时压力采样启动失败');
         }
     }
-    runBackgroundTask(dependencies.startGpuMonitor, logger, 'GPU 监控服务启动失败');
-    runBackgroundTask(dependencies.startMindmapExportRunner, logger, '思维导图导出服务启动失败');
-    runBackgroundTask(dependencies.startTransactionRunner, logger, '资金交易分析服务启动失败');
-    runBackgroundTask(dependencies.startModelEndpointMonitor, logger, '模型端点监控服务启动失败');
+    startManaged(dependencies.startGpuMonitor, 'GPU 监控服务启动失败');
+    runWhileRunning(dependencies.startMindmapExportRunner, logger, '思维导图导出服务启动失败');
+    runWhileRunning(dependencies.startTransactionRunner, logger, '资金交易分析服务启动失败');
+    startManaged(dependencies.startModelEndpointMonitor, '模型端点监控服务启动失败');
     setImmediateFn(() => {
-        runBackgroundTask(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');
-        runBackgroundTask(dependencies.startRegulationImportWorker, logger, '法规导入任务 Worker 启动失败');
-        runBackgroundTask(dependencies.startRegulationIndexRecoveryRunner, logger, '法规向量索引恢复巡检器启动失败');
-        runBackgroundTask(dependencies.recoverStaleKnowledgeDocumentIndexes, logger, '知识库索引恢复执行失败');
-        runBackgroundTask(dependencies.recoverKnowledgeEvaluationRuns, logger, '知识库评测运行恢复失败');
-        runBackgroundTask(dependencies.refreshKnowledgeFreshness, logger, '知识库文档新鲜度巡检失败');
-        runBackgroundTask(dependencies.backfillKnowledgeProductProjections, logger, '知识库历史产品投影回填失败');
-        runBackgroundTask(dependencies.recoverManualKnowledgeArticleEmbeddings, logger, '人工知识文章向量补齐失败');
+        runWhileRunning(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');
+        runWhileRunning(dependencies.startRegulationImportWorker, logger, '法规导入任务 Worker 启动失败');
+        runWhileRunning(dependencies.startRegulationIndexRecoveryRunner, logger, '法规向量索引恢复巡检器启动失败');
+        runWhileRunning(dependencies.recoverStaleKnowledgeDocumentIndexes, logger, '知识库索引恢复执行失败');
+        runWhileRunning(dependencies.recoverKnowledgeEvaluationRuns, logger, '知识库评测运行恢复失败');
+        runWhileRunning(dependencies.refreshKnowledgeFreshness, logger, '知识库文档新鲜度巡检失败');
+        runWhileRunning(dependencies.backfillKnowledgeProductProjections, logger, '知识库历史产品投影回填失败');
+        runWhileRunning(dependencies.recoverManualKnowledgeArticleEmbeddings, logger, '人工知识文章向量补齐失败');
         if (typeof dependencies.startKnowledgeWikiCompileWorker === 'function') {
-            runBackgroundTask(dependencies.startKnowledgeWikiCompileWorker, logger, '知识 Wiki 编译 Worker 启动失败');
+            startManaged(dependencies.startKnowledgeWikiCompileWorker, '知识 Wiki 编译 Worker 启动失败');
         }
         if (typeof dependencies.startKnowledgeSourceLifecycleWorker === 'function') {
-            runBackgroundTask(dependencies.startKnowledgeSourceLifecycleWorker, logger, '知识来源生命周期 Worker 启动失败');
+            startManaged(dependencies.startKnowledgeSourceLifecycleWorker, '知识来源生命周期 Worker 启动失败');
         }
         if (typeof dependencies.startWorkspaceMemorySourceLifecycleWorker === 'function') {
-            runBackgroundTask(dependencies.startWorkspaceMemorySourceLifecycleWorker, logger, '代码工作区记忆来源 Worker 启动失败');
+            startManaged(dependencies.startWorkspaceMemorySourceLifecycleWorker, '代码工作区记忆来源 Worker 启动失败');
         }
         if (typeof dependencies.startKnowledgeGraphMaintenanceRunner === 'function') {
-            runBackgroundTask(dependencies.startKnowledgeGraphMaintenanceRunner, logger, '知识图谱自动维护任务启动失败');
+            startManaged(dependencies.startKnowledgeGraphMaintenanceRunner, '知识图谱自动维护任务启动失败');
         }
-        runBackgroundTask(dependencies.startKnowledgeEmbeddingRecoveryRunner, logger, '知识库向量补齐巡检器启动失败');
-        runBackgroundTask(dependencies.startKnowledgeSourceSyncScheduler, logger, '知识库局域网来源同步调度器启动失败');
-        runBackgroundTask(dependencies.recoverAgentRuns, logger, '智能体任务恢复执行失败');
+        startManaged(dependencies.startKnowledgeEmbeddingRecoveryRunner, '知识库向量补齐巡检器启动失败');
+        startManaged(dependencies.startKnowledgeSourceSyncScheduler, '知识库局域网来源同步调度器启动失败');
+        runWhileRunning(dependencies.recoverAgentRuns, logger, '智能体任务恢复执行失败');
         if (typeof dependencies.startAgentRecoveryRunner === 'function') {
-            runBackgroundTask(dependencies.startAgentRecoveryRunner, logger, '智能体周期性恢复服务启动失败');
+            startManaged(dependencies.startAgentRecoveryRunner, '智能体周期性恢复服务启动失败');
         }
-        runBackgroundTask(dependencies.startAgentScheduleRunner, logger, '智能体计划调度器启动失败');
-        if (typeof dependencies.startAgentEventOutboxDispatcher === 'function') {
-            runBackgroundTask(dependencies.startAgentEventOutboxDispatcher, logger, 'Agent 事件 outbox 投递器启动失败');
+        startManaged(dependencies.startAgentScheduleRunner, '智能体计划调度器启动失败');
+        if (!stopping && typeof dependencies.startAgentEventOutboxDispatcher === 'function') {
+            runWhileRunning(() => { if (!stopping) return dependencies.startAgentEventOutboxDispatcher(); }, logger, 'Agent 事件 outbox 投递器启动失败');
         }
         // 技能发布熔断巡检：达到冻结阈值即自动回滚或暂停，避免坏版本长时间留在灰度里。
         if (typeof dependencies.startSkillReleaseBreakerRunner === 'function') {
-            runBackgroundTask(dependencies.startSkillReleaseBreakerRunner, logger, '技能发布熔断巡检器启动失败');
+            startManaged(dependencies.startSkillReleaseBreakerRunner, '技能发布熔断巡检器启动失败');
         }
         if (typeof dependencies.startWorkflowReleaseBreakerRunner === 'function') {
-            runBackgroundTask(dependencies.startWorkflowReleaseBreakerRunner, logger, '工作流发布熔断巡检器启动失败');
+            startManaged(dependencies.startWorkflowReleaseBreakerRunner, '工作流发布熔断巡检器启动失败');
         }
-        runBackgroundTask(dependencies.startLongTermMemoryMaintenanceRunner, logger, '长期记忆生命周期巡检器启动失败');
+        startManaged(dependencies.startLongTermMemoryMaintenanceRunner, '长期记忆生命周期巡检器启动失败');
         if (typeof dependencies.startMemoryOutcomeMetricsRunner === 'function') {
-            runBackgroundTask(dependencies.startMemoryOutcomeMetricsRunner, logger, '长期记忆效用周期指标刷新失败');
+            startManaged(dependencies.startMemoryOutcomeMetricsRunner, '长期记忆效用周期指标刷新失败');
         }
-        runBackgroundTask(dependencies.startDecisionLearningMaintenanceRunner, logger, '智能决策学习维护巡检器启动失败');
-        runBackgroundTask(dependencies.startDecisionArtifactBreakerRunner, logger, '智能决策模型制品熔断巡检器启动失败');
-        runBackgroundTask(dependencies.startAnalysisRefreshRunner, logger, '数据分析刷新与告警调度器启动失败');
-        runBackgroundTask(dependencies.startAsyncQueryRunner, logger, '数据分析异步查询 Worker 启动失败');
+        startManaged(dependencies.startDecisionLearningMaintenanceRunner, '智能决策学习维护巡检器启动失败');
+        startManaged(dependencies.startDecisionArtifactBreakerRunner, '智能决策模型制品熔断巡检器启动失败');
+        startManaged(dependencies.startAnalysisRefreshRunner, '数据分析刷新与告警调度器启动失败');
+        startManaged(dependencies.startAsyncQueryRunner, '数据分析异步查询 Worker 启动失败');
     });
+    return async () => {
+        stopping = true;
+        await Promise.allSettled([...managedStarts]);
+        const runners = [...managedRunners];
+        managedRunners.clear();
+        const results = await Promise.allSettled([
+            Promise.resolve().then(() => agentEventDispatcher.stop()),
+            ...runners.map(runner => Promise.resolve().then(() => runner.stop()))
+        ]);
+        results.filter(result => result.status === 'rejected').forEach(result => logger.warn({ err: result.reason }, '停止后台执行器失败'));
+    };
 }
 
 module.exports = {
     registerProcessErrorHandlers,
     createMaintenanceScheduler,
-    startBackgroundServices
+    startBackgroundServices,
+    startManagedRunner
 };

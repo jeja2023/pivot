@@ -14,7 +14,7 @@
  * 配套要求：每个连接建立时 SET timezone = 'Asia/Shanghai'，使 PG 的
  * timestamptz 文本输出即为北京时间，归一化只需裁剪时区后缀与小数秒。
  */
-const { Pool, types: pgTypes } = require('pg');
+const { Pool, TypeOverrides } = require('pg');
 const { logger } = require('../logger');
 
 const PG_TIMEZONE = process.env.PG_TIMEZONE || 'Asia/Shanghai';
@@ -43,11 +43,8 @@ function normalizePgTimestamp(raw) {
     return text;
 }
 
-let typeParsersApplied = false;
-
-function applyPgTypeParsers() {
-    if (typeParsersApplied) return;
-    typeParsersApplied = true;
+function createPivotPgTypes() {
+    const pgTypes = new TypeOverrides();
 
     // BIGINT / NUMERIC → Number（避免字符串化破坏 === 与算术）
     pgTypes.setTypeParser(OID_INT8, val => (val === null ? null : Number(val)));
@@ -57,6 +54,7 @@ function applyPgTypeParsers() {
     pgTypes.setTypeParser(OID_TIMESTAMPTZ, normalizePgTimestamp);
     pgTypes.setTypeParser(OID_TIMESTAMP, normalizePgTimestamp);
     pgTypes.setTypeParser(OID_DATE, normalizePgTimestamp);
+    return pgTypes;
 }
 
 let pgPool = null;
@@ -67,12 +65,12 @@ function getPgPool() {
         if (!connectionString) {
             throw new Error('[PG] DATABASE_URL 未配置，无法初始化 PostgreSQL 连接池');
         }
-        applyPgTypeParsers();
         const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || '20000', 10);
         const testSchema = String(process.env.PG_TEST_SCHEMA || '').trim();
         const safeTestSchema = /^[a-z_][a-z0-9_]{0,62}$/i.test(testSchema) ? testSchema : '';
         pgPool = new Pool({
             connectionString,
+            types: createPivotPgTypes(),
             max: parseInt(process.env.PG_POOL_MAX || '30', 10),
             idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS || '30000', 10),
             connectionTimeoutMillis: parseInt(process.env.PG_CONNECT_TIMEOUT_MS || '5000', 10),
@@ -121,6 +119,6 @@ module.exports = {
     closePgPool,
     checkPgConnection,
     normalizePgTimestamp,
-    applyPgTypeParsers,
+    createPivotPgTypes,
     PG_TIMEZONE,
 };

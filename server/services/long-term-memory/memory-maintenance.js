@@ -154,24 +154,17 @@ async function recoverMemoryEmbeddings(options = {}) {
 function startLongTermMemoryMaintenanceRunner(intervalMs = 6 * 60 * 60 * 1000) {
     if (maintenanceTimer) return maintenanceTimer;
     const safeInterval = Math.max(Number.parseInt(intervalMs, 10) || 6 * 60 * 60 * 1000, 60 * 60 * 1000);
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
+    const runner = require('../periodic-runner').createPeriodicRunner({ intervalMs: safeInterval, initialDelayMs: 30000, async run() {
         try {
             await archiveExpiredMemoriesBatch();
             await archiveStaleLowValueMemoriesBatch();
             await recoverMemoryEmbeddings({ limit: 50 });
         } catch (error) {
             logger.warn({ err: error.message }, '长期记忆生命周期巡检失败');
-        } finally {
-            running = false;
         }
-    };
-    const initial = setTimeout(() => { void tick(); }, 30000);
-    initial.unref?.();
-    maintenanceTimer = setInterval(() => { void tick(); }, safeInterval);
-    maintenanceTimer.unref?.();
+    } });
+    runner.start();
+    maintenanceTimer = { async stop() { await runner.stop(); maintenanceTimer = null; } };
     return maintenanceTimer;
 }
 

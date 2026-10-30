@@ -32,7 +32,7 @@
                 script.dataset.loaded = 'true';
                 resolve();
             };
-            script.onerror = () => reject(new Error(`加载法规脚本失败: ${src}`));
+            script.onerror = () => { script.remove(); reject(new Error(`加载法规脚本失败: ${src}`)); };
             if (!existing) {
                 script.src = src;
                 document.head.appendChild(script);
@@ -44,14 +44,25 @@
         if (window.Pivot.legacy.PivotRegulations?.ready) return window.Pivot.legacy.PivotRegulations;
         if (!readyPromise) {
             readyPromise = (async () => {
-                for (const src of scripts) {
-                    await loadScriptOnce(src);
+                // 并行预取但按依赖顺序执行；首个失败时停止，避免重试时使用不完整状态。
+                const preloads = scripts.map(src => {
+                    const link = document.createElement('link');
+                    link.rel = 'preload';
+                    link.as = 'script';
+                    link.href = window.Pivot?.versionedAssetUrl?.(src) || src;
+                    document.head.appendChild(link);
+                    return link;
+                });
+                try {
+                    for (const src of scripts) await loadScriptOnce(src);
+                } finally {
+                    preloads.forEach(link => link.remove());
                 }
                 if (!window.Pivot.legacy.PivotRegulations?.ready) {
                     throw new Error('法规工作台初始化失败');
                 }
                 return window.Pivot.legacy.PivotRegulations;
-            })();
+            })().catch(error => { readyPromise = null; throw error; });
         }
         return readyPromise;
     }

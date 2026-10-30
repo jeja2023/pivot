@@ -5,6 +5,8 @@ const { logger } = require('../logger');
 const live = new Map();
 const pending = new Map();
 const FLUSH_INTERVAL_MS = 1000;
+const LIVE_RETENTION_MS = 120 * 60 * 1000;
+let lastLivePruneAt = 0;
 let flushTimer = null;
 let flushInFlight = null;
 
@@ -128,7 +130,17 @@ async function flushPendingChatRouteMetrics(deps = {}) {
     }
 }
 
+function pruneLiveMetrics() {
+    const now = Date.now();
+    if (now - lastLivePruneAt >= 60_000) {
+        const oldest = minuteBucket(now - LIVE_RETENTION_MS);
+        for (const key of live.keys()) if (key.split('|', 1)[0] < oldest) live.delete(key);
+        lastLivePruneAt = now;
+    }
+}
+
 function recordChatRouteMetric(metric = {}, deps = {}) {
+    pruneLiveMetrics();
     const key = metricKey(metric);
     const state = mergeMetric(live.get(key) || emptyMetric(), metric);
     live.set(key, state);
@@ -142,6 +154,7 @@ function recordChatRouteMetric(metric = {}, deps = {}) {
 }
 
 function getLiveChatRouteMetrics() {
+    pruneLiveMetrics();
     return Array.from(live.entries()).map(([key, value]) => ({ key, ...value }));
 }
 

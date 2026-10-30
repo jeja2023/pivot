@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 const { ensureDocumentProcessingDirs, tempRoot } = require('../../paths');
 
@@ -11,6 +11,7 @@ const QPDF_TIMEOUT_MS = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_Q
 const QPDF_MAX_LOG_BYTES = 64 * 1024;
 let cachedHealth = null;
 let cachedAt = 0;
+let healthPending = null;
 
 function engineError(message, code = 'QPDF_UNAVAILABLE', status = 503) {
     const error = new Error(message);
@@ -30,56 +31,67 @@ function truncateLog(value) {
     return String(value || '').replace(/[\r\n]+/g, ' ').trim().slice(0, QPDF_MAX_LOG_BYTES);
 }
 
-function getQpdfHealth({ refresh = false } = {}) {
+async function getQpdfHealth({ refresh = false } = {}) {
     if (!refresh && cachedHealth && Date.now() - cachedAt < 60_000) return cachedHealth;
-    let command = '';
-    try {
-        command = configuredQpdfCommand();
-        const result = spawnSync(command, ['--version'], {
-            shell: false,
-            windowsHide: true,
-            timeout: 5000,
-            encoding: 'utf8'
-        });
-        const version = truncateLog(result.stdout || result.stderr);
-        if (result.status === 0 && /^qpdf\s+/i.test(version)) {
-            cachedHealth = { available: true, command, version };
-        } else {
-            const detail = result.error
-                ? (result.error.code || result.error.message)
-                : (result.stderr ? truncateLog(result.stderr) : (result.status !== null ? `退出码 ${result.status}` : '命令未响应'));
-            cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 qpdf CLI（命令: ${command}，原因: ${detail}）。` };
+    if (healthPending) return healthPending;
+    healthPending = (async () => {
+        let command = '';
+        try {
+            command = configuredQpdfCommand();
+            const result = await new Promise((resolve, reject) => execFile(command, ['--version'], {
+                shell: false, windowsHide: true, timeout: 5000, encoding: 'utf8', maxBuffer: QPDF_MAX_LOG_BYTES
+            }, (error, stdout, stderr) => error ? reject(error) : resolve(stdout || stderr)));
+            const version = truncateLog(result);
+            cachedHealth = /^qpdf\s+/i.test(version)
+                ? { available: true, command, version }
+                : { available: false, command: '', version: '', message: '未检测到可用的 qpdf CLI。' };
+        } catch (error) {
+            cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 qpdf CLI（${error.code || error.message || '配置异常'}）。` };
         }
-    } catch (error) {
-        cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 qpdf CLI（${error.message || '配置异常'}）。` };
-    }
-    cachedAt = Date.now();
-    return cachedHealth;
+        cachedAt = Date.now();
+        return cachedHealth;
+    })().finally(() => { healthPending = null; });
+    return healthPending;
 }
 
-function requireQpdf() {
-    const health = getQpdfHealth();
+async function requireQpdf() {
+    const health = await getQpdfHealth();
     if (!health.available) throw engineError('当前部署未安装 qpdf，无法处理加密 PDF、保护输出或执行 qpdf 结构优化。');
     return health;
 }
 
-function isPdfEncrypted(sourcePath) {
-    const health = getQpdfHealth();
+async function isPdfEncrypted(sourcePath, { health = null, spawnProcess = spawn } = {}) {
+    health = health || await getQpdfHealth();
     if (!health.available) return null;
-    const result = spawnSync(health.command, ['--is-encrypted', sourcePath], {
-        shell: false,
-        windowsHide: true,
-        timeout: 10_000,
-        encoding: 'utf8'
+    return new Promise(resolve => {
+        let child;
+        try {
+            child = spawnProcess(health.command, ['--is-encrypted', sourcePath], {
+                shell: false, windowsHide: true, stdio: 'ignore'
+            });
+        } catch (_) { resolve(null); return; }
+        let settled = false;
+        const finish = result => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(result);
+        };
+        const timer = setTimeout(() => { try { child.kill(); } catch (_) {} finish(null); }, 10_000);
+        timer.unref?.();
+        child.once('error', () => finish(null));
+        child.once('close', code => finish(code === 0 ? true : code === 2 ? false : null));
     });
-    if (result.status === 0) return true;
-    if (result.status === 2) return false;
-    return null;
 }
 
-function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS } = {}) {
+function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS, stdinText = null, sensitiveOutput = false } = {}) {
     return new Promise((resolve, reject) => {
-        const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: [stdinText === null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+        if (child.stdin) {
+            // 子进程可能在读取前退出；EPIPE 由 close 状态统一报告。
+            child.stdin.on('error', () => {});
+            child.stdin.end(stdinText);
+        }
         let stdout = '';
         let stderr = '';
         let timedOut = false;
@@ -100,7 +112,10 @@ function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS }
             if (code !== 0) {
                 const detail = truncateLog(stderr || stdout);
                 const password = /password|encrypted/i.test(detail);
-                return reject(engineError(password ? 'PDF 密码不正确或无权访问该加密文件。' : `qpdf 处理失败${detail ? `：${detail}` : ''}`, password ? 'PDF_PASSWORD_INVALID' : 'QPDF_EXECUTION_FAILED', password ? 400 : 422));
+                const message = password ? 'PDF 密码不正确或无权访问该加密文件。'
+                    : sensitiveOutput ? 'qpdf 处理失败，请检查 PDF 文件及处理参数。'
+                        : `qpdf 处理失败${detail ? `：${detail}` : ''}`;
+                return reject(engineError(message, password ? 'PDF_PASSWORD_INVALID' : 'QPDF_EXECUTION_FAILED', password ? 400 : 422));
             }
             resolve({ stdout: truncateLog(stdout), stderr: truncateLog(stderr) });
         });
@@ -124,42 +139,44 @@ async function withQpdfWorkDir(userId, operation) {
 async function writePasswordFile(directory, name, password) {
     const target = path.join(directory, `${name}-${crypto.randomUUID()}.txt`);
     // qpdf 的 --password-file 读取第一行；换行密码无法安全地通过该 CLI 传递。
-    const value = String(password || '');
-    if (!value || /[\r\n]/.test(value)) throw engineError('PDF 密码不能为空且不能包含换行符。', 'PDF_PASSWORD_INVALID', 400);
-    await fs.promises.writeFile(target, value, { mode: 0o600 });
+    await fs.promises.writeFile(target, normalizePassword(password), { mode: 0o600 });
     return target;
 }
 
+function normalizePassword(password) {
+    const value = String(password || '');
+    if (!value || /[\r\n]/.test(value)) throw engineError('PDF 密码不能为空且不能包含换行符。', 'PDF_PASSWORD_INVALID', 400);
+    return value;
+}
+
 async function decryptPdfToBuffer({ sourcePath, password, userId }) {
-    const { command } = requireQpdf();
+    const { command } = await requireQpdf();
     return withQpdfWorkDir(userId, async directory => {
-        const passwordFile = await writePasswordFile(directory, 'input-password', password);
         const outputPath = path.join(directory, 'decrypted.pdf');
-        await runQpdf(command, [`--password-file=${passwordFile}`, '--decrypt', sourcePath, outputPath], { cwd: directory });
+        await runQpdf(command, ['--password-file=-', '--decrypt', sourcePath, outputPath], { cwd: directory, stdinText: `${normalizePassword(password)}\n`, sensitiveOutput: true });
         return fs.promises.readFile(outputPath);
     });
 }
 
 async function optimizePdf({ sourcePath, userId, password = '', optimizeImages = false, jpegQuality = 75 }) {
-    const { command } = requireQpdf();
+    const { command } = await requireQpdf();
     return withQpdfWorkDir(userId, async directory => {
         const outputPath = path.join(directory, 'optimized.pdf');
         const args = ['--object-streams=generate', '--compress-streams=y', '--recompress-flate', '--linearize'];
         if (optimizeImages) {
             args.push('--optimize-images', `--jpeg-quality=${Math.min(Math.max(Number.parseInt(jpegQuality, 10) || 75, 1), 100)}`);
         }
-        if (password) args.push(`--password-file=${await writePasswordFile(directory, 'input-password', password)}`);
+        if (password) args.push('--password-file=-');
         args.push(sourcePath, outputPath);
-        await runQpdf(command, args, { cwd: directory });
+        await runQpdf(command, args, { cwd: directory, stdinText: password ? `${normalizePassword(password)}\n` : null, sensitiveOutput: Boolean(password) });
         return fs.promises.readFile(outputPath);
     });
 }
 
 async function protectPdf({ sourcePath, userId, inputPassword = '', userPassword, ownerPassword, permissions = {} }) {
-    const { command } = requireQpdf();
+    const { command } = await requireQpdf();
     return withQpdfWorkDir(userId, async directory => {
         const outputPath = path.join(directory, 'protected.pdf');
-        const responsePath = path.join(directory, 'encryption-options.txt');
         const safeUser = String(userPassword || '');
         const safeOwner = String(ownerPassword || '');
         if (!safeUser || !safeOwner || /[\r\n]/.test(safeUser) || /[\r\n]/.test(safeOwner)) {
@@ -167,19 +184,23 @@ async function protectPdf({ sourcePath, userId, inputPassword = '', userPassword
         }
         const print = permissions.print === false ? 'none' : 'full';
         const modify = permissions.modify === false ? 'none' : 'all';
-        await fs.promises.writeFile(responsePath, [
+        // qpdf 的加密参数为位置参数；hex-bytes 可安全传递以 -- 开头的密码，
+        // 响应参数从 stdin 读取，避免输出密码写入临时文件或进程命令行。
+        const response = [
+            '--password-mode=hex-bytes',
             '--encrypt',
-            `--user-password=${safeUser}`,
-            `--owner-password=${safeOwner}`,
-            '--bits=256',
+            Buffer.from(safeUser, 'utf8').toString('hex'),
+            Buffer.from(safeOwner, 'utf8').toString('hex'),
+            '256',
             `--print=${print}`,
             `--modify=${modify}`,
             '--'
-        ].join('\n'), { mode: 0o600 });
+        ].join('\n') + '\n';
         const args = [];
-        if (inputPassword) args.push(`--password-file=${await writePasswordFile(directory, 'input-password', inputPassword)}`);
-        args.push(`@${responsePath}`, sourcePath, outputPath);
-        await runQpdf(command, args, { cwd: directory });
+        // stdin 已用于选项；对已加密输入，qpdf 仍需单独的受限密码文件。
+        if (inputPassword) args.push(`--password-file=${await writePasswordFile(directory, 'input-password', Buffer.from(normalizePassword(inputPassword), 'utf8').toString('hex'))}`);
+        args.push('@-', sourcePath, outputPath);
+        await runQpdf(command, args, { cwd: directory, stdinText: response, sensitiveOutput: true });
         return fs.promises.readFile(outputPath);
     });
 }

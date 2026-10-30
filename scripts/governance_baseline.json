@@ -12,5 +12,25 @@
     "server/services/rag-documents.js": 1045,
     "server/routes/chat/index.js": 1021,
     "client/chat/agents-dag-editor.js": 1011
+  },
+  "largeFileByteThreshold": 61440,
+  "byteFiles": {
+    "server/services/knowledge-wiki.js": 63926,
+    "server/services/presentations/presentation-templates.js": 61859,
+    "client/chat/agent-automation-resources.js": 62883,
+    "client/chat/agent-harness.js": 99193,
+    "client/chat/agent-run-detail.js": 65289,
+    "client/chat/apps-workbench-editor.js": 67126,
+    "client/chat/apps-workbench-pdf-tools.js": 71373,
+    "client/chat/apps-workbench-presentations-presenter.js": 61574,
+    "client/chat/apps-workbench-presentations-templates.js": 61849,
+    "client/chat/apps-workbench-presentations.js": 109198,
+    "client/chat/dag-inspector.js": 76517,
+    "client/chat/dag-wizard-fields.js": 66615,
+    "client/chat/data-analysis/extra-panels.js": 64507,
+    "client/chat/data-analysis/view.js": 85140,
+    "client/chat/knowledge-product.js": 64683,
+    "client/chat/mcp-workbench-main.js": 70700,
+    "client/chat/rag-documents.js": 76830
   }
 }

@@ -12,6 +12,7 @@ const { getAccessibleModelAsync } = require('./models');
 const { callModelTextWithBudget } = require('./model-text-call');
 const { readTypedEnv } = require('../config/env-registry');
 const { buildRagSearchTerms } = require('./rag-tokenizer');
+const { createWikiCompileWorker } = require('./knowledge-wiki-worker');
 
 const PAGE_STATUSES = new Set(['draft', 'review', 'published', 'stale', 'superseded', 'deleted']);
 const SPACE_STATUSES = new Set(['draft', 'active', 'paused', 'deleted']);
@@ -197,8 +198,12 @@ async function listWikiSpaces(user, { collectionId = null, limit = 100 } = {}, d
     const safeLimit = Math.max(1, Math.min(Number.parseInt(limit, 10) || 100, 200));
     // PostgreSQL 只能依据主键推导同表的函数依赖。聚合页数时同时按
     // Space 和专题库主键分组，才能安全返回当前专题库的范围字段。
-    const rows = await (deps.query || query)(`
-        SELECT ws.*, kc.name AS collection_name, kc.user_id AS collection_owner_user_id,
+    const visible = [];
+    let cursor = null;
+    const batchSize = Math.max(100, safeLimit);
+    while (visible.length < safeLimit) {
+        const rows = await (deps.query || query)(`
+        SELECT ws.*, ws.updated_at::text AS wiki_cursor_updated_at, kc.name AS collection_name, kc.user_id AS collection_owner_user_id,
                kc.scope AS collection_scope, kc.allowed_units AS collection_allowed_units,
                kc.allowed_user_ids AS collection_allowed_user_ids, kc.deleted_at AS collection_deleted_at,
                COUNT(wp.id) FILTER (WHERE wp.deleted_at IS NULL AND wp.status = 'published') AS published_pages,
@@ -209,11 +214,20 @@ async function listWikiSpaces(user, { collectionId = null, limit = 100 } = {}, d
         LEFT JOIN knowledge_wiki_pages wp ON wp.space_id = ws.id AND wp.deleted_at IS NULL
         WHERE ws.deleted_at IS NULL
           ${safeCollectionId ? 'AND ws.collection_id = ?' : ''}
+          ${cursor ? 'AND (ws.updated_at, ws.id) < (?, ?)' : ''}
         GROUP BY ws.id, kc.id
         ORDER BY ws.updated_at DESC, ws.id DESC LIMIT ?
-    `, [...(safeCollectionId ? [safeCollectionId] : []), safeLimit]);
-    return rows.filter(row => canReadWikiSpace(row, user))
-        .map(row => ({ ...publicSpace(row), publishedPages: Number(row.published_pages || 0), pendingPages: Number(row.pending_pages || 0), stalePages: Number(row.stale_pages || 0) }));
+        `, [...(safeCollectionId ? [safeCollectionId] : []), ...(cursor ? [cursor.updatedAt, cursor.id] : []), batchSize]);
+        for (const row of rows) {
+            if (canReadWikiSpace(row, user)) visible.push({ ...publicSpace(row), publishedPages: Number(row.published_pages || 0), pendingPages: Number(row.pending_pages || 0), stalePages: Number(row.stale_pages || 0) });
+            if (visible.length >= safeLimit) break;
+        }
+        if (rows.length < batchSize) break;
+        const last = rows[rows.length - 1];
+        if (!last?.wiki_cursor_updated_at || !last?.id || (cursor && cursor.id === last.id && cursor.updatedAt === last.wiki_cursor_updated_at)) break;
+        cursor = { updatedAt: last.wiki_cursor_updated_at, id: last.id };
+    }
+    return visible;
 }
 
 async function updateWikiSpace({ spaceId, user, name, description, status, compilePolicy, promptVersion } = {}, deps = {}) {
@@ -706,16 +720,10 @@ function createKnowledgeWikiCompileWorker({
     deps = {}
 } = {}) {
     const config = (deps.getKnowledgeWikiConfig || getKnowledgeWikiConfig)(deps.env);
-    if (config.enabled !== true || config.workerEnabled !== true) return null;
-    const interval = Math.max(250, Number.parseInt(pollIntervalMs, 10) || config.workerPollIntervalMs || 2000);
     const safeWorkerId = normalizeText(workerId, 120) || `knowledge-wiki-worker-${process.pid}`;
-    let timer = null;
-    let running = false;
-    const log = logger || { warn() {} };
-    const runOnce = async () => {
-        if (running) return null;
-        running = true;
-        try {
+    return createWikiCompileWorker({ config, workerId: safeWorkerId, pollIntervalMs,
+        logger: logger || { warn() {} }, setIntervalFn, clearIntervalFn,
+        async run() {
             const job = await claimWikiCompileRun({ workerId: safeWorkerId, leaseSeconds }, deps);
             if (!job) return null;
             const actor = await (deps.queryOne || queryOne)(`SELECT id, username, role, unit FROM users WHERE id = ? AND deleted_at IS NULL`, [job.requested_by]);
@@ -725,22 +733,8 @@ function createKnowledgeWikiCompileWorker({
             }
             const summary = parseJson(job.summary_json, {});
             return await runWikiCompile({ runId: job.id, user: actor, modelRef: summary.modelRef, workerId: safeWorkerId, claimedRun: job }, deps);
-        } catch (error) {
-            log.warn({ err: error.message }, '知识 Wiki 编译 Worker 执行失败');
-            return null;
-        } finally {
-            running = false;
         }
-    };
-    const start = () => {
-        if (timer) return { workerId: safeWorkerId, started: true };
-        timer = setIntervalFn(() => { void runOnce(); }, interval);
-        timer?.unref?.();
-        void runOnce();
-        return { workerId: safeWorkerId, started: true };
-    };
-    const stop = () => { if (timer) clearIntervalFn(timer); timer = null; };
-    return { start, stop, runOnce, getRuntimeStatus: () => ({ workerId: safeWorkerId, started: Boolean(timer), running }) };
+    });
 }
 
 async function publishWikiPage({ pageId, user } = {}, deps = {}) {

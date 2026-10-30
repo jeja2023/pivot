@@ -834,27 +834,34 @@ async function runDueAnalysisRefreshSchedules({ limit = 10 } = {}) {
     }
 }
 
-function startAnalysisRefreshRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_REFRESH_INTERVAL_MS'), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
+function startAnalysisRefreshRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_REFRESH_INTERVAL_MS'), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout, processJobs = runDueAnalysisRefreshSchedules } = {}) {
     if (refreshRunner) return refreshRunner;
     const safeInterval = Math.max(10_000, Math.min(Number(intervalMs) || 60_000, 15 * 60_000));
     let stopped = false;
     let timer = null;
-    const tick = async () => {
-        await runDueAnalysisRefreshSchedules().catch(() => {});
-        if (!stopped) {
-            timer = setTimeoutFn(tick, safeInterval);
-            timer?.unref?.();
-        }
+    let inFlight = null;
+    const tick = () => {
+        if (stopped || inFlight) return inFlight;
+        inFlight = Promise.resolve().then(processJobs).catch(() => {}).finally(() => {
+            inFlight = null;
+            if (!stopped) {
+                timer = setTimeoutFn(tick, safeInterval);
+                timer?.unref?.();
+            }
+        });
+        return inFlight;
     };
     timer = setTimeoutFn(tick, Math.min(safeInterval, 5_000));
     timer?.unref?.();
-    refreshRunner = {
-        stop() {
+    const runner = {
+        async stop() {
             stopped = true;
             if (timer) clearTimeoutFn(timer);
-            refreshRunner = null;
+            if (inFlight) await inFlight;
+            if (refreshRunner === runner) refreshRunner = null;
         }
     };
+    refreshRunner = runner;
     return refreshRunner;
 }
 

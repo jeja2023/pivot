@@ -9,7 +9,7 @@ async function withDatasetColumns(user, datasetId, keys, operation) {
         const { instance, connection } = await shared.createDuckConnection();
         try {
             await shared.withDuckTimeout(connection, () => connection.run(`CREATE TABLE source AS SELECT ${columns.map(column => shared.sqlIdent(column.key)).join(',')} FROM read_parquet(${shared.sqlLiteral(shared.getDatasetPaths(dataset).parquetPath)})`));
-            await connection.run('SET enable_external_access=false');
+            await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
             return await shared.withDuckTimeout(connection, () => operation({ dataset, columns, connection }));
         } finally { connection.closeSync(); instance.closeSync(); }
     });

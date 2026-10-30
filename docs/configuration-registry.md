@@ -14,7 +14,7 @@
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
 | --- | --- | --- | --- | --- |
 | `PIVOT_SERVER_VOICE_ENABLED` | boolean | `true` | true / false | 允许登录用户通过统一语音识别服务处理短录音。默认仅本地或内网处理；禁用后不发起服务端识别。 |
-| `PIVOT_VOICE_PROVIDER` | enum | `local` | embedded、local、gateway、openai、qwen | 标准 Docker 默认 embedded 常驻 CPU 中文双遍识别；源码或桌面未显式配置时保留 local 系统/Vosk 兼容。gateway 连接其他内网服务器，openai/qwen 使用兼容 API；故障不静默切换。 |
+| `PIVOT_VOICE_PROVIDER` | enum | `local` | embedded、local、gateway、openai、qwen | 标准 Docker 默认 local Vosk 离线识别；embedded 需要另行准备运行环境。gateway 连接独立语音服务，openai/qwen 使用兼容 API；故障不静默切换。 |
 | `PIVOT_EMBEDDED_VOICE_MODEL_ROOT` | string | `data/speech-models` | 逗号分隔的语言标记 | 内置语音三个模型的根目录；标准 Docker 映射为 /models，子目录为 paraformer、paraformer-streaming、punctuation。 |
 | `PIVOT_EMBEDDED_VOICE_PYTHON` | string | `` | 逗号分隔的语言标记 | 内置语音 Python 解释器；标准镜像使用 /opt/pivot-speech/engine-venv/bin/python，源码开发留空优先选择项目 .venv-speech，其次系统 Python。 |
 | `PIVOT_EMBEDDED_VOICE_WORKER` | string | `` | 逗号分隔的语言标记 | 内置语音工作进程入口；标准镜像固定，源码开发留空使用项目内入口。 |

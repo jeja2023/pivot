@@ -72,6 +72,8 @@ const { getKnowledgeGraphOntology } = require('../services/knowledge-graph-ontol
 
 const ragRouter = express.Router();
 const debugQueryLimiter = rateLimit({
+    store: require('../services/rate-limit-store').createRateLimitStore('rag:debug'),
+    keyGenerator: req => req.user?.id ? `user_${req.user.id}` : getClientIp(req),
     windowMs: 60 * 1000,
     limit: 20,
     standardHeaders: true,

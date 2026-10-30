@@ -17,7 +17,7 @@ function isAgentUiVisible() {
 
 function isAgentElementVisible(id) {
     const element = document.getElementById(id);
-    return Boolean(element && !element.classList.contains('hidden'));
+    return Boolean(element && !element.closest('.hidden, [hidden], [aria-hidden="true"]'));
 }
 
 let agentRealtimePollInFlight = false;
@@ -83,6 +83,10 @@ function updateAgentAutoRefresh() {
     if (!agentRefreshTimer && modalOpen) {
         agentRefreshTimerIntervalMs = intervalMs;
         agentRefreshTimer = setInterval(async () => {
+            if (document.hidden || !isAgentUiVisible()) {
+                if (!document.hidden) updateAgentAutoRefresh();
+                return;
+            }
             await refreshAgentVisibleState();
         }, intervalMs);
     }

@@ -172,10 +172,16 @@ function createMemoryOutcomeMetricsRunner({ pollIntervalMs = 6 * 60 * 60 * 1000,
         try { return await refreshMemoryOutcomePeriods(deps); }
         catch (error) { logger.warn?.({ err: error.message }, '长期记忆效用周期指标刷新失败'); return null; }
     };
+    let inFlight = null;
+    const trackedRun = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(runOnce).finally(() => { inFlight = null; });
+        return inFlight;
+    };
     return {
-        start() { if (!timer) { timer = setInterval(() => { void runOnce(); }, interval); timer.unref?.(); void runOnce(); } return { started: true, intervalMs: interval }; },
-        stop() { if (timer) clearInterval(timer); timer = null; },
-        runOnce,
+        start() { if (!timer) { timer = setInterval(() => { void trackedRun(); }, interval); timer.unref?.(); void trackedRun(); } return { started: true, intervalMs: interval }; },
+        async stop() { if (timer) clearInterval(timer); timer = null; if (inFlight) await inFlight; },
+        runOnce: trackedRun,
         getRuntimeStatus: () => ({ started: Boolean(timer), intervalMs: interval })
     };
 }

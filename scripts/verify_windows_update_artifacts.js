@@ -32,8 +32,8 @@ async function verifyWindowsUpdateArtifacts(paths, publisherName, options = {}) 
 }
 
 async function main() {
-    const [installerPath, appPath, publisherName] = process.argv.slice(2);
-    await verifyWindowsUpdateArtifacts([installerPath, appPath], publisherName, { logger: console });
+    const [installerPath, appPath, publisherName, certificateSha256 = ''] = process.argv.slice(2);
+    await verifyWindowsUpdateArtifacts([installerPath, appPath], publisherName, { logger: console, certificateSha256 });
     console.log(`Windows 更新签名验收通过：${path.basename(installerPath)}、${path.basename(appPath)}`);
 }
 

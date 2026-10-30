@@ -34,11 +34,15 @@ function getDeploymentProfile(env = process.env) {
     const objectStorageOperational = providers.objectStorage?.ready === true
         && (providers.objectStorage?.key !== 'shared_fs' || sharedStorage.ready);
     const objectStorageReady = objectStorageOperational && providers.objectStorage?.multiNodeReady === true;
-    const multiNodeReady = databaseReady
+    // 事件广播目前仅覆盖本进程，不能因为共享队列和存储已就绪就宣称多节点可用。
+    const realtimeMultiNodeReady = false;
+    const multiNodeReady = realtimeMultiNodeReady && databaseReady
         && objectStorageReady
         && providers.queue?.ready === true
         && providers.lock?.ready === true;
     const warnings = [];
+
+    if (requestedMode !== 'single_node' && !realtimeMultiNodeReady) warnings.push('multi_node_realtime_broadcast_unavailable');
 
     if (requestedMode !== 'single_node' && !multiNodeReady) {
         warnings.push('multi_node_requires_postgres_object_storage_distributed_queue_and_lock');
@@ -90,6 +94,7 @@ function getDeploymentProfile(env = process.env) {
         providers,
         capabilities: {
             multiNodeReady,
+            realtimeMultiNodeReady,
             organizationAccess: false,
             teamAccess: false,
             tenantOwnedSecrets: false,

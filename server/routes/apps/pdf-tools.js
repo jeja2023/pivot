@@ -73,7 +73,7 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
     const router = express.Router();
 
     router.get('/capabilities', authMiddleware, asyncHandler(async (_req, res) => {
-        return res.json(getPdfToolCapabilities());
+        return res.json(await getPdfToolCapabilities());
     }));
 
     router.get('/jobs', authMiddleware, asyncHandler(async (req, res) => {

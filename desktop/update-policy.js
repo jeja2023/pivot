@@ -27,9 +27,12 @@ function isOriginAllowed(url, allowedOrigins = []) {
     return allowed.some(item => item === origin || item === host);
 }
 
-function assertHttpUpdatePolicy(url, _options = {}) {
+function assertHttpUpdatePolicy(url, options = {}) {
     if (!['http:', 'https:'].includes(url.protocol)) {
         throw new Error('自动更新 URL 必须使用 HTTP 或 HTTPS 协议。');
+    }
+    if (url.protocol === 'http:' && !isLoopbackUpdateUrl(url) && options.allowInsecureHttp !== true) {
+        throw new Error('非回环自动更新源必须使用 HTTPS；内网 HTTP 需显式启用 allowInsecureHttp。');
     }
 }
 

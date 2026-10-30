@@ -42,7 +42,7 @@ test('deployment providers do not claim multi-node readiness before adapters are
     assert.equal(getDeploymentProfile(env).providers.database.interface, 'DatabaseProvider');
 });
 
-test('PostgreSQL leases plus a shared volume satisfy the real multi-node deployment contract', () => {
+test('共享存储和租约就绪时仍要求跨节点实时广播能力', () => {
     const env = {
         PIVOT_DEPLOYMENT_MODE: 'multi_node',
         PIVOT_DB_PROVIDER: 'postgres',
@@ -61,9 +61,11 @@ test('PostgreSQL leases plus a shared volume satisfy the real multi-node deploym
     assert.equal(providers.lock.ready, true);
     assert.equal(profile.objectStorage.sharedStorage.coversData, true);
     assert.equal(profile.objectStorage.sharedStorage.coversUploads, true);
-    assert.equal(profile.capabilities.multiNodeReady, true);
-    assert.equal(profile.effectiveMode, 'multi_node');
-    assert.equal(assertDeploymentReady({ ...env, PIVOT_REQUIRE_DEPLOYMENT_READY: 'true' }).effectiveMode, 'multi_node');
+    assert.equal(profile.capabilities.multiNodeReady, false);
+    assert.equal(profile.capabilities.realtimeMultiNodeReady, false);
+    assert.equal(profile.effectiveMode, 'single_node');
+    assert.ok(profile.warnings.includes('multi_node_realtime_broadcast_unavailable'));
+    assert.throws(() => assertDeploymentReady({ ...env, PIVOT_REQUIRE_DEPLOYMENT_READY: 'true' }), /多节点部署预检未通过/);
     assert.throws(
         () => assertDeploymentReady({
             PIVOT_DEPLOYMENT_MODE: 'multi_node',

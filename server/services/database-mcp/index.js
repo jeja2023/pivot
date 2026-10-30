@@ -120,6 +120,7 @@ async function withPostgres(connection, handler, signal) {
         // 默认校验证书防止 MITM；仅当用户显式信任自签名时才放行
         ssl: connection.ssl ? { rejectUnauthorized: !connection.ssl_allow_self_signed } : false,
         connectionTimeoutMillis: timeoutMs,
+        statement_timeout: timeoutMs,
         // 连接前已将 DNS 解析结果固定为已校验 IP，避免驱动忽略 lookup 钩子。
     });
     let connected = false;

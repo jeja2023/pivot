@@ -98,6 +98,7 @@ function ensureDefaultDistributionConfig(rootDir) {
                 installOnQuit: false,
                 publisherName: DEFAULT_LOCAL_PUBLISHER,
                 allowUntrustedRoot: true,
+                allowInsecureHttp: targetRemoteUrl.startsWith('http://'),
                 allowedOrigins: targetOrigin ? [targetOrigin] : []
             }
         };

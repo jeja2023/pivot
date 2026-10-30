@@ -4,9 +4,10 @@ const service = require('../../services/mindmaps/documents');
 const schema = require('../../../client/common/mindmap-document');
 const exportsService = require('../../services/mindmaps/exports');
 function registerMindmapRoutes(router, { authMiddleware, logAction = () => {} }) {
-    const limiter = require('express-rate-limit')({ windowMs: 60000, limit: 100, keyGenerator: req => String(req.user.id), message: { error: '导图操作过于频繁，请稍后重试。' } });
-    const aiLimiter = require('express-rate-limit')({ windowMs: 60000, limit: 6, keyGenerator: req => String(req.user.id), message: { error: 'AI 生成过于频繁，请稍后重试。' } });
-    const syncLimiter = require('express-rate-limit')({ windowMs: 60000, limit: 240, keyGenerator: req => String(req.user.id), message: { error: '协作同步请求过于频繁，请关闭多余窗口。' } });
+    const store = require('../../services/rate-limit-store').createRateLimitStore;
+    const limiter = require('express-rate-limit')({ store: store('mindmaps:api'), windowMs: 60000, limit: 100, keyGenerator: req => String(req.user.id), message: { error: '导图操作过于频繁，请稍后重试。' } });
+    const aiLimiter = require('express-rate-limit')({ store: store('mindmaps:ai'), windowMs: 60000, limit: 6, keyGenerator: req => String(req.user.id), message: { error: 'AI 生成过于频繁，请稍后重试。' } });
+    const syncLimiter = require('express-rate-limit')({ store: store('mindmaps:sync'), windowMs: 60000, limit: 240, keyGenerator: req => String(req.user.id), message: { error: '协作同步请求过于频繁，请关闭多余窗口。' } });
     router.get('/apps/mindmaps/:id/sync', authMiddleware, syncLimiter, asyncHandler(async (req, res) => {
         const document = await service.get(req.user, req.params.id);
         if (document.versionId === String(req.query.versionId) && document.collaborationEpoch === String(req.query.epoch)) return res.json({ success: true, unchanged: true, role: document.role, collaboration: document.collaboration });

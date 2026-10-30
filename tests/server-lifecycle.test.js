@@ -51,3 +51,46 @@ test('HTTP lifecycle starts the app and flushes writes on shutdown', async () =>
     ]);
     assert.equal(processRef.exitCode, 0);
 });
+
+test('shutdown stops outbox work before closing the database pool', async () => {
+    const handlers = new Map();
+    const calls = [];
+    let release;
+    const stop = new Promise(resolve => { release = resolve; });
+    const processRef = { on(name, handler) { handlers.set(name, handler); }, exit() { calls.push('exit'); } };
+    startHttpServer({
+        app: { listen: () => ({ close(callback) { callback(); } }) },
+        logger: { info() {}, warn() {} }, processRef,
+        stopBackgroundServices() { calls.push('stop'); return stop; },
+        closePgPool() { calls.push('close-pool'); }
+    });
+    handlers.get('SIGTERM')();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['stop']);
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['stop', 'close-pool', 'exit']);
+});
+
+test('维护停止失败不会阻断后台停止，也不会提前关闭数据库', async () => {
+    const handlers = new Map();
+    const calls = [];
+    let release;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const schedule = () => {};
+    schedule.cancel = () => { calls.push('maintenance'); throw new Error('failed'); };
+    const processRef = { on(name, handler) { handlers.set(name, handler); }, exit() { calls.push('exit'); } };
+    startHttpServer({
+        app: { listen: () => ({ close(callback) { callback(); } }) },
+        logger: { info() {}, warn() { calls.push('warn'); } }, processRef,
+        scheduleMaintenanceTasks: schedule,
+        stopBackgroundServices() { calls.push('background'); return waiting; },
+        closePgPool() { calls.push('close-pool'); }
+    });
+    handlers.get('SIGTERM')();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['maintenance', 'background', 'warn']);
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['maintenance', 'background', 'warn', 'close-pool', 'exit']);
+});

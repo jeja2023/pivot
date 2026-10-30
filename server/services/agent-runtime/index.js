@@ -138,7 +138,7 @@ const { createPersistedAgentStepContext } = require('../agent-world-state-store'
 const { persistWorkingMemoryRevision } = require('../agent-working-memory-revisions');
 const { recordPromptInvocation, resolveActivePromptSection } = require('../agent-prompt-registry');
 const { buildAgentAuditFields } = require('../agent-step-context');
-const { recordAgentEvent } = require('../agent-event-log');
+const { recordAgentEvent, recordAgentEventBatch } = require('../agent-event-log');
 const {
     acknowledgeAppliedAgentControlMessages,
     applyAgentControlMessages,
@@ -420,6 +420,7 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         taskBudget: effectiveTaskBudget,
         captureStepContext: options => createPersistedAgentStepContext(options),
         recordAgentEvent,
+        recordAgentEventBatch,
         verifyAgentOutcome: options => verifyAndRecordTaskOutcome({ ...options, setRunMetadata }),
         pollAgentControlMessages: async (runId, user, options) => {
             // 进程在 apply 后、ack 前崩溃时，先补发 ACK；状态已是 applied 的消息
@@ -653,21 +654,15 @@ async function recoverAgentRuns() {
 function startAgentRecoveryRunner(intervalMs = 60 * 1000) {
     if (agentRecoveryTimer) return agentRecoveryTimer;
     const safeInterval = Math.max(Number.parseInt(intervalMs, 10) || 60000, 30000);
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
+    const runner = require('../periodic-runner').createPeriodicRunner({ intervalMs: safeInterval, async run() {
         try {
             await recoverAgentRuns();
         } catch (error) {
             logger.warn({ err: error.message }, '定时恢复停滞智能体任务失败');
-        } finally {
-            running = false;
         }
-    };
-    const timer = setInterval(tick, safeInterval);
-    timer.unref?.();
-    agentRecoveryTimer = timer;
+    } });
+    runner.start();
+    agentRecoveryTimer = { async stop() { await runner.stop(); agentRecoveryTimer = null; } };
     return agentRecoveryTimer;
 }
 const approveAgentTool = require('./approval-decisions').createApprovalDecision({

@@ -15,6 +15,14 @@ class ArtifactManager {
     this.db = db;
   }
 
+  async assertCanReadArtifact(artifactId, userId) {
+    const artifact = userId && await queryOne(
+      "SELECT id FROM agent_artifacts WHERE id = ? AND status <> 'deleted' AND (user_id = ? OR (status = 'public' AND type <> 'mindmap'))",
+      [artifactId, String(userId)]
+    );
+    if (!artifact) throw Object.assign(new Error('Artifact 不存在或无权访问'), { status: 404 });
+  }
+
   /**
    * 创建新的 Artifact
    */
@@ -324,6 +332,7 @@ class ArtifactManager {
    */
   async share(artifactId, userId, options = {}) {
     const { visibility = 'public', expiresIn } = options;
+    if (visibility !== 'public') throw Object.assign(new Error('不支持的分享范围'), { status: 400 });
     const uId = String(userId);
 
     const artifact = await queryOne(
@@ -370,7 +379,7 @@ class ArtifactManager {
       [shareId]
     );
 
-    if (!share) {
+    if (!share || share.visibility !== 'public') {
       throw new Error('分享链接不存在');
     }
 
@@ -395,6 +404,16 @@ class ArtifactManager {
    * 记录交互事件
    */
   async recordInteraction(artifactId, userId, interaction) {
+    await this.assertCanReadArtifact(artifactId, userId);
+    return this.insertInteraction(artifactId, userId, interaction);
+  }
+
+  async recordSharedInteraction(shareId, interaction) {
+    const artifact = await this.getShared(shareId);
+    return this.insertInteraction(artifact.id, null, interaction);
+  }
+
+  async insertInteraction(artifactId, userId, interaction) {
     const { type, data } = interaction;
     const uId = userId ? String(userId) : null;
     const dataStr = typeof data === 'string' ? data : JSON.stringify(data || {});
@@ -450,6 +469,11 @@ class ArtifactManager {
    * 添加评论
    */
   async addComment(artifactId, userId, { content, parentId = null }) {
+    await this.assertCanReadArtifact(artifactId, userId);
+    if (parentId) {
+      const parent = await queryOne('SELECT id FROM agent_artifact_comments WHERE id = ? AND artifact_id = ?', [parentId, artifactId]);
+      if (!parent) throw Object.assign(new Error('父评论不存在'), { status: 404 });
+    }
     const uId = String(userId);
     const rows = await query(`
       INSERT INTO agent_artifact_comments (
@@ -469,7 +493,8 @@ class ArtifactManager {
   /**
    * 获取评论列表
    */
-  async getComments(artifactId, options = {}) {
+  async getComments(artifactId, userId, options = {}) {
+    await this.assertCanReadArtifact(artifactId, userId);
     const { limit = 50, offset = 0 } = options;
 
     const countRow = await queryOne(

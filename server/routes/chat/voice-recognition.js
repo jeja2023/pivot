@@ -6,7 +6,7 @@ const { speechService } = require('../../services/speech-recognition');
 const { voiceStreaming } = require('../../services/speech-recognition/streaming');
 
 function registerVoiceRecognitionRoutes(router, { authMiddleware, service = speechService }) {
-    const limiter = rateLimit({ windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id),
+    const limiter = rateLimit({ store: require('../../services/rate-limit-store').createRateLimitStore('speech:recognition'), windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id),
         standardHeaders: true, legacyHeaders: false, message: { error: '语音请求过于频繁，请稍后重试。', code: 'VOICE_RATE_LIMIT' } });
     router.get('/chat/voice-synthesis', authMiddleware, limiter, asyncHandler(async (req, res) => {
         res.set('Cache-Control', 'no-store');

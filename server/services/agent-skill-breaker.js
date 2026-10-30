@@ -113,30 +113,36 @@ function createSkillReleaseBreakerRunner(options = {}) {
     );
     let timer = null;
     let running = false;
+    let inFlight = null;
     const tick = async () => {
         if (running) return;
         running = true;
         try {
-            await sweepSkillReleaseBreakers(options);
+            await (options.sweep || sweepSkillReleaseBreakers)(options);
         } catch (error) {
             logger.warn({ err: error.message }, '技能发布熔断巡检失败');
         } finally {
             running = false;
         }
     };
+    const trackedTick = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(tick).finally(() => { inFlight = null; });
+        return inFlight;
+    };
     return {
         start() {
             if (timer) return timer;
-            timer = setInterval(tick, intervalMs);
+            timer = setInterval(trackedTick, intervalMs);
             timer.unref?.();
             return timer;
         },
-        stop() {
-            if (!timer) return;
-            clearInterval(timer);
+        async stop() {
+            if (timer) clearInterval(timer);
             timer = null;
+            if (inFlight) await inFlight;
         },
-        tick,
+        tick: trackedTick,
         intervalMs
     };
 }

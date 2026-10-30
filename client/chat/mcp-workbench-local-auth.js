@@ -45,9 +45,6 @@ const MCP_LOCAL_AUTH_TYPES = [
 let mcpLocalAuthorizationStatusCache = null;
 let mcpLocalAuthorizationActiveType = 'local_database';
 const MCP_LOCAL_EXECUTION_HEARTBEAT_MS = 60000;
-const MCP_LOCAL_EXECUTION_RETRY_MS = 5000;
-let mcpLocalExecutionLoopStarted = false;
-let mcpLocalExecutionLoopRunning = false;
 let mcpLocalExecutionLastHeartbeatAt = 0;
 
 
@@ -68,10 +65,6 @@ function mcpLocalExecutionDeviceId() {
     } catch (_err) {
         return `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
-}
-
-function mcpLocalExecutionSleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function mcpLocalExecutionHasGrant(status) {
@@ -115,76 +108,6 @@ async function registerMcpLocalExecutionBridge(options = {}) {
 async function syncMcpLocalExecutionBridge(options = {}) {
     return registerMcpLocalExecutionBridge({ force: true, ...(options || {}) });
 }
-
-async function completeMcpLocalExecutionTask(task, outcome) {
-    const response = await apiFetch(`${API_BASE}/mcp/local-device/tasks/${encodeURIComponent(task.id)}/result`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            deviceId: mcpLocalExecutionDeviceId(),
-            ...outcome
-        })
-    });
-    if (!response.ok) throw new Error(await response.text() || '本机执行结果回传失败。');
-}
-
-async function handleMcpLocalExecutionTask(task) {
-    const bridge = mcpLocalExecutionBridge();
-    if (!bridge || !task?.id) return;
-    try {
-        const result = await bridge.executeLocalMcpTool({
-            taskId: task.id,
-            toolName: task.toolName,
-            input: task.input || {}
-        });
-        await completeMcpLocalExecutionTask(task, { success: true, result });
-    } catch (error) {
-        await completeMcpLocalExecutionTask(task, {
-            success: false,
-            error: {
-                message: error?.message || '本机执行失败。',
-                status: Number(error?.status || error?.statusCode || 0) || 500,
-                code: String(error?.code || '').slice(0, 80),
-                detail: String(error?.detail || '').slice(0, 1000)
-            }
-        });
-    }
-}
-
-async function runMcpLocalExecutionLoop() {
-    if (mcpLocalExecutionLoopRunning) return;
-    mcpLocalExecutionLoopRunning = true;
-    while (mcpLocalExecutionLoopStarted) {
-        try {
-            const registration = await registerMcpLocalExecutionBridge({ force: true });
-            if (!registration?.active) {
-                await mcpLocalExecutionSleep(MCP_LOCAL_EXECUTION_RETRY_MS);
-                continue;
-            }
-            const deviceId = encodeURIComponent(mcpLocalExecutionDeviceId());
-            const response = await apiFetch(`${API_BASE}/mcp/local-device/tasks/next?deviceId=${deviceId}&waitMs=25000`);
-            if (!response.ok) throw new Error(await response.text() || '本机执行任务拉取失败。');
-            const data = await response.json();
-            if (data.task) {
-                await handleMcpLocalExecutionTask(data.task);
-            }
-        } catch (error) {
-            console.debug?.('[pivot] 本机执行通道等待中:', error?.message || error);
-            await mcpLocalExecutionSleep(MCP_LOCAL_EXECUTION_RETRY_MS);
-        }
-    }
-    mcpLocalExecutionLoopRunning = false;
-}
-
-function startMcpLocalExecutionBridge() {
-    if (mcpLocalExecutionLoopStarted) return;
-    if (!mcpLocalExecutionBridge()) return;
-    mcpLocalExecutionLoopStarted = true;
-    runMcpLocalExecutionLoop();
-}
-
-setTimeout(startMcpLocalExecutionBridge, 1500);
-setInterval(startMcpLocalExecutionBridge, 10000);
 
 function mcpLocalAuthConfig(type) {
     return MCP_LOCAL_AUTH_TYPES.find(item => item.type === type) || MCP_LOCAL_AUTH_TYPES[0];

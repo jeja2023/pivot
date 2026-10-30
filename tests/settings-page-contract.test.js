@@ -87,9 +87,9 @@ test('热点接口详情始终显示中文接口名称，原始路由仅用于�
 
 test('后台调度轮询具备防重入保护', () => {
     const schedules = read('server/services/agent-schedules.js');
-    assert.match(schedules, /let running = false/);
-    assert.match(schedules, /if \(running\) return/);
+    assert.match(schedules, /createPeriodicRunner/);
     assert.match(schedules, /Promise\.allSettled/);
+    // 实际的并发与停机行为由 periodic-runner.test.js 验证。
 });
 
 test('设置 API 不把 app_settings 原始值直接交给浏览器', () => {

@@ -626,6 +626,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
     if (typeof presentations?.showPresentationsApp === 'function') {
         return await presentations.showPresentationsApp(options);
     }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-realtime.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-collab.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-templates.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-presenter.js');
@@ -705,6 +706,8 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     setAppsWorkbenchVisibility,
     getStoredAppsActiveApp,
     setStoredAppsActiveApp,
+    showRegulationsAppFromRegistry,
+    showPresentationsAppFromRegistry,
     showMindmapsAppFromRegistry
 }, [
     { globalName: 'getAppsSessionValue', exportName: 'getAppsSessionValue' },

@@ -74,12 +74,15 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
     const ownerFilter = user ? '' : 'AND knowledge_docs.user_id = ?';
     const accessFilter = user ? scopeFilter.accessSql : '';
     const accessJoin = scopeFilter.accessJoin || '';
-    const [docsResult, entityVersionRow, relationVersionRow, feedbackVersionRow] = await Promise.all([
-        queryOne(`
+    // 使用同一数据库快照读取授权文档与版本，减少连接占用并避免版本组合跨时刻。
+    const docs = await queryOne(`
             SELECT
                 COUNT(*) AS doc_count,
                 COALESCE(SUM(knowledge_docs.chunk_count), 0) AS chunk_count,
-                COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version
+                COALESCE(MAX(COALESCE(knowledge_docs.updated_at, knowledge_docs.processed_at, knowledge_docs.created_at))::text, '') AS doc_version,
+                (SELECT COALESCE(MAX(updated_at)::text, '') FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL) AS entity_version,
+                (SELECT COALESCE(MAX(updated_at)::text, '') FROM knowledge_relations WHERE user_id = ? AND status = 'active') AS relation_version,
+                (SELECT COALESCE(MAX(created_at)::text, '') FROM rag_feedback WHERE user_id = ?) AS feedback_version
             FROM knowledge_docs
             ${accessJoin}
             WHERE 1 = 1 ${ownerFilter}
@@ -88,12 +91,7 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
               AND COALESCE(knowledge_docs.is_enabled, 1) = 1
               ${scopeFilter.sql}
               ${accessFilter}
-        `, user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params]),
-        queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS entity_version FROM knowledge_entities WHERE user_id = ? AND deleted_at IS NULL', [userId]),
-        queryOne('SELECT COALESCE(MAX(updated_at)::text, \'\') AS relation_version FROM knowledge_relations WHERE user_id = ? AND status = \'active\'', [userId]),
-        queryOne('SELECT COALESCE(MAX(created_at)::text, \'\') AS feedback_version FROM rag_feedback WHERE user_id = ?', [userId])
-    ]);
-    const docs = docsResult || {};
+        `, [userId, userId, userId, ...(user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params])]) || {};
 
     return [
         'algo=dual_rrf_v2',
@@ -109,9 +107,9 @@ async function buildRagCacheScope(userId, config = {}, scope = {}, user = null, 
         `d=${Number(docs.doc_count || 0)}`,
         `h=${Number(docs.chunk_count || 0)}`,
         `dv=${docs.doc_version || ''}`,
-        `ge=${entityVersionRow?.entity_version || ''}`,
-        `gr=${relationVersionRow?.relation_version || ''}`,
-        `fb=${feedbackVersionRow?.feedback_version || ''}`
+        `ge=${docs.entity_version || ''}`,
+        `gr=${docs.relation_version || ''}`,
+        `fb=${docs.feedback_version || ''}`
     ].join('|');
 }
 

@@ -45,6 +45,7 @@ const {
 const appConfig = validateConfig();
 const appVersion = getAppVersion();
 const chatHtmlTemplate = loadChatHtmlTemplate();
+const chatWorkspaceTemplates = new Map();
 configureDirSizeCache({
     ttlMs: appConfig.directorySizeCacheMs,
     max: 64,
@@ -169,6 +170,14 @@ const healthLimiter = rateLimit({
     message: { error: '健康检查请求过于频繁，请稍后再试' }
 });
 
+// 存活探针使用进程内限流，避免频繁写入 PostgreSQL；详情接口仍使用共享限流。
+const healthProbeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: req => getClientIp(req),
+    message: { error: '健康检查请求过于频繁，请稍后再试' }
+});
+
 // 开启 Helmet 安全防护 (精细化安全配置)
 app.use(helmet({
     contentSecurityPolicy: {
@@ -289,7 +298,7 @@ if (appConfig.compressionEnabled) {
 app.use('/api', csrfMiddleware);
 app.use('/v1', csrfMiddleware);
 
-app.get('/api/health', healthLimiter, asyncHandler(async (req, res) => {
+app.get('/api/health', healthProbeLimiter, asyncHandler(async (req, res) => {
     const health = await getSystemHealthSnapshot({ public: true });
     const database = health.checks.find(check => check.name === 'database') || { status: 'error', message: '数据库健康探针未返回结果' };
     health.checks = health.checks.map(check => check.name === 'database' ? { name: 'database', ...database } : check);
@@ -304,6 +313,7 @@ app.get('/api/health', healthLimiter, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/health/details', healthLimiter, authMiddleware, asyncHandler(async (req, res) => {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: '权限不足' });
     const health = await getSystemHealthSnapshot();
     // runtime 探针是排查「全站一起卡住」的关键现场：事件循环延迟、连接池水位、
     // 在途请求与堆占用，四项同时给出才能区分「PG 慢」「线程池饿死」「GC 抖动」。
@@ -467,12 +477,24 @@ app.get('/chat/chat.html', (req, res) => {
     res.redirect(302, '/chat');
 });
 
+// 遗留页面依赖缺失的构建资源且包含不安全渲染；现统一进入工作台模板界面。
+app.get(['/agent/templates.html', '/agent/template-detail.html'], (req, res) => {
+    noCacheHeaders(res);
+    res.redirect(302, '/chat');
+});
+
 // 大型工作区按需返回：名称由 chat-template 白名单约束，内容仍是项目内的
 // 静态模板片段。首屏不再为每个用户下发自动化/工作流的完整 DOM。
 app.get('/chat/workspaces/:name', (req, res) => {
     try {
         noCacheHeaders(res);
-        res.type('html').send(applyAppVersionTemplate(loadChatWorkspaceTemplate(req.params.name), appVersion));
+        const name = req.params.name;
+        let template = process.env.NODE_ENV === 'production' ? chatWorkspaceTemplates.get(name) : null;
+        if (!template) {
+            template = loadChatWorkspaceTemplate(name);
+            if (process.env.NODE_ENV === 'production') chatWorkspaceTemplates.set(name, template);
+        }
+        res.type('html').send(applyAppVersionTemplate(template, appVersion));
     } catch (error) {
         if (error?.code === 'CHAT_WORKSPACE_TEMPLATE_NOT_FOUND') {
             return res.status(404).type('text/plain').send('未找到工作区模板。');
@@ -563,6 +585,7 @@ const secureUpload = {
     array: (field, maxCount) => [upload.array(field, maxCount), uploadSecurityMiddleware]
 };
 const uploadLimiter = rateLimit({
+    store: limiterStore('upload'),
     windowMs: 60 * 1000,
     max: 12,
     keyGenerator: (req) => req.user ? `user_${req.user.id}` : getClientIp(req),

@@ -4,7 +4,7 @@ const { compareDocuments, comparisonIr } = require('../../services/document-comp
 const { executeArtifactTool } = require('../../services/agent-tools-artifacts');
 
 function registerDocumentComparisonRoutes(router, { authMiddleware, logAction }) {
-    const saveLimiter = require('express-rate-limit')({ windowMs: 60000, limit: 30, keyGenerator: req => String(req.user.id), message: { error: '文档或脑图处理过于频繁，请稍后重试。' } });
+    const saveLimiter = require('express-rate-limit')({ store: require('../../services/rate-limit-store').createRateLimitStore('documents:comparison'), windowMs: 60000, limit: 30, keyGenerator: req => String(req.user.id), message: { error: '文档或脑图处理过于频繁，请稍后重试。' } });
     router.post('/apps/official-writing/compare', authMiddleware, saveLimiter, asyncHandler(async (req, res) => {
         const comparison = compareDocuments(req.body?.before, req.body?.after, req.body?.mode || 'character');
         let delivery;

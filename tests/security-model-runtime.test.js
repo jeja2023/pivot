@@ -185,9 +185,13 @@ test('model runtime coalesces overlapping refreshes into one request', async () 
 
 test('model runtime starts monitor loop with setTimeout only', async () => {
     const { runtime, setTimeoutCalls, setIntervalCalls } = loadModelRuntimeHarness();
-    await runtime.startModelEndpointMonitor();
+    const monitor = await runtime.startModelEndpointMonitor();
     assert.equal(setIntervalCalls.length, 0);
     assert.equal(setTimeoutCalls.length, 1);
+    await monitor.stop();
+    setTimeoutCalls[0].fn();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(setTimeoutCalls.length, 1, '停止后已排队的回调不能重新调度');
 });
 
 test('model runtime uses runtime default concurrency when model endpoint does not override it', async () => {

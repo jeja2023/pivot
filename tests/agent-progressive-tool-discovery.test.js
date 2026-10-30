@@ -80,6 +80,26 @@ test('batch reads recheck current authorization even when a safe description was
     assert.equal(executed, false);
 });
 
+test('批量预检共用一次目录快照，实际执行仍分别重新核验', async () => {
+    const { toolRef } = require('../server/services/tool-discovery');
+    const state = createToolDiscoveryState();
+    const tools = [{ ...exampleTool, name: 'orders.search' }, { ...exampleTool, name: 'orders.summary' }];
+    const refs = tools.map(toolRef);
+    rememberSearch(state, { candidates: refs.map(ref => ({ toolRef: ref })) });
+    refs.forEach(ref => rememberDescription(state, ref, { toolRef: ref, name: ref.toolName, idempotent: true, sideEffect: false, concurrency: 'read' }));
+    let catalogReads = 0;
+    let executions = 0;
+    const result = await executeReadOnlyDiscoveredBatch({ id: 1 }, refs.map(ref => ({ toolRef: ref, input: {} })), { toolDiscoveryState: state }, {
+        toolDiscovery: {
+            formatToolList: async () => { catalogReads += 1; return tools; },
+            executeDiscoveredTool: async () => { executions += 1; return 'ok'; }
+        }
+    });
+    assert.equal(result.count, 2);
+    assert.equal(catalogReads, 1);
+    assert.equal(executions, 2);
+});
+
 test('batch reads refuse a tool that becomes unsafe before dispatch', async () => {
     const state = createToolDiscoveryState();
     const reference = { toolName: 'orders.search', releaseId: null, definitionDigest: 'fixed' };

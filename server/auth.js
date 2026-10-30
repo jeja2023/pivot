@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { hashPasswordOffThread, comparePasswordOffThread } = require('./services/password-hasher');
 const crypto = require('crypto');
 const { queryOne, execute, transaction } = require('./db/client');
 const { getBeijingTimestamp } = require('./time');
@@ -33,6 +34,7 @@ const ACCESS_TOKEN_EXPIRES_MINUTES = parsePositiveInt(process.env.ACCESS_TOKEN_E
 const REFRESH_TOKEN_EXPIRES_DAYS = parsePositiveInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS, 30);
 const ACCESS_TOKEN_EXPIRES = `${ACCESS_TOKEN_EXPIRES_MINUTES}m`;
 const BCRYPT_ROUNDS = Math.max(12, Math.min(Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12, 15));
+const DUMMY_PASSWORD_HASH = '$2b$12$kltBQ2B8DFtB76eUtIxcTufJcU6FgeEmt6PNdzqNjOW/1hezwNeoa';
 
 const COOKIE_OPTIONS = {
     httpOnly: true,
@@ -236,6 +238,11 @@ async function resolveAuthenticatedUserAsync(req) {
         }
     }
 
+    // 已签发的 API Key 采用 sk- 前缀；结构完整但验证失败的 JWT 不再查询密钥表。
+    if (!String(token).startsWith('sk-') && jwt.decode(token, { complete: true })?.header?.alg) {
+        return { user: null, token, code: 'TOKEN_INVALID' };
+    }
+
     if (String(token || '').startsWith('sk-') && !getApiAccessSetting()) {
         return { user: null, token, code: 'API_ACCESS_DISABLED' };
     }
@@ -266,7 +273,7 @@ async function register(username, password, nickname, unit, role = 'user') {
         throw new UserInputError('用户名需为 3-32 位字母、数字、点、下划线或短横线');
     }
     validatePassword(password);
-    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const hash = await hashPasswordOffThread(password, BCRYPT_ROUNDS);
     const safeRole = normalizeRole(role);
 
     const deletedUser = await queryOne('SELECT id FROM users WHERE username = ? AND deleted_at IS NOT NULL', [cleanUsername]);
@@ -291,7 +298,9 @@ async function register(username, password, nickname, unit, role = 'user') {
 // 登录验证
 async function login(username, password, options = {}) {
     const user = await queryOne('SELECT * FROM users WHERE username = ? AND deleted_at IS NULL', [username]);
-    if (!user || !await bcrypt.compare(password, user.password_hash)) {
+    if (typeof password !== 'string') throw new Error('用户名或密码错误');
+    const validPassword = await comparePasswordOffThread(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !validPassword) {
         throw new Error('用户名或密码错误');
     }
     if (user.status === 'disabled') {
@@ -299,7 +308,7 @@ async function login(username, password, options = {}) {
     }
     // 旧账号在一次成功登录后以异步方式升级哈希成本，不阻塞登录响应。
     if ((bcrypt.getRounds(user.password_hash) || 0) < BCRYPT_ROUNDS) {
-        bcrypt.hash(password, BCRYPT_ROUNDS)
+        hashPasswordOffThread(password, BCRYPT_ROUNDS)
             .then(hash => execute('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [hash, user.id, user.password_hash]))
             .catch(error => logger.warn({ err: error.message, userId: user.id }, '登录后密码哈希升级失败'));
     }

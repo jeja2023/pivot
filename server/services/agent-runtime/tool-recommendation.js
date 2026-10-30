@@ -4,8 +4,7 @@
  */
 
 const { logger } = require('../../logger');
-const natural = require('natural');
-const TfIdf = natural.TfIdf;
+const { ToolRecommendationIndex } = require('./tool-recommendation-index');
 
 /**
  * 工具推荐引擎
@@ -13,7 +12,7 @@ const TfIdf = natural.TfIdf;
 class ToolRecommendationEngine {
   constructor(db) {
     this.db = db;
-    this.tfidf = new TfIdf();
+    this.tfidf = new ToolRecommendationIndex();
     this.toolIndex = new Map();
     this.categoryIndex = new Map();
     this.usageStats = new Map();

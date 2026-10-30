@@ -7,6 +7,7 @@ const reportOnly = process.argv.includes('--report');
 const productionRoots = ['server', 'client', 'desktop'];
 const ignoredPrefixes = ['client/common/vendor/'];
 const BASELINE_SHRINK_GRACE = 30;
+const BYTE_SHRINK_GRACE = 2048;
 
 function walk(relativeDir, files = []) {
     const absoluteDir = path.join(root, relativeDir);
@@ -21,6 +22,11 @@ function walk(relativeDir, files = []) {
 
 function lineCount(file) {
     return fs.readFileSync(path.join(root, file), 'utf8').split(/\r?\n/).length;
+}
+
+function byteCount(file) {
+    // Git checkouts may use CRLF on Windows; budgets must match CI's LF checkout.
+    return Buffer.byteLength(fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n'));
 }
 
 function walkTests(dir, files = []) {
@@ -40,8 +46,9 @@ function countE2eTests() {
 }
 
 const files = productionRoots.flatMap(dir => walk(dir));
-const metrics = files.map(file => ({ file, lines: lineCount(file) }));
+const metrics = files.map(file => ({ file, lines: lineCount(file), bytes: byteCount(file) }));
 const largeFiles = metrics.filter(item => item.lines > baseline.largeFileThreshold).sort((a, b) => b.lines - a.lines);
+const largeByteFiles = metrics.filter(item => item.bytes > baseline.largeFileByteThreshold).sort((a, b) => b.bytes - a.bytes);
 const failures = [];
 for (const item of largeFiles) {
     const allowed = Number(baseline.files[item.file] || 0);
@@ -59,11 +66,27 @@ for (const [file, allowed] of Object.entries(baseline.files)) {
         failures.push(`${file} 已从基线 ${allowed} 行缩小到 ${current} 行，请同步收紧治理基线`);
     }
 }
+for (const item of largeByteFiles) {
+    const allowed = Number(baseline.byteFiles[item.file] || 0);
+    if (!allowed) failures.push(`${item.file} 新增为 ${item.bytes} 字节大文件`);
+    else if (item.bytes > allowed) failures.push(`${item.file} 从基线 ${allowed} 字节增长到 ${item.bytes} 字节`);
+}
+for (const [file, allowed] of Object.entries(baseline.byteFiles)) {
+    if (!fs.existsSync(path.join(root, file))) continue;
+    const current = byteCount(file);
+    if (current <= baseline.largeFileByteThreshold) {
+        failures.push(`${file} 已降至 ${current} 字节，必须从字节基线移除`);
+    } else if (current < allowed - BYTE_SHRINK_GRACE) {
+        failures.push(`${file} 已从基线 ${allowed} 字节缩小到 ${current} 字节，请同步收紧字节基线`);
+    }
+}
 
 const report = {
     productionJavaScriptFiles: metrics.length,
     largeFileThreshold: baseline.largeFileThreshold,
     largeProductionFiles: largeFiles,
+    largeFileByteThreshold: baseline.largeFileByteThreshold,
+    largeProductionByteFiles: largeByteFiles,
     legacyWindowGlobalBudget: baseline.legacyWindowGlobalBudget,
     e2eTests: countE2eTests()
 };

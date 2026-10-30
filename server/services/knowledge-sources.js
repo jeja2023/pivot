@@ -772,31 +772,32 @@ function createKnowledgeSourceSyncScheduler({
     clearIntervalFn = clearInterval
 } = {}) {
     let timer = null;
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
-        try {
-            const result = await sync();
+    let stopped = false;
+    let inFlight = null;
+    const tick = () => {
+        if (stopped || inFlight) return inFlight;
+        inFlight = Promise.resolve().then(sync).then(result => {
             if (Number(result.started || 0) > 0 || Number(result.failures?.length || 0) > 0) {
                 logger.info({ ...result, failures: result.failures?.length || 0 }, '知识库局域网来源同步轮询完成');
             }
-        } catch (error) {
-            logger.warn({ err: error.message }, '知识库局域网来源同步轮询失败');
-        } finally {
-            running = false;
-        }
+        }).catch(error => logger.warn({ err: error.message }, '知识库局域网来源同步轮询失败'))
+            .finally(() => { inFlight = null; });
+        return inFlight;
     };
     return {
         async start() {
             if (timer) return;
+            stopped = false;
             await tick();
+            if (stopped) return;
             timer = setIntervalFn(() => { void tick(); }, Math.max(10000, Number(intervalMs) || 300000));
             timer?.unref?.();
         },
-        stop() {
+        async stop() {
+            stopped = true;
             if (timer) clearIntervalFn(timer);
             timer = null;
+            if (inFlight) await inFlight;
         },
         tick
     };

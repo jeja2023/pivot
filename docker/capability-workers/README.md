@@ -12,15 +12,17 @@
 
 从仓库根目录执行。构建底座必须是组织已审计、可追溯的 Pivot/Node 运行时镜像摘要；本机验证可使用预置的 `pivot:latest`，但发布流水线不得依赖该可变标签：
 
+`code-runner` 和 `foreach-runner` 默认使用 `node:22-bookworm-slim`，只依赖 Node 内置模块；离线构建可通过 `--build-arg BASE_IMAGE=<已加载的 Node 镜像>` 覆盖。`terminal-runner` 保持 Pivot 底座，因为其协议还需要 Python、Git 和 ripgrep。正式发布应将所选底座固定为已审核的镜像摘要。
+
 ```sh
-docker build --build-arg BASE_IMAGE=pivot:latest -f docker/capability-workers/code-runner/Dockerfile -t registry.example/pivot/code-runner:build .
-docker build --build-arg BASE_IMAGE=pivot:latest -f docker/capability-workers/foreach-runner/Dockerfile -t registry.example/pivot/foreach-runner:build .
+docker build -f docker/capability-workers/code-runner/Dockerfile -t registry.example/pivot/code-runner:build .
+docker build -f docker/capability-workers/foreach-runner/Dockerfile -t registry.example/pivot/foreach-runner:build .
 docker build --build-arg BASE_IMAGE=pivot:latest -f docker/capability-workers/terminal-runner/Dockerfile -t registry.example/pivot/terminal-runner:build .
 ```
 
 安全扫描、签名、推送到受控 registry 后，部署时必须将 manifest digest（`image@sha256:...`）填入对应 `PIVOT_AGENT_*_WORKER_IMAGE` 环境变量；禁止使用标签或 `latest`。每次镜像升级都要在隔离探针、协议回归和签名校验通过后创建新的能力发布记录。
 
-首个发布基线要求镜像内提供 `node`、`python3`、`git` 和 `rg`。`terminal-runner` 不会因缺少工具安装宿主依赖；若镜像不满足基线，对应命令会失败并由发布前探针阻断镜像登记。
+`terminal-runner` 发布基线要求镜像内提供 `node`、`python3`、`git` 和 `rg`；`code-runner` 与 `foreach-runner` 只需要 Node。`terminal-runner` 不会因缺少工具安装宿主依赖；若镜像不满足基线，对应命令会失败并由发布前探针阻断镜像登记。
 
 对应的 `*_WORKER_COMMAND` 必须与镜像的 CMD 协议一致：code/terminal 使用 `node,/runner/runner.js`，foreach 使用 `node,/runner/agent-foreach-worker.js`。Capability Worker 不使用 Docker `ENTRYPOINT` 拼接业务命令，避免镜像入口和平台登记命令产生二义性。
 

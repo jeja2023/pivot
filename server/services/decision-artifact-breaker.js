@@ -121,6 +121,7 @@ function createDecisionArtifactBreakerRunner(options = {}) {
     const intervalMs = Math.max(60 * 1000, Number(config.intervalMs) || 5 * 60 * 1000);
     let timer = null;
     let running = false;
+    let inFlight = null;
     const tick = async () => {
         if (running) return { skipped: true, reason: 'running' };
         running = true;
@@ -128,15 +129,20 @@ function createDecisionArtifactBreakerRunner(options = {}) {
         catch (error) { logger.warn({ err: error.message }, '决策模型制品熔断巡检失败'); return { error: error.message }; }
         finally { running = false; }
     };
+    const trackedTick = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(tick).finally(() => { inFlight = null; });
+        return inFlight;
+    };
     return {
         start() {
             if (timer) return timer;
-            timer = setInterval(() => { void tick(); }, intervalMs);
+            timer = setInterval(() => { void trackedTick(); }, intervalMs);
             timer.unref?.();
             return timer;
         },
-        stop() { if (timer) clearInterval(timer); timer = null; },
-        tick,
+        async stop() { if (timer) clearInterval(timer); timer = null; if (inFlight) await inFlight; },
+        tick: trackedTick,
         intervalMs
     };
 }

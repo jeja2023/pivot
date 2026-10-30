@@ -12,7 +12,7 @@ const { testSpeechSettings } = require('../services/speech-recognition/settings-
 function registerSpeechSettingsRoutes(router, { authMiddleware, logAction, settings = speechSettings, service = speechService,
     embedded = embeddedSpeech, streaming = voiceStreaming, testConnection = testSpeechSettings } = {}) {
     const administrator = (req, res, next) => isSuperAdmin(req.user) ? next() : res.status(403).json({ error: '只有系统最高管理员可以配置和测试统一语音服务。' });
-    const limiter = rateLimit({ windowMs: 60000, limit: 12, keyGenerator: req => String(req.user.id),
+    const limiter = rateLimit({ store: require('../services/rate-limit-store').createRateLimitStore('speech:settings'), windowMs: 60000, limit: 12, keyGenerator: req => String(req.user.id),
         standardHeaders: true, legacyHeaders: false, message: { error: '语音服务测试过于频繁，请稍后重试。' } });
     const speechHandler = handler => asyncHandler(async (req, res) => {
         res.set('Cache-Control', 'no-store');

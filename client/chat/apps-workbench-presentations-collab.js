@@ -56,6 +56,7 @@
 
     async function sendPresenceHeartbeat() {
         if (!state.activePresentationId) return;
+        if (!window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.()) return;
         try {
             const currentSlideId = state.activeSlideIdProvider ? state.activeSlideIdProvider() : '';
             const data = await requestJson(`${API}/${encodeURIComponent(state.activePresentationId)}/presence`, jsonOptions({

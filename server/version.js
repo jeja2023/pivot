@@ -14,8 +14,15 @@ function getAppVersion() {
     try {
         const changelogPath = path.resolve(__dirname, '..', 'CHANGELOG.md');
         if (fs.existsSync(changelogPath)) {
-            const text = fs.readFileSync(changelogPath, 'utf8');
-            const version = extractAppVersionFromChangelog(text);
+            const descriptor = fs.openSync(changelogPath, 'r');
+            const buffer = Buffer.alloc(8192);
+            let bytesRead = 0;
+            try { bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0); }
+            finally { fs.closeSync(descriptor); }
+            let version = extractAppVersionFromChangelog(buffer.subarray(0, bytesRead).toString('utf8'));
+            if (version === 'v0.0.0' && bytesRead === buffer.length) {
+                version = extractAppVersionFromChangelog(fs.readFileSync(changelogPath, 'utf8'));
+            }
             if (version && version !== 'v0.0.0') return version;
         }
     } catch (e) {

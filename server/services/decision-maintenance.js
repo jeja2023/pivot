@@ -78,10 +78,8 @@ function startDecisionLearningMaintenanceRunner(options = {}) {
     const config = { ...getDecisionMaintenanceConfig(options.env), ...options };
     if (config.enabled !== true) return null;
     const log = options.logger || logger;
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
+    const runner = require('./periodic-runner').createPeriodicRunner({
+        intervalMs: Math.max(60000, Number(config.intervalMs) || 6 * 60 * 60 * 1000), initialDelayMs: 15000, async run() {
         try {
             const cleanup = await (options.cleanupExpiredDecisionRecords || cleanupExpiredDecisionRecords)({
                 retentionDays: config.retentionDays
@@ -95,15 +93,10 @@ function startDecisionLearningMaintenanceRunner(options = {}) {
             else log.info({ readiness: report.readiness, providerCount: report.operations?.providers?.length || 0, cleanup }, '决策学习维护巡检完成');
         } catch (error) {
             log.warn({ err: error.message }, '决策学习维护巡检失败');
-        } finally {
-            running = false;
         }
-    };
-    const initial = setTimeout(() => { void tick(); }, 15000);
-    initial.unref?.();
-    const timer = setInterval(() => { void tick(); }, Math.max(60000, Number(config.intervalMs) || 6 * 60 * 60 * 1000));
-    timer.unref?.();
-    return timer;
+    } });
+    runner.start();
+    return runner;
 }
 
 module.exports = {

@@ -29,7 +29,7 @@ async function init() {
     // staged infrastructure migrations.
     assertDeploymentReady();
     await recoverDocumentProcessingJobs();
-    startBackgroundServices({ logger });
+    const stopBackgroundServices = startBackgroundServices({ logger });
     if (embeddedSpeech.enabled()) embeddedSpeech.ensureReady().then(() => {
         logger.info({ code: 'VOICE_EMBEDDED_READY' }, '内置 CPU 中文语音模型已就绪');
     }).catch(() => {
@@ -52,6 +52,7 @@ async function init() {
         scheduleMaintenanceTasks,
         flushAllWrites,
         closePgPool,
+        stopBackgroundServices,
         closeRealtimeClients: options => { closeRealtimeEventClients(options); closeVoice(); closeMindmaps(); },
         terminateSandboxProcesses: shutdownSandboxProcesses,
         terminateCapabilityWorkers: shutdownCapabilityWorkers,

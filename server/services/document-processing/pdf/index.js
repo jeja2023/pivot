@@ -89,11 +89,11 @@ async function requireImageFile(file) {
     return getStoredPathForFile(file);
 }
 
-function normalizePdfLoadError(error) {
+async function normalizePdfLoadError(error) {
     if (error?.code) return error;
     const text = String(error?.message || error || '');
     if (/encrypted|password/i.test(text)) {
-        const qpdf = getQpdfHealth();
+        const qpdf = await getQpdfHealth();
         return qpdf.available
             ? pdfError('该 PDF 已加密，请提供授权密码后重试。', 'PDF_PASSWORD_REQUIRED')
             : pdfError('当前 PDF 结构处理暂不支持加密文件。请先使用授权工具解除保护后再处理。', 'PDF_ENCRYPTION_UNSUPPORTED');
@@ -110,10 +110,10 @@ async function loadPdf(file, { password = '', userId = 0 } = {}) {
             try {
                 return await PDFDocument.load(await decryptPdfToBuffer({ sourcePath: filePath, password, userId }));
             } catch (decryptionError) {
-                throw normalizePdfLoadError(decryptionError);
+                throw await normalizePdfLoadError(decryptionError);
             }
         }
-        throw normalizePdfLoadError(error);
+        throw await normalizePdfLoadError(error);
     }
 }
 
@@ -558,7 +558,7 @@ async function compressPdf({ job, file, config, onProgress, isCancelled }) {
     const pdf = await loadPdf(file, pdfLoadOptions(job, config));
     assertPdfPageCount(pdf.getPageCount(), config.maxToolPages);
     await ensureNotCancelled(isCancelled);
-    const qpdf = getQpdfHealth();
+    const qpdf = await getQpdfHealth();
     const bytes = qpdf.available
         ? await optimizePdf({
             sourcePath,
@@ -719,6 +719,7 @@ function inspectPdfStructure(pdf) {
 }
 
 async function preflightPdfFile(file, { maxPages = 300, password = '', userId = 0 } = {}) {
+    const qpdf = await getQpdfHealth();
     const summary = {
         fileId: file?.id || null,
         originalName: file?.original_name || file?.originalName || '',
@@ -726,7 +727,7 @@ async function preflightPdfFile(file, { maxPages = 300, password = '', userId = 
         supported: false,
         pageCount: 0,
         warnings: [],
-        capabilities: { structural: true, encryptedStructural: getQpdfHealth().available },
+        capabilities: { structural: true, encryptedStructural: qpdf.available },
         encrypted: false,
         requiresPassword: false,
         structure: null
@@ -734,12 +735,12 @@ async function preflightPdfFile(file, { maxPages = 300, password = '', userId = 
     try {
         if (summary.kind === 'pdf') {
             const sourcePath = await requirePdfFile(file);
-            summary.encrypted = Boolean(isPdfEncrypted(sourcePath));
+            summary.encrypted = Boolean(await isPdfEncrypted(sourcePath, { health: qpdf }));
             summary.requiresPassword = summary.encrypted && !password;
             if (summary.requiresPassword) {
                 summary.supported = false;
-                summary.code = getQpdfHealth().available ? 'PDF_PASSWORD_REQUIRED' : 'PDF_ENCRYPTION_UNSUPPORTED';
-                summary.warnings.push(getQpdfHealth().available ? '该文件已加密，提交授权密码后可进行预检和处理。' : '该文件已加密，当前部署未安装 qpdf，无法进行结构处理。');
+                summary.code = qpdf.available ? 'PDF_PASSWORD_REQUIRED' : 'PDF_ENCRYPTION_UNSUPPORTED';
+                summary.warnings.push(qpdf.available ? '该文件已加密，提交授权密码后可进行预检和处理。' : '该文件已加密，当前部署未安装 qpdf，无法进行结构处理。');
                 return summary;
             }
             const pdf = await loadPdf(file, { password, userId });
@@ -778,10 +779,9 @@ async function getPdfPageMetrics(file, options = {}) {
     }));
 }
 
-function getPdfToolCapabilities() {
+async function getPdfToolCapabilities() {
     const font = verifyCjkFont();
-    const qpdf = getQpdfHealth();
-    const verapdf = getVeraPdfHealth();
+    const [qpdf, verapdf] = await Promise.all([getQpdfHealth(), getVeraPdfHealth()]);
     return {
         operations: Object.entries(PDF_OPERATION_META).map(([id, meta]) => ({
             id,

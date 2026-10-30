@@ -3,6 +3,7 @@ const { getBeijingTimestamp } = require('../time');
 const { getBuiltInToolDefinitions } = require('./agent-tools');
 const { listMcpServers } = require('./mcp-client');
 const { isAdmin, isSuperAdmin } = require('../permissions');
+const { loadCapabilityPackagesByKeys } = require('../repositories/capability-governance');
 
 const PACKAGE_TYPES = new Set(['builtin_tool', 'mcp_server', 'database_connection']);
 const PACKAGE_STATUSES = new Set(['enabled', 'disabled']);
@@ -270,14 +271,6 @@ async function setGlobalCapabilityPackageStatus(packageKey, user, status = 'enab
     return await queryOne('SELECT * FROM capability_packages WHERE package_key = ?', [packageKey]);
 }
 
-async function isCapabilityEnabled(type, sourceRef, user = null) {
-    const key = sourceKey(type, sourceRef);
-    const row = await queryOne('SELECT status, scope, user_id FROM capability_packages WHERE package_key = ?', [key]);
-    if (!row) return true;
-    if (user && !canAccessPackage(row, user)) return false;
-    return row.status !== 'disabled';
-}
-
 function getCapabilityToolGovernanceFromPackage(item, toolName, user = null) {
     if (!item) return normalizeToolGovernance();
     if (user && !canAccessPackage(item, user)) return { ...normalizeToolGovernance(), enabled: false };
@@ -292,6 +285,15 @@ async function getCapabilityToolGovernance(type, sourceRef, toolName, user = nul
     const row = await queryOne('SELECT status, scope, user_id, config FROM capability_packages WHERE package_key = ?', [key]);
     if (!row) return normalizeToolGovernance();
     return getCapabilityToolGovernanceFromPackage(row, toolName, user);
+}
+
+async function getCapabilityToolGovernanceBatch(items = [], user = null, { loadPackages = loadCapabilityPackagesByKeys } = {}) {
+    const entries = Array.isArray(items) ? items : [];
+    const keys = [...new Set(entries.map(item => sourceKey(item.type, item.sourceRef)))];
+    if (!keys.length) return [];
+    const rows = await loadPackages(keys);
+    const packages = new Map((rows || []).map(row => [row.package_key, row]));
+    return entries.map(item => getCapabilityToolGovernanceFromPackage(packages.get(sourceKey(item.type, item.sourceRef)), item.toolName, user));
 }
 
 async function isToolCapabilityEnabled(type, sourceRef, toolName, user = null) {
@@ -347,36 +349,20 @@ async function setGlobalCapabilityToolGovernance(packageKey, user, toolName, pat
     return await setCapabilityToolGovernance(packageKey, user, toolName, patch);
 }
 
-async function filterBuiltInToolsByCapability(tools, user) {
+async function filterBuiltInToolsByCapability(tools, user, options = {}) {
     // 能力包状态存储在 PostgreSQL 中；未配置数据库连接时不存在任何禁用配置，
     // 直接按默认（启用）返回，避免工具目录组装在纯单元测试环境下因连接池未初始化而失败。
     if (!process.env.DATABASE_URL) return tools.map(tool => ({ ...tool, governance: normalizeToolGovernance() }));
-    const results = [];
-    for (const tool of tools) {
-        const enabled = await isCapabilityEnabled('builtin_tool', tool.name, user);
-        if (!enabled) continue;
-        const governance = await getCapabilityToolGovernance('builtin_tool', tool.name, tool.name, user);
-        if (governance.enabled) {
-            results.push({ ...tool, governance });
-        }
-    }
-    return results;
+    const governance = await getCapabilityToolGovernanceBatch(tools.map(tool => ({ type: 'builtin_tool', sourceRef: tool.name, toolName: tool.name })), user, options);
+    return tools.map((tool, index) => ({ ...tool, governance: governance[index] })).filter(tool => tool.governance.enabled);
 }
 
-async function filterMcpToolsByCapability(tools, user) {
+async function filterMcpToolsByCapability(tools, user, options = {}) {
     if (!process.env.DATABASE_URL) return tools.map(tool => ({ ...tool, governance: normalizeToolGovernance() }));
-    const results = [];
-    for (const tool of tools) {
-        const type = tool.serverType === 'database'
-            ? 'database_connection'
-            : 'mcp_server';
-        const sourceRef = String(tool.serverId ?? '');
-        const governance = await getCapabilityToolGovernance(type, sourceRef, tool.name, user);
-        if (governance.enabled) {
-            results.push({ ...tool, governance });
-        }
-    }
-    return results;
+    const governance = await getCapabilityToolGovernanceBatch(tools.map(tool => ({
+        type: tool.serverType === 'database' ? 'database_connection' : 'mcp_server', sourceRef: String(tool.serverId ?? ''), toolName: tool.name
+    })), user, options);
+    return tools.map((tool, index) => ({ ...tool, governance: governance[index] })).filter(tool => tool.governance.enabled);
 }
 
 module.exports = {
@@ -385,6 +371,7 @@ module.exports = {
     getCapabilityPackage,
     getGlobalCapabilityPackage,
     getCapabilityToolGovernance,
+    getCapabilityToolGovernanceBatch,
     getCapabilityToolGovernanceFromPackage,
     isToolCapabilityEnabled,
     listCapabilityPackages,

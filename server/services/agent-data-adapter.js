@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { duckReadAll, sqlLiteral, normalizeHeader, normalizeCell, MAX_UPLOAD_ROWS, MAX_UPLOAD_COLUMNS } = require('./data-analysis/shared');
+const { duckReadAll, sqlLiteral, sqlIdent, withAnalysisSlot, normalizeHeader, normalizeCell, MAX_UPLOAD_ROWS, MAX_UPLOAD_COLUMNS } = require('./data-analysis/shared');
 const { readSpreadsheet, importCsvToParquet, importSqliteToParquet } = require('./data-analysis/datasets');
 const { createParquetFromRows } = require('./data-analysis/shared');
 
@@ -33,6 +33,31 @@ function buildDuckDbReadExpression(filePath, format) {
     throw new Error(`DuckDB 不直接读取 ${kind || 'unknown'}，请先转换为 Parquet。`);
 }
 
+function compileFilters(options = {}) {
+    let filters = options.filters;
+    const legacy = String(options.where || '').trim();
+    if (legacy) {
+        if (filters !== undefined) throw new Error('不能同时指定两种数据源过滤方式。');
+        // 兼容简单旧式比较，拒绝 SQL 表达式、子查询、函数和注释。
+        const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*(=|!=|<>|<=|>=|<|>)\s*('(?:[^']|'')*'|-?\d+(?:\.\d+)?)$/.exec(legacy);
+        if (!match) throw new Error('数据源过滤表达式包含不允许的内容，请使用结构化过滤条件。');
+        const raw = match[3];
+        filters = [{ column: match[1], op: match[2], value: raw.startsWith("'") ? raw.slice(1, -1).replace(/''/g, "'") : Number(raw) }];
+    }
+    if (filters === undefined) return '';
+    if (!Array.isArray(filters) || filters.length > 20) throw new Error('数据源过滤条件无效。');
+    return filters.map(filter => {
+        const column = String(filter?.column || '');
+        const op = String(filter?.op || '=');
+        const value = filter?.value;
+        if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(column) || !['=', '!=', '<>', '<', '<=', '>', '>='].includes(op)
+            || !['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'number' && !Number.isFinite(value))
+            || (typeof value === 'string' && value.length > 4096)) throw new Error('数据源过滤条件无效。');
+        const literal = typeof value === 'string' ? sqlLiteral(value) : String(value);
+        return `${sqlIdent(column)} ${op} ${literal}`;
+    }).join(' AND ');
+}
+
 async function queryDataSource(filePath, options = {}) {
     if (options.autonomous === true && !options.jail) {
         const error = new Error('自主任务读取数据源必须绑定工作区沙箱。');
@@ -41,15 +66,14 @@ async function queryDataSource(filePath, options = {}) {
     }
     const detected = detectDataSource(filePath);
     if (!detected.supported) throw new Error(`不支持的数据源格式：${detected.extension || '-'}。`);
+    const where = compileFilters(options);
     const materialized = await materializeDataSource(filePath, options);
     const queryPath = materialized.path;
     const limit = Math.min(Math.max(Number(options.limit) || 5000, 1), 5000);
     const offset = Math.max(Number(options.offset) || 0, 0);
-    const where = String(options.where || '').trim();
-    if (where && !/^[\w\s.()=<>!,'"%+*/-]+$/.test(where)) throw new Error('数据源过滤表达式包含不允许的字符。');
     const sql = `SELECT * FROM ${buildDuckDbReadExpression(queryPath, 'parquet')}${where ? ` WHERE ${where}` : ''} LIMIT ${limit} OFFSET ${offset}`;
     try {
-        return { source: detected, materializedPath: queryPath, rows: await duckReadAll(sql), limit, offset };
+        return { source: detected, materializedPath: queryPath, rows: await withAnalysisSlot(() => duckReadAll(sql)), limit, offset };
     } finally {
         if (materialized.cleanup) {
             try { await fs.promises.rm(queryPath, { force: true }); } catch (_) {}

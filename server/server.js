@@ -10,6 +10,7 @@ function startHttpServer({
     scheduleMaintenanceTasks,
     flushAllWrites,
     closePgPool,
+    stopBackgroundServices,
     closeRealtimeClients,
     terminateSandboxProcesses,
     terminateCapabilityWorkers,
@@ -27,6 +28,11 @@ function startHttpServer({
         if (shuttingDown) return;
         shuttingDown = true;
         logger.info({ signal }, '进程退出，正在关闭 HTTP 服务');
+        // 两类停止动作独立执行并立即处理异常，避免一项失败阻断另一项。
+        const backgroundStopped = Promise.all([
+            Promise.resolve().then(() => scheduleMaintenanceTasks?.cancel?.()),
+            Promise.resolve().then(() => stopBackgroundServices?.())
+        ].map(task => task.catch(err => logger.warn({ err }, '停止后台服务失败'))));
         try { closeRealtimeClients?.({ reason: signal.toLowerCase(), retryAfterMs: 0 }); } catch (err) {
             logger.warn({ err }, '关闭服务时通知 SSE 客户端失败');
         }
@@ -41,6 +47,15 @@ function startHttpServer({
             if (exitStarted) return;
             exitStarted = true;
             if (forceCloseTimer) clearTimeout(forceCloseTimer);
+            let backgroundTimeout;
+            await Promise.race([
+                backgroundStopped,
+                new Promise(resolve => { backgroundTimeout = setTimeout(() => {
+                    logger.warn('后台服务停止超时，继续关闭');
+                    resolve();
+                }, 5000); })
+            ]);
+            clearTimeout(backgroundTimeout);
             try {
                 if (typeof stopSpeechService === 'function') await stopSpeechService();
             } catch (err) {

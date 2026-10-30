@@ -41,7 +41,6 @@ function updateSettingsWorkspaceScale() {
         });
         settingsWorkspaceScaleObserver.observe(content);
     }
-    const baseWidth = 1540;
     const contentStyle = window.getComputedStyle(content);
     const horizontalPadding = (parseFloat(contentStyle.paddingLeft) || 0) + (parseFloat(contentStyle.paddingRight) || 0);
     const verticalPadding = (parseFloat(contentStyle.paddingTop) || 0) + (parseFloat(contentStyle.paddingBottom) || 0);
@@ -49,9 +48,9 @@ function updateSettingsWorkspaceScale() {
     const clientInnerWidth = Math.max(1, (content.clientWidth || content.offsetWidth) - horizontalPadding);
     const availableWidth = clientInnerWidth;
     const availableHeight = Math.max(1, content.clientHeight - verticalPadding - 2);
-    const useResponsiveCanvas = availableWidth < 1100;
-    const layoutWidth = useResponsiveCanvas ? availableWidth : Math.max(baseWidth, availableWidth);
-    const scale = useResponsiveCanvas ? 1 : Math.min(1, availableWidth / baseWidth);
+    // 保持实际字号，宽表格由各自滚动容器承载。
+    const layoutWidth = availableWidth;
+    const scale = 1;
     const stageWidth = Math.max(1, Math.min(clientInnerWidth, Math.floor(layoutWidth * scale)));
     stage.style.removeProperty('--settings-stage-height');
     canvas.style.setProperty('--settings-canvas-width', `${layoutWidth}px`);

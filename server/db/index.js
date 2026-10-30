@@ -46,8 +46,10 @@ async function initPostgresDatabase() {
     const { RUNTIME_SETTING_DEFINITIONS, getRuntimeDefaultValue, normalizeRuntimeSettingValue } = require('../services/runtime-settings-defs');
     const { logger } = require('../logger');
 
-    await initializePostgresStructure();
-    await runSeedsPg();
+    await require('./initialization-lock').withPgInitializationLock(async () => {
+        await initializePostgresStructure();
+        await runSeedsPg();
+    });
     await refreshUserSettingsCache();
 
     const ensureSetting = (key, value) => ensureAppSettingAsync(key, value);

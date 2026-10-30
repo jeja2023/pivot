@@ -192,6 +192,11 @@ test('streaming planning receives the refreshed tool contract and continues with
         run, steps, events: [], maybePauseForApproval: async () => false,
         executeToolByName: async (name, input, actor, _tools, context) => (await executeToolDiscoveryMeta(name, input, actor, context)).value
     });
+    const capturedTools = [];
+    deps.captureStepContext = async options => {
+        capturedTools.push(options.toolList.map(tool => tool.name));
+        return createAgentStepContext(options);
+    };
     deps.taskBudget = taskBudget;
     deps.verifyAgentOutcome = async () => ({ outcomeStatus: 'verified', hardFailures: [] });
     deps.callModelStreamingWithTools = async (_model, messages) => {
@@ -211,6 +216,8 @@ test('streaming planning receives the refreshed tool contract and continues with
     assert.equal(modelCalls, 2);
     assert.equal(taskBudget.counts.consecutive_errors, 0);
     assert.equal(taskBudget.counts.tool_calls, 1);
+    assert.ok(capturedTools.length > 0);
+    assert.ok(capturedTools.every(names => names.includes('tools.search') && !names.includes('rag.search')));
     assert.equal(steps.some(step => step.status === 'error'), false);
     assert.equal(steps.some(step => step.title === '流式工具调用兜底'), false);
 });
@@ -304,6 +311,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
         }];
         const taskBudget = new TaskBudget({ max_steps: 2, max_tool_calls: 1 });
         const capabilityRecords = [];
+        const auditBatches = [];
         const result = await tryRunAgentStreaming({
             run,
             user: { id: 7, role: 'admin' },
@@ -321,6 +329,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
             insertStep: async (_runId, _stepIndex, step) => { steps.push(step); },
             captureStepContext: async options => createAgentStepContext(options),
             recordAgentEvent: async event => { events.push(event); },
+            recordAgentEventBatch: async batch => { auditBatches.push(batch); events.push(...batch); },
             recordNativeToolCallCapability: async (_cfg, result) => { capabilityRecords.push(result); },
             recordAgentModelUsage: async () => {},
             recordAgentToolCall: async () => {},
@@ -357,6 +366,11 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
         assert.equal(events.filter(event => event.type === 'model.requested').length, 2);
         assert.equal(events.filter(event => event.type === 'model.completed').length, 2);
         const deltaEvents = events.filter(event => event.type === 'model.delta');
+        assert.ok(auditBatches.some(batch => batch.some(event => event.type === 'model.delta')));
+        for (const turnId of new Set(deltaEvents.map(event => event.turnId))) {
+            const turnEvents = events.filter(event => event.turnId === turnId);
+            assert.ok(turnEvents.findIndex(event => event.type === 'model.delta') < turnEvents.findIndex(event => event.type === 'model.completed'));
+        }
         assert.ok(deltaEvents.length >= 2);
         assert.ok(deltaEvents.some(event => event.payload.partialToolCalls.some(call => call.name === 'test.echo')));
         assert.ok(deltaEvents.some(event => event.payload.completed === true));

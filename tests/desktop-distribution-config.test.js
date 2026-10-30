@@ -39,8 +39,10 @@ test('正式分发配置支持 HTTP 与 HTTPS 自动更新，并支持从 remote
         write({ enabled: true, url: 'https://updates.example.com/pivot/', allowedOrigins: ['https://updates.example.com'] });
         assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.autoUpdate.url, 'https://updates.example.com/pivot/');
         write({ enabled: true, url: 'http://50.64.150.51:9006/downloads/' });
+        assert.throws(() => loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }), /allowInsecureHttp/);
+        write({ enabled: true, url: 'http://50.64.150.51:9006/downloads/', allowInsecureHttp: true });
         assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.autoUpdate.url, 'http://50.64.150.51:9006/downloads/');
-        write({ enabled: true, url: '', path: '/downloads/' });
+        write({ enabled: true, url: '', path: '/downloads/', allowInsecureHttp: true });
         assert.equal(loadDistributionDesktopConfig(root, { PIVOT_DISTRIBUTION_CONFIG: 'production-client.json' }, { required: true }).config.remoteUrl, 'http://50.64.150.51:9006/');
         write({ enabled: true, url: 'ftp://updates.example.com/pivot/' });
         assert.throws(

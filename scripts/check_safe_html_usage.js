@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
-const clientRoot = path.join(root, 'client', 'chat');
+const clientRoot = path.join(root, 'client');
 const reportOnly = String(process.env.PIVOT_SAFE_HTML_REPORT_ONLY || '').toLowerCase() === 'true';
 const allowedImplementationFiles = new Set(['client/chat/safe-html.js']);
 
@@ -11,7 +11,7 @@ function walk(dir, files = []) {
         if (entry.name === 'vendor' || entry.name.startsWith('.')) continue;
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(fullPath, files);
-        else if (entry.isFile() && entry.name.endsWith('.js')) files.push(fullPath);
+        else if (entry.isFile() && /\.(?:js|html)$/i.test(entry.name)) files.push(fullPath);
     }
     return files;
 }
@@ -56,21 +56,22 @@ function findUnsafeHtmlSinks(file, rel) {
     return findings;
 }
 
-const findings = [];
-for (const file of walk(clientRoot)) {
-    const rel = path.relative(root, file).replace(/\\/g, '/');
-    findings.push(...findUnsafeHtmlSinks(file, rel));
+function main() {
+    const findings = [];
+    for (const file of walk(clientRoot)) {
+        const rel = path.relative(root, file).replace(/\\/g, '/');
+        findings.push(...findUnsafeHtmlSinks(file, rel));
+    }
+    if (findings.length === 0) {
+        console.log('安全 HTML 扫描通过：客户端 JS 和 HTML 未发现 PivotSafeHtml 外部的裸 HTML 注入风险。');
+        return;
+    }
+    console.error(`安全 HTML 扫描失败：发现 ${findings.length} 处未受保护的 HTML 赋值。`);
+    findings.slice(0, 30).forEach(item => console.error(` - ${item.file}:${item.line} ${item.text}`));
+    if (findings.length > 30) console.error(` - 其余 ${findings.length - 30} 项未显示`);
+    console.error('请使用 PivotSafeHtml.setHtml(element, html) 或 DOM 构建器。');
+    if (!reportOnly) process.exitCode = 1;
 }
 
-if (findings.length === 0) {
-    console.log('安全 HTML 扫描通过：未发现 PivotSafeHtml 外部的裸 HTML 注入风险。');
-    process.exit(0);
-}
-
-console.error(`安全 HTML 扫描失败：发现 ${findings.length} 处未受保护的 HTML 赋值。`);
-findings.slice(0, 30).forEach(item => {
-    console.error(` - ${item.file}:${item.line} ${item.text}`);
-});
-if (findings.length > 30) console.error(` - ... ${findings.length - 30} more`);
-console.error('请使用 PivotSafeHtml.setHtml(element, html) 或 DOM 构建器。');
-if (!reportOnly) process.exit(1);
+if (require.main === module) main();
+module.exports = { findUnsafeHtmlSinks };

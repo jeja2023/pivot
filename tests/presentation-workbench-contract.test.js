@@ -12,13 +12,12 @@ function source(relativePath) {
 
 test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整接线', () => {
     const registry = source('client/chat/apps-workbench-core.js');
-    const scripts = source('client/chat/app-workspaces.js');
     const workspace = source('client/chat/partials/workspaces/apps.html');
     const editor = source('client/chat/apps-workbench-presentations.js');
     const presenter = source('client/chat/apps-workbench-presentations-presenter.js');
     assert.match(registry, /id:\s*'presentations'/);
     assert.match(registry, /showPresentationsAppFromRegistry/);
-    assert.match(scripts, /apps-workbench-presentations\.js/);
+    assert.match(registry, /apps-workbench-presentations\.js/);
     assert.match(workspace, /id="presentations-view"/);
     assert.match(workspace, /id="presentation-export-pptx-btn"/);
     assert.match(workspace, /id="presentation-template-package-input"/);

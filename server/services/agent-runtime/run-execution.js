@@ -411,7 +411,7 @@ const {
                 turnId: `${runId}:turn:${step}`,
                 stepIndex: step,
                 modelCfg,
-                toolList,
+                toolList: plannerToolList,
                 previousWorldState,
                 // JSON planner 每轮重新构造独立消息，必须携带完整 WorldState，不能依赖上一次 Provider 请求的上下文。
                 forceWorldStateFull: true,

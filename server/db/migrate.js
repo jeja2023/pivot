@@ -6,7 +6,11 @@ async function runMigrationsPg(options = {}) {
     const migrations = options.migrations || require('./migrations');
     const { ensurePgMigrationTable, hasPgMigration, recordPgMigration } = require('./migrations/runner');
     const client = await (options.pool || getPgPool()).connect();
+    let migrationLockHeld = false;
     try {
+        // 会话锁覆盖迁移表初始化和迁移序列；按 schema 隔离并行测试。
+        await client.query("SELECT pg_advisory_lock(hashtext('pivot:migrations'), hashtext(current_schema()))");
+        migrationLockHeld = true;
         await ensurePgMigrationTable(client);
         const applied = [];
         for (const migration of migrations.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
@@ -36,7 +40,13 @@ async function runMigrationsPg(options = {}) {
         if (applied.length) logger.info({ applied }, '[PG] 已应用版本化迁移');
         return applied;
     } finally {
-        client.release();
+        let releaseError = null;
+        if (migrationLockHeld) {
+            try { await client.query("SELECT pg_advisory_unlock(hashtext('pivot:migrations'), hashtext(current_schema()))"); }
+            catch (error) { releaseError = error; }
+        }
+        client.release(releaseError || undefined);
+        if (releaseError) throw releaseError;
     }
 }
 

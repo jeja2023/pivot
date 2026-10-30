@@ -655,6 +655,36 @@ test('聊天路由在知识库未命中时提示按普通对话继续', async ()
     }
 });
 
+test('知识检索不占主模型并发槽，上游请求开始后才占用', async () => {
+    const { aiSemaphore } = require('../../server/services/concurrency');
+    const baseline = aiSemaphore.getStatus().active;
+    let duringRetrieval = null;
+    let duringModel = null;
+    const upstream = await startFakeUpstream({ handler: (req, res) => {
+        const chunks = [];
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', () => {
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if (body.stream === true) duringModel = aiSemaphore.getStatus().active;
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+            res.end('data: {"choices":[{"delta":{"content":"回答"}}]}\n\ndata: [DONE]\n\n');
+        });
+    } });
+    const fixture = createChatFixture({ prefix: 'chat_slot_after_retrieval', upstreamUrl: upstream.url });
+    const routeServer = await startChatRouteServer({ fixture, isRagEnabled: () => true,
+        retrieveContext: async () => { duringRetrieval = aiSemaphore.getStatus().active; return null; } });
+    try {
+        const result = await postChat(routeServer.port, { sessionId: fixture.sessionId, content: '公司团建预算是多少', modelId: fixture.modelId });
+        assert.equal(duringRetrieval, baseline);
+        assert.ok(duringModel > baseline, `检索前 ${baseline}，检索中 ${duringRetrieval}，模型请求时 ${duringModel}，错误 ${JSON.stringify(result.errorEvent)}`);
+        assert.match(result.streamedContent, /回答/);
+    } finally {
+        await routeServer.close();
+        await upstream.close();
+        fixture.cleanup();
+    }
+});
+
 test('聊天路由在长期记忆命中时下发记忆检索事件', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['已结合长期记忆回答'] });
     const fixture = createChatFixture({ prefix: 'chat_memory_hit', upstreamUrl: upstream.url });

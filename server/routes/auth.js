@@ -99,6 +99,7 @@ function createAuthRouter({
             });
         } catch (e) {
             logAction(req, '登录失败', `账号: ${req.body?.username || '-'}，原因: ${e.message}`);
+            if (e.code === 'AUTH_HASH_BUSY' || e.code === 'AUTH_HASH_UNAVAILABLE') return res.status(503).json({ error: e.message, code: e.code });
             res.status(401).json({ error: e.message });
         }
     }));

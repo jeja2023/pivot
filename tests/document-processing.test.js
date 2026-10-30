@@ -633,9 +633,9 @@ test('PDF 工具不在公开任务配置中保留密码，并公开能力契约'
         assert.equal(initial.job.config.requiresPassword, true);
         const stored = db.prepare('SELECT config_json FROM document_jobs WHERE id = ?').get(initial.job.id);
         assert.equal(String(stored.config_json).includes('synthetic-password-only-for-test'), false);
-        const capabilities = getPdfToolCapabilities();
+        const capabilities = await getPdfToolCapabilities();
         assert.ok(capabilities.operations.some(item => item.id === 'watermark'));
-        assert.equal(capabilities.engines.structuralPdf.encryptedInput, getQpdfHealth().available);
+        assert.equal(capabilities.engines.structuralPdf.encryptedInput, (await getQpdfHealth()).available);
     } finally {
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM document_job_secrets WHERE user_id = ?').run(userId);
@@ -930,7 +930,7 @@ test('PDF 比较、永久脱敏与 Word 导出生成可核对结果', async () =
 });
 
 test('qpdf 适配器执行结构优化和 AES-256 保护，公开配置不含输出密码', async () => {
-    const health = getQpdfHealth({ refresh: true });
+    const health = await getQpdfHealth({ refresh: true });
     if (!health.available) return;
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -1000,7 +1000,7 @@ test('qpdf 适配器执行结构优化和 AES-256 保护，公开配置不含输
 });
 
 test('veraPDF 验证仅产出报告，未通过时绝不标记 PDF/A 合规', async () => {
-    const capabilities = getPdfToolCapabilities();
+    const capabilities = await getPdfToolCapabilities();
     if (!capabilities.engines.veraPdf.available) return;
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`

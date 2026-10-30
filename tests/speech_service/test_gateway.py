@@ -83,6 +83,15 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(result["text"], "句末正确结果")
         self.assertFalse(self.engine.lock.locked())
 
+    def test_versioned_aliases_match_existing_routes(self):
+        result = self.client.post("/v1/speech/transcriptions", json={"audioBase64": audio()}, headers=self.headers)
+        self.assertEqual(result.json()["text"], "句末正确结果")
+        with self.client.websocket_connect("/v1/speech/stream", headers=self.headers) as socket:
+            socket.send_json({"type": "begin", "hotwords": []})
+            socket.send_bytes(b"\0\0" * 1600)
+            socket.send_json({"type": "end"})
+            self.assertEqual(socket.receive_json()["text"], "句末正确结果")
+
     def test_numeric_disagreement_requires_confirmation(self):
         self.engine.partial = lambda samples, cache, final=False: "第十七条" if final else ""
         self.engine.transcribe = lambda samples, words: {"text": "第十八条", "confidence": None}

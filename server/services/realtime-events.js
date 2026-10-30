@@ -1,11 +1,14 @@
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
 const { createSseResponseWriter } = require('./sse-response');
+const { normalizeRealtimeCursor } = require('./realtime-cursor');
 
 const clientsByUser = new Map();
 let totalConnectedClients = 0;
 const MAX_REALTIME_CLIENTS_PER_USER = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS_PER_USER || '8', 10) || 8, 1);
 const MAX_REALTIME_CLIENTS = Math.max(Number.parseInt(process.env.REALTIME_MAX_CLIENTS || '1000', 10) || 1000, MAX_REALTIME_CLIENTS_PER_USER);
+const MAX_REPLAY_BUFFER_EVENTS = 1000;
+const MAX_REPLAY_BUFFER_BYTES = 4 * 1024 * 1024;
 
 function normalizeUserId(userOrId) {
     const value = typeof userOrId === 'object' ? userOrId?.id : userOrId;
@@ -14,9 +17,11 @@ function normalizeUserId(userOrId) {
 }
 
 function encodeSse(type, payload = {}) {
-    const eventId = payload.eventId || (payload.runId && payload.eventSeq ? `${payload.runId}:${payload.eventSeq}` : '');
+    // 只有持久化 agent.event 的数据库 ID 可作为重连游标；其他事件的
+    // 业务标识不能覆盖 EventSource 自动携带的 Last-Event-ID。
+    const eventId = type === 'agent.event' ? normalizeRealtimeCursor(payload.eventId) : '0';
     return [
-        ...(eventId ? [`id: ${String(eventId).replace(/[\r\n]/g, '')}`] : []),
+        ...(eventId !== '0' ? [`id: ${eventId}`] : []),
         `event: ${type}`,
         `data: ${JSON.stringify({
             type,
@@ -63,6 +68,9 @@ function subscribeUserEvents(user, res, options = {}) {
     });
 
     const client = { res, createdAt: Date.now() };
+    let buffering = options.bufferAgentEvents === true;
+    let bufferedBytes = 0;
+    const bufferedEvents = [];
     if (!clientsByUser.has(userId)) clientsByUser.set(userId, new Set());
     clientsByUser.get(userId).add(client);
     totalConnectedClients += 1;
@@ -76,7 +84,21 @@ function subscribeUserEvents(user, res, options = {}) {
             removeClient(userId, client);
         }
     };
-    client.write = write;
+    client.write = (type, payload) => {
+        if (!buffering || type !== 'agent.event') return write(type, payload);
+        const serialized = JSON.stringify(payload);
+        const bytes = Buffer.byteLength(serialized);
+        if (bufferedEvents.length >= MAX_REPLAY_BUFFER_EVENTS || bufferedBytes + bytes > MAX_REPLAY_BUFFER_BYTES) {
+            buffering = false;
+            bufferedEvents.length = 0;
+            removeClient(userId, client);
+            writer.cleanup();
+            res.destroy?.();
+            return;
+        }
+        bufferedBytes += bytes;
+        bufferedEvents.push(JSON.parse(serialized));
+    };
 
     write('connected', { userId });
     const initialEvents = Array.isArray(options.initialEvents) ? options.initialEvents : [];
@@ -93,9 +115,39 @@ function subscribeUserEvents(user, res, options = {}) {
     }
 
     const unsubscribe = () => {
+        buffering = false;
+        bufferedEvents.length = 0;
         writer.cleanup();
         removeClient(userId, client);
     };
+    unsubscribe.writeReplay = event => write('agent.event', {
+        runId: event.run_id || event.runId || '',
+        eventId: event.id || event.event_id || '',
+        eventSeq: event.event_seq || event.eventSeq || 0,
+        eventType: event.event_type || event.eventType || '',
+        payload: event.payload || {},
+        replayable: true,
+        replay: true
+    });
+    unsubscribe.finishReplay = (replayedThrough = '0') => {
+        buffering = false;
+        let lastId = BigInt(normalizeRealtimeCursor(replayedThrough));
+        bufferedEvents.sort((a, b) => {
+            const aId = BigInt(normalizeRealtimeCursor(a.eventId));
+            const bId = BigInt(normalizeRealtimeCursor(b.eventId));
+            return aId < bId ? -1 : aId > bId ? 1 : 0;
+        });
+        for (const payload of bufferedEvents) {
+            const id = BigInt(normalizeRealtimeCursor(payload.eventId));
+            if (id && id <= lastId) continue;
+            write('agent.event', payload);
+            if (id) lastId = id;
+        }
+        bufferedEvents.length = 0;
+        bufferedBytes = 0;
+    };
+    unsubscribe.isActive = () => writer.isWritable();
+    unsubscribe.waitForDrain = () => writer.waitForDrain();
     res.on?.('close', unsubscribe);
     res.on?.('finish', unsubscribe);
     return unsubscribe;

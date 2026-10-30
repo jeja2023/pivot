@@ -79,10 +79,10 @@ async function checkWritableDirectory(label, dir) {
         await fs.promises.writeFile(probe, 'ok');
         await fs.promises.unlink(probe);
         sweepLegacyProbeFiles(resolved);
-        return { label, path: resolved, status: 'ok', message: '目录正常可写' };
+        return { label, status: 'ok', message: '目录正常可写' };
     } catch (e) {
         await fs.promises.rm(probe, { force: true }).catch(() => {});
-        return { label, path: resolved, status: 'error', message: e.message };
+        return { label, status: 'error', message: '目录不可写' };
     }
 }
 
@@ -110,7 +110,6 @@ async function checkDiskUsage(dir) {
             const status = usedRatio >= 0.95 ? 'error' : (usedRatio >= 0.9 ? 'degraded' : 'ok');
             return {
                 status,
-                path: path.resolve(dir),
                 total,
                 free,
                 usedRatio,
@@ -122,7 +121,6 @@ async function checkDiskUsage(dir) {
     } catch (_) {}
     return {
         status: 'ok',
-        path: path.resolve(dir),
         usedRatio: 0,
         freeBytes: null,
         totalBytes: null,

@@ -148,7 +148,16 @@ function isIpv6PrivateOrLinkLocal(bytes) {
 
 function normalizeHostForPolicy(hostname) {
     const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    const bytes = parseIpv6Bytes(host);
+    // IPv4 兼容的 IPv6 地址可以访问与 IPv4 相同的目标。
+    if (bytes && bytes.slice(0, 12).every(byte => byte === 0) && !isIpv6LoopbackOrUnspecified(bytes)) {
+        return Array.from(bytes.slice(12)).join('.');
+    }
     return mappedIpv4Address(host) || host;
+}
+
+function isNat64WellKnownPrefix(bytes) {
+    return Boolean(bytes && bytes[0] === 0 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes.slice(4, 12).every(byte => byte === 0));
 }
 
 function isPrivateHost(hostname) {
@@ -161,13 +170,15 @@ function isPrivateHost(hostname) {
         const parts = host.split('.').map(Number);
         return parts[0] === 10 ||
             parts[0] === 127 ||
+            (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
             (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
             (parts[0] === 192 && parts[1] === 168) ||
             (parts[0] === 169 && parts[1] === 254) ||
             parts[0] === 0;
     }
     if (ipType === 6) {
-        return isIpv6LoopbackOrUnspecified(parseIpv6Bytes(host)) || isIpv6PrivateOrLinkLocal(parseIpv6Bytes(host));
+        const bytes = parseIpv6Bytes(host);
+        return isIpv6LoopbackOrUnspecified(bytes) || isIpv6PrivateOrLinkLocal(bytes) || isNat64WellKnownPrefix(bytes);
     }
     return false;
 }
@@ -181,11 +192,12 @@ function isSensitiveOutboundHost(hostname) {
         const parts = host.split('.').map(Number);
         return parts[0] === 0 ||
             parts[0] === 127 ||
+            (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
             (parts[0] === 169 && parts[1] === 254);
     }
     if (ipType === 6) {
         const bytes = parseIpv6Bytes(host);
-        return isIpv6LoopbackOrUnspecified(bytes) || Boolean(bytes && bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80);
+        return isIpv6LoopbackOrUnspecified(bytes) || isNat64WellKnownPrefix(bytes) || Boolean(bytes && bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80);
     }
     return false;
 }
@@ -308,8 +320,8 @@ function decryptSecretWithKey(value, source, context = 'pivot.encryption-rotatio
 function createSafeHttpAgents(options = {}) {
     const lookup = createSafeLookup(options);
     return {
-        httpAgent: new http.Agent({ keepAlive: true, lookup }),
-        httpsAgent: new https.Agent({ keepAlive: true, lookup })
+        httpAgent: new http.Agent({ keepAlive: false, lookup }),
+        httpsAgent: new https.Agent({ keepAlive: false, lookup })
     };
 }
 

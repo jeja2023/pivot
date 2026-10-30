@@ -186,12 +186,14 @@ async function refreshGpuStatus() {
 async function startGpuMonitor() {
     logger.info({ intervalMs: MONITOR_INTERVAL }, 'GPU 动态负载监控服务已启动');
     await refreshGpuStatus();
-    setInterval(() => {
-        refreshGpuStatus().catch(err => {
+    const runner = require('./periodic-runner').createPeriodicRunner({ intervalMs: MONITOR_INTERVAL, async run() {
+        try { await refreshGpuStatus(); } catch (err) {
             state.error = 'GPU 状态刷新异常: ' + err.message;
             logger.warn({ err: err.message }, 'GPU 监控刷新失败');
-        });
-    }, MONITOR_INTERVAL).unref();
+        }
+    } });
+    runner.start();
+    return runner;
 }
 
 function getGpuMonitorStatus() {

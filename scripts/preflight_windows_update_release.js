@@ -44,6 +44,10 @@ function preflightWindowsUpdateRelease(rootDir, env = process.env, options = {})
     if (!hasWindowsSigningCredential(env)) {
         throw new Error('Windows 自动更新发布缺少代码签名凭据：WIN_CSC_LINK、CSC_LINK、PIVOT_WINDOWS_CERTIFICATE_SHA1 或 PIVOT_WINDOWS_CERTIFICATE_SUBJECT。');
     }
+    const certificateSha256 = String(env.PIVOT_UPDATE_CERT_SHA256 || distribution.config?.autoUpdate?.certificateSha256 || '').replace(/[:\s]/g, '');
+    if (allowIntranetSelfSigned && !/^[a-f0-9]{64}$/i.test(certificateSha256)) {
+        throw new Error('自签名更新包必须提供 PIVOT_UPDATE_CERT_SHA256 证书指纹，并在客户端建立证书信任。');
+    }
     if (!resolveStealthSecret(root, env)) {
         throw new Error('Windows 自动更新发布缺少 PIVOT_DISTRIBUTION_STEALTH_SECRET 或 PIVOT_STEALTH_SECRET。');
     }

@@ -105,6 +105,35 @@ function createSseResponseWriter(res, options = {}) {
     };
     const writeComment = comment => writeRaw(encodeSseComment(comment));
     const writeData = (payload, event = '') => writeRaw(encodeSseData(payload, event));
+    const waitForDrain = (timeoutMs = 30000) => {
+        if (!isWritable()) return Promise.resolve(false);
+        if (!pendingChunks.length && !res.writableNeedDrain) return Promise.resolve(true);
+        return new Promise(resolve => {
+            const timeout = setTimeout(() => {
+                cleanupWait();
+                cleanup();
+                try { res.destroy?.(); } catch (_) {}
+                resolve(false);
+            }, Math.max(1, Number(timeoutMs) || 30000));
+            const cleanupWait = () => {
+                clearTimeout(timeout);
+                res.removeListener?.('drain', check);
+                res.removeListener?.('close', closedWait);
+                res.removeListener?.('finish', closedWait);
+                res.removeListener?.('error', closedWait);
+            };
+            const closedWait = () => { cleanupWait(); resolve(false); };
+            const check = () => {
+                if (!isWritable()) return closedWait();
+                if (!pendingChunks.length && !res.writableNeedDrain) { cleanupWait(); resolve(true); }
+            };
+            res.on?.('drain', check);
+            res.once?.('close', closedWait);
+            res.once?.('finish', closedWait);
+            res.once?.('error', closedWait);
+            check();
+        });
+    };
 
     res.once?.('close', cleanup);
     res.once?.('finish', cleanup);
@@ -129,6 +158,7 @@ function createSseResponseWriter(res, options = {}) {
     return {
         cleanup,
         isWritable,
+        waitForDrain,
         touch() { lastActivityAt = Date.now(); },
         writeComment,
         writeData,

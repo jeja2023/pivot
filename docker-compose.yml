@@ -62,9 +62,12 @@ services:
 
     # 安全加固：开启只读根文件系统，临时写操作与缓存通过 tmpfs 显式内存挂载提供
     read_only: true
+    cap_drop: [ALL]
     tmpfs:
       - /tmp:size=512m,mode=1777
       - /home/node/.cache:size=128m,mode=0700,uid=1000,gid=1000
+      - /home/node/.config:size=64m,mode=0700,uid=1000,gid=1000
+      - /home/node/.pki:size=32m,mode=0700,uid=1000,gid=1000
 
     # 日志管理：限制单文件大小和保留数量，避免占满宿主机磁盘
     logging:

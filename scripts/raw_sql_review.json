@@ -6,6 +6,60 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/routes/events.js",
+      "count": 2,
+      "rationale": "重连仅按认证用户限定快照上界并按事件 ID 分页，所有游标均参数化且限制为 PostgreSQL bigint 范围。",
+      "verification": "tests/realtime-replay.test.js 验证跨页、订阅期间事件及缓存上限；tests/agent-event-resource-plan.test.js 验证 PostgreSQL 大整数重放。"
+    },
+    {
+      "file": "server/db/initialization-lock.js",
+      "count": 2,
+      "rationale": "独立 PostgreSQL 会话以当前 schema 为范围持有初始化咨询锁，覆盖表结构、迁移与种子步骤，连接结束时释放。",
+      "verification": "tests/pg-migration-lock.test.js 使用隔离 PostgreSQL 验证并发互斥、异常释放及单连接池不死锁。"
+    },
+    {
+      "file": "server/services/agent-event-log.js",
+      "count": 16,
+      "rationale": "同一运行的有界事件批次在事务中锁定运行和已有事件，按用户稳定顺序取得事务级咨询锁，以参数化 JSON 批量维护序号、幂等键和 outbox。",
+      "verification": "tests/agent-event-resource-plan.test.js 使用隔离 PostgreSQL 验证提交顺序、并发序号、大整数 ID、重复键、失败回滚及回放。"
+    },
+    {
+      "file": "server/repositories/capability-governance.js",
+      "count": 1,
+      "rationale": "以参数化数组一次读取本次目录涉及的能力包，调用方逐项执行既有权限与状态判断，不跨请求缓存授权状态。",
+      "verification": "tests/capability-governance-batch.test.js 和 MCP 治理集成测试覆盖权限、停用与即时更新。"
+    },
+    {
+      "file": "server/db/migrate.js",
+      "count": 5,
+      "rationale": "迁移表初始化及迁移执行按当前 schema 获取和释放 PostgreSQL 会话咨询锁，避免多实例并发执行。",
+      "verification": "tests/pg-migration-lock.test.js 使用隔离 PostgreSQL 验证并发启动只执行一次迁移。"
+    },
+    {
+      "file": "server/services/long-term-memory/memory-vector-index.js",
+      "count": 7,
+      "rationale": "按维度获取咨询锁、检查索引有效性及构建状态，只删除已确认无效且未在构建的受控索引，然后在事务外并发重建。",
+      "verification": "tests/memory-hnsw-concurrent.test.js 使用隔离 PostgreSQL 和 pgvector 验证无效索引恢复与并发构建互斥。"
+    },
+    {
+      "file": "server/services/app-settings.js",
+      "count": 6,
+      "rationale": "条件更新以原值比较防止旧版隐身密钥迁移覆盖并发保存的新值，并仅在缓存仍匹配时更新缓存。",
+      "verification": "tests/stealth-secret-storage.test.js 使用隔离 PostgreSQL 验证明文迁移、加密读取及并发更新保护。"
+    },
+    {
+      "file": "server/services/agent-event-outbox.js",
+      "count": 9,
+      "rationale": "事务内锁定并批量领取、按执行器确认投递，以及标记和清理过期的已投递记录；待投递记录保持可重试，防止清理后重试重新入队。",
+      "verification": "tests/agent-event-resource-plan.test.js 使用隔离 PostgreSQL 验证并发领取、部分投递失败、重放、去重和已投递清理。"
+    },
+    {
+      "file": "server/services/agent-runtime/artifact-manager.js",
+      "count": 30,
+      "rationale": "新增参数化查询验证产物所有者或公开状态，以及父评论属于同一产物，阻断跨用户评论和交互访问。",
+      "verification": "tests/artifact-access-boundaries.test.js 覆盖越权拒绝、公开分享校验及授权交互。"
+    },
+    {
       "file": "server/repositories/model-status.js",
       "count": 5,
       "rationale": "模型状态管理独立仓储：按操作者权限受控切换模型的 active 与 disabled 状态，停用时同步清除默认标记。",

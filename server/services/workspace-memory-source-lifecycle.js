@@ -190,6 +190,7 @@ function createWorkspaceMemorySourceLifecycleWorker({ workerId = '', pollInterva
     const interval = Math.min(Math.max(Number.parseInt(pollIntervalMs, 10) || DEFAULT_POLL_MS, 250), 60000);
     let timer = null;
     let running = false;
+    let inFlight = null;
     const runOnce = async () => {
         if (running) return null;
         running = true;
@@ -197,10 +198,15 @@ function createWorkspaceMemorySourceLifecycleWorker({ workerId = '', pollInterva
         catch (error) { log.warn?.({ err: error.message }, '工作区记忆来源生命周期 Worker 执行失败'); return null; }
         finally { running = false; }
     };
+    const trackedRun = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(runOnce).finally(() => { inFlight = null; });
+        return inFlight;
+    };
     return {
-        start() { if (!timer) { timer = setInterval(() => { void runOnce(); }, interval); timer.unref?.(); void runOnce(); } return { workerId: safeWorkerId, started: true }; },
-        stop() { if (timer) clearInterval(timer); timer = null; },
-        runOnce,
+        start() { if (!timer) { timer = setInterval(() => { void trackedRun(); }, interval); timer.unref?.(); void trackedRun(); } return { workerId: safeWorkerId, started: true }; },
+        async stop() { if (timer) clearInterval(timer); timer = null; if (inFlight) await inFlight; },
+        runOnce: trackedRun,
         getRuntimeStatus: () => ({ workerId: safeWorkerId, started: Boolean(timer), running })
     };
 }

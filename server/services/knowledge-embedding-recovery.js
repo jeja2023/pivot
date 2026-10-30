@@ -67,29 +67,30 @@ function createKnowledgeEmbeddingRecoveryRunner({
 } = {}) {
     if (typeof recover !== 'function') throw new TypeError('知识库向量补齐巡检必须提供 recover 函数');
     let timer = null;
-    let running = false;
-    const tick = async () => {
-        if (running) return;
-        running = true;
-        try {
-            const result = await recover();
+    let stopped = false;
+    let inFlight = null;
+    const tick = () => {
+        if (stopped || inFlight) return inFlight;
+        inFlight = Promise.resolve().then(recover).then(result => {
             if (Number(result.scheduled || 0) > 0) logger.info(result, '知识库关键词降级文档已加入向量补齐队列');
-        } catch (error) {
-            logger.warn({ err: error.message }, '知识库向量补齐巡检失败');
-        } finally {
-            running = false;
-        }
+        }).catch(error => logger.warn({ err: error.message }, '知识库向量补齐巡检失败'))
+            .finally(() => { inFlight = null; });
+        return inFlight;
     };
     return {
         async start() {
             if (timer) return;
+            stopped = false;
             await tick();
+            if (stopped) return;
             timer = setIntervalFn(() => { void tick(); }, intervalMs);
             timer?.unref?.();
         },
-        stop() {
+        async stop() {
+            stopped = true;
             if (timer) clearIntervalFn(timer);
             timer = null;
+            if (inFlight) await inFlight;
         },
         tick
     };

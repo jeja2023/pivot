@@ -30,6 +30,8 @@ test('autonomous data adapter refuses unjailed sources and unsafe filters', asyn
     try {
         await assert.rejects(() => queryDataSource(csv, { autonomous: true }), /工作区沙箱/);
         await assert.rejects(() => queryDataSource(csv, { where: 'amount; DROP TABLE data' }), /不允许/);
+        await assert.rejects(() => queryDataSource(csv, { where: "c_1 = (SELECT content FROM read_csv('/etc/passwd'))" }), /不允许/);
+        await assert.rejects(() => queryDataSource(csv, { filters: [{ column: 'c_1', op: '= OR 1=', value: 'x' }] }), /无效/);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

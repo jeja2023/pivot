@@ -19,6 +19,7 @@ const { verifyTaskOutcome, taskVerificationFailureMessage } = require('./agent-v
 const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle');
 const { observationMessages } = require('./agent-runtime/planner');
 const { resolveApprovalKey } = require('./agent-approval-grants');
+const { createAgentEventBatchWriter } = require('./agent-event-batch-writer');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -228,7 +229,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 turnId: `${runId}:turn:${step}`,
                 stepIndex: step,
                 modelCfg,
-                toolList,
+                toolList: plannerToolList,
                 previousWorldState,
                 contextConfig: run.context_config || {},
                 policy: { toolPolicy: run.tool_policy, toolAllowlist: run.tool_allowlist, approvalPolicy: run.approval_policy, networkPolicy: run.network_policy },
@@ -270,7 +271,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             });
             let persistedContentLength = 0;
             const snapshotSampler = createStreamingSnapshotSampler();
-            let deltaEvents = Promise.resolve();
+            const deltaEvents = createAgentEventBatchWriter({
+                recordBatch: deps.recordAgentEventBatch,
+                recordOne: deps.recordAgentEvent,
+                onFailure: ({ failed, attempted }) => deps.logger?.warn({ runId, failed, attempted }, 'Agent 流式审计事件写入失败')
+            });
             const recordDelta = (snapshot, { completed = false } = {}) => {
                 const content = String(snapshot?.content || '');
                 const partialToolCalls = Array.isArray(snapshot?.partialToolCalls) ? snapshot.partialToolCalls : [];
@@ -281,9 +286,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const eventDeltaIndex = sampled.index || snapshotSampler.getAuditCount();
                 const eventDeltaOverflow = sampled.overflow;
                 const eventKey = `model:${stepContext?.contextHash || step}:delta:${eventDeltaIndex}`;
-                deltaEvents = deltaEvents.then(async () => {
-                    try {
-                        await deps.recordAgentEvent?.({
+                deltaEvents.push({
                             runId,
                             userId: user.id,
                             turnId: stepContext?.turnId || `${runId}:turn:${step}`,
@@ -302,10 +305,6 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                                 contextHash: stepContext?.contextHash || ''
                             },
                             eventKey
-                        });
-                    } catch (_) {
-                        // Event persistence is an audit side channel; a transient failure must not abort the model stream.
-                    }
                 });
             };
             const emitDelta = (snapshot) => {
@@ -380,6 +379,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     '流式工具规划',
                     { signal: deps.signal || null }
                 );
+                recordDelta({
+                    content: result?.content || '',
+                    partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
+                    finishReason: result?.finishReason || null
+                }, { completed: true });
+                await deltaEvents.finish();
                 if (!capabilityRecorded) {
                     capabilityRecorded = true;
                     try {
@@ -392,8 +397,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     }
                 }
                 try {
-                    for (const providerEvent of providerEvents) {
-                        await deps.recordAgentEvent?.({
+                    const providerAuditEvents = providerEvents.map(providerEvent => ({
                             runId,
                             userId: user.id,
                             turnId: stepContext?.turnId || `${runId}:turn:${step}`,
@@ -401,8 +405,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                             type: 'model.provider_event',
                             payload: providerEvent,
                             eventKey: `model:${stepContext?.contextHash || step}:provider:${providerEvent.sequence}`
-                        });
-                    }
+                        }));
+                    if (deps.recordAgentEventBatch) await deps.recordAgentEventBatch(providerAuditEvents);
+                    else for (const event of providerAuditEvents) await deps.recordAgentEvent?.(event);
                     await deps.recordAgentEvent?.({
                         runId,
                         userId: user.id,
@@ -443,6 +448,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     contextHash: stepContext?.contextHash || ''
                 });
             } catch (modelError) {
+                await deltaEvents.finish();
                 try {
                     await deps.recordAgentEvent?.({
                         runId,
@@ -474,12 +480,6 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 throw modelError;
             }
             // 推送最后一次流式快照，便于界面标记当前步骤已完成。
-            recordDelta({
-                content: result?.content || '',
-                partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
-                finishReason: result?.finishReason || null
-            }, { completed: true });
-            await deltaEvents;
             deps.publishUserEvent(user.id, 'agent.streaming', {
                 runId,
                 step,

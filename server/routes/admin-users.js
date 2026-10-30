@@ -1,5 +1,4 @@
 /* 管理员用户管理路由 Admin User Management Routes */
-const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
@@ -15,7 +14,7 @@ const { getBeijingTimestamp } = require('../time');
 const { getAuditActionFilterValues, localizeAuditLogRow } = require('../audit-actions');
 const { buildComplianceAuditPackage } = require('../services/compliance-package');
 const { archiveDeletedUsernameAsync } = require('../services/user-identity');
-const { hashPasswordsOffThread } = require('../services/password-hasher');
+const { hashPasswordsOffThread, hashPasswordOffThread } = require('../services/password-hasher');
 const {
     getPublicRegistrationSetting,
     setPublicRegistrationSetting
@@ -265,7 +264,7 @@ function createAdminUsersRouter({
             if (e.status === 400) return res.status(400).json({ error: e.message });
             throw e;
         }
-        const hash = await bcrypt.hash(password, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
+        const hash = await hashPasswordOffThread(password, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
         await transaction(async () => {
             await execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [hash, targetUserId]);
             await execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);

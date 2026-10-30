@@ -96,7 +96,7 @@
         finally { state.saving = false; if (state.savePromise === save) state.savePromise = null; }
     }
     async function refreshRemotePresentation({ force = false } = {}) {
-        if (!state.active?.id || state.saving) return false;
+        if (!state.active?.id || state.saving || (!force && !window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.())) return false;
         const data = await requestJson(API + '/' + encodeURIComponent(state.active.id), { cache: 'no-store' });
         const remote = data.presentation;
         if (!remote || (!force && Number(remote.version || 0) <= Number(state.active.version || 0))) return false;
@@ -118,19 +118,18 @@
     }
     function startPresentationRealtime() {
         stopPresentationRealtime();
-        if (!state.active?.id || !window.EventSource) return;
-        const source = new EventSource('/api/events', { withCredentials: true });
-        state.realtimeSource = source;
+        if (!state.active?.id) return;
         const onPresentationEvent = event => {
             let payload; try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
             if (String(payload.presentationId || '') !== String(state.active?.id || '')) return;
             if (payload.type === 'presentation.access_revoked') { revokePresentationAccess(); return; }
+            if (!window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.()) return;
             if (payload.type === 'presentation.updated') refreshRemotePresentation().catch(() => {});
             if (payload.type === 'presentation.comments') collab()?.loadComments(state.active?.id);
             if (payload.type === 'presentation.collaborators') { collab()?.loadCollaborators?.(); refreshRemotePresentation().catch(() => {}); }
         };
-        ['presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'].forEach(type => source.addEventListener(type, onPresentationEvent));
-        source.onerror = () => { /* polling remains the reconnect-safe fallback */ };
+        const types = ['presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'];
+        state.realtimeSource = window.Pivot.moduleApi('apps.presentations.realtime').subscribe?.(types, onPresentationEvent) || null;
     }
     function startPresentationSync() {
         clearInterval(state.syncTimer); state.syncTimer = window.setInterval(() => refreshRemotePresentation().catch(() => {}), 5000);
@@ -976,6 +975,10 @@ function setSelectedImageAsCover() {
             if (event.key === 'Escape') { event.preventDefault(); closePresenterMode(); } else if (event.key === 'ArrowLeft') { event.preventDefault(); movePresenterSlide(-1); } else if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); movePresenterSlide(1); }
         });
         window.addEventListener('beforeunload', () => { stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat?.(); closePresenterMode(); });
+        document.addEventListener('visibilitychange', () => {
+            if (!state.active?.id || !window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.()) return;
+            refreshRemotePresentation().catch(() => {}); collab()?.loadComments(state.active.id); collab()?.sendPresenceHeartbeat?.();
+        });
     }
     async function duplicateDocument(id) { const data = await requestJson(`${API}/${encodeURIComponent(id)}/duplicate`, jsonOptions({})); await loadDocuments(); await openPresentation(data.presentation.id); toast('已创建演示文稿副本。'); }
     async function deleteDocument(id) { const accepted = await window.Pivot.legacy.showConfirm?.('删除演示文稿', '删除后文稿将归档，不会影响已导出的历史文件。'); if (!accepted) return; await requestJson(`${API}/${encodeURIComponent(id)}`, { method: 'DELETE' }); await loadDocuments(); toast('演示文稿已归档。'); }
@@ -989,6 +992,7 @@ function setSelectedImageAsCover() {
             return;
         }
         if (!state.active) { byId('presentation-library')?.classList.remove('hidden'); byId('presentation-editor')?.classList.add('hidden'); }
+        else { await refreshRemotePresentation().catch(() => {}); collab()?.loadComments(state.active.id); collab()?.sendPresenceHeartbeat?.(); }
     }
     window.Pivot?.exposeModule?.('apps.presentations', { ready: true, showPresentationsApp, loadDocuments, openPresentation, renderPresenterMode, syncRemotePresentation });
 })();

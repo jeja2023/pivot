@@ -59,10 +59,11 @@ async function main() {
         const code = String(input.code || '');
         if (!code.trim()) throw Object.assign(new Error('代码不能为空。'), { code: 'AGENT_CODE_REQUIRED' });
         const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30000, 1000), MAX_TIMEOUT_MS);
-        const vars = input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? jsonClone(input.vars) : {};
+        const varsJson = JSON.stringify(input.vars && typeof input.vars === 'object' && !Array.isArray(input.vars) ? input.vars : {});
         const sandbox = Object.create(null);
-        Object.defineProperty(sandbox, 'vars', { value: Object.freeze(vars), enumerable: true, writable: false, configurable: false });
         const context = vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
+        // 在沙箱域中构造输入，避免宿主对象暴露宿主构造器。
+        vm.runInContext(`Object.defineProperty(globalThis, 'vars', { value: Object.freeze(JSON.parse(${JSON.stringify(varsJson)})), enumerable: true })`, context, { timeout: timeoutMs });
         const source = `'use strict'; (function () { ${code}\n})()`;
         const script = new vm.Script(source, { filename: 'agent-code.js', displayErrors: true });
         const result = script.runInContext(context, { timeout: timeoutMs, breakOnSigint: true });

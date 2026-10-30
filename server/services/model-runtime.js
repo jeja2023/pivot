@@ -289,9 +289,10 @@ async function refreshAllEndpointMonitorsCore() {
 }
 
 function scheduleNextMonitorRefresh(delayMs = MONITOR_INTERVAL_MS) {
-    if (monitorRefreshTimer) return;
+    if (!monitorStarted || monitorRefreshTimer) return;
     monitorRefreshTimer = setTimeout(() => {
         monitorRefreshTimer = null;
+        if (!monitorStarted) return;
         runMonitorRefresh()
             .catch(err => {
                 logger.warn({ err: err.message }, '模型端点刷新失败，已在下一轮重试');
@@ -316,11 +317,20 @@ async function refreshAllEndpointMonitors() {
 }
 
 async function startModelEndpointMonitor() {
-    if (monitorStarted) return;
+    if (monitorStarted) return { stop: stopModelEndpointMonitor };
     monitorStarted = true;
     logger.info({ intervalMs: MONITOR_INTERVAL_MS }, '模型端点监控已启动');
-    await runMonitorRefresh();
+    try { await runMonitorRefresh(); }
+    catch (error) { monitorStarted = false; throw error; }
     scheduleNextMonitorRefresh();
+    return { stop: stopModelEndpointMonitor };
+}
+
+async function stopModelEndpointMonitor() {
+    monitorStarted = false;
+    if (monitorRefreshTimer) clearTimeout(monitorRefreshTimer);
+    monitorRefreshTimer = null;
+    if (monitorRefreshPromise) await monitorRefreshPromise.catch(() => {});
 }
 
 function getModelEndpointRuntimeStatus(models) {

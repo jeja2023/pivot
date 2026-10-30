@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { getAppSettingValue, setAppSettingAsync } = require('./app-settings');
+const { getAppSettingValue, setAppSettingAsync, ensureAppSettingAsync, replaceAppSettingValueIfUnchanged } = require('./app-settings');
+const { encryptSecret, decryptSecret } = require('../security');
 
 const STEALTH_SETTING_ENABLED_KEY = 'stealth_mode_enabled';
 const STEALTH_SETTING_SECRET_KEY = 'stealth_secret';
@@ -7,6 +8,8 @@ const STEALTH_SETTING_SECRET_KEY = 'stealth_secret';
 let cachedSecret = '';
 let isSecretInitialized = false;
 let memoryEnabled = false;
+let migratingSecret = '';
+const SECRET_CONTEXT = 'app_settings.stealth_secret';
 
 function generateRandomSecret() {
     return crypto.randomBytes(32).toString('hex');
@@ -15,7 +18,15 @@ function generateRandomSecret() {
 function getStealthSecret() {
     const dbValue = getAppSettingValue(STEALTH_SETTING_SECRET_KEY);
     if (dbValue && typeof dbValue === 'string' && dbValue.trim()) {
-        cachedSecret = dbValue.trim();
+        const stored = dbValue.trim();
+        cachedSecret = String(decryptSecret(stored, SECRET_CONTEXT)).trim();
+        if (!/^enc:v[12]:/.test(stored) && process.env.DATA_ENCRYPTION_KEY && migratingSecret !== dbValue) {
+            migratingSecret = dbValue;
+            const encrypted = encryptSecret(stored, SECRET_CONTEXT);
+            replaceAppSettingValueIfUnchanged(STEALTH_SETTING_SECRET_KEY, dbValue, encrypted)
+                .catch(() => {})
+                .finally(() => { if (migratingSecret === dbValue) migratingSecret = ''; });
+        }
         return cachedSecret;
     }
     // .env 只作为首次启动/迁移兼容来源；一旦管理员在全局参数页保存新密钥，
@@ -31,7 +42,9 @@ function getStealthSecret() {
         const newSecret = generateRandomSecret();
         cachedSecret = newSecret;
         // 异步持久化至数据库，不阻塞当前请求
-        setAppSettingAsync(STEALTH_SETTING_SECRET_KEY, newSecret, { updatedBy: null }).catch(() => {});
+        if (process.env.DATA_ENCRYPTION_KEY) {
+            ensureAppSettingAsync(STEALTH_SETTING_SECRET_KEY, encryptSecret(newSecret, SECRET_CONTEXT), { updatedBy: null }).catch(() => {});
+        }
     }
     return cachedSecret || 'pivot-default-stealth-secret';
 }
@@ -49,9 +62,10 @@ function isStealthModeEnabled() {
     return memoryEnabled;
 }
 
-function generateStealthSignature(timestamp, secret) {
+function generateStealthSignature(timestamp, secret, authority = '') {
     const key = secret || getStealthSecret();
-    return crypto.createHmac('sha256', key).update(String(timestamp)).digest('hex');
+    const payload = authority ? `${timestamp}:${String(authority).toLowerCase()}` : String(timestamp);
+    return crypto.createHmac('sha256', key).update(payload).digest('hex');
 }
 
 function verifyStealthRequest(req) {
@@ -60,7 +74,8 @@ function verifyStealthRequest(req) {
     }
 
     const clientTime = req.headers['x-pivot-stealth-time'] || req.headers['x-pivot-stealth-timestamp'];
-    const clientToken = req.headers['x-pivot-stealth-token'] || req.headers['x-pivot-stealth-signature'];
+    const version = String(req.headers['x-pivot-stealth-version'] || '1');
+    const clientToken = version === '2' ? req.headers['x-pivot-stealth-token-v2'] : (req.headers['x-pivot-stealth-token'] || req.headers['x-pivot-stealth-signature']);
 
     if (!clientTime || !clientToken || typeof clientToken !== 'string') {
         return false;
@@ -77,7 +92,14 @@ function verifyStealthRequest(req) {
         return false;
     }
 
-    const expected = generateStealthSignature(timeNum, getStealthSecret());
+    let authority = '';
+    if (version === '2') {
+        authority = String(req.headers.host || '').trim().toLowerCase();
+        if (!authority || /[\s/@?#,]/.test(authority)) return false;
+    } else if (version !== '1' || ['false', '0', 'off'].includes(String(process.env.PIVOT_STEALTH_ALLOW_LEGACY || 'true').trim().toLowerCase())) {
+        return false;
+    }
+    const expected = generateStealthSignature(timeNum, getStealthSecret(), authority);
 
     try {
         const tokenBuf = Buffer.from(clientToken, 'utf8');
@@ -105,15 +127,12 @@ async function getStealthConfig() {
 async function setStealthConfigAsync({ enabled, secret, regenerateSecret, userId }) {
     if (regenerateSecret === true) {
         const newSecret = generateRandomSecret();
+        await setAppSettingAsync(STEALTH_SETTING_SECRET_KEY, encryptSecret(newSecret, SECRET_CONTEXT), { updatedBy: userId });
         cachedSecret = newSecret;
-        try {
-            await setAppSettingAsync(STEALTH_SETTING_SECRET_KEY, newSecret, { updatedBy: userId });
-        } catch (_) {}
     } else if (typeof secret === 'string' && secret.trim().length >= 16) {
-        cachedSecret = secret.trim();
-        try {
-            await setAppSettingAsync(STEALTH_SETTING_SECRET_KEY, cachedSecret, { updatedBy: userId });
-        } catch (_) {}
+        const nextSecret = secret.trim();
+        await setAppSettingAsync(STEALTH_SETTING_SECRET_KEY, encryptSecret(nextSecret, SECRET_CONTEXT), { updatedBy: userId });
+        cachedSecret = nextSecret;
     }
 
     if (typeof enabled === 'boolean') {

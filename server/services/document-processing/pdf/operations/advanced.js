@@ -45,7 +45,7 @@ function createAdvancedPdfOperations(helpers) {
             outputType: 'protected_pdf',
             bytes,
             pageCount: source.getPageCount(),
-            quality: { complete: true, engine: getQpdfHealth().version, encryption: 'AES-256', permissions: config.outputPermissions || {} }
+            quality: { complete: true, engine: (await getQpdfHealth()).version, encryption: 'AES-256', permissions: config.outputPermissions || {} }
         });
         await onProgress?.(90, { processedPages: output.pageCount, requestedPages: output.pageCount });
         return { outputs: [output], processedFiles: 1, processedPages: output.pageCount, requestedPages: output.pageCount };

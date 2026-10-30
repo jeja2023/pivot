@@ -25,6 +25,7 @@ app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar,FluentOverlay
 const { loadDesktopConfig, normalizeRemoteUrl, normalizeTrustedExternalOrigins, saveUserDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
+const { createStealthHeaders, isStealthTarget, publicDesktopConfig, stripStealthHeaders } = require('./stealth-policy');
 const { isTrustedExternalNavigation } = require('./external-navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 const { isDesktopWorkerRuntimeAvailable, runDesktopWorker } = require('./agent-runtime/broker');
@@ -475,12 +476,11 @@ function attachStealthHeaderInterceptor(targetSession) {
     try {
         targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
             try {
-                const secret = resolveStealthSecret(runtimeConfig, details.url);
+                stripStealthHeaders(details.requestHeaders);
+                const sameOrigin = isStealthTarget(details.url, currentTargetUrl);
+                const secret = sameOrigin ? resolveStealthSecret(runtimeConfig, currentTargetUrl) : '';
                 if (secret && typeof secret === 'string') {
-                    const now = Date.now().toString();
-                    const token = crypto.createHmac('sha256', secret).update(now).digest('hex');
-                    details.requestHeaders['X-Pivot-Stealth-Time'] = now;
-                    details.requestHeaders['X-Pivot-Stealth-Token'] = token;
+                    Object.assign(details.requestHeaders, createStealthHeaders(secret, currentTargetUrl));
                 }
             } catch (_) {}
             callback({ requestHeaders: details.requestHeaders });
@@ -795,10 +795,7 @@ ipcMain.handle('pivot-desktop:test-server-connection', async (event, payload = {
         const healthUrl = new URL('/api/health', parsed).toString();
         const headers = {};
         if (secret) {
-            const now = Date.now().toString();
-            const token = crypto.createHmac('sha256', secret).update(now).digest('hex');
-            headers['X-Pivot-Stealth-Time'] = now;
-            headers['X-Pivot-Stealth-Token'] = token;
+            Object.assign(headers, createStealthHeaders(secret, healthUrl));
         }
         const start = Date.now();
         const res = await fetch(healthUrl, {
@@ -875,7 +872,7 @@ ipcMain.handle('pivot-desktop:set-server-config', async (event, payload = {}) =>
 ipcMain.handle('pivot-desktop:status', async (event) => {
     assertTrustedIpcSender(event);
     return {
-        config: runtimeConfig,
+        config: publicDesktopConfig(runtimeConfig),
         targetUrl: currentTargetUrl,
         lastLoadError,
         updateState: updaterController ? updaterController.getState() : { enabled: false, status: 'not-ready' }

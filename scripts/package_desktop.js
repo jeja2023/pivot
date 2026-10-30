@@ -114,10 +114,15 @@ function prepareBundledDesktopConfig(options = {}) {
             if (!options.windowsUpdatePublisher || (options.windowsUpdatePublisher === 'Pivot Local Dev' && !options.allowIntranetSelfSigned)) {
                 throw new Error('Windows 自动更新发布必须使用受信任签名发布者，不能使用 Pivot Local Dev。');
             }
+            const certificateSha256 = String(process.env.PIVOT_UPDATE_CERT_SHA256 || config.autoUpdate?.certificateSha256 || '').replace(/[:\s]/g, '').toLowerCase();
+            if (options.allowIntranetSelfSigned && !/^[a-f0-9]{64}$/.test(certificateSha256)) {
+                throw new Error('自签名更新包必须提供 PIVOT_UPDATE_CERT_SHA256 证书指纹，并在客户端建立证书信任。');
+            }
             config.autoUpdate = {
                 ...config.autoUpdate,
                 publisherName: options.windowsUpdatePublisher,
-                allowUntrustedRoot: options.allowIntranetSelfSigned === true
+                allowUntrustedRoot: options.allowIntranetSelfSigned === true,
+                certificateSha256
             };
         } else {
             // 开发、冒烟和离线安装包绝不携带可用更新链，防止自签名构建覆盖
@@ -287,11 +292,12 @@ try {
             PIVOT_VERIFY_DESKTOP_BROWSER_RUNTIME: String(desktopRuntimeProfile.includesBrowserRuntime)
         }
     });
-    run(process.execPath, [electronBuilderCli, '--config', desktopBuildStaging.builderConfigPath, ...normalizeBuilderArgs(rawBuilderArgs)]);
+    run(process.execPath, ['--require', path.join(root, 'scripts', 'electron_builder_json_guard.js'), electronBuilderCli, '--config', desktopBuildStaging.builderConfigPath, ...normalizeBuilderArgs(rawBuilderArgs)]);
     if (windowsRelease) {
         const installerPath = path.join(electronOutputDir, `Pivot Setup ${projectVersion}.exe`);
         const appPath = path.join(electronOutputDir, 'win-unpacked', 'Pivot.exe');
-        run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher]);
+        run(process.execPath, [path.join('scripts', 'verify_windows_update_artifacts.js'), installerPath, appPath, windowsUpdatePublisher,
+            bundledDesktopConfig.config.autoUpdate?.certificateSha256 || process.env.PIVOT_UPDATE_CERT_SHA256 || '']);
     }
     if (windowsUpdateRelease) {
         run(process.execPath, [

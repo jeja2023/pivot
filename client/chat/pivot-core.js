@@ -226,6 +226,7 @@
             script.onerror = () => {
                 if (timer) clearTimeout(timer);
                 scriptLoadPromises.delete(key);
+                script.remove();
                 reject(new Error(`加载脚本失败: ${rawSrc}`));
             };
             timer = setTimeout(() => {

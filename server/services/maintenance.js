@@ -15,6 +15,7 @@ const { cleanupRateLimitCounters } = require('./rate-limit-store');
 const { createAgentResidencyStore } = require('./agent-residency');
 const { createAnalyzeProgress, runAnalyzeTables } = require('./analyze-maintenance');
 const { readTypedEnv } = require('../config/env-registry');
+const { createMaintenanceTaskController } = require('./maintenance-task-controller');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SEMANTIC_WORKER_INTERVAL_MS = Math.max(5000, Number.parseInt(process.env.DATA_ANALYSIS_SEMANTIC_WORKER_INTERVAL_MS || '10000', 10) || 10000);
@@ -560,6 +561,7 @@ async function sweepAgentResidency() {
 }
 
 function startMaintenanceTasks() {
+    const tasks = createMaintenanceTaskController();
     const retentionDays = getAuditLogRetentionDays();
     const apiCallLogRetentionDays = getApiCallLogRetentionDays();
     const storageGcRetentionDays = getStorageGcRetentionDays();
@@ -574,44 +576,21 @@ function startMaintenanceTasks() {
     maintenanceState.backup.maxVersions = backupMaxVersions;
     maintenanceState.backup.backupDir = backupDir;
 
-    cleanupOldLogs(retentionDays).catch(() => {});
-    cleanupApiCallLogs(apiCallLogRetentionDays).catch(() => {});
-    cleanupExpiredRefreshTokens().catch(() => {});
-    cleanupRateLimitCounters().catch(() => {});
-    cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
-    reconcileUploadStorageJob(storageGcRetentionDays).catch(() => {});
-    runAnalysisWorkspaceCleanup().catch(() => {});
-    runDocumentProcessingCleanup().catch(() => {});
-    backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
-    optimizeDatabase().catch(() => {});
-    processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务恢复失败'));
-    recoverDocumentProcessingJobs().catch(err => logger.warn({ err: err.message }, '文档处理任务恢复失败'));
-    sweepAgentResidency().catch(() => {});
-
-    setInterval(() => {
-        processSemanticAnalysisJobs({ limit: 1 }).catch(err => logger.warn({ err: err.message }, '全量语义分析任务轮询失败'));
-    }, SEMANTIC_WORKER_INTERVAL_MS).unref();
-
-    setInterval(() => {
-        sweepAgentResidency().catch(() => {});
-    }, AGENT_RESIDENCY_SWEEP_INTERVAL_MS).unref();
-
-    setInterval(() => {
-        recoverDocumentProcessingJobs().catch(err => logger.warn({ err: err.message }, '文档处理任务恢复轮询失败'));
-    }, DOCUMENT_JOB_RECOVERY_INTERVAL_MS).unref();
-
-    setInterval(() => {
-        cleanupOldLogs(retentionDays).catch(() => {});
-        cleanupApiCallLogs(apiCallLogRetentionDays).catch(() => {});
-        cleanupExpiredRefreshTokens().catch(() => {});
-        cleanupRateLimitCounters().catch(() => {});
-        cleanupSoftDeletedStorageJob(storageGcRetentionDays).catch(() => {});
-        reconcileUploadStorageJob(storageGcRetentionDays).catch(() => {});
-        runAnalysisWorkspaceCleanup().catch(() => {});
-        runDocumentProcessingCleanup().catch(() => {});
-        backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }).catch(() => {});
-        optimizeDatabase().catch(() => {});
-    }, DAY_MS).unref();
+    const dailyJobs = [
+        () => cleanupOldLogs(retentionDays), () => cleanupApiCallLogs(apiCallLogRetentionDays),
+        cleanupExpiredRefreshTokens, cleanupRateLimitCounters, () => cleanupSoftDeletedStorageJob(storageGcRetentionDays),
+        () => reconcileUploadStorageJob(storageGcRetentionDays), runAnalysisWorkspaceCleanup, runDocumentProcessingCleanup,
+        () => backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }), optimizeDatabase
+    ];
+    const runDaily = () => Promise.all(dailyJobs.map(job => tasks.run(job)));
+    tasks.every(SEMANTIC_WORKER_INTERVAL_MS, () => processSemanticAnalysisJobs({ limit: 1 }),
+        err => logger.warn({ err: err.message }, '全量语义分析任务轮询失败'),
+        { immediate: true, initialOnError: err => logger.warn({ err: err.message }, '全量语义分析任务恢复失败') });
+    tasks.every(AGENT_RESIDENCY_SWEEP_INTERVAL_MS, sweepAgentResidency, undefined, { immediate: true });
+    tasks.every(DOCUMENT_JOB_RECOVERY_INTERVAL_MS, recoverDocumentProcessingJobs,
+        err => logger.warn({ err: err.message }, '文档处理任务恢复轮询失败'),
+        { immediate: true, initialOnError: err => logger.warn({ err: err.message }, '文档处理任务恢复失败') });
+    tasks.every(DAY_MS, runDaily, undefined, { immediate: true });
 
     logger.info({
         retentionDays,
@@ -621,6 +600,7 @@ function startMaintenanceTasks() {
         backupMaxVersions,
         backupDir
     }, '后台维护服务已启动');
+    return tasks.stop;
 }
 
 module.exports = {

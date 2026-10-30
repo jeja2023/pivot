@@ -4,7 +4,7 @@
 /* eslint-disable no-undef */
 function isAgentRunDetailModalOpen() {
     const modal = document.getElementById('agent-run-detail-modal');
-    return Boolean(modal && !modal.classList.contains('hidden'));
+    return Boolean(modal && !modal.closest('.hidden, [hidden], [aria-hidden="true"]'));
 }
 function ensureAgentRunDetailModalVisible() {
     const modal = document.getElementById('agent-run-detail-modal');

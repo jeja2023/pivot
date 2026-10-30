@@ -75,6 +75,7 @@ def create_app(engine_factory=None):
         return {"ready": True, "backend": app.state.engine.backend, "streaming": app.state.engine.streaming}
 
     @app.post("/transcribe")
+    @app.post("/v1/speech/transcriptions")
     async def transcribe(request: Request):
         if not authorize(request.headers.get("authorization")):
             raise HTTPException(401, "需要有效服务凭据")
@@ -116,6 +117,7 @@ def create_app(engine_factory=None):
             raise HTTPException(503, "语音模型推理失败") from None
 
     @app.websocket("/stream")
+    @app.websocket("/v1/speech/stream")
     async def streaming(socket: WebSocket):
         if not authorize(socket.headers.get("authorization")) or not app.state.engine.streaming:
             await socket.close(code=1008)

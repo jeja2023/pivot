@@ -29,10 +29,10 @@ services:
     ports:
       - "${PIVOT_SPEECH_BIND_IP:-127.0.0.1}:8000:8000"
 
-    # 核心运行时配置：已内置安全默认值；无需 .env 文件亦可直接独立运行
+    # 核心运行时配置
     environment:
-      # 服务端 API 鉴权密钥（标准测试默认密钥；生产环境请通过环境变量或 .env 覆盖至少 24 位的强密钥）
-      SPEECH_API_KEY: ${SPEECH_API_KEY:-${PIVOT_VOICE_API_KEY:-pivot-speech-test-secret-key-32chars}}
+      # 服务端 API 鉴权密钥，至少 24 位；主应用须使用同一密钥
+      SPEECH_API_KEY: ${SPEECH_API_KEY:?请设置至少24位的语音服务密钥}
       # 语音推理后端：funasr（默认）或 qwen
       SPEECH_BACKEND: funasr
       # 推理设备：cpu（默认）或 cuda:0（需叠加 docker-compose.speech.gpu.yml）

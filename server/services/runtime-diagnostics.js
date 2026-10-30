@@ -34,7 +34,10 @@ const MAX_TRACKED_ROUTES = 128;
 function routeKeyOf(req) {
     const method = req.method || 'GET';
     const path = String(req.path || req.url || '').split('?')[0];
-    return `${method} ${path.slice(0, 120)}`;
+    // 中间件早于 Express 路由参数解析，仅保留前两段以免记录路径凭证。
+    const parts = path.split('/').filter(Boolean);
+    const safePath = '/' + parts.slice(0, 2).join('/') + (parts.length > 2 ? '/*' : '');
+    return `${method} ${safePath.slice(0, 120)}`;
 }
 
 /** 统计在途请求：请求进入时 +1，响应结束或连接关闭时 -1。 */

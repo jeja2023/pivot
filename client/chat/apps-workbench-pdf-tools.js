@@ -826,7 +826,8 @@
     function startPolling() {
         if (state.timer) return;
         state.timer = window.setInterval(async () => {
-            if (state.polling || document.hidden || window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'pdf-tools') return;
+            const view = document.getElementById('pdf-tools-view');
+            if (state.polling || document.hidden || !view || view.closest('.hidden, [hidden], [aria-hidden="true"]') || window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'pdf-tools') return;
             if (!state.jobs.some(job => ['queued', 'processing'].includes(job.status))) return;
             state.polling = true;
             try { await loadJobs({ keepActive: true }); } catch (_error) {} finally { state.polling = false; }

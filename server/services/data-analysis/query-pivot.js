@@ -330,7 +330,7 @@ async function runUserQuery(userId, datasetId, input = {}) {
         try {
             await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${selectList} FROM read_parquet(${sqlLiteral(parquetPath)})`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             // 物化完成后切断外部文件访问，使用户 SQL 无法读取数据集以外的任何文件。
-            await connection.run('SET enable_external_access=false');
+            await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
             const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             return reader.getRowObjectsJson();
         } catch (err) {

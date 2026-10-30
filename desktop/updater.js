@@ -130,7 +130,8 @@ function runPowerShellSignatureQuery(filePath, { execFileFn = execFile } = {}) {
         // 仍可加载。显式捕获该告警，避免自动加载在 -NoProfile 下失败。
         'try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop } catch { }',
         `$signature = Get-AuthenticodeSignature -LiteralPath '${escapedPath}'`,
-        '$payload = [PSCustomObject]@{ Status = [int]$signature.Status; Path = [string]$signature.Path; Subject = [string]$signature.SignerCertificate.Subject } | ConvertTo-Json -Compress',
+        '$fingerprint = ""; if ($signature.SignerCertificate) { $sha = [System.Security.Cryptography.SHA256]::Create(); try { $fingerprint = ([BitConverter]::ToString($sha.ComputeHash($signature.SignerCertificate.RawData))).Replace("-", "") } finally { $sha.Dispose() } }',
+        '$payload = [PSCustomObject]@{ Status = [int]$signature.Status; Path = [string]$signature.Path; Subject = [string]$signature.SignerCertificate.Subject; CertificateSha256 = $fingerprint } | ConvertTo-Json -Compress',
         `[System.IO.File]::WriteAllText('${escapedOutputPath}', $payload, [System.Text.UTF8Encoding]::new($false))`
     ].join('; ');
     return new Promise((resolve, reject) => {
@@ -166,11 +167,9 @@ async function verifyWindowsUpdateSignature(publisherNames, artifactPath, option
             ? options.signatureQuery
             : runPowerShellSignatureQuery;
         const result = await signatureQuery(artifactPath, options);
-        const statusCode = Number(result?.Status);
-        const allowsUntrustedRoot = options.allowUntrustedRoot === true
-            || normalizePublisherNames(publisherNames).includes('Pivot Local Dev');
-        const isValidStatus = statusCode === 0 || (allowsUntrustedRoot && (statusCode === 1 || statusCode === 6));
-        if (!isValidStatus) {
+        const statusCode = result?.Status;
+        // UnknownError 和 Incompatible 均不能证明签名有效。
+        if (!Number.isInteger(statusCode) || statusCode !== 0) {
             return `更新安装包 Authenticode 签名无效（状态 ${result?.Status ?? 'unknown'}）。`;
         }
         if (normalizeWindowsPath(result?.Path) !== normalizeWindowsPath(artifactPath)) {
@@ -178,6 +177,14 @@ async function verifyWindowsUpdateSignature(publisherNames, artifactPath, option
         }
         if (!publisherMatchesSubject(publisherNames, result?.Subject)) {
             return `更新安装包签名发布者不匹配（实际 ${String(result?.Subject || '未知')}）。`;
+        }
+        const pinned = String(options.certificateSha256 || '').replace(/[:\s]/g, '').toLowerCase();
+        const requiresPin = options.allowUntrustedRoot === true || normalizePublisherNames(publisherNames).includes('Pivot Local Dev');
+        if (requiresPin && !/^[a-f0-9]{64}$/.test(pinned)) {
+            return '自签名更新缺少受信任的 SHA-256 证书指纹。';
+        }
+        if (pinned && (!/^[a-f0-9]{64}$/.test(pinned) || pinned !== String(result?.CertificateSha256 || '').replace(/[:\s]/g, '').toLowerCase())) {
+            return '更新安装包签名证书指纹不匹配。';
         }
         return null;
     } catch (error) {
@@ -219,8 +226,8 @@ function hardenWindowsAutoUpdater(autoUpdater, updateConfig = {}, options = {}) 
         : verifyWindowsUpdateSignature;
     autoUpdater.verifyUpdateCodeSignature = (publisherNames, artifactPath) => signatureVerifier(publisherNames, artifactPath, {
         ...options,
-        allowUntrustedRoot: updateConfig.allowUntrustedRoot === true
-            || normalizePublisherNames(publisherNames).includes('Pivot Local Dev')
+        allowUntrustedRoot: updateConfig.allowUntrustedRoot === true,
+        certificateSha256: updateConfig.certificateSha256 || ''
     });
     autoUpdater.disableWebInstaller = true;
     autoUpdater.allowDowngrade = false;
@@ -353,6 +360,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
 
     const feedUrl = assertAllowedUpdateFeedUrl(updateConfig.url, {
         allowedOrigins: updateConfig.allowedOrigins || [],
+        allowInsecureHttp: updateConfig.allowInsecureHttp === true,
         env: process.env
     });
 

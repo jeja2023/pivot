@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const bcrypt = require('bcryptjs');
-const { hashPasswordsOffThread, normalizeWorkerCount } = require('../server/services/password-hasher');
+const { hashPasswordsOffThread, hashPasswordOffThread, comparePasswordOffThread, normalizeWorkerCount } = require('../server/services/password-hasher');
 
 test('用户导入密码在有限 Worker Thread 中按原顺序哈希', async () => {
     const passwords = ['Alpha1234', 'Beta5678', 'Gamma9012'];
@@ -9,4 +9,11 @@ test('用户导入密码在有限 Worker Thread 中按原顺序哈希', async ()
     assert.equal(hashes.length, passwords.length);
     hashes.forEach((hash, index) => assert.equal(bcrypt.compareSync(passwords[index], hash), true));
     assert.equal(normalizeWorkerCount(999, 3), 3);
+});
+
+test('单用户密码哈希和校验在工作线程中执行并保留 bcrypt 契约', async () => {
+    const hash = await hashPasswordOffThread('Alpha1234', 8);
+    assert.equal(await comparePasswordOffThread('Alpha1234', hash), true);
+    assert.equal(await comparePasswordOffThread('wrong', hash), false);
+    assert.equal(bcrypt.getRounds(hash), 8);
 });

@@ -355,6 +355,7 @@ function createKnowledgeGraphMaintenanceRunner({ intervalMs = 6 * 60 * 60 * 1000
     const interval = Math.min(Math.max(Number.parseInt(intervalMs, 10) || 6 * 60 * 60 * 1000, 60 * 1000), 24 * 60 * 60 * 1000);
     let timer = null;
     let running = false;
+    let inFlight = null;
     const runOnce = async () => {
         if (running) return null;
         running = true;
@@ -362,16 +363,21 @@ function createKnowledgeGraphMaintenanceRunner({ intervalMs = 6 * 60 * 60 * 1000
         catch (error) { log.warn?.({ err: error.message }, '知识图谱自动实体清理失败'); return null; }
         finally { running = false; }
     };
+    const trackedRun = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(runOnce).finally(() => { inFlight = null; });
+        return inFlight;
+    };
     return {
         start() {
             if (timer) return { started: true };
-            timer = setInterval(() => { void runOnce(); }, interval);
+            timer = setInterval(() => { void trackedRun(); }, interval);
             timer.unref?.();
-            void runOnce();
+            void trackedRun();
             return { started: true };
         },
-        stop() { if (timer) clearInterval(timer); timer = null; },
-        runOnce,
+        async stop() { if (timer) clearInterval(timer); timer = null; if (inFlight) await inFlight; },
+        runOnce: trackedRun,
         getRuntimeStatus: () => ({ started: Boolean(timer), running })
     };
 }

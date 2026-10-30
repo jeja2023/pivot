@@ -30,7 +30,8 @@
             listeners.forEach(listener => listener('connected', event));
             for (const entry of entries.values()) if (current(entry)) schedule(entry, 50);
         });
-        for (const type of ['agent.event', 'agent.run', 'agent.notification', 'agent.streaming']) {
+        for (const type of ['agent.event', 'agent.run', 'agent.notification', 'agent.streaming',
+            'presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked']) {
             source.addEventListener(type, event => {
                 listeners.forEach(listener => listener(type, event));
                 let payload;

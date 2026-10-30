@@ -505,13 +505,13 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.post('/settings/password', authMiddleware, asyncHandler(async (req, res) => {
         const { oldPassword, newPassword } = req.body;
-        if (!oldPassword || !newPassword) {
+        if (typeof oldPassword !== 'string' || !oldPassword || typeof newPassword !== 'string' || !newPassword) {
             return res.status(400).json({ error: '旧密码和新密码均不能为空' });
         }
 
         const user = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
-        const bcrypt = require('bcryptjs');
-        if (!await bcrypt.compare(oldPassword, user.password_hash)) {
+        const { comparePasswordOffThread, hashPasswordOffThread } = require('../services/password-hasher');
+        if (!await comparePasswordOffThread(oldPassword, user.password_hash)) {
             return res.status(400).json({ error: '旧密码错误' });
         }
 
@@ -522,7 +522,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             return res.status(400).json({ error: e.message });
         }
 
-        const newHash = await bcrypt.hash(newPassword, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
+        const newHash = await hashPasswordOffThread(newPassword, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
         await transaction(async (trx) => {
             await trx.execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [newHash, req.user.id]);
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);

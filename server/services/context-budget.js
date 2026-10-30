@@ -113,7 +113,29 @@ function estimateContentTokens(content) {
 }
 
 function estimateMessageTokens(message) {
-    return 4 + estimateContentTokens(message?.content);
+    return 4 + estimateContentTokens(message?.content)
+        + (message?.tool_calls ? estimateTokens(JSON.stringify(message.tool_calls)) : 0);
+}
+
+// 裁剪历史时，助手工具调用与对应结果必须一起保留或删除。
+function toolMessageGroups(messages) {
+    const groups = new Map();
+    const calls = new Map();
+    for (const message of messages) {
+        if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) continue;
+        const group = new Set([message.__originIndex]);
+        groups.set(message.__originIndex, group);
+        for (const call of message.tool_calls) if (call?.id) calls.set(String(call.id), group);
+    }
+    for (const message of messages) {
+        if (message.role !== 'tool' || !message.tool_call_id) continue;
+        const group = calls.get(String(message.tool_call_id));
+        if (group) {
+            group.add(message.__originIndex);
+            groups.set(message.__originIndex, group);
+        }
+    }
+    return groups;
 }
 
 function estimateMessagesTokens(messages = []) {
@@ -324,29 +346,34 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
         total = estimateMessagesTokens(working);
     }
 
-    // 维护运行中总 Token 计数，避免单次切片后全量重新求和导致 O(n^2)
-    
-    
-    for (let i = 0; i < working.length && total > budget.inputBudget;) {
-        const message = working[i];
-        const pinned = message.__originIndex === lastUserOriginIndex
-            || message.__originIndex === firstSystemOriginIndex
-            || isRagMessage(message)
-            || isLongTermMemoryMessage(message)
-            || isTaskWorkingMemoryMessage(message)
-            || isRetrievableEvidenceMessage(message)
-            || isMcpMessage(message);
-        if (pinned) {
-            i += 1;
-            continue;
+    const toolGroups = toolMessageGroups(working);
+    const isPinned = message => message.__originIndex === lastUserOriginIndex
+        || message.__originIndex === firstSystemOriginIndex
+        || isRagMessage(message)
+        || isLongTermMemoryMessage(message)
+        || isTaskWorkingMemoryMessage(message)
+        || isRetrievableEvidenceMessage(message)
+        || isMcpMessage(message);
+    const byOrigin = new Map(working.map(message => [message.__originIndex, message]));
+    const droppedOrigins = new Set();
+    for (const message of working) {
+        if (total <= budget.inputBudget) break;
+        if (droppedOrigins.has(message.__originIndex)) continue;
+        const group = toolGroups.get(message.__originIndex) || new Set([message.__originIndex]);
+        const members = [...group].map(index => byOrigin.get(index)).filter(Boolean);
+        if (members.some(isPinned)) continue;
+        for (const member of members) {
+            total -= estimateMessageTokens(member);
+            droppedOrigins.add(member.__originIndex);
+            metadata.droppedMessages += 1;
         }
-        total -= estimateMessageTokens(message);
-        working.splice(i, 1);
-        metadata.droppedMessages += 1;
+    }
+    for (let i = working.length - 1; i >= 0; i -= 1) {
+        if (droppedOrigins.has(working[i].__originIndex)) working.splice(i, 1);
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
-        if (!isLongTermMemoryMessage(working[i])) {
+        if (!isLongTermMemoryMessage(working[i]) || toolGroups.has(working[i].__originIndex)) {
             i += 1;
             continue;
         }
@@ -356,7 +383,7 @@ function fitMessagesToContextBudget(messages = [], modelCfg = {}, options = {}) 
     }
 
     for (let i = 0; i < working.length && total > budget.inputBudget;) {
-        if (!isMcpMessage(working[i])) {
+        if (!isMcpMessage(working[i]) || toolGroups.has(working[i].__originIndex)) {
             i += 1;
             continue;
         }

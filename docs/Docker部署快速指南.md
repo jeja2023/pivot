@@ -17,7 +17,9 @@ docker-compose up -d
 
 ### 浏览器中文语音
 
-标准镜像在构建阶段安装 CPU 中文识别运行库；默认 `embedded` 模式的三个模型通过 `./data/speech-models:/models:ro` 导入，不写入镜像。浏览器无需中文本地包，短录音仅发送当前 Pivot，在容器内存中完成识别；镜像运行阶段无需访问模型下载站点。
+标准主镜像在构建阶段安装 Vosk 离线识别运行库和模型，默认使用 `local`。需要 FunASR 双遍识别时，请部署独立语音网关并准备其模型和依赖。
+
+构建时可通过 `--build-arg NPM_REGISTRY=<受信任的 npm 镜像地址>` 指定依赖源；运行时不从该地址安装依赖。真正离线交付仍需在联网准备机构建并验收镜像，再导入生产环境。
 
 升级时需重新构建镜像并重建容器：
 
@@ -30,7 +32,7 @@ docker compose up -d --no-deps --force-recreate pivot
 
 `PIVOT_SERVER_VOICE_ENABLED=false` 可关闭部署内识别。如显式选择旧 `local` 兼容模式，标准镜像保留的 Vosk Python 和模型分别位于 `/opt/pivot-speech/venv/bin/python`、`/opt/pivot-speech/model`；`PIVOT_SERVER_VOICE_MODEL_PATH` 只用于这条兼容链路，不配置新的三个模型。
 
-中文双遍识别默认集成在主容器中，`.env` 使用 `PIVOT_VOICE_PROVIDER=embedded`，无需额外容器或 GPU。SeACo Paraformer、流式 Paraformer 和标点模型放在部署目录的 `./data/speech-models/`，主 Compose 已配置 `./data/speech-models:/models:ro`。主镜像内置 CPU 推理依赖，动态内部端口与凭据由应用管理，无需填写语音 IP、HTTP/WS 端点或共享密钥。开发机的 `artifacts/speech-models/` 是下载准备目录；选择其他内网服务器提供 API 时才使用 `gateway`，可选独立部署文件为 `docker-compose.speech.yml`。详见 [中文语音服务离线部署与验收](deployment/中文语音服务离线部署与验收.md)。
+中文双遍识别通过独立 `docker-compose.speech.yml` 部署，主服务选择 `gateway` 并配置转写、流式地址及相同的服务密钥。模型通过独立容器只读挂载，详见 [中文语音服务离线部署与验收](deployment/中文语音服务离线部署与验收.md)。
 
 ### 方法 1：外部挂载（推荐）✅
 

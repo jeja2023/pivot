@@ -569,6 +569,61 @@ function createChatRouter({
         };
 
 
+        const contextResult = await withObservabilitySpan(chatTrace, 'context_assembly', () => assembleChatContext({
+            req,
+            state: chatState,
+            modelCfg,
+            retrieveContext,
+            isRagEnabled,
+            publicUrl,
+            writeSse,
+            releaseSemaphore,
+            writeChatErrorSse,
+            persistOnError: userMessagePersisted || regenerate,
+            signal: abortController.signal
+        }), { ragEnabled, mcpEnabled });
+        if (contextResult.errorEnded) return res.end();
+        let { visionHistory, disableChatThinking, routePlan } = contextResult;
+        if (typeof contextResult.catalogAnswer === 'string') {
+            try {
+                const assistantContent = contextResult.catalogAnswer;
+                const { assistantMessageResult, assistantMessageId, sessionTitle } = await persistFinalChatResponse({
+                    persistAssistantResponse, sessionId, userId, userMessageId, user: req.user, modelCfg,
+                    visibleContent, assistantContent, assistantTokens: 0, costTime: 0, tokensPerSec: 0, routePlan, providerUsage: null
+                });
+                writeSse(JSON.stringify({ content: assistantContent }));
+                writeSse(JSON.stringify({ type: 'message_saved', role: 'assistant', ephemeral: false,
+                    messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid, modelName: '', tokenCount: 0,
+                    costTime: 0, tps: 0, content: assistantContent, routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null, sessionTitle: sessionTitle || null }));
+                finishChatTrace('completed', { mode: 'knowledge_catalog' });
+                writeSse('[DONE]');
+                return res.end();
+            } catch (error) {
+                finishChatTrace('error', { phase: 'knowledge_catalog', error: error.message });
+                await writeChatErrorSse({ writeSse, sessionId, userId, modelId: modelCfg.id,
+                    error: '保存知识库目录回复失败', detail: error.message, persist: userMessagePersisted || regenerate, log: req.log });
+                return res.end();
+            } finally {
+                releaseSemaphore();
+            }
+        }
+        if (contextResult.mcpConsentRequired) {
+            releaseSemaphore();
+            finishChatTrace('completed', {
+                mode: 'mcp_consent_required',
+                toolCandidates: routePlan?.tools?.candidates?.length || 0
+            });
+            writeSse(JSON.stringify({
+                type: 'mcp_consent_required',
+                message: '发现可辅助本轮请求的工具。确认后会自动继续处理当前消息。',
+                userMessageId,
+                routeOverrides: routePlan?.overrides || {},
+                routeMetadata: buildRouteMetadata(routePlan)
+            }));
+            writeSse('[DONE]');
+            return res.end();
+        }
+
         // --- 进入并发控制 ---
         let queuedAtGlobalGate = false;
         try {
@@ -631,61 +686,6 @@ function createChatRouter({
                 persist: userMessagePersisted || regenerate,
                 log: req.log
             });
-            return res.end();
-        }
-
-        const contextResult = await withObservabilitySpan(chatTrace, 'context_assembly', () => assembleChatContext({
-            req,
-            state: chatState,
-            modelCfg,
-            retrieveContext,
-            isRagEnabled,
-            publicUrl,
-            writeSse,
-            releaseSemaphore,
-            writeChatErrorSse,
-            persistOnError: userMessagePersisted || regenerate,
-            signal: abortController.signal
-        }), { ragEnabled, mcpEnabled });
-        if (contextResult.errorEnded) return res.end();
-        let { visionHistory, disableChatThinking, routePlan } = contextResult;
-        if (typeof contextResult.catalogAnswer === 'string') {
-            try {
-                const assistantContent = contextResult.catalogAnswer;
-                const { assistantMessageResult, assistantMessageId, sessionTitle } = await persistFinalChatResponse({
-                    persistAssistantResponse, sessionId, userId, userMessageId, user: req.user, modelCfg,
-                    visibleContent, assistantContent, assistantTokens: 0, costTime: 0, tokensPerSec: 0, routePlan, providerUsage: null
-                });
-                writeSse(JSON.stringify({ content: assistantContent }));
-                writeSse(JSON.stringify({ type: 'message_saved', role: 'assistant', ephemeral: false,
-                    messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid, modelName: '', tokenCount: 0,
-                    costTime: 0, tps: 0, content: assistantContent, routeMetadata: routePlan ? buildRouteMetadata(routePlan) : null, sessionTitle: sessionTitle || null }));
-                finishChatTrace('completed', { mode: 'knowledge_catalog' });
-                writeSse('[DONE]');
-                return res.end();
-            } catch (error) {
-                finishChatTrace('error', { phase: 'knowledge_catalog', error: error.message });
-                await writeChatErrorSse({ writeSse, sessionId, userId, modelId: modelCfg.id,
-                    error: '保存知识库目录回复失败', detail: error.message, persist: userMessagePersisted || regenerate, log: req.log });
-                return res.end();
-            } finally {
-                releaseSemaphore();
-            }
-        }
-        if (contextResult.mcpConsentRequired) {
-            releaseSemaphore();
-            finishChatTrace('completed', {
-                mode: 'mcp_consent_required',
-                toolCandidates: routePlan?.tools?.candidates?.length || 0
-            });
-            writeSse(JSON.stringify({
-                type: 'mcp_consent_required',
-                message: '发现可辅助本轮请求的工具。确认后会自动继续处理当前消息。',
-                userMessageId,
-                routeOverrides: routePlan?.overrides || {},
-                routeMetadata: buildRouteMetadata(routePlan)
-            }));
-            writeSse('[DONE]');
             return res.end();
         }
 
@@ -791,7 +791,7 @@ function createChatRouter({
             });
 
             response.data.on('end', async () => {
-                streamIdleWatchdog.stop();
+                streamIdleWatchdog.stop(); releaseSemaphore();
                 try {
                     parser.end();
                     accumulator.finish();

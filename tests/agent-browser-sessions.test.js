@@ -266,6 +266,7 @@ test('browser sessions preserve an authorized page across sequential Agent actio
         assert.match(reobserved.text, /ready/);
         const closed = await browserTestStep('关闭会话', () => closeAgentBrowserSession(created.session.id, user));
         assert.equal(closed.status, 'closed');
+        assert.equal(fs.existsSync(path.join(profileRoot, created.session.id)), false);
         assert.equal(await loadBrowserSession(created.session.id, user), null);
     } finally {
         if (sessionId) await browserTestStep('清理浏览器', () => closeAgentBrowserSession(sessionId, user), 5000).catch(() => {});

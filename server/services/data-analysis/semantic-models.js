@@ -313,17 +313,18 @@ async function executeAsyncQueryJob(job) {
     const outputDir = resolveInside(exportRoot, String(owner.id));
     await fs.promises.mkdir(outputDir, { recursive: true });
     const outputPath = resolveInside(outputDir, `${job.id}.parquet`);
-    const { instance, connection } = await createDuckConnection();
-    try {
-        await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${buildQuerySelectList(dataset, allowedColumns)} FROM read_parquet(${sqlLiteral(getDatasetPaths(dataset).parquetPath)})`), ASYNC_QUERY_TIMEOUT_MS);
-        // sql_text 已由 validateUserSql 拒绝外部读取、写入与多语句；用户查询只引用受控 data 临时表。
-        // DuckDB 的 external access 是实例启动项，不能在运行中重新开启，因此把受控 COPY 与用户 SQL 分离为 result 内表。
-        await withDuckTimeout(connection, () => connection.run(`CREATE TABLE result AS SELECT * FROM (${job.sql_text}) AS _q LIMIT ${Number(job.requested_limit) + 1}`), ASYNC_QUERY_TIMEOUT_MS);
-        await withDuckTimeout(connection, () => connection.run(`COPY result TO ${sqlLiteral(outputPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`), ASYNC_QUERY_TIMEOUT_MS);
-    } finally {
-        connection.closeSync();
-        instance.closeSync();
-    }
+    await withAnalysisSlot(async () => {
+        const { instance, connection } = await createDuckConnection();
+        try {
+            await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${buildQuerySelectList(dataset, allowedColumns)} FROM read_parquet(${sqlLiteral(getDatasetPaths(dataset).parquetPath)})`), ASYNC_QUERY_TIMEOUT_MS);
+            await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { allowedPaths: [outputPath] });
+            await withDuckTimeout(connection, () => connection.run(`CREATE TABLE result AS SELECT * FROM (${job.sql_text}) AS _q LIMIT ${Number(job.requested_limit) + 1}`), ASYNC_QUERY_TIMEOUT_MS);
+            await withDuckTimeout(connection, () => connection.run(`COPY result TO ${sqlLiteral(outputPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`), ASYNC_QUERY_TIMEOUT_MS);
+        } finally {
+            connection.closeSync();
+            instance.closeSync();
+        }
+    });
     const previewRows = await withAnalysisSlot(() => parquetToRows(outputPath, { limit: 100 }));
     const columns = previewRows.length ? Object.keys(previewRows[0]) : [];
     const now = getBeijingTimestamp();
@@ -360,18 +361,29 @@ async function processAsyncQueryJobs({ limit = 2 } = {}) {
     }
 }
 
-function startAsyncQueryRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_ASYNC_QUERY_POLL_INTERVAL_MS'), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
+function startAsyncQueryRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_ASYNC_QUERY_POLL_INTERVAL_MS'), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout, processJobs = processAsyncQueryJobs } = {}) {
     if (asyncQueryRunner) return asyncQueryRunner;
     const safeInterval = Math.max(1_000, Math.min(Number(intervalMs) || 3_000, 60_000));
     let timer = null;
     let stopped = false;
-    const tick = async () => {
-        await processAsyncQueryJobs().catch(() => {});
-        if (!stopped) { timer = setTimeoutFn(tick, safeInterval); timer?.unref?.(); }
+    let inFlight = null;
+    const tick = () => {
+        if (stopped || inFlight) return inFlight;
+        inFlight = Promise.resolve().then(processJobs).catch(() => {}).finally(() => {
+            inFlight = null;
+            if (!stopped) { timer = setTimeoutFn(tick, safeInterval); timer?.unref?.(); }
+        });
+        return inFlight;
     };
     timer = setTimeoutFn(tick, Math.min(safeInterval, 2_000));
     timer?.unref?.();
-    asyncQueryRunner = { stop() { stopped = true; if (timer) clearTimeoutFn(timer); asyncQueryRunner = null; } };
+    const runner = { async stop() {
+        stopped = true;
+        if (timer) clearTimeoutFn(timer);
+        if (inFlight) await inFlight;
+        if (asyncQueryRunner === runner) asyncQueryRunner = null;
+    } };
+    asyncQueryRunner = runner;
     return asyncQueryRunner;
 }
 

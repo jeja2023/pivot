@@ -321,6 +321,8 @@ function safePyrightEnvironment(env = process.env) {
     const next = { ...env };
     // Pyright 只做静态分析，不允许工作区借助解释器/加载路径注入宿主进程。
     ['NODE_OPTIONS', 'PYTHONHOME', 'PYTHONPATH', 'VIRTUAL_ENV', 'PYTHONSTARTUP'].forEach(key => delete next[key]);
+    // 打包后的 Electron 可执行文件同时用于启动 Node 语言服务子进程。
+    next.ELECTRON_RUN_AS_NODE = '1';
     return next;
 }
 

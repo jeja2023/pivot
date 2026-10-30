@@ -141,11 +141,12 @@ function normalizeRemoteUrl(value) {
     return normalizeHttpUrl(value, 'config.remoteUrl', true);
 }
 
-function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env) {
+function normalizeUpdateUrl(value, required, allowedOrigins = [], env = process.env, allowInsecureHttp = false) {
     return normalizeUpdateFeedUrl(value, {
         required,
         allowedOrigins,
-        env
+        env,
+        allowInsecureHttp
     });
 }
 
@@ -178,7 +179,7 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
         : DEFAULT_AUTO_UPDATE.checkIntervalMinutes;
     return {
         enabled,
-        url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env),
+        url: normalizeUpdateUrl(derivedUrl, enabled, allowedOrigins, env, merged.allowInsecureHttp === true),
         path: updatePath,
         checkOnStart: merged.checkOnStart !== false,
         checkIntervalMinutes,
@@ -186,6 +187,7 @@ function normalizeAutoUpdate(value, env = process.env, options = {}) {
         allowPrerelease: merged.allowPrerelease === true,
         publisherName: typeof merged.publisherName === 'string' ? merged.publisherName.trim().replace(/\s+/g, ' ').slice(0, 256) : '',
         allowUntrustedRoot: merged.allowUntrustedRoot === true,
+        certificateSha256: String(merged.certificateSha256 || env.PIVOT_UPDATE_CERT_SHA256 || '').trim(),
         allowInsecureHttp: merged.allowInsecureHttp === true,
         installOnQuit: merged.installOnQuit !== false,
         allowedOrigins

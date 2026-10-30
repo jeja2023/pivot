@@ -60,14 +60,15 @@ ARG TARGETARCH
 # 工具库向用户提供 MySQL/MariaDB、SQL Server 与 MongoDB 三类外部数据库连接。
 # 标准镜像完整保留它们，发布方可通过 PIVOT_DB_CONNECTORS 显式裁剪不需要的驱动。
 ARG PIVOT_DB_CONNECTORS="mysql,mssql,mongodb"
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 COPY package*.json ./
 COPY scripts/prune_runtime_modules.js ./scripts/prune_runtime_modules.js
 COPY scripts/prune_optional_database_connectors.js ./scripts/prune_optional_database_connectors.js
-ENV npm_config_registry=https://registry.npmmirror.com \
+ENV npm_config_registry=${NPM_REGISTRY} \
   npm_config_ignore_scripts=true
 
-RUN echo "registry=https://registry.npmmirror.com" > .npmrc && \
+RUN printf 'registry=%s\n' "$NPM_REGISTRY" > .npmrc && \
   npm config set fetch-retries 5 && \
   npm config set fetch-retry-mintimeout 20000 && \
   npm config set fetch-retry-maxtimeout 120000 && \

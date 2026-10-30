@@ -207,6 +207,22 @@ test('共享专题库派生的 Wiki Space 仅按单位或用户白名单只读�
     assert.match(listCall[0], /GROUP BY ws\.id, kc\.id/);
 });
 
+test('Wiki 列表在权限过滤后继续读取较旧空间', async () => {
+    const hidden = Array.from({ length: 100 }, (_, index) => ({
+        id: 200 - index, wiki_cursor_updated_at: '2026-10-30 10:00:00.123456', owner_user_id: 9,
+        collection_owner_user_id: 9, collection_scope: 'personal', scope: 'personal'
+    }));
+    const own = { id: 1, wiki_cursor_updated_at: '2026-10-29 10:00:00', owner_user_id: 8,
+        collection_owner_user_id: 8, collection_id: 3, collection_scope: 'personal', scope: 'personal', name: '我的空间' };
+    const calls = [];
+    const rows = await listWikiSpaces({ id: 8, role: 'user' }, { limit: 2 }, {
+        query: async (sql, params) => { calls.push({ sql, params }); return calls.length === 1 ? hidden : [own]; }
+    });
+    assert.deepEqual(rows.map(row => row.id), [1]);
+    assert.match(calls[1].sql, /\(ws.updated_at, ws.id\) < \(\?, \?\)/);
+    assert.deepEqual(calls[1].params, ['2026-10-30 10:00:00.123456', 101, 100]);
+});
+
 test('专题库权限收紧或文档级 ACL 拒绝时，Wiki 不保留旧共享快照也不把正文送入编译模型', async () => {
     const spaceRow = {
         id: 1, owner_user_id: 9, collection_id: 3, name: '研发 Wiki', description: '', scope: 'shared',

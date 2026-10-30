@@ -32,6 +32,7 @@ function createRateLimitStore(prefix = 'default') {
                 if (entry.resetAt <= now) fallback.delete(entryKey);
                 if (fallback.size <= 8000) break;
             }
+            while (fallback.size > 10000) fallback.delete(fallback.keys().next().value);
         }
         return { totalHits: next.hits, resetTime: new Date(next.resetAt) };
     }

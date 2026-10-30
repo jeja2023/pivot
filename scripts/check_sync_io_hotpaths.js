@@ -17,6 +17,7 @@ const root = path.resolve(__dirname, '..');
 const targets = [
     path.join(root, 'server', 'routes'),
     path.join(root, 'server', 'upload.js'),
+    path.join(root, 'server', 'auth.js'),
     path.join(root, 'server', 'services', 'rag-documents.js'),
     path.join(root, 'server', 'services', 'regulations'),
     path.join(root, 'server', 'services', 'document-processing'),
@@ -29,6 +30,10 @@ const syncMethods = new Set([
     'mkdirSync', 'openSync', 'readFileSync', 'readdirSync', 'readSync', 'renameSync',
     'rmSync', 'statSync', 'unlinkSync', 'writeFileSync'
 ]);
+const blockingMethods = {
+    child_process: new Set(['spawnSync', 'execSync', 'execFileSync']),
+    zlib: new Set(['gzipSync', 'gunzipSync', 'deflateSync', 'deflateRawSync', 'inflateSync', 'inflateRawSync', 'unzipSync', 'brotliCompressSync', 'brotliDecompressSync', 'zstdCompressSync', 'zstdDecompressSync'])
+};
 
 function collectFiles(target, files = []) {
     if (!fs.existsSync(target)) return files;
@@ -76,15 +81,49 @@ function isDirectFsSyncCall(node) {
     return node.callee.object?.type === 'Identifier' && node.callee.object.name === 'fs';
 }
 
+function requireModule(node) {
+    if (node?.type !== 'CallExpression' || node.callee?.name !== 'require' || node.arguments.length !== 1) return null;
+    const name = node.arguments[0]?.value;
+    return typeof name === 'string' ? name.replace(/^node:/, '') : null;
+}
+
+function blockingBindings(ast) {
+    const modules = new Map();
+    const functions = new Map();
+    walk(ast, node => {
+        if (node.type !== 'VariableDeclarator') return;
+        const moduleName = requireModule(node.init);
+        if (!blockingMethods[moduleName]) return;
+        if (node.id.type === 'Identifier') modules.set(node.id.name, moduleName);
+        if (node.id.type !== 'ObjectPattern') return;
+        for (const property of node.id.properties) {
+            const name = property.key?.name || property.key?.value;
+            if (blockingMethods[moduleName].has(name) && property.value?.type === 'Identifier') functions.set(property.value.name, name);
+        }
+    });
+    return { modules, functions };
+}
+
+function blockingCall(node, bindings) {
+    const callee = node.callee;
+    if (callee?.type === 'Identifier') return bindings.functions.get(callee.name) || null;
+    if (callee?.type !== 'MemberExpression') return null;
+    const method = callee.computed ? callee.property?.value : callee.property?.name;
+    const moduleName = callee.object?.type === 'Identifier' ? bindings.modules.get(callee.object.name) : requireModule(callee.object);
+    return blockingMethods[moduleName]?.has(method) ? method : null;
+}
+
 const findings = [];
 for (const file of targets.flatMap(target => collectFiles(target))) {
     const source = fs.readFileSync(file, 'utf8');
     const lines = source.split(/\r?\n/);
     const ast = parse(source, file);
+    const bindings = blockingBindings(ast);
     walk(ast, node => {
-        if (node.type !== 'CallExpression' || !isDirectFsSyncCall(node)) return;
+        if (node.type !== 'CallExpression') return;
         const property = node.callee.property;
-        const name = node.callee.computed ? property?.value : property?.name;
+        const name = isDirectFsSyncCall(node) ? (node.callee.computed ? property?.value : property?.name) : blockingCall(node, bindings);
+        if (!name) return;
         findings.push({
             file: path.relative(root, file).replace(/\\/g, '/'),
             line: node.loc.start.line,
@@ -97,8 +136,8 @@ for (const file of targets.flatMap(target => collectFiles(target))) {
 if (findings.length) {
     console.error(`同步 I/O 热路径检查失败：发现 ${findings.length} 个 HTTP 边界同步调用。`);
     findings.forEach(item => console.error(` - ${item.file}:${item.line} ${item.method}: ${item.code}`));
-    console.error('请使用 fs.promises、流式 API 或将工作转移到受控后台作业。');
+    console.error('请使用异步 API、流式 API 或将工作转移到受控后台作业。');
     process.exit(1);
 }
 
-console.log('同步 I/O 热路径检查通过：路由、上传中间件及其文件处理服务未发现同步文件操作。');
+console.log('同步 I/O 热路径检查通过：未发现直接同步文件、子进程或压缩调用。');

@@ -23,10 +23,7 @@ const VENDOR_ASSETS = [
   '/common/vendor/marked.min.js',
   '/common/vendor/purify.min.js',
   '/common/vendor/highlight.min.js',
-  '/common/vendor/katex.min.js',
-  '/common/vendor/katex.min.css',
-  '/common/vendor/github-dark.min.css',
-  '/common/vendor/echarts.min.js'
+  '/common/vendor/github-dark.min.css'
 ];
 
 const isVendorAsset = (pathname) => VENDOR_ASSETS.includes(pathname) || pathname.startsWith('/common/vendor/');

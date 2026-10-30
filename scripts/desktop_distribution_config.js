@@ -19,6 +19,9 @@ function resolveDistributionUpdateUrl(config = {}) {
     if (!['http:', 'https:'].includes(updateUrl.protocol)) {
         throw new Error('正式安装包自动更新必须使用 HTTP 或 HTTPS 协议。');
     }
+    if (updateUrl.protocol === 'http:' && !LOOPBACK_HOSTS.has(updateUrl.hostname.toLowerCase()) && autoUpdate.allowInsecureHttp !== true) {
+        throw new Error('内网 HTTP 自动更新需要显式配置 autoUpdate.allowInsecureHttp=true；建议使用 HTTPS。');
+    }
     updateUrl.hash = '';
     if (!updateUrl.pathname.endsWith('/')) updateUrl.pathname += '/';
     return updateUrl;

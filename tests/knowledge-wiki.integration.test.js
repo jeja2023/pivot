@@ -12,6 +12,7 @@ const {
 const {
     createWikiCompileRun,
     createWikiSpace,
+    listWikiSpaces,
     getWikiPage,
     publishWikiPage,
     retrieveWikiContext,
@@ -131,5 +132,26 @@ test('Wiki Space 以已发布原始资料编译候选、审核发布并在原文
         [ownerId, reviewerId].forEach(userId => {
             if (userId) db.prepare('DELETE FROM users WHERE id = ?').run(userId);
         });
+    }
+});
+
+test('Wiki 列表跨过不可见空间后返回旧的个人空间，保留游标时间精度', async () => {
+    const suffix = Date.now().toString(36);
+    const ownerId = insertUser(`wiki_list_owner_${suffix}`);
+    const otherId = insertUser(`wiki_list_other_${suffix}`);
+    const { queryOne, execute } = require('../server/db/client');
+    try {
+        const ownerCollection = await queryOne("INSERT INTO knowledge_collections (user_id,name,scope) VALUES (?,?,'personal') RETURNING id", [ownerId, `own-${suffix}`]);
+        const otherCollection = await queryOne("INSERT INTO knowledge_collections (user_id,name,scope) VALUES (?,?,'personal') RETURNING id", [otherId, `other-${suffix}`]);
+        await execute(`INSERT INTO knowledge_wiki_spaces (owner_user_id,collection_id,name,updated_at)
+            SELECT ?, ?, 'private-' || n, '2026-10-30 09:00:00.900000+00'::timestamptz FROM generate_series(1,100) AS n`, [otherId, otherCollection.id]);
+        const own = await queryOne(`INSERT INTO knowledge_wiki_spaces (owner_user_id,collection_id,name,updated_at)
+            VALUES (?, ?, 'my-space', '2026-10-30 09:00:00.500000+00'::timestamptz) RETURNING id`, [ownerId, ownerCollection.id]);
+        const spaces = await listWikiSpaces({ id: ownerId, role: 'user' }, { limit: 1 });
+        assert.deepEqual(spaces.map(item => Number(item.id)), [Number(own.id)]);
+    } finally {
+        await execute('DELETE FROM knowledge_wiki_spaces WHERE owner_user_id IN (?, ?)', [ownerId, otherId]);
+        await execute('DELETE FROM knowledge_collections WHERE user_id IN (?, ?)', [ownerId, otherId]);
+        await execute('DELETE FROM users WHERE id IN (?, ?)', [ownerId, otherId]);
     }
 });

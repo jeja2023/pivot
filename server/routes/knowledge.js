@@ -4,7 +4,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
-const { asyncHandler, normalizeLimit } = require('../http');
+const { asyncHandler, getClientIp, normalizeLimit } = require('../http');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
@@ -176,7 +176,8 @@ async function resolveCitations(matches, user) {
 
 function createKnowledgeRouter({ authMiddleware, logAction }) {
     const router = express.Router();
-    const citationHighlightLimiter = rateLimit({ windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: '来源预览请求过于频繁，请稍后重试。' } });
+    const citationHighlightLimiter = rateLimit({ store: require('../services/rate-limit-store').createRateLimitStore('knowledge:highlight'),
+        keyGenerator: req => req.user?.id ? `user_${req.user.id}` : getClientIp(req), windowMs: 60000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: '来源预览请求过于频繁，请稍后重试。' } });
     const recordKnowledgeAudit = async (req, payload) => {
         try {
             return await recordKnowledgeAiAnswer(payload);

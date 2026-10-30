@@ -422,7 +422,8 @@ test('系统健康快照报告核心检查和汇总状态', async () => {
     const disk = health.checks.find(item => item.name === 'disk');
     assert.ok(disk);
     assert.ok(['ok', 'degraded', 'error', 'unknown'].includes(disk.status));
-    assert.ok(typeof disk.path === 'string' && disk.path.length > 0);
+    assert.equal(Object.hasOwn(disk, 'path'), false);
+    assert.ok(health.checks.filter(item => ['dataDir', 'uploadsDir'].includes(item.name)).every(item => !Object.hasOwn(item, 'path')));
     if (disk.status !== 'unknown') {
         assert.ok(Number(disk.total) >= 0);
         assert.ok(Number(disk.free) >= 0);

@@ -2,7 +2,7 @@
 const { asyncHandler } = require('../../http');
 const service = require('../../services/data-analysis/transactions');
 function registerTransactionRoutes(router, { authMiddleware, logAction = () => {} }) {
-    const limiter = require('express-rate-limit')({ windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id), message: { error: '资金分析请求过于频繁，请稍后重试。' } });
+    const limiter = require('express-rate-limit')({ store: require('../../services/rate-limit-store').createRateLimitStore('analysis:transactions'), windowMs: 60000, limit: 60, keyGenerator: req => String(req.user.id), message: { error: '资金分析请求过于频繁，请稍后重试。' } });
     router.use('/apps/data-analysis/transactions', authMiddleware, limiter);
     router.get('/apps/data-analysis/transactions', asyncHandler(async (req, res) => res.json({ rows: await service.list(req.user, String(req.query.datasetId || '')) })));
     router.post('/apps/data-analysis/transactions', asyncHandler(async (req, res) => { const job = await service.create(req.user, req.body?.datasetId, req.body); logAction(req, '创建资金交易分析', `分析编号: ${job.id}`); res.status(202).json({ job }); }));

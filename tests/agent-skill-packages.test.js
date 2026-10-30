@@ -255,6 +255,28 @@ test('LAN runtime pack sync downloads and verifies an allowlisted bundle', async
     }
 });
 
+test('runtime pack sync refuses redirects outside the checked URL', async () => {
+    let destinationRequests = 0;
+    const server = http.createServer((req, res) => {
+        if (req.url === '/redirect') { res.writeHead(302, { location: '/destination' }); res.end(); }
+        else { destinationRequests += 1; res.end('unexpected'); }
+    });
+    const previous = process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
+    process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = 'true';
+    try {
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        const port = server.address().port;
+        await assert.rejects(syncRuntimePack({ type: 'browser', id: 'test', version: '1', sha256: 'a'.repeat(64), url: `http://127.0.0.1:${port}/redirect` }, {
+            networkPolicy: { allowed_origins: [`http://127.0.0.1:${port}`], allowed_ports: [port], block_loopback: false, block_private_ranges: false }
+        }));
+        assert.equal(destinationRequests, 0);
+    } finally {
+        if (previous === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
+        else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previous;
+        await new Promise(resolve => server.close(resolve));
+    }
+});
+
 test('package digest is independent of detached signature bytes', () => {
     const entries = [{ name: 'SKILL.yaml', data: Buffer.from('id: corp.demo\n') }];
     assert.equal(packageDigest(entries), packageDigest([...entries, { name: 'SKILL.sig', data: Buffer.from('different signature') }]));

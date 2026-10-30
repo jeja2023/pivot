@@ -43,8 +43,7 @@ router.post('/', requireAuth, async (req, res) => {
     console.error('创建 Artifact 失败:', error);
     res.status(500).json({
       success: false,
-      error: '创建 Artifact 失败',
-      message: error.message
+      error: '创建 Artifact 失败'
     });
   }
 });
@@ -78,8 +77,7 @@ router.get('/', requireAuth, async (req, res) => {
     console.error('获取 Artifacts 列表失败:', error);
     res.status(500).json({
       success: false,
-      error: '获取 Artifacts 列表失败',
-      message: error.message
+      error: '获取 Artifacts 列表失败'
     });
   }
 });
@@ -95,7 +93,7 @@ router.get('/shared/:shareId', async (req, res) => {
     const artifact = await artifactManager.getShared(shareId);
 
     // 记录匿名查看交互
-    await artifactManager.recordInteraction(artifact.id, null, {
+    await artifactManager.recordSharedInteraction(shareId, {
       type: 'shared_view',
       data: { shareId, timestamp: new Date() }
     }).catch(() => {});
@@ -110,7 +108,7 @@ router.get('/shared/:shareId', async (req, res) => {
     const status = (msg.includes('不存在') || msg.includes('过期')) ? 404 : 500;
     res.status(status).json({
       success: false,
-      error: msg
+      error: status === 404 ? '分享链接不存在或已过期' : '获取分享 Artifact 失败'
     });
   }
 });
@@ -139,7 +137,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     const msg = error.message || '';
     res.status(msg.includes('不存在') ? 404 : 500).json({
       success: false,
-      error: msg
+      error: msg.includes('不存在') ? 'Artifact 不存在或无权访问' : '获取 Artifact 失败'
     });
   }
 });
@@ -168,8 +166,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     console.error('更新 Artifact 失败:', error);
     res.status(500).json({
       success: false,
-      error: '更新 Artifact 失败',
-      message: error.message
+      error: '更新 Artifact 失败'
     });
   }
 });
@@ -191,8 +188,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     console.error('删除 Artifact 失败:', error);
     res.status(500).json({
       success: false,
-      error: '删除 Artifact 失败',
-      message: error.message
+      error: '删除 Artifact 失败'
     });
   }
 });
@@ -214,8 +210,7 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
     console.error('获取版本历史失败:', error);
     res.status(500).json({
       success: false,
-      error: '获取版本历史失败',
-      message: error.message
+      error: '获取版本历史失败'
     });
   }
 });
@@ -246,8 +241,7 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
     console.error('恢复版本失败:', error);
     res.status(500).json({
       success: false,
-      error: '恢复版本失败',
-      message: error.message
+      error: '恢复版本失败'
     });
   }
 });
@@ -260,6 +254,7 @@ router.post('/:id/share', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { visibility = 'public', expiresIn } = req.body;
+    if (visibility !== 'public') return res.status(400).json({ success: false, error: '不支持的分享范围' });
 
     const share = await artifactManager.share(id, req.user.id, {
       visibility,
@@ -274,8 +269,7 @@ router.post('/:id/share', requireAuth, async (req, res) => {
     console.error('分享 Artifact 失败:', error);
     res.status(500).json({
       success: false,
-      error: '分享 Artifact 失败',
-      message: error.message
+      error: '分享 Artifact 失败'
     });
   }
 });
@@ -304,10 +298,9 @@ router.post('/:id/interact', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('记录交互失败:', error);
-    res.status(500).json({
+    res.status(error.status === 404 ? 404 : 500).json({
       success: false,
-      error: '记录交互失败',
-      message: error.message
+      error: error.status === 404 ? 'Artifact 不存在或无权访问' : '记录交互失败'
     });
   }
 });
@@ -329,8 +322,7 @@ router.get('/:id/stats', requireAuth, async (req, res) => {
     console.error('获取交互统计失败:', error);
     res.status(500).json({
       success: false,
-      error: '获取交互统计失败',
-      message: error.message
+      error: '获取交互统计失败'
     });
   }
 });
@@ -362,10 +354,9 @@ router.post('/:id/comments', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('添加评论失败:', error);
-    res.status(500).json({
+    res.status(error.status === 404 ? 404 : 500).json({
       success: false,
-      error: '添加评论失败',
-      message: error.message
+      error: error.status === 404 ? 'Artifact 或父评论不存在或无权访问' : '添加评论失败'
     });
   }
 });
@@ -379,7 +370,7 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { limit = 50, offset = 0 } = req.query;
 
-    const result = await artifactManager.getComments(id, {
+    const result = await artifactManager.getComments(id, req.user.id, {
       limit: parseInt(limit, 10) || 50,
       offset: parseInt(offset, 10) || 0
     });
@@ -395,10 +386,9 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('获取评论列表失败:', error);
-    res.status(500).json({
+    res.status(error.status === 404 ? 404 : 500).json({
       success: false,
-      error: '获取评论列表失败',
-      message: error.message
+      error: error.status === 404 ? 'Artifact 不存在或无权访问' : '获取评论列表失败'
     });
   }
 });
@@ -420,8 +410,7 @@ router.delete('/:id/comments/:commentId', requireAuth, async (req, res) => {
     console.error('删除评论失败:', error);
     res.status(500).json({
       success: false,
-      error: '删除评论失败',
-      message: error.message
+      error: '删除评论失败'
     });
   }
 });

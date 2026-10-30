@@ -3,7 +3,11 @@ const bcrypt = require('bcryptjs');
 
 parentPort.once('message', (payload = {}) => {
     try {
-        const rounds = Math.min(Math.max(Number(payload.rounds) || 10, 8), 14);
+        if (payload.action === 'compare') {
+            parentPort.postMessage({ ok: true, match: bcrypt.compareSync(String(payload.password), String(payload.hash)) });
+            return;
+        }
+        const rounds = Math.min(Math.max(Number(payload.rounds) || 10, 8), 15);
         const entries = Array.isArray(payload.entries) ? payload.entries : [];
         const results = entries.map(entry => ({
             index: entry.index,

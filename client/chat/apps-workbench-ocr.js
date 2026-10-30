@@ -928,7 +928,8 @@
     function startPolling() {
         if (state.timer) return;
         state.timer = window.setInterval(() => {
-            if (window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'ocr') return;
+            const view = document.getElementById('ocr-view');
+            if (document.hidden || !view || view.closest('.hidden, [hidden], [aria-hidden="true"]') || window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') !== 'ocr') return;
             const active = state.jobs.some(job => job.status === 'queued' || job.status === 'pending' || job.status === 'processing');
             if (active) loadJobs({ keepActive: true }).catch(() => {});
         }, 4000);

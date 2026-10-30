@@ -9,7 +9,23 @@ function payloadHash(payload) {
     return crypto.createHash('sha256').update(JSON.stringify(payload ?? {})).digest('hex');
 }
 
-async function recordAgentEvent({ runId, userId = null, type, payload = {}, turnId = '', stepIndex = 0, providerVisible = false, eventKey = '', stepContext = null, entrypoint = '' } = {}) {
+function publicEvent(row) {
+    if (!row) return row;
+    const id = Number(row.id);
+    return { ...row, id: Number.isSafeInteger(id) ? id : String(row.id) };
+}
+
+async function lockEventUsers(trx, userIds) {
+    if (!userIds.length) return;
+    // 每用户持有事务锁直到提交，使该用户事件 ID 的分配顺序与提交顺序一致。
+    // 批量事件可能涉及多个用户，必须按固定顺序取锁以避免死锁。
+    await trx.query(`
+        SELECT pg_advisory_xact_lock(hashtext('pivot:agent-event-user'), hashtext(current_schema() || ':' || ordered.id::text))
+        FROM (SELECT id FROM unnest(?::bigint[]) AS item(id) ORDER BY id) ordered
+    `, [userIds]);
+}
+
+function prepareAgentEvent({ runId, userId = null, type, payload = {}, turnId = '', stepIndex = 0, providerVisible = false, eventKey = '', stepContext = null, entrypoint = '' } = {}) {
     if (!runId || !type) return null;
     const auditContext = buildAgentAuditFields({
         ...(stepContext && typeof stepContext === 'object' ? stepContext : {}),
@@ -33,26 +49,35 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
             }
         }
     }
-    const hash = payloadHash(safePayload);
-    const now = getBeijingTimestamp();
-    const safeEventKey = String(eventKey || '').slice(0, 255);
-    const safeEventType = String(type).slice(0, 80);
-    return transaction(async trx => {
+    return {
+        runId, userId, safePayload, hash: payloadHash(safePayload), now: getBeijingTimestamp(),
+        safeEventKey: String(eventKey || '').slice(0, 255), safeEventType: String(type).slice(0, 80),
+        turnId: String(turnId || '').slice(0, 160), stepIndex: Math.max(Number(stepIndex) || 0, 0),
+        providerVisible: Boolean(providerVisible)
+    };
+}
+
+async function recordAgentEvent(input = {}, { transactionFn = transaction } = {}) {
+    const prepared = prepareAgentEvent(input);
+    if (!prepared) return null;
+    const { runId, userId, safePayload, hash, now, safeEventKey, safeEventType, turnId, stepIndex, providerVisible } = prepared;
+    return transactionFn(async trx => {
         // Lock the run row so sequence allocation and idempotency checks are atomic.
         const run = await trx.queryOne('SELECT user_id, event_seq FROM agent_runs WHERE id = ? FOR UPDATE', [runId]);
         if (!run) return null;
         const effectiveUserId = userId ?? run.user_id;
         if (!effectiveUserId || !(await trx.queryOne('SELECT id FROM users WHERE id = ?', [effectiveUserId]))) return null;
+        await lockEventUsers(trx, [effectiveUserId]);
         if (safeEventKey) {
             const existing = await trx.queryOne(`
-                SELECT id, run_id, user_id, event_seq, event_type, created_at
+                SELECT id::text AS id, run_id, user_id, event_seq, event_type, created_at, outbox_retired_at
                 FROM agent_events
                 WHERE run_id = ? AND event_type = ? AND event_key = ?
                 ORDER BY event_seq ASC
-                LIMIT 1
+                LIMIT 1 FOR UPDATE
             `, [runId, safeEventType, safeEventKey]);
             if (existing) {
-                await trx.execute(`
+                if (!existing.outbox_retired_at) await trx.execute(`
                     INSERT INTO agent_event_outbox (
                         event_id, run_id, user_id, event_seq, event_type, payload,
                         status, available_at, created_at, updated_at
@@ -63,7 +88,8 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
                     WHERE id = ?
                     ON CONFLICT (event_id) DO NOTHING
                 `, [now, now, now, existing.id]);
-                return existing;
+                const { outbox_retired_at: _retiredAt, ...existingEvent } = existing;
+                return publicEvent(existingEvent);
             }
         }
         const nextSeq = (Number(run.event_seq) || 0) + 1;
@@ -73,15 +99,15 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
                 run_id, user_id, event_seq, event_key, event_type, turn_id, step_index,
                 payload, payload_hash, provider_visible, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING id, run_id, user_id, event_seq, event_type, created_at
+            RETURNING id::text AS id, run_id, user_id, event_seq, event_type, created_at
         `, [
             runId,
             effectiveUserId,
             nextSeq,
             safeEventKey,
             safeEventType,
-            String(turnId || '').slice(0, 160),
-            Math.max(Number(stepIndex) || 0, 0),
+            turnId,
+            stepIndex,
             JSON.stringify(safePayload ?? {}),
             hash,
             Boolean(providerVisible),
@@ -106,7 +132,86 @@ async function recordAgentEvent({ runId, userId = null, type, payload = {}, turn
                 now
             ]);
         }
-        return result;
+        return publicEvent(result);
+    });
+}
+
+// 有界事件批次保留各自的幂等键和序号；任何事件失败时整体回滚。
+async function recordAgentEventBatch(events = [], { transactionFn = transaction } = {}) {
+    if (!Array.isArray(events) || events.length === 0) return [];
+    if (events.length > 256) throw new Error('Agent 事件批次超过上限。');
+    const runId = events[0]?.runId;
+    if (!runId || events.some(event => event?.runId !== runId)) throw new Error('Agent 事件批次必须属于同一运行。');
+    const prepared = events.map(prepareAgentEvent);
+    return transactionFn(async trx => {
+        const run = await trx.queryOne('SELECT user_id, event_seq FROM agent_runs WHERE id = ? FOR UPDATE', [runId]);
+        if (!run) return events.map(() => null);
+        const userIds = [...new Set(prepared.filter(Boolean).map(event => String(event.userId ?? run.user_id)).filter(Boolean))];
+        const users = userIds.length ? await trx.query('SELECT id FROM users WHERE id = ANY(?::bigint[])', [userIds]) : [];
+        const validUsers = new Set(users.map(user => String(user.id)));
+        await lockEventUsers(trx, [...validUsers]);
+        const keys = prepared.filter(event => event?.safeEventKey).map(event => ({ event_type: event.safeEventType, event_key: event.safeEventKey }));
+        const existingRows = keys.length ? await trx.query(`
+            SELECT e.id::text AS id, e.run_id, e.user_id, e.event_seq, e.event_type, e.event_key, e.created_at, e.outbox_retired_at
+            FROM agent_events e JOIN (
+                SELECT DISTINCT event_type, event_key FROM jsonb_to_recordset(?::jsonb) AS k(event_type text, event_key text)
+            ) k ON k.event_type = e.event_type AND k.event_key = e.event_key
+            WHERE e.run_id = ? ORDER BY e.event_seq ASC FOR UPDATE OF e
+        `, [JSON.stringify(keys), runId]) : [];
+        const identities = new Map();
+        const identity = event => JSON.stringify([event.safeEventType, event.safeEventKey]);
+        for (const row of existingRows) {
+            const key = JSON.stringify([row.event_type, row.event_key]);
+            if (!identities.has(key)) identities.set(key, { existing: row });
+        }
+        let sequence = Number(run.event_seq) || 0;
+        const pending = [];
+        const plans = prepared.map(event => {
+            const userId = event && (event.userId ?? run.user_id);
+            if (!event || !userId || !validUsers.has(String(userId))) return null;
+            const key = event.safeEventKey ? identity(event) : '';
+            if (key && identities.has(key)) return identities.get(key);
+            sequence += 1;
+            const plan = { sequence };
+            if (key) identities.set(key, plan);
+            pending.push({
+                user_id: userId, event_seq: sequence, event_key: event.safeEventKey, event_type: event.safeEventType,
+                turn_id: event.turnId, step_index: event.stepIndex, payload: event.safePayload, payload_hash: event.hash,
+                provider_visible: event.providerVisible, created_at: event.now
+            });
+            return plan;
+        });
+        let inserted = [];
+        if (pending.length) {
+            await trx.execute('UPDATE agent_runs SET event_seq = ?, updated_at = ? WHERE id = ?', [sequence, getBeijingTimestamp(), runId]);
+            inserted = await trx.query(`
+                INSERT INTO agent_events (run_id, user_id, event_seq, event_key, event_type, turn_id, step_index, payload, payload_hash, provider_visible, created_at)
+                SELECT ?, item.user_id, item.event_seq, item.event_key, item.event_type, item.turn_id, item.step_index,
+                       item.payload, item.payload_hash, item.provider_visible, item.created_at::timestamptz
+                FROM jsonb_to_recordset(?::jsonb) AS item(user_id bigint, event_seq bigint, event_key text, event_type text,
+                    turn_id text, step_index integer, payload jsonb, payload_hash text, provider_visible boolean, created_at text)
+                ORDER BY item.event_seq
+                RETURNING id::text AS id, run_id, user_id, event_seq, event_type, created_at
+            `, [runId, JSON.stringify(pending)]);
+        }
+        const insertedBySequence = new Map(inserted.map(row => [Number(row.event_seq), row]));
+        const results = plans.map(plan => {
+            if (!plan) return null;
+            if (!plan.existing) return insertedBySequence.get(plan.sequence) || null;
+            const { event_key: _key, outbox_retired_at: _retired, ...existing } = plan.existing;
+            return existing;
+        });
+        const ids = [...new Set(results.filter(Boolean).map(row => String(row.id)))];
+        if (ids.length) {
+            const now = getBeijingTimestamp();
+            await trx.execute(`
+                INSERT INTO agent_event_outbox (event_id, run_id, user_id, event_seq, event_type, payload, status, available_at, created_at, updated_at)
+                SELECT id, run_id, user_id, event_seq, event_type, payload, 'pending', ?, ?, ?
+                FROM agent_events WHERE id = ANY(?::bigint[]) AND outbox_retired_at IS NULL
+                ON CONFLICT (event_id) DO NOTHING
+            `, [now, now, now, ids]);
+        }
+        return results.map(publicEvent);
     });
 }
 
@@ -156,5 +261,6 @@ module.exports = {
     listAgentEventsForUser,
     payloadHash,
     replayAgentEventsForUser,
-    recordAgentEvent
+    recordAgentEvent,
+    recordAgentEventBatch
 };

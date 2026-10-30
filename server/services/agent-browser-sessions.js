@@ -9,6 +9,7 @@ const { assertTenantContext } = require('./agent-tenant-context');
 const { normalizeNetworkPolicy } = require('./agent-network-policy');
 const { getRenditionForUser, openRenditionContent } = require('./agent-artifact-renditions');
 const { createBrowserSessionLeaseStore, DEFAULT_BROWSER_LEASE_MS } = require('./agent-browser-session-leases');
+const { removeClosedBrowserProfile } = require('./agent-browser-profile-cleanup');
 const { captureBrowserVisualObservation, compareBrowserVisualObservations, observeBrowserPage, recordBrowserActionEvidence, serializeBrowserActionEvidence } = require('./agent-browser-action-evidence');
 const {
     captureAgentScreenshot,
@@ -380,7 +381,7 @@ async function createLiveSession(row, user, options = {}) {
     }
     const lease = await browserLeases.acquireBrowserSessionLease(leaseInput(id, user));
     if (!lease.acquired) throw leaseAcquisitionError(lease);
-    const live = { context: null, page: null, leaseToken: lease.token, leaseLost: false, userId: Number(user.id), runId: row.run_id || null,
+    const live = { context: null, page: null, leaseToken: lease.token, leaseLost: false, userId: Number(user.id), runId: row.run_id || null, profileRoot: options.profileRoot || profileRoot(),
         consoleSummary: Array.isArray(parseJson(row.console_summary, [])) ? parseJson(row.console_summary, []) : [] };
     startLeaseHeartbeat(id, user, live);
     try {
@@ -460,6 +461,10 @@ async function closeAgentBrowserSession(id, user, { reason = 'closed', fromActio
             if (!live.leaseHeartbeat) startLeaseHeartbeat(id, user, live);
             try {
                 await closeLiveContextWithDeadline(live);
+                // 仅在确认关闭且持有租约时删除配置目录。
+                await browserLeases.withBrowserSessionLease(leaseInput(id, user, live.leaseToken), async () => {
+                    await removeClosedBrowserProfile(String(id), live.profileRoot).catch(() => {});
+                });
                 const persisted = await browserLeases.completeBrowserSessionClose({ ...leaseInput(id, user, live.leaseToken), reason });
                 stopLeaseHeartbeat(live);
                 if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
@@ -519,7 +524,7 @@ async function recoverAgentBrowserSession(id, user, { confirmed = false, options
         }
         const lease = await browserLeases.acquireBrowserSessionLease({ ...leaseInput(id, user), recovery: true, confirmed: true });
         if (!lease.acquired) throw leaseAcquisitionError(lease);
-        const live = { context: null, page: null, leaseToken: lease.token, leaseLost: false, recovering: true, userId: Number(user.id), runId: session.run_id || null,
+        const live = { context: null, page: null, leaseToken: lease.token, leaseLost: false, recovering: true, userId: Number(user.id), runId: session.run_id || null, profileRoot: options.profileRoot || profileRoot(),
             consoleSummary: Array.isArray(parseJson(session.console_summary, [])) ? parseJson(session.console_summary, []) : [] };
         startLeaseHeartbeat(id, user, live);
         try {
@@ -734,7 +739,12 @@ async function sweepExpiredAgentBrowserSessions() {
         if (row?.status === 'active') continue;
         liveSessions.delete(id);
         stopLeaseHeartbeat(live);
-        try { await closeAgentBrowserContext(live.context); } catch (_) {}
+        try {
+            await closeAgentBrowserContext(live.context);
+            if (!live.leaseLost) await browserLeases.withBrowserSessionLease(leaseInput(id, { id: live.userId }, live.leaseToken), async () => {
+                await removeClosedBrowserProfile(id, live.profileRoot).catch(() => {});
+            });
+        } catch (_) {}
         await browserLeases.releaseBrowserSessionLease(leaseInput(id, { id: live.userId }, live.leaseToken)).catch(() => {});
     }
     return Number(rows?.count || 0);

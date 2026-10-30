@@ -40,13 +40,14 @@ test('desktop local mode waits for server initialization before resolving', asyn
     assert.equal(await pending, server);
 });
 
-test('desktop update policy supports http and https for update feeds', () => {
+test('desktop update policy requires HTTPS unless HTTP is explicitly enabled', () => {
     assert.equal(
         normalizeUpdateFeedUrl('https://updates.example.com/pivot', { required: true }),
         'https://updates.example.com/pivot/'
     );
+    assert.throws(() => normalizeUpdateFeedUrl('http://50.64.150.51:9006/downloads', { required: true }), /HTTPS/);
     assert.equal(
-        normalizeUpdateFeedUrl('http://50.64.150.51:9006/downloads', { required: true }),
+        normalizeUpdateFeedUrl('http://50.64.150.51:9006/downloads', { required: true, allowInsecureHttp: true }),
         'http://50.64.150.51:9006/downloads/'
     );
     assert.throws(
@@ -61,7 +62,7 @@ test('desktop update policy allows HTTP feeds including local development loopba
         'http://127.0.0.1:9000/releases/'
     );
     assert.equal(
-        assertAllowedUpdateFeedUrl('http://50.64.150.51:9006/downloads'),
+        assertAllowedUpdateFeedUrl('http://50.64.150.51:9006/downloads', { allowInsecureHttp: true }),
         'http://50.64.150.51:9006/downloads/'
     );
 });
@@ -116,7 +117,7 @@ test('desktop update path rejects full URLs', () => {
 
 test('desktop update policy supports LAN and intranet HTTP feeds', () => {
     assert.equal(
-        assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads'),
+        assertAllowedUpdateFeedUrl('http://pivot.lan:3000/downloads', { allowInsecureHttp: true }),
         'http://pivot.lan:3000/downloads/'
     );
 });
@@ -169,23 +170,27 @@ test('Windows update signature verifier only accepts a valid signature with a ma
             await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, { platform: 'win32', signatureQuery: invalidStatus }),
             /Authenticode 签名无效/
         );
-        assert.equal(
+        assert.match(
             await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
                 platform: 'win32',
                 signatureQuery: invalidStatus,
                 allowUntrustedRoot: true
             }),
-            null
+            /Authenticode 签名无效/
         );
         const untrustedRootStatus = async () => ({ Status: 6, Path: artifact, Subject: 'CN=Pivot Production Signing' });
-        assert.equal(
+        assert.match(
             await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
                 platform: 'win32',
                 signatureQuery: untrustedRootStatus,
                 allowUntrustedRoot: true
             }),
-            null
+            /Authenticode 签名无效/
         );
+        for (const status of [2, 3, 4, null]) {
+            const rejected = async () => ({ Status: status, Path: artifact, Subject: 'CN=Pivot Production Signing', CertificateSha256: 'ab'.repeat(32) });
+            assert.match(await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, { platform: 'win32', signatureQuery: rejected, allowUntrustedRoot: true, certificateSha256: 'ab'.repeat(32) }), /Authenticode 签名无效/);
+        }
         const tamperedStatus = async () => ({ Status: 5, Path: artifact, Subject: 'CN=Pivot Production Signing' });
         assert.match(
             await verifyWindowsUpdateSignature(['Pivot Production Signing'], artifact, {
@@ -196,13 +201,17 @@ test('Windows update signature verifier only accepts a valid signature with a ma
             /Authenticode 签名无效/
         );
         const localDevStatus = async () => ({ Status: 1, Path: artifact, Subject: 'CN=Pivot Local Dev' });
-        assert.equal(
+        assert.match(
             await verifyWindowsUpdateSignature(['Pivot Local Dev'], artifact, {
                 platform: 'win32',
                 signatureQuery: localDevStatus
             }),
-            null
+            /Authenticode 签名无效/
         );
+        const pinnedSignature = async () => ({ Status: 0, Path: artifact, Subject: 'CN=Pivot Local Dev', CertificateSha256: 'ab'.repeat(32) });
+        assert.match(await verifyWindowsUpdateSignature(['Pivot Local Dev'], artifact, { platform: 'win32', signatureQuery: pinnedSignature }), /缺少.*指纹/);
+        assert.match(await verifyWindowsUpdateSignature(['Pivot Local Dev'], artifact, { platform: 'win32', signatureQuery: pinnedSignature, certificateSha256: 'cd'.repeat(32) }), /指纹不匹配/);
+        assert.equal(await verifyWindowsUpdateSignature(['Pivot Local Dev'], artifact, { platform: 'win32', signatureQuery: pinnedSignature, certificateSha256: 'ab'.repeat(32) }), null);
     } finally {
         require('node:fs').rmSync(path.dirname(artifact), { recursive: true, force: true });
     }
@@ -211,7 +220,7 @@ test('Windows update signature verifier only accepts a valid signature with a ma
 test('desktop config supports HTTP feeds when automatic updates are enabled', () => {
     const config = normalizeConfig({
         mode: 'remote', remoteUrl: 'http://192.168.10.20:3000/',
-        autoUpdate: { enabled: true, path: '/downloads/' }
+        autoUpdate: { enabled: true, path: '/downloads/', allowInsecureHttp: true }
     }, {}, {});
     assert.equal(config.autoUpdate.enabled, true);
     assert.equal(config.autoUpdate.url, 'http://192.168.10.20:3000/downloads/');

@@ -25,6 +25,7 @@ const {
     normalizeRetrievalScope
 } = require('./retrieval-scope-builder');
 const { attachCitationKeys: attachCitationKeysBase } = require('./citation-keys');
+const { hydrateCandidateEmbeddings } = require('./candidate-embeddings');
 const {
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
@@ -190,7 +191,7 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
     try {
         if (!tsQuery) return [];
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
+            SELECT c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
                    ts_rank_cd(
                        to_tsvector('simple', COALESCE(c.search_content, c.content)),
                        to_tsquery('simple', ?)
@@ -214,7 +215,7 @@ async function selectFtsCandidates(userId, keywords, limit, scope = {}, user = n
         logger.warn({ err: e.message }, 'RAG FTS 词法检索失败，回退 trigram 文本检索');
         try {
             return await query(`
-                SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
+                SELECT c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
                 FROM knowledge_chunks c
                 JOIN knowledge_docs d ON c.doc_id = d.id
                 ${scopeFilter.accessJoin}
@@ -244,7 +245,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
     const scopeParams = user ? [...scopeFilter.params, ...scopeFilter.accessParams] : [userId, ...scopeFilter.params];
     try {
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
+            SELECT c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name,
                    ${lexicalScore} AS lexical_score
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
@@ -261,7 +262,7 @@ async function selectLikeCandidates(userId, keywords, limit, scope = {}, user = 
     } catch (error) {
         logger.warn({ err: error.message }, 'RAG LIKE 相关度排序下推失败，回退基础文本检索');
         return await query(`
-            SELECT c.id, c.content, c.embedding, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
+            SELECT c.id, c.content, c.heading_path, c.chunk_index, c.char_start, c.char_end, d.name
             FROM knowledge_chunks c
             JOIN knowledge_docs d ON c.doc_id = d.id
             ${scopeFilter.accessJoin}
@@ -593,6 +594,7 @@ async function debugRetrieveContext(userId, query, {
         ]);
         const denseCandidates = await selectDenseCandidates(userId, vector, safeCandidateLimit, normalizedScope, user);
         candidates = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
+        candidates = await hydrateCandidateEmbeddings(candidates, ids => selectChunksByIds(userId, ids, ids.length, normalizedScope, user));
         scored = applyFeedbackRanking(scoreCandidatesHybrid(candidates, vector, hybrid), feedbackSignals);
         scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
         gated = gateHybridPool(scored, hybrid, config.scoreThreshold);
@@ -744,6 +746,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
                 options.user || null
             );
             chunks = mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates);
+            chunks = await hydrateCandidateEmbeddings(chunks, ids => selectChunksByIds(userId, ids, ids.length, retrievalScope, options.user || null));
             let scored = applyFeedbackRanking(scoreCandidatesHybrid(chunks, queryVector, hybrid), feedbackSignals);
             scored = rerankHybridCandidates(scored, normalizedQuery, { scoreThreshold: config.scoreThreshold });
             topScore = scored.reduce((max, item) => Math.max(max, item.denseScore || 0), 0);

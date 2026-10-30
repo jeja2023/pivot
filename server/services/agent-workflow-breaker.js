@@ -53,7 +53,13 @@ function createWorkflowReleaseBreakerRunner(options = {}) {
     const intervalMs = Math.max(60_000, Number.parseInt(options.intervalMs, 10) || DEFAULT_INTERVAL_MS);
     let timer = null;
     const tick = async () => { try { return await sweepWorkflowReleaseBreakers(options); } catch (error) { logger.warn({ err: error.message }, '工作流发布熔断巡检失败'); return null; } };
-    return { start() { if (!timer) { timer = setInterval(() => { void tick(); }, intervalMs); timer.unref?.(); void tick(); } return timer; }, stop() { if (timer) clearInterval(timer); timer = null; }, tick, intervalMs };
+    let inFlight = null;
+    const trackedTick = () => {
+        if (inFlight) return inFlight;
+        inFlight = Promise.resolve().then(tick).finally(() => { inFlight = null; });
+        return inFlight;
+    };
+    return { start() { if (!timer) { timer = setInterval(() => { void trackedTick(); }, intervalMs); timer.unref?.(); void trackedTick(); } return timer; }, async stop() { if (timer) clearInterval(timer); timer = null; if (inFlight) await inFlight; }, tick: trackedTick, intervalMs };
 }
 
 module.exports = { createWorkflowReleaseBreakerRunner, sweepWorkflowReleaseBreakers };

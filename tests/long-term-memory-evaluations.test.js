@@ -44,6 +44,7 @@ test('长期记忆向量索引只接受受支持维度并按 active 记录建立
     assert.equal(normalizeDimensions(768), 768);
     assert.equal(normalizeDimensions(2001), null);
     assert.match(buildMemoryHnswIndexSql(768), /idx_memories_embedding_hnsw_768/);
+    assert.match(buildMemoryHnswIndexSql(768), /CREATE INDEX CONCURRENTLY/);
     assert.match(buildMemoryHnswIndexSql(768), /embedding_dimensions = 768/);
     assert.match(buildMemoryHnswIndexSql(768), /status = 'active'/);
 });

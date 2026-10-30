@@ -9,6 +9,7 @@ const migrationModules = [
     require('./mindmap-previews'),
     require('./analysis-transactions'),
     require('./mindmap-themes'),
+    require('./agent-outbox-retention'),
     require('./autonomous-runtime-foundations'),
     require('./workflow-credential-user-visibility'),
     require('./chat-agent-run-message-link'),
