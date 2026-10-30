@@ -15,6 +15,7 @@ const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeInde
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
 const { clearDirSizeCache } = require('./dir-size-cache');
 const knowledgeRepository = require('../repositories/knowledge');
+const { markKnowledgeDocumentError, markKnowledgeDocumentRebuildError } = require('../repositories/knowledge-index-status');
 const knowledgeOcrPages = require('../repositories/knowledge-ocr-pages');
 const { buildPdfPageSpans } = require('./knowledge-page-locator');
 const { listDuplicateKnowledgeDocuments, buildKnowledgeQualitySignals } = require('./rag-document-quality');
@@ -455,26 +456,7 @@ async function markKnowledgeDocumentReady({ docId, userId, chunkCount }) {
     `, ['ready', chunkCount, chunkCount, now, now, docId, userId]);
     return Number(result || 0) > 0;
 }
-async function markKnowledgeDocumentError({ docId, userId, error }) {
-    const now = getBeijingTimestamp();
-    const result = await execute(`
-        UPDATE knowledge_docs
-        SET status = ?, progress = 0, error_message = ?, processed_at = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, ['error', String(error?.message || error || '知识库索引失败').slice(0, 1000), now, now, docId, userId]);
-    return Number(result || 0) > 0;
-}
-async function markKnowledgeDocumentRebuildError({ docId, userId, error }) {
-    const now = getBeijingTimestamp();
-    const result = await execute(`
-        UPDATE knowledge_docs
-        SET status = CASE WHEN status = 'lexical_ready' THEN 'lexical_ready' ELSE 'ready' END,
-            error_message = ?, processed_at = COALESCE(processed_at, ?), updated_at = ?
-        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
-    `, [`重建失败，继续使用旧索引：${String(error?.message || error || '知识库索引失败').slice(0, 900)}`, now, now, docId, userId]);
-    return Number(result || 0) > 0;
-}
-async function processKnowledgeDocument({ docId, userId, user = null, force = false, resumeCoverage = false, refreshOcrLocations = false }) {
+async function processKnowledgeDocument({ docId, userId, user = null, force = false, resumeCoverage = false, refreshOcrLocations = false, lease = null }) {
     const normalizedDocId = normalizeKnowledgeDocId(docId);
     const doc = normalizedDocId ? await getKnowledgeDocumentForUser(normalizedDocId, userId) : null;
     if (!doc) {
@@ -486,7 +468,7 @@ async function processKnowledgeDocument({ docId, userId, user = null, force = fa
     const sourcePath = getKnowledgeSourcePath(doc.source_path);
     if (!sourcePath || !await fs.promises.access(sourcePath, fs.constants.R_OK).then(() => true).catch(() => false)) {
         const error = new Error('原始文件不存在，无法重新索引，请重新上传文档');
-        await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error });
+        await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error, lease });
         throw error;
     }
 
@@ -554,7 +536,7 @@ async function processKnowledgeDocument({ docId, userId, user = null, force = fa
         const indexStatus = missingEmbeddings > 0 ? 'lexical_ready' : 'ready';
         const coverageWarning = extractionCoverage?.complete === false
             ? `正文未完整索引：已处理 ${extractionCoverage.processedPages ?? '-'} / ${extractionCoverage.sourcePageCount ?? '-'} 页，未处理页 ${extractionCoverage.omittedPages.join(',') || '无'}，失败页 ${extractionCoverage.failedPages.join(',') || '无'}${extractionCoverage.truncated ? '，正文超过字符上限' : ''}` : '';
-        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus, coverageWarning, extractionCoverage, indexFingerprint });
+        await swapKnowledgeIndexStage({ docId: normalizedDocId, stageId, userId, chunkCount, sourceHash, indexStatus, coverageWarning, extractionCoverage, indexFingerprint, lease });
         await knowledgeOcrPages.clearOtherVersions(normalizedDocId, userId, sourceHash).catch(error => logger.warn({ err: error.message, docId: normalizedDocId }, '清理旧版 OCR 页面失败'));
         await refreshGraphEntityEvidenceForDocument(normalizedDocId).catch(error => {
             logger.warn({ err: error.message, docId: normalizedDocId }, '知识图谱实体证据计数刷新失败');
@@ -585,8 +567,8 @@ async function processKnowledgeDocument({ docId, userId, user = null, force = fa
         };
     } catch (e) {
         await discardKnowledgeIndexStage(stageId);
-        if (keepOldIndex) await markKnowledgeDocumentRebuildError({ docId: normalizedDocId, userId, error: e });
-        else await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e });
+        if (e.code !== 'KNOWLEDGE_JOB_LEASE_LOST' && keepOldIndex) await markKnowledgeDocumentRebuildError({ docId: normalizedDocId, userId, error: e, lease });
+        else if (e.code !== 'KNOWLEDGE_JOB_LEASE_LOST') await markKnowledgeDocumentError({ docId: normalizedDocId, userId, error: e, lease });
         throw e;
     }
 }
@@ -760,7 +742,7 @@ function getKnowledgeIngestionWorker() {
         getConcurrency: getMaxConcurrentIndexes,
         logger,
         processJob: async job => {
-            const result = await processKnowledgeDocument({ docId: job.docId, userId: job.userId, force: job.payload?.force === true, resumeCoverage: job.payload?.resumeCoverage === true, refreshOcrLocations: job.payload?.refreshOcrLocations === true });
+            const result = await processKnowledgeDocument({ docId: job.docId, userId: job.userId, force: job.payload?.force === true, resumeCoverage: job.payload?.resumeCoverage === true, refreshOcrLocations: job.payload?.refreshOcrLocations === true, lease: { jobId: job.id, workerId: job.locked_by, attempts: job.attempts } });
             return { ...result, stage: result?.indexStatus === 'lexical_ready' ? 'lexical_indexed' : 'published' };
         }
     });

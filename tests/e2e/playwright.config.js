@@ -13,6 +13,8 @@ module.exports = {
     },
     webServer: process.env.PIVOT_E2E_SKIP_WEBSERVER === 'true' ? undefined : {
         command: 'npm run start',
+        // 同步数据库适配层只供测试夹具使用；被测服务走正常异步路径。
+        env: { PIVOT_TEST_PG_SYNC: 'false' },
         url: baseURL,
         reuseExistingServer: process.env.PIVOT_E2E_ISOLATED !== 'true',
         timeout: 60_000

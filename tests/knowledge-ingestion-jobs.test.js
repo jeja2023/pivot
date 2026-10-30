@@ -65,24 +65,25 @@ function createQueueHarness() {
             row.status = 'running';
             row.stage = row.stage === 'queued' ? 'claimed' : row.stage;
             row.attempts += 1;
+            row.locked_by = params[0];
             return 1;
         }
         if (/SET stage = \?/.test(sql) && /status = 'running'/.test(sql)) {
             const row = rows.find(item => Number(item.id) === Number(params[2]));
-            if (!row || row.status !== 'running') return 0;
+            if (!row || row.status !== 'running' || row.locked_by !== params[3] || row.attempts !== params[4]) return 0;
             row.stage = params[0];
             return 1;
         }
         if (/SET status = 'completed'/.test(sql)) {
             const row = rows.find(item => Number(item.id) === Number(params[4]));
-            if (!row || row.status !== 'running') return 0;
+            if (!row || row.status !== 'running' || row.locked_by !== params[5] || row.attempts !== params[6]) return 0;
             row.status = 'completed';
             row.stage = params[0];
             return 1;
         }
         if (/SET status = \?, stage = \?, next_retry_at/.test(sql)) {
             const row = rows.find(item => Number(item.id) === Number(params[6]));
-            if (!row || row.status !== 'running') return 0;
+            if (!row || row.status !== 'running' || row.locked_by !== params[7] || row.attempts !== params[8]) return 0;
             row.status = params[0];
             row.stage = params[1];
             row.next_retry_at = params[2];

@@ -126,7 +126,7 @@ async function ensureNotCancelled(isCancelled) {
 }
 
 async function writeBinaryOutput({ userId, fileId, jobId, sourceName, suffix, outputType = 'pdf', bytes, mimeType = 'application/pdf', extension = '.pdf', pageCount = 0, quality = {}, versionKey = '' }) {
-    const diskName = `${jobId}-${sanitizeOutputName(outputType)}-${crypto.randomUUID()}${extension}`;
+    const diskName = `${jobId}-gc1-${sanitizeOutputName(outputType)}-${crypto.randomUUID()}${extension}`;
     const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
     await fs.promises.writeFile(targetPath, Buffer.from(bytes));
     const fileName = `${baseName(sourceName)}-${suffix}${extension}`;

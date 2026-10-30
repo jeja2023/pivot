@@ -1,4 +1,6 @@
-const { deleteAppSetting, getAppSettingValue, setAppSetting } = require('../app-settings');
+const { getAppSettingValue, refreshAppSettingsCache } = require('../app-settings');
+const { transaction } = require('../../db/client');
+const { getBeijingTimestamp } = require('../../time');
 const { isPasswordError } = require('../../document-text');
 const {
     DEFAULT_DOCUMENT_PROCESSING_CONFIG,
@@ -34,7 +36,7 @@ function getDocumentProcessingSettings() {
     };
 }
 
-function updateDocumentProcessingSettings({ patch = {}, userId = null } = {}) {
+async function updateDocumentProcessingSettings({ patch = {}, userId = null } = {}) {
     const allowed = {
         engine: value => normalizeEngine(value),
         serviceUrl: value => normalizeOcrServiceUrl(value),
@@ -45,15 +47,25 @@ function updateDocumentProcessingSettings({ patch = {}, userId = null } = {}) {
         maxConcurrentJobs: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxConcurrentJobs, 1), 8),
         outputRetentionDays: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.outputRetentionDays, 1), 365)
     };
-    Object.entries(allowed).forEach(([name, normalize]) => {
-        if (!Object.prototype.hasOwnProperty.call(patch, name)) return;
+    const updates = Object.entries(allowed).flatMap(([name, normalize]) => {
+        if (!Object.prototype.hasOwnProperty.call(patch, name)) return [];
         const key = DOCUMENT_PROCESSING_SETTING_KEYS[name];
         if (name === 'serviceUrl' && String(patch[name] ?? '').trim() === '') {
-            deleteAppSetting(key);
-            return;
+            return [{ key, remove: true }];
         }
-        setAppSetting(key, normalize(patch[name]), { updatedBy: userId });
+        return [{ key, value: String(normalize(patch[name])) }];
     });
+    if (updates.length) {
+        await transaction(async trx => {
+            for (const item of updates) {
+                if (item.remove) await trx.execute('DELETE FROM app_settings WHERE key = ?', [item.key]);
+                else await trx.execute(`INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by`,
+                [item.key, item.value, getBeijingTimestamp(), userId]);
+            }
+        });
+        await refreshAppSettingsCache();
+    }
     return getDocumentProcessingSettings();
 }
 

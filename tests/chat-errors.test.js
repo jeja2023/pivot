@@ -1,9 +1,33 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { PassThrough } = require('node:stream');
 const {
     normalizeChatError,
-    buildPersistedChatErrorContent
+    buildPersistedChatErrorContent,
+    readStreamErrorDetail
 } = require('../server/services/chat-errors');
+
+test('上游错误流读取超时后释放连接并返回已收到的说明', async () => {
+    const stream = new PassThrough();
+    const pending = readStreamErrorDetail(stream, { timeoutMs: 25 });
+    stream.write('模型服务暂不可用');
+    assert.equal(await pending, '模型服务暂不可用');
+    assert.equal(stream.destroyed, true);
+});
+
+test('上游错误流正常结束或提前关闭时立即返回并清理监听器', async () => {
+    const complete = new PassThrough();
+    const completeResult = readStreamErrorDetail(complete, { timeoutMs: 1000 });
+    complete.end('认证失败');
+    assert.equal(await completeResult, '认证失败');
+    assert.equal(complete.listenerCount('data'), 0);
+    const closed = new PassThrough();
+    const closedResult = readStreamErrorDetail(closed, { timeoutMs: 1000 });
+    closed.write('部分错误');
+    closed.destroy();
+    assert.equal(await closedResult, '部分错误');
+    assert.equal(closed.listenerCount('data'), 0);
+});
 
 test('normalizeChatError 能够识别 vLLM/llama.cpp 的 exceed_context_size_error 并在详情中提取精确数字和友好中文建议', () => {
     const rawError = JSON.stringify({

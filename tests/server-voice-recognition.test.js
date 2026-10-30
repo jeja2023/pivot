@@ -17,14 +17,18 @@ function audioInput() {
     });
     return { language: 'zh-CN', audioBase64: api.encodeWave([new Float32Array(4800).fill(0.2)], 48000) };
 }
-function fixture({ hold = false, enabled = true, platform = 'win32' } = {}) {
+function fixture({ hold = false, enabled = true, platform = 'win32', noise = '', duplicate = false } = {}) {
     const children = [];
     const service = createLocalSpeechService({ enabled: () => enabled, platform, loadScript: async () => '固定系统识别脚本',
         spawnProcess(executable, args, options) {
             const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stdout.setEncoding = () => {};
             child.stderr = new EventEmitter(); child.stdin = new EventEmitter(); child.killed = false;
             child.kill = () => { child.killed = true; setImmediate(() => child.emit('close', 1)); };
-            child.finish = result => { child.stdout.emit('data', JSON.stringify(result)); child.emit('close', 0); };
+            child.finish = result => {
+                const output = `${platform === 'win32' ? 'PIVOT_SPEECH_RESULT:' : ''}${JSON.stringify(result)}\n`;
+                child.stdout.emit('data', output + (duplicate ? output : '') + noise);
+                child.emit('close', 0);
+            };
             child.stdin.end = value => {
                 child.input = value;
                 if (options.env.PIVOT_SERVER_SPEECH_MODE === 'probe') setImmediate(() => child.finish({ languages: ['zh-CN'] }));
@@ -36,6 +40,13 @@ function fixture({ hold = false, enabled = true, platform = 'win32' } = {}) {
     });
     return { service, children };
 }
+
+test('Windows 识别协议能区分诊断输出，并拒绝多个结果', async () => {
+    const { service } = fixture({ noise: '诊断输出\n' });
+    assert.equal((await service.transcribe({ id: 1 }, audioInput())).text, '识别结果');
+    const ambiguous = fixture({ duplicate: true }).service;
+    assert.equal((await ambiguous.capabilities()).available, false);
+});
 
 test('浏览器录音规范化为短 WAV，服务拒绝伪装、超长及不支持的编码', () => {
     const input = audioInput();

@@ -100,7 +100,7 @@ async function registerOutput({ userId, fileId, jobId, outputType, filePath, fil
 
 async function writeOutputFile({ userId, fileId, jobId, originalName, outputType, content, pageCount = 0, quality = {}, versionKey = '' }) {
     const meta = outputTypeMeta(outputType);
-    const diskName = String(jobId) + '-' + String(outputType) + '-' + Date.now() + meta.extension;
+    const diskName = String(jobId) + '-gc1-' + String(outputType) + '-' + crypto.randomUUID() + meta.extension;
     const targetPath = await buildManagedPath(outputsRoot, userId, diskName);
     if (Buffer.isBuffer(content)) await fs.promises.writeFile(targetPath, content);
     else await fs.promises.writeFile(targetPath, String(content || ''), 'utf8');

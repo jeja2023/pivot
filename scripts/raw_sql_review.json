@@ -6,6 +6,18 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/knowledge-index-status.js",
+      "count": 2,
+      "rationale": "文档索引失败及重建失败的既有参数化更新迁入数据访问层；后台任务在事务中先锁定当前租约，避免旧执行覆盖新状态。",
+      "verification": "tests/knowledge-ingestion-lease-fencing.test.js 和 tests/knowledge-pdf-coverage.test.js 在隔离 PostgreSQL 验证过期租约和索引状态。"
+    },
+    {
+      "file": "server/repositories/knowledge-ingestion-lease.js",
+      "count": 1,
+      "rationale": "索引暂存切换事务内以参数绑定任务、文档、用户、执行者与领取次数并锁定当前租约，防止旧执行覆盖重新领取后的结果。",
+      "verification": "tests/knowledge-ingestion-lease-fencing.test.js 使用隔离 PostgreSQL 验证过期重领后旧执行无法切换索引。"
+    },
+    {
       "file": "server/routes/knowledge.js",
       "count": 9,
       "rationale": "引用高亮仅在已有引用授权校验后查询当前文档版本及所有者一致的原文件，以参数绑定限定版本和文档；渲染前再次校验文件哈希。",
@@ -277,6 +289,30 @@
       "count": 15,
       "rationale": "最高管理员变更模型可用范围时在同一事务中更新模型归属并清除不再有权访问的默认模型引用，条件更新限制被修改对象。",
       "verification": "tests/model-scope-edit.test.js 覆盖范围切换、默认引用清理、部门范围及非最高管理员权限。"
+    },
+    {
+      "file": "server/services/official-writing-documents.js",
+      "count": 4,
+      "rationale": "版本冲突时仅使用参数绑定和当前用户标识读取同一未删除公文版本，以区分冲突与不存在；正文不进入查询结果。",
+      "verification": "tests/e2e/official-writing-save.spec.js 覆盖真实 PostgreSQL 的冲突拒绝及本页正文保留。"
+    },
+    {
+      "file": "server/services/document-processing/settings.js",
+      "count": 2,
+      "rationale": "文档处理配置先按固定白名单归一化，再以绑定参数在事务中更新或清除配置项；数据库提交后刷新缓存。",
+      "verification": "tests/document-processing.test.js 和 tests/e2e/ocr-retry.spec.js 验证设置校验、持久化和 OCR 重试。"
+    },
+    {
+      "file": "server/repositories/document-job-lock.js",
+      "count": 2,
+      "rationale": "文档执行器使用任务标识派生的 PostgreSQL 咨询锁，重领前尝试同一锁以避免正常运行中的任务被抢占；参数绑定，锁在执行结束后释放。",
+      "verification": "tests/document-job-recovery.test.js 使用真实 PostgreSQL 验证持锁与释放后的恢复；tests/document-processing.test.js 验证处理与重试。"
+    },
+    {
+      "file": "server/repositories/document-orphan-references.js",
+      "count": 4,
+      "rationale": "仅在任务锁和任务行锁保护下，以绑定参数检查任务、未完成导出和全部文档文件引用；数据库异常时清理失败关闭。",
+      "verification": "tests/document-orphan-cleanup.test.js 使用隔离 PostgreSQL 验证引用、活跃任务、持锁与故障情况下的文件保护。"
     }
   ]
 }

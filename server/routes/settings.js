@@ -266,7 +266,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
         if (serviceUrl) {
             await assertSafeOutboundUrl(serviceUrl, req.user);
         }
-        const updated = updateDocumentProcessingSettings({
+        const updated = await updateDocumentProcessingSettings({
             patch: { serviceUrl },
             userId: req.user.id
         });

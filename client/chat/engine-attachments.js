@@ -347,7 +347,8 @@ async function queueChatAttachmentFiles(inputFiles, { emptyMessage = '没有支�
 }
 
 async function handleChatAttachmentInput(e) {
-    await queueChatAttachmentFiles(e.target.files, { emptyMessage: '所选文件夹中没有支持的文件' });
+    const emptyMessage = e.target.id === 'folder-input' ? '所选文件夹中没有支持的文件' : '所选文件类型不受支持';
+    await queueChatAttachmentFiles(e.target.files, { emptyMessage });
     e.target.value = '';
 }
 

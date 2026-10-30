@@ -6,6 +6,7 @@ const { OUTPUT_TYPES } = require('./constants');
 const { createTextOutputs } = require('./exporters');
 const { createSearchablePdfOutput } = require('./pdf');
 const { getDocumentFileForUser } = require('./files');
+const { withDocumentJobLock } = require('../../repositories/document-job-lock');
 
 function exportError(message, code = 'EXPORT_NOT_READY', status = 409) {
     const error = new Error(message);
@@ -57,11 +58,17 @@ function createDocumentExportActions({ getJobRow, getPages, getBlocks }) {
     }
 
     async function createJobExport({ userId, jobId, format = OUTPUT_TYPES.TEXT, sourceModule = '' }) {
-        const job = await getStableJob({ userId, jobId, sourceModule });
-        if (!job) return null;
-        const file = await getDocumentFileForUser(job.file_id, userId);
-        const [pages, blocks] = await Promise.all([getPages(job.id), getBlocks(job.id)]);
-        return createOutput({ userId, job, file, pages, blocks, format: normalizedFormat(format) });
+        // 先验证归属，避免向无权访问的用户暴露任务是否正在持锁。
+        if (!await getStableJob({ userId, jobId, sourceModule })) return null;
+        const result = await withDocumentJobLock(jobId, async () => {
+            const job = await getStableJob({ userId, jobId, sourceModule });
+            if (!job) return { output: null };
+            const file = await getDocumentFileForUser(job.file_id, userId);
+            const [pages, blocks] = await Promise.all([getPages(job.id), getBlocks(job.id)]);
+            return { output: await createOutput({ userId, job, file, pages, blocks, format: normalizedFormat(format) }) };
+        });
+        if (!result) throw exportError('任务正在处理或清理，请稍后重试。', 'DOCUMENT_JOB_BUSY');
+        return result.output;
     }
 
     async function requestJobExport({ userId, jobId, format = OUTPUT_TYPES.TEXT, sourceModule = '' }) {

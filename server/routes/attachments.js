@@ -194,10 +194,11 @@ function createAttachmentsRouter({
                             passwordRequired: true
                         });
                     }
-                    if (path.extname(originalName).toLowerCase() === '.pdf') {
-                        throw new Error(`PDF 文本提取失败： ${readErr.message}`);
-                    }
-                    extractedText = '';
+                    await removeLocalFile(req.file.path);
+                    return res.status(readErr.status === 413 ? 413 : 422).json({
+                        error: readErr.status === 413 ? '文档超过解析大小限制，请缩小文件后重试' : '无法读取文档内容，请检查文件是否损坏或更换文件后重试',
+                        code: 'DOCUMENT_EXTRACTION_FAILED'
+                    });
                 }
                 await fs.promises.rename(req.file.path, finalPath);
 

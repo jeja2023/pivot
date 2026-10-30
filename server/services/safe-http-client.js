@@ -59,7 +59,7 @@ async function buildSafeAxiosOptions(url, options = {}) {
         maxRedirects: Number.isInteger(Number(options.maxRedirects))
             ? Math.max(0, Math.min(Number(options.maxRedirects), 1))
             : 0,
-        validateStatus: options.validateStatus,
+        ...(options.validateStatus === undefined ? {} : { validateStatus: options.validateStatus }),
         signal: options.signal,
         ...agents
     };

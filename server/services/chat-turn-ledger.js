@@ -15,7 +15,12 @@ async function beginChatTurn({ req, res, state, modelCfg, writeSse }) {
     if (turn.replay || turn.busy) {
         if (turn.assistant_message_id) {
             const message = await repository.replayTurn(turn);
-            writeSse(JSON.stringify({ type: 'message_saved', role: 'assistant', messageId: message?.id, content: message?.content || '该回答已移除。' }));
+            const outcome = typeof turn.outcome === 'string' ? JSON.parse(turn.outcome) : turn.outcome || {};
+            if (outcome.status === 'error' && outcome.code === 'MODEL_EMPTY_RESPONSE' && message) {
+                writeSse(JSON.stringify({ type: 'assistant_error', error: '模型返回空回复', code: outcome.code, retryable: true, messageId: message.id, content: message.content }));
+            } else {
+                writeSse(JSON.stringify({ type: 'message_saved', role: 'assistant', messageId: message?.id, content: message?.content || '该回答已移除。' }));
+            }
         } else if (turn.run_id) writeSse(JSON.stringify({ type: 'agent_handoff', runId: turn.run_id, automatic: true, message: '已恢复这项任务的处理状态。' }));
         else writeSse(JSON.stringify({ error: '同一请求正在处理中，请稍后刷新会话查看。', code: 'CHAT_REQUEST_IN_PROGRESS' }));
         writeSse('[DONE]');

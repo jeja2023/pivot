@@ -53,7 +53,10 @@ function createLocalSpeechService({ spawnProcess = spawn, platform = process.pla
             child.once('close', code => {
                 if (done) return;
                 let value;
-                try { value = JSON.parse(output.trim()); } catch (_) { /* 只返回固定错误，不暴露进程输出。 */ }
+                try {
+                    const lines = platform === 'win32' ? output.split(/\r?\n/).filter(line => line.startsWith('PIVOT_SPEECH_RESULT:')) : [output.trim()];
+                    if (lines.length === 1) value = JSON.parse(platform === 'win32' ? lines[0].slice('PIVOT_SPEECH_RESULT:'.length) : lines[0]);
+                } catch (_) { /* 只返回固定错误，不暴露进程输出。 */ }
                 if (code !== 0 || !value || value.error) finish(speechError('服务器本地语音识别失败，请重新录制或联系管理员。', 'VOICE_ENGINE_FAILED', 503));
                 else finish(null, value);
             });

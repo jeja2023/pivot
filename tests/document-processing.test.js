@@ -219,6 +219,37 @@ test('文档处理底座会登记文件、生成任务和受控输出', async ()
     }
 });
 
+test('手动导出与任务清理共用任务锁，锁释放后可正常导出', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare("INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'Export Lock', 'QA', 'user', 'active', now())").run(`doc_export_lock_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'document-export-lock-test', String(userId));
+    const source = path.join(tempDir, 'source.txt');
+    fs.mkdirSync(tempDir, { recursive: true });
+    fs.writeFileSync(source, '隔离导出测试');
+    const owner = await require('../server/db/pg-connection').getPgPool().connect();
+    let jobId;
+    try {
+        const initial = await createJobFromUpload({ user: { id: userId }, file: { path: source, originalname: 'source.txt', mimetype: 'text/plain', size: fs.statSync(source).size }, jobType: 'auto', sourceModule: 'document_processing' });
+        jobId = initial.job.id;
+        assert.equal((await waitForDocumentJob(userId, jobId)).job.status, 'succeeded');
+        await owner.query("SELECT pg_advisory_lock(hashtext('pivot_document_job'), hashtext($1::text))", [String(jobId)]);
+        assert.equal(await createJobExport({ userId: userId + 100000, jobId, format: 'txt' }), null);
+        await assert.rejects(createJobExport({ userId, jobId, format: 'txt' }), error => error.code === 'DOCUMENT_JOB_BUSY');
+        await owner.query("SELECT pg_advisory_unlock(hashtext('pivot_document_job'), hashtext($1::text))", [String(jobId)]);
+        const output = await createJobExport({ userId, jobId, format: 'txt' });
+        assert.ok(output?.id);
+        const saved = await getOutputDownload({ userId, outputId: output.id });
+        assert.match(fs.readFileSync(saved.filePath, 'utf8'), /隔离导出测试/);
+    } finally {
+        if (jobId) await owner.query("SELECT pg_advisory_unlock(hashtext('pivot_document_job'), hashtext($1::text))", [String(jobId)]).catch(() => {});
+        owner.release();
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
 test('文档处理任务删除会清理任务记录和受控文件', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = db.prepare(`
@@ -316,24 +347,26 @@ test('OCR engine normalization falls back to external HTTP service', () => {
     assert.equal(normalizeEngine(''), 'http');
 });
 
-test('OCR service URL setting is saved, normalized, cleared, and validated', () => {
+test('OCR service URL setting is saved, normalized, cleared, and validated', async () => {
     const key = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
     const previousUrl = process.env.OCR_SERVICE_URL;
-    preserveAppSetting(key, () => {
+    await preserveAppSetting(key, async () => {
         try {
             process.env.OCR_SERVICE_URL = 'http://env-ocr:9100';
-            const settings = updateDocumentProcessingSettings({
+            const settings = await updateDocumentProcessingSettings({
                 patch: { serviceUrl: 'http://ocr-service:9100/' },
                 userId: 1
             });
             assert.equal(settings.serviceUrl, 'http://ocr-service:9100');
             assert.equal(getDocumentProcessingSettings().serviceUrl, 'http://ocr-service:9100');
-            const cleared = updateDocumentProcessingSettings({ patch: { serviceUrl: '' }, userId: 1 });
+            const cleared = await updateDocumentProcessingSettings({ patch: { serviceUrl: '' }, userId: 1 });
             assert.equal(cleared.serviceUrl, 'http://env-ocr:9100');
-            assert.throws(
-                () => updateDocumentProcessingSettings({ patch: { serviceUrl: 'file:///tmp/ocr' }, userId: 1 }),
+            const previousEngine = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(DOCUMENT_PROCESSING_SETTING_KEYS.engine)?.value;
+            await assert.rejects(
+                () => updateDocumentProcessingSettings({ patch: { engine: 'http', serviceUrl: 'file:///tmp/ocr' }, userId: 1 }),
                 /OCR 服务地址仅支持 HTTP 或 HTTPS/
             );
+            assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(DOCUMENT_PROCESSING_SETTING_KEYS.engine)?.value, previousEngine);
         } finally {
             if (previousUrl === undefined) delete process.env.OCR_SERVICE_URL;
             else process.env.OCR_SERVICE_URL = previousUrl;
@@ -341,10 +374,10 @@ test('OCR service URL setting is saved, normalized, cleared, and validated', () 
     });
 });
 
-test('OCR engine setting normalizes legacy values to external HTTP service', () => {
+test('OCR engine setting normalizes legacy values to external HTTP service', async () => {
     const key = DOCUMENT_PROCESSING_SETTING_KEYS.engine;
-    preserveAppSetting(key, () => {
-        const settings = updateDocumentProcessingSettings({
+    await preserveAppSetting(key, async () => {
+        const settings = await updateDocumentProcessingSettings({
             patch: { engine: 'paddle' },
             userId: 1
         });
@@ -460,7 +493,7 @@ test('HTTP OCR adapter prefers saved service URL over environment default', asyn
     await preserveAppSetting(key, async () => {
         try {
             process.env.OCR_SERVICE_URL = 'http://127.0.0.1:1';
-            updateDocumentProcessingSettings({
+            await updateDocumentProcessingSettings({
                 patch: { serviceUrl: `http://127.0.0.1:${address.port}` },
                 userId: 1
             });
@@ -1029,7 +1062,7 @@ test('OCR 按明确页范围建立完整处理计划，不会静默遗漏页面'
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
         await preserveAppSetting(settingKey, async () => {
-            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            await updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
             const created = await createJobFromUpload({
                 user: { id: userId, username: `ocr_coverage_${suffix}` },
                 file: { path: sourcePath, originalname: '五页扫描件.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
@@ -1182,7 +1215,7 @@ test('混合 PDF 逐页保留原生文本并仅对扫描页进行 OCR', async ()
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
         await preserveAppSetting(settingKey, async () => {
-            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            await updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
             const result = await extractPdfTextWithPageFallback(sourcePath, { maxOcrPages: 2, desiredWidth: 640 });
             assert.equal(result.sourcePageCount, 2);
             assert.equal(result.plannedPageCount, 2);
@@ -1334,7 +1367,7 @@ test('OCR 失败页重试只补处理失败页面并保留已完成页面', asyn
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
         await preserveAppSetting(settingKey, async () => {
-            updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            await updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
             const created = await createJobFromUpload({
                 user: { id: userId, username: `ocr_retry_${suffix}` },
                 file: { path: sourcePath, originalname: 'two-pages.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
@@ -1353,6 +1386,120 @@ test('OCR 失败页重试只补处理失败页面并保留已完成页面', asyn
             assert.equal(calls, 3);
         });
     } finally {
+        await new Promise(resolve => server.close(resolve));
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('OCR 请求仍在运行时租约到期，不会启动重复识别', async () => {
+    const suffix = Date.now().toString(36);
+    const userInfo = db.prepare("INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Lease', 'QA', 'user', 'active', now())").run(`ocr_lease_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-lease-test', String(userId));
+    const sourcePath = path.join(tempDir, 'page.pdf');
+    const settingKey = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    fs.mkdirSync(tempDir, { recursive: true });
+    await createSamplePdf(sourcePath, ['Page one']);
+    let release;
+    let received;
+    let calls = 0;
+    const started = new Promise(resolve => { received = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const server = nodeHttp.createServer((req, res) => {
+        req.resume();
+        req.on('end', async () => {
+            calls += 1;
+            received();
+            await gate;
+            if (!res.destroyed) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ text: '完成一次识别', confidence: 0.98 })); }
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        await preserveAppSetting(settingKey, async () => {
+            await updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            const created = await createJobFromUpload({ user: { id: userId, username: `ocr_lease_${suffix}` },
+                file: { path: sourcePath, originalname: 'page.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
+                jobType: 'ocr', sourceModule: 'ocr_app', config: { maxRenderPages: 1, maxOcrPages: 1, dpi: 72 } });
+            let timer;
+            try { await Promise.race([started, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('OCR 请求未启动')), 15000); })]); }
+            finally { clearTimeout(timer); }
+            await require('../server/db/client').execute("UPDATE document_jobs SET lease_until = NOW() - INTERVAL '1 second' WHERE id = ?", [created.job.id]);
+            const recovery = await require('../server/services/document-processing/jobs').recoverDocumentProcessingJobs();
+            assert.equal(recovery.requeued, 0);
+            assert.equal((await getJobDetail({ userId, jobId: created.job.id })).job.status, 'processing');
+            assert.equal(calls, 1);
+            release();
+            const completed = await waitForDocumentJob(userId, created.job.id, 30000);
+            assert.equal(completed.job.status, 'succeeded');
+            assert.equal(completed.pages[0].text, '完成一次识别');
+            assert.equal(calls, 1);
+        });
+    } finally {
+        release();
+        server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('锁连接中断后重领任务，旧 OCR 迟到结果不能覆盖新结果', { timeout: 60000 }, async () => {
+    const suffix = `${process.pid}_${Date.now()}`;
+    const userInfo = db.prepare("INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', 'OCR Fence', 'QA', 'user', 'active', now())").run(`ocr_fence_${suffix}`);
+    const userId = userInfo.lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-fence-test', String(userId));
+    const sourcePath = path.join(tempDir, 'page.pdf');
+    const settingKey = DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl;
+    fs.mkdirSync(tempDir, { recursive: true });
+    await createSamplePdf(sourcePath, ['Page one']);
+    let release;
+    let received;
+    let calls = 0;
+    const started = new Promise(resolve => { received = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const server = nodeHttp.createServer((req, res) => {
+        req.resume();
+        req.on('end', async () => {
+            const current = ++calls;
+            if (current === 1) { received(); await gate; }
+            if (!res.destroyed) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ text: current === 1 ? '过期执行结果' : '新执行结果', confidence: 0.98 })); }
+        });
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        await preserveAppSetting(settingKey, async () => {
+            await updateDocumentProcessingSettings({ patch: { serviceUrl: `http://127.0.0.1:${server.address().port}` }, userId: 1 });
+            const created = await createJobFromUpload({ user: { id: userId, username: `ocr_fence_${suffix}` },
+                file: { path: sourcePath, originalname: 'page.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size },
+                jobType: 'ocr', sourceModule: 'ocr_app', config: { maxRenderPages: 1, maxOcrPages: 1, dpi: 72 } });
+            let timer;
+            try { await Promise.race([started, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('OCR 请求未启动')), 15000); })]); }
+            finally { clearTimeout(timer); }
+            const { queryOne, execute } = require('../server/db/client');
+            const backend = await queryOne('SELECT pid FROM pg_stat_activity WHERE application_name = ?', [`pivot-document-job-${created.job.id}`]);
+            assert.ok(backend?.pid);
+            await execute("UPDATE document_jobs SET lease_until = NOW() - INTERVAL '1 second' WHERE id = ?", [created.job.id]);
+            assert.equal((await queryOne('SELECT pg_terminate_backend(?) AS terminated', [backend.pid])).terminated, true);
+            const { execFile } = require('node:child_process');
+            const { promisify } = require('node:util');
+            await promisify(execFile)(process.execPath, [path.join(__dirname, 'helpers', 'document-recovery-worker.js'), String(created.job.id)],
+                { cwd: path.resolve(__dirname, '..'), env: process.env, windowsHide: true, timeout: 35000 });
+            const recovered = await getJobDetail({ userId, jobId: created.job.id });
+            assert.equal(recovered.pages[0].text, '新执行结果');
+            release();
+            await new Promise(resolve => setTimeout(resolve, 600));
+            const afterLateResult = await getJobDetail({ userId, jobId: created.job.id });
+            assert.equal(afterLateResult.job.status, 'succeeded');
+            assert.equal(afterLateResult.pages[0].text, '新执行结果');
+            assert.equal(calls, 2);
+        });
+    } finally {
+        release();
+        server.closeAllConnections();
         await new Promise(resolve => server.close(resolve));
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);

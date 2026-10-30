@@ -206,6 +206,9 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
     router.post('/models/test', authMiddleware, probeLimiter, asyncHandler(async (req, res) => {
         let { id, url, api_key, model_name, source } = req.body;
+        if ([url, api_key, model_name, source].some(value => value != null && typeof value !== 'string')) {
+            return res.status(400).json({ error: '模型地址、密钥、名称和来源必须是文本。' });
+        }
         const testId = crypto.randomUUID().slice(0, 8);
         const testSource = source || (id ? 'auto' : 'manual');
         const isManual = testSource === 'manual';

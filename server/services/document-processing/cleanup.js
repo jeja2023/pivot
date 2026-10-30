@@ -4,6 +4,7 @@ const { getAppSettingValue } = require('../app-settings');
 const { DEFAULT_DOCUMENT_PROCESSING_CONFIG } = require('./constants');
 const { safeUnlinkManaged } = require('./paths');
 const { cleanupExpiredJobSecrets } = require('./secrets');
+const { cleanupDocumentOrphans } = require('./orphan-cleanup');
 
 async function cleanupExpiredDocumentProcessingFiles(options = {}) {
     const configuredRetention = Number.parseInt(getAppSettingValue('document_processing_output_retention_days'), 10);
@@ -25,7 +26,12 @@ async function cleanupExpiredDocumentProcessingFiles(options = {}) {
         logger.info({ outputs: rows.length, removedFiles, retentionDays }, '文档处理过期输出已清理');
     }
     const expiredSecrets = await cleanupExpiredJobSecrets().catch(() => 0);
-    return { outputs: rows.length, removedFiles, retentionDays, expiredSecrets };
+    const orphans = await cleanupDocumentOrphans({ retentionDays }).catch(error => {
+        logger.warn({ err: error.message }, '文档处理未登记文件核对失败，本轮保留剩余文件');
+        return null;
+    });
+    if (orphans?.deleted) logger.info({ deleted: orphans.deleted, scanned: orphans.scanned, retentionDays: orphans.retentionDays }, '文档处理未登记文件已清理');
+    return { outputs: rows.length, removedFiles, retentionDays, expiredSecrets, orphans };
 }
 
 module.exports = {

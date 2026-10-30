@@ -7,7 +7,7 @@ try {
     Add-Type -AssemblyName System.Speech
     $voiceRecognizers = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())
     if ($env:PIVOT_SERVER_SPEECH_MODE -eq 'probe') {
-        @{ languages = @($voiceRecognizers | ForEach-Object { $_.Culture.Name }) } | ConvertTo-Json -Compress
+        [Console]::Out.WriteLine('PIVOT_SPEECH_RESULT:' + (@{ languages = @($voiceRecognizers | ForEach-Object { $_.Culture.Name }) } | ConvertTo-Json -Compress))
         exit 0
     }
     $voicePayload = [Console]::In.ReadLine() | ConvertFrom-Json
@@ -32,9 +32,9 @@ try {
         if (-not $voiceResult) { break }
         if ($voiceResult.Text) { $voiceText.Add($voiceResult.Text) }
     }
-    @{ text = ($voiceText -join ' '); language = $voiceRecognizer.Culture.Name } | ConvertTo-Json -Compress
+    [Console]::Out.WriteLine('PIVOT_SPEECH_RESULT:' + (@{ text = ($voiceText -join ' '); language = $voiceRecognizer.Culture.Name } | ConvertTo-Json -Compress))
 } catch {
-    @{ error = 'local-recognition-failed' } | ConvertTo-Json -Compress
+    [Console]::Out.WriteLine('PIVOT_SPEECH_RESULT:' + (@{ error = 'local-recognition-failed' } | ConvertTo-Json -Compress))
     exit 1
 } finally {
     if ($voiceEngine) { $voiceEngine.Dispose() }

@@ -2,7 +2,7 @@ const fs = require('fs/promises'); const path = require('path'); const os = requ
 const { promisify } = require('util'); const run = promisify(require('child_process').execFile);
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const { Client } = require('pg');
-const { createBackupBundle, verifyBackupBundle } = require('../server/services/offline-backup-bundle');
+const { BACKUP_SOURCES, createBackupBundle, verifyBackupBundle } = require('../server/services/offline-backup-bundle');
 const { postgresCommandEnv } = require('../server/services/postgres-command-env');
 
 async function main() {
@@ -33,8 +33,7 @@ async function main() {
         const row = await client.query(`SELECT content FROM "${schema}".evidence WHERE id=1`);
         if (row.rows[0]?.content !== '离线恢复验收凭据') throw new Error('数据库恢复对账失败。');
         const restored = path.join(root, 'restored'); await fs.mkdir(restored);
-        await fs.cp(path.join(output, 'cas'), path.join(restored, 'cas'), { recursive: true });
-        await fs.cp(path.join(output, 'uploads'), path.join(restored, 'uploads'), { recursive: true });
+        for (const source of BACKUP_SOURCES) await fs.cp(path.join(output, source), path.join(restored, source), { recursive: true });
         for (const item of manifest.files.filter(file => file.path !== 'database.dump')) {
             const bytes = await fs.readFile(path.join(restored, item.path));
             if (crypto.createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('恢复文件摘要不一致。');

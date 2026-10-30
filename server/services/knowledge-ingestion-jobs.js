@@ -178,52 +178,55 @@ function createKnowledgeIngestionQueue(deps = {}) {
         });
     }
 
-    async function updateStage(jobId, stage) {
+    async function updateStage(jobId, stage, { workerId, attempts } = {}) {
         const id = normalizePositiveInt(jobId);
         const safeStage = String(stage || '').trim().slice(0, 50);
-        if (!id || !safeStage) return false;
+        const attempt = normalizePositiveInt(attempts);
+        if (!id || !safeStage || !workerId || !attempt) return false;
         const changed = await executeFn(`
             UPDATE knowledge_ingestion_jobs
             SET stage = ?, updated_at = ?
-            WHERE id = ? AND status = 'running'
-        `, [safeStage, now(), id]);
+            WHERE id = ? AND status = 'running' AND locked_by = ? AND attempts = ?
+        `, [safeStage, now(), id, normalizeWorkerId(workerId), attempt]);
         return Number(changed || 0) > 0;
     }
 
-    async function renewLease(jobId, workerId) {
+    async function renewLease(jobId, workerId, attempts) {
         const id = normalizePositiveInt(jobId);
         const safeWorkerId = normalizeWorkerId(workerId);
-        if (!id) return false;
+        const attempt = normalizePositiveInt(attempts);
+        if (!id || !workerId || !attempt) return false;
         const changed = await executeFn(`
             UPDATE knowledge_ingestion_jobs
             SET locked_at = ?, updated_at = ?
-            WHERE id = ? AND status = 'running' AND locked_by = ?
-        `, [now(), now(), id, safeWorkerId]);
+            WHERE id = ? AND status = 'running' AND locked_by = ? AND attempts = ?
+        `, [now(), now(), id, safeWorkerId, attempt]);
         return Number(changed || 0) > 0;
     }
 
-    async function complete(jobId, { stage = 'published', payload = null } = {}) {
+    async function complete(jobId, { stage = 'published', payload = null, workerId, attempts } = {}) {
         const id = normalizePositiveInt(jobId);
-        if (!id) return false;
+        const attempt = normalizePositiveInt(attempts);
+        if (!id || !workerId || !attempt) return false;
         const timestamp = now();
         const changed = await executeFn(`
             UPDATE knowledge_ingestion_jobs
             SET status = 'completed', stage = ?, payload_json = COALESCE(?, payload_json),
                 completed_at = ?, locked_by = '', locked_at = NULL, updated_at = ?
-            WHERE id = ? AND status = 'running'
+            WHERE id = ? AND status = 'running' AND locked_by = ? AND attempts = ?
         `, [
             String(stage || 'published').slice(0, 50),
             payload && typeof payload === 'object' ? JSON.stringify(payload) : null,
             timestamp,
             timestamp,
-            id
+            id, normalizeWorkerId(workerId), attempt
         ]);
         return Number(changed || 0) > 0;
     }
 
     async function fail(job, error, { retryable = true, stage = 'failed' } = {}) {
         const normalized = normalizeJob(job);
-        if (!normalized?.id) return { status: 'missing', retryAt: null };
+        if (!normalized?.id || !normalized.locked_by || !normalized.attempts) return { status: 'missing', retryAt: null };
         const timestamp = now();
         const code = String(error?.code || error?.name || 'KNOWLEDGE_INGESTION_FAILED').slice(0, 80);
         const message = String(error?.message || error || '知识库索引失败').slice(0, 1500);
@@ -234,8 +237,8 @@ function createKnowledgeIngestionQueue(deps = {}) {
             UPDATE knowledge_ingestion_jobs
             SET status = ?, stage = ?, next_retry_at = ?, locked_by = '', locked_at = NULL,
                 error_code = ?, error_message = ?, updated_at = ?
-            WHERE id = ? AND status = 'running'
-        `, [status, String(stage || 'failed').slice(0, 50), nextRetryAt, code, message, timestamp, normalized.id]);
+            WHERE id = ? AND status = 'running' AND locked_by = ? AND attempts = ?
+        `, [status, String(stage || 'failed').slice(0, 50), nextRetryAt, code, message, timestamp, normalized.id, normalizeWorkerId(normalized.locked_by), normalized.attempts]);
         return {
             status: Number(changed || 0) > 0 ? status : 'unchanged',
             retryAt: nextRetryAt,
@@ -370,13 +373,13 @@ function createKnowledgeIngestionWorker({
     async function runJob(job) {
         const heartbeatMs = Math.max(1000, Math.floor(Math.max(15, Number(leaseSeconds) || 120) * 1000 / 3));
         const heartbeat = setIntervalFn(() => {
-            void queue.renewLease(job.id, workerId).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务租约续期失败'));
+            void queue.renewLease(job.id, workerId, job.attempts).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务租约续期失败'));
         }, heartbeatMs);
         heartbeat?.unref?.();
         try {
-            await queue.updateStage(job.id, 'indexing');
+            if (!await queue.updateStage(job.id, 'indexing', { workerId, attempts: job.attempts })) return;
             const result = await processJob(job);
-            await queue.complete(job.id, { stage: result?.stage || 'published', payload: result || {} });
+            await queue.complete(job.id, { stage: result?.stage || 'published', payload: result || {}, workerId, attempts: job.attempts });
         } catch (error) {
             const failure = await queue.fail(job, error, { retryable: error?.retryable !== false });
             logger.warn({

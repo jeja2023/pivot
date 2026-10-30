@@ -70,10 +70,50 @@ test('备份解析真实配置并校验完整包，拒绝未确认维护与篡�
         await assert.rejects(createBackupBundle({ ...options, maintenanceConfirmed: false }), /维护窗口/);
         await createBackupBundle(options);
         const manifest = await verifyBackupBundle(options.output);
-        assert.equal(manifest.files.length, 3);
+        assert.equal(manifest.version, 2);
+        assert.equal(manifest.files.length, 8);
         assert.equal(manifest.files.some(item => item.path === 'cas/example.txt'), true);
+        for (const name of ['document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills']) {
+            assert.equal(manifest.files.some(item => item.path === `${name}/example.txt`), true);
+        }
         await fs.writeFile(path.join(options.output, 'uploads/example.txt'), '已篡改');
         await assert.rejects(verifyBackupBundle(options.output), /校验失败/);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('备份明确记录缺失目录，排除临时文件并兼容旧清单', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-backup-scope-'));
+    const env = { DATA_DIR: path.join(root, 'data'), PIVOT_UPLOAD_DIR: path.join(root, 'uploads') };
+    const sources = backupPaths(env, root);
+    try {
+        await fs.mkdir(sources.cas, { recursive: true });
+        await fs.mkdir(sources.uploads, { recursive: true });
+        await fs.mkdir(path.join(sources.analysis, 'tmp'), { recursive: true });
+        await fs.writeFile(path.join(sources.analysis, 'tmp', 'temporary.txt'), '不纳入备份');
+        await fs.mkdir(path.join(sources.analysis, 'datasets'), { recursive: true });
+        await fs.writeFile(path.join(sources.analysis, 'datasets', 'preserved.bin'), '分析数据');
+        const output = path.join(root, 'backup');
+        const manifest = await createBackupBundle({ output, env, maintenanceConfirmed: true, dumpDatabase: file => fs.writeFile(file, 'database') });
+        assert.equal(manifest.sources.analysis, 'included');
+        assert.equal(manifest.sources['document-processing'], 'absent');
+        assert.equal(manifest.files.some(item => item.path.includes('/tmp/')), false);
+        assert.equal(manifest.files.some(item => item.path === 'analysis/datasets/preserved.bin'), true);
+        await verifyBackupBundle(output);
+        await assert.rejects(createBackupBundle({ output: path.join(root, 'nested'), env: { ...env, PIVOT_ANALYSIS_DIR: sources.cas }, maintenanceConfirmed: true, dumpDatabase: file => fs.writeFile(file, 'database') }), /相互包含/);
+        await fs.rm(path.join(output, 'agent-skills'), { recursive: true });
+        await assert.rejects(verifyBackupBundle(output), /ENOENT|目录缺失/);
+        await fs.mkdir(path.join(output, 'agent-skills'));
+        await fs.writeFile(path.join(output, 'agent-skills', 'unlisted'), '额外内容');
+        await assert.rejects(verifyBackupBundle(output), /未登记/);
+        await fs.rm(path.join(output, 'agent-skills', 'unlisted'));
+        await assert.rejects(createBackupBundle({ output: path.join(root, 'missing'), env: { ...env, PIVOT_DOCUMENT_PROCESSING_DIR: path.join(root, 'missing-docs') }, maintenanceConfirmed: true, dumpDatabase: file => fs.writeFile(file, 'database') }), error => error.code === 'ENOENT');
+        const legacy = path.join(root, 'legacy');
+        await fs.mkdir(legacy);
+        await fs.writeFile(path.join(legacy, 'database.dump'), 'database');
+        const crypto = require('node:crypto');
+        const sha256 = crypto.createHash('sha256').update('database').digest('hex');
+        await fs.writeFile(path.join(legacy, 'manifest.json'), JSON.stringify({ version: 1, files: [{ path: 'database.dump', bytes: 8, sha256 }] }));
+        assert.equal((await verifyBackupBundle(legacy)).version, 1);
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

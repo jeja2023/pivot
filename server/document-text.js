@@ -404,6 +404,9 @@ async function renderPdfPages(filePath, options = {}) {
 
 async function extractDocxText(filePath) {
     const entries = readZipEntries(await readBoundedBuffer(filePath));
+    if (!Array.from(entries.keys()).some(name => /^word\/document\.xml$/i.test(name))) {
+        throw new Error('Word 文档缺少正文结构');
+    }
     const xmlNames = Array.from(entries.keys())
         .filter(name => /^word\/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/i.test(name))
         .sort((a, b) => {
@@ -482,6 +485,9 @@ async function extractXlsxText(filePath) {
     const sheetNames = Array.from(entries.keys())
         .filter(name => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name))
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!Array.from(entries.keys()).some(name => /^xl\/workbook\.xml$/i.test(name)) || sheetNames.length === 0) {
+        throw new Error('Excel 文档缺少工作簿或工作表结构');
+    }
 
     const sheets = [];
     for (const name of sheetNames) {

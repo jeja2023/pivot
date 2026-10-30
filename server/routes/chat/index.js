@@ -43,6 +43,7 @@ const {
 } = require('../../services/chat-messages');
 const {
     buildPersistedChatErrorContent,
+    handleEmptyChatResponse,
     normalizeChatError,
     readStreamErrorDetail,
     writeChatErrorSse
@@ -811,8 +812,7 @@ function createChatRouter({
                             }, '上游未按 SSE 流式返回，已按完整 JSON 内容回放');
                         }
                     }
-                    // internalScaffoldFilter 已经消费过整个流，只需把最后暂存的尾片段补发，
-                    // 不能再次把完整 assistantContent 作为 fallback，否则会重复正文。
+                    // 过滤器已消费整个流，只补发尾片段，避免重复正文。
                     const internalTail = internalScaffoldFilter.finish();
                     if (internalTail) {
                         const visibleTail = disableChatThinking
@@ -820,7 +820,6 @@ function createChatRouter({
                             : internalTail;
                         if (visibleTail) writeContentSse(visibleTail);
                     }
-                    // 先排空上游过滤器，再结束可见文本过滤器；短回复可能整个仍在上游缓冲中。
                     if (disableChatThinking) {
                         const filteredContent = visibleReasoningFilter.finish(sawSsePayload ? '' : assistantContent);
                         if (filteredContent) {
@@ -829,6 +828,7 @@ function createChatRouter({
                         assistantContent = stripVisibleReasoningScaffold(assistantContent);
                     }
                     assistantContent = sanitizeUserVisibleText(assistantContent);
+                    if (await handleEmptyChatResponse({ content: assistantContent, charts: streamedChartSpecs, writeSse, sessionId, userId, modelCfg, persist: userMessagePersisted || regenerate, log: req.log, res, release: releaseSemaphore, recordFailure: recordModelFailure, finishTrace: finishChatTrace, onPersisted: saved => conversationTurns.updateTurn(conversationTurn, { assistant_message_id: saved.messageId, status: 'completed', outcome: { status: 'error', code: 'MODEL_EMPTY_RESPONSE' } }) })) return;
                     const groundedRagAnswer = await ragResponse.ground(assistantContent);
                     assistantContent = groundedRagAnswer.assistantContent;
                     const ragGrounding = groundedRagAnswer.ragGrounding;

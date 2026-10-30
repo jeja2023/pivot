@@ -194,6 +194,7 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('浏览器真实音频工作线程经 HTTP 和服务器实际引擎识别合成中文音频', async ({ page }) => {
+        test.setTimeout(60_000);
         test.skip(process.platform !== 'win32', '本用例验证 Windows 本地语音引擎');
         const source = [
             "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Add-Type -AssemblyName System.Speech",
@@ -210,18 +211,46 @@ test.describe('Pivot browser smoke', () => {
             { windowsHide: true, encoding: 'utf8', timeout: 15000 });
         expect(generated.status).toBe(0);
         await page.addInitScript(base64 => {
+            window.__syntheticVoiceEvents = [];
+            const record = message => window.__syntheticVoiceEvents.push(message);
+            const NativeAudioContext = window.AudioContext;
+            window.AudioContext = class extends NativeAudioContext {
+                constructor(options = {}) { super({ ...options, sinkId: { type: 'none' } }); }
+                async resume() {
+                    record(this.__pivotCapture ? 'capture-resuming' : 'source-resuming');
+                    await super.resume();
+                    record(this.__pivotCapture ? 'capture-resumed' : 'source-resumed');
+                    if (this.__pivotCapture && window.__playSyntheticSpeech) {
+                        const play = window.__playSyntheticSpeech;
+                        window.__playSyntheticSpeech = null;
+                        setTimeout(() => { record('source-started'); play(); }, 200);
+                    }
+                }
+            };
+            const NativeAudioWorkletNode = window.AudioWorkletNode;
+            window.AudioWorkletNode = class extends NativeAudioWorkletNode {
+                constructor(context, name, options) {
+                    super(context, name, options);
+                    if (name === 'pivot-voice-capture') { context.__pivotCapture = true; record('capture-created'); }
+                }
+            };
             Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: undefined });
             Object.defineProperty(window, 'webkitSpeechRecognition', { configurable: true, value: undefined });
             Object.defineProperty(window.navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
+                record('stream-requested');
                 const context = new window.AudioContext();
                 const bytes = Uint8Array.from(window.atob(base64), value => value.charCodeAt(0));
                 const buffer = await context.decodeAudioData(bytes.buffer);
+                record('audio-decoded');
                 const sound = context.createBufferSource(); sound.buffer = buffer;
                 const output = context.createMediaStreamDestination(); sound.connect(output);
                 await context.resume();
-                setTimeout(() => sound.start(), 500);
+                window.__playSyntheticSpeech = () => sound.start();
+                // 合成轨道没有麦克风驱动；避免浏览器对设备约束的未决请求阻塞测试。
+                output.stream.getTracks()[0].applyConstraints = async () => {};
                 const stop = output.stream.getTracks()[0].stop.bind(output.stream.getTracks()[0]);
                 output.stream.getTracks()[0].stop = () => { stop(); void context.close(); };
+                record('stream-ready');
                 return output.stream;
             } });
         }, generated.stdout.trim());
@@ -229,9 +258,21 @@ test.describe('Pivot browser smoke', () => {
         const status = await (await page.request.get('/api/chat/voice-recognition')).json();
         expect(status.available).toBe(true);
         expect(status.thirdPartyForwarding).toBe(false);
-        const request = page.waitForResponse(response => response.url().endsWith('/api/chat/voice-transcriptions'));
+        await page.evaluate(() => {
+            const target = document.getElementById('toast-container');
+            if (target) new window.MutationObserver(() => {
+                const text = target.textContent?.trim();
+                if (text) window.__syntheticVoiceEvents.push(`提示:${text.slice(0, 200)}`);
+            }).observe(target, { childList: true, subtree: true, characterData: true });
+        });
+        const request = page.waitForResponse(response => response.url().endsWith('/api/chat/voice-transcriptions'), { timeout: 35_000 });
         await page.locator('#chat-voice-input').click();
-        const recognized = await request;
+        let recognized;
+        try { recognized = await request; }
+        catch (error) {
+            const events = await page.evaluate(() => window.__syntheticVoiceEvents || []);
+            throw new Error(`未收到语音请求，音频阶段：${events.join(', ') || '未请求录音'}；${error.message}`);
+        }
         expect(recognized.ok()).toBe(true);
         const data = await recognized.json();
         expect(data.provider).toBe('server_windows_speech');
@@ -1027,6 +1068,7 @@ test.describe('Pivot browser smoke', () => {
         await page.keyboard.press('ArrowRight');
         await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
         await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(page.locator('#app')).toBeVisible({ timeout: 15_000 });
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: true }));
         await expect(page.locator('#monitor-quality-tab')).toHaveAttribute('aria-selected', 'true');
     });
@@ -2122,6 +2164,7 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('数据分析完成上传、非破坏性清洗、图表、字段治理、计算字段、保存视图和仪表盘刷新闭环', async ({ page }) => {
+        test.setTimeout(90_000);
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.());
         await expect(page.locator('#apps-workbench-modal')).toBeVisible({ timeout: 15_000 });

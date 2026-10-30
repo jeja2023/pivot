@@ -142,7 +142,7 @@ function normalizeChatError({ error, detail, statusCode, code } = {}) {
     }
 
     // 4. 上游限流检测 (429 rate_limit_exceeded / TPM / RPM)
-    if (finalStatusCode === 429 && /rate_limit|too many requests|rate limit reached|tpm|rpm/i.test(combinedText)) {
+    if (finalStatusCode === 429) {
         title = '模型服务请求过于频繁（触发限流）';
         finalCode = finalCode || 'RATE_LIMIT_EXCEEDED';
         detailText = '当前请求触发了上游模型服务商的并发或调用频率限制（RPM/TPM）。\n\n💡 建议解决方案：请稍候片刻后重试，或在模型管理中配置备用模型。';
@@ -216,7 +216,8 @@ async function writeChatErrorSse({
     code,
     retryable,
     persist,
-    log
+    log,
+    onPersisted
 }) {
     const normalized = normalizeChatError({ error, detail, statusCode, code });
     const payload = {
@@ -238,6 +239,7 @@ async function writeChatErrorSse({
             log
         });
         if (saved) {
+            if (onPersisted) await onPersisted(saved);
             payload.type = 'assistant_error';
             payload.content = saved.content;
             payload.messageId = saved.messageId;
@@ -245,6 +247,22 @@ async function writeChatErrorSse({
         }
     }
     writeSse(JSON.stringify(payload));
+}
+
+async function handleEmptyChatResponse({ content, charts, writeSse, sessionId, userId, modelCfg, persist, log, res, release, recordFailure, finishTrace, onPersisted }) {
+    if (String(content || '').trim() || (Array.isArray(charts) && charts.length)) return false;
+    const error = new Error('模型未返回可显示的内容，请检查模型配置或稍后重试。');
+    error.code = 'MODEL_EMPTY_RESPONSE';
+    recordFailure(modelCfg, error);
+    finishTrace('error', { phase: 'stream', code: error.code, error: error.message });
+    try {
+        await writeChatErrorSse({ writeSse, sessionId, userId, modelId: modelCfg.id, error: '模型返回空回复',
+            detail: error.message, code: error.code, retryable: true, persist, log, onPersisted });
+    } finally {
+        if (!res.writableEnded) res.end();
+        await release();
+    }
+    return true;
 }
 
 function readStreamErrorDetail(stream, { maxLength = 4000, timeoutMs = 1000 } = {}) {
@@ -256,6 +274,7 @@ function readStreamErrorDetail(stream, { maxLength = 4000, timeoutMs = 1000 } = 
             stream.off?.('data', onData);
             stream.off?.('end', onEnd);
             stream.off?.('error', onError);
+            stream.off?.('close', onClose);
             clearTimeout(timer);
         };
         const finish = () => {
@@ -273,19 +292,22 @@ function readStreamErrorDetail(stream, { maxLength = 4000, timeoutMs = 1000 } = 
             }
         };
         const onEnd = () => finish();
+        const onClose = () => finish();
         const onError = err => {
             if (!text) text = err?.message || '';
             finish();
         };
-        const timer = setTimeout(finish, timeoutMs);
+        const timer = setTimeout(() => { stream.destroy?.(); finish(); }, timeoutMs);
         stream.on('data', onData);
         stream.on('end', onEnd);
         stream.on('error', onError);
+        stream.on('close', onClose);
     });
 }
 
 module.exports = {
     buildPersistedChatErrorContent,
+    handleEmptyChatResponse,
     normalizeChatError,
     readStreamErrorDetail,
     writeChatErrorSse

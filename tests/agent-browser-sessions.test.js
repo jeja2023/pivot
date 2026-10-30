@@ -308,9 +308,12 @@ test('受控浏览器下载只留下摘要证据并立即清理会话隔离临�
         if (sessionId) await closeAgentBrowserSession(sessionId, user).catch(() => {});
         await new Promise(resolve => fixture.server.close(resolve));
         await execute('DELETE FROM agent_runs WHERE id = ?', [run.id]);
-        await fs.promises.rm(profileRoot, { recursive: true, force: true });
-        if (previousSensitiveOutbound === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
-        else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previousSensitiveOutbound;
+        try {
+            await fs.promises.rm(profileRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        } finally {
+            if (previousSensitiveOutbound === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
+            else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previousSensitiveOutbound;
+        }
     }
 });
 

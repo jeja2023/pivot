@@ -68,14 +68,15 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     router.put('/settings', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireOcrAdmin(req, res)) return;
         try {
-            const settings = updateDocumentProcessingSettings({
+            const settings = await updateDocumentProcessingSettings({
                 patch: { serviceUrl: req.body?.serviceUrl },
                 userId: req.user.id
             });
             logAction?.(req, 'OCR 服务地址更新', `服务地址: ${settings.serviceUrl}`);
             return res.json({ success: true, settings });
         } catch (error) {
-            return res.status(error.status || 400).json({ error: error.message || 'OCR 服务地址保存失败' });
+            if (error.status === 400) return res.status(400).json({ error: error.message || 'OCR 服务地址保存失败' });
+            throw error;
         }
     }));
 

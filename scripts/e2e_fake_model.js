@@ -71,8 +71,16 @@ const server = http.createServer((req, res) => {
         }
         log(`streaming ${Buffer.concat(chunks).length} bytes`);
         const knowledgeFixture = payload.messages?.some(message => String(message.content || '').includes('E2E_KNOWLEDGE_刑事案件'));
-        const streamContent = knowledgeFixture ? '刑事案件应依照法律规定办理。[引用 1]' : '真实 E2E 流式回答';
+        const attachmentFixture = JSON.stringify(payload.messages || []).includes('E2E_ATTACHMENT_独立样本文本');
+        const streamContent = knowledgeFixture ? '刑事案件应依照法律规定办理。[引用 1]' : (attachmentFixture ? '已收到附件中的独立样本文本。' : '真实 E2E 流式回答');
         res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive' });
+        if (payload.model === 'pivot-e2e-empty-response') { res.end('data: [DONE]\n\n'); return; }
+        if (payload.model === 'pivot-e2e-slow-response') {
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '开始生成'.repeat(30) } }] })}\n\n`);
+            const timer = setTimeout(() => res.end('data: {"choices":[{"delta":{"content":"结束生成"}}]}\n\ndata: [DONE]\n\n'), 10000);
+            res.on('close', () => clearTimeout(timer));
+            return;
+        }
         res.write(`data: ${JSON.stringify({ id: 'e2e-completion', choices: [{ index: 0, delta: { role: 'assistant', content: streamContent }, finish_reason: null }] })}\n\n`);
         res.write('data: {"id":"e2e-completion","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":5,"total_tokens":10}}\n\n');
         res.end('data: [DONE]\n\n');

@@ -79,6 +79,8 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
     const title = normalizeTitle(body.title);
     const manualTitle = body.manualTitle === true ? 1 : 0;
     const state = normalizeState(body.state);
+    const clientVersion = Number(body.version || 0);
+    if (!Number.isSafeInteger(clientVersion) || clientVersion < 0) throw documentError('公文版本无效。');
 
     const row = await queryOne(`
         INSERT INTO official_writing_documents
@@ -103,13 +105,18 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
                 ELSE NOW()
             END
         WHERE official_writing_documents.deleted_at IS NULL
+          AND (? = 0 OR official_writing_documents.version = ? OR
+              (official_writing_documents.title = EXCLUDED.title
+               AND official_writing_documents.manual_title = EXCLUDED.manual_title
+               AND official_writing_documents.state = EXCLUDED.state))
         RETURNING client_id, title, manual_title, state, version, created_at, updated_at
-    `, [user.id, clientId, title, manualTitle, state]);
+    `, [user.id, clientId, title, manualTitle, state, Object.hasOwn(body, 'version') ? 1 : 0, clientVersion]);
     if (!row) {
+        const existing = await queryOne('SELECT version FROM official_writing_documents WHERE user_id = ? AND client_id = ? AND deleted_at IS NULL', [user.id, clientId]);
+        if (existing) throw documentError('公文已在其他窗口更新。请保留本页内容并复制正文，再刷新查看最新版本。', 409, 'OFFICIAL_WRITING_DOCUMENT_CONFLICT');
         throw documentError('公文不存在或已删除。', 404, 'OFFICIAL_WRITING_DOCUMENT_NOT_FOUND');
     }
     const publicDoc = toPublicDocument(row);
-    const clientVersion = Number(body.version || 0);
     // 当客户端显式传入了当前版本号且更新后版本未自增时，判定为内容无变动
     publicDoc.isModified = clientVersion > 0 ? Number(row.version) !== clientVersion : true;
     return publicDoc;

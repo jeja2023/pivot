@@ -1,4 +1,5 @@
 ﻿const fs = require('fs');
+const crypto = require('crypto');
 const sharp = require('sharp');
 
 const { renderPdfPages } = require('../../document-text');
@@ -6,7 +7,7 @@ const { buildManagedPath, pagesRoot, toProjectRelativePath } = require('./paths'
 const { readImageMetadata } = require('./files');
 
 async function writePageBuffer({ userId, jobId, pageNumber, buffer }) {
-    const fileName = `${jobId}-page-${String(pageNumber).padStart(4, '0')}.png`;
+    const fileName = `${jobId}-gc1-page-${String(pageNumber).padStart(4, '0')}-${crypto.randomUUID()}.png`;
     const targetPath = await buildManagedPath(pagesRoot, userId, fileName);
     await fs.promises.writeFile(targetPath, buffer);
     let width = 0;

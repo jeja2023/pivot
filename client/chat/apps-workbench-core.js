@@ -248,6 +248,7 @@ function createOfficialWritingState(overrides = {}) {
 // 文档库结构：{ activeId, docs: [{ id, title, updatedAt, state }] }
 let officialWritingLibrary = { activeId: '', docs: [] };
 const officialWritingSaveTimers = new Map();
+const officialWritingSaveTasks = new Map();
 const officialWritingDeletedDocumentIds = new Set();
 let officialWritingLoadSequence = 0;
 let officialWritingLegacyStoragePurged = false;
@@ -550,6 +551,10 @@ function showAppsHome() {
 
 async function showOfficialWritingApp() {
     setStoredAppsActiveApp('official-writing');
+    // 工作区模板经过安全净化；仅为固定的公文编辑区域恢复可编辑能力。
+    for (const id of ['official-writing-source-surface', 'official-writing-draft-surface']) {
+        document.getElementById(id)?.setAttribute('contenteditable', 'true');
+    }
     window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
@@ -828,7 +833,7 @@ async function persistOfficialWritingDocument(doc) {
     if (!doc?.id || typeof apiFetch !== 'function') return;
     const currentFingerprint = computeOfficialWritingDocFingerprint(doc);
     if (doc.version > 0 && doc._savedFingerprint === currentFingerprint) return;
-    if (!doc.version && isOfficialWritingStateEmpty(doc.state)) return;
+    if (!doc.version && !doc.manualTitle && isOfficialWritingStateEmpty(doc.state)) return;
 
     const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}/${encodeURIComponent(doc.id)}`, {
         method: 'PUT',
@@ -845,7 +850,7 @@ async function persistOfficialWritingDocument(doc) {
     if (current) {
         current.version = saved.version;
         current.updatedAt = saved.updatedAt;
-        current._savedFingerprint = computeOfficialWritingDocFingerprint(current);
+        current._savedFingerprint = currentFingerprint;
     }
 }
 
@@ -853,18 +858,26 @@ function scheduleOfficialWritingDocumentSave(doc, { immediate = false } = {}) {
     if (!doc?.id || officialWritingDeletedDocumentIds.has(doc.id)) return;
     const currentFingerprint = computeOfficialWritingDocFingerprint(doc);
     if (doc.version > 0 && doc._savedFingerprint === currentFingerprint) return;
-    if (!doc.version && isOfficialWritingStateEmpty(doc.state)) return;
+    if (!doc.version && !doc.manualTitle && isOfficialWritingStateEmpty(doc.state)) return;
 
     const previous = officialWritingSaveTimers.get(doc.id);
     if (previous) clearTimeout(previous);
     const save = async () => {
         officialWritingSaveTimers.delete(doc.id);
+        const previousTask = officialWritingSaveTasks.get(doc.id);
+        const task = (async () => {
+            if (previousTask) await previousTask.catch(() => {});
+            if (!officialWritingDeletedDocumentIds.has(doc.id)) await persistOfficialWritingDocument(doc);
+        })();
+        officialWritingSaveTasks.set(doc.id, task);
         try {
-            await persistOfficialWritingDocument(doc);
+            await task;
         } catch (error) {
             if (!officialWritingDeletedDocumentIds.has(doc.id)) {
                 showToast?.(error?.message || '公文保存失败，请稍后重试', 'error');
             }
+        } finally {
+            if (officialWritingSaveTasks.get(doc.id) === task) officialWritingSaveTasks.delete(doc.id);
         }
     };
     if (immediate) {
@@ -882,6 +895,8 @@ async function deleteOfficialWritingDocumentFromServer(docId) {
         officialWritingSaveTimers.delete(docId);
     }
     try {
+        const pendingSave = officialWritingSaveTasks.get(docId);
+        if (pendingSave) await pendingSave.catch(() => {});
         if (typeof apiFetch !== 'function') return;
         const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}/${encodeURIComponent(docId)}`, { method: 'DELETE' });
         // 新建后立即删除的文档可能尚未发送保存请求；404 可安全视为删除完成。

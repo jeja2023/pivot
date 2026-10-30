@@ -16,6 +16,7 @@
  * 占位符兼容：? (参数占位符) 在发送给 PostgreSQL 时自动转换为 $1, $2, ...
  */
 const { getPgPool } = require('./pg-connection');
+const { getScopedSession } = require('./scoped-session');
 const { LruCache } = require('../cache');
 
 const SLOW_SQL_THRESHOLD_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '500', 10) || 500, 100);
@@ -161,7 +162,7 @@ function toPostgresParams(sql) {
  */
 async function query(sql, params = []) {
     const startedAt = Date.now();
-    const result = await getPgPool().query(getPostgresSql(sql), params);
+    const result = await (getScopedSession() || getPgPool()).query(getPostgresSql(sql), params);
     const duration = Date.now() - startedAt;
     if (duration >= SLOW_SQL_THRESHOLD_MS) {
         notifySlowSql(sql, duration, params);
@@ -212,6 +213,7 @@ async function queryWithStatementTimeout(sql, params = [], timeoutMs = 0) {
         ? Math.min(parsedTimeout, 600_000)
         : 0;
     if (!safeTimeout) return await query(sql, params);
+    if (getScopedSession()) throw new Error('持锁任务不支持独立超时查询。');
 
     const startedAt = Date.now();
     // Optional UI enrichment must not queue behind a saturated pool for the
@@ -266,7 +268,7 @@ async function queryOne(sql, params = []) {
  */
 async function execute(sql, params = []) {
     const startedAt = Date.now();
-    const result = await getPgPool().query(getPostgresSql(sql), params);
+    const result = await (getScopedSession() || getPgPool()).query(getPostgresSql(sql), params);
     const duration = Date.now() - startedAt;
     if (duration >= SLOW_SQL_THRESHOLD_MS) {
         notifySlowSql(sql, duration, params);
@@ -280,6 +282,7 @@ async function execute(sql, params = []) {
  * @returns {Promise<any>}
  */
 async function transaction(fn) {
+    if (getScopedSession()) throw new Error('持锁任务不支持独立数据库事务。');
     const client = await getPgPool().connect();
     let releaseError = null;
     try {

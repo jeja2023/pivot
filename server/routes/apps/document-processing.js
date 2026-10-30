@@ -53,7 +53,7 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
 
     router.put('/admin/settings', authMiddleware, asyncHandler(async (req, res) => {
         if (!requireDocumentProcessingSuperAdmin(req, res)) return;
-        const settings = updateDocumentProcessingSettings({ patch: req.body || {}, userId: req.user.id });
+        const settings = await updateDocumentProcessingSettings({ patch: req.body || {}, userId: req.user.id });
         logAction?.(req, '文档处理配置更新', '更新 OCR/PDF 处理限制');
         return res.json({ success: true, settings });
     }));

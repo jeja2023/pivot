@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { query, queryOne, execute } = require('../../db/client');
+const { withDocumentJobLock } = require('../../repositories/document-job-lock');
 const { extractDocumentText, truncateExtractedText } = require('../../document-text');
 const { logger } = require('../../logger');
 const { getBeijingTimestamp } = require('../../time');
@@ -52,7 +53,7 @@ const runningJobs = new Set();
 let runningCount = 0;
 const JOB_LEASE_MS = Math.max(60_000, Number.parseInt(process.env.DOCUMENT_PROCESSING_JOB_LEASE_MS || String(15 * 60 * 1000), 10) || 15 * 60 * 1000);
 const JOB_RECOVERY_BATCH = Math.max(1, Math.min(500, Number.parseInt(process.env.DOCUMENT_PROCESSING_RECOVERY_BATCH || '100', 10) || 100));
-const WORKER_ID = String(process.env.DOCUMENT_PROCESSING_WORKER_ID || `${process.pid}-${crypto.randomUUID()}`).slice(0, 120);
+const WORKER_ID = `scoped-v1:${String(process.env.DOCUMENT_PROCESSING_WORKER_ID || `${process.pid}-${crypto.randomUUID()}`).slice(0, 110)}`;
 function jobLeaseCutoff() { return getBeijingTimestamp(new Date(Date.now() - JOB_LEASE_MS)); }
 async function getJobRow(jobId, userId = null) {
     const id = Number.parseInt(jobId, 10);
@@ -77,7 +78,8 @@ async function setJobStatus(jobId, status, patch = {}) {
     const terminal = [JOB_STATUSES.SUCCEEDED, JOB_STATUSES.FAILED, JOB_STATUSES.PARTIAL_SUCCESS, JOB_STATUSES.NEEDS_REVIEW, JOB_STATUSES.CANCELLED].includes(status);
     const refreshLease = status === JOB_STATUSES.PROCESSING;
     const leaseUntil = getBeijingTimestamp(new Date(Date.now() + JOB_LEASE_MS));
-    const expectedEpoch = Number.isSafeInteger(Number(patch.executionEpoch)) ? Number(patch.executionEpoch) : null;
+    const expectedEpoch = patch.executionEpoch !== null && patch.executionEpoch !== undefined && Number.isSafeInteger(Number(patch.executionEpoch))
+        ? Number(patch.executionEpoch) : null;
     await execute(`
         UPDATE document_jobs
         SET status = ?, progress = ?, error_message = ?, result_json = ?, updated_at = ?, completed_at = ?, cancelled_at = ?,
@@ -86,13 +88,14 @@ async function setJobStatus(jobId, status, patch = {}) {
             lease_owner = CASE WHEN ? THEN ? WHEN ? THEN '' ELSE lease_owner END,
             review_state = CASE WHEN ? THEN 'pending' ELSE review_state END
         WHERE id = ? AND (status <> ? OR ? = ?) AND execution_epoch = COALESCE(?, execution_epoch)
+            AND (?::bigint IS NULL OR status = ?)
     `, [
         status, progress, errorMessage, safeJson(result), now, completedAt, cancelledAt,
         refreshLease, now, terminal,
         refreshLease, leaseUntil, terminal,
         refreshLease, WORKER_ID, terminal,
         status === JOB_STATUSES.NEEDS_REVIEW,
-        jobId, JOB_STATUSES.CANCELLED, status, JOB_STATUSES.CANCELLED, expectedEpoch
+        jobId, JOB_STATUSES.CANCELLED, status, JOB_STATUSES.CANCELLED, expectedEpoch, expectedEpoch, JOB_STATUSES.PROCESSING
     ]);
     await updateOcrBatchForJob(jobId).catch(() => {});
     return await getJobRow(jobId);
@@ -360,14 +363,16 @@ async function recoverDocumentProcessingJobs({ limit = JOB_RECOVERY_BATCH } = {}
     const requeued = await execute(`
         UPDATE document_jobs
         SET status = ?, locked_at = NULL, updated_at = ?, error_message = ''
-        WHERE status = ? AND COALESCE(lease_until, locked_at) IS NOT NULL AND COALESCE(lease_until, locked_at) < ? AND attempts < max_attempts
-    `, [JOB_STATUSES.QUEUED, now, JOB_STATUSES.PROCESSING, cutoff]);
+        WHERE status = ? AND ((lease_owner LIKE 'scoped-v1:%' AND lease_until < ?) OR ((lease_until IS NULL OR COALESCE(lease_owner, '') NOT LIKE 'scoped-v1:%') AND COALESCE(lease_until, locked_at) < ?)) AND attempts < max_attempts
+            AND pg_try_advisory_xact_lock(hashtext('pivot_document_job'), hashtext(id::text))
+    `, [JOB_STATUSES.QUEUED, now, JOB_STATUSES.PROCESSING, now, cutoff]);
     const failed = await execute(`
         UPDATE document_jobs
         SET status = ?, locked_at = NULL, completed_at = ?, updated_at = ?,
             error_message = CASE WHEN error_message = '' THEN ? ELSE error_message END
-        WHERE status = ? AND COALESCE(lease_until, locked_at) IS NOT NULL AND COALESCE(lease_until, locked_at) < ? AND attempts >= max_attempts
-    `, [JOB_STATUSES.FAILED, now, now, '任务处理租约已过期且达到最大重试次数。', JOB_STATUSES.PROCESSING, cutoff]);
+        WHERE status = ? AND ((lease_owner LIKE 'scoped-v1:%' AND lease_until < ?) OR ((lease_until IS NULL OR COALESCE(lease_owner, '') NOT LIKE 'scoped-v1:%') AND COALESCE(lease_until, locked_at) < ?)) AND attempts >= max_attempts
+            AND pg_try_advisory_xact_lock(hashtext('pivot_document_job'), hashtext(id::text))
+    `, [JOB_STATUSES.FAILED, now, now, '任务处理租约已过期且达到最大重试次数。', JOB_STATUSES.PROCESSING, now, cutoff]);
     const pending = await query(`
         SELECT id
         FROM document_jobs
@@ -651,85 +656,85 @@ const processPdfToolJob = createPdfJobProcessor({
     sanitizeErrorMessage,
     touchProgress
 });
-
-
 async function processJob(jobId) {
-    const initialJob = await getJobRow(jobId);
-    if (!initialJob || initialJob.status !== JOB_STATUSES.QUEUED) return null;
-    const file = await getDocumentFileForUser(initialJob.file_id, initialJob.user_id);
-    const filePath = await getDocumentFilePathAsync(file);
-    if (!file || !filePath) {
-        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
-    }
-    const now = getBeijingTimestamp();
-    const leaseUntil = getBeijingTimestamp(new Date(Date.now() + JOB_LEASE_MS));
-    const claimed = await execute(`
-        UPDATE document_jobs
-        SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, lease_until = ?, lease_owner = ?, execution_epoch = execution_epoch + 1, updated_at = ?
-        WHERE id = ? AND status = ? AND cancelled_at IS NULL
-    `, [JOB_STATUSES.PROCESSING, 5, now, leaseUntil, WORKER_ID, now, jobId, JOB_STATUSES.QUEUED]);
-    if (claimed !== 1) return await getJobRow(jobId);
-    const job = await getJobRow(jobId);
-    if (!job) return null;
-    const rawConfig = parseJson(job.config_json, {});
-    // 兼容旧任务的明文密码：首次实际执行时立即迁移到短期加密密钥表，
-    // 然后回写不含密码的公开配置，避免继续经详情接口泄露。
-    const legacyPassword = String(rawConfig.password || '');
-    if (legacyPassword) {
-        await storeJobPassword({ userId: job.user_id, jobId: job.id, password: legacyPassword });
-        delete rawConfig.password;
-        rawConfig.requiresPassword = true;
-        await execute('UPDATE document_jobs SET config_json = ?, config_version = ?, updated_at = ? WHERE id = ?', [safeJson(normalizeConfig(rawConfig)), 2, getBeijingTimestamp(), job.id]);
-    }
-    const config = {
-        ...normalizeConfig(rawConfig),
-        password: await getJobPassword({ userId: job.user_id, jobId: job.id }),
-        outputPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'output_password' }),
-        ownerPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'owner_password' })
-    };
-    if (config.requiresPassword && !config.password) {
-        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '文件密码已过期或未提供，请在再次处理时重新输入密码。', result: { errorCode: 'PDF_PASSWORD_REQUIRED' } });
-    }
+    return await withDocumentJobLock(jobId, async () => {
+        const initialJob = await getJobRow(jobId);
+        if (!initialJob || initialJob.status !== JOB_STATUSES.QUEUED) return null;
+        const file = await getDocumentFileForUser(initialJob.file_id, initialJob.user_id);
+        const filePath = await getDocumentFilePathAsync(file);
+        if (!file || !filePath) {
+            return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '原始文件不存在，请重新上传。' });
+        }
+        const now = getBeijingTimestamp();
+        const leaseUntil = getBeijingTimestamp(new Date(Date.now() + JOB_LEASE_MS));
+        const claimed = await execute(`
+            UPDATE document_jobs
+            SET status = ?, progress = ?, attempts = attempts + 1, locked_at = ?, lease_until = ?, lease_owner = ?, execution_epoch = execution_epoch + 1, updated_at = ?
+            WHERE id = ? AND status = ? AND cancelled_at IS NULL
+        `, [JOB_STATUSES.PROCESSING, 5, now, leaseUntil, WORKER_ID, now, jobId, JOB_STATUSES.QUEUED]);
+        if (claimed !== 1) return await getJobRow(jobId);
+        const job = await getJobRow(jobId);
+        if (!job) return null;
+        const rawConfig = parseJson(job.config_json, {});
+        // 兼容旧任务的明文密码：首次实际执行时立即迁移到短期加密密钥表，
+        // 然后回写不含密码的公开配置，避免继续经详情接口泄露。
+        const legacyPassword = String(rawConfig.password || '');
+        if (legacyPassword) {
+            await storeJobPassword({ userId: job.user_id, jobId: job.id, password: legacyPassword });
+            delete rawConfig.password;
+            rawConfig.requiresPassword = true;
+            await execute('UPDATE document_jobs SET config_json = ?, config_version = ?, updated_at = ? WHERE id = ?', [safeJson(normalizeConfig(rawConfig)), 2, getBeijingTimestamp(), job.id]);
+        }
+        const config = {
+            ...normalizeConfig(rawConfig),
+            password: await getJobPassword({ userId: job.user_id, jobId: job.id }),
+            outputPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'output_password' }),
+            ownerPassword: await getJobSecret({ userId: job.user_id, jobId: job.id, purpose: 'owner_password' })
+        };
+        if (config.requiresPassword && !config.password) {
+            return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: '文件密码已过期或未提供，请在再次处理时重新输入密码。', result: { errorCode: 'PDF_PASSWORD_REQUIRED' } });
+        }
 
-    try {
-        if (await isCancelled(jobId)) return await getJobRow(jobId);
-        const retryingFailedPages = parseJson(job.result_json, {}).retryFailedPages === true;
-        if (!retryingFailedPages) await cleanupJobArtifacts(jobId);
-        await touchProgress(jobId, 12, { fileType: file.file_type }, Number(job.execution_epoch));
-        let outcome;
-        if (job.job_type === JOB_TYPES.PDF_TOOL) {
-            outcome = await processPdfToolJob({ job, file, config });
-        } else if (job.job_type === JOB_TYPES.OCR && (isImageExtension(file.file_ext) || isPdfExtension(file.file_ext))) {
-            outcome = await ocrProcessor.processImageOcr({ job, file, filePath, config });
-        } else if (job.job_type === JOB_TYPES.OCR && isTextExtractableExtension(file.file_ext)) {
-            outcome = await processTextExtraction({ job, file, filePath, config });
-        } else if (job.job_type === JOB_TYPES.AUTO && isImageExtension(file.file_ext)) {
-            const pages = await ocrProcessor.preparePagesForJob({ job, file, filePath, config });
-            outcome = {
-                status: JOB_STATUSES.NEEDS_REVIEW,
-                progress: 100,
-                result: { requiresOcr: true, renderedPages: pages.length, message: '图片文件已登记并生成预览，等待 OCR 识别或人工确认。' }
-            };
-        } else if (isTextExtractableExtension(file.file_ext)) {
-            outcome = await processTextExtraction({ job, file, filePath, config });
-        } else {
-            outcome = { status: JOB_STATUSES.NEEDS_REVIEW, progress: 100, result: { message: '该文件类型暂不支持自动文本抽取。' } };
+        try {
+            if (await isCancelled(jobId)) return await getJobRow(jobId);
+            const retryingFailedPages = parseJson(job.result_json, {}).retryFailedPages === true;
+            if (!retryingFailedPages) await cleanupJobArtifacts(jobId);
+            await touchProgress(jobId, 12, { fileType: file.file_type }, Number(job.execution_epoch));
+            let outcome;
+            if (job.job_type === JOB_TYPES.PDF_TOOL) {
+                outcome = await processPdfToolJob({ job, file, config });
+            } else if (job.job_type === JOB_TYPES.OCR && (isImageExtension(file.file_ext) || isPdfExtension(file.file_ext))) {
+                outcome = await ocrProcessor.processImageOcr({ job, file, filePath, config });
+            } else if (job.job_type === JOB_TYPES.OCR && isTextExtractableExtension(file.file_ext)) {
+                outcome = await processTextExtraction({ job, file, filePath, config });
+            } else if (job.job_type === JOB_TYPES.AUTO && isImageExtension(file.file_ext)) {
+                const pages = await ocrProcessor.preparePagesForJob({ job, file, filePath, config });
+                outcome = {
+                    status: JOB_STATUSES.NEEDS_REVIEW,
+                    progress: 100,
+                    result: { requiresOcr: true, renderedPages: pages.length, message: '图片文件已登记并生成预览，等待 OCR 识别或人工确认。' }
+                };
+            } else if (isTextExtractableExtension(file.file_ext)) {
+                outcome = await processTextExtraction({ job, file, filePath, config });
+            } else {
+                outcome = { status: JOB_STATUSES.NEEDS_REVIEW, progress: 100, result: { message: '该文件类型暂不支持自动文本抽取。' } };
+            }
+            if (await isCancelled(jobId)) {
+                await cleanupJobArtifacts(jobId);
+                return await getJobRow(jobId);
+            }
+            return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '', executionEpoch: Number(job.execution_epoch) });
+        } catch (error) {
+            if (await isCancelled(jobId)) {
+                await cleanupJobArtifacts(jobId);
+                return await getJobRow(jobId);
+            }
+            const message = sanitizeErrorMessage(error);
+            return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() }, executionEpoch: Number(job.execution_epoch) });
+        } finally {
+            await removeJobSecrets({ userId: job.user_id, jobId: job.id }).catch(() => {});
         }
-        if (await isCancelled(jobId)) {
-            await cleanupJobArtifacts(jobId);
-            return await getJobRow(jobId);
-        }
-        return await setJobStatus(jobId, outcome.status, { progress: outcome.progress, result: outcome.result, errorMessage: '', executionEpoch: Number(job.execution_epoch) });
-    } catch (error) {
-        if (await isCancelled(jobId)) {
-            await cleanupJobArtifacts(jobId);
-            return await getJobRow(jobId);
-        }
-        const message = sanitizeErrorMessage(error);
-        return await setJobStatus(jobId, JOB_STATUSES.FAILED, { progress: 0, errorMessage: message, result: { failedAt: getBeijingTimestamp() }, executionEpoch: Number(job.execution_epoch) });
-    } finally {
-        await removeJobSecrets({ userId: job.user_id, jobId: job.id }).catch(() => {});
-    }
+    });
 }
 
 async function retryJob({ userId, jobId, sourceModule = '', password = '', outputPassword = '', ownerPassword = '', retryFailedPages = false }) {

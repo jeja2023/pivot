@@ -532,7 +532,7 @@ ragRouter.post('/docs/:id/refresh-ocr-locations', authMiddleware, asyncHandler(a
 }));
 
 ragRouter.post('/docs/retry-failed', authMiddleware, asyncHandler(async (req, res) => {
-    const result = scheduleFailedKnowledgeDocumentsForUser({ userId: req.user.id, limit: 50, user: req.user });
+    const result = await scheduleFailedKnowledgeDocumentsForUser({ userId: req.user.id, limit: 50, user: req.user });
     clearRagCacheForUser(req.user.id);
     auditRagAction(req, '知识库失败文档重试', result);
     req.log?.info(result, 'RAG 失败文档批量重试');
@@ -559,9 +559,9 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
         scope,
         user: req.user
     });
-    const queue = getKnowledgeIndexQueueStatus(req.user.id);
+    const queue = await getKnowledgeIndexQueueStatus(req.user.id);
     const elapsedMs = Date.now() - startedAt;
-    recordRagDebugQuery({
+    await recordRagDebugQuery({
         userId: req.user.id,
         query,
         scope,

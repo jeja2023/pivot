@@ -87,7 +87,8 @@ async function main() {
         PG_IDLE_TIMEOUT_MS: '100',
         PIVOT_TEST_PG_SYNC: 'true',
         PIVOT_DB_WRITE_QUEUE_DISABLED: 'false',
-        PIVOT_LOGIN_RATE_LIMIT_MAX: '100',
+        // 整套浏览器回归在同一隔离服务内创建大量独立会话；专门的限流测试仍验证真实门禁。
+        PIVOT_LOGIN_RATE_LIMIT_MAX: '1000',
         DEFAULT_ADMIN_PASSWORD: 'E2eAdmin123',
         JWT_SECRET: 'pivot-e2e-tests-jwt-secret-012345678901234567890123',
         DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123',

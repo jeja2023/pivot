@@ -2,6 +2,7 @@ const { queryOne, execute, transaction } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { clearKnowledgeGraphForDocument } = require('./knowledge-graph');
+const { lockCurrentKnowledgeLease } = require('../repositories/knowledge-ingestion-lease');
 
 async function createKnowledgeIndexStage({ doc, userId }) {
     const now = getBeijingTimestamp();
@@ -22,9 +23,13 @@ async function discardKnowledgeIndexStage(stageId) {
     await execute('DELETE FROM knowledge_docs WHERE id = ?', [stageId]);
 }
 
-async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready', coverageWarning = '', extractionCoverage = {}, indexFingerprint = '', enqueueLifecycle = null }) {
+async function swapKnowledgeIndexStage({ docId, stageId, userId, chunkCount, sourceHash, indexStatus = 'ready', coverageWarning = '', extractionCoverage = {}, indexFingerprint = '', enqueueLifecycle = null, lease = null }) {
     const now = getBeijingTimestamp();
     await transaction(async trx => {
+        if (lease) {
+            const held = await lockCurrentKnowledgeLease(trx, { ...lease, docId, userId });
+            if (!held) throw Object.assign(new Error('知识库索引任务租约已失效，不能切换索引。'), { code: 'KNOWLEDGE_JOB_LEASE_LOST' });
+        }
         const target = await trx.query('SELECT id FROM knowledge_docs WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [docId, userId]);
         if (!target.length) throw new Error('文档已删除或无权访问，无法切换索引');
         const oldChunks = await trx.query('SELECT id FROM knowledge_chunks WHERE doc_id = ?', [docId]);

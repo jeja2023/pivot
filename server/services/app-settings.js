@@ -127,12 +127,6 @@ async function deleteAppSettingAsync(key) {
     return true;
 }
 
-function deleteAppSetting(key) {
-    settingsCache.delete(key);
-    deleteAppSettingAsync(key).catch(() => {});
-    return true;
-}
-
 async function getAppSettingsMapAsync() {
     await refreshAppSettingsCache();
     return getAppSettingsMap();
@@ -143,7 +137,6 @@ function isAppSettingsConflictTargetError() {
 }
 
 module.exports = {
-    deleteAppSetting,
     deleteAppSettingAsync,
     ensureAppSetting,
     ensureAppSettingAsync,

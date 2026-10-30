@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.69",
+  "version": "0.7.73",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -51,6 +51,7 @@
     "preflight:deployment": "node scripts/preflight_deployment.js",
     "preflight:capability-workers": "node scripts/preflight_capability_workers.js",
     "drill:capability-workers": "node scripts/capability_worker_isolation_drill.js",
+    "drill:application-restore": "node scripts/rehearse_application_restore.js",
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
     "evaluate:ocr-quality": "node scripts/evaluate_ocr_quality.js",
