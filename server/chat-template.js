@@ -56,8 +56,6 @@ function loadChatWorkspaceTemplate(name) {
 }
 
 module.exports = {
-    chatPartialsDir,
-    chatTemplatePath,
     lazyWorkspaceTemplates,
     loadChatHtmlTemplate,
     loadChatWorkspaceTemplate,

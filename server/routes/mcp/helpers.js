@@ -1,6 +1,7 @@
 const { queryOne } = require('../../db/client');
 const { isSuperAdmin } = require('../../permissions');
 const { normalizeCustomPresentation } = require('../../services/mcp-tool-presentation');
+const { resolveMcpStreamIdleMs } = require('../../services/mcp-transport');
 
 const SYSTEM_MCP_SERVICES = {
     reports: {
@@ -109,6 +110,7 @@ function normalizeExternalServerConfig(payload = {}) {
         ...current,
         healthCheckUrl: String(pickConfigValue(payload, current, 'health_check_url', 'healthCheckUrl', '')).trim(),
         timeoutMs,
+        streamIdleTimeoutMs: resolveMcpStreamIdleMs(pickConfigValue(payload, current, 'stream_idle_timeout_ms', 'streamIdleTimeoutMs', current.stream_idle_timeout_ms)),
         protocolMode,
         protocolVersion: String(pickConfigValue(payload, current, 'protocol_version', 'protocolVersion', protocolMode === 'standard' ? '2025-11-25' : '2024-11-05')).trim(),
         authMode: allowedAuthMode,

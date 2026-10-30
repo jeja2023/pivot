@@ -70,6 +70,9 @@ test('编辑外部 MCP 服务时保留工具中文展示配置并限制规模', 
         },
         timeoutMs: 9000
     });
+    assert.equal(normalized.streamIdleTimeoutMs, 120000);
+    assert.equal(normalizeExternalServerConfig({ stream_idle_timeout_ms: 0 }).streamIdleTimeoutMs, 0);
+    assert.equal(normalizeExternalServerConfig({ streamIdleTimeoutMs: 600000 }).streamIdleTimeoutMs, 600000);
     assert.deepEqual(normalized.toolPresentations, {
         query_table: { displayName: '查询业务订单', displayDescription: '按订单条件查询。' }
     });

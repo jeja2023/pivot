@@ -20,6 +20,7 @@ const {
     getAccessibleModelAsync,
     getUserRunnableModelsAsync
 } = require('../services/models');
+const { getModelForStatusManagement, updateModelStatus } = require('../repositories/model-status');
 const { getEmbeddingConfig } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
@@ -60,12 +61,12 @@ async function getTestableModel(modelId, user) {
     let model;
     if (isNumeric) {
         model = await queryOne(
-            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND (id = ? OR model_name = ?) AND (user_id = ? OR user_id IS NULL)",
+            "SELECT * FROM models WHERE COALESCE(status, 'active') IN ('active', 'disabled') AND (id = ? OR model_name = ?) AND (user_id = ? OR user_id IS NULL)",
             [modelId, modelId, user.id]
         );
     } else {
         model = await queryOne(
-            "SELECT * FROM models WHERE COALESCE(status, 'active') = 'active' AND model_name = ? AND (user_id = ? OR user_id IS NULL)",
+            "SELECT * FROM models WHERE COALESCE(status, 'active') IN ('active', 'disabled') AND model_name = ? AND (user_id = ? OR user_id IS NULL)",
             [modelId, user.id]
         );
     }
@@ -167,7 +168,21 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         // 处理掩码情况：只能复用当前用户可访问模型且 URL 未被替换时的真实 Key
         if (id && api_key === '********') {
-            const storedModel = await getAccessibleModelAsync(id, req.user);
+            let storedModel = await getAccessibleModelAsync(id, req.user);
+            if (!storedModel && id) {
+                const candidate = await getModelForStatusManagement(id);
+                if (candidate && canManageModel(candidate, req.user)) {
+                    storedModel = candidate;
+                    if (storedModel.api_key) {
+                        try {
+                            storedModel.api_key = decryptSecret(storedModel.api_key, 'models.api_key');
+                        } catch (e) {
+                            storedModel.api_key = '';
+                            storedModel.secret_error = e.message || '模型密钥解密失败';
+                        }
+                    }
+                }
+            }
             if (!storedModel || String(storedModel.id) !== String(id) || !canUseStoredModelSecret(storedModel, req.user)) {
                 logAction(req, '模型列表拉取拦截', `无权复用模型密钥，模型ID: ${id}`);
                 return res.status(403).json({ success: false, error: '无权访问该模型或模型不存在' });
@@ -283,15 +298,22 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const page = normalizePage(req.query.page);
         const limit = normalizeLimit(req.query.limit);
         const offset = (page - 1) * limit;
+        const statusFilter = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+        let statusCondition = "COALESCE(m.status, 'active') IN ('active', 'disabled')";
+        if (statusFilter === 'active') {
+            statusCondition = "COALESCE(m.status, 'active') = 'active'";
+        } else if (statusFilter === 'disabled') {
+            statusCondition = "COALESCE(m.status, 'active') = 'disabled'";
+        }
         let where = '';
         let filterParams = [];
 
         if (!isAdmin(req.user)) {
             const unitCheck = `(COALESCE(m.allowed_units, '') = '' OR ${exactCsvTokenSql('m.allowed_units')})`;
-            where = `WHERE COALESCE(m.status, 'active') = 'active' AND (m.user_id = ? OR (m.user_id IS NULL AND ${unitCheck}))`;
+            where = `WHERE ${statusCondition} AND (m.user_id = ? OR (m.user_id IS NULL AND ${unitCheck}))`;
             filterParams = [req.user.id, (req.user.unit || '').trim()];
         } else {
-            where = "WHERE COALESCE(m.status, 'active') = 'active'";
+            where = `WHERE ${statusCondition}`;
         }
 
         // 为管理员增加过滤：不显示普通用户的私有默认模型
@@ -314,7 +336,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                     WHEN m.user_id = ? THEN m.url
                     ELSE '********'
                 END) as url,
-                m.model_name, m.is_default, 
+                m.model_name, m.is_default, COALESCE(m.status, 'active') as status, 
                 m.daily_token_limit, m.allowed_units, m.created_at,
                 m.temperature, m.max_input_tokens, m.max_tokens, m.context_window_tokens, m.monitor_url, m.max_concurrent, m.supports_vision, m.supports_reasoning, m.chat_thinking_enabled, m.supports_tool_calls, m.tool_call_mode, m.tool_call_probe_status, m.tool_call_probe_protocol, m.tool_call_probe_error, m.tool_call_probed_at,
                 m.input_price_per_million, m.output_price_per_million, m.price_currency,
@@ -366,10 +388,11 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency);
+        const status = req.body.status === 'disabled' ? 'disabled' : 'active';
 
         await execute(
-            'INSERT INTO models (user_id, name, url, api_key, model_name, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [targetUserId, name, url, encryptSecret(api_key, 'models.api_key'), model_name, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, 0, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency]
+            'INSERT INTO models (user_id, name, url, api_key, model_name, status, daily_token_limit, allowed_units, created_at, temperature, max_input_tokens, max_tokens, context_window_tokens, monitor_url, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, input_price_per_million, output_price_per_million, price_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [targetUserId, name, url, encryptSecret(api_key, 'models.api_key'), model_name, status, dailyLimit, allowedUnits, getBeijingTimestamp(), temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, 0, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency]
         );
 
         logAction(req, '添加模型', `添加${targetUserId === null ? '全局' : '个人'}模型: ${name}`);
@@ -411,16 +434,19 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const inputPricePerMillion = normalizePriceValue(req.body.input_price_per_million);
         const outputPricePerMillion = normalizePriceValue(req.body.output_price_per_million);
         const priceCurrency = normalizePriceCurrency(req.body.price_currency || existing.price_currency);
+        const requestedStatus = req.body.status !== undefined
+            ? (['active', 'disabled'].includes(req.body.status) ? req.body.status : (existing.status || 'active'))
+            : (existing.status || 'active');
 
         let changed;
         if (isSuperAdmin(req.user)) {
             changed = await transaction(async trx => {
                 const updated = await trx.execute(
-                    'UPDATE models SET user_id = ?, is_default = CASE WHEN ? = \'personal\' THEN 0 ELSE is_default END, name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id IS NOT DISTINCT FROM ?',
-                    [nextUserId, nextScope, name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, existing.user_id]
+                    'UPDATE models SET user_id = ?, is_default = CASE WHEN ? = \'personal\' OR ? = \'disabled\' THEN 0 ELSE is_default END, status = ?, name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, allowed_units = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id IS NOT DISTINCT FROM ?',
+                    [nextUserId, nextScope, requestedStatus, requestedStatus, name, url, nextApiKey, model_name, dailyLimit, allowedUnits, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, existing.user_id]
                 );
                 if (!updated) return 0;
-                if (nextScope === 'personal' && currentScope === 'global') {
+                if ((nextScope === 'personal' || requestedStatus === 'disabled') && currentScope === 'global') {
                     await trx.execute("UPDATE app_settings SET value = '', updated_at = ? WHERE key = 'default_model_id' AND value = ?", [getBeijingTimestamp(), String(req.params.id)]);
                     await trx.execute('UPDATE users SET default_model_id = NULL WHERE default_model_id = ? AND id <> ?', [req.params.id, req.user.id]);
                 } else if (nextScope === 'global' && allowedUnits) {
@@ -428,20 +454,56 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
                 }
                 return updated;
             });
-            if (changed && nextScope === 'personal' && currentScope === 'global') await require('../services/app-settings').refreshAppSettingsCache().catch(() => {});
+            if (changed && (nextScope === 'personal' || requestedStatus === 'disabled') && currentScope === 'global') await require('../services/app-settings').refreshAppSettingsCache().catch(() => {});
         } else {
             changed = await execute(
-                'UPDATE models SET name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
-                [name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id]
+                'UPDATE models SET status = ?, is_default = CASE WHEN ? = \'disabled\' THEN 0 ELSE is_default END, name = ?, url = ?, api_key = ?, model_name = ?, daily_token_limit = ?, temperature = ?, max_input_tokens = ?, max_tokens = ?, context_window_tokens = ?, monitor_url = ?, max_concurrent = ?, supports_vision = ?, supports_reasoning = ?, chat_thinking_enabled = ?, tool_call_mode = ?, tool_call_probe_status = CASE WHEN tool_call_mode = ? THEN tool_call_probe_status ELSE \'unknown\' END, tool_call_probe_error = CASE WHEN tool_call_mode = ? THEN tool_call_probe_error ELSE \'\' END, input_price_per_million = ?, output_price_per_million = ?, price_currency = ? WHERE id = ? AND user_id = ?',
+                [requestedStatus, requestedStatus, name, url, nextApiKey, model_name, dailyLimit, temp, maxInputTokens, maxTokens, contextWindowTokens, monitor_url || '', maxConcurrent, supportsVision, supportsReasoning, chatThinkingEnabled, toolCallMode, toolCallMode, toolCallMode, inputPricePerMillion, outputPricePerMillion, priceCurrency, req.params.id, req.user.id]
             );
         }
 
         if (changed > 0) {
+            if (!isSuperAdmin(req.user) && requestedStatus === 'disabled') {
+                await clearModelDefaultReferences(req.params.id);
+            }
             logAction(req, '修改模型', `更新模型: ${name} (ID: ${req.params.id})，可用范围: ${currentScope === 'global' ? '全局' : '个人'} → ${nextScope === 'global' ? '全局' : '个人'}`);
             res.json({ success: true });
         } else {
             res.status(403).json({ error: '无权修改或模型不存在' });
         }
+    }));
+
+    router.patch('/models/:id/status', authMiddleware, asyncHandler(async (req, res) => {
+        const existing = await getModelForStatusManagement(req.params.id);
+        if (!existing || existing.status === 'deleted' || existing.status === 'usage_only') {
+            return res.status(404).json({ error: '模型不存在。' });
+        }
+        if (!canManageModel(existing, req.user)) {
+            return res.status(403).json({ error: '无权操作该模型。' });
+        }
+        const targetStatus = String(req.body?.status || '').trim();
+        if (!['active', 'disabled'].includes(targetStatus)) {
+            return res.status(400).json({ error: '模型状态无效，仅支持 active（启用）或 disabled（停用）。' });
+        }
+        const changed = await updateModelStatus({
+            modelId: existing.id,
+            status: targetStatus,
+            userId: existing.user_id,
+            isSuperAdmin: isSuperAdmin(req.user)
+        });
+        if (!changed) {
+            return res.status(403).json({ error: '修改模型状态失败或无权操作。' });
+        }
+        if (targetStatus === 'disabled') {
+            await clearModelDefaultReferences(existing.id);
+            if (existing.user_id === null) {
+                await require('../services/app-settings').refreshAppSettingsCache().catch(() => {});
+            }
+            logAction(req, '停用模型', `关闭/停用模型: ${existing.name} (ID: ${existing.id})`);
+            return res.json({ success: true, status: targetStatus, message: '模型已关闭（已停用）' });
+        }
+        logAction(req, '启用模型', `开启/启用模型: ${existing.name} (ID: ${existing.id})`);
+        return res.json({ success: true, status: targetStatus, message: '模型已开启（已启用）' });
     }));
 
     router.delete('/models/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -468,7 +530,21 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
         const { password } = req.body;
         if (!password) return res.status(400).json({ error: '需要输入密码进行二次验证' });
 
-        const model = await getAccessibleModelAsync(req.params.id, req.user);
+        let model = await getAccessibleModelAsync(req.params.id, req.user);
+        if (!model) {
+            const candidate = await getModelForStatusManagement(req.params.id);
+            if (candidate && canManageModel(candidate, req.user)) {
+                model = candidate;
+                if (model.api_key) {
+                    try {
+                        model.api_key = decryptSecret(model.api_key, 'models.api_key');
+                    } catch (e) {
+                        model.api_key = '';
+                        model.secret_error = e.message || '模型密钥解密失败';
+                    }
+                }
+            }
+        }
         if (!canUseStoredModelSecret(model, req.user)) return res.status(403).json({ error: '无权查看该模型密钥' });
 
         const bcrypt = require('bcryptjs');

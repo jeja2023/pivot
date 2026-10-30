@@ -10,7 +10,7 @@ const {
     getPendingModelUsageTotal
 } = require('./db-write-queue');
 
-const modelListFields = "id, user_id, name, url, model_name, is_default, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, tool_call_probe_status, tool_call_probe_protocol, tool_call_probe_error, tool_call_probed_at, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
+const modelListFields = "id, user_id, name, url, model_name, is_default, status, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, tool_call_probe_status, tool_call_probe_protocol, tool_call_probe_error, tool_call_probed_at, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
 
 const normalizeTags = (value) => String(value || '')
     .split(',')

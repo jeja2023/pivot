@@ -176,7 +176,7 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
     const settings = settingsRes.ok ? await settingsRes.json() : {};
     if (settings.ocrConfig) window.Pivot.ocrConfig = settings.ocrConfig;
     renderRetrievalModelServices(settings);
-    window.Pivot.legacy.updateEmbeddingSettingsForm?.(settings.retrievalModelConfig || settings.embeddingConfig, settings.rerankConfig);
+    window.Pivot.getModule?.('settings.retrievalForm')?.updateEmbeddingSettingsForm?.(settings.retrievalModelConfig || settings.embeddingConfig, settings.rerankConfig);
     window.Pivot.legacy.bindEmbeddingModalEvents?.();
     if (!window.Pivot?.ocrEngineStatus) {
         apiFetch(`${API_BASE}/apps/ocr/engines`, { headers: authHeaders() })
@@ -198,33 +198,44 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
 
     PivotSafeHtml.setHtml(document.getElementById('model-list-body'), data.map((m, idx) => {
         const isGlobalModel = !m.user_id;
+        const isModelDisabled = (m.status || 'active') === 'disabled';
         const isPersonalDefault = String(m.id) === String(personalDefaultId);
         const isGlobalDefault = isGlobalModel && String(m.id) === String(globalDefaultId);
         const isSuperAdmin = isSuperAdminUser();
         const isMyModel = String(m.user_id) === String(currentUser?.id);
         
         let defaultBtn = '';
-        if (isSuperAdmin) {
-            if (isGlobalDefault) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-global-default" data-model-id="" data-page="${page}">取消默认</button>`;
-            } else if (isGlobalModel) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-global-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
-            } else if (isMyModel && isPersonalDefault) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消个人默认</button>`;
-            } else if (isMyModel) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为个人默认</button>`;
-            }
-        } else {
-            if (isPersonalDefault) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--danger); color: var(--danger);" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消默认</button>`;
-            } else if (isMyModel) {
-                defaultBtn = `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
+        if (!isModelDisabled) {
+            if (isSuperAdmin) {
+                if (isGlobalDefault) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-global-default" data-model-id="" data-page="${page}">取消默认</button>`;
+                } else if (isGlobalModel) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-global-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
+                } else if (isMyModel && isPersonalDefault) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消个人默认</button>`;
+                } else if (isMyModel) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为个人默认</button>`;
+                }
+            } else {
+                if (isPersonalDefault) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-personal-default" data-model-id="" data-page="${page}">取消默认</button>`;
+                } else if (isMyModel) {
+                    defaultBtn = `<button class="btn-secondary" data-model-action="set-personal-default" data-model-id="${m.id}" data-page="${page}">设为默认</button>`;
+                }
             }
         }
 
         const isOwnModel = String(m.user_id) === String(currentUser?.id);
         const canEdit = isOwnModel || (isSuperAdmin && isGlobalModel);
         const canDelete = canEdit;
+        let toggleStatusBtn = '';
+        if (canEdit) {
+            if (isModelDisabled) {
+                toggleStatusBtn = `<button class="btn-secondary" data-model-action="toggle-status" data-model-id="${m.id}" data-target-status="active" data-page="${page}" title="开启该模型">开启</button>`;
+            } else {
+                toggleStatusBtn = `<button class="btn-secondary" data-model-action="toggle-status" data-model-id="${m.id}" data-target-status="disabled" data-page="${page}" title="关闭该模型（停用但保留配置）">关闭</button>`;
+            }
+        }
         
         let displayUrl = escapeHtml(m.url);
         if (isSuperAdmin) {
@@ -239,11 +250,11 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
         const safeScope = escapeHtml(scopeText);
 
         return `
-        <tr id="model-row-${m.id}">
+        <tr id="model-row-${m.id}" class="model-row ${isModelDisabled ? 'is-disabled' : ''}">
             <td class="text-center">${(page - 1) * pageState.limit + idx + 1}</td>
             <td title="${escapeHtml(m.name)}">
                 <div class="model-name-cell">
-                    <span>${escapeHtml(m.name)}${m.user_id ? ' <small>(私有)</small>' : ' <small>(全局)</small>'}</span>
+                    <span>${escapeHtml(m.name)}${m.user_id ? ' <small>(私有)</small>' : ' <small>(全局)</small>'}${isModelDisabled ? ' <span class="model-status-tag is-disabled">(已停用)</span>' : ''}</span>
                 </div>
             </td>
             <td title="${displayUrl}">${displayUrl}</td>
@@ -252,16 +263,18 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
             <td title="${safeScope}">${safeScope}</td>
             <td title="${escapeHtml(m.owner_nickname || m.owner_name || '全局')}">${escapeHtml(m.owner_nickname || m.owner_name || '全局')}</td>
             <td class="text-center">
-                <span class="status-dot status-unknown" id="status-${m.id}" title="未检测"></span>
-                <small id="latency-${m.id}"></small>
+                ${isModelDisabled
+                    ? '<span class="model-status-badge is-disabled" title="已停用（关闭）">已停用</span>'
+                    : `<span class="status-dot status-unknown" id="status-${m.id}" title="未检测"></span><span class="model-status-badge is-active">已启用</span><small id="latency-${m.id}"></small>`}
             </td>
             <td title="${escapeHtml(formatDateToCN(m.created_at))}">${escapeHtml(formatDateToCN(m.created_at))}</td>
             <td class="text-center">
                 <div style="display: flex; gap: 4px; justify-content: center; align-items: center;">
-                    <button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem; border-color: var(--primary); color: var(--primary);" data-model-action="test" data-model="${encodeActionArg(m)}">测试</button>
+                    <button class="btn-secondary" data-model-action="test" data-model="${encodeActionArg(m)}">测试</button>
                     ${defaultBtn}
-                    ${canEdit ? `<button class="btn-secondary" style="padding: 1px 5px; font-size: 0.68rem;" data-model-action="edit" data-model="${encodeActionArg(m)}">编辑</button>` : ''}
-                    ${canDelete ? `<button class="btn-danger" style="padding: 1px 5px; font-size: 0.68rem;" data-model-action="delete" data-model-id="${m.id}">删除</button>` : ''}
+                    ${toggleStatusBtn}
+                    ${canEdit ? `<button class="btn-secondary" data-model-action="edit" data-model="${encodeActionArg(m)}">编辑</button>` : ''}
+                    ${canDelete ? `<button class="btn-danger" data-model-action="delete" data-model-id="${m.id}">删除</button>` : ''}
                 </div>
             </td>
         </tr>
@@ -286,6 +299,10 @@ document.getElementById('model-list-body')?.addEventListener('click', async (eve
     if (action === 'test' && model) return window.Pivot.legacy.testExistingModel(model);
     if (action === 'edit' && model) return window.Pivot.legacy.prepareEditModel(model);
     if (action === 'delete' && modelId) return window.Pivot.legacy.deleteModel(modelId);
+    if (action === 'toggle-status' && modelId) {
+        const targetStatus = button.dataset.targetStatus || 'disabled';
+        return window.Pivot.legacy.toggleModelStatus(modelId, targetStatus, page);
+    }
     if (action === 'set-global-default') {
         await window.Pivot.legacy.setGlobalDefaultModel(modelId, button);
         return window.Pivot.legacy.loadModels(page);
@@ -389,6 +406,8 @@ window.Pivot.legacy.prepareEditModel = (model) => {
     if (outputPriceEl) outputPriceEl.value = model.output_price_per_million || '';
     const currencyEl = document.getElementById('m-price-currency');
     if (currencyEl) currencyEl.value = formatModelPriceCurrency(model.price_currency);
+    const statusEnabledEl = document.getElementById('m-status-enabled');
+    if (statusEnabledEl) statusEnabledEl.checked = (model.status || 'active') !== 'disabled';
     document.getElementById('model-modal-title').innerText = '编辑模型配置';
     window.Pivot.legacy.updateModelScopeControls?.(model);
     document.getElementById('model-modal-container').classList.remove('hidden');
@@ -467,6 +486,8 @@ window.Pivot.legacy.resetModelForm = () => {
     if (supportsReasoningEl) supportsReasoningEl.checked = false;
     const chatThinkingEnabledEl = document.getElementById('m-chat-thinking-enabled');
     if (chatThinkingEnabledEl) chatThinkingEnabledEl.checked = false;
+    const statusEnabledEl = document.getElementById('m-status-enabled');
+    if (statusEnabledEl) statusEnabledEl.checked = true;
     const keyInput = document.getElementById('m-key');
     if (keyInput) keyInput.type = 'password';
 };

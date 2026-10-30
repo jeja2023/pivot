@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/model-status.js",
+      "count": 5,
+      "rationale": "模型状态管理独立仓储：按操作者权限受控切换模型的 active 与 disabled 状态，停用时同步清除默认标记。",
+      "verification": "tests/model-status.test.js 覆盖模型开启、关闭、越权阻断、默认模型解绑与列表过滤。"
+    },
+    {
       "file": "server/repositories/knowledge-index-status.js",
       "count": 2,
       "rationale": "文档索引失败及重建失败的既有参数化更新迁入数据访问层；后台任务在事务中先锁定当前租约，避免旧执行覆盖新状态。",

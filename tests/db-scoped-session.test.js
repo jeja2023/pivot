@@ -13,8 +13,8 @@ test('持锁任务的数据库调用使用隔离连接，连接失效时不回�
         assert.equal((await queryWithStatementTimeout('SELECT ? AS value', [9], 0))[0].value, 9);
         await assert.rejects(() => transaction(async () => {}), /持锁任务/);
         await assert.rejects(() => queryWithStatementTimeout('SELECT 1', [], 100), /持锁任务/);
-        client.query = async () => { throw new Error('connection lost'); };
-        await assert.rejects(() => execute('UPDATE example SET value = ?', [10]), /connection lost/);
+        client.query = async () => { throw new Error('连接已断开'); };
+        await assert.rejects(() => execute('UPDATE example SET value = ?', [10]), /连接已断开/);
     });
     assert.deepEqual(calls.map(call => call.sql), ['SELECT $1 AS value', 'UPDATE example SET value = $1', 'SELECT $1 AS value']);
 });

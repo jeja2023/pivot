@@ -67,6 +67,7 @@ window.Pivot.legacy.addModel = async () => {
         context_window_tokens: document.getElementById('m-context-window-tokens') ? parseTokenAmount(document.getElementById('m-context-window-tokens').value) || undefined : undefined,
         max_concurrent: document.getElementById('m-max-concurrent') ? Number(document.getElementById('m-max-concurrent').value || 0) : 0,
         monitor_url: document.getElementById('m-monitor-url') ? document.getElementById('m-monitor-url').value.trim() : '',
+        status: document.getElementById('m-status-enabled')?.checked ? 'active' : 'disabled',
         supports_vision: document.getElementById('m-supports-vision')?.checked ? 1 : 0,
         supports_reasoning: document.getElementById('m-supports-reasoning')?.checked ? 1 : 0,
         chat_thinking_enabled: document.getElementById('m-chat-thinking-enabled')?.checked ? 1 : 0,
@@ -104,6 +105,36 @@ window.Pivot.legacy.deleteModel = (id) => {
     window.Pivot.legacy.showConfirm('删除模型', '确定要删除该模型配置吗？', async () => {
         const res = await apiFetch(`${API_BASE}/models/${id}`, { method: 'DELETE', headers: authHeaders() });
         if (res.ok) { showToast('模型已删除'); window.Pivot.legacy.loadModels(pageState.models); }
+    });
+};
+
+window.Pivot.legacy.toggleModelStatus = (modelId, targetStatus, page = 1) => {
+    const isDisabling = targetStatus === 'disabled';
+    const title = isDisabling ? '关闭模型' : '开启模型';
+    const message = isDisabling
+        ? '确定要关闭该模型吗？关闭后将停用该模型，不再在对话与应用中提供调用，但会完整保留模型配置。'
+        : '确定要开启该模型吗？开启后将在可用模型列表中恢复提供。';
+
+    window.Pivot.legacy.showConfirm(title, message, async () => {
+        try {
+            const res = await apiFetch(`${API_BASE}/models/${modelId}/status`, {
+                method: 'PATCH',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ status: targetStatus })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showToast(isDisabling ? '模型已关闭（已停用）' : '模型已开启（已启用）', 'success');
+                await window.Pivot.legacy.loadModels(page);
+                if (window.Pivot.legacy.refreshModelSelector) {
+                    window.Pivot.legacy.refreshModelSelector();
+                }
+            } else {
+                showToast(data.error || '操作失败', 'error');
+            }
+        } catch (e) {
+            showToast('请求失败，请检查网络', 'error');
+        }
     });
 };
 

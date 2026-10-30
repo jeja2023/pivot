@@ -2,6 +2,12 @@
 
 This document records optimization work that is intentionally staged instead of forced into one risky rewrite.
 
+## 2026-10-30 MCP 流式稳定性（v0.7.74）
+
+- 标准 MCP 响应流增加可配置的空闲保护和连接释放；模型流沿用现有期限，并补充连接关闭验证。
+- 聊天模板和设置页各完成一项小范围治理；其余候选导出和 legacy 别名仍需逐项确认后渐进处理。
+- 定向测试覆盖本地 HTTP、静默、心跳、取消和重连；真实服务、长时间负载和生产环境仍需验收。详见 [v0.7.74 发布记录](releases/v0.7.74-MCP流式稳定性与治理优化.md)。
+
 ## 2026-10-30 基础能力四轮修复（v0.7.70–v0.7.73）
 
 - **v0.7.70**：模型空回复、请求重放与 429 提示；见[第一轮发布记录](releases/v0.7.70-基础能力第一轮模型与聊天错误处理.md)。

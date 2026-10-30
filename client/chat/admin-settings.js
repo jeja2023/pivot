@@ -532,7 +532,7 @@ function updateEmbeddingSettingsForm(embeddingConfig = {}, rerankConfig = {}) {
     setSettingsInitialValues('#setting-rag-embedding-url, #setting-rag-embedding-model, #setting-rag-rerank-url, #setting-rag-rerank-protocol, #setting-rag-rerank-model, #setting-rag-rerank-candidate-limit, #setting-rag-rerank-timeout-ms');
 }
 
-window.Pivot.legacy.updateEmbeddingSettingsForm = updateEmbeddingSettingsForm;
+window.Pivot.registerModule('settings.retrievalForm', { updateEmbeddingSettingsForm });
 
 function setRetrievalModelModalVisibility(modal, open, options = {}) {
     if (!modal) return;

@@ -121,7 +121,7 @@ test('检索模型服务统一从模型配置页进入，知识库仅展示状�
     assert.doesNotMatch(knowledgeHtml, /id="rag-embedding-modal-open-btn"/);
     assert.match(modelsJs, /function renderRetrievalModelServices/);
     assert.match(modelsJs, /updateEmbeddingSettingsForm\?\.\(settings\.retrievalModelConfig/);
-    assert.match(settingsJs, /window\.Pivot\.legacy\.updateEmbeddingSettingsForm = updateEmbeddingSettingsForm/);
+    assert.match(settingsJs, /window\.Pivot\.registerModule\('settings\.retrievalForm', \{ updateEmbeddingSettingsForm \}\)/);
     assert.match(settingsJs, /function openRetrievalModelConfigSection\(section\)/);
     assert.match(settingsJs, /window\.Pivot\.legacy\.openRetrievalModelConfigSection = openRetrievalModelConfigSection/);
     assert.match(settingsJs, /serviceCards\.addEventListener\('click', event => \{/);

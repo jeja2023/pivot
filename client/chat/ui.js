@@ -144,6 +144,7 @@ async function compactCurrentSessionContext() {
 };
 
 function isSelectableModelForCurrentUser(model) {
+    if ((model?.status || 'active') === 'disabled') return false;
     if (!model?.user_id) return true;
     return String(model.user_id) === String(currentUser?.id);
 }

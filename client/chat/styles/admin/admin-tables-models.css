@@ -59,9 +59,9 @@
 .models-table .col-capability { width: 74px; }
 .models-table .col-units { width: 92px; }
 .models-table .col-owner { width: 92px; }
-.models-table .col-status { width: 78px; }
+.models-table .col-status { width: 96px; }
 .models-table .col-created { width: 148px; }
-.models-table .col-actions { width: 232px; }
+.models-table .col-actions { width: 252px; }
 .models-table td:nth-child(4) {
     color: var(--text-main);
     font-family: inherit;
@@ -89,6 +89,92 @@
 .models-table td:nth-child(10) button {
     height: 24px;
     line-height: 1;
+    padding: 1px 5px;
+    font-size: 0.68rem;
+}
+
+.models-table button[data-model-action="test"] {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.models-table button[data-model-action="set-global-default"][data-model-id=""],
+.models-table button[data-model-action="set-personal-default"][data-model-id=""] {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.models-table button[data-model-action="set-global-default"]:not([data-model-id=""]),
+.models-table button[data-model-action="set-personal-default"]:not([data-model-id=""]) {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.models-table button[data-model-action="toggle-status"][data-target-status="active"] {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.models-table button[data-model-action="toggle-status"][data-target-status="disabled"] {
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
+.models-table .model-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-height: 20px;
+    line-height: 1;
+    padding: 0 6px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 0.72rem;
+    font-weight: 500;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.models-table .model-status-badge.is-active {
+    background: var(--surface);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.models-table .model-status-badge.is-disabled {
+    background: var(--bg-side);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+.models-table tr.is-disabled td {
+    opacity: 0.76;
+}
+
+.models-table tr.is-disabled:hover td {
+    opacity: 1;
+}
+
+.models-table .model-name-cell .model-status-tag.is-disabled {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: normal;
+    margin-left: 4px;
+}
+
+.models-table tr.is-disabled td {
+    opacity: 0.76;
+}
+
+.models-table tr.is-disabled:hover td {
+    opacity: 1;
+}
+
+.models-table .model-name-cell .model-status-tag.is-disabled {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: normal;
+    margin-left: 4px;
 }
 
 .retrieval-model-services {

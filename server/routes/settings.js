@@ -377,14 +377,14 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         if (parsedModelId !== null) {
             const sql = isSuperAdmin(req.user)
-                ? 'SELECT id FROM models WHERE id = ?'
-                : 'SELECT id FROM models WHERE id = ? AND (user_id = ? OR user_id IS NULL)';
+                ? "SELECT id FROM models WHERE id = ? AND COALESCE(status, 'active') = 'active'"
+                : "SELECT id FROM models WHERE id = ? AND COALESCE(status, 'active') = 'active' AND (user_id = ? OR user_id IS NULL)";
             const params = isSuperAdmin(req.user)
                 ? [parsedModelId]
                 : [parsedModelId, req.user.id];
             const model = await queryOne(sql, params);
             if (!model) {
-                return res.status(400).json({ error: '只能将您可访问的模型设为默认' });
+                return res.status(400).json({ error: '只能将您可访问且已启用的模型设为默认' });
             }
         }
 
@@ -461,9 +461,12 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             if (!allowedSettings.has(key)) continue;
             const value = toSettingValue(key, updates[key]);
             if (key === 'default_model_id' && value) {
-                const globalModel = await queryOne('SELECT id FROM models WHERE id = ? AND user_id IS NULL', [value]);
+                const globalModel = await queryOne('SELECT id, status FROM models WHERE id = ? AND user_id IS NULL', [value]);
                 if (!globalModel) {
                     throw new Error('系统默认模型只能选择全局模型，不能选择用户私有模型');
+                }
+                if (globalModel.status === 'disabled') {
+                    throw new Error('不能将已关闭/停用的模型设为系统默认模型');
                 }
             }
             if (key === RAG_CONFIG_KEYS.embeddingApiUrl && value) {

@@ -391,11 +391,13 @@ test('mock SSE harness propagates provider disconnect and cancellation', async (
 });
 
 test('Agent 流建立后长期无新数据会按无进展策略中止', async () => {
+    let connectionClosed = false;
     const server = http.createServer((req, res) => {
         req.resume();
         req.on('end', () => {
             res.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive' });
             res.flushHeaders();
+            res.once('close', () => { connectionClosed = true; });
         });
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -409,6 +411,8 @@ test('Agent 流建立后长期无新数据会按无进展策略中止', async ()
             }),
             error => error?.code === 'AGENT_MODEL_STREAM_IDLE'
         );
+        await new Promise(resolve => setTimeout(resolve, 100));
+        assert.equal(connectionClosed, true);
     } finally {
         await closeServer(server);
     }

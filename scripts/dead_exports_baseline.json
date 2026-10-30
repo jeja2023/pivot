@@ -1,6 +1,6 @@
 {
   "description": "Baseline for server exports with no static external reference. New dead exports are forbidden; existing entries must only decrease after review.",
-  "total": 560,
+  "total": 558,
   "entries": [
     {
       "file": "server/audit-actions.js",
@@ -21,14 +21,6 @@
     {
       "file": "server/auth.js",
       "name": "UserInputError"
-    },
-    {
-      "file": "server/chat-template.js",
-      "name": "chatPartialsDir"
-    },
-    {
-      "file": "server/chat-template.js",
-      "name": "chatTemplatePath"
     },
     {
       "file": "server/db/client.js",

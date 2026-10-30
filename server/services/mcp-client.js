@@ -515,6 +515,7 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
         config = {};
     }
     const timeoutMs = Math.max(1000, Math.min(Number(config.timeoutMs || config.timeout_ms || MCP_TIMEOUT_MS) || MCP_TIMEOUT_MS, 120000));
+    const streamIdleTimeoutMs = config.streamIdleTimeoutMs ?? config.stream_idle_timeout_ms;
     const protocolMode = String(config.protocolMode || config.protocol_mode || 'legacy').toLowerCase() === 'standard' ? 'standard' : 'legacy';
     const authMode = String(config.authMode || config.auth_mode || 'auto').toLowerCase();
     let connectionAuthorization = options.connectionAuthorization || null;
@@ -569,12 +570,13 @@ async function callMcpJsonRpc(server, method, params = {}, user = null, options 
                 : requestParams
         }, requestOptions);
         if (notification) {
-            if (protocolMode === 'standard') await drainMcpResponse(response);
+            if (protocolMode === 'standard') await drainMcpResponse(response, { idleTimeoutMs: streamIdleTimeoutMs, signal: options.signal });
             return response;
         }
         if (protocolMode !== 'standard') return response;
         const readStream = async (streamResponse, attempt, streamHeaders) => readMcpStreamResponse(streamResponse, requestId, {
             signal: options.signal || null,
+            idleTimeoutMs: streamIdleTimeoutMs,
             onNotification: options.onNotification,
             maxBytes: 4 * 1024 * 1024,
             keepAlive: options.keepAlive === true,
