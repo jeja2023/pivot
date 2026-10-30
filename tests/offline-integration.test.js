@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const dns = require('node:dns').promises;
 const { backupPaths, createBackupBundle, verifyBackupBundle } = require('../server/services/offline-backup-bundle');
 const { mcpOutboundOptions } = require('../server/services/mcp-managed-outbound');
@@ -26,6 +27,28 @@ test('无效镜像标签在创建离线包之前被拒绝', async () => {
     try {
         await assert.rejects(exportOfflineTools(['--export', output, '--tools-image=bad:tag\n    privileged: true']), /镜像/);
         await assert.rejects(fs.access(output), error => error.code === 'ENOENT');
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
+});
+
+test('离线包校验兼容旧包和包含一键安装脚本的新包', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-offline-manifest-test-'));
+    const names = ['image-1.tar', 'image-2.tar', 'image-3.tar', 'docker-compose.tools.yml', 'requirements.lock', 'verify_bundle.py'];
+    try {
+        const entries = [];
+        for (const name of [...names, 'install_bundle.py']) {
+            await fs.writeFile(path.join(root, name), name);
+            entries.push({ path: name, sha256: crypto.createHash('sha256').update(name).digest('hex') });
+        }
+        const manifest = { version: 1, images: [{}, {}, {}], files: entries.slice(0, 6) };
+        await fs.writeFile(path.join(root, 'bom.json'), JSON.stringify(manifest));
+        await exportOfflineTools(['--verify', root]);
+        manifest.files = entries;
+        await fs.writeFile(path.join(root, 'bom.json'), JSON.stringify(manifest));
+        await exportOfflineTools(['--verify', root]);
+        await fs.writeFile(path.join(root, 'install_bundle.py'), 'changed');
+        await assert.rejects(exportOfflineTools(['--verify', root]), /校验失败/);
     } finally {
         await fs.rm(root, { recursive: true, force: true });
     }

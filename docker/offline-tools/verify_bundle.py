@@ -7,7 +7,8 @@ import sys
 root = Path(sys.argv[1] if len(sys.argv) > 1 else '.').resolve()
 manifest = json.loads((root / 'bom.json').read_text(encoding='utf-8'))
 expected = {'image-1.tar', 'image-2.tar', 'image-3.tar', 'docker-compose.tools.yml', 'requirements.lock', 'verify_bundle.py'}
-if manifest.get('version') != 1 or {item['path'] for item in manifest['files']} != expected or len(manifest['files']) != len(expected):
+names = {item['path'] for item in manifest['files']}
+if manifest.get('version') != 1 or names not in (expected, expected | {'install_bundle.py'}) or len(manifest['files']) != len(names):
     raise SystemExit('物料清单不完整或包含非法路径。')
 for item in manifest['files']:
     file = root / item['path']

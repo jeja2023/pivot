@@ -27,13 +27,16 @@ async function main(args = process.argv.slice(2)) {
     if (args[0] === '--verify' && args[1]) {
         const root = path.resolve(args[1]);
         const manifest = JSON.parse(await fs.readFile(path.join(root, 'bom.json'), 'utf8'));
-        if (manifest.version !== 1 || !Array.isArray(manifest.files) || manifest.files.length !== 6
+        if (manifest.version !== 1 || !Array.isArray(manifest.files) || ![6, 7].includes(manifest.files.length)
             || !Array.isArray(manifest.images) || manifest.images.length !== images.length) throw new Error('离线物料清单无效。');
         const names = new Set();
         for (const item of manifest.files) {
-            if (!/^(image-[123]\.tar|docker-compose\.tools\.yml|requirements\.lock|verify_bundle\.py)$/.test(item.path)
+            if (!/^(image-[123]\.tar|docker-compose\.tools\.yml|requirements\.lock|verify_bundle\.py|install_bundle\.py)$/.test(item.path)
                 || names.has(item.path) || await digestFile(path.join(root, item.path)) !== item.sha256) throw new Error('离线物料校验失败。');
             names.add(item.path);
+        }
+        for (const required of ['image-1.tar', 'image-2.tar', 'image-3.tar', 'docker-compose.tools.yml', 'requirements.lock', 'verify_bundle.py']) {
+            if (!names.has(required)) throw new Error('离线物料清单缺少必要文件。');
         }
         console.log('离线物料摘要校验通过。');
         return;
@@ -57,7 +60,7 @@ async function main(args = process.argv.slice(2)) {
         await run('docker', ['save', '--output', path.join(root, name), selectedImages[index]], { windowsHide: true });
         files.push({ path: name, sha256: await digestFile(path.join(root, name)) });
     }
-    for (const [source, name] of [['docker-compose.tools.yml', 'docker-compose.tools.yml'], ['docker/offline-tools/requirements.lock', 'requirements.lock'], ['docker/offline-tools/verify_bundle.py', 'verify_bundle.py']]) {
+    for (const [source, name] of [['docker-compose.tools.yml', 'docker-compose.tools.yml'], ['docker/offline-tools/requirements.lock', 'requirements.lock'], ['docker/offline-tools/verify_bundle.py', 'verify_bundle.py'], ['docker/offline-tools/install_bundle.py', 'install_bundle.py']]) {
         if (name === 'docker-compose.tools.yml') await fs.writeFile(path.join(root, name), compose, 'utf8');
         else await fs.copyFile(source, path.join(root, name));
         files.push({ path: name, sha256: await digestFile(path.join(root, name)) });
