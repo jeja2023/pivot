@@ -2,7 +2,7 @@
 // @ts-check
 
 // 将短时间内的审计事件合并，同时保留单条失败时的独立重试能力。
-/** @param {{recordBatch?: (events: any[]) => Promise<any>, recordOne?: (event: any) => Promise<any>, onFailure?: (details: {failed: number, attempted: number}) => void, maxBatchSize?: number, intervalMs?: number}} [options] */
+/** 事件批量写入器选项配置 @param {{recordBatch?: (events: any[]) => Promise<any>, recordOne?: (event: any) => Promise<any>, onFailure?: (details: {failed: number, attempted: number}) => void, maxBatchSize?: number, intervalMs?: number}} [options] */
 function createAgentEventBatchWriter({ recordBatch, recordOne, onFailure, maxBatchSize = 16, intervalMs = 2000 } = {}) {
     const batchSize = Math.max(1, Math.min(Number(maxBatchSize) || 16, 256));
     const delay = Math.max(50, Math.min(Number(intervalMs) || 2000, 10000));

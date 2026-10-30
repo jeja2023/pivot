@@ -17,8 +17,8 @@ test('批次失败后逐条尝试，不让单条错误阻断后续事件', async
     const attempts = [];
     const failures = [];
     const writer = createAgentEventBatchWriter({ intervalMs: 10000,
-        recordBatch: async () => { throw new Error('batch failed'); },
-        recordOne: async item => { attempts.push(item.index); if (item.index === 1) throw new Error('one failed'); },
+        recordBatch: async () => { throw new Error('模拟批量写入失败'); },
+        recordOne: async item => { attempts.push(item.index); if (item.index === 1) throw new Error('模拟单条写入失败'); },
         onFailure: details => failures.push(details) });
     writer.push({ index: 1 }); writer.push({ index: 2 });
     await writer.finish();
@@ -28,7 +28,7 @@ test('批次失败后逐条尝试，不让单条错误阻断后续事件', async
 
 test('批次失败但逐条重试成功时不报告丢失', async () => {
     const failures = [];
-    const writer = createAgentEventBatchWriter({ recordBatch: async () => { throw new Error('batch failed'); },
+    const writer = createAgentEventBatchWriter({ recordBatch: async () => { throw new Error('模拟批量写入失败'); },
         recordOne: async () => {}, onFailure: value => failures.push(value) });
     writer.push({ index: 1 });
     await writer.finish();

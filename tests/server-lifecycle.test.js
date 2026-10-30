@@ -78,7 +78,7 @@ test('维护停止失败不会阻断后台停止，也不会提前关闭数据�
     let release;
     const waiting = new Promise(resolve => { release = resolve; });
     const schedule = () => {};
-    schedule.cancel = () => { calls.push('maintenance'); throw new Error('failed'); };
+    schedule.cancel = () => { calls.push('maintenance'); throw new Error('模拟维护取消失败'); };
     const processRef = { on(name, handler) { handlers.set(name, handler); }, exit() { calls.push('exit'); } };
     startHttpServer({
         app: { listen: () => ({ close(callback) { callback(); } }) },

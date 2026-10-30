@@ -192,9 +192,9 @@ test('分析执行器在启动与关机竞态时仍会停止', async () => {
 test('受管执行器启动失败时清理已创建资源', async () => {
     let stopped = false;
     await assert.rejects(startManagedRunner(() => ({
-        async start() { throw new Error('start failed'); },
+        async start() { throw new Error('模拟启动失败'); },
         async stop() { stopped = true; }
-    })), /start failed/);
+    })), /模拟启动失败/);
     assert.equal(stopped, true);
 });
 

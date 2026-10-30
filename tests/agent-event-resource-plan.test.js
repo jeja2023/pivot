@@ -54,7 +54,7 @@ test('outbox 同步投递错误不会阻断后续轮询', async () => {
     let count = 0;
     const dispatcher = createAgentEventOutboxDispatcher({
         logger: { warn() {} },
-        dispatchBatch: () => { count += 1; throw new Error('simulated synchronous failure'); }
+        dispatchBatch: () => { count += 1; throw new Error('模拟同步投递失败'); }
     });
     await dispatcher.tick();
     await dispatcher.tick();
@@ -83,7 +83,7 @@ test('Agent event outbox is retryable and event replay advances by seq', { skip:
         const delivered = [];
         const result = await dispatchAgentEventOutboxBatch({
             workerId: `worker-${runId}`,
-            publish: async () => { throw new Error('simulated delivery failure'); }
+            publish: async () => { throw new Error('模拟投递失败'); }
         });
         assert.equal(result.delivered, 0, 'failed item remains pending for retry');
 
@@ -169,7 +169,7 @@ test('outbox 按数值顺序领取超出安全整数范围的事件 ID', { skip:
                     });
                     response.on('error', reject);
                 });
-                request.setTimeout(5000, () => request.destroy(new Error('SSE replay timed out')));
+                request.setTimeout(5000, () => request.destroy(new Error('SSE 重放超时')));
                 request.on('error', reject);
             });
             assert.ok(frames.indexOf(`id: ${eventIds[0]}\n`) < frames.indexOf(`id: ${eventIds[1]}\n`));
@@ -270,7 +270,7 @@ test('批量投递只确认成功项，异步投递失败仍可重试', { skip: 
         const failed = String(events[7].id);
         const result = await dispatchAgentEventOutboxBatch({
             workerId: 'batch-delivery', limit: 100,
-            publish: async (_user, _type, event) => { if (String(event.eventId) === failed) throw new Error('simulated'); }
+            publish: async (_user, _type, event) => { if (String(event.eventId) === failed) throw new Error('模拟异常'); }
         });
         assert.deepEqual(result, { claimed: 30, delivered: 29 });
         const counts = await queryOne("SELECT COUNT(*) FILTER (WHERE status = 'delivered') AS delivered, COUNT(*) FILTER (WHERE status = 'pending') AS pending FROM agent_event_outbox WHERE run_id = ?", [runId]);

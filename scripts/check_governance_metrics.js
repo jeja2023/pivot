@@ -25,7 +25,7 @@ function lineCount(file) {
 }
 
 function byteCount(file) {
-    // Git checkouts may use CRLF on Windows; budgets must match CI's LF checkout.
+    // Windows 环境下拉取可能为 CRLF 换行；预算需按 CI 的 LF 换行对齐字节数。
     return Buffer.byteLength(fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n'));
 }
 

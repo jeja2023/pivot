@@ -36,7 +36,7 @@ test('重连按页补发所有事件并缓存查询期间的实时事件', async
                 });
                 response.on('error', reject);
             });
-            request.setTimeout(5000, () => request.destroy(new Error('SSE replay timed out')));
+            request.setTimeout(5000, () => request.destroy(new Error('SSE 重放超时')));
             request.on('error', reject);
         });
         await waiting;
@@ -117,7 +117,7 @@ test('单次重放限制页数并保留可继续的已送达游标', async () =>
                 response.on('end', () => resolve(body));
                 response.on('error', reject);
             });
-            request.setTimeout(5000, () => request.destroy(new Error('SSE replay timed out')));
+            request.setTimeout(5000, () => request.destroy(new Error('SSE 重放超时')));
             request.on('error', reject);
         });
         const first = await read('1');

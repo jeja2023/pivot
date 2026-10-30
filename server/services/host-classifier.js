@@ -18,8 +18,8 @@ async function lookupWithTimeout(host, options = {}) {
     const lookup = dns.lookup(host, options);
     const timeout = new Promise((_, reject) => {
         timer = setTimeout(() => {
-            /** @type {NodeJS.ErrnoException} */
-            const error = new Error(`DNS lookup timeout for ${host}`);
+            /** 类型注解 @type {NodeJS.ErrnoException} */
+            const error = new Error(`DNS 解析超时：${host}`);
             error.code = 'DNS_LOOKUP_TIMEOUT';
             reject(error);
         }, timeoutMs);
