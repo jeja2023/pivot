@@ -935,13 +935,13 @@ async function executeMcpTool(fullName, input, user, options = {}) {
         const result = await callMcpJsonRpc(server, 'tools/call', {
             name: match[2],
             arguments: input || {}
-        }, user, options);
+        }, user, { ...options, toolName: fullName });
         recordMcpCallLog({
             user,
             serverId: server.id,
             toolName: match[2],
             source: options.source || 'manual',
-            status: 'success',
+            status: result?.isError === true ? 'error' : 'success',
             durationMs: Date.now() - startedAt,
             input,
             output: result

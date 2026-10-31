@@ -22,6 +22,8 @@ test('extracted Agent routes retain authentication, ownership and mutation guard
     const otherSession = await login(otherName, password, { clientIp: '127.0.0.1' });
     const runId = `route-evidence-${suffix}`;
     await execute("INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES (?, ?, '路由测试', '验证路由隔离', 'running', '{}', NOW(), NOW())", [runId, owner.id]);
+    await execute("INSERT INTO agent_steps (run_id,step_index,type,title,tool_name,input,output,status) VALUES (?,1,'tool','契约读取','tools.describe',?,?,'error')",
+        [runId, JSON.stringify({ toolRef: { toolName: 'mcp.89.render_diagram' }, token: 'private-test-secret' }), JSON.stringify({ code: 'TOOL_POLICY_DENIED', reasonCodes: ['task_tool_allowlist'] })]);
     const transaction = await createTaskTransaction({ run: { id: runId, goal: '验证路由隔离' }, user: owner });
     const app = express();
     app.use(express.json());
@@ -42,6 +44,17 @@ test('extracted Agent routes retain authentication, ownership and mutation guard
         assert.equal((await request(`/agents/transactions/${transaction.id}`, otherSession.accessToken)).status, 404);
         assert.equal((await request(`/agents/runs/${runId}/evidence`, ownerSession.accessToken)).status, 200);
         assert.equal((await request(`/agents/runs/${runId}/evidence`, otherSession.accessToken)).status, 404);
+        const bundle = await request(`/agents/runs/${runId}/audit-bundle?format=json`, ownerSession.accessToken);
+        assert.equal(bundle.status, 200);
+        const exported = await bundle.json();
+        assert.deepEqual(exported.bundle.steps[0].toolDiagnostics.targets, ['mcp.89.render_diagram']);
+        assert.equal(JSON.stringify(exported).includes('private-test-secret'), false);
+        const markdown = await request(`/agents/runs/${runId}/audit-bundle`, ownerSession.accessToken);
+        const body = await markdown.text();
+        assert.match(body, /mcp\.89\.render_diagram/);
+        assert.match(body, /TOOL_POLICY_DENIED/);
+        assert.doesNotMatch(body, /private-test-secret/);
+        assert.equal((await request(`/agents/runs/${runId}/audit-bundle`, otherSession.accessToken)).status, 404);
         assert.equal((await request(`/agents/runs/${runId}/browser-sessions`, otherSession.accessToken)).status, 404);
         assert.equal((await request(`/agents/transactions/${transaction.id}/verify`, ownerSession.accessToken, { method: 'POST', body: '{}' })).status, 409);
         assert.equal((await request(`/agents/transactions/${transaction.id}/commit`, ownerSession.accessToken, { method: 'POST', body: '{}', headers: { 'x-test-block': 'yes' } })).status, 429);

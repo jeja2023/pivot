@@ -89,10 +89,15 @@ async function readyRunArtifacts(runId, userId) {
 }
 
 async function currentExecutionScope(runId, userId) {
-    return queryOne(`SELECT r.status,r.metadata, CASE WHEN r.metadata->'chatBridge' IS NULL THEN TRUE ELSE EXISTS (
+    const row = await queryOne(`SELECT r.status,r.metadata,r.tool_policy,r.tool_allowlist,r.network_policy, CASE WHEN r.metadata->'chatBridge' IS NULL THEN TRUE ELSE EXISTS (
         SELECT 1 FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.id::text = r.metadata->'chatBridge'->>'userMessageId'
             AND m.user_id = r.user_id AND m.session_id = r.session_id AND m.deleted_at IS NULL AND s.deleted_at IS NULL
     ) END AS source_active FROM agent_runs r WHERE r.id = ? AND r.user_id = ? AND r.deleted_at IS NULL`, [runId, userId]);
+    if (row) {
+        row.tool_allowlist = typeof row.tool_allowlist === 'string' ? JSON.parse(row.tool_allowlist) : row.tool_allowlist || [];
+        row.network_policy = parseTurnDecision(row.network_policy);
+    }
+    return row;
 }
 
 async function readTaskSource(runId, userId, messageId = null) {

@@ -56,26 +56,48 @@ async function resumeWaitingConversationTask(run, user, deps = {}) {
     return Boolean(changed);
 }
 
-async function continueConversationTask({ decision, user, sessionId, userMessageId, instruction, sourceContent = '' }, deps = {}) {
+async function continueConversationTask({ decision, user, sessionId, userMessageId, instruction, sourceContent = '', routeOverrides = {}, mcpToolAllowlist = null }, deps = {}) {
     const tasks = await (deps.listSessionTasks || turns.listSessionTasks)(sessionId, user.id);
     const run = tasks.find(item => item.id === decision.continuationOf);
     if (!run) return { continued: false, reason: 'task_not_active' };
     if (!ACTIVE.has(run.status)) return { continued: false, reason: 'task_completed', previousRun: run };
     const metadata = parseConversationRunMetadata(run.metadata);
+    const revisedSelection = Array.isArray(routeOverrides.tools) && routeOverrides.tools.length > 0;
+    const excluded = routeOverrides.excludeTools === true;
+    const selectedNames = revisedSelection ? routeOverrides.tools : metadata.chatBridge?.selectedTools || [];
+    const keepSelectedTools = !excluded && (revisedSelection || (decision.routing?.tools !== 'none' && metadata.capabilityConstraints?.capabilities?.length > 0
+        && metadata.routeCorrection?.routeOverrides?.excludeTools !== true));
+    const selection = keepSelectedTools && selectedNames.length
+        ? await (deps.resolveChatSelectedTools || require('./chat-selected-tools').resolveChatSelectedTools)(user,
+            { ...routeOverrides, tools: selectedNames }, revisedSelection ? mcpToolAllowlist : metadata.chatBridge.mcpToolAllowlist)
+        : { names: [], tools: [], origins: [], ports: [] };
+    const reviseScope = revisedSelection || excluded;
     const idempotencyKey = `chat:${sessionId}:${userMessageId}`;
     const taskContractPatch = { goal: decision.objective || run.goal, constraints: decision.constraints || [], deliverables: decision.deliverables || [],
         acceptance: { ...decision.acceptance, requireSemanticVerification: true,
             requireCompleteSource: metadata.taskContract?.acceptance?.requireCompleteSource === true || sourceContent.length > 12000 }, authorizationRef: `user_message:${userMessageId}` };
-    await (deps.sendAgentControlMessage || sendAgentControlMessage)({ user, toRunId: run.id, type: 'steer', idempotencyKey, payload: { instruction, source: 'chat', sourceMessageId: userMessageId, taskContractPatch } });
-    await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => ({
+    await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => {
+        if (reviseScope && Number(current.chatToolScope?.sourceMessageId || 0) > Number(userMessageId)) throw new Error('工具范围已由更新的消息修改，请重新确认当前任务。');
+        return ({
         ...current,
         conversationTaskId: current.conversationTaskId || run.id,
+        ...(reviseScope ? {
+            chatBridge: { ...current.chatBridge, selectedTools: selection.names, mcpToolAllowlist, mcpEnabled: !excluded },
+            routeCorrection: { kind: 'tool_selection', sourceMessageId: userMessageId, routeOverrides },
+            chatToolScope: { sourceMessageId: userMessageId, toolPolicy: excluded ? 'builtin_only' : 'all',
+                toolAllowlist: excluded ? ['chat.read_source'] : [...(selection.executionNames || selection.names), 'chat.read_source'],
+                networkPolicy: { enabled: !excluded, allowed_origins: selection.origins, allowed_ports: selection.ports, allow_redirect: false } }
+        } : {}),
         requiredSourceMessages: [...new Set([...(current.requiredSourceMessages || []), ...(sourceContent.length > 12000 ? [userMessageId] : [])])],
         ...(current.capabilityConstraints?.present === true && Array.isArray(decision.requiredCapabilities) ? { capabilityConstraints: { ...current.capabilityConstraints,
-            capabilities: [...new Set([...decision.requiredCapabilities, ...(current.chatBridge ? ['conversation.read_source'] : [])])],
+            capabilities: [...new Set([...(excluded ? [] : decision.requiredCapabilities), ...(current.chatBridge ? ['conversation.read_source'] : []),
+                ...(!excluded && (revisedSelection || (current.capabilityConstraints?.capabilities?.length > 0 && current.routeCorrection?.routeOverrides?.excludeTools !== true
+                    && JSON.stringify(current.chatBridge?.selectedTools || []) === JSON.stringify(selectedNames)))
+                    ? selection.tools.flatMap(tool => tool.capabilities || []) : [])])],
             authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
         conversationMessageIds: [...new Set([...(current.conversationMessageIds || []), userMessageId])].slice(-100)
-    }), { userId: user.id });
+    }); }, { userId: user.id, updateToolScope: reviseScope });
+    await (deps.sendAgentControlMessage || sendAgentControlMessage)({ user, toRunId: run.id, type: 'steer', idempotencyKey, payload: { instruction, source: 'chat', sourceMessageId: userMessageId, taskContractPatch } });
     if (run.status === 'needs_input') {
         await resumeWaitingConversationTask(run, user, deps);
     }

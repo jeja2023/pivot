@@ -139,7 +139,8 @@ function registerAgentRunEvidenceRoutes(router, { authMiddleware, automationGuar
                 toolName: s.tool_name,
                 durationMs: s.duration_ms,
                 status: s.status,
-                createdAt: s.created_at
+                createdAt: s.created_at,
+                toolDiagnostics: require('../services/agent-tool-diagnostics').toolStepDiagnostics(s)
             })),
             evidenceCount: evidence.length,
             evidence: evidence.map(e => ({
@@ -186,6 +187,11 @@ function registerAgentRunEvidenceRoutes(router, { authMiddleware, automationGuar
             `| 步数 | 类型 | 工具 / 动作 | 耗时 | 状态 | 发生时间 |`,
             `| :--- | :--- | :--- | :--- | :--- | :--- |`,
             ...steps.map(s => `| ${s.step_index} | ${s.type || 'step'} | ${s.title || s.tool_name || '-'} | ${s.duration_ms ? `${s.duration_ms}ms` : '-'} | ${s.status || 'done'} | ${s.created_at || '-'} |`),
+            ``,
+            `### 工具定位与策略诊断（不包含业务参数与凭据）`,
+            '```json',
+            JSON.stringify(bundle.steps.filter(step => step.toolDiagnostics.targets.length || step.toolDiagnostics.code).map(step => ({ step: step.stepIndex, tool: step.toolName, ...step.toolDiagnostics })), null, 2),
+            '```',
             ``,
             `## 三、工程证据凭据 (共 ${evidence.length} 项)`,
             ``,

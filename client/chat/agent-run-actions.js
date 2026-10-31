@@ -39,6 +39,9 @@ async function runAgentActionOnce(key, runId, selectors, task, fallbackMessage) 
 }
 
 function getSelectedAgentToolAllowlist() {
+    // 当前任务编辑器不再展示工具复选框；缺少控件表示沿用账号授权目录。
+    // 兼容旧模板的显式全不选，仍保持拒绝全部工具的语义。
+    if (!document.querySelectorAll('[data-agent-tool-allow]').length) return [];
     const checked = [...document.querySelectorAll('[data-agent-tool-allow]:checked')].map(input => input.dataset.agentToolAllow);
     if (!checked.length) return ['__none__'];
     if (checked.length === agentToolsCache.length) return [];

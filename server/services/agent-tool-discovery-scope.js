@@ -44,6 +44,9 @@ async function refreshDiscoveryScope(run = {}, user = null, deps = {}) {
         throw error;
     }
     run.metadata = current.metadata;
+    for (const key of ['tool_policy', 'tool_allowlist', 'network_policy']) {
+        if (current[key] !== undefined) run[key] = current[key];
+    }
     return run;
 }
 

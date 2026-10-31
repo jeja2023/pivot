@@ -35,14 +35,17 @@ async function updateAgentRunMetadataWithRetry(runId, transform, options = {}) {
         }
         const expected = JSON.stringify(current);
         const serialized = JSON.stringify(next);
+        const scope = options.updateToolScope === true ? next.chatToolScope : null;
+        const scopeSql = scope ? ', tool_policy = ?, tool_allowlist = ?::jsonb, network_policy = ?::jsonb' : '';
+        const scopeValues = scope ? [scope.toolPolicy, JSON.stringify(scope.toolAllowlist), JSON.stringify(scope.networkPolicy)] : [];
         const changes = await execute(`
             UPDATE agent_runs
-            SET metadata = ?::jsonb, updated_at = ?
+            SET metadata = ?::jsonb, updated_at = ?${scopeSql}
             WHERE id = ?${ownershipSql}
               AND COALESCE(metadata, '{}'::jsonb) = ?::jsonb
         `, userId
-            ? [serialized, getBeijingTimestamp(), id, userId, expected]
-            : [serialized, getBeijingTimestamp(), id, expected]);
+            ? [serialized, getBeijingTimestamp(), ...scopeValues, id, userId, expected]
+            : [serialized, getBeijingTimestamp(), ...scopeValues, id, expected]);
         if (Number(changes || 0) === 1) return next;
     }
     const error = new Error('Agent 运行元数据并发更新冲突，请重试。');

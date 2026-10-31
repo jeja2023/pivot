@@ -339,6 +339,7 @@ function createChatRouter({
             return res.end();
         }
         let automaticExecution = await decideAutomaticChatExecution({
+            routeOverrides: chatState.routeOverrides, mcpToolAllowlist,
             regenerate,
             ephemeralVoice,
             chatMode,
@@ -376,6 +377,7 @@ function createChatRouter({
 
         await touchSession(sessionId);
         const controlResult = await handleAutomaticTaskControl({
+            routeOverrides: chatState.routeOverrides, mcpToolAllowlist,
             decision: automaticExecution,
             sessionId,
             userId,
@@ -483,6 +485,7 @@ function createChatRouter({
                     sessionSystemPrompt: preflight.session?.system_prompt || '',
                     mcpEnabled,
                     mcpToolAllowlist,
+                    routeOverrides: chatState.routeOverrides,
                     ragEnabled,
                     ragScope,
                     retrieveContext,

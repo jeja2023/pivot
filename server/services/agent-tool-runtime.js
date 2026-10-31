@@ -113,6 +113,7 @@ function findAgentToolByName(name, toolList = []) {
 }
 
 async function executeToolByName(name, input, user, toolList = [], context = {}) {
+    if (context.run) await require('./agent-tool-discovery-scope').refreshDiscoveryScope(context.run, user);
     const safeName = String(name || '').trim();
     if (context.autonomous === true && context.discoveredExecution !== true) {
         const plannerTools = context.plannerToolNames instanceof Set ? context.plannerToolNames : new Set(context.plannerToolNames || []);
@@ -231,7 +232,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             let output;
             if (safeName.startsWith('mcp.')) {
                 output = await executeMcpTool(safeName, effectiveInput, user, {
-                    networkPolicy: context.run?.network_policy || context.run?.networkPolicy || null,
+                    networkPolicy: executionPlan.network?.policy || context.run?.network_policy || context.run?.networkPolicy || null,
                     requireNetworkPolicy: context.autonomous === true,
                     source: context.source || 'agent', signal: context.signal || null, traceContext: context.traceContext || {}, connectionAccountId: policyEvaluation.connection?.id || null,
                     executionGrant: executionGrant?.token || null,
@@ -273,6 +274,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                     ...(executionGrant ? { executionGrant: executionGrant.token, executionGrantSummary: executionGrant.summary } : {})
                 });
             }
+            require('./tool-result-status').assertToolResultSuccess(output);
             const outputIssues = validateToolOutput(tool, policyEvaluation.toolItem, output);
             if (outputIssues.length) {
                 const error = new Error(`工具输出契约校验失败：${outputIssues[0]}`);
@@ -281,6 +283,8 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 error.category = 'validation';
                 throw error;
             }
+            // 发现元工具转发的是内层业务调用已经交付的结果，不能再次生成产物。
+            if (require('./agent-tool-progressive-discovery').isDiscoveryMetaTool(tool)) return output;
             return await require('./tool-result-artifacts').materializeToolArtifact(output, user, context);
         }
     });

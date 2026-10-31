@@ -17,6 +17,7 @@ function findTool(toolList = [], name = '') {
 }
 
 async function resolveProgressiveExecution({ toolName, input = {}, user, toolList = [], state = null, run = null } = {}) {
+    if (run) await require('./agent-tool-discovery-scope').refreshDiscoveryScope(run, user);
     const name = String(toolName || '').trim();
     const selectedTool = findTool(toolList, name);
     if (!selectedTool) throw progressiveExecutionError(`工具不可用或无权访问：${name || '-'}`, 'TOOL_NOT_AVAILABLE');

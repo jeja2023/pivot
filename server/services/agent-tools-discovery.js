@@ -197,6 +197,7 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
             now: state?.now
         });
         rememberSearch(state, value);
+        require('./agent-discovery-progress').recordDiscoverySearch(state, value, context.run || {});
         return { handled: true, value };
     }
     if (name === 'tools.describe') {
@@ -259,7 +260,11 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
             return { handled: true, value: await recoverExecutionReference(reference, user, context, deps, error.code) };
         }
         const execute = deps.toolDiscovery?.executeDiscoveredTool || executeDiscoveredTool;
-        try { return { handled: true, value: await execute(user, effectiveInput, context) }; }
+        try {
+            const value = await execute(user, effectiveInput, context);
+            if (state) state.searchProgress = null;
+            return { handled: true, value };
+        }
         catch (error) {
             // 只有执行前的引用校验失败可恢复，业务工具自身的同名错误不能触发重试。
             if (error.code !== 'TOOL_REFERENCE_STALE' || error.referenceRejected !== true) throw error;

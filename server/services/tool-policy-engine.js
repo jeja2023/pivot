@@ -330,6 +330,7 @@ function createToolPolicyEngine(deps = {}) {
                 maxAttempts: request.options?.maxAttempts ?? request.options?.max_attempts ?? 3,
                 signal: request.options?.signal || null
             });
+            require('./tool-result-status').assertToolResultSuccess(output);
             const outputIssues = validateToolOutput(evaluation.tool, evaluation.toolItem, output);
             if (outputIssues.length) {
                 const error = new Error(`工具输出契约校验失败：${outputIssues[0]}`);

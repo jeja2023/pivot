@@ -839,7 +839,7 @@ const {
                     title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
                     input: effectivePlanInput,
-                    output: { error: toolErr.message, diagnosis },
+                    output: { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes, diagnosis },
                     errorMessage: toolErr.message,
                     status: 'error',
                     durationMs: Date.now() - startedAt,
@@ -867,6 +867,10 @@ const {
                 } catch (auditError) {
                     auditError.cause = toolErr;
                     throw auditError;
+                }
+                if (toolErr.code === 'TOOL_DISCOVERY_NO_PROGRESS') {
+                    await require('../agent-discovery-progress').pauseForMissingTool({ updateRun, createAgentNotification }, runId, user.id, toolErr);
+                    return;
                 }
                 if (step < sliceEndStep) await updateRun(runId, { status: 'replanning', updated_at: getBeijingTimestamp() });
             }

@@ -489,6 +489,7 @@ const MCP_TOOL_SAMPLE_INPUTS = {
         pretty: true
     },
     'system.health': {},
+    'render_diagram': { source: 'flowchart LR\n    A[开始] --> B[处理]\n    B --> C[结束]', diagram_type: 'mermaid' },
     'system.modelRuntime': {},
     'models.list': {},
     'rag.search': {
@@ -642,13 +643,13 @@ async function runMcpToolTest() {
         });
         const duration = Date.now() - startTime;
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success === false) {
+        if (!res.ok || data.success === false || data.result?.isError === true) {
             const errMsg = data.error || '工具调用返回错误';
             if (statusEl) {
                 statusEl.className = 'mcp-tool-test-status error';
                 statusEl.textContent = `执行失败 (${duration}ms)`;
             }
-            if (resultEl) resultEl.textContent = `错误状态：${res.status}\n错误信息：${errMsg}`;
+            if (resultEl) resultEl.textContent = data.result?.isError === true ? JSON.stringify(data.result, null, 2) : `错误状态：${res.status}\n错误信息：${errMsg}`;
             return;
         }
         if (statusEl) {

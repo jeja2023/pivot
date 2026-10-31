@@ -15,6 +15,11 @@ async function mcpOutboundOptions(server, user, options = {}, getAccessibleServe
     const endpoint = new URL(String(server.base_url).trim().replace(/\/+$/, ''));
     let policy = options.networkPolicy;
     if (typeof policy === 'string') policy = JSON.parse(policy);
+    if (policy?.enabled === false) throw new Error('任务网络策略已禁用网络访问。');
+    const bound = policy?.mcp_endpoints?.[options.toolName];
+    if (bound && bound === endpoint.href && String(options.toolName).startsWith(`mcp.${server.id}.`)) {
+        policy = { ...policy, allowed_origins: [endpoint.origin], allowed_ports: [Number(endpoint.port || (endpoint.protocol === 'https:' ? 443 : 80))], allow_redirect: false };
+    }
     if (options.requireNetworkPolicy === true && (!policy || typeof policy !== 'object')) throw new Error('自主任务必须配置工具连接的网络白名单。');
     const assertUrl = async target => {
         const parsed = new URL(target);

@@ -746,7 +746,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 observations.push({ step, tool: call.name, input: args, error: toolErr.message });
                 await deps.insertStep(runId, step, {
                     type: 'tool', title: `工具执行失败：${call.name}`, toolName: call.name,
-                    input: args, output: { error: toolErr.message }, errorMessage: toolErr.message,
+                    input: args, output: { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes }, errorMessage: toolErr.message,
                     status: 'error', durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                 });
                 await recordToolCall({
@@ -764,6 +764,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                 });
                 if (taskBudget) taskBudget.recordError();
+                if (toolErr.code === 'TOOL_DISCOVERY_NO_PROGRESS') {
+                    await require('./agent-discovery-progress').pauseForMissingTool(deps, runId, user.id, toolErr);
+                    return { completed: true, roundsUsed, needsInput: true };
+                }
             }
             if (stagnantRounds >= 3) {
                 return completeWithWarning(`检测到工具 ${lastOperationSignature.split(':')[0] || '调用'} 连续重复且没有进展，已提前停止。`);

@@ -27,6 +27,7 @@ async function createChatAgentHandoff({
     sessionSystemPrompt = '',
     mcpEnabled = false,
     mcpToolAllowlist = null,
+    routeOverrides = {},
     ragEnabled = false,
     ragScope = {},
     retrieveContext,
@@ -57,8 +58,14 @@ async function createChatAgentHandoff({
     const automatic = automaticExecution && automaticExecution.action === 'agent_run';
     // 明确的自然语言委托可授权系统使用已有权限的能力。
     // Agent 运行时在执行前仍会依据策略和审批要求对每个候选工具进行评估。
-    const effectiveMcpEnabled = Boolean(mcpEnabled || (automatic && automaticExecution.allowMcp === true));
-    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source'])] : [];
+    const requestedTools = routeOverrides.tools?.length ? routeOverrides.tools
+        : automatic && automaticExecution.routing?.tools === 'task' ? automaticExecution.routing.toolNames || [] : [];
+    const selection = await require('./chat-selected-tools').resolveChatSelectedTools(user, { ...routeOverrides, tools: requestedTools }, mcpToolAllowlist);
+    const selectedTools = selection.tools;
+    const effectiveMcpEnabled = routeOverrides.excludeTools !== true && Boolean(mcpEnabled || (automatic && automaticExecution.allowMcp === true) || selectedTools.length);
+    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source', ...selectedTools.flatMap(tool => tool.capabilities || [])])] : [];
+    const automaticEndpoints = automatic && effectiveMcpEnabled && !selection.names.length
+        ? await require('./chat-selected-tools').resolveAutomaticMcpEndpoints(user, capabilities, mcpToolAllowlist) : {};
     const taskBudget = resolveChatAgentBudget({ modelCfg, decision: automaticExecution || {}, ragEnabled, mcpEnabled: effectiveMcpEnabled,
         content: modelContent, history: chatHistory, systemPrompt: sessionSystemPrompt, context: agentContext });
     const budget = taskBudget.budget;
@@ -134,6 +141,8 @@ async function createChatAgentHandoff({
         } : {})
     };
     metadata.chatBridge.executionProfile = taskBudget.profile;
+    metadata.chatBridge.selectedTools = selection.names;
+    if (selection.names.length) metadata.chatHistory.push({ role: 'user', content: `本次已选择工具：${selection.names.join('、')}。使用真实目录中的工具引用，工具权限与审批仍由服务端核验。` });
     if (automaticExecution?.completedWork) metadata.chatHistory.push({ role: 'assistant', content: `上一任务已结束。本次仅处理用户新要求，已完成操作不重放。\n${JSON.stringify(automaticExecution.completedWork).slice(0, 10000)}` });
     if (automatic && modelContent.length > 12000) metadata.chatHistory.push({ role: 'assistant', content: '本轮原始资料超过内联上限。必须通过 chat.read_source 从 offset=0 开始分页读取完整来源，不得把截断片段当作完整附件。' });
     const run = await agentRunFactory({
@@ -148,13 +157,15 @@ async function createChatAgentHandoff({
         ...((automatic || taskBudget.profile === 'knowledge_qa') ? { maxTokenBudget: budget.max_tokens_total, budgetConfig: budget } : {}),
         runMode: 'standard',
         toolPolicy: effectiveMcpEnabled ? 'all' : 'builtin_only',
-        toolAllowlist: [],
+        toolAllowlist: selection.names.length ? [...(selection.executionNames || selection.names), 'chat.read_source'] : [],
         approvalPolicy: 'safe_mcp_auto',
         timeoutMs: AGENT_DEFAULT_TIMEOUT_MS,
         toolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,
         retryLimit: 1,
-        contextConfig: { mode: 'recent', notes: modeNote },
-        networkPolicy: { enabled: !automatic || capabilities.some(cap => /^(?:network\.|data\.)/.test(cap)) },
+        contextConfig: { mode: 'recent', notes: selectedTools.length ? `${modeNote} 用户选择的工具：${selectedTools.map(tool => tool.name).join('、')}。请先搜索并使用返回的工具引用。` : modeNote },
+        networkPolicy: { enabled: routeOverrides.excludeTools !== true && (selection.names.length > 0 || !automatic || capabilities.some(cap => /^(?:network\.|data\.)/.test(cap))),
+            ...(selection.origins.length ? { allowed_origins: selection.origins, allowed_ports: selection.ports, allow_redirect: false } : {}),
+            ...(Object.keys(automaticEndpoints).length ? { mcp_endpoints: automaticEndpoints } : {}) },
         metadata
     });
     return { run, agentContext, automatic };

@@ -43,7 +43,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
         // 调度器手中的旧快照不能覆盖用户刚撤回的权限或暂停要求。
         const scope = !fresh || fresh.source_active === false || ['needs_input','cancelled','deleted'].includes(fresh.status)
             ? { present: true, capabilities: [] } : current.capabilityConstraints;
-        run = { ...run, metadata: { ...metadata, capabilityConstraints: scope || { present: true, capabilities: [] } } };
+        run = { ...run, ...(fresh || {}), metadata: { ...metadata, ...current, capabilityConstraints: scope || { present: true, capabilities: [] } } };
     }
     const tool = normalizeToolContract(rawTool);
     const normalizedInput = normalizeToolInput(tool.name, input, run);
@@ -70,7 +70,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
             key: String(context.approvalKey || context.operationKey || '').slice(0, 255),
             inputHash: ''
         },
-        network: { required: Boolean(tool.network), url: '', preflight: 'not_applicable' },
+        network: { required: Boolean(tool.network), url: '', preflight: 'not_applicable', policy: run.network_policy || run.networkPolicy || {} },
         sandbox: sandboxChoice(tool, context),
         retry: retrySemantics(tool, policy)
     };

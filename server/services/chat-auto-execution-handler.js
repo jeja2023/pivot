@@ -15,7 +15,7 @@ const { getChatCapabilityAvailability } = require('./chat-capability-scope');
 async function decideAutomaticChatExecution({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
     autoExecutionEnabled = false, modelContent = '', maxGoalLength = 12000,
-    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, sessionsRepository, log, projectId, writeSse
+    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null
 } = {}, deps = {}) {
     const intentPrompt = String(modelContent).split(/\n---\s*\n【参考文档/)[0];
     const providedSources = [...String(modelContent).matchAll(/【参考文档:\s*([^\n】]{1,240})】\s*\n/g)].slice(0, 20).map(match => ({ kind: 'inline_attachment', name: match[1], available: true, sourceMessageId: userMessageId }));
@@ -78,7 +78,7 @@ async function decideAutomaticChatExecution({
         const [tasks, memories, availability] = await Promise.all([
             (deps.getConversationTasks || getConversationTasks)(sessionId, userId),
             (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4 }).catch(() => []),
-            (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user)
+            (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user, {}, { prompt: intentPrompt, selectedTools: routeOverrides.tools, manualAllowlist: mcpToolAllowlist })
         ]);
         if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
         const resolved = await (deps.resolveChatIntent || resolveChatIntent)({
@@ -109,7 +109,8 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
     let content = '';
     try {
         if (decision.action === 'continue_run') {
-            const result = await (deps.continueConversationTask || continueConversationTask)({ decision, user, sessionId, userMessageId, instruction: visibleContent, sourceContent: modelContent });
+            const result = await (deps.continueConversationTask || continueConversationTask)({ decision, user, sessionId, userMessageId, instruction: visibleContent, sourceContent: modelContent,
+                routeOverrides: options.routeOverrides, mcpToolAllowlist: options.mcpToolAllowlist });
             if (result.continued) {
                 await ledger.updateTurn(turn, { run_id: result.run.id, conversation_task_id: result.conversationTaskId });
                 content = result.pendingApproval ? '已补充本次要求；当前任务仍在等待原有审批决定。' : '已将本次要求交给当前任务继续处理。';
