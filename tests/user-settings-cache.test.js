@@ -57,7 +57,7 @@ test('用户设置缓存有界，失效后等待数据库，并拒绝并发写�
         assert.equal(await settings.getUserSettingValueAsync(1, 'rag_top_k'), undefined);
         await settings.refreshUserSettingsCache();
         fail = true;
-        await assert.rejects(settings.getUserSettingValueAsync(1, 'rag_top_k'), /database unavailable/);
+        await assert.rejects(settings.getUserSettingValueAsync(1, 'rag_top_k'), /模拟数据库不可用/);
     } finally {
         release();
         Date.now = realNow;

@@ -42,7 +42,7 @@ test('实时事件索引只在明确执行时并发创建，冲突时不改变�
         const conflict = await ensureRealtimeIndex(admin, schema, { create: true });
         assert.equal(conflict.action, 'name_conflict');
         assert.equal((await admin.query('SELECT to_regclass($1) AS object', [`${schema}.${INDEX_NAME}`])).rows[0].object, `${schema}.${INDEX_NAME}`);
-        await assert.rejects(ensureRealtimeIndex(admin, `${schema}";DROP SCHEMA public`, { create: true }), /invalid schema/);
+        await assert.rejects(ensureRealtimeIndex(admin, `${schema}";DROP SCHEMA public`, { create: true }), /无效的数据库模式名称/);
     } finally {
         await other.end();
         if (created) await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
