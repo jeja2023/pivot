@@ -468,54 +468,24 @@ const MCP_TOOL_SAMPLE_INPUTS = {
         valueField: 'price',
         aggregation: 'sum'
     },
-    'doc.chunk_text': {
-        text: '这是第一段新闻内容。\n\n这是第二段新闻内容，包含更多详细信息。\n\n这是第三段总结。',
-        maxChars: 200
-    },
-    'doc.extract_outline': {
-        text: '# 第一章 系统概述\n\n系统由前端与后端组成。\n\n## 1.1 架构设计\n\n采用微内核架构。\n\n# 第二章 部署指南'
-    },
-    'doc.extract_key_values': {
-        text: '姓名：张三\n职位：高级工程师\n入职日期：2024-01-15'
-    },
-    'format.to_markdown_table': {
-        rows: [
-            { 序号: 1, 模块: '认证中心', 状态: '正常' },
-            { 序号: 2, 模块: '模型网关', 状态: '正常' }
-        ]
-    },
-    'format.to_json': {
-        value: 'key1=value1\nkey2=value2',
-        pretty: true
-    },
+    'doc.chunk_text': { text: '第一段内容。\n\n第二段详细信息。\n\n第三段总结。', maxChars: 200 },
+    'doc.extract_outline': { text: '# 第一章 系统概述\n\n系统由前端与后端组成。\n\n## 1.1 架构设计\n\n采用微内核架构。\n\n# 第二章 部署指南' },
+    'doc.extract_key_values': { text: '姓名：张三\n职位：高级工程师\n入职日期：2024-01-15' },
+    'format.to_markdown_table': { rows: [{ 序号: 1, 模块: '认证中心', 状态: '正常' }, { 序号: 2, 模块: '模型网关', 状态: '正常' }] },
+    'format.to_json': { value: 'key1=value1\nkey2=value2', pretty: true },
     'system.health': {},
-    'render_diagram': { source: 'flowchart LR\n    A[开始] --> B[处理]\n    B --> C[结束]', diagram_type: 'mermaid' },
+    'render_diagram': { source: 'flowchart LR\nA-->B', diagram_type: 'mermaid' },
     'system.modelRuntime': {},
     'models.list': {},
-    'rag.search': {
-        query: '系统部署要求',
-        limit: 3
-    },
+    'rag.search': { query: '系统部署要求', limit: 3 },
     'db.list_tables': {},
     'db.count_tables': {},
-    'db.describe_table': {
-        table: 'users'
-    },
-    'db.run_readonly_query': {
-        sql: 'SELECT 1 AS test_status, current_timestamp AS test_time;'
-    },
-    'db.group_count': {
-        table: 'users',
-        groupBy: 'role'
-    },
-    'reports.list_files': {
-        limit: 5
-    },
+    'db.describe_table': { table: 'users' },
+    'db.run_readonly_query': { sql: 'SELECT 1 AS test_status, current_timestamp AS test_time;' },
+    'db.group_count': { table: 'users', groupBy: 'role' },
+    'reports.list_files': { limit: 5 },
     'im.list_allowed_targets': {},
-    'im.send_markdown': {
-        target: 'test_group',
-        markdown: '**测试消息**：智枢工具单步测试'
-    }
+    'im.send_markdown': { target: 'test_group', markdown: '**测试消息**：智枢工具单步测试' }
 };
 
 function generateDefaultSampleInput(schema) {
@@ -643,13 +613,13 @@ async function runMcpToolTest() {
         });
         const duration = Date.now() - startTime;
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success === false || data.result?.isError === true) {
+        if (!res.ok || data.success === false || data.result?.isError) {
             const errMsg = data.error || '工具调用返回错误';
             if (statusEl) {
                 statusEl.className = 'mcp-tool-test-status error';
                 statusEl.textContent = `执行失败 (${duration}ms)`;
             }
-            if (resultEl) resultEl.textContent = data.result?.isError === true ? JSON.stringify(data.result, null, 2) : `错误状态：${res.status}\n错误信息：${errMsg}`;
+            if (resultEl) resultEl.textContent = data.result?.isError ? JSON.stringify(data.result, null, 2) : `错误状态：${res.status}\n错误信息：${errMsg}`;
             return;
         }
         if (statusEl) {

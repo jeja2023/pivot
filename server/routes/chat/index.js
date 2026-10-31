@@ -340,23 +340,11 @@ function createChatRouter({
         }
         let automaticExecution = await decideAutomaticChatExecution({
             routeOverrides: chatState.routeOverrides, mcpToolAllowlist,
-            regenerate,
-            ephemeralVoice,
-            chatMode,
-            agentExecutionAllowed,
-            autoExecutionEnabled: readAutoExecutionEnabled(),
-            modelContent,
-            maxGoalLength: MAX_CHAT_AGENT_GOAL_LENGTH,
-            sessionId,
-            userId,
-            user: req.user,
-            userMessageId,
-            modelCfg,
-            signal: abortController.signal,
-            projectId: chatState.projectId,
-            writeSse,
-            sessionsRepository,
-            log: req.log
+            regenerate, ephemeralVoice, chatMode, agentExecutionAllowed,
+            autoExecutionEnabled: readAutoExecutionEnabled(), modelContent,
+            maxGoalLength: MAX_CHAT_AGENT_GOAL_LENGTH, sessionId, userId,
+            user: req.user, userMessageId, modelCfg, signal: abortController.signal,
+            projectId: chatState.projectId, writeSse, sessionsRepository, log: req.log
         });
         automaticExecution.projectId = chatState.projectId;
         automaticExecution.modelId = modelCfg.id;
