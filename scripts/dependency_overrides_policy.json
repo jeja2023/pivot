@@ -30,7 +30,7 @@
     "expiresOn": "2026-12-31"
   },
   "follow-redirects": {
-    "reason": "axios 传递依赖的重定向处理库；升级至修复 cross-origin 凭据泄露与敏感头正则表达式逃逸漏洞的 1.16.1 补丁版本。",
+    "reason": "axios 传递依赖的重定向处理库；升级至修复 cross-origin 凭据泄露与跨域敏感头丢弃漏洞的 1.16.2 补丁版本。",
     "scope": "production",
     "expiresOn": "2026-12-31"
   },
