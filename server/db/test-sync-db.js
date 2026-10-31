@@ -88,34 +88,49 @@ function request(worker, value) {
 }
 
 function createTestDb() {
-    const worker = createWorker();
+    let worker = createWorker();
+    function executeRequest(value) {
+        if (Atomics.load(worker.control, 0) !== IDLE) {
+            try { worker.close(); } catch (_) {}
+            worker = createWorker();
+        }
+        try {
+            return request(worker, value);
+        } catch (error) {
+            if (Atomics.load(worker.control, 0) !== IDLE) {
+                try { worker.close(); } catch (_) {}
+                worker = createWorker();
+            }
+            throw error;
+        }
+    }
     return {
         prepare(sql) {
             return {
-                get(...params) { return request(worker, { mode: 'get', sql, params }).rows[0]; },
-                all(...params) { return request(worker, { mode: 'all', sql, params }).rows; },
+                get(...params) { return executeRequest({ mode: 'get', sql, params }).rows[0]; },
+                all(...params) { return executeRequest({ mode: 'all', sql, params }).rows; },
                 run(...params) {
-                    const result = request(worker, { mode: 'run', sql, params });
+                    const result = executeRequest({ mode: 'run', sql, params });
                     return { changes: result.rowCount || 0, lastInsertRowid: result.lastInsertRowid || 0 };
                 }
             };
         },
-        exec(sql) { request(worker, { mode: 'run', sql, params: [] }); },
+        exec(sql) { executeRequest({ mode: 'run', sql, params: [] }); },
         transaction(fn) {
             if (typeof fn !== 'function') throw new TypeError('transaction callback must be a function');
             return (...args) => {
-                request(worker, { mode: 'run', sql: 'BEGIN', params: [] });
+                executeRequest({ mode: 'run', sql: 'BEGIN', params: [] });
                 try {
                     const result = fn(...args);
-                    request(worker, { mode: 'run', sql: 'COMMIT', params: [] });
+                    executeRequest({ mode: 'run', sql: 'COMMIT', params: [] });
                     return result;
                 } catch (error) {
-                    request(worker, { mode: 'run', sql: 'ROLLBACK', params: [] });
+                    executeRequest({ mode: 'run', sql: 'ROLLBACK', params: [] });
                     throw error;
                 }
             };
         },
-        close: worker.close
+        close() { worker.close(); }
     };
 }
 

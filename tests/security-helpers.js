@@ -169,6 +169,7 @@ const {
     recordRagFeedback,
     recoverStaleKnowledgeDocumentIndexes,
     scheduleFailedKnowledgeDocumentsForUser,
+    stopKnowledgeIngestionWorker,
     setKnowledgeDocumentCollection,
     setKnowledgeDocumentTags
 } = require('../server/services/rag-documents');
@@ -966,6 +967,7 @@ module.exports = {
     sortDagNodesByDependencies,
     splitStreamTextForDisplay,
     stmts,
+    stopKnowledgeIngestionWorker,
     summarizeRagContextSources,
     suggestDuplicateEntities,
     streamingTools,

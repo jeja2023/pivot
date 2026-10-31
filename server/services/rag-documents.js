@@ -755,6 +755,10 @@ async function startKnowledgeIngestionWorker() {
     return await getKnowledgeIngestionWorker().start();
 }
 
+async function stopKnowledgeIngestionWorker() {
+    if (knowledgeIngestionWorker) await knowledgeIngestionWorker.stop();
+}
+
 async function shutdownKnowledgeIngestionWorker() {
     knowledgeIngestionShuttingDown = true;
     if (knowledgeIngestionWorker) await knowledgeIngestionWorker.shutdown();
@@ -1029,6 +1033,7 @@ module.exports = {
     setKnowledgeDocumentEnabled,
     scheduleKnowledgeDocumentIndexing,
     startKnowledgeIngestionWorker,
+    stopKnowledgeIngestionWorker,
     shutdownKnowledgeIngestionWorker,
     syncKnowledgeDocumentIndexConcurrency
 };

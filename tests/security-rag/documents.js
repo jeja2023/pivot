@@ -29,6 +29,7 @@ const {
     retrieveContext,
     runExpressHandlers,
     scheduleFailedKnowledgeDocumentsForUser,
+    stopKnowledgeIngestionWorker,
     setKnowledgeDocumentCollection,
     setKnowledgeDocumentTags,
     test,
@@ -494,6 +495,8 @@ test('RAG 汇总会统计文档并调度可重试失败文档', async () => {
         const queuedAgain = await scheduleFailedKnowledgeDocumentsForUser({ userId: userInfo.lastInsertRowid, limit: 10 });
         assert.deepEqual(queuedAgain, { total: 1, scheduled: 0, alreadyProcessing: 1 });
     } finally {
+        await stopKnowledgeIngestionWorker();
+        db.prepare('DELETE FROM knowledge_ingestion_jobs WHERE user_id = ?').run(userInfo.lastInsertRowid);
         db.prepare('DELETE FROM knowledge_docs WHERE id IN (?, ?)').run(readyDoc.lastInsertRowid, failedDoc.lastInsertRowid);
         db.prepare('DELETE FROM users WHERE id = ?').run(userInfo.lastInsertRowid);
     }
