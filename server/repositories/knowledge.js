@@ -263,12 +263,6 @@ async function listAccessibleChunkEmbeddings({ userId, scopeFilter, user = null,
     return indexedRows.concat(legacyRows).slice(0, safeLimit);
 }
 
-function listChunkEmbeddingsByIds(ids = []) {
-    const safeIds = [...new Set(ids.map(value => Number.parseInt(value, 10)).filter(value => Number.isSafeInteger(value) && value > 0))].slice(0, 500);
-    if (!safeIds.length) return Promise.resolve([]);
-    return query(`SELECT id, embedding FROM knowledge_chunks WHERE id IN (${safeIds.map(() => '?').join(',')})`, safeIds);
-}
-
 function listCitationKeysByChunkIds(ids = []) {
     const safeIds = [...new Set(ids.map(value => Number.parseInt(value, 10)).filter(value => Number.isSafeInteger(value) && value > 0))].slice(0, 500);
     if (!safeIds.length) return Promise.resolve([]);
@@ -352,7 +346,6 @@ module.exports = {
     countDocumentChunks,
     listAllDocumentChunks,
     listAccessibleChunkEmbeddings,
-    listChunkEmbeddingsByIds,
     listCitationKeysByChunkIds,
     iterateAccessibleChunkEmbeddings: listAccessibleChunkEmbeddings,
     getDocumentName,

@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { getEmbeddingConfig } = require('./rag-config');
+const { getEmbeddingConfigAsync } = require('./rag-config');
 const { generateEmbedding, cosineSimilarity, normalizeRetrievalScope } = require('./rag-index');
 const knowledgeCatalogIndex = require('./knowledge-catalog-index');
 const mcpToolCatalogIndex = require('./mcp-tool-catalog-index');
@@ -406,7 +406,7 @@ function createSemanticRouter(deps = {}) {
     }
 
     const getConfig = deps.getChatAutoRouteConfig || getChatAutoRouteConfig;
-    const getEmbedding = deps.getEmbeddingConfig || getEmbeddingConfig;
+    const getEmbedding = deps.getEmbeddingConfig || getEmbeddingConfigAsync;
     const generateQueryEmbedding = deps.generateEmbedding || generateEmbedding;
     const catalogIndex = deps.knowledgeCatalogIndex || knowledgeCatalogIndex;
     const toolIndex = deps.mcpToolCatalogIndex || mcpToolCatalogIndex;
@@ -470,7 +470,7 @@ function createSemanticRouter(deps = {}) {
         const needAutoTools = routeEnabled && config.autoToolDiscoveryEnabled && !overrides.excludeTools && toolRequested;
 
         if ((needAutoRag || needAutoTools) && cleanPrompt) {
-            const embeddingConfig = getEmbedding(user?.id || null);
+            const embeddingConfig = await getEmbedding(user?.id || null);
             if (embeddingConfig?.http?.url) {
                 const embeddingStartedAt = Date.now();
                 try {
@@ -517,7 +517,7 @@ function createSemanticRouter(deps = {}) {
             rag.reasonCode = isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'rag_not_requested';
         } else {
             try {
-                const embeddingConfig = getEmbedding(user?.id || null);
+                const embeddingConfig = await getEmbedding(user?.id || null);
                 const entries = await catalogIndex.getVisibleEntries({ user, embeddingConfig });
                 const scored = entries
                     .map(entry => ({ entry, ...scoreCollection(entry, cleanPrompt, queryVector || []) }))
@@ -599,8 +599,8 @@ function createSemanticRouter(deps = {}) {
                 tools.reasonCode = tools.reasonCode || 'no_authorized_tool';
             } else {
                 try {
-                    const embeddingConfig = getEmbedding(user?.id || null);
-                    const entries = toolIndex.getEntries(permitted, { embeddingConfig, userId: user?.id || null });
+                    const embeddingConfig = await getEmbedding(user?.id || null);
+                    const entries = await toolIndex.getEntries(permitted, { embeddingConfig, userId: user?.id || null });
                     const scored = entries
                         .map(entry => ({ entry, ...scoreTool(entry, cleanPrompt, queryVector || [], overrides) }))
                         .sort((left, right) => right.score - left.score || right.rule - left.rule)

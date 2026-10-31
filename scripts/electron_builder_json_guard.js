@@ -15,9 +15,26 @@ function installCollectorGuard(Collector) {
     };
 }
 
-if (require.main !== module) {
-    const { NodeModulesCollector } = require('app-builder-lib/out/node-module-collector/nodeModulesCollector');
-    installCollectorGuard(NodeModulesCollector);
+function installCertificateOutputGuard(Manager) {
+    const original = Manager.prototype.getCertificateFromStoreInfo;
+    Manager.prototype.getCertificateFromStoreInfo = function getGuardedCertificate(options, vm) {
+        // 只处理 electron-builder 的证书枚举输出，保留原有证书选择和签名校验。
+        const wrapped = Object.create(vm);
+        wrapped.exec = async (...args) => {
+            const result = await vm.exec(...args);
+            const commandArgs = args[1];
+            return Array.isArray(commandArgs) && commandArgs.some(arg => typeof arg === 'string' && arg.includes('Get-ChildItem -Recurse Cert: -CodeSigningCert'))
+                ? stripKnownRuntimeDiagnostic(result) : result;
+        };
+        return original.call(this, options, wrapped);
+    };
 }
 
-module.exports = { installCollectorGuard, stripKnownRuntimeDiagnostic };
+if (require.main !== module) {
+    const { NodeModulesCollector } = require('app-builder-lib/out/node-module-collector/nodeModulesCollector');
+    const { WindowsSignToolManager } = require('app-builder-lib/out/codeSign/windowsSignToolManager');
+    installCollectorGuard(NodeModulesCollector);
+    installCertificateOutputGuard(WindowsSignToolManager);
+}
+
+module.exports = { installCertificateOutputGuard, installCollectorGuard, stripKnownRuntimeDiagnostic };

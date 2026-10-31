@@ -14,9 +14,11 @@ const { assertSafeOutboundUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
+    getPublicEmbeddingConfigAsync,
     getPublicRerankConfig,
-    getEmbeddingConfig,
+    getEmbeddingConfigAsync,
     getRagConfig,
+    getRagConfigAsync,
     toRagSettingValue
 } = require('../services/rag-config');
 const {
@@ -190,16 +192,16 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
     registerSpeechSettingsRoutes(router, { authMiddleware, logAction });
 
-    router.get('/settings', authMiddleware, (req, res) => {
+    router.get('/settings', authMiddleware, asyncHandler(async (req, res) => {
         const settings = getSettings();
         const uploadRuntimeConfig = getUploadRuntimeConfig();
         const ocrSettings = getDocumentProcessingSettings();
         const payload = {
             ragEnabled: true,
-            ragConfig: getRagConfig({}, isSuperAdmin(req.user) ? null : req.user?.id),
+            ragConfig: await getRagConfigAsync({}, isSuperAdmin(req.user) ? null : req.user?.id),
             memoryConfig: getMemoryConfig(settings),
             apiAccessEnabled: getApiAccessSetting(),
-            embeddingConfig: getPublicEmbeddingConfig(isSuperAdmin(req.user) ? null : req.user?.id),
+            embeddingConfig: await getPublicEmbeddingConfigAsync(isSuperAdmin(req.user) ? null : req.user?.id),
             retrievalModelConfig: getPublicEmbeddingConfig(),
             rerankConfig: getPublicRerankConfig(),
             speechConfig: speechSettings.publicConfig({ administrator: isSuperAdmin(req.user) }),
@@ -250,7 +252,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             payload.deploymentProfile = getDeploymentProfile();
         }
         res.json(payload);
-    });
+    }));
 
     router.get('/settings/ocr', authMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足' });
@@ -304,7 +306,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
         // 如果用户没填密钥（输入框为空），尝试使用已保存的密钥
         if (!apiKey) {
-            const savedConfig = getEmbeddingConfig(req.user.id).http;
+            const savedConfig = (await getEmbeddingConfigAsync(req.user.id)).http;
             apiKey = savedConfig.apiKey || '';
         }
         try {
@@ -349,7 +351,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             logAction(req, '修改个人向量模型配置', changed.join('；'));
         }
         const isSuper = isSuperAdmin(req.user);
-        const userEmbedding = getPublicEmbeddingConfig(req.user?.id);
+        const userEmbedding = await getPublicEmbeddingConfigAsync(req.user?.id);
         const rerankCfg = getPublicRerankConfig();
         const maskedUserEmbedding = (!isSuper && userEmbedding?.apiUrl && !(userEmbedding.isPersonal && userEmbedding.source?.url === 'user'))
             ? { ...userEmbedding, apiUrl: '********' }
@@ -359,7 +361,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             : rerankCfg;
         res.json({
             success: true,
-            ragConfig: getRagConfig({}, req.user?.id),
+            ragConfig: await getRagConfigAsync({}, req.user?.id),
             embeddingConfig: maskedUserEmbedding,
             rerankConfig: maskedRerank
         });

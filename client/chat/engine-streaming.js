@@ -1,4 +1,12 @@
 // 聊天流式响应、SSE 解析与助手统计辅助函数 Chat streaming, SSE parsing, and assistant stats helpers
+/* global postChatAgentControl */
+async function cancelChatAgentRun(runId) {
+    if (!runId) return null;
+    const result = await postChatAgentControl(runId, '/cancel');
+    showToast('已请求停止连续 Agent', 'info');
+    return result;
+}
+
 const escapeChatStatusHtml = (value) => {
     if (window.Pivot.legacy.PivotSafeHtml) return window.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
     return String(value ?? '')
@@ -375,10 +383,15 @@ const resolveStreamInterval = (contentLength) => {
     return 320;
 };
 
-function estimateStreamingTokenCount(content) {
+// 使用半 token 为单位累积，可逐段相加且与一次性估算的舍入结果一致。
+function estimateStreamingTokenUnits(content) {
     const text = String(content || '');
     const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-    return Math.ceil(chineseChars * 2 + (text.length - chineseChars) * 0.5);
+    return text.length + chineseChars * 3;
+}
+
+function estimateStreamingTokenCount(content) {
+    return Math.ceil(estimateStreamingTokenUnits(content) / 2);
 }
 
 function stripStreamingThoughtContent(content = '') {
@@ -464,6 +477,30 @@ function createBrowserSseParser({ onData, onDone } = {}) {
     return { write, end, isDone: () => done };
 }
 
+const plainStreamingNodes = new WeakMap();
+const PLAIN_STREAM_CHARS = /^[A-Za-z0-9\u4e00-\u9fa5，。！？、；： ]+$/;
+function appendPlainStreamingText(textBody, content) {
+    const previous = plainStreamingNodes.get(textBody);
+    if (!previous || !content.startsWith(previous.content) || !textBody.contains(previous.node)
+        || previous.node.data !== previous.content || textBody.children.length !== 1
+        || textBody.firstElementChild !== previous.node.parentNode || previous.node.parentNode.childNodes.length !== 1) return false;
+    const suffix = content.slice(previous.content.length);
+    if (!suffix) return true;
+    if (!PLAIN_STREAM_CHARS.test(suffix)) return false;
+    previous.node.appendData(suffix);
+    previous.content = content;
+    return true;
+}
+
+function rememberPlainStreamingText(textBody, content) {
+    plainStreamingNodes.delete(textBody);
+    const paragraph = textBody.firstElementChild;
+    const node = paragraph?.firstChild;
+    if (content && PLAIN_STREAM_CHARS.test(content) && textBody.children.length === 1
+        && paragraph?.tagName === 'P' && paragraph.childNodes.length === 1
+        && node?.nodeType === 3 && node.data === content) plainStreamingNodes.set(textBody, { content, node });
+}
+
 function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount, startTime) {
     if (!textBody) return;
     const messageContent = textBody.closest('.message-content') || textBody.parentElement;
@@ -473,15 +510,17 @@ function renderStreamingAssistantContent(textBody, statsEl, content, tokenCount,
     const existingThoughtContent = textBody.querySelector('.thought-block.thinking .thought-content');
 
     if (hasOpenThought && existingThoughtContent) {
+        plainStreamingNodes.delete(textBody);
         PivotSafeHtml.setHtml(existingThoughtContent, renderMarkdown(content.replace(/^<(thought|think|thinking)>/i, ''), { deferPivotCharts: true }));
         if (existingThoughtContent.closest('.thought-block')?.classList.contains('is-open')) {
             const inner = existingThoughtContent.closest('.thought-content-inner');
             inner.scrollTop = inner.scrollHeight;
         }
-    } else {
+    } else if (!appendPlainStreamingText(textBody, content)) {
         const thoughtState = rememberThoughtStateBeforeRender(textBody);
         PivotSafeHtml.setHtml(textBody, renderAiMessage(content, true, thoughtState.openStates));
         restoreThoughtStateAfterRender(textBody, thoughtState);
+        rememberPlainStreamingText(textBody, content);
     }
 
     const elapsed = Math.max((Date.now() - startTime) / 1000, 0.001);

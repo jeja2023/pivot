@@ -543,7 +543,7 @@ test('PDF tools split outputs can be downloaded as one archive', async () => {
         assert.ok(Buffer.isBuffer(archive.buffer));
         assert.equal(archive.mimeType, 'application/zip');
         assert.match(archive.fileName, /全部输出\.zip$/);
-        const entries = readZipEntries(archive.buffer);
+        const entries = await readZipEntries(archive.buffer);
         assert.equal(entries.size, 2);
         assert.ok(Array.from(entries.keys()).every(name => name.endsWith('.pdf')));
         const streamArchive = await getJobOutputsArchiveStream({ userId, jobId: detail.job.id, sourceModule: 'pdf_tools' });
@@ -554,7 +554,7 @@ test('PDF tools split outputs can be downloaded as one archive', async () => {
             streamArchive.stream.once('end', resolve);
             streamArchive.stream.resume();
         });
-        assert.equal(readZipEntries(Buffer.concat(chunks)).size, 2);
+        assert.equal((await readZipEntries(Buffer.concat(chunks))).size, 2);
     } finally {
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);

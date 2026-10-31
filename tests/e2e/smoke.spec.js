@@ -210,6 +210,10 @@ test.describe('Pivot browser smoke', () => {
         const generated = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')],
             { windowsHide: true, encoding: 'utf8', timeout: 15000 });
         expect(generated.status).toBe(0);
+        // 此机器的 PowerShell 退出时可能在 stdout 追加一条原生诊断；不能把它交给 atob。
+        const audioBase64 = generated.stdout.replace(/(?:\r?\n\[0x[0-9a-f]+\] ANOMALY: use of REX\.w is meaningless \(default operand size is 64\))+(?:\r?\n)?\s*$/i, '').trim();
+        expect(audioBase64).toMatch(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
+        expect(Buffer.from(audioBase64, 'base64').subarray(0, 4).toString('ascii')).toBe('RIFF');
         await page.addInitScript(base64 => {
             window.__syntheticVoiceEvents = [];
             const record = message => window.__syntheticVoiceEvents.push(message);
@@ -253,7 +257,7 @@ test.describe('Pivot browser smoke', () => {
                 record('stream-ready');
                 return output.stream;
             } });
-        }, generated.stdout.trim());
+        }, audioBase64);
         await ensureBrowserSession(page);
         const status = await (await page.request.get('/api/chat/voice-recognition')).json();
         expect(status.available).toBe(true);

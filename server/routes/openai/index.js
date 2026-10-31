@@ -31,7 +31,7 @@ const {
 const { getGlobalSamplingRuntimeConfig } = require('../../services/runtime-settings');
 const { forwardChatCompletion } = require('../../services/model-forwarder');
 const { createApiAccessGuard } = require('../../services/api-access-settings');
-const { getEmbeddingConfig } = require('../../services/rag-config');
+const { getEmbeddingConfigAsync } = require('../../services/rag-config');
 const { requestEmbeddings, getEmbeddingRuntimeGuardUser } = require('../../services/rag-index');
 const { executeBuiltInTool, getBuiltInToolDefinitions } = require('../../services/agent-tools');
 const { defaultToolPolicyEngine } = require('../../services/tool-policy-engine');
@@ -154,7 +154,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
     // 1. 获取模型列表 (OpenAI 兼容)
     router.get('/models', authMiddleware, asyncHandler(async (req, res) => {
         const models = await getUserAccessibleModelsAsync(req.user);
-        const embeddingModel = buildEmbeddingModelItem(getEmbeddingConfig(req.user?.id));
+        const embeddingModel = buildEmbeddingModelItem(await getEmbeddingConfigAsync(req.user?.id));
         const data = models.map(m => ({
             id: m.model_name || m.id.toString(), // 外部调用核心标识：优先使用语义化的 model_name
             object: 'model',
@@ -223,7 +223,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
     }));
 
     router.post('/embeddings', authMiddleware, embeddingLimiter, asyncHandler(async (req, res) => {
-        const config = getEmbeddingConfig(req.user?.id);
+        const config = await getEmbeddingConfigAsync(req.user?.id);
         const configuredModel = String(config.http?.model || '').trim();
         const requestedModel = String(req.body?.model || configuredModel || '').trim();
 

@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { generateEmbeddingsAdaptive } = require('./rag-index/embedding-client');
-const { getEmbeddingConfig } = require('./rag-config');
+const { getEmbeddingConfigAsync } = require('./rag-config');
 const { logger } = require('../logger');
 const { query, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
@@ -60,7 +60,7 @@ function embeddingKey(config = {}) {
 
 function createMcpToolCatalogIndex(deps = {}) {
     const generateEmbeddings = deps.generateEmbeddingsAdaptive || generateEmbeddingsAdaptive;
-    const getConfig = deps.getEmbeddingConfig || getEmbeddingConfig;
+    const getConfig = deps.getEmbeddingConfig || getEmbeddingConfigAsync;
     const read = deps.query || query;
     const write = deps.execute || execute;
     const now = deps.getBeijingTimestamp || getBeijingTimestamp;
@@ -124,8 +124,8 @@ function createMcpToolCatalogIndex(deps = {}) {
         }));
     }
 
-    function getEntries(tools = [], { embeddingConfig = null, userId = null } = {}) {
-        const config = embeddingConfig || getConfig(userId);
+    async function getEntries(tools = [], { embeddingConfig = null, userId = null } = {}) {
+        const config = embeddingConfig || await getConfig(userId);
         const key = embeddingKey(config);
         return (Array.isArray(tools) ? tools : []).map(tool => {
             const fingerprint = toolFingerprint(tool);
@@ -141,7 +141,7 @@ function createMcpToolCatalogIndex(deps = {}) {
     }
 
     async function refreshEntries(entries = [], { user = null, embeddingConfig = null, signal = null } = {}) {
-        const config = embeddingConfig || getConfig(user?.id || null);
+        const config = embeddingConfig || await getConfig(user?.id || null);
         if (!config?.http?.url) return entries;
         const hydratedEntries = await hydratePersistedEntries(entries, user);
         const missing = hydratedEntries.filter(entry => entry && !parseVector(entry.vector).length);

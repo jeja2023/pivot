@@ -14,4 +14,14 @@ async function hydrateCandidateEmbeddings(candidates, fetchAuthorizedChunks) {
         .map(chunk => missing.has(Number(chunk.id)) ? { ...chunk, embedding: byId.get(Number(chunk.id)) } : chunk);
 }
 
-module.exports = { hydrateCandidateEmbeddings };
+async function retainAuthorizedDenseCandidates(candidates, fetchAuthorizedChunks, parseEmbedding) {
+    if (!candidates.length) return candidates;
+    const rows = await fetchAuthorizedChunks(candidates.map(chunk => chunk.id));
+    const byId = new Map(rows.map(row => [Number(row.id), row.embedding]));
+    return candidates.filter(chunk => byId.has(Number(chunk.id))).map(chunk => {
+        const embedding = byId.get(Number(chunk.id));
+        return embedding ? { ...chunk, __entry: parseEmbedding(chunk.id, embedding) } : chunk;
+    });
+}
+
+module.exports = { hydrateCandidateEmbeddings, retainAuthorizedDenseCandidates };

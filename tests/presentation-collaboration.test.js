@@ -3,6 +3,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { fork } = require('node:child_process');
+const express = require('express');
 
 const {
     recordPresence,
@@ -46,6 +48,17 @@ async function createTenantScopedUser(role = 'admin') {
         tenantId: Number(tenant.rows[0].id),
         user: { id: Number(user.rows[0].id), username, role, tenant_id: Number(tenant.rows[0].id) }
     };
+}
+
+function startPresenceNode(tenantId) {
+    const child = fork(path.join(__dirname, 'fixtures/presentation-presence-node.js'), [], {
+        env: { ...process.env, PIVOT_TEST_PRESENCE_TENANT_ID: String(tenantId) }, stdio: ['ignore', 'ignore', 'ignore', 'ipc']
+    });
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { child.kill(); reject(new Error('第二节点启动超时')); }, 15000);
+        child.once('message', message => { clearTimeout(timer); resolve({ child, port: message.port }); });
+        child.once('exit', code => { clearTimeout(timer); reject(new Error(`第二节点提前退出: ${code}`)); });
+    });
 }
 
 test('在线 Presence 注册表支持心跳保活、幻灯片位置更新、用户离开与自动过期', () => {
@@ -157,10 +170,24 @@ test('数据库集成：演示文稿评论线程组织、解决状态与协作�
     const stranger = { id: Number(strangerUserRow.rows[0].id), username: 'stranger_' + suffix, role: 'user', tenant_id: tenantId };
 
     let presentation;
+    let server;
+    let child;
+    const previousMode = process.env.PIVOT_DEPLOYMENT_MODE;
     try {
         // 1. 所有者创建演示文稿
         presentation = await createPresentation(owner, { title: '协作测试演示文稿', templateId: 'business-blue' });
         assert.ok(presentation.id);
+        const users = new Map([[String(owner.id), owner], [String(collaborator.id), collaborator], [String(stranger.id), stranger]]);
+        const authMiddleware = (req, res, next) => { req.user = users.get(req.get('X-Test-User')); if (!req.user) return res.sendStatus(401); next(); };
+        const app = express(); app.use(express.json());
+        const passthrough = (_req, _res, next) => next();
+        app.use('/api', require('../server/routes/apps/presentations').createPresentationsRouter({ authMiddleware, logAction() {}, uploadLimiter: passthrough, upload: { single: () => passthrough } }));
+        server = await new Promise(resolve => { const instance = app.listen(0, '127.0.0.1', () => resolve(instance)); });
+        const callPresence = (user, method = 'GET', id = presentation.id) => fetch(`http://127.0.0.1:${server.address().port}/api/apps/presentations/${encodeURIComponent(id)}/presence`, {
+            method, headers: { 'X-Test-User': String(user.id), 'Content-Type': 'application/json' }, ...(method === 'POST' ? { body: JSON.stringify({ slideId: 'slide-test' }) } : {})
+        });
+        assert.equal((await callPresence(owner, 'POST')).status, 200);
+        for (const method of ['GET', 'POST', 'DELETE']) assert.equal((await callPresence(stranger, method)).status, 404);
 
         // 2. 外人访问被拒
         const strangerAccess = await getPresentation(stranger, presentation.id);
@@ -182,6 +209,35 @@ test('数据库集成：演示文稿评论线程组织、解决状态与协作�
         const collabAccess = await getPresentation(collaborator, presentation.id);
         assert.ok(collabAccess);
         assert.equal(collabAccess.title, '协作测试演示文稿');
+        assert.equal((await callPresence(collaborator, 'POST')).status, 200);
+        const present = await (await callPresence(collaborator)).json();
+        assert.deepEqual(present.presences.map(item => item.userId).sort((a, b) => a - b), [owner.id, collaborator.id].sort((a, b) => a - b));
+        process.env.PIVOT_DEPLOYMENT_MODE = 'multi_node';
+        let node = await startPresenceNode(tenantId);
+        child = node.child;
+        const callOther = (user, method = 'GET') => fetch(`http://127.0.0.1:${node.port}/api/apps/presentations/${encodeURIComponent(presentation.id)}/presence`, {
+            method, headers: { 'X-Test-User': String(user.id), 'Content-Type': 'application/json' }, ...(method === 'POST' ? { body: JSON.stringify({ slideId: 'shared-slide' }) } : {})
+        });
+        assert.equal((await callPresence(owner, 'POST')).status, 200);
+        assert.equal((await callOther(collaborator, 'POST')).status, 200);
+        const crossNode = await (await callPresence(owner)).json();
+        assert.deepEqual(crossNode.presences.map(item => item.userId).sort((a, b) => a - b), [owner.id, collaborator.id].sort((a, b) => a - b));
+        assert.equal(crossNode.presences.find(item => item.userId === collaborator.id).slideId, 'shared-slide');
+        const exited = new Promise(resolve => child.once('exit', resolve));
+        child.kill();
+        await exited;
+        assert.equal((await (await callPresence(owner)).json()).presences.length, 2);
+        node = await startPresenceNode(tenantId); child = node.child;
+        for (const method of ['GET', 'POST', 'DELETE']) assert.equal((await callOther(stranger, method)).status, 404);
+        await pool().query("UPDATE users SET status = 'disabled' WHERE id = $1", [collaborator.id]);
+        assert.deepEqual((await (await callPresence(owner)).json()).presences.map(item => item.userId), [owner.id]);
+        await pool().query("UPDATE users SET status = 'active' WHERE id = $1", [collaborator.id]);
+        await pool().query("UPDATE presentation_shared_presence SET last_seen_at = NOW() - INTERVAL '46 seconds' WHERE user_id = $1", [collaborator.id]);
+        assert.equal((await (await callOther(owner)).json()).presences.length, 1);
+        await pool().query("UPDATE presentation_shared_presence SET last_seen_at = NOW() - INTERVAL '2 days' WHERE user_id = $1", [collaborator.id]);
+        assert.equal(await require('../server/services/presentations/presentation-shared-presence').pruneExpiredPresence(), 1);
+        assert.equal((await (await callPresence(owner)).json()).presences.length, 1);
+        assert.equal((await callOther(collaborator, 'POST')).status, 200);
 
         // 5. 协作者在第 1 页发表主评论
         const slide1Id = presentation.content.slides[0].id;
@@ -222,12 +278,19 @@ test('数据库集成：演示文稿评论线程组织、解决状态与协作�
 
         const collabAccessRevoked = await getPresentation(collaborator, presentation.id);
         assert.equal(collabAccessRevoked, null);
+        for (const method of ['GET', 'POST', 'DELETE']) assert.equal((await callPresence(collaborator, method)).status, 404);
+        for (const method of ['GET', 'POST', 'DELETE']) assert.equal((await callOther(collaborator, method)).status, 404);
+        assert.deepEqual((await (await callOther(owner)).json()).presences.map(item => item.userId), [owner.id]);
 
         // 10. 删除评论验证级联删除
         await deletePresentationComment(owner, presentation.id, mainComment.id);
         const remainingComments = await listPresentationComments(owner, presentation.id);
         assert.equal(remainingComments.comments.length, 0);
     } finally {
+        if (child && child.exitCode === null && child.connected) { const exited = new Promise(resolve => child.once('exit', resolve)); child.send('stop'); await exited; }
+        if (previousMode === undefined) delete process.env.PIVOT_DEPLOYMENT_MODE; else process.env.PIVOT_DEPLOYMENT_MODE = previousMode;
+        if (server) { server.closeAllConnections?.(); await new Promise(resolve => server.close(resolve)); }
+        require('../server/services/presentations/presentation-presence').resetAllPresence();
         if (presentation?.id) {
             await deletePresentation(owner, presentation.id).catch(() => {});
             await pool().query('DELETE FROM presentation_documents WHERE client_id = $1', [presentation.id]);

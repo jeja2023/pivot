@@ -3,7 +3,7 @@ const { query, execute } = require('../db/client');
 const knowledgeRepository = require('../repositories/knowledge');
 const { buildDocumentAccessFilter } = require('./knowledge-access');
 const { generateEmbeddingsAdaptive } = require('./rag-index/embedding-client');
-const { getEmbeddingConfig } = require('./rag-config');
+const { getEmbeddingConfigAsync } = require('./rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { logger } = require('../logger');
 
@@ -77,7 +77,7 @@ function createKnowledgeCatalogIndex(deps = {}) {
     const executeFn = deps.execute || execute;
     const listCollections = deps.listCollections || (user => knowledgeRepository.listCollections(user));
     const generateEmbeddings = deps.generateEmbeddingsAdaptive || generateEmbeddingsAdaptive;
-    const getConfig = deps.getEmbeddingConfig || getEmbeddingConfig;
+    const getConfig = deps.getEmbeddingConfig || getEmbeddingConfigAsync;
     const now = deps.getBeijingTimestamp || getBeijingTimestamp;
     const cache = new Map();
     const inFlight = new Map();
@@ -165,7 +165,7 @@ function createKnowledgeCatalogIndex(deps = {}) {
     }
 
     async function getVisibleEntries({ user, embeddingConfig = null } = {}) {
-        const config = embeddingConfig || getConfig(user?.id || null);
+        const config = embeddingConfig || await getConfig(user?.id || null);
         const embeddingKey = embeddingKeyForConfig(config);
         const sources = await loadVisibleSources(user);
         const stored = await loadStoredVectors(sources, embeddingKey);
@@ -219,7 +219,7 @@ function createKnowledgeCatalogIndex(deps = {}) {
     }
 
     async function refreshEntries(entries = [], { user, embeddingConfig = null, signal = null } = {}) {
-        const config = embeddingConfig || getConfig(user?.id || null);
+        const config = embeddingConfig || await getConfig(user?.id || null);
         const embeddingKey = embeddingKeyForConfig(config);
         if (!config?.http?.url) return [];
         const missing = entries

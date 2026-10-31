@@ -5,6 +5,7 @@ const { DEFAULT_DOCUMENT_PROCESSING_CONFIG } = require('./constants');
 const { safeUnlinkManaged } = require('./paths');
 const { cleanupExpiredJobSecrets } = require('./secrets');
 const { cleanupDocumentOrphans } = require('./orphan-cleanup');
+const { cleanupQpdfWorkdirs } = require('./qpdf-workdir-lease');
 
 async function cleanupExpiredDocumentProcessingFiles(options = {}) {
     const configuredRetention = Number.parseInt(getAppSettingValue('document_processing_output_retention_days'), 10);
@@ -31,7 +32,8 @@ async function cleanupExpiredDocumentProcessingFiles(options = {}) {
         return null;
     });
     if (orphans?.deleted) logger.info({ deleted: orphans.deleted, scanned: orphans.scanned, retentionDays: orphans.retentionDays }, '文档处理未登记文件已清理');
-    return { outputs: rows.length, removedFiles, retentionDays, expiredSecrets, orphans };
+    const qpdfWorkdirs = await cleanupQpdfWorkdirs().catch(error => { logger.warn({ err: error.message }, 'qpdf 临时目录巡检失败'); return null; });
+    return { outputs: rows.length, removedFiles, retentionDays, expiredSecrets, orphans, qpdfWorkdirs };
 }
 
 module.exports = {

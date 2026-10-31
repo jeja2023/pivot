@@ -4,8 +4,7 @@ const schema = require('../../../client/common/mindmap-document');
 const repository = require('../../repositories/mindmaps');
 const documents = require('./documents');
 const { canonicalJson } = require('../canonical-json');
-let running = false;
-let interval = null;
+const { createQueueRunner } = require('../queue-runner');
 function publicJob(row) { return { id: row.id, artifactId: String(row.artifact_id), versionId: String(row.version_id), format: row.format, status: row.status, renditionId: row.rendition_id ? String(row.rendition_id) : null, error: row.error_message || '', createdAt: row.created_at }; }
 async function create(user, artifactId, input = {}) {
     if (!require('./formats').EXPORT_FORMATS.includes(input.format)) throw schema.error('请选择受支持的导图导出格式。');
@@ -30,19 +29,16 @@ async function execute(job) {
     await require('../agent-artifact-delivery').recordDeliveryEvent({ tenantId: tenant.tenantId, renditionId: result.row.id, runId: result.row.run_id, toolCallId: result.row.tool_call_id, actorType: 'user', actorId: String(user.id), eventType: 'mindmap_render', contentDigest: result.row.content_digest });
     await repository.finishJob(job, result.row.id);
 }
-async function drain() {
-    if (running) return;
-    running = true;
+async function runBatch({ shouldStop }) {
     try {
         for (let count = 0; count < 10; count++) {
+            if (shouldStop()) break;
             const job = await repository.claimJob(); if (!job) break;
             try { await execute(job); }
             catch (error) { await repository.finishJob(job, null, error.expose ? error.message : '导出失败，请重试或联系管理员检查运行环境。'); }
         }
     } catch (error) { require('../../logger').logger.error({ code: error.code || 'MINDMAP_EXPORT_FAILED' }, '思维导图导出队列处理失败'); }
-    finally { running = false; }
 }
-function schedule() { setImmediate(() => { void drain(); }); }
-function start() { if (!interval) { interval = setInterval(schedule, 15000); interval.unref(); schedule(); } }
-function stop() { clearInterval(interval); interval = null; }
+const runner = createQueueRunner(runBatch);
+const { schedule, drain, start, stop } = runner;
 module.exports = { create, get, drain, start, stop };

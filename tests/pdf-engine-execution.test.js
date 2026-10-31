@@ -25,6 +25,7 @@ test('veraPDF 进程超时会终止并报告超时错误', async () => {
 });
 
 test('真实 qpdf 可解密、优化和重新保护 PDF，并支持特殊 Unicode 密码', async t => {
+    if (!process.env.DATABASE_URL) return t.skip('需要隔离 PostgreSQL 临时目录租约');
     const health = await getQpdfHealth({ refresh: true });
     if (!health.available) return t.skip('本机未安装 qpdf');
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-qpdf-test-'));

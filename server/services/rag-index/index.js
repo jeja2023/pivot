@@ -25,13 +25,13 @@ const {
     normalizeRetrievalScope
 } = require('./retrieval-scope-builder');
 const { attachCitationKeys: attachCitationKeysBase } = require('./citation-keys');
-const { hydrateCandidateEmbeddings } = require('./candidate-embeddings');
+const { hydrateCandidateEmbeddings, retainAuthorizedDenseCandidates } = require('./candidate-embeddings');
 const {
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
-    getRagConfig,
+    getRagConfigAsync,
     getHybridRetrievalConfig,
-    getChunkSizeForDocType
+    getChunkSizeForDocTypeAsync
 } = require('../rag-config');
 const { getRagLimits } = require('../resource-limits');
 const { ensureKnowledgeVectorIndex } = require('../knowledge-vector-index');
@@ -356,16 +356,12 @@ async function selectDenseCandidates(userId, queryVector, limit, scope = {}, use
         if (!Number.isFinite(denseScore) || denseScore <= 0) continue;
         insertDenseCandidate(top, { ...chunk, __denseScore: denseScore, __entry: entry }, limit);
     }
-    if (top.length && typeof knowledgeRepository.listChunkEmbeddingsByIds === 'function') {
-        const embeddings = await knowledgeRepository.listChunkEmbeddingsByIds(top.map(chunk => chunk.id));
-        const byId = new Map(embeddings.map(row => [Number(row.id), row.embedding]));
-        top.forEach(chunk => {
-            const embedding = byId.get(Number(chunk.id));
-            if (embedding) chunk.__entry = getChunkEmbedding(chunk.id, embedding, queryVector.length);
-        });
-    }
-    top.forEach((chunk, idx) => { chunk.__denseRank = idx; });
-    return top;
+    // 二次加载向量时重新执行同一授权过滤；撤权或删除的候选不得继续使用。
+    const authorized = await retainAuthorizedDenseCandidates(top,
+        ids => selectChunksByIds(userId, ids, ids.length, scope, user),
+        (id, embedding) => getChunkEmbedding(id, embedding, queryVector.length));
+    authorized.forEach((chunk, idx) => { chunk.__denseRank = idx; });
+    return authorized;
 }
 
 function mergeIndependentCandidates(lexicalCandidates, denseCandidates, graphCandidates = []) {
@@ -536,7 +532,7 @@ async function debugRetrieveContext(userId, query, {
     scope = {},
     user = null
 } = {}) {
-    const config = getRagConfig({ topK, candidateLimit, scoreThreshold }, userId);
+    const config = await getRagConfigAsync({ topK, candidateLimit, scoreThreshold }, userId);
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) {
         return {
@@ -682,7 +678,7 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     const startedAt = Date.now();
     const normalizedQuery = normalizeCacheQuery(query);
     if (!normalizedQuery) return '';
-    const baseConfig = getRagConfig({ topK }, userId);
+    const baseConfig = await getRagConfigAsync({ topK }, userId);
     const config = {
         ...baseConfig,
         topK: topK == null
@@ -839,13 +835,13 @@ function buildEnrichedChunkText(content, headingPath) {
 
 async function indexDocumentChunks(docId, text, { onProgress, userId = null, user = null, embeddingTimeoutMs = null } = {}) {
     const startedAt = Date.now();
-    const ragConfig = getRagConfig({}, userId);
+    const ragConfig = await getRagConfigAsync({}, userId);
     const embeddingConfig = getSystemEmbeddingConfig();
     const embeddingProfile = getEmbeddingProfile(embeddingConfig);
     const docRow = await knowledgeRepository.getDocumentName(docId);
     const docName = docRow.name || '';
     const docType = detectDocType(docName, text);
-    const typedChunkSize = getChunkSizeForDocType(docType, ragConfig.chunkSize, userId);
+    const typedChunkSize = await getChunkSizeForDocTypeAsync(docType, ragConfig.chunkSize, userId);
     // 结构感知切片：返回 [{ content(原文), headingPath(面包屑) }]。
     const chunks = chunkDocument(text, {
         docName,

@@ -178,6 +178,70 @@ test('知识库 Worker 在长任务期间持续刷新租约，停止后清理心
     assert.ok(cleared >= 2, '任务完成和 Worker 停止均应释放 timer');
 });
 
+test('知识库 Worker 停机等待在途领取与任务，并阻止请求重新启动', async () => {
+    let releaseClaim;
+    let notifyClaim;
+    let releaseJob;
+    let notifyJob;
+    const claiming = new Promise(resolve => { notifyClaim = resolve; });
+    const claimGate = new Promise(resolve => { releaseClaim = resolve; });
+    const working = new Promise(resolve => { notifyJob = resolve; });
+    const jobGate = new Promise(resolve => { releaseJob = resolve; });
+    let claims = 0;
+    let completed = false;
+    const queue = {
+        recoverExpiredLeases: async () => ({}),
+        claimNext: async () => { claims += 1; notifyClaim(); await claimGate; return { id: 1, docId: 2, userId: 3 }; },
+        updateStage: async () => true,
+        complete: async () => { completed = true; },
+        fail: async () => ({}), renewLease: async () => true
+    };
+    const worker = createKnowledgeIngestionWorker({ queue, processJob: async () => { notifyJob(); await jobGate; return {}; }, logger: { warn() {} } });
+    const starting = worker.start();
+    await claiming;
+    let stopped = false;
+    const stopping = worker.shutdown().then(() => { stopped = true; });
+    releaseClaim();
+    await working;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(stopped, false);
+    releaseJob();
+    await Promise.all([starting, stopping]);
+    assert.equal(completed, true);
+    assert.equal((await worker.start()).started, false);
+    assert.equal(claims, 1);
+});
+
+test('知识库 Worker 启动恢复期间停机不会留下定时器', async () => {
+    let release;
+    let notify;
+    let timers = 0;
+    const ready = new Promise(resolve => { notify = resolve; });
+    const barrier = new Promise(resolve => { release = resolve; });
+    const queue = { async recoverExpiredLeases() { notify(); await barrier; }, async claimNext() { throw new Error('停机后不能领取任务'); } };
+    const worker = createKnowledgeIngestionWorker({ queue, processJob: async () => ({}), setIntervalFn() { timers += 1; } });
+    const starting = worker.start();
+    await ready;
+    const stopping = worker.shutdown();
+    release();
+    await Promise.all([starting, stopping]);
+    assert.equal(timers, 0);
+    assert.equal(worker.getRuntimeStatus().started, false);
+});
+
+test('知识库 Worker 启动恢复失败后可重试', async () => {
+    let calls = 0;
+    const queue = {
+        async recoverExpiredLeases() { if (++calls === 1) throw new Error('暂时不可用'); },
+        async claimNext() { return null; }
+    };
+    const worker = createKnowledgeIngestionWorker({ queue, processJob: async () => ({}) });
+    await assert.rejects(worker.start(), /暂时不可用/);
+    assert.equal(worker.getRuntimeStatus().started, false);
+    assert.equal((await worker.start()).started, true);
+    await worker.stop();
+});
+
 test('知识库任务退避、HNSW 建索引和 PostgreSQL FTS 词元均有安全边界', () => {
     assert.equal(retryDelayMs(1), 1000);
     assert.equal(retryDelayMs(20), 15 * 60 * 1000);

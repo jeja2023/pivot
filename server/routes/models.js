@@ -21,7 +21,7 @@ const {
     getUserRunnableModelsAsync
 } = require('../services/models');
 const { getModelForStatusManagement, updateModelStatus } = require('../repositories/model-status');
-const { getEmbeddingConfig } = require('../services/rag-config');
+const { getEmbeddingConfigAsync } = require('../services/rag-config');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
 const { safeJsonGet } = require('../services/safe-http-client');
@@ -132,7 +132,7 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
             ].filter(Boolean)
         }));
 
-        const embeddingConfig = getEmbeddingConfig(req.user?.id);
+        const embeddingConfig = await getEmbeddingConfigAsync(req.user?.id);
         const embeddingModel = String(embeddingConfig.http?.model || '').trim();
         const embeddingUrl = String(embeddingConfig.http?.url || '').trim();
         if (embeddingModel && embeddingUrl && !models.some(model => model.model_name === embeddingModel && model.type === 'embedding')) {

@@ -10,6 +10,8 @@ const migrationModules = [
     require('./analysis-transactions'),
     require('./mindmap-themes'),
     require('./agent-outbox-retention'),
+    require('./token-metrics-snapshot'),
+    require('./presentation-shared-presence'),
     require('./autonomous-runtime-foundations'),
     require('./workflow-credential-user-visibility'),
     require('./chat-agent-run-message-link'),

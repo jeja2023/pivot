@@ -2,7 +2,7 @@ const { getAppSettingValue } = require('./app-settings');
 const { decryptSecret, encryptSecret } = require('../security');
 const { getRagLimits } = require('./resource-limits');
 const {
-    getUserSettingValue,
+    getUserSettingsAsync,
     getUserSettingValueAsync
 } = require('./user-settings');
 
@@ -29,6 +29,17 @@ const EMBEDDING_MODES = {
     http: 'http'
 };
 
+const RAG_USER_KEYS = [
+    RAG_CONFIG_KEYS.scoreThreshold, RAG_CONFIG_KEYS.topK, RAG_CONFIG_KEYS.candidateLimit,
+    RAG_CONFIG_KEYS.chunkSize, RAG_CONFIG_KEYS.chunkOverlap, RAG_CONFIG_KEYS.embeddingMode,
+    RAG_CONFIG_KEYS.embeddingApiUrl, RAG_CONFIG_KEYS.embeddingApiKey, RAG_CONFIG_KEYS.embeddingModel
+];
+
+function userSetting(settings, key) { return settings?.[key]?.value; }
+async function loadRagUserSettings(userId) {
+    return userId ? getUserSettingsAsync(userId, RAG_USER_KEYS) : null;
+}
+
 function clampNumber(value, fallback, min, max) {
     const parsed = Number.parseFloat(value);
     if (!Number.isFinite(parsed)) return fallback;
@@ -49,14 +60,15 @@ function normalizeEmbeddingMode(_value) {
     return EMBEDDING_MODES.http;
 }
 
-function getEmbeddingConfig(userId = null, { allowUserSettings = true } = {}) {
+function getEmbeddingConfig(userId = null, { allowUserSettings = true, userSettings = null } = {}) {
     // 个人向量配置适合个人知识库；共享法规库必须由唯一的系统配置生成和检索，
     // 否则不同管理员会把同一批条文写入不兼容的向量空间。
     const useUserSettings = allowUserSettings && Boolean(userId);
-    const userMode = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingMode) : undefined;
-    const userUrl = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiUrl) : undefined;
-    const userKey = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingApiKey) : undefined;
-    const userModel = useUserSettings ? getUserSettingValue(userId, RAG_CONFIG_KEYS.embeddingModel) : undefined;
+    if (useUserSettings && !userSettings) throw new Error('个人向量配置必须异步加载');
+    const userMode = useUserSettings ? userSetting(userSettings, RAG_CONFIG_KEYS.embeddingMode) : undefined;
+    const userUrl = useUserSettings ? userSetting(userSettings, RAG_CONFIG_KEYS.embeddingApiUrl) : undefined;
+    const userKey = useUserSettings ? userSetting(userSettings, RAG_CONFIG_KEYS.embeddingApiKey) : undefined;
+    const userModel = useUserSettings ? userSetting(userSettings, RAG_CONFIG_KEYS.embeddingModel) : undefined;
     const storedMode = getSettingValue(RAG_CONFIG_KEYS.embeddingMode);
     const storedUrl = getSettingValue(RAG_CONFIG_KEYS.embeddingApiUrl);
     const storedKey = getSettingValue(RAG_CONFIG_KEYS.embeddingApiKey);
@@ -90,6 +102,11 @@ function getEmbeddingConfig(userId = null, { allowUserSettings = true } = {}) {
     };
 }
 
+async function getEmbeddingConfigAsync(userId = null, options = {}) {
+    const userSettings = options.allowUserSettings === false ? null : await loadRagUserSettings(userId);
+    return getEmbeddingConfig(userId, { ...options, userSettings });
+}
+
 function getSystemEmbeddingConfig() {
     return getEmbeddingConfig(null, { allowUserSettings: false });
 }
@@ -101,8 +118,7 @@ function getEmbeddingProfile(config = {}) {
     return `${mode}:${model}`;
 }
 
-function getPublicEmbeddingConfig(userId = null) {
-    const config = getEmbeddingConfig(userId);
+function publicEmbeddingConfig(config) {
     return {
         mode: config.mode,
         apiUrl: config.http.url,
@@ -111,6 +127,11 @@ function getPublicEmbeddingConfig(userId = null) {
         isPersonal: config.source.url === 'user' || config.source.model === 'user' || config.source.apiKey === 'user',
         source: config.source
     };
+}
+
+function getPublicEmbeddingConfig(userId = null) { return publicEmbeddingConfig(getEmbeddingConfig(userId)); }
+async function getPublicEmbeddingConfigAsync(userId = null) {
+    return publicEmbeddingConfig(await getEmbeddingConfigAsync(userId));
 }
 
 function normalizeBoolean(value, fallback = false) {
@@ -185,7 +206,8 @@ function getRerankProfile(config = getRerankConfig()) {
     ].join(':');
 }
 
-function getRagConfig(overrides = {}, userId = null) {
+function getRagConfig(overrides = {}, userId = null, userSettings = null) {
+    if (userId && !userSettings) throw new Error('个人检索配置必须异步加载');
     const ragLimits = getRagLimits();
     const defaultScoreThreshold = clampNumber(process.env.RAG_SCORE_THRESHOLD, 0.4, 0, 1);
     const defaultTopK = clampInteger(process.env.RAG_TOP_K, 3, 1, ragLimits.topKMax || 10);
@@ -196,31 +218,31 @@ function getRagConfig(overrides = {}, userId = null) {
     const defaultCitationConfidenceThreshold = clampNumber(process.env.RAG_CITATION_CONFIDENCE_THRESHOLD, 0.42, 0, 1);
 
     const scoreThreshold = clampNumber(
-        overrides.scoreThreshold ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.scoreThreshold) ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
+        overrides.scoreThreshold ?? userSetting(userSettings, RAG_CONFIG_KEYS.scoreThreshold) ?? getSettingValue(RAG_CONFIG_KEYS.scoreThreshold),
         defaultScoreThreshold,
         0,
         1
     );
     const topK = clampInteger(
-        overrides.topK ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.topK) ?? getSettingValue(RAG_CONFIG_KEYS.topK),
+        overrides.topK ?? userSetting(userSettings, RAG_CONFIG_KEYS.topK) ?? getSettingValue(RAG_CONFIG_KEYS.topK),
         defaultTopK,
         1,
         ragLimits.topKMax || 10
     );
     const candidateLimit = clampInteger(
-        overrides.candidateLimit ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.candidateLimit) ?? getSettingValue(RAG_CONFIG_KEYS.candidateLimit),
+        overrides.candidateLimit ?? userSetting(userSettings, RAG_CONFIG_KEYS.candidateLimit) ?? getSettingValue(RAG_CONFIG_KEYS.candidateLimit),
         defaultCandidateLimit,
         Math.max(topK, 20),
         ragLimits.candidateLimitMax || 1000
     );
     const chunkSize = clampInteger(
-        overrides.chunkSize ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
+        overrides.chunkSize ?? userSetting(userSettings, RAG_CONFIG_KEYS.chunkSize) ?? getSettingValue(RAG_CONFIG_KEYS.chunkSize),
         defaultChunkSize,
         200,
         ragLimits.chunkSizeMax || 2000
     );
     const chunkOverlap = clampInteger(
-        overrides.chunkOverlap ?? getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkOverlap) ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
+        overrides.chunkOverlap ?? userSetting(userSettings, RAG_CONFIG_KEYS.chunkOverlap) ?? getSettingValue(RAG_CONFIG_KEYS.chunkOverlap),
         defaultChunkOverlap,
         0,
         Math.floor(chunkSize / 2)
@@ -235,6 +257,10 @@ function getRagConfig(overrides = {}, userId = null) {
         rerankThreshold: clampNumber(overrides.rerankThreshold ?? defaultRerankThreshold, defaultRerankThreshold, 0, 1),
         citationConfidenceThreshold: clampNumber(overrides.citationConfidenceThreshold ?? defaultCitationConfidenceThreshold, defaultCitationConfidenceThreshold, 0, 1)
     };
+}
+
+async function getRagConfigAsync(overrides = {}, userId = null) {
+    return getRagConfig(overrides, userId, await loadRagUserSettings(userId));
 }
 
 // 混合检索（RRF 融合 + MMR 去重）参数。env 优先，否则用默认值。
@@ -255,12 +281,13 @@ function getHybridRetrievalConfig() {
 
 // 按文档类型解析切片字符数：法规放大以容纳整条，prose 适度放大，
 // 表格/markdown 沿用基础 chunkSize。结果受运行时 chunkSizeMax 上限约束。
-function getChunkSizeForDocType(docType, baseChunkSize, userId = null) {
+function getChunkSizeForDocType(docType, baseChunkSize, userId = null, userSettings = null) {
+    if (userId && !userSettings) throw new Error('个人切片配置必须异步加载');
     const ragLimits = getRagLimits();
     const max = ragLimits.chunkSizeMax || 4000;
     if (docType === 'legal') {
         return clampInteger(
-            getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_LEGAL,
+            userSetting(userSettings, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_LEGAL,
             Math.min(Math.max(baseChunkSize, 1100), max),
             200,
             max
@@ -268,13 +295,17 @@ function getChunkSizeForDocType(docType, baseChunkSize, userId = null) {
     }
     if (docType === 'prose') {
         return clampInteger(
-            getUserSettingValue(userId, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_PROSE,
+            userSetting(userSettings, RAG_CONFIG_KEYS.chunkSize) ? baseChunkSize : process.env.RAG_CHUNK_SIZE_PROSE,
             Math.min(Math.max(baseChunkSize, 800), max),
             200,
             max
         );
     }
     return clampInteger(baseChunkSize, baseChunkSize, 200, max);
+}
+
+async function getChunkSizeForDocTypeAsync(docType, baseChunkSize, userId = null) {
+    return getChunkSizeForDocType(docType, baseChunkSize, userId, await loadRagUserSettings(userId));
 }
 
 function toRagSettingValue(key, value) {
@@ -334,16 +365,19 @@ module.exports = {
     EMBEDDING_MODES,
     RAG_CONFIG_KEYS,
     getEmbeddingConfig,
+    getEmbeddingConfigAsync,
     getSystemEmbeddingConfig,
     getEmbeddingProfile,
     getPublicEmbeddingConfig,
+    getPublicEmbeddingConfigAsync,
     getPublicRerankConfig,
     getRagConfig,
+    getRagConfigAsync,
     getRerankConfig,
     getRerankProfile,
     getHybridRetrievalConfig,
     getChunkSizeForDocType,
-    getUserSettingValue,
+    getChunkSizeForDocTypeAsync,
     getUserSettingValueAsync,
     normalizeEmbeddingMode,
     toRagSettingValue

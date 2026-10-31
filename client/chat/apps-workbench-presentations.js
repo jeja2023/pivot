@@ -97,7 +97,9 @@
     }
     async function refreshRemotePresentation({ force = false } = {}) {
         if (!state.active?.id || state.saving || (!force && !window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.())) return false;
-        const data = await requestJson(API + '/' + encodeURIComponent(state.active.id), { cache: 'no-store' });
+        const data = await window.Pivot.moduleApi('apps.presentations.realtime').fetchCurrent({ active: state.active, getActive: () => state.active,
+            request: id => requestJson(API + '/' + encodeURIComponent(id), { cache: 'no-store' }), onRevoked: revokePresentationAccess });
+        if (!data) return false;
         const remote = data.presentation;
         if (!remote || (!force && Number(remote.version || 0) <= Number(state.active.version || 0))) return false;
         if (state.dirty && !force) {
@@ -113,26 +115,23 @@
         byId('presentation-editor')?.classList.add('hidden'); byId('presentation-library')?.classList.remove('hidden');
         toast('你已被移出该演示文稿，当前访问已撤销。', 'warning'); loadDocuments().catch(() => {});
     }
-    function stopPresentationRealtime() {
-        if (state.realtimeSource) { state.realtimeSource.close(); state.realtimeSource = null; }
-    }
+    function stopPresentationRealtime() { if (state.realtimeSource) { state.realtimeSource.close(); state.realtimeSource = null; } }
     function startPresentationRealtime() {
         stopPresentationRealtime();
         if (!state.active?.id) return;
-        const onPresentationEvent = event => {
-            let payload; try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
-            if (String(payload.presentationId || '') !== String(state.active?.id || '')) return;
-            if (payload.type === 'presentation.access_revoked') { revokePresentationAccess(); return; }
-            if (!window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.()) return;
-            if (payload.type === 'presentation.updated') refreshRemotePresentation().catch(() => {});
-            if (payload.type === 'presentation.comments') collab()?.loadComments(state.active?.id);
-            if (payload.type === 'presentation.collaborators') { collab()?.loadCollaborators?.(); refreshRemotePresentation().catch(() => {}); }
-        };
-        const types = ['presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'];
-        state.realtimeSource = window.Pivot.moduleApi('apps.presentations.realtime').subscribe?.(types, onPresentationEvent) || null;
+        state.realtimeSource = window.Pivot.moduleApi('apps.presentations.realtime').subscribePresentation?.({
+            getActiveId: () => state.active?.id, onRevoked: revokePresentationAccess,
+            onUpdated: () => refreshRemotePresentation().catch(() => {}),
+            onComments: () => collab()?.loadComments(state.active?.id),
+            onCollaborators: () => { collab()?.loadCollaborators?.(); refreshRemotePresentation().catch(() => {}); },
+            onReconnect: () => { refreshRemotePresentation().catch(() => {}); collab()?.loadComments(state.active?.id); }
+        }) || null;
     }
     function startPresentationSync() {
-        clearInterval(state.syncTimer); state.syncTimer = window.setInterval(() => refreshRemotePresentation().catch(() => {}), 5000);
+        clearInterval(state.syncTimer);
+        state.syncTimer = window.Pivot.moduleApi('apps.presentations.realtime').startPolling({
+            getActiveId: () => state.active?.id, onRefresh: () => refreshRemotePresentation().catch(() => {}), onComments: id => collab()?.loadComments(id)
+        });
     }
     function stopPresentationSync() { clearInterval(state.syncTimer); state.syncTimer = null; state.remoteVersionAvailable = false; }
     async function syncRemotePresentation() {

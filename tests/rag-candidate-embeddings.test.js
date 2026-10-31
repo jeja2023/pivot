@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { hydrateCandidateEmbeddings } = require('../server/services/rag-index/candidate-embeddings');
+const { hydrateCandidateEmbeddings, retainAuthorizedDenseCandidates } = require('../server/services/rag-index/candidate-embeddings');
 
 test('仅批量加载缺失的词法候选向量并保留排名与权限过滤结果', async () => {
     const dense = { id: 2, __entry: { vec: [1, 0] }, __denseRank: 0 };
@@ -18,6 +18,15 @@ test('仅批量加载缺失的词法候选向量并保留排名与权限过滤�
     assert.equal(hydrated[1], dense);
     assert.equal(hydrated[2].embedding, null);
     assert.equal(hydrated.length, 3, '补取时权限已撤销的候选不能继续参与排序');
+});
+
+test('稠密候选二次授权后丢弃已撤权文档并保留有效向量', async () => {
+    const candidates = [{ id: 1, __denseScore: 0.9 }, { id: 2, __denseScore: 0.8 }];
+    const result = await retainAuthorizedDenseCandidates(candidates, async ids => {
+        assert.deepEqual(ids, [1, 2]);
+        return [{ id: 2, embedding: '[1,0]' }];
+    }, (id, embedding) => ({ id, embedding }));
+    assert.deepEqual(result, [{ id: 2, __denseScore: 0.8, __entry: { id: 2, embedding: '[1,0]' } }]);
 });
 
 test('候选已有向量时不会发起额外读取', async () => {

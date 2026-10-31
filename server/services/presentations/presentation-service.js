@@ -666,6 +666,7 @@ module.exports = {
     duplicatePresentation,
     exportPresentationTemplate,
     getPresentation,
+    getPresentationRow,
     getPresentationTemplateStatistics,
     getPresentationTemplateSource,
     reparsePresentationTemplateSource,

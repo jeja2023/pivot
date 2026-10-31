@@ -367,13 +367,32 @@ function createKnowledgeIngestionWorker({
     let draining = false;
     let running = 0;
     let timer = null;
+    let shutdownRequested = false;
+    let startupTask = null;
+    let drainTask = null;
+    let recoveryTask = null;
+    const inFlight = new Set();
+
+    function track(promise) {
+        inFlight.add(promise);
+        promise.then(() => inFlight.delete(promise), () => inFlight.delete(promise));
+        return promise;
+    }
+
+    function recover() {
+        if (recoveryTask) return recoveryTask;
+        const task = Promise.resolve().then(() => queue.recoverExpiredLeases({ leaseSeconds }));
+        recoveryTask = task;
+        task.then(() => { if (recoveryTask === task) recoveryTask = null; }, () => { if (recoveryTask === task) recoveryTask = null; });
+        return task;
+    }
 
     const maxConcurrency = () => Math.max(1, Math.min(Number.parseInt(getConcurrency(), 10) || 1, 64));
 
     async function runJob(job) {
         const heartbeatMs = Math.max(1000, Math.floor(Math.max(15, Number(leaseSeconds) || 120) * 1000 / 3));
         const heartbeat = setIntervalFn(() => {
-            void queue.renewLease(job.id, workerId, job.attempts).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务租约续期失败'));
+            void track(queue.renewLease(job.id, workerId, job.attempts).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务租约续期失败')));
         }, heartbeatMs);
         heartbeat?.unref?.();
         try {
@@ -396,7 +415,7 @@ function createKnowledgeIngestionWorker({
         }
     }
 
-    async function drain() {
+    async function drainWork() {
         if (draining || !started) return;
         draining = true;
         try {
@@ -404,7 +423,7 @@ function createKnowledgeIngestionWorker({
                 const job = await queue.claimNext({ workerId, leaseSeconds });
                 if (!job) break;
                 running += 1;
-                runJob(job).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务执行出现未处理错误'));
+                track(runJob(job).catch(error => logger.warn({ err: error.message, jobId: job.id }, '知识库索引任务执行出现未处理错误')));
             }
         } catch (error) {
             logger.warn({ err: error.message }, '知识库索引 Worker 领取任务失败');
@@ -413,36 +432,52 @@ function createKnowledgeIngestionWorker({
         }
     }
 
+    function drain() {
+        if (drainTask) return drainTask;
+        const task = Promise.resolve().then(drainWork);
+        drainTask = task;
+        task.then(() => { if (drainTask === task) drainTask = null; }, () => { if (drainTask === task) drainTask = null; });
+        return task;
+    }
+
     async function kick() {
         await drain();
     }
 
-    async function start() {
-        if (started) return getRuntimeStatus();
+    function start() {
+        if (started || shutdownRequested) return Promise.resolve(getRuntimeStatus());
         started = true;
-        await queue.recoverExpiredLeases({ leaseSeconds });
-        timer = setIntervalFn(() => {
-            // 每轮先回收真正失去心跳的任务，再领取可运行任务。实际执行中的
-            // Worker 会按 lease 的三分之一刷新 locked_at，避免长文档被抢占。
-            void queue.recoverExpiredLeases({ leaseSeconds }).catch(error => logger.warn({ err: error.message }, '知识库索引任务租约恢复失败'));
-            void kick();
-        }, Math.max(250, Number(pollIntervalMs) || 1000));
-        timer?.unref?.();
-        await kick();
-        return getRuntimeStatus();
+        const task = (async () => {
+            await recover();
+            if (!started || shutdownRequested) return getRuntimeStatus();
+            timer = setIntervalFn(() => {
+                void recover().catch(error => logger.warn({ err: error.message }, '知识库索引任务租约恢复失败'));
+                void kick();
+            }, Math.max(250, Number(pollIntervalMs) || 1000));
+            timer?.unref?.();
+            await kick();
+            return getRuntimeStatus();
+        })().catch(error => { started = false; if (timer) clearIntervalFn(timer); timer = null; throw error; });
+        startupTask = task;
+        task.then(() => { if (startupTask === task) startupTask = null; }, () => { if (startupTask === task) startupTask = null; });
+        return task;
     }
 
-    function stop() {
+    async function stop() {
         started = false;
         if (timer) clearIntervalFn(timer);
         timer = null;
+        await Promise.allSettled([startupTask, drainTask, recoveryTask].filter(Boolean));
+        while (inFlight.size) await Promise.allSettled([...inFlight]);
     }
+
+    async function shutdown() { shutdownRequested = true; await stop(); }
 
     function getRuntimeStatus() {
         return { started, running, maxConcurrent: maxConcurrency(), workerId: normalizeWorkerId(workerId) };
     }
 
-    return { getRuntimeStatus, kick, start, stop };
+    return { getRuntimeStatus, kick, start, stop, shutdown };
 }
 
 module.exports = {

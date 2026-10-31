@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { promisify } = require('util');
+const inflateRaw = promisify(zlib.inflateRaw);
 
 const pdfParse = require('pdf-parse');
 const WordExtractor = require('word-extractor');
@@ -109,7 +111,7 @@ function findEndOfCentralDirectory(buffer) {
     return -1;
 }
 
-function readZipEntries(buffer) {
+async function readZipEntries(buffer) {
     const eocdOffset = findEndOfCentralDirectory(buffer);
     if (eocdOffset < 0) throw new Error('无效的 ZIP 文件：未找到中央目录区');
 
@@ -118,6 +120,7 @@ function readZipEntries(buffer) {
     let offset = buffer.readUInt32LE(eocdOffset + 16);
     const entries = new Map();
     let totalUncompressedSize = 0;
+    let totalActualSize = 0;
 
     for (let i = 0; i < entryCount; i += 1) {
         if (offset < 0 || offset + 46 > buffer.length) {
@@ -166,7 +169,7 @@ function readZipEntries(buffer) {
         if (method === 0) {
             data = compressedData;
         } else if (method === 8) {
-            data = zlib.inflateRawSync(compressedData, {
+            data = await inflateRaw(compressedData, {
                 maxOutputLength: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES
             });
         } else {
@@ -174,6 +177,10 @@ function readZipEntries(buffer) {
         }
         if (data.length > MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES) {
             throw new Error(`ZIP 条目解压后超出限制: ${fileName}`);
+        }
+        totalActualSize += data.length;
+        if (totalActualSize > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES) {
+            throw new Error('ZIP 压缩包实际总解压体积超出安全上限');
         }
 
         entries.set(fileName, data);
@@ -403,7 +410,7 @@ async function renderPdfPages(filePath, options = {}) {
 }
 
 async function extractDocxText(filePath) {
-    const entries = readZipEntries(await readBoundedBuffer(filePath));
+    const entries = await readZipEntries(await readBoundedBuffer(filePath));
     if (!Array.from(entries.keys()).some(name => /^word\/document\.xml$/i.test(name))) {
         throw new Error('Word 文档缺少正文结构');
     }
@@ -422,7 +429,7 @@ async function extractDocxText(filePath) {
 }
 
 async function extractOfdText(filePath) {
-    const entries = readZipEntries(await readBoundedBuffer(filePath));
+    const entries = await readZipEntries(await readBoundedBuffer(filePath));
     const contentNames = Array.from(entries.keys())
         .filter(name => /(?:^|\/)Content\.xml$/i.test(name))
         .sort((left, right) => left.localeCompare(right, 'en'));
@@ -478,7 +485,7 @@ function extractCellValue(cellXml, sharedStrings) {
 }
 
 async function extractXlsxText(filePath) {
-    const entries = readZipEntries(await readBoundedBuffer(filePath));
+    const entries = await readZipEntries(await readBoundedBuffer(filePath));
     const sharedStrings = entries.has('xl/sharedStrings.xml')
         ? extractSharedStrings(entries.get('xl/sharedStrings.xml').toString('utf8'))
         : [];

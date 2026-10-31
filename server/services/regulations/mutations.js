@@ -810,18 +810,20 @@ async function getRegulationIndexSummary() {
     };
 }
 
-function createRegulationIndexRecoveryRunner({ intervalMs, batchSize, logger = defaultLogger, setIntervalFn = setInterval, clearIntervalFn = clearInterval } = {}) {
+function createRegulationIndexRecoveryRunner({ intervalMs, batchSize, logger = defaultLogger, setIntervalFn = setInterval, clearIntervalFn = clearInterval, recover = recoverRegulationArticleEmbeddings } = {}) {
     const defaults = getRegulationIndexRecoverySettings();
     const safeIntervalMs = clampRegulationIndexSetting(intervalMs, defaults.intervalMs, 1_000, 300_000);
     const safeBatchSize = clampRegulationIndexSetting(batchSize, defaults.batchSize, 1, 50);
     let started = false;
     let timer = null;
     let running = false;
-    async function tick() {
-        if (running) return { skipped: true };
+    let tickTask = null;
+    let shutdownRequested = false;
+    async function tickWork() {
+        if (running || shutdownRequested) return { skipped: true };
         running = true;
         try {
-            return await recoverRegulationArticleEmbeddings({ limit: safeBatchSize });
+            return await recover({ limit: safeBatchSize });
         } catch (error) {
             logger.warn({ err: error.message }, '法规向量索引恢复巡检失败');
             return { error: error.message };
@@ -829,29 +831,46 @@ function createRegulationIndexRecoveryRunner({ intervalMs, batchSize, logger = d
             running = false;
         }
     }
+    function tick() {
+        if (shutdownRequested || tickTask) return Promise.resolve({ skipped: true });
+        const task = Promise.resolve().then(tickWork);
+        tickTask = task;
+        task.then(() => { if (tickTask === task) tickTask = null; }, () => { if (tickTask === task) tickTask = null; });
+        return task;
+    }
     async function start() {
-        if (started) return { started, running };
+        if (started || shutdownRequested) return { started, running };
         started = true;
         void tick().catch(() => {});
         timer = setIntervalFn(() => { void tick(); }, safeIntervalMs);
         timer?.unref?.();
         return { started, running };
     }
-    function stop() {
+    async function stop() {
         started = false;
         if (timer) clearIntervalFn(timer);
         timer = null;
+        if (tickTask) await tickTask;
     }
-    return { start, stop, tick, getRuntimeStatus: () => ({ started, running, intervalMs: safeIntervalMs, batchSize: safeBatchSize }) };
+    async function shutdown() { shutdownRequested = true; await stop(); }
+    return { start, stop, shutdown, tick, getRuntimeStatus: () => ({ started, running, intervalMs: safeIntervalMs, batchSize: safeBatchSize }) };
 }
 
 let regulationIndexRecoveryRunner = null;
+let regulationIndexRecoveryShuttingDown = false;
 async function startRegulationIndexRecoveryRunner() {
+    if (regulationIndexRecoveryShuttingDown) return { started: false, running: false };
     if (!regulationIndexRecoveryRunner) regulationIndexRecoveryRunner = createRegulationIndexRecoveryRunner();
     return await regulationIndexRecoveryRunner.start();
 }
 
+async function shutdownRegulationIndexRecoveryRunner() {
+    regulationIndexRecoveryShuttingDown = true;
+    if (regulationIndexRecoveryRunner) await regulationIndexRecoveryRunner.shutdown();
+}
+
 async function triggerRegulationIndexRecovery() {
+    if (regulationIndexRecoveryShuttingDown) return { skipped: true };
     if (!regulationIndexRecoveryRunner) regulationIndexRecoveryRunner = createRegulationIndexRecoveryRunner();
     return await regulationIndexRecoveryRunner.tick();
 }
@@ -937,6 +956,7 @@ module.exports = {
     resolveRegulationVersionDownloadPath,
     saveRegulationDocumentVersion,
     startRegulationIndexRecoveryRunner,
+    shutdownRegulationIndexRecoveryRunner,
     triggerRegulationIndexRecovery,
     setRegulationArticleStatus,
     updateRegulationDocument,

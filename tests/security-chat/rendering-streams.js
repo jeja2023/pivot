@@ -937,6 +937,18 @@ test('前端流式速度统计会排除思考块 token', () => {
     assert.equal(openThought, 0);
 });
 
+test('流式 token 估算逐段累加与完整文本一致', () => {
+    const sandbox = createChatRenderSandbox();
+    vm.runInNewContext(
+        fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'engine-streaming.js'), 'utf8'),
+        sandbox
+    );
+    for (const chunks of [['a', 'b', '中'], ['你', '好', ' ', '🌟'], ['\ud83c', '\udf1f', 'a'], ['a', 'b', 'c']]) {
+        const units = chunks.reduce((total, chunk) => total + sandbox.estimateStreamingTokenUnits(chunk), 0);
+        assert.equal(Math.ceil(units / 2), sandbox.estimateStreamingTokenCount(chunks.join('')));
+    }
+});
+
 test('createStreamAccumulator 可收集不含思考标签的转发流文本', () => {
     const accumulator = createStreamAccumulator();
     accumulator.pushPayload(JSON.stringify({ choices: [{ delta: { reasoning_content: 'hidden' } }] }));

@@ -46,7 +46,7 @@ const {
     testEmbeddingConnection,
     debugRetrieveContext
 } = require('../services/rag-index');
-const { getEmbeddingConfig, getRerankConfig } = require('../services/rag-config');
+const { getEmbeddingConfigAsync, getRerankConfig } = require('../services/rag-config');
 const { testRerankConnection } = require('../services/rerank-client');
 const {
     confirmRelation,
@@ -595,7 +595,7 @@ ragRouter.post('/debug-query', authMiddleware, debugQueryLimiter, asyncHandler(a
     return res.json({ ...result, queue, elapsedMs });
 }));
 ragRouter.post('/settings/test-embedding', authMiddleware, asyncHandler(async (req, res) => {
-    const savedConfig = getEmbeddingConfig(req.user.id).http;
+    const savedConfig = (await getEmbeddingConfigAsync(req.user.id)).http;
     const rawUrl = String(req.body?.apiUrl || '').trim();
     const rawKey = String(req.body?.apiKey || '').trim();
     const isUsingSavedUrl = !rawUrl || rawUrl === '********';

@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 
-const { ensureDocumentProcessingDirs, tempRoot } = require('../../paths');
+const { withQpdfLease } = require('../../qpdf-workdir-lease');
 
 const QPDF_TIMEOUT_MS = Math.min(Math.max(Number.parseInt(process.env.DOCUMENT_QPDF_TIMEOUT_MS || '120000', 10) || 120000, 5000), 10 * 60 * 1000);
 const QPDF_MAX_LOG_BYTES = 64 * 1024;
@@ -84,9 +84,13 @@ async function isPdfEncrypted(sourcePath, { health = null, spawnProcess = spawn 
     });
 }
 
-function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS, stdinText = null, sensitiveOutput = false } = {}) {
+function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS, stdinText = null, sensitiveOutput = false, signal = null } = {}) {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(engineError('qpdf 临时目录租约已失效。', 'QPDF_LEASE_LOST', 503));
         const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: [stdinText === null ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+        let leaseLost = false;
+        const abort = () => { leaseLost = true; try { child.kill(); } catch (_) {} };
+        signal?.addEventListener('abort', abort, { once: true });
         if (child.stdin) {
             // 子进程可能在读取前退出；EPIPE 由 close 状态统一报告。
             child.stdin.on('error', () => {});
@@ -104,10 +108,14 @@ function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS, 
         }, timeoutMs);
         child.once('error', error => {
             clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            if (leaseLost) return reject(engineError('qpdf 临时目录租约已失效。', 'QPDF_LEASE_LOST', 503));
             reject(engineError(`qpdf 无法启动：${truncateLog(error.message)}`, 'QPDF_EXECUTION_FAILED'));
         });
         child.once('close', code => {
             clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            if (leaseLost) return reject(engineError('qpdf 临时目录租约已失效。', 'QPDF_LEASE_LOST', 503));
             if (timedOut) return reject(engineError('qpdf 处理超时，未发布输出文件。', 'QPDF_TIMEOUT', 504));
             if (code !== 0) {
                 const detail = truncateLog(stderr || stdout);
@@ -122,18 +130,8 @@ function runQpdf(command, args, { cwd = undefined, timeoutMs = QPDF_TIMEOUT_MS, 
     });
 }
 
-async function makeWorkDir(userId) {
-    await ensureDocumentProcessingDirs();
-    return fs.promises.mkdtemp(path.join(tempRoot, `${Number.parseInt(userId, 10) || 'system'}-qpdf-`));
-}
-
 async function withQpdfWorkDir(userId, operation) {
-    const directory = await makeWorkDir(userId);
-    try {
-        return await operation(directory);
-    } finally {
-        await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
-    }
+    return withQpdfLease(operation);
 }
 
 async function writePasswordFile(directory, name, password) {
@@ -151,16 +149,16 @@ function normalizePassword(password) {
 
 async function decryptPdfToBuffer({ sourcePath, password, userId }) {
     const { command } = await requireQpdf();
-    return withQpdfWorkDir(userId, async directory => {
+    return withQpdfWorkDir(userId, async (directory, signal) => {
         const outputPath = path.join(directory, 'decrypted.pdf');
-        await runQpdf(command, ['--password-file=-', '--decrypt', sourcePath, outputPath], { cwd: directory, stdinText: `${normalizePassword(password)}\n`, sensitiveOutput: true });
+        await runQpdf(command, ['--password-file=-', '--decrypt', sourcePath, outputPath], { cwd: directory, stdinText: `${normalizePassword(password)}\n`, sensitiveOutput: true, signal });
         return fs.promises.readFile(outputPath);
     });
 }
 
 async function optimizePdf({ sourcePath, userId, password = '', optimizeImages = false, jpegQuality = 75 }) {
     const { command } = await requireQpdf();
-    return withQpdfWorkDir(userId, async directory => {
+    return withQpdfWorkDir(userId, async (directory, signal) => {
         const outputPath = path.join(directory, 'optimized.pdf');
         const args = ['--object-streams=generate', '--compress-streams=y', '--recompress-flate', '--linearize'];
         if (optimizeImages) {
@@ -168,14 +166,14 @@ async function optimizePdf({ sourcePath, userId, password = '', optimizeImages =
         }
         if (password) args.push('--password-file=-');
         args.push(sourcePath, outputPath);
-        await runQpdf(command, args, { cwd: directory, stdinText: password ? `${normalizePassword(password)}\n` : null, sensitiveOutput: Boolean(password) });
+        await runQpdf(command, args, { cwd: directory, stdinText: password ? `${normalizePassword(password)}\n` : null, sensitiveOutput: Boolean(password), signal });
         return fs.promises.readFile(outputPath);
     });
 }
 
 async function protectPdf({ sourcePath, userId, inputPassword = '', userPassword, ownerPassword, permissions = {} }) {
     const { command } = await requireQpdf();
-    return withQpdfWorkDir(userId, async directory => {
+    return withQpdfWorkDir(userId, async (directory, signal) => {
         const outputPath = path.join(directory, 'protected.pdf');
         const safeUser = String(userPassword || '');
         const safeOwner = String(ownerPassword || '');
@@ -200,7 +198,7 @@ async function protectPdf({ sourcePath, userId, inputPassword = '', userPassword
         // stdin 已用于选项；对已加密输入，qpdf 仍需单独的受限密码文件。
         if (inputPassword) args.push(`--password-file=${await writePasswordFile(directory, 'input-password', Buffer.from(normalizePassword(inputPassword), 'utf8').toString('hex'))}`);
         args.push('@-', sourcePath, outputPath);
-        await runQpdf(command, args, { cwd: directory, stdinText: response, sensitiveOutput: true });
+        await runQpdf(command, args, { cwd: directory, stdinText: response, sensitiveOutput: true, signal });
         return fs.promises.readFile(outputPath);
     });
 }

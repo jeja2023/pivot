@@ -26,7 +26,7 @@ const {
 } = require('../security-helpers');
 const { refreshAppSettingsCache } = require('../../server/services/app-settings');
 const { refreshUserSettingsCacheForUser } = require('../../server/services/user-settings');
-const { getSystemEmbeddingConfig } = require('../../server/services/rag-config');
+const { getSystemEmbeddingConfig, getEmbeddingConfigAsync, getPublicEmbeddingConfigAsync } = require('../../server/services/rag-config');
 
 test('RAG 嵌入配置优先使用已存设置并遮蔽 API key', async () => {
     const previousEnv = {
@@ -134,7 +134,7 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', asyn
         await refreshAppSettingsCache();
         await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
 
-        const personal = getEmbeddingConfig(userInfo.lastInsertRowid);
+        const personal = await getEmbeddingConfigAsync(userInfo.lastInsertRowid);
         assert.equal(personal.http.url, 'https://user.example/v1');
         assert.equal(personal.http.apiKey, 'user-key');
         assert.equal(personal.http.model, 'user-model');
@@ -146,14 +146,14 @@ test('RAG 嵌入配置优先使用用户设置并回退到系统默认值', asyn
         assert.equal(system.http.model, 'system-model');
         assert.notEqual(system.source.url, 'user');
 
-        const publicPersonal = getPublicEmbeddingConfig(userInfo.lastInsertRowid);
+        const publicPersonal = await getPublicEmbeddingConfigAsync(userInfo.lastInsertRowid);
         assert.equal(publicPersonal.isPersonal, true);
         assert.equal(publicPersonal.hasApiKey, true);
         assert.equal(Object.prototype.hasOwnProperty.call(publicPersonal, 'apiKey'), false);
 
         db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userInfo.lastInsertRowid);
         await refreshUserSettingsCacheForUser(userInfo.lastInsertRowid);
-        const fallback = getEmbeddingConfig(userInfo.lastInsertRowid);
+        const fallback = await getEmbeddingConfigAsync(userInfo.lastInsertRowid);
         assert.equal(fallback.http.url, 'https://system.example/v1');
         assert.equal(fallback.http.apiKey, 'system-key');
         assert.equal(fallback.http.model, 'system-model');
@@ -221,8 +221,8 @@ test('非 root 管理员会把嵌入配置保存为个人设置', async () => {
     try {
         await runExpressHandlers(embeddingRoute.route.stack.map(layer => layer.handle), req, res);
         assert.equal(res.statusCode, 200);
-        assert.equal(getEmbeddingConfig(adminUser.id).http.url, 'https://192.0.2.30/v1');
-        assert.equal(getEmbeddingConfig(adminUser.id).http.model, 'personal-admin-model');
+        assert.equal((await getEmbeddingConfigAsync(adminUser.id)).http.url, 'https://192.0.2.30/v1');
+        assert.equal((await getEmbeddingConfigAsync(adminUser.id)).http.model, 'personal-admin-model');
         assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(RAG_CONFIG_KEYS.embeddingApiUrl)?.value === 'https://192.0.2.30/v1', false);
 
         const deniedReq = { body: { rag_embedding_api_url: 'https://192.0.2.31/v1' }, user: adminUser };

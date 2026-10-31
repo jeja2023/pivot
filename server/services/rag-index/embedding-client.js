@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { safeJsonPost } = require('../safe-http-client');
-const { EMBEDDING_MODES, normalizeEmbeddingMode, getEmbeddingConfig } = require('../rag-config');
+const { EMBEDDING_MODES, normalizeEmbeddingMode, getEmbeddingConfigAsync } = require('../rag-config');
 const { getOrCreateEmbeddingUsageModel, recordModelTokenUsage } = require('../models');
 const { estimateEmbeddingTokens } = require('../token-accounting');
 const { estimateTokens } = require('../../llm');
@@ -433,7 +433,7 @@ async function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source
 }
 
 async function generateEmbedding(text, mode = null, embeddingConfig = null, userId = null, options = {}) {
-    const config = getEmbeddingConfig(userId);
+    const config = await getEmbeddingConfigAsync(userId);
     const targetMode = normalizeEmbeddingMode(mode || config.mode);
 
     if (targetMode === EMBEDDING_MODES.http) {
@@ -486,7 +486,7 @@ async function generateEmbedding(text, mode = null, embeddingConfig = null, user
 
 async function generateEmbeddings(inputs, mode = null, embeddingConfig = null, userId = null, options = {}) {
     const safeInputs = Array.isArray(inputs) ? inputs : [inputs];
-    const config = getEmbeddingConfig(userId);
+    const config = await getEmbeddingConfigAsync(userId);
     const targetMode = normalizeEmbeddingMode(mode || config.mode);
 
     if (targetMode === EMBEDDING_MODES.http) {

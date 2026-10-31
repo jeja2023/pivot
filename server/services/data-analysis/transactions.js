@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const repository = require('../../repositories/analysis-transactions');
 const shared = require('./shared');
 const { normalize, invalid } = require('./transaction-config');
-let running = false; let interval;
+const { createQueueRunner } = require('../queue-runner');
 const revision = dataset => crypto.createHash('sha256').update(JSON.stringify([dataset.parquet_path, dataset.row_count, dataset.source_version, dataset.updated_at])).digest('hex');
 const configOf = job => typeof job.config === 'string' ? JSON.parse(job.config) : job.config;
 function publicJob(row) { return { id: row.id, datasetId: row.dataset_id, sourceRevision: row.source_revision, status: row.status, error: row.error, createdAt: row.created_at, expiresAt: row.expires_at, ...(row.result ? { result: typeof row.result === 'string' ? JSON.parse(row.result) : row.result } : {}), config: configOf(row) }; }
@@ -30,11 +30,11 @@ async function calculate(user, datasetId, input) {
         return result;
     });
 }
-async function drain() {
-    if (running) return; running = true;
+async function runBatch({ shouldStop }) {
     try {
         await repository.cleanup();
         for (let count = 0; count < 5; count++) {
+            if (shouldStop()) break;
             const job = await repository.claim(); if (!job) break;
             try {
                 const user = await shared.resolveAnalysisUser(job.user_id); if (!user || user.status !== 'active' || user.deleted_at) throw invalid('分析账号已失效。', 403);
@@ -45,11 +45,9 @@ async function drain() {
                 await repository.finish(job, result);
             } catch (error) { await repository.finish(job, null, error.expose ? error.message : '交易分析失败，请检查映射、源数据及运行环境。'); }
         }
-        await require('./transaction-delivery').drain();
+        if (!shouldStop()) await require('./transaction-delivery').drain();
     } catch (error) { require('../../logger').logger.error({ code: error.code || 'TRANSACTION_JOB_FAILED' }, '资金交易分析队列处理失败'); }
-    finally { running = false; }
 }
-function schedule() { setImmediate(() => { void drain(); }); }
-function start() { if (!interval) { interval = setInterval(schedule, 15000).unref(); schedule(); } }
-function stop() { clearInterval(interval); interval = null; }
+const runner = createQueueRunner(runBatch);
+const { schedule, drain, start, stop } = runner;
 module.exports = { create, get, list, remove, calculate, drain, start, stop };

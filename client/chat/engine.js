@@ -1,5 +1,5 @@
 // --- 数据引擎模块 Engine ---
-/* global syncChatLocalMcpBridgeBeforeSend, getChatLocalMcpBridgeDebugSnapshot */
+/* global syncChatLocalMcpBridgeBeforeSend, getChatLocalMcpBridgeDebugSnapshot, estimateStreamingTokenUnits, cancelChatAgentRun */
 let currentAbortController = null;
 // 正在执行的发送任务；新消息发出时先中断它，再串行接管，避免两次发送并发
 let activeSendTask = null;
@@ -14,8 +14,6 @@ function hasSendableChatPayload() {
     const text = String(inputEl?.value || '').trim();
     return Boolean(text) || window.Pivot.legacy.pendingAttachments.length > 0;
 }
-
-
 async function postChatAgentControl(runId, path, body = {}) {
     const response = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}${path}`, {
         method: 'POST',
@@ -25,13 +23,6 @@ async function postChatAgentControl(runId, path, body = {}) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || '连续 Agent 操作失败');
     return data;
-}
-
-async function cancelChatAgentRun(runId) {
-    if (!runId) return null;
-    const result = await postChatAgentControl(runId, '/cancel');
-    showToast('已请求停止连续 Agent', 'info');
-    return result;
 }
 
 async function steerChatAgentRun(runId) {
@@ -491,6 +482,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
     };
     let fullAiContent = '';
     let tokenCount = 0;
+    let tokenUnits = 0;
     let startTime = Date.now();
     let hasShownQueueToast = false;
     let renderTimer = null;
@@ -605,7 +597,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             if (!content) return;
             fullAiContent += content;
             if (ephemeralVoice) window.Pivot?.moduleApi?.('chat.realtimeVoice')?.handleAssistantDelta?.(content, voiceSessionId);
-            tokenCount = estimateStreamingTokenCount(fullAiContent);
+            tokenUnits += estimateStreamingTokenUnits(content);
+            tokenCount = Math.ceil(tokenUnits / 2);
             if (!hasRenderedFirstStreamContent) {
                 hasRenderedFirstStreamContent = true;
                 flushStreamRender();
@@ -662,7 +655,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             localReplayTimer = null;
             renderTimer = null;
             fullAiContent = content;
-            tokenCount = estimateStreamingTokenCount(fullAiContent);
+            tokenUnits = estimateStreamingTokenUnits(fullAiContent);
+            tokenCount = Math.ceil(tokenUnits / 2);
             hasRenderedPersistedAssistantContent = true;
             if (ephemeralVoice) window.Pivot?.moduleApi?.('chat.realtimeVoice')?.flushAssistantSpeech?.(content, voiceSessionId);
             if (textBody && isRequestMessageVisible()) {
@@ -853,7 +847,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                     if (data.messageId) window.Pivot.legacy.setMessageActionId?.(aiMsgEl, data.messageId);
                     if (data.content) {
                         fullAiContent = data.content;
-                        tokenCount = estimateStreamingTokenCount(fullAiContent);
+                        tokenUnits = estimateStreamingTokenUnits(fullAiContent);
+                        tokenCount = Math.ceil(tokenUnits / 2);
                         if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
                     }
                     const elapsed = getElapsedSeconds();
@@ -950,7 +945,8 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         if (e.name === 'AbortError') {
             if (remainingStreamContent) {
                 fullAiContent += remainingStreamContent;
-                tokenCount = estimateStreamingTokenCount(fullAiContent);
+                tokenUnits += estimateStreamingTokenUnits(remainingStreamContent);
+                tokenCount = Math.ceil(tokenUnits / 2);
             }
             // 被新消息打断时不追加提示文字，干净截断即可
             if (!myController.pivotSupersededBySend) {

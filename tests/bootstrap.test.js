@@ -214,3 +214,32 @@ test('已启动的知识库与熔断巡检在关机时停止', async () => {
     await stop();
     assert.deepEqual(stopped.sort(), ['breaker', 'knowledge']);
 });
+
+test('关闭时等待思维导图和交易分析队列的停止操作', async () => {
+    const stopped = [];
+    const stop = startBackgroundServices({
+        logger: { warn() {} }, setImmediateFn() {},
+        agentEventDispatcher: { async stop() {} },
+        dependencies: {
+            startMindmapExportRunner: () => ({ async stop() { stopped.push('mindmap'); } }),
+            startTransactionRunner: () => ({ async stop() { stopped.push('transactions'); } })
+        }
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    await stop();
+    assert.deepEqual(stopped.sort(), ['mindmap', 'transactions']);
+});
+
+test('启动与关闭竞态也会清理已经由路由加载的旧流式服务', async () => {
+    const calls = [];
+    const stop = startBackgroundServices({
+        logger: { warn() {} }, setImmediateFn() {},
+        agentEventDispatcher: { async stop() {} },
+        dependencies: {
+            startLegacyStreamingRunner() { calls.push('start'); },
+            stopLegacyStreamingRunner() { calls.push('stop'); }
+        }
+    });
+    await stop();
+    assert.deepEqual(calls, ['stop']);
+});

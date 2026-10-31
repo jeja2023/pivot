@@ -6,10 +6,34 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/services/presentations/presentation-shared-presence.js",
+      "count": 4,
+      "rationale": "多节点在线状态按已授权文稿和用户参数化读取、更新及删除；读取时再次过滤已撤权和失效账号，过期数据每次最多清理 500 条。",
+      "verification": "tests/presentation-collaboration.test.js 使用隔离 PostgreSQL 和两个进程验证授权、撤权、过期和跨节点读取。"
+    },
+    {
+      "file": "server/services/token-metrics.js",
+      "count": 4,
+      "rationale": "使用参数化时间边界及按 schema 限定的事务咨询锁，共享可从原始消息和用量记录重建的短期指标快照；写入、读取及过期重算均在受控事务中执行。",
+      "verification": "tests/token-metrics.test.js 在隔离 PostgreSQL 对照原聚合，覆盖多连接并发、过期、修改、删除和日期切换。"
+    },
+    {
+      "file": "server/services/document-processing/qpdf-workdir-lease.js",
+      "count": 4,
+      "rationale": "使用独立 PostgreSQL 会话持有按 schema 和随机目录标识限定的咨询锁，清理前非阻塞获取同一锁并确认目录仍未变化。",
+      "verification": "tests/qpdf-workdir-lease.test.js 使用独立进程验证活动租约保留、强制退出后回收及未知目录保护。"
+    },
+    {
       "file": "server/routes/events.js",
-      "count": 2,
-      "rationale": "重连仅按认证用户限定快照上界并按事件 ID 分页，所有游标均参数化且限制为 PostgreSQL bigint 范围。",
-      "verification": "tests/realtime-replay.test.js 验证跨页、订阅期间事件及缓存上限；tests/agent-event-resource-plan.test.js 验证 PostgreSQL 大整数重放。"
+      "count": 3,
+      "rationale": "按认证用户限定重放上界及多节点首次连接起点，游标均参数化并限制为 PostgreSQL bigint 范围。",
+      "verification": "tests/realtime-replay.test.js 与 tests/realtime-multiprocess.test.js 验证重放和跨节点恢复。"
+    },
+    {
+      "file": "server/services/realtime-durable-feed.js",
+      "count": 1,
+      "rationale": "按认证用户和参数化游标分页查询已提交事件，使用事件主键排序并限制每批数量。",
+      "verification": "tests/realtime-durable-feed.test.js 和 tests/realtime-multiprocess.test.js 验证用户隔离、顺序和节点重启恢复。"
     },
     {
       "file": "server/db/initialization-lock.js",
@@ -115,7 +139,7 @@
     },
     {
       "file": "server/repositories/knowledge.js",
-      "count": 17,
+      "count": 16,
       "rationale": "聊天文档目录和概览使用参数化范围条件及现有文档访问过滤，目录最多读取 101 条并标记截断，正文仅取启用且已就绪文档的有限片段。",
       "verification": "tests/chat-knowledge-catalog.test.js 使用隔离 PostgreSQL 验证跨用户、删除、停用、处理中及来源片段过滤。"
     },

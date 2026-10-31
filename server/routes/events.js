@@ -3,13 +3,24 @@ const { asyncHandler } = require('../http');
 const { subscribeUserEvents } = require('../services/realtime-events');
 const { query } = require('../db/client');
 const { normalizeRealtimeCursor } = require('../services/realtime-cursor');
+const { startDurableEventFeed } = require('../services/realtime-durable-feed');
+const { getDeploymentProfile } = require('../services/deployment-profile');
 const MAX_REPLAY_PAGES = 25;
 
-function createEventsRouter({ authMiddleware, database = { query } }) {
+function createEventsRouter({ authMiddleware, database = { query }, durableEvents = getDeploymentProfile().requestedMode === 'multi_node' }) {
     const router = express.Router();
 
     router.get('/events', authMiddleware, asyncHandler(async (req, res) => {
-        const after = normalizeRealtimeCursor(req.get('Last-Event-ID') || req.query.after);
+        const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
+        const after = normalizeRealtimeCursor(suppliedCursor);
+        if (durableEvents) {
+            const isReconnect = suppliedCursor !== undefined && /^\d{1,19}$/.test(String(suppliedCursor)) && (after !== '0' || /^0+$/.test(String(suppliedCursor)));
+            const bounds = !isReconnect ? await database.query('SELECT COALESCE(MAX(id), 0)::text AS max_id FROM agent_events WHERE user_id = ?', [req.user.id]) : [];
+            const cursor = isReconnect ? after : normalizeRealtimeCursor(bounds[0]?.max_id);
+            const subscription = subscribeUserEvents(req.user, res, { databaseAgentEvents: true, initialCursor: cursor });
+            if (subscription.writeReplay) startDurableEventFeed({ userId: req.user.id, after: cursor, subscription, database, response: res });
+            return;
+        }
         const subscription = subscribeUserEvents(req.user, res, { bufferAgentEvents: after !== '0' });
         if (after === '0' || !subscription.writeReplay) return;
         try {

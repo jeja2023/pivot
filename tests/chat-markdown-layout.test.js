@@ -151,6 +151,30 @@ test('长模型名和实时统计在窄屏完整显示，消息操作按钮保�
     } finally { await page.close(); }
 });
 
+test('纯文本流复用段落，Markdown 和 HTML 输入回退到安全渲染', async () => {
+    const page = await createPage();
+    try {
+        await appendReply(page, '开始');
+        const result = await page.evaluate(() => {
+            const body = document.querySelector('.text-body');
+            const stats = document.querySelector('.message-stats');
+            const render = text => window.renderStreamingAssistantContent(body, stats, text, 1, Date.now());
+            render('普通回答');
+            const initial = body.querySelector('p').firstChild;
+            render('普通回答继续');
+            const reused = body.querySelector('p').firstChild === initial;
+            render('普通回答继续');
+            const unchanged = body.querySelector('p').firstChild === initial;
+            const plainText = body.textContent.trim();
+            render('普通回答继续 **强调**');
+            const markdown = body.querySelector('strong')?.textContent;
+            render('普通回答继续 **强调** <img src=x onerror=alert(1)>');
+            return { reused, unchanged, plainText, markdown, unsafe: body.querySelector('[onerror]') !== null };
+        });
+        assert.deepEqual(result, { reused: true, unchanged: true, plainText: '普通回答继续', markdown: '强调', unsafe: false });
+    } finally { await page.close(); }
+});
+
 test('深浅主题的回复、表格和思考正文保持可读，减少动态效果偏好生效', async () => {
     const output = path.resolve(__dirname, '..', '.tmp', 'markdown-layout-regression');
     fs.mkdirSync(output, { recursive: true });

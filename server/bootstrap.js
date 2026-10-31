@@ -117,8 +117,15 @@ function startBackgroundServices({
         startModelEndpointMonitor,
         recoverStaleKnowledgeDocumentIndexes,
         startKnowledgeIngestionWorker,
+        shutdownKnowledgeIngestionWorker: () => require('./services/rag-documents').shutdownKnowledgeIngestionWorker(),
         startRegulationImportWorker,
         startRegulationIndexRecoveryRunner,
+        shutdownRegulationWorkers: async () => {
+            const regulations = require('./services/regulations');
+            const results = await Promise.allSettled([regulations.shutdownRegulationImportWorker(), regulations.shutdownRegulationIndexRecoveryRunner()]);
+            const failures = results.filter(result => result.status === 'rejected');
+            if (failures.length) throw new AggregateError(failures.map(result => result.reason), '法规后台执行器停止失败');
+        },
         recoverKnowledgeEvaluationRuns,
         refreshKnowledgeFreshness,
         backfillKnowledgeProductProjections,
@@ -150,6 +157,8 @@ function startBackgroundServices({
         startDecisionArtifactBreakerRunner: () => startManagedRunner(() => createDecisionArtifactBreakerRunner()),
         startAnalysisRefreshRunner,
         startAsyncQueryRunner,
+        startLegacyStreamingRunner: () => require('./services/agent-runtime/streaming-service').startHeartbeat(),
+        stopLegacyStreamingRunner: () => require('./services/agent-runtime/streaming-service').cleanup(),
         startMindmapExportRunner: () => require('./services/mindmaps/exports').start(),
         startTransactionRunner: () => require('./services/data-analysis/transactions').start(),
         startRuntimeDiagnostics
@@ -180,8 +189,9 @@ function startBackgroundServices({
         }
     }
     startManaged(dependencies.startGpuMonitor, 'GPU 监控服务启动失败');
-    runWhileRunning(dependencies.startMindmapExportRunner, logger, '思维导图导出服务启动失败');
-    runWhileRunning(dependencies.startTransactionRunner, logger, '资金交易分析服务启动失败');
+    runWhileRunning(dependencies.startLegacyStreamingRunner, logger, '流式交互服务启动失败');
+    startManaged(dependencies.startMindmapExportRunner, '思维导图导出服务启动失败');
+    startManaged(dependencies.startTransactionRunner, '资金交易分析服务启动失败');
     startManaged(dependencies.startModelEndpointMonitor, '模型端点监控服务启动失败');
     setImmediateFn(() => {
         runWhileRunning(dependencies.startKnowledgeIngestionWorker, logger, '知识库持久化索引 Worker 启动失败');
@@ -237,6 +247,9 @@ function startBackgroundServices({
         managedRunners.clear();
         const results = await Promise.allSettled([
             Promise.resolve().then(() => agentEventDispatcher.stop()),
+            Promise.resolve().then(() => dependencies.stopLegacyStreamingRunner?.()),
+            Promise.resolve().then(() => dependencies.shutdownKnowledgeIngestionWorker?.()),
+            Promise.resolve().then(() => dependencies.shutdownRegulationWorkers?.()),
             ...runners.map(runner => Promise.resolve().then(() => runner.stop()))
         ]);
         results.filter(result => result.status === 'rejected').forEach(result => logger.warn({ err: result.reason }, '停止后台执行器失败'));

@@ -72,13 +72,13 @@ test('模型成本辅助函数和合规包会生成可审计导出', async () =>
     }
 });
 
-test('readZipEntries 会拒绝声明膨胀过大的条目', () => {
+test('readZipEntries 会拒绝声明膨胀过大的条目', async () => {
     const zip = buildSingleEntryZip({
         name: 'word/document.xml',
         data: Buffer.from('<w:t>small</w:t>'),
         declaredUncompressedSize: MAX_ZIP_ENTRY_UNCOMPRESSED_BYTES + 1
     });
-    assert.throws(() => readZipEntries(zip), /too large|too much data|超出限制/);
+    await assert.rejects(readZipEntries(zip), /too large|too much data|超出限制/);
 });
 
 test('聊天标题辅助函数会净化生成标题并保护自定义标题', () => {

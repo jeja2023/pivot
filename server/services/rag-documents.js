@@ -9,7 +9,7 @@ const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
 const { clearRagCacheForUser } = require('./rag-cache');
 const { indexDocumentChunks } = require('./rag-index');
-const { getRagConfig, getSystemEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
+const { getRagConfigAsync, getSystemEmbeddingConfig, getEmbeddingProfile } = require('./rag-config');
 const { getGraphSummary, refreshGraphEntityEvidenceForDocument } = require('./knowledge-graph');
 const { createKnowledgeIndexStage, discardKnowledgeIndexStage, swapKnowledgeIndexStage } = require('./rag-index-staging');
 const { getBackgroundRuntimeConfig } = require('./runtime-settings');
@@ -59,6 +59,7 @@ const allowedExtensions = new Set([
 ]);
 const knowledgeIngestionQueue = createKnowledgeIngestionQueue();
 let knowledgeIngestionWorker = null;
+let knowledgeIngestionShuttingDown = false;
 function invalidateKnowledgeCatalog(collectionId) {
     try { invalidateKnowledgeCatalogCollection(collectionId); } catch (_) {}
 }
@@ -472,7 +473,7 @@ async function processKnowledgeDocument({ docId, userId, user = null, force = fa
         throw error;
     }
 
-    const ragConfig = getRagConfig({}, userId);
+    const ragConfig = await getRagConfigAsync({}, userId);
     const embeddingConfig = getSystemEmbeddingConfig();
     let previousCoverage = doc.extraction_coverage_json || {};
     if (typeof previousCoverage === 'string') { try { previousCoverage = JSON.parse(previousCoverage); } catch (_) { previousCoverage = {}; } }
@@ -750,7 +751,13 @@ function getKnowledgeIngestionWorker() {
 }
 
 async function startKnowledgeIngestionWorker() {
+    if (knowledgeIngestionShuttingDown) return { started: false, running: 0 };
     return await getKnowledgeIngestionWorker().start();
+}
+
+async function shutdownKnowledgeIngestionWorker() {
+    knowledgeIngestionShuttingDown = true;
+    if (knowledgeIngestionWorker) await knowledgeIngestionWorker.shutdown();
 }
 
 async function scheduleKnowledgeDocumentIndexing({ docId, userId, user = null, priority = 0, force = false, resumeCoverage = false, refreshOcrLocations = false }) {
@@ -856,7 +863,7 @@ async function getKnowledgeDocumentSummaryForUser(userId, scope = {}) {
         sourceSize: 0,
         retryableErrors,
         lastError,
-        config: getRagConfig({}, normalized.id),
+        config: await getRagConfigAsync({}, normalized.id),
         queue: await getKnowledgeIndexQueueStatus(normalized.id)
     };
 
@@ -1022,5 +1029,6 @@ module.exports = {
     setKnowledgeDocumentEnabled,
     scheduleKnowledgeDocumentIndexing,
     startKnowledgeIngestionWorker,
+    shutdownKnowledgeIngestionWorker,
     syncKnowledgeDocumentIndexConcurrency
 };

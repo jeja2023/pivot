@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const os = require('os');
-const { query } = require('./db/client');
+const { query, queryOne, transaction } = require('./db/client');
 const { aiSemaphore } = require('./services/concurrency');
 const { getGpuMonitorStatus } = require('./services/gpu-monitor');
 const { getMaintenanceStatus } = require('./services/maintenance');
@@ -15,6 +15,8 @@ const { getAgentGovernanceMetricsSnapshot } = require('./services/agent-governan
 const { getRuntimeDiagnostics } = require('./services/runtime-diagnostics');
 const { getQueueDiagnostics } = require('./services/db-write-queue');
 const { getPresentationMetricsSnapshot } = require('./services/presentations/presentation-metrics');
+const { readTokenMetrics, readSharedTokenMetrics } = require('./services/token-metrics');
+const { getDeploymentProfile } = require('./services/deployment-profile');
 
 function getBeijingDayBounds(date = new Date()) {
     const day = getBeijingTimestamp(date).slice(0, 10);
@@ -123,74 +125,27 @@ const line = (name, labels, value) => {
     return `${name}${labelText} ${value}`;
 };
 
-async function getTokenRows() {
-    return await query(`
-        SELECT model_id, model_name, role, SUM(tokens) AS tokens
-        FROM (
-            SELECT
-                COALESCE(m.model_id, 0) AS model_id,
-                COALESCE(md.name, 'unknown') AS model_name,
-                COALESCE(m.role, 'unknown') AS role,
-                COALESCE(SUM(m.token_count), 0) AS tokens
-            FROM messages m
-            LEFT JOIN models md ON md.id = m.model_id
-            GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
-            UNION ALL
-            SELECT
-                COALESCE(e.model_id, 0) AS model_id,
-                COALESCE(md.name, 'unknown') AS model_name,
-                COALESCE(e.source, 'api') AS role,
-                COALESCE(SUM(e.token_count), 0) AS tokens
-            FROM model_usage_events e
-            LEFT JOIN models md ON md.id = e.model_id
-            GROUP BY COALESCE(e.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(e.source, 'api')
-        )
-        GROUP BY model_id, model_name, role
-    `);
-}
-
-async function getTodayTokenRows() {
-    const { start, nextStart } = getBeijingDayBounds();
-    return await query(`
-        SELECT model_id, model_name, role, SUM(tokens) AS tokens
-        FROM (
-            SELECT
-                COALESCE(m.model_id, 0) AS model_id,
-                COALESCE(md.name, 'unknown') AS model_name,
-                COALESCE(m.role, 'unknown') AS role,
-                COALESCE(SUM(m.token_count), 0) AS tokens
-            FROM messages m
-            LEFT JOIN models md ON md.id = m.model_id
-            WHERE m.created_at >= ? AND m.created_at < ?
-            GROUP BY COALESCE(m.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(m.role, 'unknown')
-            UNION ALL
-            SELECT
-                COALESCE(e.model_id, 0) AS model_id,
-                COALESCE(md.name, 'unknown') AS model_name,
-                COALESCE(e.source, 'api') AS role,
-                COALESCE(SUM(e.token_count), 0) AS tokens
-            FROM model_usage_events e
-            LEFT JOIN models md ON md.id = e.model_id
-            WHERE e.created_at >= ? AND e.created_at < ?
-            GROUP BY COALESCE(e.model_id, 0), COALESCE(md.name, 'unknown'), COALESCE(e.source, 'api')
-        )
-        GROUP BY model_id, model_name, role
-    `, [start, nextStart, start, nextStart]);
-}
-
 async function getTokenMetricsSnapshot() {
     const now = Date.now();
     if (tokenMetricsCache.expiresAt > now) return tokenMetricsCache;
     if (tokenMetricsCache.loading) return tokenMetricsCache.loading;
-    tokenMetricsCache.loading = Promise.allSettled([getTokenRows(), getTodayTokenRows()]).then(results => {
-        const errors = results.filter(result => result.status === 'rejected').map(result => result.reason?.message || 'token aggregate failed');
+    const { start, nextStart } = getBeijingDayBounds();
+    const multiNode = getDeploymentProfile().requestedMode === 'multi_node';
+    const loading = multiNode
+        ? readSharedTokenMetrics({ queryOne, transaction, start, nextStart, ttlMs: TOKEN_METRICS_CACHE_TTL_MS })
+        : readTokenMetrics(query, start, nextStart).then(result => ({ ...result, ageMs: 0 }));
+    tokenMetricsCache.loading = loading.then(result => {
         tokenMetricsCache = {
-            expiresAt: Date.now() + TOKEN_METRICS_CACHE_TTL_MS,
-            all: results[0].status === 'fulfilled' ? (results[0].value || []) : tokenMetricsCache.all,
-            today: results[1].status === 'fulfilled' ? (results[1].value || []) : tokenMetricsCache.today,
-            error: errors.join('; '),
+            expiresAt: Date.now() + Math.max(0, TOKEN_METRICS_CACHE_TTL_MS - result.ageMs),
+            all: result.all,
+            today: result.today,
+            error: '',
             loading: null
         };
+        return tokenMetricsCache;
+    }).catch(error => {
+        tokenMetricsCache = { ...tokenMetricsCache, expiresAt: Date.now() + TOKEN_METRICS_CACHE_TTL_MS,
+            error: error?.message || 'token aggregate failed', loading: null };
         return tokenMetricsCache;
     }).finally(() => {
         tokenMetricsCache.loading = null;

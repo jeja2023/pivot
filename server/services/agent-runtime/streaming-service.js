@@ -6,6 +6,7 @@
 const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../../db/connection');
+const { logger } = require('../../logger');
 
 class StreamingService extends EventEmitter {
   constructor() {
@@ -323,7 +324,8 @@ class StreamingService extends EventEmitter {
    * 心跳检查
    */
   startHeartbeat() {
-    setInterval(() => {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
       const now = Date.now();
       const timeout = 5 * 60 * 1000; // 5分钟超时
 
@@ -344,6 +346,7 @@ class StreamingService extends EventEmitter {
         }
       }
     }, this.heartbeatInterval);
+    this.heartbeatTimer.unref?.();
   }
 
   /**
@@ -406,25 +409,23 @@ class StreamingService extends EventEmitter {
    * 清理所有会话（用于服务关闭）
    */
   async cleanup() {
-    console.log(`清理 ${this.activeSessions.size} 个活跃会话...`);
-    for (const sessionId of this.activeSessions.keys()) {
-      await this.closeSession(sessionId, 'shutdown');
-    }
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+    const sessions = [...this.activeSessions.entries()];
+    const results = await Promise.allSettled(sessions.map(async ([sessionId, session]) => {
+      try { await this.closeSession(sessionId, 'shutdown'); }
+      finally {
+        try { session.res.end(); } catch (_) {}
+        this.activeSessions.delete(sessionId);
+        this.sessionBuffers.delete(sessionId);
+      }
+    }));
+    const failures = results.filter(result => result.status === 'rejected').length;
+    if (failures) logger.warn({ failures }, '旧流式会话状态清理失败，连接已释放');
   }
 }
 
 // 单例模式
 const streamingService = new StreamingService();
-
-// 优雅关闭
-process.on('SIGTERM', async () => {
-  await streamingService.cleanup();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  await streamingService.cleanup();
-  process.exit(0);
-});
 
 module.exports = streamingService;

@@ -8,6 +8,12 @@ const BROWSER_RUNTIME_RESOURCE = Object.freeze({
     to: 'agent-runtime/browser'
 });
 const RUNTIME_PROFILES = new Set(['remote', 'local']);
+// 排除 Source Map 调试元数据文件；两种模式下均保留可执行的 PDF 模块、Worker、字体与许可资源。
+const PDF_SOURCE_MAP_EXCLUDES = Object.freeze([
+    '!node_modules/pdf-parse/**/*.map',
+    '!node_modules/pdfjs-dist/**/*.map',
+    '!node_modules/pdf-lib/**/*.map'
+]);
 
 function normalizeDesktopRuntimeProfile(value) {
     const profile = String(value || '').trim().toLowerCase();
@@ -42,6 +48,9 @@ function applyDesktopRuntimeProfile(packageJson, profile) {
     const retained = resources.filter(resource => !isBrowserRuntimeResource(resource));
     if (normalized === 'local') retained.push({ ...BROWSER_RUNTIME_RESOURCE });
     build.extraResources = retained;
+    if (Array.isArray(build.files)) {
+        build.files = [...build.files.filter(item => !PDF_SOURCE_MAP_EXCLUDES.includes(item)), ...PDF_SOURCE_MAP_EXCLUDES];
+    }
     return {
         profile: normalized,
         includesBrowserRuntime: normalized === 'local'
@@ -64,6 +73,7 @@ function prepareDesktopRuntimeProfile(rootDir, { config = {}, profile } = {}) {
 
 module.exports = {
     BROWSER_RUNTIME_RESOURCE,
+    PDF_SOURCE_MAP_EXCLUDES,
     applyDesktopRuntimeProfile,
     normalizeDesktopRuntimeProfile,
     prepareDesktopRuntimeProfile,

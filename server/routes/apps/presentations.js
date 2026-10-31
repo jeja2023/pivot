@@ -30,6 +30,7 @@ const {
     duplicatePresentation,
     exportPresentationTemplate,
     getPresentation,
+    getPresentationRow,
     getPresentationTemplateStatistics,
     getPresentationTemplateSource,
     reparsePresentationTemplateSource,
@@ -67,6 +68,8 @@ const {
     listActivePresence,
     leavePresence
 } = require('../../services/presentations/presentation-presence');
+const { listSharedPresence, recordSharedPresence, leaveSharedPresence } = require('../../services/presentations/presentation-shared-presence');
+const { getDeploymentProfile } = require('../../services/deployment-profile');
 const { runPresentationValidation } = require('../../services/presentations/presentation-validation');
 const { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal } = require('../../services/presentations/presentation-ai');
 const { resolveAppsModel, buildModelSecretErrorPayload } = require('./helpers');
@@ -715,24 +718,28 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         res.json(result);
     }));
     router.get('/apps/presentations/:id/presence', authMiddleware, asyncHandler(async (req, res) => {
-        const activeCollaborators = listActivePresence(req.params.id);
+        const presentation = await getPresentationRow(req.user, req.params.id);
+        if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
+        const activeCollaborators = getDeploymentProfile().requestedMode === 'multi_node'
+            ? await listSharedPresence(presentation.id, req.user.id) : listActivePresence(presentation.client_id);
         res.json({ activeCollaborators, presences: activeCollaborators });
     }));
     router.post('/apps/presentations/:id/presence', authMiddleware, asyncHandler(async (req, res) => {
-        const activeCollaborators = recordPresence({
-            presentationId: req.params.id,
-            user: req.user,
-            slideId: req.body?.slideId || req.body?.activeSlideId,
-            selectedElementId: req.body?.selectedElementId,
-            isEditing: req.body?.isEditing
-        });
+        const presentation = await getPresentationRow(req.user, req.params.id);
+        if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
+        const input = { slideId: req.body?.slideId || req.body?.activeSlideId,
+            selectedElementId: req.body?.selectedElementId, isEditing: req.body?.isEditing };
+        const activeCollaborators = getDeploymentProfile().requestedMode === 'multi_node'
+            ? await recordSharedPresence({ presentationId: presentation.id, userId: req.user.id, ...input })
+            : recordPresence({ presentationId: presentation.client_id, user: req.user, ...input });
         res.json({ activeCollaborators, presences: activeCollaborators });
     }));
     router.delete('/apps/presentations/:id/presence', authMiddleware, asyncHandler(async (req, res) => {
-        const activeCollaborators = leavePresence({
-            presentationId: req.params.id,
-            user: req.user
-        });
+        const presentation = await getPresentationRow(req.user, req.params.id);
+        if (!presentation) return res.status(404).json({ error: '演示文稿不存在或无权访问。' });
+        const activeCollaborators = getDeploymentProfile().requestedMode === 'multi_node'
+            ? await leaveSharedPresence({ presentationId: presentation.id, userId: req.user.id })
+            : leavePresence({ presentationId: presentation.client_id, user: req.user });
         res.json({ activeCollaborators, presences: activeCollaborators });
     }));
     router.get('/apps/presentations/:id/collaborators', authMiddleware, asyncHandler(async (req, res) => {

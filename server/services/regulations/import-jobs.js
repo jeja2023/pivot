@@ -318,22 +318,37 @@ function createRegulationImportWorker({
     pollIntervalMs = 1000,
     logger = defaultLogger,
     setIntervalFn = setInterval,
-    clearIntervalFn = clearInterval
+    clearIntervalFn = clearInterval,
+    recoverJobs = recoverRegulationImportJobs,
+    claimJob = claimNextRegulationImportJob,
+    processJob = processRegulationImportJob,
+    failJob = failRegulationImportJob
 } = {}) {
     let started = false;
     let running = false;
     let timer = null;
-    async function drain() {
+    let startupTask = null;
+    let drainTask = null;
+    let recoveryTask = null;
+    let shutdownRequested = false;
+    function recover() {
+        if (recoveryTask) return recoveryTask;
+        const task = Promise.resolve().then(() => recoverJobs());
+        recoveryTask = task;
+        task.then(() => { if (recoveryTask === task) recoveryTask = null; }, () => { if (recoveryTask === task) recoveryTask = null; });
+        return task;
+    }
+    async function drainWork() {
         if (!started || running) return;
         running = true;
         try {
             while (started) {
-                const job = await claimNextRegulationImportJob({ workerId });
+                const job = await claimJob({ workerId });
                 if (!job) break;
                 try {
-                    await processRegulationImportJob(job);
+                    await processJob(job);
                 } catch (error) {
-                    const result = await failRegulationImportJob(job, error);
+                    const result = await failJob(job, error);
                     logger.warn({ err: error.message, jobId: job.id, status: result.status }, '法规导入任务执行失败');
                 }
             }
@@ -341,37 +356,64 @@ function createRegulationImportWorker({
             running = false;
         }
     }
-    async function start() {
-        if (started) return { started, running };
-        started = true;
-        await recoverRegulationImportJobs();
-        timer = setIntervalFn(() => { void recoverRegulationImportJobs(); void drain(); }, Math.max(500, Number(pollIntervalMs) || 1000));
-        timer?.unref?.();
-        await drain();
-        return { started, running };
+    function drain() {
+        if (drainTask) return drainTask;
+        const task = Promise.resolve().then(drainWork);
+        drainTask = task;
+        task.then(() => { if (drainTask === task) drainTask = null; }, () => { if (drainTask === task) drainTask = null; });
+        return task;
     }
-    function stop() {
+    function start() {
+        if (started || shutdownRequested) return Promise.resolve({ started, running });
+        started = true;
+        const task = (async () => {
+            await recover();
+            if (!started || shutdownRequested) return { started, running };
+            timer = setIntervalFn(() => {
+                void recover().catch(error => logger.warn({ err: error.message }, '法规导入租约恢复失败'));
+                void drain().catch(error => logger.warn({ err: error.message }, '法规导入任务调度失败'));
+            }, Math.max(500, Number(pollIntervalMs) || 1000));
+            timer?.unref?.();
+            await drain();
+            return { started, running };
+        })().catch(error => { started = false; if (timer) clearIntervalFn(timer); timer = null; throw error; });
+        startupTask = task;
+        task.then(() => { if (startupTask === task) startupTask = null; }, () => { if (startupTask === task) startupTask = null; });
+        return task;
+    }
+    async function stop() {
         started = false;
         if (timer) clearIntervalFn(timer);
         timer = null;
+        await Promise.allSettled([startupTask, drainTask, recoveryTask].filter(Boolean));
     }
-    return { start, stop, drain, getRuntimeStatus: () => ({ started, running, workerId }) };
+    async function shutdown() { shutdownRequested = true; await stop(); }
+    return { start, stop, shutdown, drain, getRuntimeStatus: () => ({ started, running, workerId }) };
 }
 
 let regulationImportWorker = null;
+let regulationImportShuttingDown = false;
 async function startRegulationImportWorker() {
+    if (regulationImportShuttingDown) return { started: false, running: false };
     if (!regulationImportWorker) regulationImportWorker = createRegulationImportWorker();
     return await regulationImportWorker.start();
+}
+
+async function shutdownRegulationImportWorker() {
+    regulationImportShuttingDown = true;
+    if (regulationImportWorker) await regulationImportWorker.shutdown();
 }
 
 module.exports = {
     cancelRegulationImportJob,
     claimNextRegulationImportJob,
+    createRegulationImportWorker,
     enqueueRegulationImportJob,
     failRegulationImportJob,
     listRegulationImportJobs,
     processRegulationImportJob,
     retryRegulationImportJob,
     startRegulationImportWorker,
+    shutdownRegulationImportWorker,
     updateRegulationImportJob
 };

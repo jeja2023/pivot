@@ -17,5 +17,39 @@
         return source;
     }
 
-    window.Pivot.exposeModule('apps.presentations.realtime', { isVisible, subscribe });
+    function subscribePresentation({ getActiveId, onRevoked, onUpdated, onComments, onCollaborators, onReconnect }) {
+        const types = ['connected', 'presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'];
+        return subscribe(types, event => {
+            let payload; try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
+            if (payload.type === 'connected') { if (isVisible()) onReconnect(); return; }
+            if (String(payload.presentationId || '') !== String(getActiveId() || '')) return;
+            if (payload.type === 'presentation.access_revoked') { onRevoked(); return; }
+            if (!isVisible()) return;
+            if (payload.type === 'presentation.updated') onUpdated();
+            if (payload.type === 'presentation.comments') onComments();
+            if (payload.type === 'presentation.collaborators') onCollaborators();
+        });
+    }
+
+    function startPolling({ getActiveId, onRefresh, onComments }) {
+        let lastComments = Date.now();
+        return window.setInterval(() => {
+            const id = getActiveId();
+            if (!id || !isVisible()) return;
+            onRefresh();
+            if (Date.now() - lastComments >= 15000) { lastComments = Date.now(); onComments(id); }
+        }, 5000);
+    }
+
+    async function fetchCurrent({ active, getActive, request, onRevoked }) {
+        let result;
+        try { result = await request(active.id); }
+        catch (error) {
+            if (getActive() === active && (error.status === 403 || error.status === 404)) onRevoked();
+            throw error;
+        }
+        return getActive() === active ? result : null;
+    }
+
+    window.Pivot.exposeModule('apps.presentations.realtime', { isVisible, subscribe, subscribePresentation, startPolling, fetchCurrent });
 })();

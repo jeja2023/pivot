@@ -115,8 +115,10 @@
     async function loadComments(presentationId) {
         const pId = presentationId || state.activePresentationId;
         if (!pId) return;
+        const request = state.commentsRequest = (state.commentsRequest || 0) + 1;
         try {
             const data = await requestJson(`${API}/${encodeURIComponent(pId)}/comments`);
+            if (String(state.activePresentationId) !== String(pId) || state.commentsRequest !== request) return;
             state.comments = Array.isArray(data.comments) ? data.comments : [];
             updateCommentsBadge();
             renderComments();

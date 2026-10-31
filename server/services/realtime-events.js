@@ -20,8 +20,10 @@ function encodeSse(type, payload = {}) {
     // 只有持久化 agent.event 的数据库 ID 可作为重连游标；其他事件的
     // 业务标识不能覆盖 EventSource 自动携带的 Last-Event-ID。
     const eventId = type === 'agent.event' ? normalizeRealtimeCursor(payload.eventId) : '0';
+    const initialCursor = type === 'connected' && payload.durableCursor !== undefined
+        ? normalizeRealtimeCursor(payload.durableCursor) : null;
     return [
-        ...(eventId !== '0' ? [`id: ${eventId}`] : []),
+        ...(initialCursor !== null ? [`id: ${initialCursor}`] : eventId !== '0' ? [`id: ${eventId}`] : []),
         `event: ${type}`,
         `data: ${JSON.stringify({
             type,
@@ -85,6 +87,8 @@ function subscribeUserEvents(user, res, options = {}) {
         }
     };
     client.write = (type, payload) => {
+        // 持久事件由数据库游标连续读取；outbox 本地推送可能跨执行器乱序。
+        if (options.databaseAgentEvents === true && type === 'agent.event') return;
         if (!buffering || type !== 'agent.event') return write(type, payload);
         const serialized = JSON.stringify(payload);
         const bytes = Buffer.byteLength(serialized);
@@ -100,7 +104,7 @@ function subscribeUserEvents(user, res, options = {}) {
         bufferedEvents.push(JSON.parse(serialized));
     };
 
-    write('connected', { userId });
+    write('connected', { userId, ...(options.databaseAgentEvents ? { durableCursor: options.initialCursor || '0' } : {}) });
     const initialEvents = Array.isArray(options.initialEvents) ? options.initialEvents : [];
     for (const event of initialEvents) {
         write('agent.event', {
