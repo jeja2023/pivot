@@ -4,7 +4,18 @@ const crypto = require('crypto');
 const { transaction, query, queryOne, execute } = require('../db/client');
 const { estimateTokens, getStoredMessageContextTokens } = require('../llm');
 
-const parseTurnDecision = value => typeof value === 'string' ? JSON.parse(value) : value || {};
+function safeJsonParse(value, fallback) {
+    if (typeof value !== 'string') return value || fallback;
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    try {
+        return JSON.parse(trimmed);
+    } catch (_) {
+        return fallback;
+    }
+}
+
+const parseTurnDecision = value => safeJsonParse(value, {});
 
 function decisionAudit(value = {}) {
     const keys = ['version','action','intent','nextAction','reasonCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','learningDecisionId','durationMs','modelId','modelCalls','policyVersion','shadow','projectId'];
@@ -94,8 +105,10 @@ async function currentExecutionScope(runId, userId) {
             AND m.user_id = r.user_id AND m.session_id = r.session_id AND m.deleted_at IS NULL AND s.deleted_at IS NULL
     ) END AS source_active FROM agent_runs r WHERE r.id = ? AND r.user_id = ? AND r.deleted_at IS NULL`, [runId, userId]);
     if (row) {
-        row.tool_allowlist = typeof row.tool_allowlist === 'string' ? JSON.parse(row.tool_allowlist) : row.tool_allowlist || [];
-        row.network_policy = parseTurnDecision(row.network_policy);
+        const list = safeJsonParse(row.tool_allowlist, []);
+        row.tool_allowlist = Array.isArray(list) ? list : [];
+        const policy = safeJsonParse(row.network_policy, {});
+        row.network_policy = (policy && typeof policy === 'object' && !Array.isArray(policy)) ? policy : {};
     }
     return row;
 }
