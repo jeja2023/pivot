@@ -1,4 +1,4 @@
-/* global window, document, Event, currentAbortController, getComputedStyle -- Playwright 浏览器端执行上下文 */
+/* global window, document, Event, EventSource, currentAbortController, getComputedStyle -- Playwright 浏览器端执行上下文 */
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -6,6 +6,8 @@ const { test, expect } = require('@playwright/test');
 const { execute, queryOne } = require('../../server/db/client');
 const { createToolOrchestrator } = require('../../server/services/agent-tool-orchestrator');
 const { saveAssistantMessage } = require('../../server/services/chat-messages');
+const { writeSnapshot } = require('../../server/services/realtime-stream-snapshot');
+const { enqueueChannelDelivery } = require('../../server/services/agent-channel-adapters');
 
 async function loginAndSession(page, title) {
     const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } });
@@ -31,6 +33,59 @@ async function refreshTask(page, runId) {
         await api.refresh(api.attach(element, id));
     }, runId);
 }
+
+test('跨节点流式快照通过授权接口在任务详情恢复', async ({ page }) => {
+    test.setTimeout(60_000);
+    const { session } = await loginAndSession(page, '实时快照恢复');
+    const user = await queryOne("SELECT id FROM users WHERE username = 'admin'");
+    const runId = `snapshot-e2e-${crypto.randomUUID()}`;
+    await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,locked_by,realtime_lease_epoch,lock_expires_at,last_heartbeat_at) VALUES (?,?,?,'实时任务','验证快照','planning',?,'snapshot-e2e',1,NOW()+INTERVAL '5 minutes',NOW())", [runId, user.id, session.id, JSON.stringify({ chatBridge: { version: 1, sessionId: session.id } })]);
+    try {
+        assertSnapshot(await writeSnapshot({ runId, userId: user.id, leaseOwner: 'snapshot-e2e', leaseEpoch: '1', step: 1,
+            snapshot: { runId, step: 1, content: '跨节点恢复的完整正文', partialToolCalls: [] } }));
+        await openSession(page, session.id);
+        await page.evaluate(async () => { await window.Pivot.legacy.ensureWorkspaceScripts('agent'); });
+        await page.evaluate(async id => { await window.Pivot.legacy.openAgentRun(id); }, runId);
+        await expect(page.locator('#agent-run-detail-modal')).toBeVisible();
+        await page.evaluate(id => window.Pivot.moduleApi('agent.streamingRecovery').refreshAgentStreamingSnapshot(id), runId);
+        await expect(page.locator('#agent-run-detail .agent-streaming-panel')).toContainText('跨节点恢复的完整正文');
+        await page.reload();
+        await page.waitForFunction(() => Boolean(window.Pivot?.legacy?.ensureWorkspaceScripts));
+        await page.evaluate(async () => { await window.Pivot.legacy.ensureWorkspaceScripts('agent'); });
+        await page.evaluate(async id => { await window.Pivot.legacy.openAgentRun(id); }, runId);
+        await page.evaluate(id => window.Pivot.moduleApi('agent.streamingRecovery').refreshAgentStreamingSnapshot(id), runId);
+        await expect(page.locator('#agent-run-detail .agent-streaming-panel')).toContainText('跨节点恢复的完整正文');
+    } finally { await execute('DELETE FROM agent_runs WHERE id = ?', [runId]); }
+});
+
+function assertSnapshot(value) { expect(value).toBe(true); }
+
+test('Web 渠道消息在新连接中按独立游标逐条恢复', async ({ page }) => {
+    test.setTimeout(60_000);
+    const { session } = await loginAndSession(page, '渠道重放');
+    const user = await queryOne("SELECT id, username, nickname, unit, role FROM users WHERE username = 'admin'");
+    const binding = `channel-e2e-${crypto.randomUUID()}`;
+    await execute("INSERT INTO agent_channel_bindings (id,user_id,channel_type,channel_key,credential_ref,config,notification_policy,status,created_at,updated_at) VALUES (?,?,'web','test','','{}'::jsonb,'{}'::jsonb,'active',NOW(),NOW())", [binding, user.id]);
+    try {
+        const delivery = await enqueueChannelDelivery(user, { bindingId: binding, idempotencyKey: binding, eventType: 'test', subject: '渠道测试', body: '逐条恢复内容' });
+        await openSession(page, session.id);
+        const received = await page.evaluate(async () => await new Promise((resolve, reject) => {
+            const source = new EventSource('/api/events/channels?after=0', { withCredentials: true });
+            const timeout = setTimeout(() => { source.close(); reject(new Error('渠道重放超时')); }, 10000);
+            source.addEventListener('agent.channel', event => {
+                const data = JSON.parse(event.data);
+                if (data.body !== '逐条恢复内容') return;
+                clearTimeout(timeout); source.close(); resolve({ id: event.lastEventId, data });
+            });
+            source.onerror = () => { clearTimeout(timeout); source.close(); reject(new Error('渠道连接失败')); };
+        }));
+        expect(received.data.deliveryId).toBe(String(delivery.id));
+        expect(received.id).toMatch(/^\d+$/);
+    } finally {
+        await execute('DELETE FROM agent_channel_deliveries WHERE binding_id = ?', [binding]);
+        await execute('DELETE FROM agent_channel_bindings WHERE id = ?', [binding]);
+    }
+});
 
 test('真实持久事件驱动工具执行、完成回看与受控文件下载', async ({ page }) => {
     const { session, headers } = await loginAndSession(page, '执行过程与文件交付');

@@ -116,7 +116,7 @@ function createAgentQueue({
                 updated_at = ?
             FROM candidate_run c
             WHERE r.id = c.id
-            RETURNING r.id, r.user_id
+            RETURNING r.id, r.user_id, r.realtime_lease_epoch::text AS realtime_lease_epoch
         `, [
             ...userExcludeParams,
             instanceId,
@@ -316,7 +316,7 @@ function createAgentQueue({
                 activeStartedAt.set(runId, Date.now());
                 startLockRenewal(runId, user.id);
                 queuedHints.delete(runId);
-                runAgent(runId, user).catch(async err => {
+                runAgent(runId, user, { leaseOwner: instanceId, leaseEpoch: claimed.realtime_lease_epoch }).catch(async err => {
                     logger.error({ err: err.message, runId }, '智能体运行在运行时锁保护下发生异常');
                     if (!['AGENT_RUN_CANCELLED', 'AGENT_RUN_LEASE_LOST'].includes(err?.code)) {
                         await markRunError(runId, err.message);

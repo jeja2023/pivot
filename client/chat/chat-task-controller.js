@@ -4,6 +4,29 @@
     const cachedStates = new Map();
     const listeners = new Set();
     let source = null;
+    let channelSource = null;
+    let channelRetryTimer = null;
+    let channelFeedAvailable = false;
+    const recentChannelIds = new Map();
+    const channelDeliveryKey = event => {
+        try { return String(JSON.parse(event.data || '{}').deliveryId || ''); } catch (_) { return ''; }
+    };
+    function deliverChannel(type, event, strict = false) {
+        const id = channelDeliveryKey(event);
+        const now = Date.now();
+        if (id && now - (recentChannelIds.get(id) || 0) < 30000) return true;
+        let handled = false; let failed = false;
+        for (const listener of channelListeners) {
+            try { listener(type, event); handled = true; } catch (_) { failed = true; }
+        }
+        if (handled && !failed && id) {
+            recentChannelIds.delete(id);
+            recentChannelIds.set(id, now);
+            if (recentChannelIds.size > 512) recentChannelIds.delete(recentChannelIds.values().next().value);
+        }
+        return strict ? handled && !failed : handled;
+    }
+    const channelListeners = new Set();
     let sessionEpoch = 0;
     const model = () => window.Pivot.moduleApi('chat.taskState');
     const current = entry => !entry.disposed && entry.epoch === sessionEpoch && String(currentSessionId || '') === entry.state.sessionId;
@@ -20,20 +43,64 @@
     function closeSource() {
         source?.close();
         source = null;
+        channelSource?.close();
+        channelSource = null;
+        channelFeedAvailable = false;
+        if (channelRetryTimer) clearTimeout(channelRetryTimer);
+        channelRetryTimer = null;
+    }
+
+    function openChannelSource() {
+        if (!channelFeedAvailable || !channelListeners.size || channelSource || !currentUser?.id) return;
+        const storageKey = `pivot_channel_cursor_${String(currentUser.id)}`;
+        let initialCursorPending = true;
+        let heldEvents = [];
+        let after = '';
+        try { const saved = sessionStorage.getItem(storageKey); if (/^\d{1,19}$/.test(saved || '')) after = `?after=${saved}`; } catch (_) {}
+        channelSource = new EventSource(`${API_BASE}/events/channels${after}`, { withCredentials: true });
+        const saveCursor = event => { if (/^\d{1,19}$/.test(event.lastEventId || '')) try { sessionStorage.setItem(storageKey, event.lastEventId); } catch (_) {} };
+        function processChannel(event) {
+            if (deliverChannel('agent.channel', event, true)) saveCursor(event);
+            else {
+                channelSource?.close(); channelSource = null;
+                if (channelListeners.size && !channelRetryTimer) channelRetryTimer = setTimeout(() => { channelRetryTimer = null; openChannelSource(); }, 1000);
+            }
+        }
+        channelSource.addEventListener('channel.connected', event => {
+            if (!initialCursorPending) return;
+            try { sessionStorage.setItem(storageKey, event.lastEventId); initialCursorPending = false; }
+            catch (_) { channelSource?.close(); channelSource = null; return; }
+            for (const held of heldEvents) processChannel(held);
+            heldEvents = [];
+        });
+        channelSource.addEventListener('agent.channel', event => {
+            if (initialCursorPending) { if (heldEvents.length < 100) heldEvents.push(event); else { channelSource?.close(); channelSource = null; } return; }
+            processChannel(event);
+        });
     }
 
     function syncSource() {
         if (!currentUser || !needsSource()) return closeSource();
         if (source || !window.EventSource || !currentUser) return;
-        source = new EventSource(`${API_BASE}/events`, { withCredentials: true });
+        source = new EventSource(`${API_BASE}/events?channels=1`, { withCredentials: true });
         source.addEventListener('connected', event => {
+            try {
+                channelFeedAvailable = JSON.parse(event.data || '{}').channelFeed === true;
+                if (channelFeedAvailable) openChannelSource();
+                else { channelSource?.close(); channelSource = null; if (channelRetryTimer) clearTimeout(channelRetryTimer); channelRetryTimer = null; }
+            } catch (_) {}
             listeners.forEach(listener => listener('connected', event));
             for (const entry of entries.values()) if (current(entry)) schedule(entry, 50);
         });
-        for (const type of ['agent.event', 'agent.run', 'agent.notification', 'agent.streaming',
+        source.addEventListener('realtime.resync', event => {
+            listeners.forEach(listener => listener('realtime.resync', event));
+            for (const entry of entries.values()) if (current(entry)) schedule(entry, 50);
+        });
+        for (const type of ['agent.event', 'agent.run', 'agent.notification', 'agent.streaming', 'agent.channel',
             'presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked']) {
             source.addEventListener(type, event => {
-                listeners.forEach(listener => listener(type, event));
+                if (type === 'agent.channel') deliverChannel(type, event);
+                else listeners.forEach(listener => listener(type, event));
                 let payload;
                 try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
                 const runId = String(payload.runId || payload.run?.id || payload.notification?.run_id || '');
@@ -296,10 +363,16 @@
         if (entry && current(entry)) model().applyStreaming(entry.state, payload);
     }
 
-    function subscribe(listener) {
+    function subscribe(listener, { channel = false } = {}) {
         listeners.add(listener);
+        if (channel) channelListeners.add(listener);
         syncSource();
-        return () => { listeners.delete(listener); syncSource(); };
+        if (channel && source && !channelSource) openChannelSource();
+        return () => {
+            listeners.delete(listener); channelListeners.delete(listener);
+            if (!channelListeners.size) { channelSource?.close(); channelSource = null; if (channelRetryTimer) clearTimeout(channelRetryTimer); channelRetryTimer = null; }
+            syncSource();
+        };
     }
 
     document.addEventListener('visibilitychange', () => {

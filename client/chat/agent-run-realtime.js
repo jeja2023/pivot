@@ -22,12 +22,31 @@ function isAgentElementVisible(id) {
 
 let agentRealtimePollInFlight = false;
 let agentRefreshTimerIntervalMs = 0;
+let agentControlPlaneLastRefreshAt = 0;
+let agentSnapshotRequest = 0;
+
+async function refreshAgentStreamingSnapshot(runId) {
+    if (!runId || activeAgentRunId !== runId || typeof isAgentRunDetailModalOpen !== 'function' || !isAgentRunDetailModalOpen()) return;
+    const request = ++agentSnapshotRequest;
+    try {
+        const response = await apiFetch(`${API_BASE}/events/streaming/${encodeURIComponent(runId)}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (request !== agentSnapshotRequest || activeAgentRunId !== runId || !isAgentRunDetailModalOpen()) return;
+        if (data.snapshot?.runId === runId) renderAgentStreamingPanel(data.snapshot);
+    } catch (_) {}
+}
+window.Pivot.exposeModule('agent.streamingRecovery', { refreshAgentStreamingSnapshot });
 
 async function refreshAgentVisibleState(payload = {}) {
     if (agentRealtimePollInFlight) return;
     agentRealtimePollInFlight = true;
     try {
         const tasks = [];
+        if (Date.now() - agentControlPlaneLastRefreshAt >= 15000) {
+            agentControlPlaneLastRefreshAt = Date.now();
+            window.Pivot.moduleApi('agent.controlPlaneRecovery')?.schedule?.();
+        }
         const agentVisible = isAgentElementVisible('agent-workbench-modal')
             || (typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen());
         const dagVisible = isAgentElementVisible('agent-dag-workbench-modal');
@@ -58,6 +77,7 @@ async function refreshAgentVisibleState(payload = {}) {
         if (activeAgentRunId && typeof isAgentRunDetailModalOpen === 'function' && isAgentRunDetailModalOpen() && (!runId || runId === activeAgentRunId)) {
             try {
                 await window.Pivot.legacy.openAgentRun(activeAgentRunId, { silent: true });
+                void refreshAgentStreamingSnapshot(activeAgentRunId);
             } catch (e) {}
         }
     } finally {
@@ -104,6 +124,7 @@ function handleAgentRealtimeEvent(event) {
     if (payload.type === 'agent.notification' && payload.notification?.status === 'unread') {
         showToast(agentNotificationTitle(payload.notification) || '收到新的智能体通知', 'info');
     }
+    if (payload.type === 'agent.notification' || payload.type === 'agent.channel') window.Pivot.moduleApi('agent.controlPlaneRecovery')?.schedule?.({ immediate: true });
     scheduleAgentRealtimeRefresh(payload);
 }
 
@@ -112,11 +133,11 @@ window.Pivot.legacy.initAgentRealtime = function() {
     const shared = window.Pivot.moduleApi('chat.tasks');
     if (typeof shared.subscribe === 'function') {
         const unsubscribe = shared.subscribe((type, event) => {
-            if (type === 'connected') { agentRealtimeConnected = true; updateAgentAutoRefresh(); }
+            if (type === 'connected' || type === 'realtime.resync') { agentRealtimeConnected = true; updateAgentAutoRefresh(); window.Pivot.moduleApi('agent.controlPlaneRecovery')?.schedule?.({ immediate: true }); void refreshAgentStreamingSnapshot(activeAgentRunId); }
             else if (type === 'error') { agentRealtimeConnected = false; updateAgentAutoRefresh(); }
             else if (type === 'agent.streaming') handleAgentStreamingEvent(event);
-            else if (type === 'agent.run' || type === 'agent.notification') handleAgentRealtimeEvent(event);
-        });
+            else if (type === 'agent.run' || type === 'agent.notification' || type === 'agent.channel') handleAgentRealtimeEvent(event);
+        }, { channel: true });
         agentRealtimeSource = { close: unsubscribe };
         updateAgentAutoRefresh();
         return;
@@ -125,9 +146,14 @@ window.Pivot.legacy.initAgentRealtime = function() {
     agentRealtimeSource.addEventListener('connected', () => {
         agentRealtimeConnected = true;
         updateAgentAutoRefresh();
+        window.Pivot.moduleApi('agent.controlPlaneRecovery')?.schedule?.({ immediate: true });
+        void refreshAgentStreamingSnapshot(activeAgentRunId);
     });
+    // 共享 SSE 控制器不可用时仍需通过自己的连接恢复可见状态。
+    agentRealtimeSource.addEventListener('realtime.resync', () => { window.Pivot.moduleApi('agent.controlPlaneRecovery')?.schedule?.({ immediate: true }); void refreshAgentStreamingSnapshot(activeAgentRunId); });
     agentRealtimeSource.addEventListener('agent.run', handleAgentRealtimeEvent);
     agentRealtimeSource.addEventListener('agent.notification', handleAgentRealtimeEvent);
+    agentRealtimeSource.addEventListener('agent.channel', handleAgentRealtimeEvent);
     agentRealtimeSource.addEventListener('agent.streaming', handleAgentStreamingEvent);
     agentRealtimeSource.onerror = () => {
         agentRealtimeConnected = false;
@@ -141,6 +167,10 @@ function handleAgentStreamingEvent(event) {
     try { payload = JSON.parse(event.data || '{}'); } catch (e) { return; }
     if (!payload || !payload.runId) return;
     window.Pivot.legacy.handleChatAgentStreamingEvent?.(payload);
+    // 跨节点提示不携带模型正文或工具参数，不能覆盖已有流式正文。
+    if (payload.metadataOnly === true) { void refreshAgentStreamingSnapshot(payload.runId); return; }
+    // 取消等待中的旧快照请求，避免覆盖后到的本地实时内容。
+    agentSnapshotRequest += 1;
     // 只为当前打开的任务渲染，避免后台任务覆盖前台 UI
     if (activeAgentRunId !== payload.runId) return;
     renderAgentStreamingPanel(payload);

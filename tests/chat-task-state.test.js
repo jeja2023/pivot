@@ -60,3 +60,16 @@ test('断线保留已确认状态，跨会话数据无效，未返回操作结�
     api.applyFeed(state, feed('cancelled', 4));
     assert.equal(api.records(state)[0].status, 'uncertain');
 });
+
+test('跨节点流式状态提示不允许步骤或完成状态倒退', () => {
+    const api = harness();
+    const state = api.create('run', 'session');
+    api.applyFeed(state, feed('running', 1));
+    assert.equal(api.applyStreaming(state, { metadataOnly: true, step: 2, completed: true, partialToolCalls: [] }), true);
+    assert.equal(api.applyStreaming(state, { metadataOnly: true, step: 1, completed: false, partialToolCalls: [] }), false);
+    assert.equal(api.applyStreaming(state, { metadataOnly: true, step: 2, completed: false, partialToolCalls: [] }), false);
+    assert.equal(state.streaming.step, 2);
+    assert.equal(state.streaming.completed, true);
+    assert.equal(api.applyStreaming(state, { metadataOnly: true, step: 3, completed: false, partialToolCalls: [{}] }), true);
+    assert.equal(state.streaming.preparingTool, true);
+});

@@ -223,6 +223,7 @@ test('an awaiting approval run releases its queue slot to the next run', async (
         releaseNextRun = resolve;
     });
     const started = [];
+    const leaseEpochs = [];
     const queue = createAgentQueue({
         logger: { info() {}, warn() {}, error() {} },
         instanceId: `queue-slot-test-${suffix}`,
@@ -232,8 +233,9 @@ test('an awaiting approval run releases its queue slot to the next run', async (
             id: runId === approvalRunId ? users[0].id : users[1].id,
             username: runId
         }),
-        runAgent: async runId => {
+        runAgent: async (runId, _user, execution) => {
             started.push(runId);
+            leaseEpochs.push(execution.leaseEpoch);
             if (runId === approvalRunId) {
                 db.prepare([
                     "UPDATE agent_runs SET status = 'awaiting_approval',",
@@ -257,6 +259,7 @@ test('an awaiting approval run releases its queue slot to the next run', async (
         await waitFor(nextStarted, 'next queued run did not acquire the released slot', 10000);
 
         assert.deepEqual(started, [approvalRunId, nextRunId]);
+        assert.deepEqual(leaseEpochs, ['1', '1']);
         assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(approvalRunId).status, 'awaiting_approval');
         assert.equal(db.prepare('SELECT status FROM agent_runs WHERE id = ?').get(nextRunId).status, 'running');
         assert.equal(queue.getStatus().active, 1);

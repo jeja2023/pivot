@@ -12,7 +12,8 @@ const AGENT_MAX_TOTAL_RUNTIME_MS = Math.max(
 );
 const AGENT_STALE_RUNNING_MINUTES = Math.max(Number.parseInt(process.env.AGENT_STALE_RUNNING_MINUTES || '30', 10) || 30, 5);
 const AGENT_QUEUE_LOCK_MS = Math.max(Number.parseInt(process.env.AGENT_QUEUE_LOCK_MS || `${24 * 60 * 60 * 1000}`, 10) || (24 * 60 * 60 * 1000), 60000);
-const AGENT_INSTANCE_ID = process.env.PIVOT_INSTANCE_ID || `agent_${crypto.randomBytes(4).toString('hex')}`;
+// 配置的实例名可重复，执行租约使用附带启动随机标识的唯一值。
+const AGENT_INSTANCE_ID = `${String(process.env.PIVOT_INSTANCE_ID || 'agent').slice(0, 80)}:${crypto.randomUUID()}`;
 
 function getAgentMaxConcurrentRuns() {
     return getAgentConcurrencyConfig().maxConcurrentRuns;

@@ -5,10 +5,28 @@ const { query } = require('../db/client');
 const { normalizeRealtimeCursor } = require('../services/realtime-cursor');
 const { startDurableEventFeed } = require('../services/realtime-durable-feed');
 const { getDeploymentProfile } = require('../services/deployment-profile');
+const { realtimeWakeup } = require('../services/realtime-wakeup');
+const { startChannelFeed } = require('../services/realtime-channel-feed');
+const { readSnapshot } = require('../services/realtime-stream-snapshot');
 const MAX_REPLAY_PAGES = 25;
+const defaultDatabase = { query, cleanupEnabled: true };
 
-function createEventsRouter({ authMiddleware, database = { query }, durableEvents = getDeploymentProfile().requestedMode === 'multi_node' }) {
+function createEventsRouter({ authMiddleware, database = defaultDatabase, durableEvents = getDeploymentProfile().requestedMode === 'multi_node', wakeup = database === defaultDatabase ? realtimeWakeup : null }) {
     const router = express.Router();
+
+    router.get('/events/streaming/:runId', authMiddleware, asyncHandler(async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        const snapshot = await readSnapshot(req.params.runId, req.user.id);
+        if (!snapshot) return res.status(404).json({ error: '实时快照不可用' });
+        return res.json({ snapshot });
+    }));
+
+    router.get('/events/channels', authMiddleware, asyncHandler(async (req, res) => {
+        if (!durableEvents) return res.status(404).end();
+        const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
+        return await startChannelFeed({ userId: req.user.id, after: normalizeRealtimeCursor(suppliedCursor), suppliedCursor,
+            database, response: res, wakeup });
+    }));
 
     router.get('/events', authMiddleware, asyncHandler(async (req, res) => {
         const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
@@ -17,8 +35,9 @@ function createEventsRouter({ authMiddleware, database = { query }, durableEvent
             const isReconnect = suppliedCursor !== undefined && /^\d{1,19}$/.test(String(suppliedCursor)) && (after !== '0' || /^0+$/.test(String(suppliedCursor)));
             const bounds = !isReconnect ? await database.query('SELECT COALESCE(MAX(id), 0)::text AS max_id FROM agent_events WHERE user_id = ?', [req.user.id]) : [];
             const cursor = isReconnect ? after : normalizeRealtimeCursor(bounds[0]?.max_id);
-            const subscription = subscribeUserEvents(req.user, res, { databaseAgentEvents: true, initialCursor: cursor });
-            if (subscription.writeReplay) startDurableEventFeed({ userId: req.user.id, after: cursor, subscription, database, response: res });
+            // 独立渠道订阅尚未完成安全握手与混版验收，暂不对客户端声明可用。
+            const subscription = subscribeUserEvents(req.user, res, { databaseAgentEvents: true, initialCursor: cursor, channelFeed: false });
+            if (subscription.writeReplay) startDurableEventFeed({ userId: req.user.id, after: cursor, subscription, database, response: res, wakeup, intervalMs: wakeup ? 5000 : 1000 });
             return;
         }
         const subscription = subscribeUserEvents(req.user, res, { bufferAgentEvents: after !== '0' });

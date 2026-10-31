@@ -89,6 +89,7 @@ function subscribeUserEvents(user, res, options = {}) {
     client.write = (type, payload) => {
         // 持久事件由数据库游标连续读取；outbox 本地推送可能跨执行器乱序。
         if (options.databaseAgentEvents === true && type === 'agent.event') return;
+        if (options.separateChannel === true && type === 'agent.channel') return;
         if (!buffering || type !== 'agent.event') return write(type, payload);
         const serialized = JSON.stringify(payload);
         const bytes = Buffer.byteLength(serialized);
@@ -104,7 +105,7 @@ function subscribeUserEvents(user, res, options = {}) {
         bufferedEvents.push(JSON.parse(serialized));
     };
 
-    write('connected', { userId, ...(options.databaseAgentEvents ? { durableCursor: options.initialCursor || '0' } : {}) });
+    write('connected', { userId, ...(options.databaseAgentEvents ? { durableCursor: options.initialCursor || '0', channelFeed: options.channelFeed === true } : {}) });
     const initialEvents = Array.isArray(options.initialEvents) ? options.initialEvents : [];
     for (const event of initialEvents) {
         write('agent.event', {
@@ -157,7 +158,7 @@ function subscribeUserEvents(user, res, options = {}) {
     return unsubscribe;
 }
 
-function publishUserEvent(userOrId, type, payload = {}) {
+function deliverLocalUserEvent(userOrId, type, payload = {}) {
     const userId = normalizeUserId(userOrId);
     if (!userId || !type) return 0;
     const clients = clientsByUser.get(userId);
@@ -167,6 +168,12 @@ function publishUserEvent(userOrId, type, payload = {}) {
         client.write(type, payload);
         delivered += 1;
     }
+    return delivered;
+}
+
+function publishUserEvent(userOrId, type, payload = {}, options = {}) {
+    const delivered = deliverLocalUserEvent(userOrId, type, payload);
+    if (options.crossNode !== false) require('./realtime-hints').publishHint(normalizeUserId(userOrId), type, payload);
     return delivered;
 }
 
@@ -194,6 +201,7 @@ function closeRealtimeEventClients({ reason = 'server_shutdown', retryAfterMs = 
 
 module.exports = {
     closeRealtimeEventClients,
+    deliverLocalUserEvent,
     getRealtimeStats,
     publishUserEvent,
     subscribeUserEvents

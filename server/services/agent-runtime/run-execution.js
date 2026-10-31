@@ -117,7 +117,7 @@ const {
     });
     const preparation = createRunPreparation({ formatToolList, listToolReliability, selectToolOrder, setRunMetadata, logger, verifyAgentOutcome });
     const { finalize: finalizeRun } = createRunFinalizer({ activeRunControllers, updateRun, getBeijingTimestamp, syncAgentTraceFromRun });
-    async function runAgent(runId, user) {
+    async function runAgent(runId, user, execution = {}) {
     const runController = new AbortController();
     activeRunControllers.set(runId, runController);
     let deadlineTimer = null;
@@ -129,6 +129,8 @@ const {
     try {
         await assertRunUserActive(user);
         const run = await getRunForUser(runId, user, { includeDeleted: true });
+        if (run && execution.leaseOwner) run.realtimeLeaseOwner = String(execution.leaseOwner);
+        if (run && execution.leaseEpoch) run.realtimeLeaseEpoch = String(execution.leaseEpoch);
         runForSummary = run;
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;

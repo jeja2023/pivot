@@ -20,6 +20,9 @@ const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle'
 const { observationMessages } = require('./agent-runtime/planner');
 const { resolveApprovalKey } = require('./agent-approval-grants');
 const { createAgentEventBatchWriter } = require('./agent-event-batch-writer');
+const { createSnapshotWriter } = require('./realtime-stream-snapshot');
+const { getDeploymentProfile } = require('./deployment-profile');
+const { publishHint } = require('./realtime-hints');
 
 const MAX_STREAM_AUDIT_SNAPSHOTS = Math.min(
     Math.max(Number.parseInt(process.env.AGENT_EVENT_MAX_SNAPSHOTS || '64', 10) || 64, 8),
@@ -271,6 +274,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             });
             let persistedContentLength = 0;
             const snapshotSampler = createStreamingSnapshotSampler();
+            const sharedSnapshots = createSnapshotWriter({ runId, userId: user.id, leaseOwner: run.realtimeLeaseOwner, leaseEpoch: run.realtimeLeaseEpoch,
+                enabled: getDeploymentProfile().requestedMode === 'multi_node', notify: publishHint, publishLocal: deps.publishUserEvent });
             const deltaEvents = createAgentEventBatchWriter({
                 recordBatch: deps.recordAgentEventBatch,
                 recordOne: deps.recordAgentEvent,
@@ -312,13 +317,15 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 touchStreamingHeartbeat();
                 if (!snapshotSampler.sampleUi(snapshot)) return;
                 recordDelta(snapshot);
-                deps.publishUserEvent(user.id, 'agent.streaming', {
+                const visibleSnapshot = {
                     runId,
                     step,
                     content: sanitizeUserVisibleText(snapshot.content || ''),
                     partialToolCalls: snapshot.partialToolCalls || [],
                     finishReason: snapshot.finishReason || null
-                });
+                };
+                sharedSnapshots.push(visibleSnapshot);
+                if (!sharedSnapshots.publishesLocally()) deps.publishUserEvent(user.id, 'agent.streaming', visibleSnapshot, { crossNode: false });
             };
             let result;
             let usageResult = null;
@@ -449,6 +456,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 });
             } catch (modelError) {
                 await deltaEvents.finish();
+                await sharedSnapshots.finish();
                 try {
                     await deps.recordAgentEvent?.({
                         runId,
@@ -480,14 +488,17 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 throw modelError;
             }
             // 推送最后一次流式快照，便于界面标记当前步骤已完成。
-            deps.publishUserEvent(user.id, 'agent.streaming', {
+            const completedSnapshot = {
                 runId,
                 step,
                 content: sanitizeUserVisibleText(result?.content || ''),
                 partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
                 finishReason: result?.finishReason || null,
                 completed: true
-            });
+            };
+            sharedSnapshots.push(completedSnapshot);
+            await sharedSnapshots.finish();
+            if (!sharedSnapshots.publishesLocally()) deps.publishUserEvent(user.id, 'agent.streaming', completedSnapshot, { crossNode: false });
                 usageResult = await recordUsage(user, modelCfg, conversationForModel, result?.content || '', 'agent_planner_streaming', runId, {
                     budget: deps.taskBudget,
                     usage: result?.usage || result?.provider?.usage?.raw || null,

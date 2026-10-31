@@ -23,11 +23,20 @@ function readPendingEvents(database, userId, cursor) {
 }
 
 // 在每条连接上按用户游标读取已提交事件；查询失败时断开，客户端用最后 ID 重连。
-function startDurableEventFeed({ userId, after, subscription, database, response, intervalMs = 1000, maxBufferedBytes = 4 * 1024 * 1024 }) {
+function startDurableEventFeed({ userId, after, subscription, database, response, wakeup = null, intervalMs = 1000, maxBufferedBytes = 4 * 1024 * 1024 }) {
     let cursor = normalizeRealtimeCursor(after);
     let timer = null;
     let stopped = false;
     let running = false;
+    let wakePending = false;
+    let unsubscribeWake = null;
+    function wake() {
+        if (stopped) return;
+        if (running) { wakePending = true; return; }
+        if (timer) clearTimeout(timer);
+        timer = null;
+        void tick().catch(() => { if (!stopped) { subscription(); response.destroy(); } });
+    }
     async function tick() {
         if (stopped || running || !subscription.isActive()) return;
         running = true;
@@ -51,16 +60,18 @@ function startDurableEventFeed({ userId, after, subscription, database, response
                 cursor = next;
             }
             if (!stopped && subscription.isActive()) {
-                timer = setTimeout(tick, rows.length === 200 || (last && last !== rows[rows.length - 1]) ? 0 : intervalMs);
+                timer = setTimeout(tick, wakePending || rows.length === 200 || (last && last !== rows[rows.length - 1]) ? 0 : intervalMs);
+                wakePending = false;
                 timer.unref?.();
             }
         } catch (_) {
             if (!stopped) { subscription(); response.destroy(); }
         } finally { running = false; }
     }
-    const stop = () => { stopped = true; if (timer) clearTimeout(timer); timer = null; };
+    const stop = () => { stopped = true; if (timer) clearTimeout(timer); timer = null; unsubscribeWake?.(); unsubscribeWake = null; };
     response.once('close', stop);
     response.once('finish', stop);
+    if (wakeup) unsubscribeWake = wakeup.subscribe(userId, wake);
     tick().catch(() => { if (!stopped) { subscription(); response.destroy(); } });
     return stop;
 }

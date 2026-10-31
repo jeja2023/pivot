@@ -83,6 +83,8 @@
 
     function applyStreaming(state, payload) {
         if (state.connection === 'forbidden' || terminal.has(state.run.status) || waiting.has(state.run.status) || state.run.status === 'verifying') return false;
+        if (payload.metadataOnly === true && state.streaming && (Number(payload.step || 0) < state.streaming.step
+            || (Number(payload.step || 0) === state.streaming.step && state.streaming.completed && !payload.completed))) return false;
         state.streaming = { step: Number(payload.step || 0), preparingTool: Boolean(payload.partialToolCalls?.length), completed: payload.completed === true };
         return true;
     }

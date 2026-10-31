@@ -8,6 +8,37 @@ const express = require('express');
 const { startDurableEventFeed } = require('../server/services/realtime-durable-feed');
 const { createEventsRouter } = require('../server/routes/events');
 
+test('通知在查询期间到达时立即补查，停止后不再调度', async t => {
+    const response = new EventEmitter();
+    response.destroy = () => response.emit('close');
+    let wake;
+    let unsubscribed = false;
+    const wakeup = { subscribe(_user, fn) { wake = fn; return () => { unsubscribed = true; }; } };
+    const subscription = () => {};
+    subscription.isActive = () => true;
+    subscription.writeReplay = () => {};
+    subscription.waitForDrain = async () => true;
+    let release;
+    let notify;
+    const ready = new Promise(resolve => { notify = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    let calls = 0;
+    const database = { async query() { calls += 1; if (calls === 1) { notify(); await gate; } return []; } };
+    const stop = startDurableEventFeed({ userId: 1, after: '0', subscription, database, response, wakeup, intervalMs: 30000 });
+    t.after(() => { release(); stop(); });
+    await ready;
+    wake(); wake();
+    release();
+    const deadline = Date.now() + 2000;
+    while (calls < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(calls, 2);
+    stop();
+    assert.equal(unsubscribed, true);
+    wake();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(calls, 2);
+});
+
 test('同一用户和游标的并发连接共享查询，不同用户或游标独立查询', async t => {
     const calls = [];
     let release;

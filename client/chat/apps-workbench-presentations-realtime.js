@@ -18,10 +18,10 @@
     }
 
     function subscribePresentation({ getActiveId, onRevoked, onUpdated, onComments, onCollaborators, onReconnect }) {
-        const types = ['connected', 'presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'];
+        const types = ['connected', 'realtime.resync', 'presentation.updated', 'presentation.comments', 'presentation.collaborators', 'presentation.access_revoked'];
         return subscribe(types, event => {
             let payload; try { payload = JSON.parse(event.data || '{}'); } catch (_) { return; }
-            if (payload.type === 'connected') { if (isVisible()) onReconnect(); return; }
+            if (payload.type === 'connected' || payload.type === 'realtime.resync') { if (isVisible()) onReconnect(); return; }
             if (String(payload.presentationId || '') !== String(getActiveId() || '')) return;
             if (payload.type === 'presentation.access_revoked') { onRevoked(); return; }
             if (!isVisible()) return;
