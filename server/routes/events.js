@@ -11,7 +11,7 @@ const { readSnapshot } = require('../services/realtime-stream-snapshot');
 const MAX_REPLAY_PAGES = 25;
 const defaultDatabase = { query, cleanupEnabled: true };
 
-function createEventsRouter({ authMiddleware, database = defaultDatabase, durableEvents = getDeploymentProfile().requestedMode === 'multi_node', wakeup = database === defaultDatabase ? realtimeWakeup : null }) {
+function createEventsRouter({ authMiddleware, database = defaultDatabase, durableEvents = getDeploymentProfile().requestedMode === 'multi_node', channelFeed = true, wakeup = database === defaultDatabase ? realtimeWakeup : null }) {
     const router = express.Router();
 
     router.get('/events/streaming/:runId', authMiddleware, asyncHandler(async (req, res) => {
@@ -22,7 +22,7 @@ function createEventsRouter({ authMiddleware, database = defaultDatabase, durabl
     }));
 
     router.get('/events/channels', authMiddleware, asyncHandler(async (req, res) => {
-        if (!durableEvents) return res.status(404).end();
+        if (!channelFeed) return res.status(404).end();
         const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
         return await startChannelFeed({ userId: req.user.id, after: normalizeRealtimeCursor(suppliedCursor), suppliedCursor,
             database, response: res, wakeup });
