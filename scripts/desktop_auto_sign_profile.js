@@ -37,6 +37,22 @@ function ensureWindowsSelfSignedCertificate(publisher = DEFAULT_LOCAL_PUBLISHER)
     }
 }
 
+function getWindowsCertificateSha256(thumbprint) {
+    if (process.platform !== 'win32' || !thumbprint) return '';
+    try {
+        const normalized = String(thumbprint).replace(/[^a-f0-9]/gi, '');
+        if (!/^[a-f0-9]{40}$/i.test(normalized)) return '';
+        const cmd = `Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.Thumbprint -eq '${normalized}' } | ForEach-Object { [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($_.RawData)).Replace('-', '').ToLower() }`;
+        const output = cp.execSync(`powershell -NoProfile -Command "${cmd}"`, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+        }).trim().toLowerCase();
+        return /^[a-f0-9]{64}$/.test(output) ? output : '';
+    } catch (_) {
+        return '';
+    }
+}
+
 function isLocalhostUrl(url) {
     if (!url) return true;
     try {
@@ -61,18 +77,22 @@ function ensureDefaultDistributionConfig(rootDir) {
             existingConfig = null;
         }
     }
-    const shouldRegenerate = !existingConfig || isLocalhostUrl(existingConfig.remoteUrl);
+
+    const devConfigPath = path.join(root, 'config.json');
+    let baseConfig = {};
+    try {
+        baseConfig = JSON.parse(fs.readFileSync(devConfigPath, 'utf8'));
+    } catch (_) {}
+
+    const targetRemoteUrl = !isLocalhostUrl(baseConfig.remoteUrl)
+        ? baseConfig.remoteUrl
+        : 'http://50.64.150.51:9006/';
+    const needsInsecureHttp = targetRemoteUrl.startsWith('http://');
+    const shouldRegenerate = !existingConfig
+        || isLocalhostUrl(existingConfig.remoteUrl)
+        || (needsInsecureHttp && !existingConfig.autoUpdate?.allowInsecureHttp);
 
     if (shouldRegenerate) {
-        const devConfigPath = path.join(root, 'config.json');
-        let baseConfig = {};
-        try {
-            baseConfig = JSON.parse(fs.readFileSync(devConfigPath, 'utf8'));
-        } catch (_) {}
-
-        const targetRemoteUrl = !isLocalhostUrl(baseConfig.remoteUrl)
-            ? baseConfig.remoteUrl
-            : 'http://50.64.150.51:9006/';
         let targetOrigin = '';
         try {
             targetOrigin = new URL(targetRemoteUrl).origin;
@@ -98,7 +118,7 @@ function ensureDefaultDistributionConfig(rootDir) {
                 installOnQuit: false,
                 publisherName: DEFAULT_LOCAL_PUBLISHER,
                 allowUntrustedRoot: true,
-                allowInsecureHttp: targetRemoteUrl.startsWith('http://'),
+                allowInsecureHttp: needsInsecureHttp,
                 allowedOrigins: targetOrigin ? [targetOrigin] : []
             }
         };
@@ -123,12 +143,19 @@ function autoProvisionDesktopEnvironment(rootDir, env = process.env, options = {
         }
 
         // 未发布的本机联调包或局域网放行模式仍可使用当前用户证书库中的自签名证书。
+        let certSha1 = normalizeWindowsCertificateSha1(env.PIVOT_WINDOWS_CERTIFICATE_SHA1);
         if ((!options.requireTrustedSigning || allowIntranetSelfSigned) && (!hasSigning || !hasPublisher)) {
             const thumbprint = ensureWindowsSelfSignedCertificate(DEFAULT_LOCAL_PUBLISHER);
             if (thumbprint) {
                 if (!hasPublisher) env.PIVOT_WINDOWS_UPDATE_PUBLISHER = DEFAULT_LOCAL_PUBLISHER;
                 if (!hasSigning) env.PIVOT_WINDOWS_CERTIFICATE_SHA1 = thumbprint;
+                certSha1 = thumbprint;
             }
+        }
+
+        if (allowIntranetSelfSigned && !env.PIVOT_UPDATE_CERT_SHA256 && certSha1) {
+            const certSha256 = getWindowsCertificateSha256(certSha1);
+            if (certSha256) env.PIVOT_UPDATE_CERT_SHA256 = certSha256;
         }
 
         if (!String(env.PIVOT_DISTRIBUTION_CONFIG || '').trim() && options.requireDistributionConfig === true && !allowIntranetSelfSigned) {

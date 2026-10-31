@@ -94,3 +94,26 @@ test('autoProvisionDesktopEnvironment 保留用户显式传入的环境变量', 
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
+
+test('ensureDefaultDistributionConfig 在缺少 allowInsecureHttp 时自动重新生成', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-auto-insecure-http-'));
+    try {
+        const tmpDir = path.join(root, '.tmp');
+        fs.mkdirSync(tmpDir, { recursive: true });
+        const staleConfig = {
+            mode: 'remote',
+            remoteUrl: 'http://50.64.150.51:9006/',
+            autoUpdate: {
+                enabled: true,
+                publisherName: 'Pivot Local Dev'
+            }
+        };
+        fs.writeFileSync(path.join(tmpDir, 'dist-config.json'), JSON.stringify(staleConfig, null, 2), 'utf8');
+
+        const configPath = ensureDefaultDistributionConfig(root);
+        const regenerated = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        assert.equal(regenerated.autoUpdate?.allowInsecureHttp, true);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
