@@ -117,12 +117,16 @@
         host.appendChild(modal);
     }
 
-    function options(columns, emptyLabel) {
-        return `<option value="">${esc(emptyLabel)}</option>${(columns || []).map(column => `<option value="${esc(column.key)}">${esc(column.name)}</option>`).join('')}`;
+    function options(items, emptyLabel) {
+        return `<option value="">${esc(emptyLabel)}</option>${(items || []).map(item => {
+            const val = item.key ?? item.id ?? '';
+            const label = item.name ?? item.displayName ?? item.fieldKey ?? val;
+            return `<option value="${esc(val)}">${esc(label)}</option>`;
+        }).join('')}`;
     }
 
     function selectedDataset() {
-        const id = document.getElementById('data-analysis-scale-dataset')?.value || activeDatasetId();
+        const id = document.getElementById('data-analysis-scale-dataset')?.value || state.scalabilityDatasetId || activeDatasetId();
         return (state.datasets || []).find(item => String(item.id) === String(id)) || null;
     }
 
@@ -136,12 +140,18 @@
         if (!selector) return;
         const desired = state.scalabilityDatasetId || activeDatasetId();
         PivotSafeHtml.setHtml(selector, options(state.datasets || [], '请选择数据集'));
-        selector.value = (state.datasets || []).some(item => item.id === desired) ? desired : '';
+        selector.value = (state.datasets || []).some(item => String(item.id) === String(desired)) ? desired : '';
         const dataset = selectedDataset();
         const columns = dataset?.columns || [];
         ['data-analysis-scale-partition-field', 'data-analysis-scale-materialization-group', 'data-analysis-scale-materialization-field'].forEach((id, index) => {
             const element = document.getElementById(id);
-            if (element) PivotSafeHtml.setHtml(element, options(columns, index === 1 ? '不分组（全局聚合）' : '请选择字段'));
+            if (element) {
+                const prev = element.value;
+                PivotSafeHtml.setHtml(element, options(columns, index === 1 ? '不分组（全局聚合）' : '请选择字段'));
+                if (prev && columns.some(col => String(col.key ?? col.id) === String(prev))) {
+                    element.value = prev;
+                }
+            }
         });
         const status = document.getElementById('data-analysis-scale-status');
         const assets = document.getElementById('data-analysis-scale-assets');
@@ -163,7 +173,8 @@
     async function loadScalability(datasetId = activeDatasetId(), options = {}) {
         const id = String(datasetId || '').trim();
         state.scalabilityDatasetId = id;
-        if (!id) { state.scalability = null; renderScalability(); return null; }
+        renderScalability();
+        if (!id) { state.scalability = null; return null; }
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}/scalability`);
             if (String(state.scalabilityDatasetId) !== id) return null;
@@ -236,6 +247,7 @@
             }
         });
         root.addEventListener('click', event => {
+            if (event.target.closest('#data-analysis-open-scale-modal')) void loadScalability(activeDatasetId(), { silent: true });
             if (event.target.closest('#data-analysis-scale-refresh')) void loadScalability(activeDatasetId());
             if (event.target.closest('#data-analysis-scale-append')) void appendIncrement().catch(error => toast(error.message || '增量导入失败', 'error'));
             if (event.target.closest('#data-analysis-scale-partition')) void partitionDataset().catch(error => toast(error.message || '创建分区失败', 'error'));

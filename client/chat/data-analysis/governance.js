@@ -421,7 +421,12 @@
         if (!root || root.dataset.governanceEventsBound === 'true') return;
         root.dataset.governanceEventsBound = 'true';
         root.addEventListener('change', event => {
-            if (event.target?.id === 'data-analysis-governance-dataset') loadGovernance(event.target.value).catch(error => toast(error?.message || '加载治理信息失败', 'error'));
+            if (event.target?.id === 'data-analysis-governance-dataset') {
+                const datasetId = event.target.value;
+                loadGovernance(datasetId).catch(error => toast(error?.message || '加载治理信息失败', 'error'));
+                app.loadScalability?.(datasetId, { silent: true });
+                app.loadSemanticModels?.({ silent: true });
+            }
             if (event.target?.id === 'data-analysis-assets-dataset') {
                 loadAssets(event.target.value).catch(error => toast(error?.message || '加载分析资产失败', 'error'));
             }

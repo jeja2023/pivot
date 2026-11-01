@@ -136,3 +136,28 @@ test('真实浏览器验证字段治理表格各列完整显示与单行不换�
     }
 });
 
+test('规模化管道与指标口径自动同步治理数据集字段契约', () => {
+    const scaleJsPath = path.resolve(__dirname, '../client/chat/data-analysis/scalability.js');
+    const govJsPath = path.resolve(__dirname, '../client/chat/data-analysis/governance.js');
+    const semanticJsPath = path.resolve(__dirname, '../client/chat/data-analysis/semantic-models.js');
+
+    const scaleJs = fs.readFileSync(scaleJsPath, 'utf8');
+    const govJs = fs.readFileSync(govJsPath, 'utf8');
+    const semanticJs = fs.readFileSync(semanticJsPath, 'utf8');
+
+    // 1. scalability options 函数支持对象同时具备 key/id 与 name/displayName 属性
+    assert.match(scaleJs, /item\.key\s*\?\?\s*item\.id/);
+    assert.match(scaleJs, /item\.name\s*\?\?\s*item\.displayName/);
+
+    // 2. scalability loadScalability 立即执行 renderScalability
+    assert.match(scaleJs, /state\.scalabilityDatasetId\s*=\s*id;\s*renderScalability\(\);/);
+
+    // 3. governance dataset 切换时同步触发 loadScalability 与 loadSemanticModels
+    assert.match(govJs, /app\.loadScalability\?\.\(datasetId,\s*\{\s*silent:\s*true\s*\}\)/);
+    assert.match(govJs, /app\.loadSemanticModels\?\.\(\{\s*silent:\s*true\s*\}\)/);
+
+    // 4. 按钮点击时触发实时加载与渲染
+    assert.match(scaleJs, /#data-analysis-open-scale-modal/);
+    assert.match(semanticJs, /#data-analysis-open-metric-modal/);
+});
+

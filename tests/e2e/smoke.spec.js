@@ -2226,6 +2226,9 @@ test.describe('Pivot browser smoke', () => {
 
         await page.locator('#data-analysis-open-scale-modal').click();
         await expect(page.locator('#data-analysis-scalability-panel')).toBeVisible({ timeout: 15_000 });
+        if (!await page.locator('#data-analysis-scale-dataset').inputValue()) {
+            await page.locator('#data-analysis-scale-dataset').selectOption({ index: 1 });
+        }
         await page.locator('#data-analysis-scale-partition-field').selectOption('c_1');
         const partitionResponse = page.waitForResponse(response => response.url().endsWith('/partitions') && response.request().method() === 'POST');
         await page.locator('#data-analysis-scale-partition').click();
