@@ -167,7 +167,7 @@ async function issueRefreshToken(executor, userId, familyId = crypto.randomUUID(
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
     // 转换为北京时间字符串格式用于数据库存储 (YYYY-MM-DD HH:mm:ss)
     const expiresAtStr = getBeijingTimestamp(expiresAt);
-    
+
     await executor.execute('INSERT INTO refresh_tokens (user_id, token, expires_at, family_id, device_id, login_ip) VALUES (?, ?, ?, ?, ?, ?)', [userId, hashRefreshToken(token), expiresAtStr, familyId, normalizeDeviceId(deviceId), normalizeIpAddress(loginIp)]);
     return token;
 }
@@ -347,7 +347,7 @@ async function login(username, password, options = {}) {
             sessionReplaced
         };
     });
-    return { 
+    return {
         ...result,
         user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active', created_at: user.created_at })
     };
@@ -464,20 +464,20 @@ function csrfMiddleware(req, res, next) {
     next();
 }
 
-module.exports = { 
+module.exports = {
     getUserById,
-    register, 
-    login, 
+    register,
+    login,
     refreshTokens,
-    authMiddleware, 
-    validatePassword, 
+    authMiddleware,
+    validatePassword,
     getCookie,
     resolveAuthenticatedUserAsync,
     AUTH_COOKIE_NAME,
     REFRESH_COOKIE_NAME,
     DEVICE_COOKIE_NAME,
     CSRF_COOKIE_NAME,
-    ACCESS_COOKIE_OPTIONS, 
+    ACCESS_COOKIE_OPTIONS,
     REFRESH_COOKIE_OPTIONS,
     DEVICE_COOKIE_OPTIONS,
     LEGACY_REFRESH_COOKIE_OPTIONS,

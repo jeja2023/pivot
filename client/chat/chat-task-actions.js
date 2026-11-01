@@ -17,8 +17,9 @@
 
     function setSafeMarkup(element, markup) {
         if (!element) return;
-        if (window.PivotSafeHtml?.setHtml) {
-            window.PivotSafeHtml.setHtml(element, markup);
+        const safeHtml = typeof PivotSafeHtml !== 'undefined' ? PivotSafeHtml : window.Pivot?.legacy?.PivotSafeHtml;
+        if (safeHtml?.setHtml) {
+            safeHtml.setHtml(element, markup);
             return;
         }
         const parsed = new DOMParser().parseFromString(markup, 'text/html');
@@ -181,9 +182,14 @@
         }
     }
 
+    function resolveDocsApi() {
+        return typeof DocsAPI !== 'undefined' ? DocsAPI : null;
+    }
+
     async function previewWithOnlyOffice(artifact, config, preview, notice) {
         if (!/^\/[A-Za-z0-9_-]+\/web-apps\/apps\/api\/documents\/api\.js$/.test(String(config.scriptUrl || ''))) throw new Error('文档服务地址无效。');
-        if (!window.DocsAPI?.DocEditor) {
+        let docsApi = resolveDocsApi();
+        if (!docsApi?.DocEditor) {
             await new Promise((resolve, reject) => {
                 const script = document.createElement('script');
                 script.src = config.scriptUrl;
@@ -191,15 +197,16 @@
                 script.onerror = () => { script.remove(); reject(new Error('文档服务无法连接，请检查 ONLYOFFICE 代理配置。')); };
                 document.head.appendChild(script);
             });
+            docsApi = resolveDocsApi();
         }
         if (!previewIsCurrent(preview)) return;
-        if (!window.DocsAPI?.DocEditor) throw new Error('文档服务初始化失败。');
+        if (!docsApi?.DocEditor) throw new Error('文档服务初始化失败。');
         notice.remove();
         const host = document.createElement('div');
         host.className = 'chat-result-preview-office';
-        host.id = `onlyoffice-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        host.id = 'onlyoffice-preview-' + Date.now() + '-' + Math.random().toString(36).slice(2);
         preview.body.appendChild(host);
-        const editor = new window.DocsAPI.DocEditor(host.id, config.editor);
+        const editor = new docsApi.DocEditor(host.id, config.editor);
         if (previewIsCurrent(preview)) activePreview.cleanup = () => editor.destroyEditor?.();
         else editor.destroyEditor?.();
     }

@@ -139,3 +139,11 @@ test('个人工作台入口和刷新操作通过受控模块共享', () => {
     assert.doesNotMatch(personal, /legacy\.loadPersonalWorkbench\s*=/);
     assert.match(main, /moduleApi\('workspaces\.navigation'\)\.openPersonalWorkbench/);
 });
+
+test('结果文件预览与操作符合全局变量命名空间规范，无非法的直接 window 属性挂载或访问', () => {
+    const actions = read('client/chat/chat-task-actions.js');
+
+    assert.doesNotMatch(actions, /window\.PivotSafeHtml/);
+    assert.doesNotMatch(actions, /window\.DocsAPI/);
+    assert.match(actions, /resolveDocsApi/);
+});
