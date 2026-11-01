@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/services/agent-idle-chat-tasks.js",
+      "count": 1,
+      "rationale": "会话任务等待补充信息超时巡检使用单条参数化条件更新原子处理，只针对无外部副作用、待审批事务及控制消息的常规任务，避免分布式并发重复更新。",
+      "verification": "tests/agent-idle-chat-tasks.test.js 与 tests/agent-idle-chat-tasks-postgres.test.js 覆盖过期巡检、边界条件与并发更新。"
+    },
+    {
       "file": "server/services/realtime-stream-snapshot.js",
       "count": 3,
       "rationale": "快照按运行、用户与执行租约参数化写入和读取，正文加密保存；过期清理每次限量。",

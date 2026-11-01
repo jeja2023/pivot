@@ -8,7 +8,7 @@
         resuming: '正在恢复任务', verifying: '正在核验结果', needs_input: '等待补充信息或继续',
         approval_required: '等待操作授权', waiting_approval: '等待审批决定', awaiting_approval: '等待审批决定',
         awaiting_commit: '等待确认提交外部操作', completed: '任务已完成', completed_with_errors: '任务完成，部分步骤有异常',
-        partial: '任务部分完成', error: '任务执行失败', failed: '任务执行失败', cancelled: '任务已停止', deleted: '任务不可用'
+        partial: '任务已结束，部分完成', error: '任务执行失败', failed: '任务执行失败', cancelled: '任务已停止', deleted: '任务不可用'
     });
 
     function timestamp(value) {

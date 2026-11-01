@@ -627,6 +627,12 @@ async function recoverAgentRuns() {
     let recoveredChatResults = null;
     let expiredBrowserSessions = 0;
     let expiredVoiceSessions = 0;
+    let expiredChatTasks = 0;
+    try {
+        expiredChatTasks = await require('../agent-idle-chat-tasks').expireIdleChatTasks({ query, publishAgentRunEvent, recordAgentEvent, finalizeTerminalRun: runState.finalizeTerminalRun, logger });
+    } catch (error) {
+        logger.warn({ err: error.message }, '等待补充信息的会话任务巡检失败');
+    }
     try {
         recoveredChatResults = await recoverChatAgentResults({ limit: 200 });
     } catch (error) {
@@ -645,7 +651,7 @@ async function recoverAgentRuns() {
         logger.warn({ err: error.message }, '实时语音会话过期回收失败');
     }
     if (recoveredQueued > 0 || staleRunning.length > 0) {
-        logger.info({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults, expiredBrowserSessions, expiredVoiceSessions }, '智能体运行时异常任务恢复完成');
+        logger.info({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults, expiredBrowserSessions, expiredVoiceSessions, expiredChatTasks }, '智能体运行时异常任务恢复完成');
     } else {
         logger.debug({ recoveredQueued, staleRunning: staleRunning.length, recoveredChatResults, expiredBrowserSessions, expiredVoiceSessions }, '智能体运行时周期巡检完成');
     }

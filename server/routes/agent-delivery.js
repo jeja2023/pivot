@@ -69,7 +69,7 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
         let claims;
         try { claims = require('../services/onlyoffice-preview').verifyReadTicket(req.query.token); }
         catch (_) { return res.status(403).json({ error: '预览凭据无效或已过期。' }); }
-        const user = await require('../db/client').queryOne("SELECT id,role,unit,status,token_version FROM users WHERE id = ? AND deleted_at IS NULL", [claims.userId]);
+        const user = await require('../auth').getUserById(claims.userId);
         if (!user || user.status === 'disabled' || Number(user.token_version || 0) !== Number(claims.tokenVersion)) return res.status(403).json({ error: '预览权限已失效。' });
         const rendition = await getRenditionForUser(claims.renditionId, user);
         if (!rendition || rendition.format !== 'docx' || rendition.status !== 'ready' || (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now())) return res.status(404).json({ error: '预览文件不可用。' });

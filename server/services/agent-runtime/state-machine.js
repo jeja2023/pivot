@@ -41,7 +41,7 @@ const TRANSITIONS = {
     completed: new Set(['deleted']),
     completed_with_errors: new Set(['deleted']),
     partial: new Set(['queued', 'deleted']),
-    needs_input: new Set(['queued', 'resuming', 'cancelled', 'error', 'deleted']),
+    needs_input: new Set(['queued', 'resuming', 'partial', 'cancelled', 'error', 'deleted']),
     error: new Set(['queued', 'deleted']),
     failed: new Set(['queued', 'deleted']),
     cancelled: new Set(['queued', 'deleted']),

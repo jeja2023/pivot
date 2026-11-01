@@ -89,7 +89,7 @@
             ${state.connection === 'unavailable' ? button('refresh', terminal ? '刷新记录' : '重新连接', '重新获取任务最新状态') : ''}
             ${!terminal && status !== 'awaiting_commit' ? button('steer', '补充要求', '为当前任务补充要求') : ''}
             ${!terminal && !waiting ? control('pause', '暂停', '暂停当前任务，可随后继续') : ''}
-            ${resumable ? control('resume', '继续', '从上次执行位置继续任务', 'btn-primary') : ''}
+            ${resumable ? control('resume', terminal ? '续跑任务' : '继续', '从上次执行位置继续任务', 'btn-primary') : ''}
             ${status === 'awaiting_commit' ? button('details', '查看提交决定', '查看待提交操作并决定提交或回滚', 'btn-primary') : ''}
             </div>${!terminal && status !== 'awaiting_commit' ? control('cancel', '停止任务', '停止当前任务的后续处理', 'btn-danger-outline') : ''}</div>`;
     }

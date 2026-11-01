@@ -208,6 +208,13 @@ function getCookie(req, name) {
     return cookies[name];
 }
 
+async function getUserById(id) {
+    return queryOne(
+        'SELECT id, username, nickname, unit, role, status, created_at, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
+        [id]
+    );
+}
+
 async function resolveAuthenticatedUserAsync(req) {
     const authHeader = req.headers?.authorization;
     const cookieToken = getCookie(req, AUTH_COOKIE_NAME);
@@ -225,10 +232,7 @@ async function resolveAuthenticatedUserAsync(req) {
             if (!tokenIp || !requestIp) return { user: null, token, code: 'AUTH_IP_BINDING_REQUIRED' };
             if (tokenIp !== requestIp) return { user: null, token, code: 'AUTH_IP_MISMATCH' };
         }
-        const user = await queryOne(
-            'SELECT id, username, nickname, unit, role, status, created_at, default_model_id, token_version FROM users WHERE id = ? AND deleted_at IS NULL',
-            [decoded.id]
-        );
+        const user = await getUserById(decoded.id);
         if (user && user.status !== 'disabled' && Number(decoded.tv ?? 0) === Number(user.token_version || 0)) {
             return { user: withPermissionFlags(user), token, code: 'AUTH_OK' };
         }
@@ -461,6 +465,7 @@ function csrfMiddleware(req, res, next) {
 }
 
 module.exports = { 
+    getUserById,
     register, 
     login, 
     refreshTokens,

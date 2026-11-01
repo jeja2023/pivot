@@ -362,6 +362,7 @@ async function markRunError(runId, message) {
     return {
         appendRunMetadataList,
         assertRunUserActive,
+        finalizeTerminalRun,
         getRunStatus,
         getRunUser,
         markRunError,
