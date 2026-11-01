@@ -2210,6 +2210,7 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#data-analysis-chart-result')).toContainText(/区域|销售额/, { timeout: 15_000 });
 
         await page.locator('[data-data-analysis-tab="governance"]').click();
+        await page.locator('#data-analysis-governance-dataset').selectOption({ index: 1 });
         await expect(page.locator('#data-analysis-field-governance')).toContainText('区域', { timeout: 15_000 });
         const amountRow = page.locator('[data-analysis-governance-field="c_2"]');
         await amountRow.locator('[data-governance-input="displayName"]').fill('已确认销售额');
@@ -2241,6 +2242,7 @@ test.describe('Pivot browser smoke', () => {
         await expect(page.locator('#data-analysis-scalability-modal')).toBeHidden();
 
         await page.locator('[data-data-analysis-tab="assets"]').click();
+        await page.locator('#data-analysis-assets-dataset').selectOption({ index: 1 });
         await page.locator('#data-analysis-open-save-view-modal').click();
         await page.locator('#data-analysis-view-name').fill('区域销售额图表');
         await page.locator('#data-analysis-view-type').selectOption('chart');
