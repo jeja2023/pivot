@@ -7,7 +7,7 @@ const {
     listDashboards, getDashboard, saveDashboard, saveDashboardItem, deleteDashboardItem, refreshDashboard,
     listRefreshSchedules, saveRefreshSchedule, saveAlertRule, getAlertRule, listAlertRules, getDatasetSourceState,
     listMetricDefinitions, saveMetricDefinition, evaluateMetricDefinition,
-    getDataModel, listDataModels, saveDataModel, addDataModelRelation, runDataModelJoin,
+    getDataModel, listDataModels, saveDataModel, addDataModelRelation, runDataModelJoin, runDataModelAnalysis,
     createAsyncQueryJob, getAsyncQueryJob, listAsyncQueryJobs, cancelAsyncQueryJob,
     getScalabilityState, createDatasetPartitions, listMaterializations, saveMaterialization
 } = require('../../services/data-analysis');
@@ -154,6 +154,11 @@ function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }
     router.post('/apps/data-analysis/models/:modelId/query', authMiddleware, asyncHandler(async (req, res) => {
         const result = await runDataModelJoin({ user: req.user, modelId: req.params.modelId, relationId: req.body?.relationId, limit: req.body?.limit });
         logAction(req, '数据分析-运行跨数据集关联', `模型: ${req.params.modelId}，关联: ${result.relation.id}`);
+        res.json(result);
+    }));
+    router.post('/apps/data-analysis/models/:modelId/analysis', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await runDataModelAnalysis({ user: req.user, modelId: req.params.modelId, dimension: req.body?.dimension, measure: req.body?.measure, aggregation: req.body?.aggregation, limit: req.body?.limit });
+        logAction(req, '数据分析-跨数据集汇总', `模型: ${req.params.modelId}，数据集数: ${result.datasetCount}`);
         res.json(result);
     }));
 

@@ -33,7 +33,7 @@
         }
     }
 
-    async function loadDatasets({ keepActive = true } = {}) {
+    async function loadDatasets({ keepActive = true, loadActiveDetail = true } = {}) {
         const data = await fetchJson(`${API}/datasets`);
         state.datasets = Array.isArray(data.datasets) ? data.datasets : [];
         if (!keepActive || !state.datasets.some(item => item.id === state.activeId)) {
@@ -42,7 +42,7 @@
         if (!state.compareLeftId) state.compareLeftId = '';
         if (!state.compareRightId) state.compareRightId = '';
         render();
-        if (state.activeId) await loadDatasetDetail(state.activeId);
+        if (state.activeId && loadActiveDetail) await loadDatasetDetail(state.activeId);
     }
 
     async function loadDatasetDetail(id) {
@@ -193,6 +193,8 @@
         const explicitTab = String(options?.tab || options?.view || '').trim();
         const requestedTab = normalizeTab(explicitTab || getStoredActiveTab());
         resetAiWorkspace();
+        if (requestedTab === 'governance') await app.loadGovernance?.('');
+        if (requestedTab === 'assets') await app.loadAssets?.('');
         if (requestedDatasetId) state.activeId = requestedDatasetId;
         window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'data-analysis');
         document.getElementById('apps-home-view')?.classList.add('hidden');
@@ -205,10 +207,15 @@
         }
         await window.Pivot.legacy.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
-        await loadDatasets({ keepActive: true });
-        if (['governance', 'assets'].includes(requestedTab)) {
-            await app.loadGovernance?.(state.activeId, { silent: true });
+        await loadDatasets({ keepActive: true, loadActiveDetail: !['governance', 'assets'].includes(requestedTab) || Boolean(requestedDatasetId) });
+        if (requestedTab === 'governance') {
+            if (state.governanceDatasetId) await app.loadGovernance?.(state.governanceDatasetId, { silent: true });
+            else app.renderGovernance?.();
             await app.loadSemanticModels?.({ silent: true });
+        }
+        if (requestedTab === 'assets') {
+            if (state.assetsDatasetId) await app.loadAssets?.(state.assetsDatasetId, { silent: true });
+            else app.renderGovernance?.();
         }
         if (requestedTab === 'dashboards') await app.loadDashboards?.({ keepActive: true, silent: true });
         if (requestedTab === 'query') await app.loadAsyncQueryJobs?.({ silent: true });

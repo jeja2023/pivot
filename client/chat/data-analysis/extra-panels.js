@@ -25,32 +25,32 @@
     <div class="data-analysis-panel-header">
         <div class="data-analysis-panel-header-left">
             <div class="data-analysis-header-icon-badge">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg>
             </div>
             <div class="data-analysis-panel-header-intro">
-                <div class="data-analysis-title-row">
-                    <h5>字段治理工作台</h5>
-                    <span class="data-analysis-badge-safe">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                        元数据治理 · 四级权限脱敏隔离
-                    </span>
-                </div>
-                <p>统一维护字段业务含义、度量/维度角色、单位格式和敏感等级；支持计算衍生字段、指标口径、跨数据集关联模型与规模化数据管道。</p>
+        <div class="data-analysis-title-row">
+            <h5>字段治理工作台</h5>
+            <span class="data-analysis-badge-safe">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                元数据治理 · 四级权限脱敏隔离
+            </span>
+        </div>
+        <p>统一维护字段业务含义、度量/维度角色、单位格式和敏感等级；支持计算衍生字段、指标口径、跨数据集关联模型与规模化数据管道。</p>
             </div>
         </div>
         <div class="data-analysis-panel-header-actions">
             <label class="data-analysis-dataset-picker" title="选择治理数据集">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-                <span class="data-analysis-picker-label">治理数据集</span>
-                <select id="data-analysis-governance-dataset" class="form-input data-analysis-picker-select"></select>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+        <span class="data-analysis-picker-label">治理数据集</span>
+        <select id="data-analysis-governance-dataset" class="form-input data-analysis-picker-select"></select>
             </label>
             <button id="data-analysis-governance-refresh" class="btn-secondary" type="button" title="刷新治理信息">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                <span>刷新治理信息</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+        <span>刷新治理信息</span>
             </button>
-            <button id="data-analysis-open-share-modal" class="btn-secondary" type="button" data-analysis-modal-trigger="data-analysis-share-modal" title="设置数据集共享范围">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-                <span>共享范围</span>
+            <button id="data-analysis-open-share-modal" class="btn-secondary" type="button" title="管理数据集协作者与单位共享权限">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+        <span>共享协作</span>
             </button>
         </div>
     </div>
@@ -62,20 +62,20 @@
         </div>
         <div class="data-analysis-status-strip-actions">
             <button id="data-analysis-open-calc-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-calc-modal">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="8" y1="6" x2="16" y2="6"></line><line x1="16" y1="14" x2="16" y2="18"></line></svg>
-                <span>计算字段管理</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="8" y1="6" x2="16" y2="6"></line><line x1="16" y1="14" x2="16" y2="18"></line></svg>
+        <span>计算字段管理</span>
             </button>
             <button id="data-analysis-open-metric-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-metric-modal">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-                <span>业务指标口径</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        <span>业务指标口径</span>
             </button>
             <button id="data-analysis-open-model-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-model-modal">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
-                <span>跨表关联模型</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        <span>跨表关联模型</span>
             </button>
             <button id="data-analysis-open-scale-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-scalability-modal">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-                <span>规模化数据管道</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+        <span>规模化数据管道</span>
             </button>
         </div>
     </div>
@@ -83,17 +83,17 @@
     <div class="data-analysis-governance-card data-analysis-field-governance-card">
         <div class="data-analysis-governance-card-header">
             <div>
-                <div class="data-analysis-card-title-wrap">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                    <h5>字段字典与权限治理</h5>
-                </div>
-                <p>统一维护显示名、业务类型、度量/维度角色、单位、日期格式和敏感级别（机密/受限字段在共享查询中自动脱敏屏蔽）。</p>
+        <div class="data-analysis-card-title-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <h5>字段字典与权限治理</h5>
+        </div>
+        <p>统一维护显示名、业务类型、度量/维度角色、单位、日期格式和敏感级别（机密/受限字段在共享查询中自动脱敏屏蔽）。</p>
             </div>
             <div class="data-analysis-inline-actions">
-                <button id="data-analysis-governance-save" class="btn-primary btn-sm" type="button">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                    <span>保存字段治理</span>
-                </button>
+        <button id="data-analysis-governance-save" class="btn-primary btn-sm" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            <span>保存字段治理</span>
+        </button>
             </div>
         </div>
         <div id="data-analysis-field-governance" class="data-analysis-field-governance"></div>
@@ -105,58 +105,58 @@
     <div class="modal data-analysis-dialog-modal data-analysis-calc-modal-dialog data-analysis-modal-size-720">
         <div class="data-analysis-modal-header">
             <div class="data-analysis-modal-title-group">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="8" y1="6" x2="16" y2="6"></line><line x1="16" y1="14" x2="16" y2="18"></line></svg>
-                <div>
-                    <h3>计算字段管理</h3>
-                    <p class="data-analysis-modal-subtitle">查看已有计算字段，或基于字段表达式实时演算派生新版本数据集。</p>
-                </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="8" y1="6" x2="16" y2="6"></line><line x1="16" y1="14" x2="16" y2="18"></line></svg>
+        <div>
+            <h3>计算字段管理</h3>
+            <p class="data-analysis-modal-subtitle">查看已有计算字段，或基于字段表达式实时演算派生新版本数据集。</p>
+        </div>
             </div>
         </div>
         <div class="data-analysis-modal-body">
             <div>
-                <span class="data-analysis-subheading">已生效计算字段列表</span>
-                <div id="data-analysis-calculated-fields" class="data-analysis-asset-list data-analysis-modal-scroll-180"></div>
+        <span class="data-analysis-subheading">已生效计算字段列表</span>
+        <div id="data-analysis-calculated-fields" class="data-analysis-asset-list data-analysis-modal-scroll-180"></div>
             </div>
             <div class="data-analysis-modal-divider">
-                <span class="data-analysis-subheading">+ 新增计算字段</span>
-                <div class="data-analysis-calc-form data-analysis-modal-form-grid">
-                    <label>
-                        <span class="data-analysis-label-title">字段名称 <span class="required">*</span></span>
-                        <input id="data-analysis-calc-name" class="form-input" maxlength="80" placeholder="例如：含税销售额">
-                    </label>
-                    <label>
-                        <span class="data-analysis-label-title">单位</span>
-                        <input id="data-analysis-calc-unit" class="form-input" maxlength="40" placeholder="例如：元">
-                    </label>
-                    <label class="grid-span-full">
-                        <span class="data-analysis-label-title">表达式 <span class="required">*</span></span>
-                        <textarea id="data-analysis-calc-expression" class="form-input" maxlength="1000" placeholder="例如：{{c_2}} * 1.13"></textarea>
-                    </label>
-                    <label>
-                        <span class="data-analysis-label-title">敏感级别</span>
-                        <select id="data-analysis-calc-sensitivity" class="form-input">
-                            <option value="internal">内部</option>
-                            <option value="public">公开</option>
-                            <option value="confidential">机密</option>
-                            <option value="restricted">受限</option>
-                        </select>
-                    </label>
-                    <label>
-                        <span class="data-analysis-label-title">派生数据集名称</span>
-                        <input id="data-analysis-calc-dataset-name" class="form-input" maxlength="120" placeholder="默认：原数据集（含计算字段）">
-                    </label>
-                </div>
-                <div class="data-analysis-inline-actions data-analysis-modal-mt-14">
-                    <button id="data-analysis-calc-preview" class="btn-secondary btn-sm" type="button">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        <span>预览计算</span>
-                    </button>
-                    <button id="data-analysis-calc-create" class="btn-primary btn-sm" type="button">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        <span>生成派生数据集</span>
-                    </button>
-                </div>
-                <div id="data-analysis-calc-preview-result" class="data-analysis-calc-preview-result"></div>
+        <span class="data-analysis-subheading">+ 新增计算字段</span>
+        <div class="data-analysis-calc-form data-analysis-modal-form-grid">
+            <label>
+                <span class="data-analysis-label-title">字段名称 <span class="required">*</span></span>
+                <input id="data-analysis-calc-name" class="form-input" maxlength="80" placeholder="例如：含税销售额">
+            </label>
+            <label>
+                <span class="data-analysis-label-title">单位</span>
+                <input id="data-analysis-calc-unit" class="form-input" maxlength="40" placeholder="例如：元">
+            </label>
+            <label class="grid-span-full">
+                <span class="data-analysis-label-title">表达式 <span class="required">*</span></span>
+                <textarea id="data-analysis-calc-expression" class="form-input" maxlength="1000" placeholder="例如：{{c_2}} * 1.13"></textarea>
+            </label>
+            <label>
+                <span class="data-analysis-label-title">敏感级别</span>
+                <select id="data-analysis-calc-sensitivity" class="form-input">
+                    <option value="internal">内部</option>
+                    <option value="public">公开</option>
+                    <option value="confidential">机密</option>
+                    <option value="restricted">受限</option>
+                </select>
+            </label>
+            <label>
+                <span class="data-analysis-label-title">派生数据集名称</span>
+                <input id="data-analysis-calc-dataset-name" class="form-input" maxlength="120" placeholder="默认：原数据集（含计算字段）">
+            </label>
+        </div>
+        <div class="data-analysis-inline-actions data-analysis-modal-mt-14">
+            <button id="data-analysis-calc-preview" class="btn-secondary btn-sm" type="button">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                <span>预览计算</span>
+            </button>
+            <button id="data-analysis-calc-create" class="btn-primary btn-sm" type="button">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>生成派生数据集</span>
+            </button>
+        </div>
+        <div id="data-analysis-calc-preview-result" class="data-analysis-calc-preview-result"></div>
             </div>
         </div>
         <div class="data-analysis-modal-footer">
@@ -166,80 +166,50 @@
     </div>
 </div>
 
-<!-- 数据集共享范围弹窗 -->
-<div id="data-analysis-share-modal" class="modal-overlay data-analysis-modal-overlay hidden">
-    <div class="modal data-analysis-dialog-modal">
-        <div class="data-analysis-modal-header">
-            <div class="data-analysis-modal-title-group">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-                <div>
-                    <h3>数据集共享范围设置</h3>
-                    <p class="data-analysis-modal-subtitle">控制当前数据集在部门及团队内的共享与敏感字段隔离策略。</p>
-                </div>
-            </div>
-        </div>
-        <div class="data-analysis-modal-body">
-            <div class="data-analysis-modal-form-col">
-                <label class="data-analysis-share-toggle data-analysis-modal-checkbox-row">
-                    <input id="data-analysis-dataset-shared" type="checkbox"> 共享给指定部门
-                </label>
-                <label class="data-analysis-modal-meta-note">
-                    共享部门名称
-                    <input id="data-analysis-dataset-shared-units" class="form-input" maxlength="500" placeholder="例如：财务部, 运营部（逗号分隔）">
-                </label>
-                <p class="data-analysis-form-hint">共享数据集时，标记为机密或受限的敏感字段将在被共享用户预览、查询和导出中被自动剔除。</p>
-            </div>
-        </div>
-        <div class="data-analysis-modal-footer">
-            <button class="btn-secondary" type="button" data-analysis-modal-close="data-analysis-share-modal">取消</button>
-            <button id="data-analysis-dataset-share-save" class="btn-primary" type="button">保存共享范围</button>
-        </div>
-    </div>
-</div>
 
 <!-- 指标口径管理弹窗 -->
 <div id="data-analysis-metric-modal" class="modal-overlay data-analysis-modal-overlay hidden">
     <div class="modal data-analysis-dialog-modal data-analysis-modal-size-720">
         <div class="data-analysis-modal-header">
             <div class="data-analysis-modal-title-group">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-                <div>
-                    <h3>业务指标口径管理</h3>
-                    <p class="data-analysis-modal-subtitle">标准化原子指标与聚合口径，供全域复用与看板消费。</p>
-                </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+        <div>
+            <h3>业务指标口径管理</h3>
+            <p class="data-analysis-modal-subtitle">标准化原子指标与聚合口径，供全域复用与看板消费。</p>
+        </div>
             </div>
         </div>
         <div class="data-analysis-modal-body">
             <div>
-                <span class="data-analysis-subheading">已定义指标列表</span>
-                <div id="data-analysis-metrics" class="data-analysis-asset-list data-analysis-modal-scroll-180"></div>
+        <span class="data-analysis-subheading">已定义指标列表</span>
+        <div id="data-analysis-metrics" class="data-analysis-asset-list data-analysis-modal-scroll-180"></div>
             </div>
             <div class="data-analysis-modal-divider">
-                <span class="data-analysis-subheading">+ 新建指标口径</span>
-                <div class="data-analysis-metric-form data-analysis-modal-form-grid">
-                    <label class="grid-span-full">
-                        <span class="data-analysis-label-title">指标名称 <span class="required">*</span></span>
-                        <input id="data-analysis-metric-name" class="form-input" maxlength="120" placeholder="例如：总销售额、日活跃用户数">
-                    </label>
-                    <label>
-                        <span class="data-analysis-label-title">目标字段</span>
-                        <select id="data-analysis-metric-field" class="form-input"></select>
-                    </label>
-                    <label>
-                        <span class="data-analysis-label-title">聚合计算方式</span>
-                        <select id="data-analysis-metric-aggregation" class="form-input">
-                            <option value="sum">求和 (SUM)</option>
-                            <option value="count">计数 (COUNT)</option>
-                            <option value="avg">平均值 (AVG)</option>
-                            <option value="min">最小值 (MIN)</option>
-                            <option value="max">最大值 (MAX)</option>
-                        </select>
-                    </label>
-                    <label class="grid-span-full">
-                        <span class="data-analysis-label-title">显示单位</span>
-                        <input id="data-analysis-metric-unit" class="form-input" maxlength="40" placeholder="例如：元、笔、人次">
-                    </label>
-                </div>
+        <span class="data-analysis-subheading">+ 新建指标口径</span>
+        <div class="data-analysis-metric-form data-analysis-modal-form-grid">
+            <label class="grid-span-full">
+                <span class="data-analysis-label-title">指标名称 <span class="required">*</span></span>
+                <input id="data-analysis-metric-name" class="form-input" maxlength="120" placeholder="例如：总销售额、日活跃用户数">
+            </label>
+            <label>
+                <span class="data-analysis-label-title">目标字段</span>
+                <select id="data-analysis-metric-field" class="form-input"></select>
+            </label>
+            <label>
+                <span class="data-analysis-label-title">聚合计算方式</span>
+                <select id="data-analysis-metric-aggregation" class="form-input">
+                    <option value="sum">求和 (SUM)</option>
+                    <option value="count">计数 (COUNT)</option>
+                    <option value="avg">平均值 (AVG)</option>
+                    <option value="min">最小值 (MIN)</option>
+                    <option value="max">最大值 (MAX)</option>
+                </select>
+            </label>
+            <label class="grid-span-full">
+                <span class="data-analysis-label-title">显示单位</span>
+                <input id="data-analysis-metric-unit" class="form-input" maxlength="40" placeholder="例如：元、笔、人次">
+            </label>
+        </div>
             </div>
         </div>
         <div class="data-analysis-modal-footer">
@@ -254,45 +224,45 @@
     <div class="modal data-analysis-dialog-modal data-analysis-modal-size-840">
         <div class="data-analysis-modal-header">
             <div class="data-analysis-modal-title-group">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
-                <div>
-                    <h3>跨数据集关联模型管理</h3>
-                    <p class="data-analysis-modal-subtitle">跨表多源关联，支持一对多、多对一关联质量校验与预览。</p>
-                </div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+        <div>
+            <h3>跨数据集关联模型管理</h3>
+            <p class="data-analysis-modal-subtitle">跨表多源关联，支持一对多、多对一关联质量校验与预览。</p>
+        </div>
             </div>
         </div>
         <div class="data-analysis-modal-body">
             <div class="data-analysis-governance-grid data-analysis-modal-mb-16">
-                <div>
-                    <span class="data-analysis-subheading">已定义模型列表</span>
-                    <div id="data-analysis-models" class="data-analysis-asset-list data-analysis-modal-scroll-200"></div>
+        <div>
+            <span class="data-analysis-subheading">已定义模型列表</span>
+            <div id="data-analysis-models" class="data-analysis-asset-list data-analysis-modal-scroll-200"></div>
+        </div>
+        <div>
+            <div id="data-analysis-model-relation-panel" class="data-analysis-model-relation-panel hidden data-analysis-modal-divider-clean">
+                <div class="data-analysis-model-relation-subhead">
+                    <h6 id="data-analysis-model-relation-title">模型关联</h6>
+                    <button class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-relation-modal">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        <span>配置关联</span>
+                    </button>
                 </div>
-                <div>
-                    <div id="data-analysis-model-relation-panel" class="data-analysis-model-relation-panel hidden data-analysis-modal-divider-clean">
-                        <div class="data-analysis-model-relation-subhead">
-                            <h6 id="data-analysis-model-relation-title">模型关联</h6>
-                            <button class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-relation-modal">
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                <span>配置关联</span>
-                            </button>
-                        </div>
-                        <div id="data-analysis-model-relations" class="data-analysis-asset-list data-analysis-modal-scroll-180-plain"></div>
-                        <div id="data-analysis-model-query-result" class="data-analysis-calc-preview-result"></div>
-                    </div>
-                </div>
+                <div id="data-analysis-model-relations" class="data-analysis-asset-list data-analysis-modal-scroll-180-plain"></div>
+                <div id="data-analysis-model-query-result" class="data-analysis-calc-preview-result"></div>
+            </div>
+        </div>
             </div>
             <div class="data-analysis-modal-divider">
-                <span class="data-analysis-subheading">+ 新建跨数据集模型</span>
-                <div class="data-analysis-model-form data-analysis-modal-form-grid">
-                    <label class="grid-span-full">
-                        <span class="data-analysis-label-title">模型名称 <span class="required">*</span></span>
-                        <input id="data-analysis-model-name" class="form-input" maxlength="120" placeholder="例如：订单与客户多维分析模型">
-                    </label>
-                    <label class="grid-span-full">
-                        <span class="data-analysis-label-title">模型用途说明</span>
-                        <input id="data-analysis-model-description" class="form-input" maxlength="500" placeholder="模型业务背景与分析目标说明">
-                    </label>
-                </div>
+        <span class="data-analysis-subheading">+ 新建跨数据集模型</span>
+        <div class="data-analysis-model-form data-analysis-modal-form-grid">
+            <label class="grid-span-full">
+                <span class="data-analysis-label-title">模型名称 <span class="required">*</span></span>
+                <input id="data-analysis-model-name" class="form-input" maxlength="120" placeholder="例如：订单与客户多维分析模型">
+            </label>
+            <label class="grid-span-full">
+                <span class="data-analysis-label-title">模型用途说明</span>
+                <input id="data-analysis-model-description" class="form-input" maxlength="500" placeholder="模型业务背景与分析目标说明">
+            </label>
+        </div>
             </div>
         </div>
         <div class="data-analysis-modal-footer">
@@ -307,8 +277,8 @@
     <div class="modal data-analysis-dialog-modal data-analysis-modal-size-620">
         <div class="data-analysis-modal-header">
             <div class="data-analysis-modal-title-group">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
-                <div>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="data-analysis-modal-icon"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+        <div>
                     <h3>配置跨数据集关联关系</h3>
                     <p class="data-analysis-modal-subtitle">设定主外键与 Join 关联规则，校验跨表连接正确性。</p>
                 </div>

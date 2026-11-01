@@ -7,6 +7,8 @@
     const fetchJson = (...args) => app.fetchJson(...args);
     const toast = (...args) => app.toast(...args);
     const guardButton = (...args) => app.guardButton(...args);
+    let governanceRequest = 0;
+    let assetsRequest = 0;
 
     function dataSetOptions(selected = '', emptyLabel = '请选择数据集') {
         const items = [`<option value="">${esc(emptyLabel)}</option>`];
@@ -17,11 +19,11 @@
     }
 
     function currentGovernanceDatasetId() {
-        return state.governanceDatasetId || state.activeId || '';
+        return state.governanceDatasetId || '';
     }
 
     function currentAssetsDatasetId() {
-        return byId('data-analysis-assets-dataset')?.value || currentGovernanceDatasetId();
+        return state.assetsDatasetId || '';
     }
 
     function getInputValue(id) {
@@ -49,17 +51,41 @@
             return;
         }
         PivotSafeHtml.setHtml(box, `
-            <div class="table-container"><table class="data-table compact-table data-analysis-governance-table"><thead><tr><th>字段</th><th>显示名称</th><th>业务类型</th><th>角色</th><th>单位/日期格式</th><th>敏感级别</th><th>业务定义</th></tr></thead><tbody>
-            ${fields.map(field => `<tr data-analysis-governance-field="${esc(field.fieldKey)}">
-                <td><code>${esc(field.fieldKey)}</code><span class="data-analysis-field-source">${esc(field.sourceName || '')}</span></td>
-                <td><input class="form-input" data-governance-input="displayName" maxlength="80" value="${esc(field.displayName || field.sourceName || '')}"></td>
-                <td><select class="form-input" data-governance-input="logicalType"><option value="auto"${field.logicalType === 'auto' ? ' selected' : ''}>自动识别</option><option value="text"${field.logicalType === 'text' ? ' selected' : ''}>文本</option><option value="number"${field.logicalType === 'number' ? ' selected' : ''}>数值</option><option value="date"${field.logicalType === 'date' ? ' selected' : ''}>日期</option><option value="boolean"${field.logicalType === 'boolean' ? ' selected' : ''}>布尔</option></select></td>
-                <td><label><input type="checkbox" data-governance-input="isDimension"${field.isDimension ? ' checked' : ''}> 维度</label><label><input type="checkbox" data-governance-input="isMetric"${field.isMetric ? ' checked' : ''}> 指标</label></td>
-                <td><input class="form-input" data-governance-input="unit" maxlength="40" value="${esc(field.unit || '')}" placeholder="单位"><input class="form-input" data-governance-input="dateFormat" maxlength="60" value="${esc(field.dateFormat || '')}" placeholder="日期格式"></td>
-                <td><select class="form-input" data-governance-input="sensitivity"><option value="public"${field.sensitivity === 'public' ? ' selected' : ''}>公开</option><option value="internal"${field.sensitivity === 'internal' ? ' selected' : ''}>内部</option><option value="confidential"${field.sensitivity === 'confidential' ? ' selected' : ''}>机密</option><option value="restricted"${field.sensitivity === 'restricted' ? ' selected' : ''}>受限</option></select></td>
-                <td><input class="form-input" data-governance-input="businessDefinition" maxlength="1000" value="${esc(field.businessDefinition || '')}" placeholder="业务含义与口径"></td>
-            </tr>`).join('')}
-            </tbody></table></div>`);
+            <div class="table-container data-analysis-governance-table-wrap">
+                <table class="data-table compact-table data-analysis-governance-table">
+                    <colgroup>
+                        <col class="data-analysis-gov-col-field">
+                        <col class="data-analysis-gov-col-name">
+                        <col class="data-analysis-gov-col-type">
+                        <col class="data-analysis-gov-col-role">
+                        <col class="data-analysis-gov-col-format">
+                        <col class="data-analysis-gov-col-sensitivity">
+                        <col class="data-analysis-gov-col-def">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="data-analysis-gov-th-field">字段</th>
+                            <th class="data-analysis-gov-th-name">显示名称</th>
+                            <th class="data-analysis-gov-th-type">业务类型</th>
+                            <th class="data-analysis-gov-th-role">角色</th>
+                            <th class="data-analysis-gov-th-format">单位/日期格式</th>
+                            <th class="data-analysis-gov-th-sensitivity">敏感级别</th>
+                            <th class="data-analysis-gov-th-def">业务定义</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    ${fields.map(field => `<tr data-analysis-governance-field="${esc(field.fieldKey)}">
+                        <td><div class="data-analysis-gov-field-cell"><code class="data-analysis-gov-field-code">${esc(field.fieldKey)}</code><span class="data-analysis-field-source">${esc(field.sourceName || '')}</span></div></td>
+                        <td><input class="form-input" data-governance-input="displayName" maxlength="80" value="${esc(field.displayName || field.sourceName || '')}" placeholder="显示名称"></td>
+                        <td><select class="form-input" data-governance-input="logicalType"><option value="auto"${field.logicalType === 'auto' ? ' selected' : ''}>自动识别</option><option value="text"${field.logicalType === 'text' ? ' selected' : ''}>文本</option><option value="number"${field.logicalType === 'number' ? ' selected' : ''}>数值</option><option value="date"${field.logicalType === 'date' ? ' selected' : ''}>日期</option><option value="boolean"${field.logicalType === 'boolean' ? ' selected' : ''}>布尔</option></select></td>
+                        <td><div class="data-analysis-governance-role-cell"><label class="data-analysis-governance-checkbox-label"><input type="checkbox" data-governance-input="isDimension"${field.isDimension ? ' checked' : ''}> 维度</label><label class="data-analysis-governance-checkbox-label"><input type="checkbox" data-governance-input="isMetric"${field.isMetric ? ' checked' : ''}> 指标</label></div></td>
+                        <td><div class="data-analysis-governance-dual-input"><input class="form-input data-analysis-gov-input-unit" data-governance-input="unit" maxlength="40" value="${esc(field.unit || '')}" placeholder="单位"><input class="form-input data-analysis-gov-input-date" data-governance-input="dateFormat" maxlength="60" value="${esc(field.dateFormat || '')}" placeholder="日期格式"></div></td>
+                        <td><select class="form-input" data-governance-input="sensitivity"><option value="public"${field.sensitivity === 'public' ? ' selected' : ''}>公开</option><option value="internal"${field.sensitivity === 'internal' ? ' selected' : ''}>内部</option><option value="confidential"${field.sensitivity === 'confidential' ? ' selected' : ''}>机密</option><option value="restricted"${field.sensitivity === 'restricted' ? ' selected' : ''}>受限</option></select></td>
+                        <td><input class="form-input" data-governance-input="businessDefinition" maxlength="1000" value="${esc(field.businessDefinition || '')}" placeholder="业务含义与口径"></td>
+                    </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`);
     }
 
     function renderCalculatedFields() {
@@ -111,6 +137,10 @@
     function renderSavedViews() {
         const box = byId('data-analysis-saved-views');
         if (!box) return;
+        if (!currentAssetsDatasetId()) {
+            PivotSafeHtml.setHtml(box, '<div class="data-analysis-empty">请选择关联数据集后查看分析资产。</div>');
+            return;
+        }
         const views = state.savedViews || [];
         const typeLabels = { query: 'SQL 查询', pivot: '数据透视', chart: '可视化图表' };
         PivotSafeHtml.setHtml(box, views.length ? views.map(view => `
@@ -141,11 +171,8 @@
         const governanceSelect = byId('data-analysis-governance-dataset');
         const assetsSelect = byId('data-analysis-assets-dataset');
         const selected = currentGovernanceDatasetId();
-        if (governanceSelect) PivotSafeHtml.setHtml(governanceSelect, dataSetOptions(selected));
-        if (assetsSelect) PivotSafeHtml.setHtml(assetsSelect, dataSetOptions(currentAssetsDatasetId()));
-        const dataset = (state.datasets || []).find(item => item.id === selected);
-        if (byId('data-analysis-dataset-shared')) byId('data-analysis-dataset-shared').checked = dataset?.scope === 'shared';
-        if (byId('data-analysis-dataset-shared-units')) byId('data-analysis-dataset-shared-units').value = dataset?.allowedUnits || '';
+        if (governanceSelect) { PivotSafeHtml.setHtml(governanceSelect, dataSetOptions(selected)); governanceSelect.value = selected; }
+        if (assetsSelect) { PivotSafeHtml.setHtml(assetsSelect, dataSetOptions(currentAssetsDatasetId())); assetsSelect.value = currentAssetsDatasetId(); }
         renderSourceState();
         renderFieldGovernance();
         renderCalculatedFields();
@@ -154,29 +181,47 @@
 
     async function loadGovernance(datasetId = currentGovernanceDatasetId(), { silent = false } = {}) {
         const id = String(datasetId || '').trim();
+        const request = ++governanceRequest;
         state.governanceDatasetId = id;
+        state.fieldGovernance = [];
+        state.calculatedFields = [];
+        state.sourceState = null;
+        renderGovernance();
         if (!id) {
-            state.fieldGovernance = [];
-            state.calculatedFields = [];
-            state.sourceState = null;
-            state.savedViews = [];
-            renderGovernance();
             return;
         }
         try {
-            const [fields, calculated, source, views] = await Promise.all([
+            const [fields, calculated, source] = await Promise.all([
                 fetchJson(`${API}/datasets/${encodeURIComponent(id)}/fields`),
                 fetchJson(`${API}/datasets/${encodeURIComponent(id)}/calculated-fields`),
-                fetchJson(`${API}/datasets/${encodeURIComponent(id)}/source-state`),
-                fetchJson(`${API}/views?datasetId=${encodeURIComponent(id)}`)
+                fetchJson(`${API}/datasets/${encodeURIComponent(id)}/source-state`)
             ]);
+            if (request !== governanceRequest) return;
             state.fieldGovernance = fields.fields || [];
             state.calculatedFields = calculated.fields || [];
             state.sourceState = source || null;
+            renderGovernance();
+        } catch (error) {
+            if (request === governanceRequest && !silent) toast(error?.message || '加载数据治理信息失败', 'error');
+        }
+    }
+
+    async function loadAssets(datasetId = currentAssetsDatasetId(), { silent = false } = {}) {
+        const id = String(datasetId || '').trim();
+        const request = ++assetsRequest;
+        state.assetsDatasetId = id;
+        state.savedViews = [];
+        renderGovernance();
+        if (!id) {
+            return;
+        }
+        try {
+            const views = await fetchJson(`${API}/views?datasetId=${encodeURIComponent(id)}`);
+            if (request !== assetsRequest) return;
             state.savedViews = views.views || [];
             renderGovernance();
         } catch (error) {
-            if (!silent) toast(error?.message || '加载数据治理信息失败', 'error');
+            if (request === assetsRequest && !silent) toast(error?.message || '加载分析资产失败', 'error');
         }
     }
 
@@ -235,18 +280,99 @@
         toast(`已生成派生数据集「${data.dataset?.name || ''}」。`, 'success');
     }
 
-    async function saveDatasetSharing() {
+    async function openDatasetShareModal() {
         const datasetId = currentGovernanceDatasetId();
-        const scope = byId('data-analysis-dataset-shared')?.checked ? app.SHARED_SCOPE : 'personal';
-        const allowedUnits = getInputValue('data-analysis-dataset-shared-units');
-        const data = await fetchJson(`${API}/datasets/${encodeURIComponent(datasetId)}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, allowedUnits })
+        const dataset = (state.datasets || []).find(item => item.id === datasetId);
+        if (!dataset) {
+            toast('请先从顶部选择需要共享的数据集。', 'warning');
+            return;
+        }
+        const curUser = (typeof currentUser !== 'undefined' && currentUser) || window.Pivot?.legacy?.currentUser || null;
+        const isOwner = !dataset.userId || !curUser?.id || String(dataset.userId) === String(curUser.id);
+        if (!isOwner) {
+            toast('只有数据集所有者可以修改共享与协作者设置。', 'warning');
+            return;
+        }
+
+        const modalEngine = window.Pivot?.modules?.['share.collaborators'] || window.Pivot?.legacy?.PivotShareCollabModal;
+        if (!modalEngine) {
+            toast('共享协作组件尚未就绪，请刷新重试。', 'error');
+            return;
+        }
+
+        let targets = { units: [], users: [] };
+        try {
+            targets = await fetchJson(`${API}/share-targets`);
+        } catch (_e) {
+            targets = { units: [], users: [] };
+        }
+
+        const owner = curUser ? {
+            id: curUser.id,
+            username: curUser.username,
+            nickname: curUser.nickname || curUser.username,
+            unit: curUser.unit || '未分配单位'
+        } : null;
+
+        const existingUserIds = String(dataset.allowedUserIds || '')
+            .split(',')
+            .map(s => Number(s.trim()))
+            .filter(Number.isSafeInteger);
+
+        const initialCollaborators = existingUserIds.map(id => {
+            const found = (targets.users || []).find(u => Number(u.id) === id);
+            return {
+                id,
+                username: found?.username || `用户${id}`,
+                nickname: found?.nickname || found?.username || `用户${id}`,
+                unit: found?.unit || '未分配单位',
+                role: 'viewer'
+            };
         });
-        const index = state.datasets.findIndex(item => item.id === datasetId);
-        if (index >= 0) state.datasets[index] = { ...state.datasets[index], ...data.dataset };
-        app.closeModal?.('data-analysis-share-modal');
-        renderGovernance();
-        toast(scope === app.SHARED_SCOPE ? '数据集共享范围已保存。' : '数据集已恢复为仅自己可见。', 'success');
+
+        const existingUnits = String(dataset.allowedUnits || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        modalEngine.open({
+            modalId: 'data-analysis-dataset-share-modal',
+            title: '数据集协作者与共享',
+            subtitle: '管理协同查看、分析与共享该数据集的成员与部门协作范围。',
+            summaryTitle: dataset.name || '数据集',
+            summaryDesc: '共享数据集时，标记为机密或受限的敏感字段将在被共享用户预览、查询和导出中被自动剔除。',
+            owner,
+            users: Array.isArray(targets.users) ? targets.users : [],
+            units: Array.isArray(targets.units) ? targets.units : [],
+            initialCollaborators,
+            roles: [
+                { value: 'viewer', label: '查看者（可浏览及使用受控脱敏数据）', shortLabel: '查看者' }
+            ],
+            defaultRole: 'viewer',
+            onSave: async ({ collaborators, selectedBatchUnits }) => {
+                const finalUserIds = (collaborators || []).map(c => Number(c.id)).filter(Number.isSafeInteger);
+                const batchUnits = Array.isArray(selectedBatchUnits) && selectedBatchUnits.length
+                    ? selectedBatchUnits
+                    : existingUnits;
+                const willShare = finalUserIds.length > 0 || batchUnits.length > 0;
+                const scope = willShare ? app.SHARED_SCOPE : 'personal';
+
+                const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scope,
+                        allowedUnits: batchUnits.join(','),
+                        allowedUserIds: finalUserIds.join(',')
+                    })
+                });
+
+                const index = state.datasets.findIndex(item => item.id === dataset.id);
+                if (index >= 0) state.datasets[index] = { ...state.datasets[index], ...data.dataset };
+                renderGovernance();
+                toast(willShare ? '数据集共享与协作者设置已保存。' : '已取消数据集共享（已设为私有）。', 'success');
+            }
+        });
     }
 
     async function saveCurrentView() {
@@ -261,7 +387,7 @@
         });
         if (byId('data-analysis-view-name')) byId('data-analysis-view-name').value = '';
         app.closeModal?.('data-analysis-save-view-modal');
-        await loadGovernance(datasetId, { silent: true });
+        await loadAssets(datasetId, { silent: true });
         toast(`已保存分析视图「${view.view?.name || name}」。`, 'success');
     }
 
@@ -287,7 +413,7 @@
 
     async function deleteSavedView(viewId) {
         await fetchJson(`${API}/views/${encodeURIComponent(viewId)}`, { method: 'DELETE' });
-        await loadGovernance(currentAssetsDatasetId(), { silent: true });
+        await loadAssets(currentAssetsDatasetId(), { silent: true });
         toast('分析视图已删除。', 'success');
     }
 
@@ -297,19 +423,21 @@
         root.addEventListener('change', event => {
             if (event.target?.id === 'data-analysis-governance-dataset') loadGovernance(event.target.value).catch(error => toast(error?.message || '加载治理信息失败', 'error'));
             if (event.target?.id === 'data-analysis-assets-dataset') {
-                state.governanceDatasetId = event.target.value;
-                loadGovernance(event.target.value).catch(error => toast(error?.message || '加载分析资产失败', 'error'));
+                loadAssets(event.target.value).catch(error => toast(error?.message || '加载分析资产失败', 'error'));
             }
         });
         root.addEventListener('click', async event => {
             try {
-                if (event.target.closest('#data-analysis-governance-refresh') || event.target.closest('#data-analysis-assets-refresh')) {
+                if (event.target.closest('#data-analysis-governance-refresh')) {
                     await loadGovernance(currentGovernanceDatasetId()); return;
+                }
+                if (event.target.closest('#data-analysis-assets-refresh')) {
+                    await loadAssets(currentAssetsDatasetId()); return;
                 }
                 if (event.target.closest('#data-analysis-governance-save')) { await guardButton('data-analysis-governance-save', '保存中…', saveFieldGovernance); return; }
                 if (event.target.closest('#data-analysis-calc-preview')) { await guardButton('data-analysis-calc-preview', '计算中…', previewCalculatedField); return; }
                 if (event.target.closest('#data-analysis-calc-create')) { await guardButton('data-analysis-calc-create', '生成中…', createCalculatedField); return; }
-                if (event.target.closest('#data-analysis-dataset-share-save')) { await guardButton('data-analysis-dataset-share-save', '保存中…', saveDatasetSharing); return; }
+                if (event.target.closest('#data-analysis-open-share-modal')) { await openDatasetShareModal(); return; }
                 if (event.target.closest('#data-analysis-save-view')) { await guardButton('data-analysis-save-view', '保存中…', saveCurrentView); return; }
                 const output = event.target.closest('[data-analysis-open-calculated-output]');
                 if (output) { await app.loadDatasetDetail?.(output.dataset.analysisOpenCalculatedOutput); app.activateTab?.('overview'); return; }
@@ -325,9 +453,13 @@
 
     Object.assign(app, {
         loadGovernance,
+        loadAssets,
         renderGovernance,
         renderCalculatedPreview,
+        openDatasetShareModal,
         bindGovernanceEvents,
-        currentViewConfig
+        currentViewConfig,
+        currentGovernanceDatasetId,
+        currentAssetsDatasetId
     });
 })();

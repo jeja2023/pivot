@@ -1023,6 +1023,169 @@ body.auth-active {
 }
 #confirm-container { z-index: 7000 !important; }
 #input-prompt-container { z-index: 7100 !important; }
+#input-prompt-container .modal {
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 40px));
+    padding: 22px 24px;
+    border-radius: 14px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px var(--border);
+}
+.input-prompt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+#input-prompt-title {
+    margin: 0;
+    font-size: 1.08rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.3;
+}
+.input-prompt-message {
+    margin: 0 0 12px;
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
+.input-prompt-suggestions {
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+.input-prompt-suggestions-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.input-prompt-suggestions-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.input-prompt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+    text-align: left;
+    line-height: 1.35;
+}
+.input-prompt-chip:hover {
+    background: var(--bg-main);
+    border-color: var(--primary);
+    color: var(--primary);
+    transform: translateY(-1px);
+}
+.input-prompt-chip:active {
+    transform: translateY(0);
+}
+.input-prompt-body {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+}
+#input-prompt-container .input-prompt-input {
+    margin-bottom: 6px;
+    height: 38px;
+    font-size: 0.84rem;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+}
+#input-prompt-container .input-prompt-textarea {
+    margin-bottom: 6px;
+    min-height: 100px;
+    max-height: 240px;
+    font-size: 0.84rem;
+    line-height: 1.55;
+    padding: 10px 12px;
+    resize: vertical;
+    border-radius: var(--radius-md);
+}
+.input-prompt-meta-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    padding: 0 2px;
+}
+.input-prompt-shortcut-tip {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+.input-prompt-meta-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.input-prompt-clear-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    padding: 0;
+    text-decoration: underline;
+}
+.input-prompt-clear-btn:hover {
+    color: var(--danger);
+}
+.input-prompt-counter {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.input-prompt-counter.limit-near {
+    color: var(--warning);
+}
+.input-prompt-counter.limit-reached {
+    color: var(--danger);
+    font-weight: 700;
+}
+.input-prompt-error-msg {
+    margin: -4px 0 10px;
+    color: var(--danger);
+    font-size: 0.82rem;
+}
+.input-prompt-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 8px;
+}
+.input-prompt-actions .btn-secondary,
+.input-prompt-actions .btn-primary {
+    min-width: 88px;
+    height: 36px;
+    padding: 0 16px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+}
 #alert-container { z-index: 7200 !important; }
 #alert-container .modal {
     width: min(560px, calc(100vw - 32px)) !important;

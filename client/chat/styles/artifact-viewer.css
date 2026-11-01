@@ -2,6 +2,224 @@
    Pivot Artifact Viewer (交互空间弹窗与抽屉工作区样式)
    ========================================================================== */
 
+/* 结果文件使用非模态右侧面板，左侧会话保持可操作。 */
+.chat-result-preview {
+    position: fixed;
+    z-index: 6300;
+    inset: 0 0 0 auto;
+    width: min(880px, 50vw);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -6px 0 24px var(--shadow-color, rgba(15, 23, 42, 0.1));
+}
+
+body.pivot-desktop-runtime .chat-result-preview,
+.pivot-desktop-runtime .chat-result-preview {
+    top: 30px;
+    bottom: 0;
+    height: calc(100vh - 30px);
+    height: calc(100dvh - 30px);
+    border-top: 1px solid var(--border, rgba(148, 163, 184, 0.16));
+}
+
+.chat-result-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 18px;
+    min-height: 54px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+}
+
+.chat-result-preview-header-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.chat-result-preview-header-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--primary-subtle, rgba(16, 163, 127, 0.1));
+    color: var(--primary, #10a37f);
+    flex-shrink: 0;
+}
+
+.chat-result-preview-title {
+    font-size: 0.95rem;
+    font-weight: 650;
+    color: var(--text-heading, var(--text-primary, #0f172a));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: -0.01em;
+}
+
+.chat-result-preview-meta-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 4px;
+    background: var(--bg-tertiary, rgba(226, 232, 240, 0.8));
+    color: var(--text-muted, #64748b);
+    border: 1px solid var(--border-subtle, rgba(203, 213, 225, 0.6));
+    flex-shrink: 0;
+    text-transform: uppercase;
+}
+
+.chat-result-preview-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.chat-result-preview-close {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 6px);
+}
+
+.chat-result-preview-download-btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 6px);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.chat-result-preview-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    background: var(--bg-secondary, #f8fafc);
+}
+
+.chat-result-preview-notice {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 18px 0;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--primary-subtle, rgba(16, 163, 127, 0.07));
+    border: 1px solid var(--border-subtle, rgba(16, 163, 127, 0.2));
+    color: var(--text-secondary, #64748b);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.chat-result-preview-notice-error {
+    background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--surface, #ffffff));
+    border-color: color-mix(in srgb, var(--danger, #ef4444) 25%, transparent);
+    color: var(--danger, #ef4444);
+}
+
+.chat-result-preview-notice-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: currentColor;
+}
+
+.chat-result-preview-notice-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.chat-result-preview-frame,
+.chat-result-preview-office {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+    display: block;
+    margin-top: 10px;
+}
+
+.chat-result-preview-image-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow: auto;
+}
+
+.chat-result-preview-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: 0 4px 20px -2px var(--shadow-color, rgba(15, 23, 42, 0.12));
+    border: 1px solid var(--border-subtle, rgba(203, 213, 225, 0.7));
+    background: var(--surface, #ffffff);
+}
+
+body.dark-mode .chat-result-preview {
+    background: var(--surface, #1e293b);
+    border-left-color: var(--border, rgba(51, 65, 85, 0.7));
+    box-shadow: -6px 0 24px var(--shadow-dark, rgba(0, 0, 0, 0.35));
+}
+
+body.dark-mode .chat-result-preview-header {
+    background: var(--surface, #1e293b);
+    border-bottom-color: var(--border, rgba(51, 65, 85, 0.7));
+}
+
+body.dark-mode .chat-result-preview-body {
+    background: var(--bg-card, #0f172a);
+}
+
+body.dark-mode .chat-result-preview-meta-badge {
+    background: var(--bg-secondary, rgba(51, 65, 85, 0.6));
+    border-color: var(--border-subtle, rgba(71, 85, 105, 0.5));
+    color: var(--text-muted, #94a3b8);
+}
+
+body.dark-mode .chat-result-preview-notice {
+    background: var(--primary-subtle-dark, rgba(16, 163, 127, 0.12));
+    border-color: var(--border-subtle-dark, rgba(16, 163, 127, 0.25));
+    color: var(--text-muted, #94a3b8);
+}
+
+body.dark-mode .chat-result-preview-image {
+    border-color: var(--border, rgba(51, 65, 85, 0.7));
+    box-shadow: 0 4px 20px -2px var(--shadow-dark, rgba(0, 0, 0, 0.4));
+}
+
+@media (min-width: 701px) {
+    body.chat-result-preview-open .chat-container { margin-right: min(880px, 50vw); }
+}
+
+@media (max-width: 700px) {
+    .chat-result-preview { width: 100vw; }
+}
+
 /* 全屏遮罩与抽屉容器 */
 .pivot-artifact-modal-overlay {
     position: fixed;
@@ -15,6 +233,13 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body.pivot-desktop-runtime .pivot-artifact-modal-overlay,
+.pivot-desktop-runtime .pivot-artifact-modal-overlay {
+    top: 30px;
+    height: calc(100vh - 30px);
+    height: calc(100dvh - 30px);
 }
 
 .pivot-artifact-modal-overlay.active {

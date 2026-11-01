@@ -54,6 +54,7 @@ const {
     processAsyncQueryJobs,
     getAsyncQueryJob
 } = require('../server/services/data-analysis/semantic-models');
+const { runDataModelAnalysis } = require('../server/services/data-analysis/model-analysis');
 const {
     appendIncrementalDataset,
     createDatasetPartitions,
@@ -404,12 +405,16 @@ test('数据分析指标口径、跨数据集模型与可恢复异步查询保�
     const user = { id: userInfo.lastInsertRowid, username: `analysis_semantic_${suffix}`, unit: 'QA', role: 'user', status: 'active' };
     let sales;
     let regions;
+    let managers;
     try {
         sales = await require('../server/services/data-analysis/datasets').createDatasetFromRows({
             user, name: '订单事实表', rows: [{ region: '华东', amount: 100 }, { region: '华南', amount: 200 }], sourceType: 'database'
         });
         regions = await require('../server/services/data-analysis/datasets').createDatasetFromRows({
             user, name: '区域维表', rows: [{ region: '华东', manager: '甲' }, { region: '华南', manager: '乙' }], sourceType: 'database'
+        });
+        managers = await require('../server/services/data-analysis/datasets').createDatasetFromRows({
+            user, name: '负责人维表', rows: [{ manager: '甲', team: '一组' }, { manager: '乙', team: '二组' }], sourceType: 'database'
         });
         const metric = await saveMetricDefinition({
             user, datasetId: sales.id,
@@ -427,6 +432,11 @@ test('数据分析指标口径、跨数据集模型与可恢复异步查询保�
         const joined = await runDataModelJoin({ user, modelId: model.id, relationId: relation.id, limit: 10 });
         assert.equal(joined.rows.length, 2);
         assert.equal(joined.columns.some(column => column.includes('区域负责人') || column.includes('manager')), true);
+
+        await addDataModelRelation({ user, modelId: model.id, body: { leftDatasetId: regions.id, leftFieldKey: 'c_2', rightDatasetId: managers.id, rightFieldKey: 'c_1', joinType: 'left' } });
+        const analysis = await runDataModelAnalysis({ user, modelId: model.id, dimension: { datasetId: managers.id, fieldKey: 'c_2' }, measure: { datasetId: sales.id, fieldKey: 'c_2' }, aggregation: 'sum' });
+        assert.deepEqual(analysis.rows.map(row => [row['分组'], Number(row['汇总值'])]), [['二组', 200], ['一组', 100]]);
+        await assert.rejects(runDataModelAnalysis({ user, modelId: model.id, dimension: { datasetId: managers.id, fieldKey: 'missing' } }), /可访问/);
 
         const job = await createAsyncQueryJob({ user, datasetId: sales.id, sql: 'SELECT SUM("amount") AS total FROM data', limit: 10000 });
         assert.equal(job.status, 'queued');

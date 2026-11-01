@@ -27,6 +27,8 @@
     function activateTab(tab) {
         const previousTab = document.querySelector('.data-analysis-tab.active')?.dataset.dataAnalysisTab;
         const targetTab = normalizeTab(tab);
+        if (previousTab !== targetTab && targetTab === 'governance') app.loadGovernance?.('');
+        if (previousTab !== targetTab && targetTab === 'assets') app.loadAssets?.('');
         const preservesAnalysisContext = ['governance', 'assets', 'dashboards'].includes(targetTab);
         if (previousTab && previousTab !== targetTab && !preservesAnalysisContext) clearTabData(previousTab);
         document.querySelectorAll('.data-analysis-tab').forEach(button => {

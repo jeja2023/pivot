@@ -220,6 +220,7 @@ function serializeDataset(row) {
     if (!row) return null;
     return {
         id: row.id,
+        userId: row.user_id,
         name: row.name,
         originalName: row.original_name,
         fileType: row.file_type,

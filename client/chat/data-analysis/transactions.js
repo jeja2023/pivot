@@ -251,7 +251,19 @@
         clearTimeout(timer);
         datasetId = $('finance-dataset')?.value;
         if (!datasetId) {
-            html($('finance-runs'), '');
+            html($('finance-runs'), `
+                <tr>
+                    <td colspan="5">
+                        <div class="finance-empty-card">
+                            <div class="finance-empty-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><circle cx="11.5" cy="14.5" r="2.5"/><path d="M13.25 16.25L16 19"/></svg>
+                            </div>
+                            <strong>请选择分析数据集</strong>
+                            <p>从上方下拉框选择需要进行资金借贷核算与对手方穿透分析的数据集。</p>
+                        </div>
+                    </td>
+                </tr>
+            `);
             if ($('finance-runs-count')) $('finance-runs-count').textContent = '0 项记录';
             return;
         }
@@ -618,6 +630,7 @@
         onTab?.(tab);
         if (tab !== 'transactions') {
             close();
+            datasetId = '';
             return;
         }
         mount();
@@ -625,13 +638,16 @@
         if (datasets.length === 0) {
             html($('finance-dataset'), '<option value="">暂无可用数据集</option>');
         } else {
-            html($('finance-dataset'), datasets.map(dataset => `<option value="${esc(dataset.id)}">${esc(dataset.name)}</option>`).join(''));
+            const options = ['<option value="">请选择数据集</option>'].concat(
+                datasets.map(dataset => `<option value="${esc(dataset.id)}"${dataset.id === datasetId ? ' selected' : ''}>${esc(dataset.name)}</option>`)
+            );
+            html($('finance-dataset'), options.join(''));
         }
-        $('finance-dataset').value = datasetId || app.state.activeId || datasets[0]?.id || '';
+        $('finance-dataset').value = datasetId || '';
         const selectEl = $('finance-dataset');
         if (selectEl) {
             const text = selectEl.options[selectEl.selectedIndex]?.text || '';
-            selectEl.title = text ? `当前分析数据集：${text}` : '请选择数据集';
+            selectEl.title = text && selectEl.value ? `当前分析数据集：${text}` : '请选择数据集';
         }
         void refresh().catch(app.toast);
     };

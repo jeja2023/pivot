@@ -14,7 +14,7 @@ const INSTRUCTIONS = [
     'routing.tools：none 表示不调用外部工具；read_only 表示已有授权的单次只读查询；task 表示需要持久任务、多步或副作用操作。read_only 不得申请文件写入、代码执行、发送或交付能力，具体工具仍由执行策略复核。',
     'routing.retrievalQuery 必须是结合最近用户问题消解指代后的完整业务问题，保留主体、时间、地区、人员类别及否定条件；它不是回答、不是整段聊天记录，不得凭空补充事实。',
     'availability 只是本人可见的有限能力摘要，partial 不代表完整目录。routing.toolNames 只能取其中完整 name，且必须符合所需能力；多业务来源不明确时先问具体业务系统，不能按排序猜测。连接缺失时不能编造结果。',
-    'requiredCapabilities 只能取 capabilities[].id 字符串，永不授予权限。evidenceRefs 只用 current_message 或给定用户/助手消息的 message:<id>，不输出推理过程。依赖检索、真实资料或实时数据时 acceptance.requireEvidence=true。',
+    'requiredCapabilities 只能取 capabilities[].id 字符串，永不授予权限。evidenceRefs 只用 current_message 或给定用户/助手消息的 message:<id>，不输出推理过程。依赖检索、真实资料或实时数据时 acceptance.requireEvidence=true；仅将用户提供的内容绘制、转换或生成文件，调用网络工具本身不表示需要额外外部资料。',
     '返回完整结构：{action:"direct_answer|plan_only|agent_run|continue_run|clarify",intent:"简短意图",objective:"完整目标",constraints:[],deliverables:[],requiredCapabilities:[],missingFacts:[],evidenceRefs:["current_message"],continuationOf:null,question:"",acceptance:{requireEvidence:false,artifactRequired:false},routing:{knowledge:"required|none|auto",tools:"read_only|task|none",retrievalQuery:"完整业务问题",toolNames:[]},confidence:0.0}。',
     '对照示例：“我们公司婚假有几天？”→direct_answer, knowledge=required, tools=none；“写一份婚假申请模板”→direct_answer, knowledge=none, tools=none。',
     '对照示例：前文用户问公司婚假，本轮“那实习生呢？”→direct_answer, knowledge=required, retrievalQuery="公司婚假制度对实习生的适用规则"；本轮“换个话题，解释实习是什么”→direct_answer, knowledge=none。',

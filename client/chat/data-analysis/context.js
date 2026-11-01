@@ -80,6 +80,7 @@
         queryMode: 'visual',
         visualQuery: createVisualQuery(),
         governanceDatasetId: '',
+        assetsDatasetId: '',
         fieldGovernance: [],
         calculatedFields: [],
         savedViews: [],

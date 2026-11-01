@@ -7,7 +7,7 @@
     let eventsBound = false;
 
     function activeDatasetId() {
-        return String(state.governanceDatasetId || state.activeId || '').trim();
+        return String(state.governanceDatasetId || '').trim();
     }
 
     function mountScalabilityPanel() {

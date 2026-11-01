@@ -183,17 +183,36 @@
         </div>
     </div>
 
-    <!-- 模型配置弹窗 (Add/Edit Model Modal) -->
-    <div id="input-prompt-container" class="modal-overlay hidden" style="z-index: 1600;">
-        <div class="modal" style="width: 360px;">
-            <h3 id="input-prompt-title">安全验证</h3>
-            <p id="input-prompt-message" style="margin: 15px 0; color: var(--text-muted); line-height: 1.5;"></p>
-            <input id="input-prompt-field" class="form-input" autocomplete="off">
-            <textarea id="input-prompt-textarea" class="form-input hidden" rows="8" autocomplete="off" style="resize: vertical; line-height: 1.5;"></textarea>
-            <p id="input-prompt-error" class="hidden" style="margin: -6px 0 12px; color: var(--danger); font-size: 0.82rem;"></p>
-            <div style="display: flex; gap: 10px;">
-                <button id="modal-input-prompt-cancel" class="btn-secondary" style="flex: 1;">取消</button>
-                <button id="modal-input-prompt-ok" class="btn-primary" style="flex: 1;">确认</button>
+    <!-- 通用输入与调整提示弹窗 (Input Prompt Modal) -->
+    <div id="input-prompt-container" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="input-prompt-title">
+        <div class="modal input-prompt-modal">
+            <div class="input-prompt-header">
+                <h3 id="input-prompt-title">安全验证</h3>
+            </div>
+            <p id="input-prompt-message" class="input-prompt-message"></p>
+            
+            <div id="input-prompt-suggestions" class="input-prompt-suggestions hidden">
+                <span class="input-prompt-suggestions-label">常用方向：</span>
+                <div id="input-prompt-suggestions-list" class="input-prompt-suggestions-list"></div>
+            </div>
+
+            <div class="input-prompt-body">
+                <input id="input-prompt-field" class="form-input input-prompt-input" autocomplete="off">
+                <textarea id="input-prompt-textarea" class="form-input input-prompt-textarea hidden" rows="5" autocomplete="off"></textarea>
+                <div class="input-prompt-meta-bar">
+                    <span id="input-prompt-shortcut-tip" class="input-prompt-shortcut-tip">按 Ctrl + Enter 提交，Esc 取消</span>
+                    <div class="input-prompt-meta-right">
+                        <button type="button" id="input-prompt-clear" class="btn-secondary input-prompt-clear-btn hidden">清空</button>
+                        <span id="input-prompt-counter" class="input-prompt-counter hidden">0 / 4000</span>
+                    </div>
+                </div>
+            </div>
+
+            <p id="input-prompt-error" class="hidden input-prompt-error-msg"></p>
+            
+            <div class="input-prompt-actions">
+                <button id="modal-input-prompt-cancel" class="btn-secondary" type="button">取消</button>
+                <button id="modal-input-prompt-ok" class="btn-primary" type="button">确认</button>
             </div>
         </div>
     </div>

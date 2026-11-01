@@ -99,8 +99,10 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
         const issues = parsed === null ? ['结果不是合法 JSON。'] : validateValueAgainstSchema(parsed, acceptance.outputSchema, { allowTemplates: false }, '结果', []);
         add('output_schema', issues.length === 0, issues[0] || 'valid');
     }
-    const artifactNames = findArtifactNames(observations);
-    if (acceptance.artifactRequired) add('artifact_required', artifactNames.length > 0, artifactNames.length > 0 ? artifactNames.join('、') : '尚未生成要求的文件');
+    const verifiedArtifacts = acceptance.requireSemanticVerification ? (semanticVerification?.verifiedArtifacts || []) : [];
+    const artifactNames = acceptance.requireSemanticVerification ? verifiedArtifacts.map(item => text(item.title, 300)).filter(Boolean) : findArtifactNames(observations);
+    const hasArtifact = acceptance.requireSemanticVerification ? verifiedArtifacts.length > 0 : artifactNames.length > 0;
+    if (acceptance.artifactRequired) add('artifact_required', hasArtifact, hasArtifact ? (artifactNames.join('、') || '已生成受控文件') : '尚未生成要求的文件');
     if (acceptance.requireSemanticVerification) add('deliverables_verified', semanticVerification?.passed === true, semanticVerification?.reason || (semanticVerification?.missing || []).join('；'));
     acceptance.requiredArtifacts.forEach(required => add('required_artifact', artifactNames.includes(required), required));
     const evidenceFound = hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0);

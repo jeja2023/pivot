@@ -37,7 +37,8 @@ async function materializeToolArtifact(output, user, context = {}) {
     const delivery = await executeArtifactTool('artifact.render', { ir, format, ...(context.targetArtifactId ? { artifactId: context.targetArtifactId } : {}) }, user, context);
     if (assetId && !delivery.reused) await require('./agent-artifact-cas').incrementRefCount(assetId, 1);
     const { svg: _svg, ...summary } = envelope;
-    return { ...output, structuredContent: { ...output.structuredContent, pivotArtifact: summary }, ...delivery };
+    // 原始 MCP 文本通常重复携带完整 SVG；渲染结果已保存到受控产物，无需再次发送给模型。
+    return { ...output, content: [{ type: 'text', text: delivery.text || '工具产物已生成。' }], structuredContent: { ...output.structuredContent, pivotArtifact: summary }, ...delivery };
 }
 
 module.exports = { auditReportIr, materializeToolArtifact };

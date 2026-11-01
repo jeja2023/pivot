@@ -28,7 +28,7 @@ function normalizeCapabilityDecision(raw = {}, { action = 'direct_answer', promp
         retrievalQuery: query || String(prompt).trim().slice(0, 4000),
         requestedCapabilities: requested,
         toolNames,
-        requireEvidence: !forbidden && (knowledge === 'required' || tools === 'read_only' || requested.some(cap => /^(?:knowledge\.|data\.|filesystem\.read|artifact\.read|conversation\.read_source|network\.)/.test(cap)) || raw.acceptance?.requireEvidence === true),
+        requireEvidence: !forbidden && (knowledge === 'required' || tools === 'read_only' || requested.some(cap => /^(?:knowledge\.|data\.|filesystem\.read|artifact\.read|conversation\.read_source|network\.(?:web_search|browser_visit))/.test(cap)) || raw.acceptance?.requireEvidence === true),
         allowAutomaticRead: !forbidden && tools === 'read_only' && requested.length > 0
     };
 }

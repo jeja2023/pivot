@@ -34,10 +34,10 @@ async function steerChatAgentRun(runId) {
     }
     const instruction = await promptFn({
         title: '调整 Agent 执行方向',
-        message: '请输入新的执行方向，该指令会在下一轮规划前生效。',
-        placeholder: '例如：优先检查 agent.code 失败原因，不要重复执行已失败步骤。',
-        requiredMessage: '请输入新的执行方向。',
-        width: 520
+        message: '输入新的引导指令，Agent 将在下一轮规划思考前生效并调整策略。',
+        placeholder: '例如：不参考其它资料，优先排查失败原因，不要重复执行已失败步骤。',
+        requiredMessage: '请输入新的执行方向。', multiline: true, maxLength: 4000, width: 580, okText: '确认调整',
+        suggestions: ['不参考其它资料，仅基于已有上下文回答', '优先排查上一步失败原因，不要重复失败步骤', '跳过外部检索，直接生成最终结论', '补充更详细的推理过程与数据支撑', '精简输出，只给出关键结论与行动建议']
     });
     const text = String(instruction || '').trim();
     if (!text) return null;

@@ -8,7 +8,7 @@
     const guardButton = (...args) => app.guardButton(...args);
 
     function governanceDataset() {
-        const id = state.governanceDatasetId || state.activeId || '';
+        const id = state.governanceDatasetId || '';
         return (state.datasets || []).find(item => item.id === id) || null;
     }
 
@@ -57,10 +57,22 @@
         if (rightDataset) PivotSafeHtml.setHtml(rightDataset, dataSetOptions(rightDataset.value));
         renderRelationFieldOptions();
         const relations = model.relations || [];
+        const datasetIds = new Set(relations.filter(relation => relation.status === 'active').flatMap(relation => [relation.leftDatasetId, relation.rightDatasetId]));
+        const datasets = (state.datasets || []).filter(dataset => datasetIds.has(dataset.id));
+        const options = '<option value="">请选择字段</option>' + datasets.flatMap(dataset => (dataset.columns || []).map(column => `<option value="${esc(JSON.stringify({ datasetId: dataset.id, fieldKey: column.key }))}">${esc(dataset.name)} · ${esc(column.name)}</option>`)).join('');
+        for (const id of ['data-analysis-model-dimension', 'data-analysis-model-measure']) {
+            const select = byId(id);
+            if (select) {
+                const previous = select.value;
+                PivotSafeHtml.setHtml(select, options);
+                select.value = previous;
+                if (select.selectedIndex < 0) select.selectedIndex = 0;
+            }
+        }
         const renderRelation = relation => `
             <div class="data-analysis-asset-row">
                 <div class="data-analysis-asset-info">
-                    <strong>${esc(relation.leftDatasetId)}.${esc(relation.leftFieldKey)} → ${esc(relation.rightDatasetId)}.${esc(relation.rightFieldKey)}</strong>
+                    <strong>${esc((state.datasets || []).find(item => item.id === relation.leftDatasetId)?.name || relation.leftDatasetId)}.${esc((state.datasets || []).find(item => item.id === relation.leftDatasetId)?.columns?.find(field => field.key === relation.leftFieldKey)?.name || relation.leftFieldKey)} → ${esc((state.datasets || []).find(item => item.id === relation.rightDatasetId)?.name || relation.rightDatasetId)}.${esc((state.datasets || []).find(item => item.id === relation.rightDatasetId)?.columns?.find(field => field.key === relation.rightFieldKey)?.name || relation.rightFieldKey)}</strong>
                     <span>${esc(relation.joinType === 'inner' ? '内关联' : '左关联')} · ${esc(relation.cardinality)} · 左侧 ${fmtNumber(relation.quality?.leftRows || 0)} 行 / 右侧 ${fmtNumber(relation.quality?.rightRows || 0)} 行</span>
                 </div>
                 <button class="btn-secondary btn-sm" type="button" data-analysis-model-run-relation="${esc(relation.id)}" title="预览关联数据样本">
@@ -112,6 +124,7 @@
             const data = await fetchJson(`${API}/models/${encodeURIComponent(modelId)}`);
             state.activeDataModelId = modelId;
             state.activeDataModel = data.model || null;
+            if (byId('data-analysis-model-query-result')) byId('data-analysis-model-query-result').textContent = '';
             renderModels();
         } catch (error) {
             if (!silent) toast(error?.message || '加载数据模型失败', 'error');
@@ -170,13 +183,27 @@
         if (!box) return;
         const rows = result.rows || [];
         const columns = result.columns || [];
-        PivotSafeHtml.setHtml(box, rows.length ? `<div class="table-container"><table class="data-table compact-table"><thead><tr>${columns.map(column => `<th>${esc(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${esc(row[column] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="data-analysis-empty">关联没有返回记录。</div>');
+        PivotSafeHtml.setHtml(box, rows.length ? `${result.truncated ? '<p>结果超过显示上限，仅显示前 100 行。</p>' : ''}<div class="table-container"><table class="data-table compact-table"><thead><tr>${columns.map(column => `<th>${esc(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${esc(row[column] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="data-analysis-empty">关联没有返回记录。</div>');
     }
 
     async function runModelRelation(relationId) {
         const model = state.activeDataModel;
         if (!model) return;
         const result = await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relationId, limit: 100 }) });
+        renderModelQueryResult(result);
+    }
+
+    async function runModelAnalysis() {
+        const model = state.activeDataModel;
+        if (!model) throw new Error('请先选择数据模型。');
+        const dimensionValue = byId('data-analysis-model-dimension')?.value;
+        const measureValue = byId('data-analysis-model-measure')?.value;
+        const aggregation = byId('data-analysis-model-aggregation')?.value || 'count';
+        if (!dimensionValue || (aggregation !== 'count' && !measureValue)) throw new Error('请选择分组字段和所需的数值字段。');
+        const result = await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/analysis`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dimension: JSON.parse(dimensionValue), measure: measureValue ? JSON.parse(measureValue) : null, aggregation, limit: 100 })
+        });
         renderModelQueryResult(result);
     }
 
@@ -195,6 +222,7 @@
                 const select = event.target.closest('[data-analysis-model-select]');
                 if (select) { await loadDataModel(select.dataset.analysisModelSelect); return; }
                 if (event.target.closest('#data-analysis-model-relation-save')) { await guardButton('data-analysis-model-relation-save', '保存中…', saveModelRelation); return; }
+                if (event.target.closest('#data-analysis-model-analyze')) { await guardButton('data-analysis-model-analyze', '汇总中…', runModelAnalysis); return; }
                 const preview = event.target.closest('[data-analysis-model-run-relation]');
                 if (preview) { await runModelRelation(preview.dataset.analysisModelRunRelation); return; }
             } catch (error) {

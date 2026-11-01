@@ -1,12 +1,23 @@
 /* 数据分析治理、资产与仪表盘：沿用工作区与全局统一视觉设计，支持卡片式布局与功能弹窗。 */
 
 .data-analysis-governance-layout,
-.data-analysis-dashboard-layout {
+.data-analysis-dashboard-layout,
+.data-analysis-dialog-modal {
+    --border-color: var(--border, #e2e8f0);
     display: flex;
     flex-direction: column;
     gap: 14px;
     min-height: 0;
     width: 100%;
+}
+
+body.dark-mode .data-analysis-governance-layout,
+.dark-mode .data-analysis-governance-layout,
+body.dark-mode .data-analysis-dashboard-layout,
+.dark-mode .data-analysis-dashboard-layout,
+body.dark-mode .data-analysis-dialog-modal,
+.dark-mode .data-analysis-dialog-modal {
+    --border-color: var(--border, #334155);
 }
 
 /* 统一顶部标头与工具栏（与数据清洗/智能分析保持一致） */
@@ -244,20 +255,70 @@
 }
 
 .data-analysis-field-source {
-    display: block;
+    display: inline-block;
     color: var(--text-muted);
-    font-size: 0.72rem;
-    margin-top: 3px;
-    max-width: 140px;
+    font-size: 0.74rem;
+    margin: 0;
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    vertical-align: middle;
+    flex-shrink: 1;
+}
+
+.data-analysis-governance-table-wrap {
+    max-height: 540px;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+    border-radius: 8px;
+    background: var(--surface, #ffffff);
 }
 
 .data-analysis-governance-table {
     width: 100%;
+    min-width: 1150px;
+    table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
+}
+
+.data-analysis-gov-col-field,
+.data-analysis-gov-th-field {
+    width: 160px;
+}
+
+.data-analysis-gov-col-name,
+.data-analysis-gov-th-name {
+    width: 140px;
+}
+
+.data-analysis-gov-col-type,
+.data-analysis-gov-th-type {
+    width: 110px;
+}
+
+.data-analysis-gov-col-role,
+.data-analysis-gov-th-role {
+    width: 160px;
+}
+
+.data-analysis-gov-col-format,
+.data-analysis-gov-th-format {
+    width: 240px;
+}
+
+.data-analysis-gov-col-sensitivity,
+.data-analysis-gov-th-sensitivity {
+    width: 120px;
+}
+
+.data-analysis-gov-col-def,
+.data-analysis-gov-th-def {
+    width: auto;
+    min-width: 220px;
 }
 
 .data-analysis-governance-table th {
@@ -271,24 +332,51 @@
     font-weight: 700;
     color: var(--text-muted);
     border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+    white-space: nowrap;
 }
 
 .data-analysis-governance-table td {
     vertical-align: middle;
-    padding: 8px 10px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.1));
+    overflow: visible;
 }
 
 .data-analysis-governance-table tr:hover td {
     background: color-mix(in srgb, var(--primary) 3%, transparent);
 }
 
-.data-analysis-governance-table input,
+.data-analysis-gov-field-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.data-analysis-gov-field-code {
+    display: inline-block;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--primary, #10a37f);
+    background: color-mix(in srgb, var(--primary, #10a37f) 8%, transparent);
+    padding: 2px 6px;
+    border-radius: 4px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.data-analysis-governance-table input:not([type="checkbox"]),
 .data-analysis-governance-table select {
-    min-width: 90px;
     width: 100%;
     font-size: 0.76rem;
     height: 28px;
+    margin: 0 !important;
+    margin-bottom: 0 !important;
     border-radius: 6px;
     border: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
     padding: 0 8px;
@@ -308,22 +396,60 @@
     cursor: pointer;
 }
 
-.data-analysis-governance-table input:focus,
+.data-analysis-governance-table input:not([type="checkbox"]):focus,
 .data-analysis-governance-table select:focus {
     border-color: var(--primary);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
     outline: none;
 }
 
+.data-analysis-governance-role-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+}
+
+.data-analysis-governance-table input[type="checkbox"] {
+    width: 15px !important;
+    height: 15px !important;
+    min-width: 15px !important;
+    max-width: 15px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    cursor: pointer;
+    accent-color: var(--primary, #10a37f);
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
 .data-analysis-governance-table td label {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     white-space: nowrap;
     font-size: 0.74rem;
     color: var(--text-main);
-    margin-right: 8px;
+    margin: 0 !important;
+    margin-bottom: 0 !important;
+    flex-shrink: 0 !important;
     cursor: pointer;
+    user-select: none;
+}
+
+.data-analysis-governance-dual-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.data-analysis-governance-dual-input input {
+    flex: 1 1 50%;
+    min-width: 0 !important;
+    margin: 0 !important;
+    margin-bottom: 0 !important;
 }
 
 /* 列表展示项 */
@@ -878,15 +1004,15 @@ input[type="file"].form-input::-webkit-file-upload-button {
 
 /* 通用弹窗模态样式 (Dialog Modals) */
 .data-analysis-dialog-modal {
-    width: min(540px, 92vw);
+    width: min(560px, 92vw);
     max-height: 85vh;
     display: flex;
     flex-direction: column;
     padding: 22px 24px;
-    border-radius: var(--radius-lg, 16px);
-    background: var(--surface);
+    border-radius: var(--radius-lg, 14px);
+    background: var(--surface, #ffffff);
     box-shadow: 0 24px 48px var(--shadow-modal);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border, #e2e8f0);
     text-align: left !important;
     animation: dataAnalysisModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -908,7 +1034,7 @@ input[type="file"].form-input::-webkit-file-upload-button {
     justify-content: space-between;
     gap: 12px;
     padding-bottom: 14px;
-    border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.16));
+    border-bottom: 1px solid var(--border, rgba(148, 163, 184, 0.16));
     text-align: left !important;
 }
 
@@ -927,7 +1053,7 @@ input[type="file"].form-input::-webkit-file-upload-button {
 }
 
 .data-analysis-modal-icon {
-    color: var(--primary);
+    color: var(--primary, #059669);
     flex-shrink: 0;
 }
 
@@ -937,15 +1063,16 @@ input[type="file"].form-input::-webkit-file-upload-button {
     font-weight: 700;
     color: var(--text-main);
     text-align: left !important;
-    line-height: 1.3;
+    line-height: 1.35;
 }
 
-.data-analysis-modal-header p {
-    margin: 2px 0 0;
-    font-size: 0.74rem;
-    color: var(--text-muted);
+.data-analysis-modal-header p,
+.data-analysis-modal-subtitle {
+    margin: 3px 0 0 !important;
+    font-size: 0.80rem !important;
+    color: var(--text-muted) !important;
     text-align: left !important;
-    line-height: 1.4;
+    line-height: 1.45 !important;
 }
 
 .data-analysis-modal-close-btn {
@@ -964,6 +1091,13 @@ input[type="file"].form-input::-webkit-file-upload-button {
 }
 
 .data-analysis-dialog-modal .data-analysis-subheading {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    font-size: 0.84rem !important;
+    font-weight: 600 !important;
+    color: var(--text-main) !important;
+    margin-bottom: 8px !important;
     text-align: left !important;
 }
 
@@ -975,22 +1109,49 @@ input[type="file"].form-input::-webkit-file-upload-button {
     text-align: left !important;
 }
 
+/* 弹窗内空状态提示卡片 */
+.data-analysis-dialog-modal .data-analysis-empty {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 72px !important;
+    padding: 16px 14px !important;
+    border-radius: var(--radius-sm, 6px) !important;
+    border: 1px dashed var(--border, #e2e8f0) !important;
+    background: var(--bg-side, #f8fafc) !important;
+    color: var(--text-muted, #64748b) !important;
+    font-size: 0.82rem !important;
+    text-align: center !important;
+    line-height: 1.5 !important;
+}
+
 .data-analysis-modal-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 12px 14px;
     text-align: left !important;
 }
 
-.data-analysis-modal-form-grid label {
+.data-analysis-modal-form-grid label,
+.data-analysis-modal-form-col label:not(.data-analysis-dataset-picker):not(.data-analysis-file-btn) {
     display: flex;
     flex-direction: column;
     align-items: flex-start !important;
     text-align: left !important;
-    gap: 6px;
-    font-size: 0.78rem;
+    gap: 5px;
+    font-size: 0.80rem;
     font-weight: 600;
     color: var(--text-main);
+    width: 100%;
+}
+
+.data-analysis-modal-field-block {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start !important;
+    text-align: left !important;
+    gap: 5px;
     width: 100%;
 }
 
@@ -998,15 +1159,16 @@ input[type="file"].form-input::-webkit-file-upload-button {
     display: inline-flex !important;
     align-items: center !important;
     gap: 3px !important;
-    font-size: 0.78rem !important;
+    font-size: 0.80rem !important;
     font-weight: 600 !important;
     color: var(--text-main) !important;
-    line-height: 1.2 !important;
+    line-height: 1.3 !important;
     text-align: left !important;
     white-space: nowrap !important;
 }
 
 .data-analysis-label-title .required,
+.data-analysis-dialog-modal .required,
 .required {
     color: var(--danger, #ef4444) !important;
     margin-left: 2px !important;
@@ -1017,40 +1179,79 @@ input[type="file"].form-input::-webkit-file-upload-button {
     vertical-align: baseline !important;
 }
 
-.data-analysis-dialog-modal label {
-    text-align: left !important;
-}
-
-.data-analysis-dialog-modal .data-analysis-share-toggle {
-    display: flex !important;
-    align-items: center !important;
-    text-align: left !important;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]),
-.data-analysis-modal-form-grid select {
+/* 字段治理与共享弹窗控件统一（严格限制在治理表单内，不覆盖规模化管道定制控件） */
+.data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.data-analysis-modal-form-grid select,
+.data-analysis-modal-form-grid textarea,
+.data-analysis-modal-form-col input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.data-analysis-modal-form-col select,
+.data-analysis-modal-form-col textarea {
     width: 100% !important;
-    height: 34px;
-    min-height: 34px;
-    font-size: 0.8rem;
-    font-weight: 400;
-    line-height: 32px;
-    border-radius: var(--radius-sm, 6px);
-    border: 1px solid var(--border-color);
-    padding: 0 10px;
-    background-color: var(--surface);
-    color: var(--text-main);
+    height: 36px !important;
+    min-height: 36px !important;
+    font-size: 0.84rem !important;
+    font-weight: 400 !important;
+    line-height: 34px !important;
+    border-radius: var(--radius-sm, 6px) !important;
+    border: 1px solid var(--border, #e2e8f0) !important;
+    padding: 0 12px !important;
+    background-color: var(--surface, #ffffff) !important;
+    color: var(--text-main) !important;
     text-align: left !important;
-    transition: all 0.15s ease;
-    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+    box-sizing: border-box !important;
+    margin-bottom: 0 !important;
+}
+
+.data-analysis-modal-form-grid select,
+.data-analysis-modal-form-col select {
+    padding-right: 32px !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+    cursor: pointer !important;
+}
+
+.data-analysis-modal-form-grid textarea,
+.data-analysis-modal-form-col textarea {
+    height: auto !important;
+    min-height: 74px !important;
+    font-size: 0.84rem !important;
+    font-weight: 400 !important;
+    border-radius: var(--radius-sm, 6px) !important;
+    border: 1px solid var(--border, #e2e8f0) !important;
+    padding: 8px 12px !important;
+    background-color: var(--surface, #ffffff) !important;
+    color: var(--text-main) !important;
+    text-align: left !important;
+    line-height: 1.55 !important;
+    resize: vertical !important;
+}
+
+.data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]):focus,
+.data-analysis-modal-form-grid select:focus,
+.data-analysis-modal-form-grid textarea:focus,
+.data-analysis-modal-form-col input:not([type="checkbox"]):not([type="radio"]):focus,
+.data-analysis-modal-form-col select:focus,
+.data-analysis-modal-form-col textarea:focus {
+    border-color: var(--primary, #059669) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary, #059669) 16%, transparent) !important;
+    outline: none !important;
+}
+
+.data-analysis-modal-form-grid input::placeholder,
+.data-analysis-modal-form-grid textarea::placeholder,
+.data-analysis-modal-form-col input::placeholder,
+.data-analysis-modal-form-col textarea::placeholder {
+    color: var(--text-muted, #94a3b8) !important;
+    font-size: 0.82rem !important;
 }
 
 .data-analysis-modal-form-grid input[type="checkbox"],
 .data-analysis-modal-form-grid input[type="radio"],
-.data-analysis-dialog-modal input[type="checkbox"] {
+.data-analysis-modal-form-col input[type="checkbox"] {
     width: 16px !important;
     min-width: 16px !important;
     max-width: 16px !important;
@@ -1059,10 +1260,10 @@ input[type="file"].form-input::-webkit-file-upload-button {
     max-height: 16px !important;
     margin: 0 !important;
     padding: 0 !important;
-    cursor: pointer;
-    flex-shrink: 0;
-    accent-color: var(--primary);
-    vertical-align: middle;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+    accent-color: var(--primary, #059669) !important;
+    vertical-align: middle !important;
 }
 
 /* 共享配置卡片 */
@@ -1072,7 +1273,7 @@ input[type="file"].form-input::-webkit-file-upload-button {
     gap: 10px;
     padding: 12px 14px;
     background: var(--bg-hover, var(--surface));
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border, #e2e8f0);
     border-radius: var(--radius-md, 10px);
     transition: all 0.2s ease;
     box-sizing: border-box;
@@ -1108,45 +1309,42 @@ input[type="file"].form-input::-webkit-file-upload-button {
     flex-direction: column;
     gap: 8px;
     padding-top: 8px;
-    border-top: 1px dashed var(--border-color);
+    border-top: 1px dashed var(--border, #e2e8f0);
 }
 
 .data-analysis-share-card-details.hidden {
     display: none !important;
 }
 
-.data-analysis-modal-form-grid select {
-    padding-right: 28px;
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    cursor: pointer;
+/* 共享范围弹窗与提示卡片规范 */
+.data-analysis-dialog-modal .data-analysis-form-hint-box,
+.data-analysis-dialog-modal .data-analysis-form-hint {
+    margin: 4px 0 0 !important;
+    padding: 10px 12px !important;
+    background: var(--bg-side, #f8fafc) !important;
+    border: 1px solid var(--border, #e2e8f0) !important;
+    border-radius: var(--radius-sm, 6px) !important;
+    color: var(--text-muted) !important;
+    font-size: 0.78rem !important;
+    line-height: 1.55 !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
 }
 
-.data-analysis-modal-form-grid textarea {
-    width: 100% !important;
-    min-height: 70px;
-    font-size: 0.8rem;
-    font-weight: 400;
-    border-radius: 7px;
-    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.22));
-    padding: 8px 10px;
-    background-color: var(--surface, #ffffff);
-    color: var(--text-main);
-    text-align: left !important;
-    transition: all 0.15s ease;
-    box-sizing: border-box;
-    resize: vertical;
+.data-analysis-dialog-modal .data-analysis-hint-icon {
+    color: var(--text-muted, #64748b) !important;
+    flex-shrink: 0 !important;
+    margin-top: 1px !important;
 }
 
-.data-analysis-modal-form-grid input:focus,
-.data-analysis-modal-form-grid select:focus,
-.data-analysis-modal-form-grid textarea:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
-    outline: none;
+/* 跨数据集模型弹窗响应式列切换：无关联面板时整宽展示列表 */
+#data-analysis-model-modal .data-analysis-governance-grid:has(#data-analysis-model-relation-panel.hidden) {
+    grid-template-columns: 1fr !important;
+}
+
+#data-analysis-model-modal .data-analysis-governance-grid > div:has(#data-analysis-model-relation-panel.hidden) {
+    display: none !important;
 }
 
 .data-analysis-modal-footer {
@@ -1155,11 +1353,26 @@ input[type="file"].form-input::-webkit-file-upload-button {
     justify-content: flex-end;
     gap: 10px;
     padding-top: 14px;
-    border-top: 1px solid var(--border-color, rgba(148, 163, 184, 0.16));
+    border-top: 1px solid var(--border, rgba(148, 163, 184, 0.16));
+}
+
+.data-analysis-modal-footer .btn-secondary {
+    height: 34px !important;
+    padding: 0 16px !important;
+    font-size: 0.82rem !important;
+    border-radius: var(--radius-sm, 6px) !important;
+}
+
+.data-analysis-modal-footer .btn-primary {
+    height: 34px !important;
+    padding: 0 18px !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    border-radius: var(--radius-sm, 6px) !important;
 }
 
 .data-analysis-calc-modal-dialog {
-    width: min(640px, 94vw);
+    width: min(680px, 94vw);
 }
 
 .data-analysis-scalability-modal-dialog {
@@ -1185,9 +1398,85 @@ body.dark-mode .data-analysis-pipe-select,
 .dark-mode .data-analysis-pipe-select,
 body.dark-mode .data-analysis-modal-form-grid select,
 .dark-mode .data-analysis-modal-form-grid select,
+body.dark-mode .data-analysis-modal-form-col select,
+.dark-mode .data-analysis-modal-form-col select,
 body.dark-mode .data-analysis-governance-table select,
 .dark-mode .data-analysis-governance-table select {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+}
+
+body.dark-mode .data-analysis-governance-table-wrap,
+.dark-mode .data-analysis-governance-table-wrap {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .data-analysis-governance-table th,
+.dark-mode .data-analysis-governance-table th {
+    background: var(--bg-surface-subtle, rgba(30, 41, 59, 0.95));
+    border-color: var(--border, #334155);
+}
+
+body.dark-mode .data-analysis-governance-table td,
+.dark-mode .data-analysis-governance-table td {
+    border-color: var(--border, rgba(51, 65, 85, 0.6));
+}
+
+body.dark-mode .data-analysis-governance-table input:not([type="checkbox"]),
+.dark-mode .data-analysis-governance-table input:not([type="checkbox"]),
+body.dark-mode .data-analysis-governance-table select,
+.dark-mode .data-analysis-governance-table select {
+    background-color: var(--bg-card, #0f172a);
+    border-color: var(--border, #334155);
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .data-analysis-dialog-modal,
+.dark-mode .data-analysis-dialog-modal {
+    background: var(--surface, #1e293b) !important;
+    border-color: var(--border, #334155) !important;
+}
+
+body.dark-mode .data-analysis-dialog-modal .data-analysis-modal-header,
+.dark-mode .data-analysis-dialog-modal .data-analysis-modal-header,
+body.dark-mode .data-analysis-dialog-modal .data-analysis-modal-footer,
+.dark-mode .data-analysis-dialog-modal .data-analysis-modal-footer,
+body.dark-mode .data-analysis-dialog-modal .data-analysis-modal-divider,
+.dark-mode .data-analysis-dialog-modal .data-analysis-modal-divider {
+    border-color: var(--border, #334155) !important;
+}
+
+body.dark-mode .data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.dark-mode .data-analysis-modal-form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+body.dark-mode .data-analysis-modal-form-grid select,
+.dark-mode .data-analysis-modal-form-grid select,
+body.dark-mode .data-analysis-modal-form-grid textarea,
+.dark-mode .data-analysis-modal-form-grid textarea,
+body.dark-mode .data-analysis-modal-form-col input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.dark-mode .data-analysis-modal-form-col input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+body.dark-mode .data-analysis-modal-form-col select,
+.dark-mode .data-analysis-modal-form-col select,
+body.dark-mode .data-analysis-modal-form-col textarea,
+.dark-mode .data-analysis-modal-form-col textarea {
+    background-color: var(--bg-card, #0f172a) !important;
+    border-color: var(--border, #334155) !important;
+    color: var(--text-main, #f1f5f9) !important;
+}
+
+body.dark-mode .data-analysis-dialog-modal .data-analysis-empty,
+.dark-mode .data-analysis-dialog-modal .data-analysis-empty {
+    background: var(--bg-surface-subtle, rgba(30, 41, 59, 0.45)) !important;
+    border-color: var(--border, rgba(148, 163, 184, 0.22)) !important;
+    color: var(--text-muted, #94a3b8) !important;
+}
+
+body.dark-mode .data-analysis-dialog-modal .data-analysis-form-hint-box,
+.dark-mode .data-analysis-dialog-modal .data-analysis-form-hint-box,
+body.dark-mode .data-analysis-dialog-modal .data-analysis-form-hint,
+.dark-mode .data-analysis-dialog-modal .data-analysis-form-hint {
+    background: var(--bg-surface-subtle, rgba(30, 41, 59, 0.45)) !important;
+    border-color: var(--border, rgba(148, 163, 184, 0.22)) !important;
+    color: var(--text-muted, #94a3b8) !important;
 }
 
 body.dark-mode .data-analysis-file-picker-row,

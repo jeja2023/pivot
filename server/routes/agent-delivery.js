@@ -62,6 +62,36 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
     const challengeGuard = typeof deviceChallengeLimiter === 'function' ? deviceChallengeLimiter : (_req, _res, next) => next();
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
 
+    // ONLYOFFICE 服务端拉取文件时没有用户浏览器会话；短期票据绑定用户和文件，读取时再次核验权限。
+    router.get('/agents/onlyoffice/file', asyncHandler(async (req, res) => {
+        // 全局错误处理器也不能将预览票据写入日志。
+        req.originalUrl = String(req.originalUrl || req.url).split('?')[0];
+        let claims;
+        try { claims = require('../services/onlyoffice-preview').verifyReadTicket(req.query.token); }
+        catch (_) { return res.status(403).json({ error: '预览凭据无效或已过期。' }); }
+        const user = await require('../db/client').queryOne("SELECT id,role,unit,status,token_version FROM users WHERE id = ? AND deleted_at IS NULL", [claims.userId]);
+        if (!user || user.status === 'disabled' || Number(user.token_version || 0) !== Number(claims.tokenVersion)) return res.status(403).json({ error: '预览权限已失效。' });
+        const rendition = await getRenditionForUser(claims.renditionId, user);
+        if (!rendition || rendition.format !== 'docx' || rendition.status !== 'ready' || (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now())) return res.status(404).json({ error: '预览文件不可用。' });
+        let stream;
+        try { ({ stream } = await openRenditionContent(rendition, user)); }
+        catch (_) { return res.status(410).json({ error: '预览文件内容不可用。' }); }
+        res.setHeader('Content-Type', rendition.mime_type);
+        res.setHeader('Content-Length', String(rendition.byte_size));
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        try { await require('node:stream/promises').pipeline(stream, res); } catch (_) { res.destroy(); }
+    }));
+
+    router.post('/agents/renditions/:id/onlyoffice-preview', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
+        const rendition = await getRenditionForUser(req.params.id, req.user);
+        if (!rendition) return res.status(404).json({ error: '渲染产物不存在或无权访问。' });
+        if (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now()) return res.status(410).json({ error: '结果文件已经过期。' });
+        const config = require('../services/onlyoffice-preview').createPreviewConfig(rendition, req.user);
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ success: true, onlyoffice: config });
+    }));
+
     // ── 渲染器状态 ──────────────────────────────────────────────────────────
     router.get('/agents/renderers', authMiddleware, asyncHandler(async (_req, res) => {
         res.json({ data: listRendererStatus() });
@@ -130,6 +160,20 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
         const rendition = await getRenditionForUser(req.params.id, req.user);
         if (!rendition) return res.status(404).json({ error: '渲染产物不存在或无权访问。' });
         res.json({ success: true, ir: await readRenditionIr(rendition, req.user), irDigest: rendition.ir_digest });
+    }));
+
+    // 此视图从已授权版本的 IR 重新生成，只读且不创建新的交付文件。
+    router.get('/agents/renditions/:id/document-preview', authMiddleware, asyncHandler(async (req, res) => {
+        const rendition = await getRenditionForUser(req.params.id, req.user);
+        if (!rendition) return res.status(404).json({ error: '渲染产物不存在或无权访问。' });
+        if (rendition.status !== 'ready' || (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now())) {
+            return res.status(410).json({ error: '结果文件尚未就绪或已经过期。' });
+        }
+        if (rendition.format !== 'docx') return res.status(400).json({ error: '当前格式不支持文档预览。' });
+        const ir = await readRenditionIr(rendition, req.user);
+        const rendered = await require('../services/document-rendering').renderDocumentIr(ir, 'html');
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ success: true, html: rendered.buffer.toString('utf8'), imagePlaceholders: ir.blocks.some(block => block.type === 'image') });
     }));
 
     router.post('/agents/renditions/:id/download-token', authMiddleware, automationGuard, asyncHandler(async (req, res) => {

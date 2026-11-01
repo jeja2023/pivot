@@ -40,5 +40,15 @@ test('聊天 Agent 任务不再将最终提示文本长度伪装为模型吞吐�
     assert.doesNotMatch(engine, /steerChatAgentRun[\s\S]*window\.prompt/);
     assert.match(runActions, /showInputPrompt/);
     assert.doesNotMatch(runActions, /steerAgentRun[\s\S]*window\.prompt/);
+    assert.match(runActions, /multiline:\s*true/);
+    assert.match(runActions, /suggestions:\s*\[/);
+    assert.match(engine, /multiline:\s*true/);
+    assert.match(engine, /suggestions:\s*\[/);
     assert.match(runDetail, /data-agent-steer/);
+    const modals = fs.readFileSync(path.join(root, 'client', 'chat', 'partials', 'pre-app-modals.html'), 'utf8');
+    assert.match(modals, /id="input-prompt-suggestions"/);
+    assert.match(modals, /id="input-prompt-counter"/);
+    const dialogs = fs.readFileSync(path.join(root, 'client', 'chat', 'app', 'dialogs.js'), 'utf8');
+    assert.match(dialogs, /input-prompt-chip/);
+    assert.match(dialogs, /updateInputPromptMeta/);
 });

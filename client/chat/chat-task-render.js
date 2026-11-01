@@ -56,12 +56,22 @@
         const delivery = artifact.delivery ? ({ delivered: '已保存到授权本机目录', confirmed: '已保存到授权本机目录',
             pending: '已加入本机保存队列', claimed: '正在保存到本机', failed: '本机保存失败，可查看详情', expired: '本机保存请求已过期', cancelled: '本机保存已取消' })[artifact.delivery.state] : '';
         const selector = `data-task-artifact="${attr(artifact.id)}" data-task-rendition="${attr(rendition?.id || '')}"`;
-        return `<li class="chat-task-artifact"><div><strong>${escape(artifact.title)}</strong>
-            <span>${escape([format, size, `版本 ${artifact.version}`].filter(Boolean).join(' · '))}</span>
-            <span>${escape(delivery || (rendition?.ready ? '文件已生成，可下载' : rendition?.status === 'expired' ? '文件已过期' : '结果已记录，尚无可下载文件'))}</span></div>
-            <div class="chat-task-artifact-actions">${button('preview', '查看', '查看结果内容与版本', 'btn-secondary', selector)}
+        return `<li class="chat-task-artifact">
+            <div class="chat-task-artifact-info">
+                <span class="chat-task-artifact-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </span>
+                <strong class="chat-task-artifact-title">${escape(artifact.title)}</strong>
+                <span class="chat-task-artifact-badge">${escape(format || '文件')}</span>
+                <span class="chat-task-artifact-meta">${size ? `${escape(size)} · ` : ''}版本 ${escape(artifact.version)}</span>
+                <span class="chat-task-artifact-status">${escape(delivery || (rendition?.ready ? '文件已生成，可下载' : rendition?.status === 'expired' ? '文件已过期' : '结果已记录，尚无可下载文件'))}</span>
+            </div>
+            <div class="chat-task-artifact-actions">
+                ${button('preview', '预览', '查看结果内容与版本', 'btn-secondary', selector)}
                 ${rendition?.ready ? button('download', '下载', '下载已生成的结果文件', 'btn-secondary', selector) : ''}
-                ${rendition?.ready && window.pivotDesktop?.getDeliveryStatus && !saved ? button('save-local', '保存到本机', '选择授权目录保存结果文件', 'btn-secondary', selector) : ''}</div></li>`;
+                ${rendition?.ready && window.pivotDesktop?.getDeliveryStatus && !saved ? button('save-local', '保存到本机', '选择授权目录保存结果文件', 'btn-secondary', selector) : ''}
+            </div>
+        </li>`;
     }
 
     function controlsMarkup(entry) {

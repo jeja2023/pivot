@@ -40,19 +40,58 @@ function resetInputPromptError() {
     errorEl.classList.add('hidden');
 }
 
+function updateInputPromptMeta() {
+    const field = inputPromptOptions.multiline === true
+        ? document.getElementById('input-prompt-textarea')
+        : document.getElementById('input-prompt-field');
+    const clearBtn = document.getElementById('input-prompt-clear');
+    const counterEl = document.getElementById('input-prompt-counter');
+    if (!field) return;
+    const val = field.value || '';
+    if (clearBtn) clearBtn.classList.toggle('hidden', !val);
+    if (counterEl) {
+        const max = inputPromptOptions.maxLength || (inputPromptOptions.multiline ? 4000 : null);
+        if (max) {
+            counterEl.classList.remove('hidden');
+            counterEl.innerText = `${val.length} / ${max}`;
+            const nearLimit = val.length >= Math.floor(max * 0.85) && max >= val.length;
+            const overLimit = val.length > max;
+            counterEl.classList.toggle('limit-near', nearLimit);
+            counterEl.classList.toggle('limit-reached', overLimit);
+        } else {
+            counterEl.classList.add('hidden');
+        }
+    }
+}
+
 function closeInputPrompt(value = null) {
     const container = document.getElementById('input-prompt-container');
     container?.classList.add('hidden');
     // 还原自定义宽度，避免影响下一个复用该弹窗的调用方。
     const modal = container?.querySelector('.modal');
     if (modal) modal.style.width = '';
+    const suggestionsBox = document.getElementById('input-prompt-suggestions');
+    const suggestionsList = document.getElementById('input-prompt-suggestions-list');
+    if (suggestionsBox) suggestionsBox.classList.add('hidden');
+    if (suggestionsList) suggestionsList.replaceChildren();
+    const clearBtn = document.getElementById('input-prompt-clear');
+    if (clearBtn) clearBtn.classList.add('hidden');
+    const counterEl = document.getElementById('input-prompt-counter');
+    if (counterEl) counterEl.classList.add('hidden');
+
     const resolve = inputPromptResolve;
     inputPromptResolve = null;
     inputPromptOptions = {};
     const field = document.getElementById('input-prompt-field');
     const textarea = document.getElementById('input-prompt-textarea');
-    field?.classList.remove('hidden');
-    textarea?.classList.add('hidden');
+    if (field) {
+        field.value = '';
+        field.classList.remove('hidden');
+    }
+    if (textarea) {
+        textarea.value = '';
+        textarea.classList.add('hidden');
+    }
     if (resolve) resolve(value);
 }
 
@@ -62,15 +101,24 @@ window.Pivot.legacy.showInputPrompt = function(options = {}) {
     const messageEl = document.getElementById('input-prompt-message');
     const field = document.getElementById('input-prompt-field');
     const textarea = document.getElementById('input-prompt-textarea');
+    const okBtn = document.getElementById('modal-input-prompt-ok');
+    const cancelBtn = document.getElementById('modal-input-prompt-cancel');
+    const tipEl = document.getElementById('input-prompt-shortcut-tip');
+    const suggestionsBox = document.getElementById('input-prompt-suggestions');
+    const suggestionsList = document.getElementById('input-prompt-suggestions-list');
+
     if (!container || !titleEl || !messageEl || !field || !textarea) return Promise.resolve(null);
 
     if (inputPromptResolve) closeInputPrompt(null);
     inputPromptOptions = options;
-    // 可选自定义宽度（如重命名长公文标题）；不传则回退到 CSS 默认宽度。
+    // 可选自定义宽度；不传则回退到 CSS 默认宽度。
     const modal = container.querySelector('.modal');
-    if (modal) modal.style.width = options.width ? `${options.width}px` : '';
+    if (modal) modal.style.width = options.width ? `min(${options.width}px, calc(100vw - 32px))` : '';
     titleEl.innerText = options.title || '输入';
     messageEl.innerText = options.message || options.label || '';
+    if (okBtn) okBtn.innerText = options.okText || '确认';
+    if (cancelBtn) cancelBtn.innerText = options.cancelText || '取消';
+
     const activeField = options.multiline === true ? textarea : field;
     field.classList.toggle('hidden', activeField !== field);
     textarea.classList.toggle('hidden', activeField !== textarea);
@@ -78,7 +126,45 @@ window.Pivot.legacy.showInputPrompt = function(options = {}) {
     activeField.value = options.value || '';
     activeField.placeholder = options.placeholder || '';
     activeField.autocomplete = options.autocomplete || 'off';
+
+    if (tipEl) {
+        tipEl.innerText = options.multiline === true
+            ? '按 Ctrl + Enter 提交，Esc 取消'
+            : '按 Enter 提交，Esc 取消';
+    }
+
+    // 快捷标签 / 建议项渲染
+    if (suggestionsBox && suggestionsList) {
+        suggestionsList.replaceChildren();
+        if (Array.isArray(options.suggestions) && options.suggestions.length > 0) {
+            suggestionsBox.classList.remove('hidden');
+            for (const item of options.suggestions) {
+                const text = typeof item === 'string' ? item : (item?.text || item?.label || '');
+                if (!text) continue;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn-secondary input-prompt-chip';
+                btn.textContent = text;
+                btn.addEventListener('click', () => {
+                    const current = activeField.value.trim();
+                    if (!current) {
+                        activeField.value = text;
+                    } else if (!current.includes(text)) {
+                        activeField.value = `${current}\n${text}`;
+                    }
+                    activeField.focus();
+                    resetInputPromptError();
+                    updateInputPromptMeta();
+                });
+                suggestionsList.appendChild(btn);
+            }
+        } else {
+            suggestionsBox.classList.add('hidden');
+        }
+    }
+
     resetInputPromptError();
+    updateInputPromptMeta();
     container.classList.remove('hidden');
     setTimeout(() => activeField.focus(), 0);
 
@@ -101,23 +187,54 @@ function submitInputPrompt() {
         field.focus();
         return;
     }
+    const max = inputPromptOptions.maxLength || (inputPromptOptions.multiline ? 4000 : null);
+    if (max && trimmed.length > max) {
+        errorEl.innerText = `内容长度不能超过 ${max} 个字符（当前 ${trimmed.length} 字）`;
+        errorEl.classList.remove('hidden');
+        field.focus();
+        return;
+    }
     closeInputPrompt(inputPromptOptions.trim === false ? value : trimmed);
 }
 
 document.getElementById('modal-input-prompt-ok')?.addEventListener('click', submitInputPrompt);
 document.getElementById('modal-input-prompt-cancel')?.addEventListener('click', () => closeInputPrompt(null));
-['input-prompt-field', 'input-prompt-textarea'].forEach(id => document.getElementById(id)?.addEventListener('input', resetInputPromptError));
-['input-prompt-field', 'input-prompt-textarea'].forEach(id => document.getElementById(id)?.addEventListener('keydown', (event) => {
-    if (event.isComposing || event.keyCode === 229) return;
-    if (inputPromptOptions.multiline === true && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return;
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        submitInputPrompt();
-    } else if (event.key === 'Escape') {
-        event.preventDefault();
+document.getElementById('modal-input-prompt-close')?.addEventListener('click', () => closeInputPrompt(null));
+document.getElementById('input-prompt-container')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) {
         closeInputPrompt(null);
     }
-}));
+});
+document.getElementById('input-prompt-clear')?.addEventListener('click', () => {
+    const field = inputPromptOptions.multiline === true
+        ? document.getElementById('input-prompt-textarea')
+        : document.getElementById('input-prompt-field');
+    if (field) {
+        field.value = '';
+        field.focus();
+        resetInputPromptError();
+        updateInputPromptMeta();
+    }
+});
+['input-prompt-field', 'input-prompt-textarea'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+        resetInputPromptError();
+        updateInputPromptMeta();
+    });
+    el.addEventListener('keydown', (event) => {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (inputPromptOptions.multiline === true && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return;
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            submitInputPrompt();
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            closeInputPrompt(null);
+        }
+    });
+});
 
 // --- 通用提示与详情弹窗 ---
 let alertResolve = null;

@@ -57,3 +57,30 @@ test('真实工具结果经 IR 和 CAS 生成可授权下载的报告与图形',
         } finally { await execute('DELETE FROM agent_artifacts WHERE id = ?', [result.artifactId]); }
     }
 });
+
+test('任务生成的图形按运行和用户核验，完整文件进入交付验收且不重复传递 SVG 正文', async () => {
+    const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
+    const runId = `diagram-verify-${process.pid}-${Date.now()}`;
+    await execute("INSERT INTO agent_runs (id,user_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,'绘图验收','生成流程图','running','{}',NOW(),NOW())", [runId, user.id]);
+    let result;
+    try {
+        result = await materializeToolArtifact({ content: [{ type: 'text', text: '原始 SVG 不应传入模型' }], structuredContent: { pivotArtifact: { kind: 'diagram', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>' } } }, user, { runId, stepId: `${runId}:1` });
+        assert.equal(JSON.stringify(result.content).includes('原始 SVG'), false);
+        const { readyRunArtifacts } = require('../server/repositories/chat-conversation-turns');
+        assert.equal((await readyRunArtifacts(runId, user.id)).length, 1);
+        assert.equal((await readyRunArtifacts(runId, Number(user.id) + 999999)).length, 0);
+        const contract = { deliverables: ['流程图图片'], acceptance: { artifactRequired: true, requireSemanticVerification: true } };
+        const { verifyAutomaticTask } = require('../server/services/chat-task-verification');
+        const verification = await verifyAutomaticTask({ run: { id: runId, model_id: 1 }, user, contract, answer: '已生成图形' }, {
+            getModel: async () => ({}), callModelJson: async () => ({ passed: true, coveredDeliverables: ['流程图图片'], missing: [] })
+        });
+        assert.equal(verification.passed, true);
+        const report = require('../server/services/agent-verification').verifyTaskOutcome({ taskContract: contract, answer: '已生成图形', semanticVerification: verification });
+        assert.equal(report.outcomeStatus, 'verified');
+        await execute("UPDATE agent_artifact_renditions SET status = 'failed' WHERE id = ?", [result.renditionId]);
+        assert.equal((await verifyAutomaticTask({ run: { id: runId }, user, contract, answer: '已生成图形' }, { getModel: async () => ({}) })).reason, 'artifact_not_materialized');
+    } finally {
+        if (result) await execute('DELETE FROM agent_artifacts WHERE id = ?', [result.artifactId]);
+        await execute('DELETE FROM agent_runs WHERE id = ?', [runId]);
+    }
+});

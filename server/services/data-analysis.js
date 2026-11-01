@@ -9,6 +9,7 @@ const semanticAnalysis = require('./data-analysis/semantic-analysis');
 const cleaning = require('./data-analysis/cleaning');
 const governance = require('./data-analysis/governance');
 const semanticModels = require('./data-analysis/semantic-models');
+const modelAnalysis = require('./data-analysis/model-analysis');
 const scalability = require('./data-analysis/scalability');
 
 module.exports = {
@@ -29,5 +30,6 @@ module.exports = {
     ...cleaning,
     ...governance,
     ...semanticModels,
+    ...modelAnalysis,
     ...scalability
 };
