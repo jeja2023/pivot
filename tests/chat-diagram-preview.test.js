@@ -14,20 +14,32 @@ function harness(responseType = 'image/svg+xml', config = null) {
     let api;
     const document = { body: { classList: { add() {}, remove() {} }, appendChild: item => { created.push(item); } }, addEventListener() {}, removeEventListener() {}, createElement(tag) {
         const events = {};
-        return { tag, style: {}, children: [], attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+        const el = { tag, style: {}, children: [], attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
             append(...items) { this.children.push(...items); }, appendChild(item) { this.children.push(item); },
+            replaceChildren(...items) { this.children = [...items]; },
             addEventListener(name, fn) { events[name] = fn; }, remove() { this.removed = true; }, events };
+        let directText = '';
+        Object.defineProperty(el, 'textContent', {
+            get() { if (directText) return directText; return this.children.map(c => c.textContent || '').join(''); },
+            set(v) { directText = v; }
+        });
+        return el;
     } };
     const tasks = { renderEntry() {}, refresh: async () => {} };
     const context = { document, URL: { createObjectURL: () => 'blob:test', revokeObjectURL: value => revoked.push(value) }, API_BASE: '/api',
         AbortController, setTimeout, clearTimeout, showToast: text => toasts.push(text),
-        PivotSafeHtml: { setSrcdoc(frame, html) { frame.srcdoc = html; } },
+        PivotSafeHtml: { setSrcdoc(frame, html) { frame.srcdoc = html; }, setHtml(el, markup) { el.innerHTML = markup; } },
         apiFetch: async url => { requests.push(url); if (url.endsWith('/onlyoffice-preview')) return { ok: true, json: async () => ({ onlyoffice: config }) };
             if (url.endsWith('/document-preview')) return { ok: true, json: async () => ({ html: '<h1>旅行方案</h1>', imagePlaceholders: false }) };
             return url.endsWith('/download-token')
             ? { ok: true, json: async () => ({ token: 'one-use' }) }
             : { ok: true, blob: async () => ({ type: responseType }) }; },
         window: { Pivot: { legacy: {}, moduleApi: () => tasks, exposeModule: (_name, exposed) => { api = exposed; } } } };
+    Object.defineProperty(context, 'DocsAPI', {
+        get() { return context.window.DocsAPI; },
+        set(v) { context.window.DocsAPI = v; },
+        configurable: true
+    });
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/chat-task-actions.js'), 'utf8'), context);
     return { api, created, revoked, requests, toasts, window: context.window, context };
 }
@@ -37,9 +49,11 @@ test('查看图形读取已授权渲染文件，图片关闭后释放临时地�
     const entry = { state: { artifacts: [{ id: '106', title: '结构图', rendition: { id: '13', format: 'svg', ready: true } }] } };
     await h.api.perform(entry, 'preview', { dataset: { taskArtifact: '106', taskRendition: '13' } });
     assert.deepEqual(h.requests, ['/api/agents/renditions/13/download-token', '/api/agents/renditions/13/download?token=one-use']);
-    assert.equal(h.created[0].children[1].children[1].src, 'blob:test');
-    assert.equal(h.created[0].children[1].children[1].tag, 'img');
-    h.created[0].children[0].children[1].events.click();
+    const img = h.created[0].children[1].children[1].tag === 'img' ? h.created[0].children[1].children[1] : h.created[0].children[1].children[1].children[0];
+    assert.equal(img.src, 'blob:test');
+    assert.equal(img.tag, 'img');
+    const closeBtn = (h.created[0].children[0].children[1].children || []).find(c => c.tag === 'button' && c.textContent.includes('关闭')) || h.created[0].children[0].children[1];
+    closeBtn.events.click();
     assert.deepEqual(h.revoked, ['blob:test']);
 });
 
@@ -65,7 +79,8 @@ test('配置 ONLYOFFICE 时打开只读编辑器，关闭时释放实例', async
     assert.equal(h.requests.length, 1);
     assert.equal(created.editor.editorConfig.mode, 'view');
     assert.match(created.id, /^onlyoffice-preview-/);
-    h.created[0].children[0].children[1].events.click();
+    const closeBtn = (h.created[0].children[0].children[1].children || []).find(c => c.tag === 'button' && c.textContent.includes('关闭')) || h.created[0].children[0].children[1];
+    closeBtn.events.click();
     assert.equal(destroyed, true);
 });
 
@@ -91,6 +106,7 @@ test('切换到新文件后，旧预览的迟到失败不会覆盖新面板或�
     rejectOld(new Error('旧请求失败'));
     await old;
     assert.equal(h.created[0].removed, true);
-    assert.equal(h.created[1].children[0].children[0].textContent, '新文档');
+    const titleEl = (h.created[1].children[0].children[0].children || []).find(c => c.tag === 'strong') || h.created[1].children[0].children[0];
+    assert.equal(titleEl.textContent, '新文档');
     assert.deepEqual(h.toasts, []);
 });

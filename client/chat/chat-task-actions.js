@@ -23,8 +23,16 @@
             safeHtml.setHtml(element, markup);
             return;
         }
-        const parsed = new DOMParser().parseFromString(markup, 'text/html');
-        element.replaceChildren(...parsed.body.childNodes);
+        if (typeof DOMParser !== 'undefined') {
+            const parsed = new DOMParser().parseFromString(markup, 'text/html');
+            if (element.replaceChildren) {
+                element.replaceChildren(...parsed.body.childNodes);
+            }
+            return;
+        }
+        if (element.replaceChildren) {
+            element.replaceChildren();
+        }
     }
 
     function createNoticeElement(text) {
@@ -45,7 +53,10 @@
         const textSpan = document.createElement('span');
         textSpan.className = 'chat-result-preview-notice-text';
         textSpan.textContent = text;
-        notice.replaceChildren(iconWrap, textSpan);
+        notice.textContent = text;
+        if (notice.replaceChildren) {
+            notice.replaceChildren(iconWrap, textSpan);
+        }
     }
 
     function createResultPreview(artifact, trigger) {
