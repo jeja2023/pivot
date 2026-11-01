@@ -24,6 +24,7 @@ const browserGlobals = {
     CSS: 'readonly',
     CustomEvent: 'readonly',
     DOMPurify: 'readonly',
+    DOMParser: 'readonly',
     FileReader: 'readonly',
     FormData: 'readonly',
     Headers: 'readonly',

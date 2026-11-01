@@ -1,3 +1,4 @@
+/* global DocsAPI */
 // 聊天内控制只作用于明确的运行，审批同时绑定当前请求摘要。
 (function initializeChatTaskActions() {
     let previewSequence = 0;

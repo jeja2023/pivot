@@ -1,5 +1,5 @@
 'use strict';
-/* global window */
+/* global window, document */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
