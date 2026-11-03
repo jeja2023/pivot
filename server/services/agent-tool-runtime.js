@@ -39,6 +39,19 @@ function compactToolOutputForModel(value, modelCfg = {}, options = {}) {
             budget.unbounded ? 24000 : Math.max(2000, Math.floor(budget.inputBudget * 0.45)),
             24000
         );
+    // 知识证据只能截断到完整来源边界；不能把 JSON 字符串截断后丢失权限复核标识。
+    if (value?.knowledgeSourceVersion === 1 && Array.isArray(value.matches)) {
+        const matches = [];
+        for (const match of value.matches) {
+            const candidate = [...matches, match];
+            if (estimateTokens(JSON.stringify(candidate)) > Math.max(500, targetTokens - 500)) break;
+            matches.push(match);
+        }
+        const incomplete = matches.length < value.matches.length;
+        return { knowledgeSourceVersion: 1, query: value.query, matches, sources: matches.map(item => item.source),
+            context: matches.length ? require('./rag-index/retrieval-context').formatInjectedContext(matches.map(item => ({ text: item.content, source: item.docName, citationKey: item.source?.citationKey }))) : '',
+            retrieval: value.retrieval, ...(incomplete ? { __partial: true } : {}) };
+    }
     const structured = value?.structuredContent && typeof value.structuredContent === 'object'
         ? value.structuredContent
         : null;
@@ -219,7 +232,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                 toolName: safeName,
                 definitionDigest: policyEvaluation.toolItem?.definitionDigest || policyEvaluation.toolItem?.definition_digest || '',
                 policyDecision: 'allow', source: policyEvaluation.source, input: effectiveInput, error,
-                status: 'error', retryable: Boolean(executionPlan.retry?.retryable), ...policyEvaluation.trace
+                status: 'error', reasonCodes: error.details?.reasonCodes || [], retryable: Boolean(executionPlan.retry?.retryable), ...policyEvaluation.trace
             });
         },
         execute: async ({ input: effectiveInput, executionGrant = null }) => {
@@ -285,7 +298,8 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
             }
             // 发现元工具转发的是内层业务调用已经交付的结果，不能再次生成产物。
             if (require('./agent-tool-progressive-discovery').isDiscoveryMetaTool(tool)) return output;
-            return await require('./tool-result-artifacts').materializeToolArtifact(output, user, context);
+            try { return await require('./tool-result-artifacts').materializeToolArtifact(output, user, context); }
+            catch (cause) { throw Object.assign(new Error('工具返回结果后的文件登记或渲染失败。', { cause }), { code: 'TOOL_ARTIFACT_MATERIALIZATION_FAILED', category: 'delivery', retryable: false }); }
         }
     });
     await releaseGuards();

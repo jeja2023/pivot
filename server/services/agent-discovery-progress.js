@@ -7,7 +7,8 @@ function recordDiscoverySearch(state, result, run = {}) {
     if (state.searchProgress?.key !== key) state.searchProgress = { key, empty: 0 };
     if (result.candidates.length) return;
     state.searchProgress.empty++;
-    if (state.searchProgress.empty < 4) return;
+    const limit = require('../config/env-registry').readTypedEnv('PIVOT_AGENT_EMPTY_SEARCH_LIMIT');
+    if (state.searchProgress.empty < limit) return;
     const error = new Error('当前任务的授权工具目录中多次未找到所需工具，已停止重复搜索。请检查工具是否已启用并加入本次任务范围，或重新选择工具后继续。');
     error.code = 'TOOL_DISCOVERY_NO_PROGRESS';
     error.category = 'capability';

@@ -338,6 +338,18 @@ function createChatRouter({
                 code: schemaUnavailable ? 'CHAT_SCHEMA_UNAVAILABLE' : error.code || 'CHAT_REQUEST_UNAVAILABLE' }));
             return res.end();
         }
+        let knowledgeSelection;
+        try {
+            knowledgeSelection = await require('../../services/chat-knowledge-selection').resolveChatKnowledgeSelection(chatState, req.user, userMessageId);
+            if (knowledgeSelection && !knowledgeSelection.scope.cleared) {
+                ragScope = knowledgeSelection.scope;
+                chatState.ragScope = ragScope;
+            }
+        } catch (error) {
+            writeSse(JSON.stringify({ error: error.message, code: error.code || 'KNOWLEDGE_SCOPE_DENIED' }));
+            writeSse('[DONE]');
+            return res.end();
+        }
         let automaticExecution = await decideAutomaticChatExecution({
             routeOverrides: chatState.routeOverrides, mcpToolAllowlist,
             regenerate, ephemeralVoice, chatMode, agentExecutionAllowed,
@@ -348,6 +360,7 @@ function createChatRouter({
         });
         automaticExecution.projectId = chatState.projectId;
         automaticExecution.modelId = modelCfg.id;
+        if (knowledgeSelection) automaticExecution.knowledgeScope = knowledgeSelection.scope;
         await conversationTurns.updateTurn(conversationTurn, { decision: automaticExecution });
         ({ mcpEnabled, ragEnabled } = applyAutomaticExecutionDecision(chatState, automaticExecution));
         if (automaticExecution.action === 'agent_run') {

@@ -428,7 +428,7 @@ async function getRunDetailForUser(runId, user) {
     }
     return {
         run,
-        steps: steps || [],
+        steps: await require('./knowledge-tool-results').presentKnowledgeSteps(steps, user),
         dagNodes: effectiveDagNodes,
         invocations: invocations || [],
         iterationItems: iterationItems || [],

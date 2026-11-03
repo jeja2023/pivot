@@ -169,9 +169,9 @@
     },
     {
       "file": "server/repositories/knowledge.js",
-      "count": 16,
-      "rationale": "聊天文档目录和概览使用参数化范围条件及现有文档访问过滤，目录最多读取 101 条并标记截断，正文仅取启用且已就绪文档的有限片段。",
-      "verification": "tests/chat-knowledge-catalog.test.js 使用隔离 PostgreSQL 验证跨用户、删除、停用、处理中及来源片段过滤。"
+      "count": 20,
+      "rationale": "聊天文档目录和概览使用参数化范围条件及现有文档访问过滤，目录最多读取 101 条并标记截断，正文仅取启用且已就绪文档的有限片段。 2026-11-03：新增参数化引用批量验证与受控分块读取；用户状态从数据库复查，文档ACL、当前版本、就绪/启用状态及任务范围均在仓库层核验，片段最多100项且不接受动态表名。",
+      "verification": "tests/chat-knowledge-catalog.test.js 使用隔离 PostgreSQL 验证跨用户、删除、停用、处理中及来源片段过滤。 tests/knowledge-chain-postgres.test.js验证跨用户、停用、内容变化、引用版本与知识到DOCX交付；tests/knowledge-tool-chain.test.js验证范围交集与降级。"
     },
     {
       "file": "server/repositories/mindmap-previews.js",
@@ -181,9 +181,9 @@
     },
     {
       "file": "server/repositories/chat-conversation-turns.js",
-      "count": 18,
-      "rationale": "对话请求与用户消息在会话行锁事务内原子认领；参数化查询均按用户和会话隔离，CAS 租约令牌阻断过期执行器写入；执行边界每次按 user_id 复核最新能力范围与暂停状态；系统终态回调按可信 run_id 更新结果，指标聚合仅由用户本人或超级管理员调用。续跑查询限定父运行、当前用户及未删除的真实续跑关联，等待输入的同一运行通过状态 CAS 只排队一次并保留检查点。任务来源资料读取严格限定在当前运行关联的原始消息与明确登记的后续消息白名单内，按未删除会话与任务隔离复核。",
-      "verification": "tests/chat-conversation-product.test.js 并发认领、过期租约、冲突重试、同运行续接与跨用户隔离；tests/agent-resume-budget.test.js 聊天并发继续、旧续跑链复用和额度耗尽；tests/chat-source-tool.test.js 任务附件原始资料读取白名单与回退安全；security-chat HTTP 回归。"
+      "count": 19,
+      "rationale": "2026-11-03：沿用会话消息幂等与执行范围读取，新增按所属用户、会话、未删除来源消息和本轮之前的消息ID读取最后一次明确知识选择；仅返回专题/标签ID，不读取其他用户资料。全部参数绑定，不接受动态排序或表名。",
+      "verification": "tests/knowledge-chain-postgres.test.js验证选择持久化和跨用户隔离；tests/chat-conversation-product.test.js验证消息幂等、续接、删除来源与运行中撤权。"
     },
     {
       "file": "server/repositories/agent-learning-evaluation.js",

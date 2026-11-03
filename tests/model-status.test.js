@@ -38,6 +38,14 @@ async function updateModel(user, id, body) {
     return response;
 }
 
+async function testModel(user, id) {
+    const router = makeModelsRouter(user);
+    const route = router.stack.find(layer => layer.route?.path === '/models/test' && layer.route?.methods?.post);
+    const response = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+    await runExpressHandlers(route.route.stack.map(layer => layer.handle), { body: { id: String(id), url: '********', api_key: '********' }, user }, response);
+    return response;
+}
+
 test('模型支持关闭与开启：停用模型不删除配置、自动清除默认引用且不出现在可运行列表', async () => {
     const admin = await queryOne("SELECT id, username, role, unit FROM users WHERE username = 'admin'");
     assert.ok(admin);
@@ -87,7 +95,7 @@ test('模型支持关闭与开启：停用模型不删除配置、自动清除�
         assert.equal(runnableList.some(item => Number(item.id) === Number(globalModel.id)), false);
         assert.equal(runnableList.some(item => Number(item.id) === Number(personalModel.id)), false);
 
-        // 7. GET /models 列表默认展示 active 与 disabled 模型（供设置页面查看与管理）
+        // 7. GET /models 列表默认展示 active 与 disabled 模型（供管理员设置页面查看与管理）
         const allList = await getModels(admin, { limit: '100' });
         assert.equal(allList.statusCode, 200);
         const globalInList = allList.body.data.find(item => Number(item.id) === Number(globalModel.id));
@@ -96,6 +104,16 @@ test('模型支持关闭与开启：停用模型不删除配置、自动清除�
         assert.equal(globalInList.status, 'disabled');
         assert.ok(personalInList);
         assert.equal(personalInList.status, 'disabled');
+
+        // 7b. 普通用户查看 GET /models：能看到自己停用的个人模型，但绝看不到已被关闭的全局模型
+        const userList = await getModels(user, { limit: '100' });
+        assert.equal(userList.statusCode, 200);
+        assert.equal(userList.body.data.some(item => Number(item.id) === Number(globalModel.id)), false, '普通用户不应在模型列表中看到已关闭的全局模型');
+        assert.equal(userList.body.data.some(item => Number(item.id) === Number(personalModel.id)), true, '普通用户应能看到自己已停用的个人模型');
+
+        // 7c. 普通用户不能对已关闭的全局模型发起测试
+        const userTestDisabledGlobal = await testModel(user, globalModel.id);
+        assert.equal(userTestDisabledGlobal.statusCode, 403, '普通用户测试已关闭的全局模型必须返回 403');
 
         // 8. 传递 status=active 时过滤掉已关闭模型
         const activeOnlyList = await getModels(admin, { status: 'active', limit: '100' });
@@ -120,5 +138,7 @@ test('模型支持关闭与开启：停用模型不删除配置、自动清除�
     } finally {
         await execute('DELETE FROM models WHERE id IN (?, ?)', [globalModel.id, personalModel.id]);
         await execute('DELETE FROM users WHERE id IN (?, ?)', [user.id, stranger.id]);
+        const { closePgPool } = require('../server/db/pg-connection');
+        await closePgPool();
     }
 });

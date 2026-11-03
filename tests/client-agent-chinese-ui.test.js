@@ -57,6 +57,22 @@ function createClientEnvironment() {
     return sandbox;
 }
 
+test('知识片段显示引用与不完整提示，来源标题不执行 HTML', () => {
+    const env = createClientEnvironment();
+    const html = env.agentStepReadableMarkup({ output: { knowledgeSourceVersion: 1, retrieval: { status: 'partial' }, sources: [
+        { title: '<script>资料</script>', citationKey: 'kb:1:v1:b1', truncated: true, coverage: { known: true, complete: false } },
+        { title: '旧资料', citationKey: '' }
+    ] } });
+    assert.match(html, /data-knowledge-citation="kb:1:v1:b1"/);
+    assert.match(html, /文档索引不完整/);
+    assert.match(html, /暂无可打开的引用/);
+    assert.doesNotMatch(html, /<script>/);
+    const compact = env.agentStepReadableMarkup({ output: { knowledgeSourceVersion: 1, sources: [], __partial: true, knowledgeEvidence: { knowledgeSourceVersion: 1, sources: [{ title: '完整清单', citationKey: 'kb:1:v1:b1' }] } } });
+    assert.match(compact, /完整清单/);
+    assert.match(compact, /上下文限制/);
+    assert.match(env.agentStepReadableMarkup({ output: { knowledgeSourceVersion: 1, sources: [], retrieval: { reasonCode: 'KNOWLEDGE_SOURCE_UNAVAILABLE' } } }), /不可访问/);
+});
+
 test('富文本内容校对节点输出全面中文化', () => {
     const env = createClientEnvironment();
 

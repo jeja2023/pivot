@@ -34,6 +34,7 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
         } catch (_) { return { passed: false, reason: 'artifact_integrity_failed' }; }
     }
     const verifiedArtifacts = artifacts.map(item => ({ id: item.id, title: item.title, format: item.format, contentDigest: item.content_digest }));
+    if (!await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user)) return { passed: false, reason: 'source_revoked', verifiedArtifacts };
     const model = await (deps.getModel || getRunnableModelForUserAsync)(run.chosen_model_id || run.model_id, user);
     if (!model) return { passed: false, reason: 'verifier_unavailable', verifiedArtifacts };
     const controller = new AbortController();
@@ -56,6 +57,7 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
         const expected = contract.deliverables || [];
         const uncovered = expected.map(String).filter(item => !covered.includes(item));
         const missing = [...new Set([...reportedMissing, ...uncovered])].slice(0, 16);
+        if (!await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user)) return { passed: false, reason: 'source_revoked', verifiedArtifacts };
         return { passed: result.passed === true && missing.length === 0 && expected.every(item => covered.includes(String(item))), missing: missing.slice(0, 16).map(String), coveredDeliverables: covered.slice(0, 16).map(String), artifactIds: artifacts.map(item => item.id), verifiedArtifacts, verifier: 'chat-deliverables-v1' };
     } catch (_) { signal?.throwIfAborted(); return { passed: false, reason: 'verifier_unavailable', verifiedArtifacts, verifier: 'chat-deliverables-v1' }; }
     finally { clearTimeout(timer); }

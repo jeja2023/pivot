@@ -553,11 +553,11 @@ async function debugRetrieveContext(userId, query, {
     const keywords = buildKeywordCandidates(normalizedQuery);
     const displayKeywords = buildRagDisplayTerms(normalizedQuery);
     const requiredTerms = buildRagRequiredTerms(normalizedQuery);
-    const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
-        getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user }),
-        selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
-        hasAccessibleChunks(userId, normalizedScope, user)
-    ]);
+    const { graphContext, lexicalCandidates, corpusAvailable, degradedPaths } = await require('./initial-candidates').loadInitialCandidates({
+        graph: () => getGraphContextForQuery(userId, normalizedQuery, { scope: normalizedScope, user }),
+        lexical: () => selectLexicalCandidates(userId, normalizedQuery, safeCandidateLimit, normalizedScope, user),
+        accessible: () => hasAccessibleChunks(userId, normalizedScope, user)
+    });
     if (!corpusAvailable) {
         return {
             query: normalizedQuery,
@@ -662,7 +662,8 @@ async function debugRetrieveContext(userId, query, {
         scope: normalizedScope,
         hybrid,
         ranking: {
-            mode: confidenceRejected ? 'confidence_rejected' : (usedKeywordFallback ? 'keyword_fallback' : 'hybrid_dual_rrf_mmr'),
+            mode: degradedPaths.includes('lexical') && usedKeywordFallback ? 'retrieval_unavailable' : confidenceRejected ? 'confidence_rejected' : (usedKeywordFallback ? 'keyword_fallback' : 'hybrid_dual_rrf_mmr'),
+            degradedPaths,
             selectedChunkIds: selected.map(match => match.chunkId).filter(Boolean),
             gatedCount: gated.length,
             confidenceRejectionReason,
@@ -710,11 +711,11 @@ async function retrieveContext(userId, query, topK = null, options = {}) {
     }
 
     try {
-        const [graphContext, lexicalCandidates, corpusAvailable] = await Promise.all([
-            getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null }),
-            selectLexicalCandidates(userId, normalizedQuery, config.candidateLimit, retrievalScope, options.user || null),
-            hasAccessibleChunks(userId, retrievalScope, options.user || null)
-        ]);
+        const { graphContext, lexicalCandidates, corpusAvailable } = await require('./initial-candidates').loadInitialCandidates({
+            graph: () => getGraphContextForQuery(userId, normalizedQuery, { scope: retrievalScope, user: options.user || null }),
+            lexical: () => selectLexicalCandidates(userId, normalizedQuery, config.candidateLimit, retrievalScope, options.user || null),
+            accessible: () => hasAccessibleChunks(userId, retrievalScope, options.user || null)
+        });
 
         if (!corpusAvailable) {
             setToCache(userId, normalizedQuery, config.topK, '', cacheScope);

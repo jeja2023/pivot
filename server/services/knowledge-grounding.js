@@ -239,7 +239,9 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
     const mismatchedCitations = [...text.matchAll(/\[(?:引用\s*)?(\d{1,3})\s*\|\s*citation:\s*([^|\]\s]+)(?:\s*\|[^\]\n]*)?\s*\]/gi)]
         .filter(match => sourceKeys.get(Number(match[1])) !== match[2])
         .map(match => ({ index: Number(match[1]), key: match[2] }));
-    const refusal = /知识库中未找到足够依据|未检索到足够相关内容|依据不足/.test(text);
+    const refusalMention = /知识库中未找到足够依据|未检索到足够相关内容|依据不足/.test(text);
+    // 只有完整匹配的受控拒答才免于事实验证；夹带结论或引用时必须按普通回答核验。
+    const refusal = /^(?:知识库中未找到足够依据|未检索到足够相关内容|依据不足)[。.!！]?$/u.test(text);
     const unsupportedClaims = strict && !refusal
         ? findUnsupportedClaims(text, sources, validIndexes)
         : [];
@@ -255,6 +257,7 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
         invalidSourceIndexes: invalidIndexes,
         invalidCitationKeys: invalidKeys,
         mismatchedCitations,
+        refusalMixedWithContent: refusalMention && !refusal,
         unsupportedClaims
     };
     return {
@@ -265,6 +268,7 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
 }
 
 module.exports = {
+    buildKnowledgeInsufficientAnswer,
     extractKnowledgeSources,
     validateKnowledgeAnswer,
     verifyKnowledgeAnswerSemantics,

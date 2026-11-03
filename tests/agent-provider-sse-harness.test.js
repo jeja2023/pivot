@@ -9,6 +9,26 @@ const { createAgentStepContext } = require('../server/services/agent-step-contex
 const { TaskBudget } = require('../server/services/agent-budget');
 const NETWORK_TIMEOUT_DRILL_MS = 2_000;
 
+test('知识任务在来源核验完成前不公开流式正文，撤权后只保存安全提示', async () => {
+    const run = { id: 'knowledge-output-guard', user_id: 7, goal: '依据资料回答', max_steps: 2,
+        metadata: { capabilityConstraints: { capabilities: ['knowledge.search'] } } };
+    const steps = [];
+    const events = [];
+    const updates = [];
+    const deps = streamingDeps({ run, steps, events });
+    deps.callModelStreamingWithTools = async (_model, _messages, _tools, options) => {
+        options.onDelta({ content: '不应公开的资料正文', reasoning: '', partialToolCalls: [] });
+        return { content: '不应公开的资料正文', hasToolCalls: false, toolCalls: [] };
+    };
+    deps.verifyAgentOutcome = async () => ({ outcomeStatus: 'needs_input', hardFailures: ['knowledge_sources_current'], semanticVerification: { reason: 'source_revoked' } });
+    deps.updateRun = async (_id, fields) => updates.push(fields);
+    await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] }, deps);
+    assert.equal(JSON.stringify(events).includes('不应公开的资料正文'), false);
+    assert.equal(JSON.stringify(steps).includes('不应公开的资料正文'), false);
+    assert.match(updates.at(-1).final_answer, /资料来源已变化/);
+});
+
 test('streaming sampler merges UI updates and reserves one audit snapshot for completion', () => {
     const sampler = createStreamingSnapshotSampler({ maxAuditSnapshots: 4, uiIntervalMs: 100, auditIntervalMs: 1000, auditMinGrowth: 3 });
     assert.equal(sampler.sampleUi({ content: 'a' }, 0), true);

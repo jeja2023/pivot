@@ -282,6 +282,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 onFailure: ({ failed, attempted }) => deps.logger?.warn({ runId, failed, attempted }, 'Agent 流式审计事件写入失败')
             });
             const recordDelta = (snapshot, { completed = false } = {}) => {
+                if (require('./knowledge-output-guard').holdKnowledgeOutput(run, observations)) return;
                 const content = String(snapshot?.content || '');
                 const partialToolCalls = Array.isArray(snapshot?.partialToolCalls) ? snapshot.partialToolCalls : [];
                 const sampled = snapshotSampler.sampleAudit(snapshot, { completed });
@@ -313,6 +314,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 });
             };
             const emitDelta = (snapshot) => {
+                if (require('./knowledge-output-guard').holdKnowledgeOutput(run, observations)) return;
                 if (!snapshot) return;
                 touchStreamingHeartbeat();
                 if (!snapshotSampler.sampleUi(snapshot)) return;
@@ -510,7 +512,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 title: result?.hasToolCalls ? `流式工具计划：${result.toolCalls.map(c => c.name).filter(Boolean).join(', ') || '工具'}` : '流式最终答案',
                 input: { goal: run.goal },
                 output: {
-                    content: sanitizeUserVisibleText(result?.content || ''),
+                    content: require('./knowledge-output-guard').holdKnowledgeOutput(run, observations) ? '' : sanitizeUserVisibleText(result?.content || ''),
                     toolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, arguments: c.arguments || c.argumentsRaw })),
                     finishReason: result?.finishReason || ''
                 },
@@ -520,7 +522,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
 
             if (!result?.hasToolCalls) {
                 finalizingAnswer = true;
-                const answer = sanitizeUserVisibleText(result?.content || '') || (usageResult?.budgetExceeded ? '当前额度已用完，本次尚未生成可用答案。' : await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                let answer = sanitizeUserVisibleText(result?.content || '') || (usageResult?.budgetExceeded ? '当前额度已用完，本次尚未生成可用答案。' : await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     budget: deps.taskBudget,
                     allowBudgetExceeded: true
                 }));
@@ -528,6 +530,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 await assertRunNotCancelled(runId);
                 await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning, { allowed: !budgetWarning, remainingSteps: sliceEndStep - step });
+                answer = require('./knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 if (verification.repair?.allowed) {
                     const metadata = deps.getRunMetadata?.(run) || {};
@@ -722,10 +725,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 }
                 if (executed.status === 'success') {
                     const compactOutput = compactToolOutput(executed.output, modelCfg);
-                    observations.push({ step, tool: call.name, input: args, output: compactOutput });
+                    const knowledgeEvidence = require('./knowledge-tool-results').knowledgeEvidenceManifest(executed.output);
+                    observations.push({ step, tool: call.name, input: args, output: compactOutput, ...(knowledgeEvidence ? { knowledgeEvidence } : {}) });
                     await deps.insertStep(runId, step, {
                         type: 'tool', title: `工具执行完成：${call.name}`, toolName: call.name,
-                        input: args, output: compactOutput, durationMs: executed.durationMs,
+                        input: args, output: knowledgeEvidence ? { ...compactOutput, knowledgeEvidence } : compactOutput, durationMs: executed.durationMs,
                         contextHash: stepContext?.contextHash || ''
                     });
                     await recordToolCall({

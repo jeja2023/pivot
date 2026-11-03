@@ -7,6 +7,14 @@ const { getCapabilityDefinition } = require('./agent-capability-registry');
 
 const DEFAULT_DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_DISCOVERY_CACHE_ENTRIES = 100;
+// 业务词只影响当前授权目录内的排序，不创建工具或扩大权限。
+const BUSINESS_ALIASES = Object.freeze({
+    'rag.search': '知识库 资料 制度 条款 依据 来源 引用 检索',
+    'knowledge.graph.query': '知识图谱 实体 关系 归属 责任 影响',
+    'artifact.render': '生成 Word 文档 PDF 文件 导出 报告',
+    'render_diagram': '绘图 画图 画流程图 业务流程 流程图 时序图 结构图 Mermaid Graphviz PlantUML',
+    'run_ast_audit': 'Python 代码 审查 静态检查 危险调用'
+});
 
 function normalizeTerms(value) {
     const source = String(value || '').toLowerCase();
@@ -35,7 +43,8 @@ function rankTools(query, tools = [], filters = {}) {
     const keywords = normalizeTerms(query);
     return (tools || []).filter(tool => matchesFilters(tool, filters)).map(tool => {
         const capTitles = (tool.capabilities || []).map(cap => getCapabilityDefinition(cap)?.title || '').filter(Boolean);
-        const corpus = [tool.name, tool.title, tool.description, tool.serverName, ...(tool.capabilities || []), ...capTitles].join(' ').toLowerCase();
+        const aliases = BUSINESS_ALIASES[String(tool.name || '').replace(/^mcp\.\d+\./, '')] || '';
+        const corpus = [tool.name, tool.title, tool.description, tool.serverName, aliases, ...(tool.capabilities || []), ...capTitles].join(' ').toLowerCase();
         const matchedTerms = keywords.filter(term => corpus.includes(term));
         const title = `${tool.title || ''} ${tool.name || ''}`.toLowerCase();
         const score = matchedTerms.length + matchedTerms.filter(term => title.includes(term)).length * 0.5;

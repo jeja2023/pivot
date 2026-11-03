@@ -3,7 +3,6 @@ const { chatSourceToolDefinition, executeChatSource } = require('./chat-source-t
 const { searchUserSessions } = require('./agent-session-search');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
-const { debugRetrieveContext } = require('./rag-index');
 const { queryKnowledgeGraph } = require('./knowledge-graph');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { getRunnableModelForUserAsync, getUserRunnableModelsAsync } = require('./models');
@@ -12,7 +11,6 @@ const { buildChartSpec, buildTableBlock } = require('./builtin-mcp');
 const { isSuperAdmin } = require('../permissions');
 const { executeContentReview } = require('./agent-content-review');
 const { fitMessagesToContextBudget, getModelContextBudget } = require('./context-budget');
-const { normalizeContextConfig } = require('./agent-validators');
 const { executeAgentHttp } = require('./agent-http-tool');
 const { executeAgentWebSearch, isAgentWebSearchAvailable } = require('./agent-web-search');
 const {
@@ -525,6 +523,8 @@ function getBuiltInToolDefinitions(user) {
             description: '检索当前用户的知识库，返回按相关度排序的片段和来源文档。',
             input_schema: asJsonSchema({
                 query: { type: 'string', description: '检索问题或关键词。' },
+                collectionIds: { type: 'array', items: { type: 'integer', minimum: 1 }, maxItems: 50, description: '可选专题标识，只能收窄本次任务已有资料范围。' },
+                tagNames: { type: 'array', items: { type: 'string' }, maxItems: 20, description: '可选标签，只能收窄已有范围。' },
                 topK: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
                 candidateLimit: { type: 'integer', minimum: 10, maximum: 200, default: 80 }
             }, ['query']),
@@ -951,35 +951,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (name === 'workflow.embed_code') return executeWorkflowEmbedCode(input);
     if (name === 'report.compose') return executeReportCompose(input);
 
-    if (name === 'rag.search') {
-        const query = String(input.query || '').trim();
-        if (!query) throw new Error('请填写检索问题。');
-        let chatBridge = context?.run?.metadata?.chatBridge;
-        if (typeof chatBridge === 'string') {
-            try { chatBridge = JSON.parse(chatBridge); } catch (_) { chatBridge = null; }
-        }
-        const runContextConfig = normalizeContextConfig(context?.run?.context_config || context?.run?.contextConfig || {});
-        // 显式选择的项目资料包优先且只能收窄范围；RAG 内部仍会再次执行当前 ACL。
-        const scope = runContextConfig.collectionIds.length
-            ? { collectionIds: runContextConfig.collectionIds }
-            : (chatBridge?.ragScope && typeof chatBridge.ragScope === 'object' ? chatBridge.ragScope : {});
-        const result = await debugRetrieveContext(user.id, query, {
-            topK: parsePositiveInt(input.topK, 5, 10),
-            candidateLimit: parsePositiveInt(input.candidateLimit, 80, 200),
-            scope,
-            user
-        });
-        return {
-            query,
-            matches: (result.matches || []).map(match => ({
-                docName: match.docName,
-                score: match.score,
-                hit: match.hit,
-                content: clampText(match.content, 1600)
-            })),
-            metrics: result.metrics || null
-        };
-    }
+    if (name === 'rag.search') return require('./knowledge-tool-results').executeKnowledgeSearch(input, user, context);
 
     if (name === 'sessions.search') {
         return await searchUserSessions(user, input);
@@ -997,14 +969,8 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     }
 
     if (name === 'knowledge.list') {
-        const limit = parsePositiveInt(input.limit, 20, 50);
-        return await query(`
-            SELECT id, name, status, is_enabled, chunk_count, indexed_chunks, progress, error_message, updated_at
-            FROM knowledge_docs
-            WHERE user_id = ? AND deleted_at IS NULL
-            ORDER BY updated_at DESC, created_at DESC
-            LIMIT ?
-        `, [user.id, limit]);
+        const scope = await require('./knowledge-tool-results').resolveKnowledgeToolScope(user, input, context);
+        return await require('../repositories/knowledge').listChatKnowledgeCatalog(user, scope, parsePositiveInt(input.limit, 20, 50));
     }
 
     if (name === 'knowledge.graph.query') {
@@ -1012,6 +978,8 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         if (!graphQuery) throw new Error('请填写知识图谱查询问题。');
         return queryKnowledgeGraph({
             userId: user.id,
+            user,
+            scope: await require('./knowledge-tool-results').resolveKnowledgeToolScope(user, input, context),
             query: graphQuery,
             entityLimit: parsePositiveInt(input.entityLimit, 6, 10),
             relationLimit: parsePositiveInt(input.relationLimit, 12, 20)

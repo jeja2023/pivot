@@ -105,7 +105,8 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
     if (acceptance.artifactRequired) add('artifact_required', hasArtifact, hasArtifact ? (artifactNames.join('、') || '已生成受控文件') : '尚未生成要求的文件');
     if (acceptance.requireSemanticVerification) add('deliverables_verified', semanticVerification?.passed === true, semanticVerification?.reason || (semanticVerification?.missing || []).join('；'));
     acceptance.requiredArtifacts.forEach(required => add('required_artifact', artifactNames.includes(required), required));
-    const evidenceFound = hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0);
+    const evidenceFound = semanticVerification?.reason !== 'source_revoked' && (hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0));
+    if (semanticVerification?.reason === 'source_revoked') add('knowledge_sources_current', false, '资料来源已变化或不可访问');
     if (acceptance.requireEvidence) add('evidence', evidenceFound, evidenceFound ? '已提供可核验来源' : '缺少引用来源与佐证');
     const hardFailures = rules.filter(rule => rule.hard && !rule.passed);
     const outcomeStatus = partial ? 'partial' : hardFailures.length ? 'needs_input' : 'verified';
@@ -129,6 +130,7 @@ function taskVerificationFailureMessage(report = {}) {
         valid_json: '结果格式不符合要求', output_schema: '结果结构不符合要求',
         artifact_required: '尚未生成要求的文件', required_artifact: '缺少要求的文件',
         deliverables_verified: '交付内容尚未通过核验'
+        ,knowledge_sources_current: '资料来源已变化或不可访问'
     };
     const semanticReasons = { source_revoked: '原始资料已不可用', source_not_fully_read: '尚未读取完整资料',
         artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试' };
@@ -163,8 +165,12 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         }
     }
     const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '');
-    const semanticVerification = contract.acceptance.requireSemanticVerification && !partial
+    let semanticVerification = contract.acceptance.requireSemanticVerification && !partial
         ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null;
+    if (!semanticVerification && observations.some(item => item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1 || item.output?.knowledgeContextVersion === 1)) {
+        const current = await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user || { id: run?.user_id });
+        if (!current) semanticVerification = { passed: false, reason: 'source_revoked' };
+    }
     signal?.throwIfAborted();
     const report = verifyTaskOutcome({
         taskContract: taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract,

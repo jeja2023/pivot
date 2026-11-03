@@ -72,10 +72,13 @@ async function getTestableModel(modelId, user) {
     }
     if (!model) return null;
     if (model.user_id && model.user_id !== user.id) return null;
-    if (!model.user_id && !isAdmin(user) && model.allowed_units) {
-        const units = String(model.allowed_units || '').split(',').map(unit => unit.trim()).filter(Boolean);
-        const userUnit = String(user.unit || '').trim();
-        if (!userUnit || !units.includes(userUnit)) return null;
+    if (!model.user_id && !isAdmin(user)) {
+        if ((model.status || 'active') === 'disabled') return null;
+        if (model.allowed_units) {
+            const units = String(model.allowed_units || '').split(',').map(unit => unit.trim()).filter(Boolean);
+            const userUnit = String(user.unit || '').trim();
+            if (!userUnit || !units.includes(userUnit)) return null;
+        }
     }
     if (model.api_key) {
         try {
@@ -310,7 +313,13 @@ function createModelsRouter({ authMiddleware, logAction, normalizePage, normaliz
 
         if (!isAdmin(req.user)) {
             const unitCheck = `(COALESCE(m.allowed_units, '') = '' OR ${exactCsvTokenSql('m.allowed_units')})`;
-            where = `WHERE ${statusCondition} AND (m.user_id = ? OR (m.user_id IS NULL AND ${unitCheck}))`;
+            const globalStatusCond = statusFilter === 'disabled'
+                ? '1 = 0'
+                : "COALESCE(m.status, 'active') = 'active'";
+            where = `WHERE (
+                (m.user_id = ? AND ${statusCondition})
+                OR (m.user_id IS NULL AND ${globalStatusCond} AND ${unitCheck})
+            )`;
             filterParams = [req.user.id, (req.user.unit || '').trim()];
         } else {
             where = `WHERE ${statusCondition}`;

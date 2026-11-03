@@ -17,6 +17,7 @@ function toolStepDiagnostics(step = {}) {
         })].map(identifier).filter(Boolean);
     const codes = output.reasonCodes || output.diagnosis?.reasonCodes;
     return { targets: [...new Set(targets)], code: identifier(output.code),
+        ...(output.code ? { chain: require('./tool-chain-status').failureStage({ code: output.code }) } : {}),
         category: identifier(output.diagnosis?.category), reasonCodes: (Array.isArray(codes) ? codes : []).map(identifier).filter(Boolean) };
 }
 

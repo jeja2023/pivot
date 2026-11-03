@@ -39,6 +39,12 @@ async function createChatAgentHandoff({
     requestKey = ''
 } = {}) {
     if (typeof agentRunFactory !== 'function') throw new Error('Agent 运行时尚未初始化。');
+    const knowledgeSelected = Boolean(routeOverrides.collections?.length || routeOverrides.tagNames?.length);
+    if (knowledgeSelected && routeOverrides.excludeRag !== true) {
+        ragScope = require('./knowledge-tool-results').intersectScopes(ragScope, { collectionIds: routeOverrides.collections, tagNames: routeOverrides.tagNames });
+        ragScope = await require('./knowledge-tool-results').resolveKnowledgeToolScope(user, {}, { run: { metadata: { chatBridge: { ragScope } } } });
+    }
+    ragEnabled = ragEnabled && routeOverrides.excludeRag !== true;
     const chatHistory = normalizeChatHistory((Array.isArray(sessionMessages) ? sessionMessages : []).filter(message => (
         !userMessageId || Number(message?.id || 0) !== Number(userMessageId)
     )));
@@ -50,7 +56,7 @@ async function createChatAgentHandoff({
         projectId: project.projectId,
         modelCfg,
         modelContent: automaticExecution?.objective || modelContent,
-        ragEnabled: ragEnabled && (!automaticExecution || (automaticExecution.requiredCapabilities || []).some(cap => cap.startsWith('knowledge.'))),
+        ragEnabled: ragEnabled && (knowledgeSelected || !automaticExecution || (automaticExecution.requiredCapabilities || []).some(cap => cap.startsWith('knowledge.'))),
         ragScope,
         retrieveContext,
         isRagEnabled
@@ -63,7 +69,7 @@ async function createChatAgentHandoff({
     const selection = await require('./chat-selected-tools').resolveChatSelectedTools(user, { ...routeOverrides, tools: requestedTools }, mcpToolAllowlist);
     const selectedTools = selection.tools;
     const effectiveMcpEnabled = routeOverrides.excludeTools !== true && Boolean(mcpEnabled || (automatic && automaticExecution.allowMcp === true) || selectedTools.length);
-    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source', ...selectedTools.flatMap(tool => tool.capabilities || [])])] : [];
+    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source', ...(ragEnabled && knowledgeSelected ? ['knowledge.search'] : []), ...selectedTools.flatMap(tool => tool.capabilities || [])])] : [];
     const automaticEndpoints = automatic && effectiveMcpEnabled && !selection.names.length
         ? await require('./chat-selected-tools').resolveAutomaticMcpEndpoints(user, capabilities, mcpToolAllowlist) : {};
     const taskBudget = resolveChatAgentBudget({ modelCfg, decision: automaticExecution || {}, ragEnabled, mcpEnabled: effectiveMcpEnabled,
@@ -157,7 +163,7 @@ async function createChatAgentHandoff({
         ...((automatic || taskBudget.profile === 'knowledge_qa') ? { maxTokenBudget: budget.max_tokens_total, budgetConfig: budget } : {}),
         runMode: 'standard',
         toolPolicy: effectiveMcpEnabled ? 'all' : 'builtin_only',
-        toolAllowlist: selection.names.length ? [...(selection.executionNames || selection.names), 'chat.read_source'] : [],
+        toolAllowlist: selection.names.length ? [...(selection.executionNames || selection.names), 'chat.read_source', ...(ragEnabled && knowledgeSelected ? ['rag.search', 'knowledge.list', 'knowledge.graph.query'] : [])] : [],
         approvalPolicy: 'safe_mcp_auto',
         timeoutMs: AGENT_DEFAULT_TIMEOUT_MS,
         toolTimeoutMs: AGENT_TOOL_TIMEOUT_MS,

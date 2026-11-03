@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.83",
+  "version": "0.7.86",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -110,7 +110,8 @@
     "report:decision-release-evidence": "node scripts/collect_decision_release_evidence.js",
     "build:mindmap-vendor": "node scripts/build_mindmap_vendor.js",
     "check:mindmap-vendor": "node scripts/check_mindmap_vendor.js",
-    "test:offline-tools:integration": "node scripts/run_offline_tools_integration.js"
+    "test:offline-tools:integration": "node scripts/run_offline_tools_integration.js",
+    "test:tool-knowledge-chain": "node scripts/verify_tool_knowledge_chain.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",

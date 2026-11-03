@@ -105,7 +105,9 @@ function presentTaskEvent(row) {
             title: tool !== 'terminal.runtime' && /[\u3400-\u9fff]/.test(String(payload.toolTitle || '')) ? safeTaskText(payload.toolTitle, 80) : toolLabel(tool, { action: payload.action }),
             location: executionLocation(tool, parseObject(payload.executionPlan)),
             status: payload.outcomeMayBeUncertain ? 'uncertain' : statuses[type] || 'failed', durationMs: Math.max(0, Number(payload.durationMs || 0)),
+            chain: payload.chain ? { stage: safeTaskText(payload.chain.stage, 40), status: safeTaskText(payload.chain.status, 40), reasonCode: safeTaskText(payload.chain.reasonCode, 100) } : undefined,
             detail: payload.outcomeMayBeUncertain ? '操作结果尚未确认，请核实后再决定是否重试。'
+                : payload.chain ? safeTaskText(payload.chain.message, 240)
                 : safeTaskText(payload.errorMessage || payload.resultSummary || (type === 'tool.replayed' ? '复用已完成结果，未重复执行。' : type === 'transaction.effect_staged' ? '已准备外部操作，尚未提交执行。' : '')) };
     }
     if (type.startsWith('approval.')) return { ...base, kind: 'approval',
@@ -121,12 +123,14 @@ function presentTaskEvent(row) {
 
 function presentLegacyStep(step) {
     const type = String(step.type || '');
+    const output = parseObject(step.output);
+    const chain = output.code ? require('./tool-chain-status').failureStage({ code: output.code }) : null;
     return { id: `step:${step.id}`, seq: 0, legacyStepId: Number(step.id), kind: type === 'tool' ? 'tool' : 'phase',
         operationId: `legacy:${step.id}`, title: type === 'tool' ? toolLabel(step.tool_name)
             : type === 'plan' ? '已生成执行安排' : type === 'approval' ? '操作授权记录' : '任务处理记录',
         status: ['error', 'failed'].includes(step.status) ? 'failed' : 'completed',
         durationMs: Math.max(0, Number(step.duration_ms || 0)), at: step.completed_at || step.created_at,
-        location: type === 'tool' ? executionLocation(step.tool_name) : '', detail: '' };
+        location: type === 'tool' ? executionLocation(step.tool_name) : '', detail: chain?.message || '', ...(chain ? { chain } : {}) };
 }
 
 module.exports = { EVENT_TYPES, STATUS_LABELS, parseObject, safeTaskText, toolLabel, executionLocation, approvalSummary, presentTaskEvent, presentLegacyStep };

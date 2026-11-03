@@ -104,7 +104,9 @@ async function listToolInvocationEventsForUser(user, options = {}, deps = {}) {
         WHERE actor_id = ?
         ORDER BY created_at DESC LIMIT ?
     `, [user?.id || 0, limit]);
-    return rows.map(row => ({ ...row, policy_reason_codes: row.policy_reason_codes || [] }));
+    return rows.map(row => ({ ...row, policy_reason_codes: row.policy_reason_codes || [],
+        chain: row.status === 'success' ? { stage: 'execution', status: 'succeeded', reasonCode: 'TOOL_EXECUTED' }
+            : require('./tool-chain-status').failureStage({ code: row.error_code }) }));
 }
 
 async function getToolInvocationEventForUser(id, user, deps = {}) {

@@ -8,6 +8,7 @@ const REGISTRY_END = '# <<< PIVOT_TYPED_CONFIG_REGISTRY <<<';
 const ROOT = path.resolve(__dirname, '../..');
 
 const ENV_CONFIG_REGISTRY = Object.freeze({
+    PIVOT_AGENT_EMPTY_SEARCH_LIMIT: { group: '工具发现', type: 'integer', defaultValue: 4, min: 2, max: 12, description: '同一目标、目录和用户修订下累计空搜索次数上限；业务调用成功或用户修订后重置，达到上限暂停等待选择工具。' },
     PIVOT_TTS_ENDPOINT: { group: '语音合成', type: 'string', defaultValue: '', description: '管理员批准的统一离线 WAV 语音合成端点，例如 http://tts:8502/speech；浏览器不能指定目标。' },
     PIVOT_TTS_CREDENTIAL: { group: '语音合成', type: 'string', defaultValue: '', description: '统一朗读服务的受控凭据引用；仅有凭据使用权限的账号可以朗读，留空关闭服务。' },
     PIVOT_SERVER_VOICE_ENABLED: { group: '语音识别', type: 'boolean', defaultValue: true, description: '允许登录用户通过统一语音识别服务处理短录音。默认仅本地或内网处理；禁用后不发起服务端识别。' },

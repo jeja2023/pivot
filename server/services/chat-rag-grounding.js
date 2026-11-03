@@ -15,7 +15,8 @@ async function groundChatRagAnswer({
     emitContentSse,
     writeSse,
     routePlan,
-    question
+    question,
+    validateCitationKeys = require('../repositories/knowledge').validateCitationKeys
 } = {}) {
     if (!contextResult?.ragGrounding?.required) return { assistantContent, ragGrounding: null };
     releaseSemaphore?.();
@@ -27,6 +28,14 @@ async function groundChatRagAnswer({
         user,
         callModel: callModelTextWithBudget
     });
+    if (ragGrounding.grounding.accepted && ragGrounding.grounding.status !== 'insufficient_evidence') {
+        let current = false;
+        try { current = ragGrounding.sources.every(source => source.citationKey) && await validateCitationKeys(ragGrounding.sources.map(source => source.citationKey), user); } catch (_) { /* 授权核验失败时不公开正文。 */ }
+        if (!current) {
+            ragGrounding.answer = '知识库资料已变化或当前不可访问，请重新检索后再试。';
+            ragGrounding.grounding = { ...ragGrounding.grounding, accepted: false, status: 'source_revoked' };
+        }
+    }
     const groundedAnswer = contextResult.ragGrounding.overview && ragGrounding.grounding.accepted && ragGrounding.grounding.status !== 'insufficient_evidence'
         ? `以下内容基于部分文档的开头片段，不能代表文档或专题的全部内容。\n\n${ragGrounding.answer}`
         : ragGrounding.answer;

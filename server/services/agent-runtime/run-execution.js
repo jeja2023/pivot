@@ -642,7 +642,7 @@ const {
             }
 
             if (plan.action === 'final' || !plan.tool) {
-                const answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
+                let answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     signal: runController.signal,
                     budget: taskBudget,
                     ...plannerChatContext
@@ -650,6 +650,7 @@ const {
                 await assertRunNotCancelled(runId);
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer, false, '', { allowed: true, remainingSteps: sliceEndStep - step });
+                answer = require('../knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 if (verification.repair?.allowed) {
                     taskContract = verification.taskContract;
@@ -765,11 +766,13 @@ const {
                     }
                 }
                 await updateRun(runId, { status: 'observing', updated_at: getBeijingTimestamp() });
+                const knowledgeEvidence = require('../knowledge-tool-results').knowledgeEvidenceManifest(output);
                 observations.push({
                     step,
                     tool: plan.tool,
                     input: effectivePlanInput,
-                    output: compactOutput
+                    output: compactOutput,
+                    ...(knowledgeEvidence ? { knowledgeEvidence } : {})
                 });
                 taskWorkingState = recordWorkingObservation(taskWorkingState, { tool: plan.tool, output: compactOutput }, taskContract, run.goal);
                 await setRunMetadata(runId, { taskContract, workingState: taskWorkingState });
@@ -781,7 +784,7 @@ const {
                     title: `工具执行完成：${plan.tool}`,
                     toolName: plan.tool,
                     input: effectivePlanInput,
-                    output: compactOutput,
+                    output: knowledgeEvidence ? { ...compactOutput, knowledgeEvidence } : compactOutput,
                     durationMs: Date.now() - startedAt,
                     contextHash: stepContext.contextHash
                 });

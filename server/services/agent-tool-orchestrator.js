@@ -56,6 +56,9 @@ function createToolOrchestrator(overrides = {}) {
     const invokeHooks = overrides.invokeAgentLifecycleHooks || invokeAgentLifecycleHooks;
 
     async function event(type, request, payload = {}) {
+        if (['tool.failed', 'tool.denied', 'sandbox.denied', 'transaction.denied'].includes(type) && !payload.chain) {
+            payload = { ...payload, chain: require('./tool-chain-status').failureStage({ code: payload.errorCode }) };
+        }
         if (typeof emitEvent !== 'function' || !request?.run?.id) return;
         try {
             const stepContext = {
@@ -333,6 +336,7 @@ function createToolOrchestrator(overrides = {}) {
             }
             try { await onComplete?.({ output, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event('tool.completed', requestWithKey, {
+                chain: require('./tool-chain-status').resultStage(output),
                 durationMs: Math.max(0, Date.now() - executionStartedAt),
                 resultSummary: summarizeToolOutcome(output),
                 executionPlan: summarizeToolExecutionPlan(executionPlan || {}),
@@ -347,6 +351,7 @@ function createToolOrchestrator(overrides = {}) {
                 : 'tool.failed';
             try { await onFailure?.({ error, policy, operationKey, effectiveInput, executionPlan }); } catch (_) {}
             await event(eventType, requestWithKey, {
+                chain: require('./tool-chain-status').failureStage(error),
                 errorCode: String(error?.code || ''),
                 errorCategory: String(error?.category || ''),
                 errorMessage: String(error?.message || '').slice(0, 500),

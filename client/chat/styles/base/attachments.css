@@ -420,6 +420,136 @@ body.dark-mode .doc-card {
 }
 .attachment-preview-empty a { color: var(--link-color, #93c5fd); }
 
+.attachment-preview-office {
+    width: 100%;
+    height: 100%;
+    min-height: 520px;
+    flex: 1 1 auto;
+    border: none;
+}
+.attachment-preview-text-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+.attachment-preview-notice {
+    padding: 8px 14px;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.8rem;
+    border-bottom: 1px solid #fef3c7;
+}
+.attachment-excel-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+.attachment-excel-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--bg-secondary, #f1f5f9);
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+.attachment-excel-tab {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.attachment-excel-tab:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+    color: var(--text-primary, #0f172a);
+}
+.attachment-excel-tab.is-active {
+    background: var(--surface, #ffffff);
+    border-color: var(--border, #cbd5e1);
+    color: var(--primary, #007aff);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.attachment-excel-sheet-wrapper {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 12px;
+    background: var(--surface, #ffffff);
+    min-height: 0;
+}
+.attachment-excel-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+    font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+    color: var(--text-primary, #0f172a);
+}
+.attachment-excel-table th,
+.attachment-excel-table td {
+    border: 1px solid var(--border, #e2e8f0);
+    padding: 6px 10px;
+    white-space: nowrap;
+    text-align: left;
+}
+.attachment-excel-table tr:first-child th,
+.attachment-excel-table tr:first-child td {
+    background: var(--bg-secondary, #f8fafc);
+    font-weight: 600;
+}
+.attachment-excel-table .excel-row-num {
+    background: var(--bg-tertiary, #f1f5f9);
+    color: var(--text-muted, #94a3b8);
+    font-size: 0.72rem;
+    width: 40px;
+    text-align: center;
+    user-select: none;
+}
+.attachment-excel-truncated-hint {
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    color: var(--text-muted, #64748b);
+    text-align: center;
+    background: var(--bg-secondary, #f8fafc);
+    border-top: 1px dashed var(--border, #e2e8f0);
+}
+body.dark-mode .attachment-excel-tabs {
+    background: var(--bg-secondary, #0f172a);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .attachment-excel-tab.is-active {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #475569);
+    color: #60a5fa;
+}
+body.dark-mode .attachment-excel-sheet-wrapper {
+    background: var(--surface, #1e293b);
+}
+body.dark-mode .attachment-excel-table {
+    color: #f1f5f9;
+}
+body.dark-mode .attachment-excel-table th,
+body.dark-mode .attachment-excel-table td {
+    border-color: var(--border, #334155);
+}
+body.dark-mode .attachment-excel-table tr:first-child th,
+body.dark-mode .attachment-excel-table tr:first-child td {
+    background: #0f172a;
+}
+body.dark-mode .attachment-excel-table .excel-row-num {
+    background: #1e293b;
+    color: #64748b;
+}
+
 body.dark-mode .attachment-preview-shell {
     background: var(--surface, #1e293b);
     border-color: var(--border);

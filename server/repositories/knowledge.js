@@ -120,6 +120,42 @@ function listCollectionResourceDocuments(collectionId, user, limit = 100) {
 }
 
 // 聊天目录与概览均复用检索范围和文档访问控制，不能因指定专题而扩大权限。
+async function validateCitationKeys(keys, user) {
+    const unique = [...new Set(keys.map(String))].filter(Boolean).slice(0, 100);
+    if (!unique.length) return true;
+    const actor = await queryOne('SELECT id,role,unit,status FROM users WHERE id = ? AND deleted_at IS NULL', [user?.id]);
+    if (!actor || actor.status === 'disabled') return false;
+    const normalized = normalizeKnowledgeUser(actor);
+    const rows = await query(`SELECT ci.citation_key FROM knowledge_citations ci
+        JOIN knowledge_documents kd ON kd.id = ci.document_id
+        WHERE ci.citation_key IN (${unique.map(() => '?').join(',')}) AND kd.deleted_at IS NULL
+          AND kd.current_version_id = ci.version_id AND kd.lifecycle_status NOT IN ('archived','expired')
+          AND (kd.owner_user_id = ? OR ? = TRUE)
+          AND EXISTS (SELECT 1 FROM knowledge_docs d WHERE d.id = kd.legacy_doc_id
+              AND d.deleted_at IS NULL AND COALESCE(d.is_enabled,1) <> 0 AND d.status IN ('ready','lexical_ready'))
+    `, [...unique, normalized.id, normalized.isSuperAdmin]);
+    return unique.every(key => rows.some(row => row.citation_key === key));
+}
+
+async function readSourceChunks(chunkIds, user, scope = {}) {
+    const ids = [...new Set(chunkIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0))].slice(0, 100);
+    if (!ids.length) return [];
+    const actor = await queryOne('SELECT id,role,unit,status FROM users WHERE id = ? AND deleted_at IS NULL', [user?.id]);
+    if (!actor || actor.status === 'disabled') return [];
+    user = actor;
+    const access = buildDocumentAccessFilter(user, 'd', 'c');
+    const scoped = require('../services/rag-index/retrieval-scope-builder').buildRetrievalScopeSql(scope, 'd', user);
+    return query(`SELECT ch.id AS chunk_id,ch.doc_id,ch.content,ch.char_start,ch.char_end,d.name,d.collection_id,d.extraction_coverage_json,d.index_fingerprint,
+        citation.citation_key,citation.document_id,citation.version_id,citation.block_id
+        FROM knowledge_chunks ch JOIN knowledge_docs d ON d.id = ch.doc_id
+        LEFT JOIN knowledge_collections c ON c.id = d.collection_id AND c.deleted_at IS NULL
+        ${scoped.accessJoin}
+        LEFT JOIN LATERAL (SELECT citation_key,document_id,version_id,block_id FROM knowledge_citations WHERE legacy_chunk_id = ch.id ORDER BY id DESC LIMIT 1) citation ON TRUE
+        WHERE ch.id IN (${ids.map(() => '?').join(',')}) AND d.deleted_at IS NULL
+          AND d.status IN ('ready','lexical_ready') AND COALESCE(d.is_enabled,1) <> 0 AND ${access.sql} ${scoped.sql}
+    `, [...ids, ...access.params, ...scoped.params]);
+}
+
 function listChatKnowledgeCatalog(user, scope = {}, limit = 101) {
     if (!normalizeKnowledgeUser(user).id) return Promise.resolve([]);
     const { buildRetrievalScopeSql } = require('../services/rag-index/retrieval-scope-builder');
@@ -333,6 +369,8 @@ function listProblemDocuments(userId) {
 }
 
 module.exports = {
+    validateCitationKeys,
+    readSourceChunks,
     getCollectionForUser,
     listCollections,
     findCollectionByName,

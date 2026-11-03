@@ -17,8 +17,18 @@ function safeJsonParse(value, fallback) {
 
 const parseTurnDecision = value => safeJsonParse(value, {});
 
+async function latestKnowledgeScope(sessionId, userId, beforeMessageId) {
+    const row = await queryOne(`SELECT t.decision->'knowledgeScope' AS scope FROM chat_conversation_turns t
+        JOIN sessions s ON s.id = t.session_id AND s.user_id = t.user_id AND s.deleted_at IS NULL
+        JOIN messages m ON m.id = t.user_message_id AND m.user_id = t.user_id AND m.deleted_at IS NULL
+        WHERE t.session_id = ? AND t.user_id = ? AND t.user_message_id < ? AND t.decision->'knowledgeScope' IS NOT NULL
+        ORDER BY t.user_message_id DESC LIMIT 1`, [sessionId, userId, beforeMessageId]);
+    return row ? parseTurnDecision(row.scope) : null;
+}
+
 function decisionAudit(value = {}) {
     const keys = ['version','action','intent','nextAction','reasonCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','learningDecisionId','durationMs','modelId','modelCalls','policyVersion','shadow','projectId'];
+    if (value.knowledgeScope) keys.push('knowledgeScope');
     return Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 }
 
@@ -157,4 +167,4 @@ async function getExecutionMetrics(userId, { admin = false, days = 30 } = {}) {
         GROUP BY 1,2,3 ORDER BY 1,2,3`, [admin, userId, Math.max(1, Math.min(Number(days) || 30, 90))]);
 }
 
-module.exports = { claimTurn, updateTurn, releaseTurn, renewTurn, replayTurn, listSessionTasks, findTaskContinuation, requeueWaitingTask, recordRunOutcome, readyRunArtifacts, currentExecutionScope, readTaskSource, getExecutionMetrics };
+module.exports = { latestKnowledgeScope, claimTurn, updateTurn, releaseTurn, renewTurn, replayTurn, listSessionTasks, findTaskContinuation, requeueWaitingTask, recordRunOutcome, readyRunArtifacts, currentExecutionScope, readTaskSource, getExecutionMetrics };

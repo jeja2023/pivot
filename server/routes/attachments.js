@@ -327,6 +327,132 @@ function createAttachmentsRouter({
         res.json({ success: true });
     }));
 
+    router.get('/api/attachments/onlyoffice/file', asyncHandler(async (req, res) => {
+        req.originalUrl = String(req.originalUrl || req.url).split('?')[0];
+        let claims;
+        try {
+            claims = require('../services/onlyoffice-preview').verifyAttachmentReadTicket(req.query.token);
+        } catch (_) {
+            return res.status(403).json({ error: '附件预览凭据无效或已过期。' });
+        }
+        const user = await require('../auth').getUserById(claims.userId);
+        if (!user || user.status === 'disabled' || Number(user.token_version || 0) !== Number(claims.tokenVersion)) {
+            return res.status(403).json({ error: '附件预览权限已失效。' });
+        }
+        const attachment = await queryOne(
+            'SELECT * FROM attachments WHERE id = ? AND deleted_at IS NULL',
+            [claims.attachmentId]
+        );
+        if (!attachment || (Number(attachment.user_id) !== Number(user.id) && !isSuperAdmin(user))) {
+            return res.status(404).json({ error: '附件不可用或无权访问。' });
+        }
+        const { target } = getSafeUploadPath(attachment.user_id, attachment.session_id, path.basename(attachment.file_path));
+        try {
+            await fs.promises.access(target, fs.constants.R_OK);
+        } catch (_) {
+            return res.status(404).json({ error: '附件文件内容不存在。' });
+        }
+        const stat = await fs.promises.stat(target);
+        res.setHeader('Content-Type', attachment.file_type || 'application/octet-stream');
+        res.setHeader('Content-Length', String(stat.size));
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        const stream = fs.createReadStream(target);
+        try {
+            await require('node:stream/promises').pipeline(stream, res);
+        } catch (_) {
+            res.destroy();
+        }
+    }));
+
+    router.post('/api/attachments/preview-config', authMiddleware, asyncHandler(async (req, res) => {
+        const { url, attachmentId } = req.body || {};
+        let attachment = null;
+        if (attachmentId) {
+            attachment = await queryOne('SELECT * FROM attachments WHERE id = ? AND deleted_at IS NULL', [Number(attachmentId)]);
+        } else if (url) {
+            const cleanUrl = String(url || '').split(/[?#]/)[0].replace(/^\/api/, '');
+            let decodedUrl;
+            try { decodedUrl = decodeURIComponent(cleanUrl); } catch (_) { decodedUrl = cleanUrl; }
+            const expectedPath = decodedUrl.replace(/^\/+/, '');
+            attachment = await queryOne('SELECT * FROM attachments WHERE file_path = ? AND deleted_at IS NULL', [expectedPath]);
+        }
+        if (!attachment) {
+            return res.status(404).json({ error: '附件不存在或已删除。' });
+        }
+        if (!isSuperAdmin(req.user) && Number(attachment.user_id) !== Number(req.user.id)) {
+            return res.status(403).json({ error: '无权查看该附件。' });
+        }
+
+        const { target } = getSafeUploadPath(attachment.user_id, attachment.session_id, path.basename(attachment.file_path));
+        try {
+            await fs.promises.access(target, fs.constants.R_OK);
+        } catch (_) {
+            return res.status(404).json({ error: '附件物理文件不存在。' });
+        }
+
+        const ext = path.extname(attachment.file_name || attachment.file_path).toLowerCase().replace(/^\./, '');
+        const isExcel = ['xlsx', 'xls', 'csv'].includes(ext);
+        const isWord = ['docx', 'doc'].includes(ext);
+        const isPpt = ['pptx', 'ppt'].includes(ext);
+
+        const { configuration, createAttachmentPreviewConfig } = require('../services/onlyoffice-preview');
+        let ooConfig = null;
+        try { ooConfig = configuration(); } catch (_) { ooConfig = null; }
+
+        if (ooConfig && (isWord || isExcel || isPpt)) {
+            try {
+                const onlyoffice = createAttachmentPreviewConfig(attachment, req.user, { config: ooConfig });
+                if (onlyoffice) {
+                    return res.json({
+                        success: true,
+                        mode: 'onlyoffice',
+                        format: ext,
+                        onlyoffice
+                    });
+                }
+            } catch (ooErr) {
+                logger.warn({ err: ooErr.message, attachmentId: attachment.id }, '创建 ONLYOFFICE 附件预览配置失败');
+            }
+        }
+
+        if (isExcel && ['xlsx', 'xls'].includes(ext)) {
+            const { extractExcelPreviewData } = require('../services/excel-preview');
+            try {
+                const excelData = extractExcelPreviewData(target);
+                return res.json({
+                    success: true,
+                    mode: 'excel',
+                    format: ext,
+                    excel: excelData
+                });
+            } catch (excelErr) {
+                return res.status(422).json({ error: excelErr.message || 'Excel 内容解析失败' });
+            }
+        }
+
+        if (isWord) {
+            try {
+                const text = await extractDocumentText(target, attachment.file_type, attachment.file_name, { maxChars: 15000 });
+                return res.json({
+                    success: true,
+                    mode: 'text',
+                    format: ext,
+                    text,
+                    notice: '当前未连接 ONLYOFFICE 服务，已为你展示文档抽取文本预览。'
+                });
+            } catch (wordErr) {
+                return res.status(422).json({ error: wordErr.message || 'Word 文档读取失败' });
+            }
+        }
+
+        return res.json({
+            success: true,
+            mode: 'unsupported',
+            format: ext
+        });
+    }));
+
     return router;
 }
 

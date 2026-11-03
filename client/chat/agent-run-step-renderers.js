@@ -379,6 +379,21 @@ function agentStepReadableMarkup(step) {
         ? (unwrapAgentStructuredPayload(normalized) || normalized)
         : null;
     if (!structured || typeof structured !== 'object') return '';
+    if (structured.knowledgeSourceVersion === 1) {
+        const sources = structured.knowledgeEvidence?.knowledgeSourceVersion === 1 && Array.isArray(structured.knowledgeEvidence.sources)
+            ? structured.knowledgeEvidence.sources : Array.isArray(structured.sources) ? structured.sources : [];
+        const status = structured.retrieval?.reasonCode === 'KNOWLEDGE_SOURCE_UNAVAILABLE' ? '资料来源已变化、不可访问或无法确认，请重新检索。'
+            : structured.retrieval?.status === 'partial' ? '检索已降级，结果仅覆盖部分片段。'
+                : sources.length ? '已获得资料片段，不代表文档全文。' : '未获得可靠资料。';
+        return `<div class="agent-step-readable"><p>${agentEscape(status)}</p>${structured.__partial ? '<p>模型使用的片段已按上下文限制截取，以下展示本次检索的来源。</p>' : ''}${sources.slice(0, 10).map(source => {
+            const title = agentEscape(source.title || '资料');
+            const coverage = source.coverage?.known && !source.coverage.complete ? ' · 文档索引不完整' : '';
+            const excerpt = source.truncated ? ' · 片段已截断' : '';
+            const key = String(source.citationKey || '');
+            return key ? `<p><button type="button" class="btn-secondary" data-knowledge-citation="${agentEscapeAttr(key)}">${title}</button>${agentEscape(coverage + excerpt)}</p>`
+                : `<p>${title} · 暂无可打开的引用${agentEscape(coverage + excerpt)}</p>`;
+        }).join('')}</div>`;
+    }
     return agentStepChartSummaryMarkup(structured)
         || agentStepRowsMarkup(structured)
         || `<div class="agent-step-readable agent-result-readable">${agentResultReadableMarkup(structured, { maxRows: 5, maxItems: 6 })}</div>`;

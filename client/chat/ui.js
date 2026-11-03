@@ -189,6 +189,7 @@ async function refreshModelSelector() {
         if (models.length === 0) {
             PivotSafeHtml.setHtml(triggerBtn, '<span id="selected-model-name">暂无可用模型</span>');
             triggerBtn.disabled = true;
+            hiddenInput.value = '';
             return;
         }
 

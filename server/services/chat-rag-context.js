@@ -83,6 +83,7 @@ function buildChatRagEvidenceObservation(chatBridge = {}) {
     return {
         tool: 'rag.search',
         output: {
+            knowledgeContextVersion: 1,
             sources: sources.map(source => ({ index: source.index, citationKey: source.citationKey, source: source.source })),
             // 验收复用本轮实际检索的资料快照，不为补齐工具观察而再次检索。
             content: context
