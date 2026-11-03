@@ -268,7 +268,6 @@ function validateKnowledgeAnswer({ answer = '', ragContext = '', strict = false 
 }
 
 module.exports = {
-    buildKnowledgeInsufficientAnswer,
     extractKnowledgeSources,
     validateKnowledgeAnswer,
     verifyKnowledgeAnswerSemantics,

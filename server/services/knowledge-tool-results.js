@@ -119,4 +119,4 @@ async function presentKnowledgeSteps(steps, user, deps = {}) {
     }));
 }
 
-module.exports = { intersectScopes, resolveKnowledgeToolScope, executeKnowledgeSearch, presentKnowledgeResult, knowledgeEvidenceManifest, revalidateKnowledgeToolEvidence, presentKnowledgeSteps, digest };
+module.exports = { intersectScopes, resolveKnowledgeToolScope, executeKnowledgeSearch, knowledgeEvidenceManifest, revalidateKnowledgeToolEvidence, presentKnowledgeSteps, digest };
