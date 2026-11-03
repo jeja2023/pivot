@@ -29,11 +29,17 @@ async function groundChatRagAnswer({
         callModel: callModelTextWithBudget
     });
     if (ragGrounding.grounding.accepted && ragGrounding.grounding.status !== 'insufficient_evidence') {
-        let current = false;
-        try { current = ragGrounding.sources.every(source => source.citationKey) && await validateCitationKeys(ragGrounding.sources.map(source => source.citationKey), user); } catch (_) { /* 授权核验失败时不公开正文。 */ }
-        if (!current) {
-            ragGrounding.answer = '知识库资料已变化或当前不可访问，请重新检索后再试。';
-            ragGrounding.grounding = { ...ragGrounding.grounding, accepted: false, status: 'source_revoked' };
+        const citedIndexes = ragGrounding.grounding.citedSourceIndexes || [];
+        const citedSources = ragGrounding.sources.filter(source => citedIndexes.includes(source.index));
+        const relevantSources = citedSources.length ? citedSources : ragGrounding.sources;
+        const citationKeys = relevantSources.map(source => source.citationKey).filter(Boolean);
+        if (citationKeys.length > 0) {
+            let current = false;
+            try { current = await validateCitationKeys(citationKeys, user); } catch (_) { /* 授权核验失败时不公开正文。 */ }
+            if (!current) {
+                ragGrounding.answer = '知识库资料已变化或当前不可访问，请重新检索后再试。';
+                ragGrounding.grounding = { ...ragGrounding.grounding, accepted: false, status: 'source_revoked' };
+            }
         }
     }
     const groundedAnswer = contextResult.ragGrounding.overview && ragGrounding.grounding.accepted && ragGrounding.grounding.status !== 'insufficient_evidence'

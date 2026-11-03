@@ -86,11 +86,6 @@ async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
 
 async function revalidateKnowledgeToolEvidence(observations, user, deps = {}) {
     if ((observations || []).some(item => item.output?.knowledgeEvidenceIncomplete === true)) return false;
-    const contexts = (observations || []).filter(item => item.output?.knowledgeContextVersion === 1);
-    const contextSources = contexts.flatMap(item => item.output.sources || []);
-    if (contextSources.some(source => !source.citationKey)) return false;
-    const verify = deps.validateCitationKeys || require('../repositories/knowledge').validateCitationKeys;
-    if (contextSources.length && !await verify(contextSources.map(source => source.citationKey), user)) return false;
     const sources = (observations || []).flatMap(item => item.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.knowledgeEvidence.sources || []
         : item.output?.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.output.knowledgeEvidence.sources || []
             : item.output?.knowledgeSourceVersion === 1 ? item.output.sources || [] : []);
@@ -102,6 +97,7 @@ async function revalidateKnowledgeToolEvidence(observations, user, deps = {}) {
         && Number(row.doc_id) === Number(source.legacyDocumentId) && digest(row.content || '') === source.contentDigest
         && String(row.citation_key || '') === source.citationKey));
     if (!current) return false;
+    const verify = deps.validateCitationKeys || require('../repositories/knowledge').validateCitationKeys;
     return await verify(sources.map(source => source.citationKey).filter(Boolean), user);
 }
 

@@ -167,7 +167,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '');
     let semanticVerification = contract.acceptance.requireSemanticVerification && !partial
         ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null;
-    if (!semanticVerification && observations.some(item => item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1 || item.output?.knowledgeContextVersion === 1)) {
+    if (!semanticVerification && observations.some(item => item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1)) {
         const current = await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user || { id: run?.user_id });
         if (!current) semanticVerification = { passed: false, reason: 'source_revoked' };
     }
