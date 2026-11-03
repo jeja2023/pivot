@@ -26,7 +26,7 @@ async function mcpOutboundOptions(server, user, options = {}, getAccessibleServe
         if (parsed.href !== endpoint.href || parsed.username || parsed.password) throw new Error('工具连接禁止访问登记端点以外的地址。');
         if (policy) {
             try { await assertNetworkPolicyUrl(target, policy, { requireAllowlist: true }); }
-            catch (cause) { throw Object.assign(new Error('工具连接未通过任务网络策略检查。', { cause }), { code: 'MCP_NETWORK_POLICY_DENIED', category: 'policy', status: 403 }); }
+            catch (cause) { throw Object.assign(new Error(`工具连接未通过任务网络策略检查：${cause.message || ''}`, { cause }), { code: 'MCP_NETWORK_POLICY_DENIED', category: 'policy', status: 403 }); }
         }
         if (managed) {
             // 保留敏感地址和 DNS 复核；不以管理员身份发起请求，也不允许本机或元数据地址。

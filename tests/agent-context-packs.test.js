@@ -21,6 +21,7 @@ test('project context packs are ACL-resolved, persisted as a snapshot, and alway
     const creation = read('server/services/agent-runtime/run-creation.js');
     const planner = read('server/services/agent-runtime/planner.js');
     const tools = read('server/services/agent-tools.js');
+    const knowledgeResults = read('server/services/knowledge-tool-results.js');
     const client = read('client/chat/agent-run-actions.js');
     const partial = read('client/chat/partials/workspaces/agent.html');
 
@@ -28,8 +29,9 @@ test('project context packs are ACL-resolved, persisted as a snapshot, and alway
     assert.match(creation, /resolveAgentContextPack/);
     assert.match(creation, /runMetadata\.projectContextPack/);
     assert.match(planner, /项目资料包/);
-    assert.match(tools, /runContextConfig\.collectionIds\.length/);
-    assert.match(tools, /scope = runContextConfig\.collectionIds\.length/);
+    assert.match(tools, /executeKnowledgeSearch/);
+    assert.match(knowledgeResults, /collectionIds:\s*config\.collectionIds/);
+    assert.match(knowledgeResults, /intersectScopes/);
     assert.match(client, /collectionIds:/);
     assert.match(partial, /id="agent-context-collections"/);
 });
