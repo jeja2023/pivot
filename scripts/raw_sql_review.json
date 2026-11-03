@@ -78,6 +78,12 @@
       "verification": "tests/agent-event-resource-plan.test.js 使用隔离 PostgreSQL 验证提交顺序、并发序号、大整数 ID、重复键、失败回滚及回放。"
     },
     {
+      "file": "server/repositories/attachments.js",
+      "count": 2,
+      "rationale": "附件数据访问层独立仓储：按主键 ID 与项目相对路径参数化只读查询未删除附件，供 ONLYOFFICE 在线预览及回源拉取使用，保持路由层无直接 SQL 规范。",
+      "verification": "tests/attachment-office-preview-integration.test.js 与 tests/onlyoffice-preview.test.js 覆盖票据签名鉴权、所有权隔离与文档安全拉取。"
+    },
+    {
       "file": "server/repositories/capability-governance.js",
       "count": 1,
       "rationale": "以参数化数组一次读取本次目录涉及的能力包，调用方逐项执行既有权限与状态判断，不跨请求缓存授权状态。",

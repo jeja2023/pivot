@@ -12,6 +12,10 @@ const { logger } = require('../logger');
 const { normalizeUploadedOriginalName } = require('../upload');
 const { encodeAttachmentUrl, toProjectRelativePath } = require('../security');
 const { isSuperAdmin } = require('../permissions');
+const {
+    getActiveAttachmentById,
+    getActiveAttachmentByFilePath
+} = require('../repositories/attachments');
 const { getAttachmentContextLimit } = require('../services/resource-limits');
 const { clearDirSizeCache } = require('../services/dir-size-cache');
 
@@ -339,10 +343,7 @@ function createAttachmentsRouter({
         if (!user || user.status === 'disabled' || Number(user.token_version || 0) !== Number(claims.tokenVersion)) {
             return res.status(403).json({ error: '附件预览权限已失效。' });
         }
-        const attachment = await queryOne(
-            'SELECT * FROM attachments WHERE id = ? AND deleted_at IS NULL',
-            [claims.attachmentId]
-        );
+        const attachment = await getActiveAttachmentById(claims.attachmentId);
         if (!attachment || (Number(attachment.user_id) !== Number(user.id) && !isSuperAdmin(user))) {
             return res.status(404).json({ error: '附件不可用或无权访问。' });
         }
@@ -369,13 +370,13 @@ function createAttachmentsRouter({
         const { url, attachmentId } = req.body || {};
         let attachment = null;
         if (attachmentId) {
-            attachment = await queryOne('SELECT * FROM attachments WHERE id = ? AND deleted_at IS NULL', [Number(attachmentId)]);
+            attachment = await getActiveAttachmentById(attachmentId);
         } else if (url) {
             const cleanUrl = String(url || '').split(/[?#]/)[0].replace(/^\/api/, '');
             let decodedUrl;
             try { decodedUrl = decodeURIComponent(cleanUrl); } catch (_) { decodedUrl = cleanUrl; }
             const expectedPath = decodedUrl.replace(/^\/+/, '');
-            attachment = await queryOne('SELECT * FROM attachments WHERE file_path = ? AND deleted_at IS NULL', [expectedPath]);
+            attachment = await getActiveAttachmentByFilePath(expectedPath);
         }
         if (!attachment) {
             return res.status(404).json({ error: '附件不存在或已删除。' });
