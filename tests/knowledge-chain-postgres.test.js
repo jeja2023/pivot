@@ -10,10 +10,11 @@ const { publishLegacyDocumentProjection } = require('../server/services/knowledg
 test('统一知识结果使用当前 ACL 和版本，变更、停用和跨用户时不复用旧证据', async () => {
     const suffix = `${process.pid}-${Date.now()}`;
     const user = await queryOne("INSERT INTO users(username,password_hash,role,status) VALUES (?,'hash','user','active') RETURNING id,role", [`knowledge-chain-${suffix}`]);
+    const sessionId = `scope-session-${suffix}`;
+    const runId = `knowledge-delivery-${suffix}`;
     let doc;
     try {
         const collection = await queryOne('INSERT INTO knowledge_collections(user_id,name,created_at,updated_at) VALUES (?,?,NOW(),NOW()) RETURNING id', [user.id, '测试制度']);
-        const sessionId = `scope-session-${suffix}`;
         await execute('INSERT INTO sessions(id,user_id,title,created_at) VALUES (?,?,?,NOW())', [sessionId, user.id, '范围测试']);
         const turns = require('../server/repositories/chat-conversation-turns');
         const turn = await turns.claimTurn({ userId: user.id, sessionId, requestKey: 'scope', inputHash: 'a'.repeat(64), content: '指定专题', modelId: null });
@@ -38,7 +39,6 @@ test('统一知识结果使用当前 ACL 和版本，变更、停用和跨用户
         const step = { tool_name: 'rag.search', output: result, error_message: null };
         assert.equal((await presentSteps([step], user))[0].output.sources[0].title, '测试制度.txt');
         assert.doesNotMatch(JSON.stringify(await presentSteps([step], { id: Number(user.id) + 99999, role: 'user' })), /测试制度|报销应在/);
-        const runId = `knowledge-delivery-${suffix}`;
         await execute("INSERT INTO agent_runs(id,user_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,'制度报告','根据制度生成文档','running','{}',NOW(),NOW())", [runId, user.id]);
         const delivery = await require('../server/services/agent-tools-artifacts').executeArtifactTool('artifact.render', {
             format: 'docx', ir: { ir_version: '1', doc_type: 'report', meta: { title: '制度报告' }, blocks: [{ type: 'paragraph', runs: [{ text: `${result.matches[0].content} [引用 1 | citation:${result.sources[0].citationKey}]` }] }] }
@@ -61,6 +61,30 @@ test('统一知识结果使用当前 ACL 和版本，变更、停用和跨用户
         assert.equal(await repository.validateCitationKeys([rows[0].citation_key], user), false);
         assert.equal((await repository.readSourceChunks([chunk.id], user)).length, 0);
     } finally {
-        await execute('DELETE FROM users WHERE id = ?', [user.id]);
+        if (runId) {
+            try { await execute('DELETE FROM agent_verifications WHERE run_id = ?', [runId]); } catch (_) {}
+            try { await execute('DELETE FROM agent_artifact_renditions WHERE run_id = ?', [runId]); } catch (_) {}
+            try { await execute('DELETE FROM agent_artifacts WHERE run_id = ?', [runId]); } catch (_) {}
+            try { await execute('DELETE FROM agent_runs WHERE id = ?', [runId]); } catch (_) {}
+        }
+        if (sessionId) {
+            try { await execute('DELETE FROM chat_conversation_turns WHERE session_id = ?', [sessionId]); } catch (_) {}
+            try { await execute('DELETE FROM messages WHERE session_id = ?', [sessionId]); } catch (_) {}
+            try { await execute('DELETE FROM sessions WHERE id = ?', [sessionId]); } catch (_) {}
+        }
+        if (doc?.id) {
+            try {
+                await execute('DELETE FROM knowledge_citations WHERE document_id IN (SELECT id FROM knowledge_documents WHERE legacy_doc_id = ?)', [doc.id]);
+                await execute('DELETE FROM knowledge_blocks WHERE document_id IN (SELECT id FROM knowledge_documents WHERE legacy_doc_id = ?)', [doc.id]);
+                await execute('DELETE FROM knowledge_document_versions WHERE document_id IN (SELECT id FROM knowledge_documents WHERE legacy_doc_id = ?)', [doc.id]);
+                await execute('DELETE FROM knowledge_documents WHERE legacy_doc_id = ?', [doc.id]);
+                await execute('DELETE FROM knowledge_chunks WHERE doc_id = ?', [doc.id]);
+                await execute('DELETE FROM knowledge_docs WHERE id = ?', [doc.id]);
+            } catch (_) {}
+        }
+        if (user?.id) {
+            try { await execute('DELETE FROM knowledge_collections WHERE user_id = ?', [user.id]); } catch (_) {}
+            try { await execute('DELETE FROM users WHERE id = ?', [user.id]); } catch (_) {}
+        }
     }
 });
