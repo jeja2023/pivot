@@ -37,10 +37,7 @@ const {
     summarizeRagContextSources
 } = require('../../services/chat-rag-context');
 const { createChatRagResponseFlow } = require('../../services/chat-rag-grounding');
-const {
-    touchSession,
-    updateLastAssistantStats
-} = require('../../services/chat-messages');
+const { touchSession } = require('../../services/chat-messages');
 const {
     buildPersistedChatErrorContent,
     handleEmptyChatResponse,
@@ -116,31 +113,12 @@ function createChatRouter({
         return getChatAutoRouteConfig().autoExecutionEnabled === true;
     };
 
-    router.get('/chat/capabilities', authMiddleware, (_req, res) => {
-        const enabled = readAgentExecutionEnabled();
-        const autoRoute = getChatAutoRouteConfig();
-        res.json({
-            success: true,
-            defaultMode: 'normal',
-            modes: enabled ? ['normal', 'agent'] : ['normal'],
-            agentExecutionEnabled: enabled,
-            autoRoute: {
-                enabled: autoRoute.enabled,
-                rag: autoRoute.autoRagEnabled,
-                toolDiscovery: autoRoute.autoToolDiscoveryEnabled,
-                execution: readAutoExecutionEnabled(),
-                shadow: autoRoute.shadowMode
-            }
-        });
+    registerChatAuxiliaryRoutes(router, {
+        authMiddleware,
+        logAction,
+        readAgentExecutionEnabled,
+        readAutoExecutionEnabled
     });
-
-    router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
-        const { sessionId, costTime, tps } = req.body;
-        await updateLastAssistantStats({ sessionId, userId: req.user.id, costTime, tps });
-        res.json({ success: true });
-    }));
-
-    registerChatAuxiliaryRoutes(router, { authMiddleware, logAction });
 
     router.post('/chat', authMiddleware, chatLimiter, asyncHandler(async (req, res) => {
         const chatState = buildChatRequestState(req);

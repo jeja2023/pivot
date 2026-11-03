@@ -5,9 +5,40 @@ const { getAgentVoiceSession, listAgentVoiceSessions, recordAgentVoiceEvent, sta
 const { controlVoiceSessionAgentRun } = require('./voice-task-control');
 const { getExecutionMetrics } = require('../../repositories/chat-conversation-turns');
 const { isSuperAdmin } = require('../../permissions');
+const { updateLastAssistantStats } = require('../../services/chat-messages');
+const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 
-function registerChatAuxiliaryRoutes(router, { authMiddleware, logAction }) {
+function registerChatAuxiliaryRoutes(router, {
+    authMiddleware,
+    logAction,
+    readAgentExecutionEnabled = () => false,
+    readAutoExecutionEnabled = () => false
+}) {
     require('./voice-recognition').registerVoiceRecognitionRoutes(router, { authMiddleware });
+
+    router.get('/chat/capabilities', authMiddleware, (_req, res) => {
+        const enabled = typeof readAgentExecutionEnabled === 'function' ? readAgentExecutionEnabled() : false;
+        const autoRoute = getChatAutoRouteConfig();
+        res.json({
+            success: true,
+            defaultMode: 'normal',
+            modes: enabled ? ['normal', 'agent'] : ['normal'],
+            agentExecutionEnabled: enabled,
+            autoRoute: {
+                enabled: autoRoute.enabled,
+                rag: autoRoute.autoRagEnabled,
+                toolDiscovery: autoRoute.autoToolDiscoveryEnabled,
+                execution: typeof readAutoExecutionEnabled === 'function' ? readAutoExecutionEnabled() : false,
+                shadow: autoRoute.shadowMode
+            }
+        });
+    });
+
+    router.post('/chat/stats', authMiddleware, asyncHandler(async (req, res) => {
+        const { sessionId, costTime, tps } = req.body || {};
+        await updateLastAssistantStats({ sessionId, userId: req.user?.id, costTime, tps });
+        res.json({ success: true });
+    }));
     router.get('/chat/execution-metrics', authMiddleware, asyncHandler(async (req, res) => {
         const rows = await getExecutionMetrics(req.user.id, { admin: req.query.scope === 'organization' && isSuperAdmin(req.user), days: req.query.days });
         res.json({ success: true, metrics: rows, verification: '独立核验与用户纠正分别统计，自动启动或沉默不作为成功。' });
