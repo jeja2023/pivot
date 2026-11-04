@@ -198,6 +198,8 @@ function validateScopedReportPaths(toolName, input = {}) {
 }
 
 function policyErrorForDecision(decision = {}) {
+    const inputError = require('./tool-input-validation').inputErrorForDecision(decision);
+    if (inputError) return inputError;
     const result = {
         decision: decision.decision || 'denied',
         reasons: decision.reasons || ['工具调用被策略拒绝。'],
@@ -253,10 +255,15 @@ function createToolPolicyEngine(deps = {}) {
         sanitizedInput = normalizeToolInput(safeName || tool.name, sanitizedInput, effectiveRun);
         const catalog = await resolveCatalogReference(safeName || tool.name, tool, { ...effectiveOptions, input: sanitizedInput }, deps);
         validateScopedReportPaths(safeName, sanitizedInput);
-        const issues = validateToolInput(tool, sanitizedInput);
+        const issues = validateToolInput(tool, input && typeof input === 'object' && !Array.isArray(input) ? sanitizedInput : input);
         if (issues.length) {
-            const error = policyErrorForDecision({ decision: 'denied', tool, reasons: [`工具输入契约校验失败：${issues[0]}`], reasonCodes: ['tool_input_invalid'] });
-            await recordEvent({ actorId: user.id, tenantId: tenant?.id || tenant, serverId: catalog.serverId, releaseId: catalog.release?.id, toolItemId: catalog.item?.id, toolName: safeName || tool.name, definitionDigest: catalog.item?.definitionDigest || catalog.item?.definition_digest || '', policyDecision: 'denied', reasonCodes: ['tool_input_invalid'], source: sourceName(source), input: sanitizedInput, error, status: 'denied', ...traceIdentifiers(traceContext) });
+            // 参数错误也先复核当前任务范围，混合越权拒绝不能降为可修复参数错误。
+            const invalidPlan = await buildPlan({ run: effectiveRun, tool, input: sanitizedInput, user,
+                context: { ...effectiveOptions, consumeBudget: false, allowApproval: true } });
+            const decision = invalidPlan.policy?.decision === 'denied' ? invalidPlan.policy
+                : { decision: 'denied', reasons: [`工具输入契约校验失败：${issues[0]}`], reasonCodes: ['tool_input_invalid'] };
+            const error = policyErrorForDecision({ ...decision, tool, inputIssues: issues });
+            await recordEvent({ actorId: user.id, tenantId: tenant?.id || tenant, serverId: catalog.serverId, releaseId: catalog.release?.id, toolItemId: catalog.item?.id, toolName: safeName || tool.name, definitionDigest: catalog.item?.definitionDigest || catalog.item?.definition_digest || '', policyDecision: 'denied', reasonCodes: decision.reasonCodes, source: sourceName(source), input: sanitizedInput, error, status: 'denied', ...traceIdentifiers(traceContext) });
             throw error;
         }
         if (catalog.release?.status && catalog.release.status !== 'active' && !effectiveOptions.allowHistoricalRelease) {

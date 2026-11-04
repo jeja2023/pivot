@@ -1,388 +1,6 @@
 /* global createEmptyOfficialWritingDoc, deleteOfficialWritingDocumentFromServer, scheduleOfficialWritingDocumentSave */
 // ===== 多文档库管理 =====
 
-function getOfficialWritingDocSummary(doc) {
-    const state = doc?.state || {};
-    const sourceCount = getTextCount(state.source);
-    const draftCount = getTextCount(state.draft);
-    const pendingSuggestions = Array.isArray(state.suggestions)
-        ? state.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected').length
-        : 0;
-    let status = '待起草';
-    if (draftCount > 0) status = pendingSuggestions > 0 ? '可审阅' : '可导出';
-    else if (sourceCount > 0) status = '可起草';
-    return {
-        docType: state.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType,
-        sourceCount,
-        draftCount,
-        pendingSuggestions,
-        status
-    };
-}
-
-function renderOfficialWritingDocItems(docs) {
-    return docs.map(doc => {
-        const summary = getOfficialWritingDocSummary(doc);
-        const active = doc.id === officialWritingLibrary.activeId;
-        const itemClass = ['official-writing-doc-item', active ? 'active' : '']
-            .filter(Boolean)
-            .join(' ');
-        const meta = `${summary.docType} · ${summary.status} · ${formatVersionTime(doc.updatedAt)}`;
-        return `
-        <div class="${itemClass}" data-official-writing-doc-id="${escapeAppsHtml(doc.id)}" role="listitem">
-            <button type="button" class="official-writing-doc-open" data-official-writing-doc-open="${escapeAppsHtml(doc.id)}" title="${escapeAppsHtml(doc.title)}">
-                <strong>${escapeAppsHtml(doc.title || '未命名公文')}</strong>
-                <small>${escapeAppsHtml(meta)}</small>
-            </button>
-            <span class="official-writing-doc-actions">
-                <button type="button" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}" title="重命名" aria-label="重命名">重命名</button>
-                <button type="button" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}" title="删除" aria-label="删除">删除</button>
-            </span>
-        </div>`;
-    }).join('');
-}
-
-function getOfficialWritingStatusClass(summary) {
-    if (summary.draftCount > 0 && summary.pendingSuggestions > 0) return 'review';
-    if (summary.draftCount > 0) return 'ready';
-    if (summary.sourceCount > 0) return 'draftable';
-    return 'empty';
-}
-
-function getOfficialWritingLibraryPageInfo(total) {
-    const limit = Math.max(Number(officialWritingUiState.libraryPageSize || 10), 1);
-    const totalPages = Math.max(Math.ceil(total / limit), 1);
-    const page = Math.min(Math.max(Number(officialWritingUiState.libraryPage || 1), 1), totalPages);
-    officialWritingUiState.libraryPage = page;
-    officialWritingUiState.libraryPageSize = limit;
-    return {
-        total,
-        limit,
-        totalPages,
-        page,
-        startIndex: (page - 1) * limit
-    };
-}
-
-function renderOfficialWritingHomeSummary(docs, pageDocs) {
-    const target = document.getElementById('official-writing-home-summary');
-    if (!target) return;
-    const summaries = docs.map(getOfficialWritingDocSummary);
-    const total = docs.length;
-    const currentPageCount = Array.isArray(pageDocs) ? pageDocs.length : docs.length;
-    const draftable = summaries.filter(item => item.status === '可起草').length;
-    const review = summaries.filter(item => item.status === '可审阅').length;
-    const ready = summaries.filter(item => item.status === '可导出').length;
-    const draftChars = summaries.reduce((sum, item) => sum + item.draftCount, 0);
-    const chips = [
-        `${total} 篇公文`,
-        `${currentPageCount} 本页`,
-        `${draftable} 篇可起草`,
-        `${review} 篇待审阅`,
-        `${ready} 篇可导出`,
-        `${draftChars} 正文字数`,
-    ];
-    PivotSafeHtml.setHtml(target, chips.map(text => `<span class="regulations-summary-pill">${escapeAppsHtml(text)}</span>`).join(''));
-}
-
-function renderOfficialWritingDocTableRows(docs, startIndex = 0) {
-    if (!docs.length) {
-        return '<tr><td colspan="9" class="text-center official-writing-table-empty">暂无公文</td></tr>';
-    }
-    return docs.map((doc, index) => {
-        const summary = getOfficialWritingDocSummary(doc);
-        const statusClass = getOfficialWritingStatusClass(summary);
-        return `
-            <tr data-official-writing-doc-id="${escapeAppsHtml(doc.id)}">
-                <td class="text-center">${startIndex + index + 1}</td>
-                <td><span class="official-writing-table-name">${escapeAppsHtml(doc.title || '未命名公文')}</span></td>
-                <td>${escapeAppsHtml(summary.docType)}</td>
-                <td class="text-center"><span class="official-writing-status-pill ${statusClass}">${escapeAppsHtml(summary.status)}</span></td>
-                <td class="text-center">${summary.draftCount} 字</td>
-                <td class="text-center">${summary.sourceCount} 字</td>
-                <td class="text-center">${summary.pendingSuggestions} 建议</td>
-                <td>${escapeAppsHtml(formatVersionTime(doc.updatedAt))}</td>
-                <td class="text-center">
-                    <span class="official-writing-row-actions">
-                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-open="${escapeAppsHtml(doc.id)}">编辑</button>
-                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-rename="${escapeAppsHtml(doc.id)}">重命名</button>
-                        <button type="button" class="btn-secondary official-writing-row-action" data-official-writing-doc-delete="${escapeAppsHtml(doc.id)}">删除</button>
-                    </span>
-                </td>
-            </tr>`;
-    }).join('');
-}
-
-function renderOfficialWritingDocPagination(pageInfo) {
-    const pager = document.getElementById('official-writing-pagination');
-    if (!pager) return;
-    if (typeof window.Pivot.legacy.renderWorkspacePagination !== 'function') {
-        pager.replaceChildren();
-        return;
-    }
-    window.Pivot.legacy.renderWorkspacePagination(pager, {
-        total: pageInfo.total,
-        page: pageInfo.page,
-        limit: pageInfo.limit,
-        onPageChange: targetPage => {
-            officialWritingUiState.libraryPage = targetPage;
-            renderOfficialWritingDocList();
-        }
-    });
-}
-
-function renderOfficialWritingDetailHeader() {
-    const doc = getActiveOfficialWritingDoc();
-    if (!doc) return;
-    const summary = getOfficialWritingDocSummary(doc);
-    setText('official-writing-active-doc-title', doc.title || '未命名公文');
-    setText('official-writing-active-doc-meta', `${summary.docType} · ${summary.status} · ${summary.draftCount} 字正文`);
-    const renameBtn = document.getElementById('official-writing-current-rename-btn');
-    const deleteBtn = document.getElementById('official-writing-current-delete-btn');
-    if (renameBtn) renameBtn.dataset.officialWritingDocRename = doc.id;
-    if (deleteBtn) deleteBtn.dataset.officialWritingDocDelete = doc.id;
-}
-
-function renderOfficialWritingDocList() {
-    const docs = [...officialWritingLibrary.docs].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    const pageInfo = getOfficialWritingLibraryPageInfo(docs.length);
-    const pageDocs = docs.slice(pageInfo.startIndex, pageInfo.startIndex + pageInfo.limit);
-    const listHtml = renderOfficialWritingDocItems(docs);
-    const empty = '<div class="official-writing-empty-note">暂无公文</div>';
-    const list = document.getElementById('official-writing-doc-list');
-    if (list) PivotSafeHtml.setHtml(list, listHtml || empty);
-    const tableBody = document.getElementById('official-writing-home-doc-table-body');
-    if (tableBody) PivotSafeHtml.setHtml(tableBody, renderOfficialWritingDocTableRows(pageDocs, pageInfo.startIndex));
-    renderOfficialWritingHomeSummary(docs, pageDocs);
-    renderOfficialWritingDocPagination(pageInfo);
-    setText('official-writing-doc-count', `${officialWritingLibrary.docs.length} 篇`);
-    renderOfficialWritingDetailHeader();
-}
-
-function setOfficialWritingScreen(screen) {
-    const normalized = screen === 'editor' ? 'editor' : 'library';
-    officialWritingUiState.screen = normalized;
-    const panel = document.querySelector('.official-writing-panel');
-    if (panel) panel.dataset.officialWritingScreen = normalized;
-    if (normalized === 'library') {
-        renderOfficialWritingDocList();
-        return;
-    }
-    renderOfficialWritingDetailHeader();
-    resizeOfficialWritingDraftPage();
-}
-
-function showOfficialWritingLibrary() {
-    if (officialWritingUiState.screen === 'editor') syncOfficialWritingStateFromInputs();
-    setOfficialWritingScreen('library');
-}
-
-function setOfficialWritingCreateDialogError(message = '') {
-    const error = document.getElementById('official-writing-create-error');
-    if (!error) return;
-    error.textContent = message || '公文名称不能为空';
-    error.classList.toggle('hidden', !message);
-}
-
-function openOfficialWritingCreateDialog() {
-    const modal = document.getElementById('official-writing-create-modal');
-    if (!modal) return;
-    const activeState = getActiveOfficialWritingDoc()?.state || officialWritingState || OFFICIAL_WRITING_DEFAULT_FORM_STATE;
-    const title = document.getElementById('official-writing-create-title');
-    const type = document.getElementById('official-writing-create-type');
-    const standard = document.getElementById('official-writing-create-standard');
-    if (title) title.value = '';
-    if (type) type.value = activeState.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType;
-    if (standard) standard.value = activeState.standard || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard;
-    setOfficialWritingCreateDialogError('');
-    modal.classList.remove('hidden');
-    window.setTimeout(() => title?.focus(), 0);
-}
-
-function closeOfficialWritingCreateDialog() {
-    document.getElementById('official-writing-create-modal')?.classList.add('hidden');
-    setOfficialWritingCreateDialogError('');
-}
-
-function setOfficialWritingDraftDialogError(message = '') {
-    const error = document.getElementById('official-writing-draft-error');
-    if (!error) return;
-    error.textContent = message || '请输入起草要求';
-    error.classList.toggle('hidden', !message);
-}
-
-function openOfficialWritingDraftDialog() {
-    const modal = document.getElementById('official-writing-draft-modal');
-    const input = document.getElementById('official-writing-draft-instruction');
-    if (!modal) return;
-    syncOfficialWritingStateFromInputs();
-    if (input) {
-        const defaultPlaceholder = input.dataset.officialWritingDefaultPlaceholder || input.getAttribute('placeholder') || '';
-        const requirements = officialWritingState.requirements || '';
-        const standardHints = Array.from(document.querySelectorAll('[data-official-writing-requirement]'))
-            .map(button => String(button.dataset.officialWritingRequirement || '').trim())
-            .filter(Boolean);
-        const shouldClearOnFocus = !!requirements.trim() && standardHints.includes(requirements.trim());
-        input.dataset.officialWritingDefaultPlaceholder = defaultPlaceholder;
-        input.dataset.officialWritingInitialHint = shouldClearOnFocus ? requirements : '';
-        input.dataset.officialWritingClearOnFocus = shouldClearOnFocus ? 'true' : 'false';
-        input.value = requirements;
-        input.placeholder = defaultPlaceholder;
-    }
-    setOfficialWritingDraftDialogError('');
-    modal.classList.remove('hidden');
-    void window.Pivot.legacy.PivotAppModels?.refresh?.('official-writing-draft', 'official-writing-draft-model');
-    window.setTimeout(() => input?.focus(), 0);
-}
-
-function closeOfficialWritingDraftDialog() {
-    document.getElementById('official-writing-draft-modal')?.classList.add('hidden');
-    setOfficialWritingDraftDialogError('');
-}
-
-function submitOfficialWritingDraftDialog(event) {
-    if (event) event.preventDefault();
-    const input = document.getElementById('official-writing-draft-instruction');
-    const requirements = String(input?.value || '').trim();
-    if (!requirements) {
-        setOfficialWritingDraftDialogError('请输入起草要求');
-        input?.focus();
-        return;
-    }
-    const target = document.getElementById('official-writing-requirements');
-    if (target) target.value = requirements;
-    closeOfficialWritingDraftDialog();
-    closeOfficialWritingDrawer();
-    runOfficialWritingMode('draft');
-}
-
-function submitOfficialWritingCreateDialog(event) {
-    if (event) event.preventDefault();
-    const title = document.getElementById('official-writing-create-title');
-    const docType = document.getElementById('official-writing-create-type');
-    const standard = document.getElementById('official-writing-create-standard');
-    const rawTitle = String(title?.value || '').trim();
-    if (!rawTitle) {
-        setOfficialWritingCreateDialogError('请输入公文名称');
-        title?.focus();
-        return;
-    }
-    closeOfficialWritingCreateDialog();
-    createOfficialWritingDoc({
-        title: rawTitle,
-        docType: docType?.value,
-        standard: standard?.value
-    });
-}
-
-function switchOfficialWritingDoc(docId, options = {}) {
-    const openEditor = options.openEditor !== false;
-    if (!docId) return;
-    if (docId === officialWritingLibrary.activeId) {
-        if (openEditor) setOfficialWritingScreen('editor');
-        return;
-    }
-    const target = officialWritingLibrary.docs.find(doc => doc.id === docId);
-    if (!target) return;
-    // 切换前先把当前编辑器内容写回当前活动文档。
-    syncOfficialWritingStateFromInputs({ immediate: true });
-    officialWritingLibrary.activeId = docId;
-    officialWritingState = target.state;
-    officialWritingUndoStack.length = 0;
-    officialWritingRedoStack.length = 0;
-    officialWritingUiState.lastSelection = null;
-    updateOfficialWritingUndoRedoButtons();
-    hydrateOfficialWritingForm();
-    renderOfficialWritingWorkspace();
-    renderOfficialWritingDocList();
-    if (openEditor) setOfficialWritingScreen('editor');
-}
-
-function createOfficialWritingDoc(options = {}) {
-    if (officialWritingLibrary.docs.length) syncOfficialWritingStateFromInputs();
-    const docType = String(options.docType || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType).trim() || OFFICIAL_WRITING_DEFAULT_FORM_STATE.docType;
-    const standard = String(options.standard || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard).trim() || OFFICIAL_WRITING_DEFAULT_FORM_STATE.standard;
-    const rawTitle = String(options.title ?? '').trim();
-    const title = compactTextPreview(rawTitle || `${docType}草稿`, 40);
-    const doc = {
-        id: generateOfficialWritingDocId(), title, manualTitle: Boolean(rawTitle),
-        updatedAt: new Date().toISOString(), version: 0,
-        state: createOfficialWritingState({ docType, standard })
-    };
-    officialWritingLibrary.docs.unshift(doc);
-    officialWritingUiState.libraryPage = 1;
-    officialWritingLibrary.activeId = doc.id;
-    officialWritingState = doc.state;
-    officialWritingUndoStack.length = 0;
-    officialWritingRedoStack.length = 0;
-    officialWritingUiState.lastSelection = null;
-    updateOfficialWritingUndoRedoButtons();
-    hydrateOfficialWritingForm();
-    scheduleOfficialWritingDocumentSave(doc, { immediate: true });
-    renderOfficialWritingWorkspace();
-    renderOfficialWritingDocList();
-    setOfficialWritingScreen('editor');
-    if (typeof showToast === 'function') showToast('已新建公文');
-    getOfficialWritingSurface('draft')?.focus();
-}
-
-async function renameOfficialWritingDoc(docId) {
-    const doc = officialWritingLibrary.docs.find(item => item.id === docId);
-    if (!doc) return;
-    const next = await window.Pivot.legacy.showInputPrompt?.({
-        title: '重命名公文',
-        message: '请输入新的公文标题：',
-        placeholder: '新公文',
-        value: doc.title || '',
-        requiredMessage: '公文标题不能为空',
-        width: 520
-    });
-    if (next === null) return;
-    const trimmed = next.trim();
-    if (!trimmed) return;
-    doc.title = compactTextPreview(trimmed, 40);
-    doc.manualTitle = true;
-    doc.updatedAt = new Date().toISOString();
-    scheduleOfficialWritingDocumentSave(doc, { immediate: true });
-    renderOfficialWritingDocList();
-}
-
-async function deleteOfficialWritingDoc(docId) {
-    const index = officialWritingLibrary.docs.findIndex(item => item.id === docId);
-    if (index < 0) return;
-    const doc = officialWritingLibrary.docs[index];
-    const hasContent = String(doc.state?.draft || '').trim() || String(doc.state?.source || '').trim();
-    if (hasContent) {
-        const confirmed = await (window.Pivot.legacy.showConfirm?.('删除公文', `确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)
-            ?? Promise.resolve(window.confirm(`确认删除公文「${doc.title || '未命名公文'}」？此操作不可恢复。`)));
-        if (!confirmed) return;
-    }
-    try {
-        await deleteOfficialWritingDocumentFromServer(docId);
-    } catch (error) {
-        showToast?.(error?.message || '删除公文失败，请稍后重试', 'error');
-        return;
-    }
-    const wasActive = officialWritingLibrary.activeId === docId;
-    officialWritingLibrary.docs.splice(index, 1);
-    if (!officialWritingLibrary.docs.length) {
-        const fresh = createEmptyOfficialWritingDoc();
-        officialWritingLibrary.docs.push(fresh);
-        officialWritingLibrary.activeId = fresh.id;
-    } else if (wasActive) {
-        officialWritingLibrary.activeId = officialWritingLibrary.docs[0].id;
-    }
-    officialWritingState = getActiveOfficialWritingDoc().state;
-    officialWritingUndoStack.length = 0;
-    officialWritingRedoStack.length = 0;
-    updateOfficialWritingUndoRedoButtons();
-    hydrateOfficialWritingForm();
-    saveOfficialWritingState({ immediate: true });
-    renderOfficialWritingWorkspace();
-    renderOfficialWritingDocList();
-    if (wasActive) setOfficialWritingScreen('library');
-    if (typeof showToast === 'function') showToast('已删除公文');
-}
 function hydrateOfficialWritingForm() {
     const type = document.getElementById('official-writing-type');
     const standard = document.getElementById('official-writing-standard');
@@ -415,13 +33,15 @@ function updateOfficialWritingModeControls() {
 
 // 发文要素表单（版头 + 版记）字段 id 与 state.meta 键的映射。
 const OFFICIAL_WRITING_META_FIELD_IDS = {
+    titleBreaks: 'official-writing-meta-title-breaks',
     secrecy: 'official-writing-meta-secrecy',
     urgency: 'official-writing-meta-urgency',
     issuer: 'official-writing-meta-issuer',
     issueNumber: 'official-writing-meta-issue-number',
     cc: 'official-writing-meta-cc',
     printer: 'official-writing-meta-printer',
-    printDate: 'official-writing-meta-print-date'
+    printDate: 'official-writing-meta-print-date',
+    issuingOrg: 'official-writing-meta-issuing-org', signoff: 'official-writing-meta-signoff', issuedAt: 'official-writing-meta-issued-at'
 };
 
 function hydrateOfficialWritingMetaForm() {
@@ -441,246 +61,6 @@ function syncOfficialWritingMetaFromInputs() {
     });
     officialWritingState.meta = meta;
     return meta;
-}
-
-function getOfficialWritingText(field) {
-    if (officialWritingProgrammaticTextUpdate) return document.getElementById(field)?.value || '';
-    if (field === 'official-writing-source' && isOfficialWritingSurfaceActive('source')) {
-        syncOfficialWritingSurfaceToTextarea('source');
-    }
-    if (field === 'official-writing-draft' && isOfficialWritingSurfaceActive('draft')) {
-        syncOfficialWritingSurfaceToTextarea('draft');
-    }
-    return document.getElementById(field)?.value || '';
-}
-
-function getOfficialWritingSurface(target = 'draft') {
-    return document.getElementById(target === 'source' ? 'official-writing-source-surface' : 'official-writing-draft-surface');
-}
-
-function getOfficialWritingRawEditor(target = 'draft') {
-    return document.getElementById(target === 'source' ? 'official-writing-source' : 'official-writing-draft');
-}
-
-function getOfficialWritingSurfaceText(text) {
-    return String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-}
-
-function isOfficialWritingSurfaceActive(target) {
-    const surface = getOfficialWritingSurface(target);
-    return Boolean(surface && (document.activeElement === surface || surface.contains(document.activeElement)));
-}
-
-function getOfficialWritingParagraphLines(text) {
-    return getOfficialWritingSurfaceText(text)
-        .split('\n')
-        .map(line => line.trimEnd());
-}
-
-function isOfficialWritingDateLine(line) {
-    return /^(【日期】|【成文日期】|(?:【待补充】|[0-9０-９]{4}|[一二三四五六七八九十〇零]{4})年(?:【待补充】|[0-9０-９]{1,2}|[一二三四五六七八九十〇零]{1,3})月(?:【待补充】|[0-9０-９]{1,2}|[一二三四五六七八九十〇零]{1,3})日)$/.test(String(line || '').trim());
-}
-
-function isOfficialWritingClosingLine(line) {
-    return /^(此致|敬礼|谨此|特此|专此|此复|特此函达|特此报告)/.test(String(line || '').trim());
-}
-
-function isOfficialWritingFooterLabelLine(line) {
-    return /^(附件|抄送|联系人|联系电话|邮编|地址|电话|传真)[:：]/.test(String(line || '').trim());
-}
-
-function isOfficialWritingSignatureLine(line, index = 0, lines = []) {
-    const text = String(line || '').trim();
-    if (/^(【发文单位】|【日期】|【成文日期】)$/.test(text) || isOfficialWritingDateLine(text)) return true;
-    const nonEmptyIndexes = lines
-        .map((item, itemIndex) => String(item || '').trim() ? itemIndex : -1)
-        .filter(itemIndex => itemIndex >= 0);
-    const tailIndexes = nonEmptyIndexes.slice(-2);
-    const lastIndex = tailIndexes[tailIndexes.length - 1];
-    return tailIndexes[0] === index
-        && lastIndex !== undefined
-        && isOfficialWritingDateLine(lines[lastIndex])
-        && !isOfficialWritingNumberedHeading(text)
-        && !isOfficialWritingSubHeading(text)
-        && !isOfficialWritingRecipientLine(text)
-        && !isOfficialWritingClosingLine(text)
-        && !isOfficialWritingFooterLabelLine(text)
-        && text.length <= 28;
-}
-
-function isOfficialWritingRecipientLine(line) {
-    return /[:：]$/.test(line) || /^(【主送机关】|主送机关[:：]|各有关单位[:：]?|各部门[:：]?|各单位[:：]?)/.test(line);
-}
-
-function isOfficialWritingNumberedHeading(line) {
-    return /^[一二三四五六七八九十]+[、.．]/.test(line);
-}
-
-function isOfficialWritingSubHeading(line) {
-    return /^[（(][一二三四五六七八九十0-9一二三四五六七八九十]+[）)]/.test(line) || /^\d+[、.．]/.test(line);
-}
-
-function isOfficialWritingIndentedItem(line) {
-    return /^[（(][一二三四五六七八九十0-9]+[）)]/.test(String(line || '').trim());
-}
-
-function classifyOfficialWritingLine(line, index, lines) {
-    const text = String(line || '').trim();
-    if (!text) return { type: 'blank', text: '' };
-    const firstNonEmptyIndex = lines.findIndex(item => String(item || '').trim());
-    if (index === firstNonEmptyIndex) {
-        if (/^[【\[]/.test(text) || /通知|通报|请示|报告|意见|函|纪要|决定|公告|批复|通知$/.test(text)) {
-            return { type: 'title', text };
-        }
-    }
-    if (isOfficialWritingSignatureLine(text, index, lines)) return { type: 'signature', text };
-    if (isOfficialWritingFooterLabelLine(text)) return { type: 'label', text };
-    if (isOfficialWritingRecipientLine(text)) return { type: 'recipient', text };
-    if (isOfficialWritingClosingLine(text)) {
-        return { type: 'closing', text };
-    }
-    if (isOfficialWritingNumberedHeading(text)) {
-        return { type: 'major-heading', text };
-    }
-    if (isOfficialWritingIndentedItem(text)) {
-        return { type: 'indented-item', text };
-    }
-    if (/^\d+[、.．]/.test(text)) {
-        return { type: 'minor-heading', text };
-    }
-    if (/^[一二三四五六七八九十]+、/.test(text) || /^[-—]/.test(text)) {
-        return { type: 'paragraph-heading', text };
-    }
-    if (/^【.*】[:：]?$/.test(text)) {
-        return { type: 'label', text };
-    }
-    return { type: 'paragraph', text };
-}
-
-function renderOfficialWritingSurface(target = 'draft', { force = false } = {}) {
-    const surface = getOfficialWritingSurface(target);
-    const textarea = getOfficialWritingRawEditor(target);
-    if (!surface || !textarea) return;
-    if (!force && surface === document.activeElement) return;
-    const value = getOfficialWritingSurfaceText(textarea.value || '');
-    const lines = getOfficialWritingParagraphLines(value);
-    const activeClass = surface.classList.contains('is-active') ? ' is-active' : '';
-    const hiddenClass = surface.classList.contains('is-document-hidden') ? ' is-document-hidden' : '';
-    surface.className = `official-writing-document-surface official-writing-editable-surface official-writing-surface-${target}${activeClass}${hiddenClass}`;
-    PivotSafeHtml.setHtml(surface, '');
-    if (!value.trim()) {
-        surface.dataset.empty = 'true';
-        surface.dataset.placeholder = textarea.placeholder || surface.dataset.placeholder || '请输入正文';
-        return;
-    }
-    delete surface.dataset.empty;
-    let paragraphIndex = 0;
-    let cursor = 0;
-    let previousContentType = '';
-    lines.forEach((line, index) => {
-        const rawLine = String(line || '');
-        const lineStart = cursor;
-        const lineEnd = cursor + rawLine.length;
-        const kind = classifyOfficialWritingLine(line, index, lines);
-        cursor = lineEnd + (index < lines.length - 1 ? 1 : 0);
-        if (kind.type === 'blank') {
-            const gap = document.createElement('div');
-            gap.className = 'official-writing-surface-blank';
-            gap.dataset.textStart = String(lineStart);
-            gap.dataset.textEnd = String(lineEnd);
-            surface.appendChild(gap);
-            paragraphIndex += 1;
-            return;
-        }
-        const block = document.createElement('div');
-        block.className = `official-writing-surface-line official-writing-surface-${kind.type}`;
-        if (kind.type === 'signature') {
-            block.classList.add(previousContentType === 'signature'
-                ? 'official-writing-surface-signature-continuation'
-                : 'official-writing-surface-signature-start');
-        }
-        block.dataset.paragraphIndex = String(paragraphIndex);
-        block.dataset.textStart = String(lineStart);
-        block.dataset.textEnd = String(lineEnd);
-        const textSpan = document.createElement('span');
-        textSpan.className = 'official-writing-surface-text';
-        textSpan.textContent = kind.text;
-        block.appendChild(textSpan);
-        surface.appendChild(block);
-        if (kind.type !== 'minor-heading' && kind.type !== 'major-heading') {
-            paragraphIndex += 1;
-        }
-        previousContentType = kind.type;
-    });
-}
-
-function renderOfficialWritingSurfaces({ force = false } = {}) {
-    renderOfficialWritingSurface('source', { force });
-    renderOfficialWritingSurface('draft', { force });
-}
-
-function syncOfficialWritingSurfaceToTextarea(target = 'draft') {
-    const surface = getOfficialWritingSurface(target);
-    const textarea = getOfficialWritingRawEditor(target);
-    if (!surface || !textarea) return;
-    if (surface.dataset.syncing === '1') return;
-    surface.dataset.syncing = '1';
-    textarea.value = normalizeOfficialWritingSurfaceText(surface.innerText || surface.textContent || '');
-    delete surface.dataset.syncing;
-}
-
-function handleOfficialWritingSurfaceInput(event) {
-    const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
-    const selection = getOfficialWritingSurfaceSelection(target);
-    // 即时部分：保持文本与光标同步，让键入手感不卡顿。
-    syncOfficialWritingSurfaceToTextarea(target);
-    renderOfficialWritingSurface(target, { force: true });
-    if (selection) {
-        const textarea = getOfficialWritingTextarea(target);
-        const point = Math.min(selection.end, textarea?.value.length || 0);
-        setOfficialWritingSurfaceSelection(target, point, point);
-    }
-    // 重活（整库持久化 + 校对/合规 + 列表重建 + 回流）去抖执行。
-    scheduleOfficialWritingAnalysis();
-}
-
-function handleOfficialWritingSurfaceBlur(event) {
-    const target = event.currentTarget?.dataset?.officialWritingSurface || 'draft';
-    syncOfficialWritingSurfaceToTextarea(target);
-    renderOfficialWritingSurface(target);
-    // 失焦时立即冲刷待执行的去抖任务，避免离开输入框时丢失最近一次保存。
-    flushOfficialWritingAnalysis();
-}
-
-function handleOfficialWritingSurfacePaste(event) {
-    event.preventDefault();
-    const text = event.clipboardData?.getData('text/plain') || '';
-    document.execCommand?.('insertText', false, text);
-}
-
-function handleOfficialWritingSurfaceKeydown(event) {
-    if (event.key === 'Tab') {
-        event.preventDefault();
-        document.execCommand?.('insertText', false, '    ');
-    }
-}
-
-function updateOfficialWritingSurfaceVisibility() {
-    const panel = document.querySelector('.official-writing-panel');
-    if (!panel) return;
-    const mode = panel.dataset.writingViewMode || 'document';
-    ['source', 'draft'].forEach(target => {
-        const surface = getOfficialWritingSurface(target);
-        const textarea = getOfficialWritingRawEditor(target);
-        if (!surface || !textarea) return;
-        surface.classList.toggle('is-active', true);
-        textarea.classList.toggle('is-active-editor', false);
-        if (mode === 'document' && target === 'source') {
-            surface.classList.add('is-document-hidden');
-        } else {
-            surface.classList.remove('is-document-hidden');
-        }
-    });
 }
 
 function syncOfficialWritingStateFromInputs(options = {}) {
@@ -709,45 +89,10 @@ function getTextCount(text) {
 }
 
 function getOfficialWritingWorkspaceSummary() {
-    const sourceCount = getTextCount(officialWritingState.source);
-    const draftCount = getTextCount(officialWritingState.draft);
-    const risks = getOfficialWritingComplianceRisks();
-    const pendingSuggestions = officialWritingState.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected').length;
-    const commentCount = officialWritingState.comments.length;
-    const versionCount = officialWritingState.versions.length;
-    const referenceCount = getOfficialWritingReferenceMatches().length;
-    let statusTitle = '待起草';
-    let statusDetail = '先粘贴原文材料或直接起草正文。';
-
-    if (draftCount > 0) {
-        if (risks.length === 0) {
-            statusTitle = pendingSuggestions > 0 ? '可审阅' : '可导出';
-            statusDetail = pendingSuggestions > 0
-                ? `正文已成稿，还有 ${pendingSuggestions} 条建议待处理。`
-                : '正文已成稿，可继续审校或直接导出。';
-        } else if (risks.length <= 2) {
-            statusTitle = '待确认';
-            statusDetail = `正文还有 ${risks.length} 项风险需要处理后再正式流转。`;
-        } else {
-            statusTitle = '待完善';
-            statusDetail = `正文还有 ${risks.length} 项风险，建议先补齐关键信息。`;
-        }
-    } else if (sourceCount > 0) {
-        statusTitle = '可起草';
-        statusDetail = '原文材料已就绪，可直接起草正文。';
-    }
-
-    return {
-        sourceCount,
-        draftCount,
-        risks,
-        pendingSuggestions,
-        commentCount,
-        versionCount,
-        referenceCount,
-        statusTitle,
-        statusDetail
-    };
+    const summary = officialWritingDocument.summary(officialWritingState);
+    return { ...summary, risks: getOfficialWritingComplianceRisks(), commentCount: officialWritingState.comments.length,
+        versionCount: officialWritingState.versions.length, referenceCount: (officialWritingState.references || []).length,
+        statusTitle: summary.status, statusDetail: summary.issues.join('；') || (summary.reviewed ? '当前正文已完成 AI 审校，请人工复核后流转。' : '可继续编辑、审校或预览导出。') };
 }
 
 function setText(id, text) {
@@ -814,223 +159,7 @@ function splitOfficialWritingParagraphs(text) {
     return paragraphs;
 }
 
-function normalizeOfficialWritingIndex(value, fallback = 0) {
-    const number = Number(value);
-    return Number.isFinite(number) && number >= 0 ? number : fallback;
-}
-
-function getOfficialWritingTextarea(target = 'draft') {
-    return document.getElementById(target === 'source' ? 'official-writing-source' : 'official-writing-draft');
-}
-
-function getOfficialWritingTargetFromTextarea(textarea) {
-    return textarea?.id === 'official-writing-source' ? 'source' : 'draft';
-}
-
-function normalizeOfficialWritingSurfaceText(text) {
-    return String(text || '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .replace(/\u00a0/g, ' ')
-        .trimEnd();
-}
-
-function getOfficialWritingSurfaceSelection(target) {
-    const surface = getOfficialWritingSurface(target);
-    const selection = window.getSelection?.();
-    if (!surface || !selection || selection.rangeCount === 0) return null;
-    const range = selection.getRangeAt(0);
-    if (!surface.contains(range.startContainer) && surface !== range.startContainer) return null;
-    if (!surface.contains(range.endContainer) && surface !== range.endContainer) return null;
-    let startPoint = getOfficialWritingOffsetFromSurfacePoint(surface, range.startContainer, range.startOffset);
-    let endPoint = getOfficialWritingOffsetFromSurfacePoint(surface, range.endContainer, range.endOffset);
-    if (startPoint == null || endPoint == null) {
-        const before = range.cloneRange();
-        before.selectNodeContents(surface);
-        before.setEnd(range.startContainer, range.startOffset);
-        startPoint = normalizeOfficialWritingSurfaceText(before.toString()).length;
-        endPoint = startPoint + normalizeOfficialWritingSurfaceText(range.toString()).length;
-    }
-    const start = Math.min(startPoint, endPoint);
-    const end = Math.max(startPoint, endPoint);
-    const textarea = getOfficialWritingTextarea(target);
-    return {
-        target,
-        start,
-        end,
-        text: textarea?.value?.slice(start, end) || normalizeOfficialWritingSurfaceText(range.toString())
-    };
-}
-
-function getActiveOfficialWritingSurfaceSelection() {
-    const selection = window.getSelection?.();
-    if (!selection || selection.rangeCount === 0) return null;
-    return ['source', 'draft']
-        .map(target => ({ target, surface: getOfficialWritingSurface(target) }))
-        .filter(item => item.surface)
-        .map(item => {
-            const range = selection.getRangeAt(0);
-            const active = document.activeElement === item.surface
-                || item.surface.contains(range.startContainer)
-                || item.surface.contains(range.endContainer);
-            return active ? getOfficialWritingSurfaceSelection(item.target) : null;
-        })
-        .find(Boolean) || null;
-}
-
-function getOfficialWritingTextOffsetWithinLine(line, node, offset) {
-    if (!line) return 0;
-    if (node === line) return Math.min(offset, line.textContent?.length || 0);
-    const range = document.createRange();
-    range.selectNodeContents(line);
-    range.setEnd(node, offset);
-    return range.toString().length;
-}
-
-function getOfficialWritingOffsetFromSurfacePoint(surface, node, offset) {
-    const elementNode = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-    const line = elementNode?.closest?.('.official-writing-surface-line');
-    if (!line || !surface.contains(line)) return null;
-    const lineStart = Number(line.dataset.textStart || 0);
-    const lineEnd = Number(line.dataset.textEnd || lineStart);
-    const relative = getOfficialWritingTextOffsetWithinLine(line, node, offset);
-    return Math.max(lineStart, Math.min(lineEnd, lineStart + relative));
-}
-
-function findOfficialWritingTextPoint(node, offset) {
-    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-    let currentOffset = Math.max(0, offset);
-    let lastText = null;
-    while (walker.nextNode()) {
-        const textNode = walker.currentNode;
-        lastText = textNode;
-        const length = textNode.nodeValue?.length || 0;
-        if (currentOffset <= length) return { node: textNode, offset: currentOffset };
-        currentOffset -= length;
-    }
-    if (lastText) return { node: lastText, offset: lastText.nodeValue?.length || 0 };
-    return { node, offset: Math.min(node.childNodes.length, 0) };
-}
-
-function getOfficialWritingSurfacePoint(target, offset) {
-    const surface = getOfficialWritingSurface(target);
-    if (!surface) return null;
-    const lines = Array.from(surface.querySelectorAll('.official-writing-surface-line'));
-    if (!lines.length) return { node: surface, offset: 0 };
-    const safeOffset = Math.max(0, offset);
-    for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index];
-        const start = Number(line.dataset.textStart || 0);
-        const end = Number(line.dataset.textEnd || start);
-        if (safeOffset <= end) return findOfficialWritingTextPoint(line, safeOffset - start);
-    }
-    const lastLine = lines[lines.length - 1];
-    return findOfficialWritingTextPoint(lastLine, lastLine.textContent?.length || 0);
-}
-
-function setOfficialWritingSurfaceSelection(target, start, end = start) {
-    const surface = getOfficialWritingSurface(target);
-    const startPoint = getOfficialWritingSurfacePoint(target, start);
-    const endPoint = getOfficialWritingSurfacePoint(target, end);
-    if (!surface || !startPoint || !endPoint) return;
-    const range = document.createRange();
-    range.setStart(startPoint.node, startPoint.offset);
-    range.setEnd(endPoint.node, endPoint.offset);
-    const selection = window.getSelection?.();
-    if (!selection) return;
-    selection.removeAllRanges();
-    selection.addRange(range);
-    surface.focus();
-}
-
-function setTextareaSelection(textarea, start, end = start) {
-    if (!textarea) return;
-    const safeStart = Math.max(0, Math.min(textarea.value.length, start));
-    const safeEnd = Math.max(safeStart, Math.min(textarea.value.length, end));
-    textarea.setSelectionRange(safeStart, safeEnd);
-    const target = getOfficialWritingTargetFromTextarea(textarea);
-    renderOfficialWritingSurface(target);
-    setOfficialWritingSurfaceSelection(target, safeStart, safeEnd);
-}
-
-function setOfficialWritingTextareaValue(target, value) {
-    const textarea = getOfficialWritingTextarea(target);
-    if (!textarea) return;
-    officialWritingProgrammaticTextUpdate = true;
-    try {
-        textarea.value = String(value || '');
-        renderOfficialWritingSurface(target, { force: true });
-    } finally {
-        officialWritingProgrammaticTextUpdate = false;
-    }
-}
-
-// 自定义操作历史暂不启用；保留调用点，避免 AI/模板/建议流程产生额外耦合。
-function pushOfficialWritingUndoSnapshot() {
-    // 暂不记录自定义操作历史。
-}
-
-function updateOfficialWritingUndoRedoButtons() {
-    // 撤销/重做按钮已暂时下线。
-}
-
-function replaceTextareaRange(textarea, start, end, replacement, { skipSnapshot } = {}) {
-    if (!textarea) return;
-    if (!skipSnapshot) pushOfficialWritingUndoSnapshot();
-    const before = textarea.value.slice(0, start);
-    const after = textarea.value.slice(end);
-    officialWritingProgrammaticTextUpdate = true;
-    try {
-        textarea.value = `${before}${replacement}${after}`;
-        setTextareaSelection(textarea, start, start + replacement.length);
-    } finally {
-        officialWritingProgrammaticTextUpdate = false;
-    }
-    syncOfficialWritingStateFromInputs();
-    renderOfficialWritingSurface(getOfficialWritingTargetFromTextarea(textarea), { force: true });
-}
-
-function getCurrentOfficialWritingSelection() {
-    const surfaceSelection = getActiveOfficialWritingSurfaceSelection();
-    if (surfaceSelection) {
-        const textarea = getOfficialWritingTextarea(surfaceSelection.target);
-        if (textarea) {
-            textarea.selectionStart = surfaceSelection.start;
-            textarea.selectionEnd = surfaceSelection.end;
-        }
-        return surfaceSelection;
-    }
-    const source = getOfficialWritingTextarea('source');
-    const draft = getOfficialWritingTextarea('draft');
-    const active = document.activeElement === source ? source : draft;
-    const target = active === source ? 'source' : 'draft';
-    const start = normalizeOfficialWritingIndex(active?.selectionStart, 0);
-    const end = normalizeOfficialWritingIndex(active?.selectionEnd, start);
-    const text = active?.value?.slice(start, end) || '';
-    return { target, start, end, text };
-}
-
-function rememberOfficialWritingSelection() {
-    const selection = getCurrentOfficialWritingSelection();
-    if (selection.text.trim()) officialWritingUiState.lastSelection = selection;
-    return selection;
-}
-
-function getBestOfficialWritingSelection() {
-    const live = getCurrentOfficialWritingSelection();
-    if (live.text.trim()) {
-        officialWritingUiState.lastSelection = live;
-        return live;
-    }
-    return officialWritingUiState.lastSelection || live;
-}
-
-function getOfficialWritingInsertionPoint(target = 'draft') {
-    const surfaceSelection = getOfficialWritingSurfaceSelection(target);
-    if (surfaceSelection) return surfaceSelection.end;
-    const textarea = getOfficialWritingTextarea(target);
-    return textarea?.selectionEnd || textarea?.value.length || 0;
-}
+// 文本事务和历史限额由 apps-workbench-history.js 统一管理。
 
 function getOfficialWritingMaterialSegments() {
     const source = String(officialWritingState.source || '');
@@ -1040,24 +169,7 @@ function getOfficialWritingMaterialSegments() {
         .slice(0, 12);
 }
 
-function recordOfficialWritingAutoSave() {
-    const draft = String(officialWritingState.draft || '');
-    if (!draft.trim()) return;
-    const last = officialWritingState.autoSaves?.[0];
-    if (last?.draft === draft) return;
-    officialWritingState.autoSaves = [
-        {
-            id: `autosave-${Date.now()}`,
-            name: `${getOfficialWritingDocType()}自动草稿`,
-            draft,
-            source: officialWritingState.source,
-            createdAt: new Date().toISOString()
-        },
-        ...(Array.isArray(officialWritingState.autoSaves) ? officialWritingState.autoSaves : [])
-    ].slice(0, 8);
-}
-
-function getOfficialWritingComplianceRisks() {
+function computeOfficialWritingComplianceRisks() {
     const draft = String(officialWritingState.draft || '').trim();
     const source = String(officialWritingState.source || '').trim();
     const risks = [];
@@ -1074,7 +186,7 @@ function getOfficialWritingComplianceRisks() {
     if (placeholder) {
         risks.push({ id: 'placeholder', level: '高', title: '存在待补充占位', detail: '正文中仍有占位内容，正式流转前需要补齐或删除。', start: placeholder.index, end: placeholder.index + placeholder[0].length, suggestion: '请根据材料补齐该处事实信息，无法确认时保留待核实说明。' });
     }
-    if (!/[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日/.test(draft) && !/\d{4}[.-]\d{1,2}[.-]\d{1,2}/.test(draft)) {
+    if (!officialWritingDocument.isoDate(officialWritingState.meta?.issuedAt) && !/[0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日/.test(draft) && !/\d{4}[.-]\d{1,2}[.-]\d{1,2}/.test(draft)) {
         risks.push({ id: 'missing-date', level: '低', title: '未识别成文日期', detail: '如需正式行文，建议在落款处补齐日期。', start: Math.max(0, draft.length - 20), end: draft.length, suggestion: '建议在落款处补充“XXXX年XX月XX日”。' });
     }
     if (draft.length > 80 && source.length > 80 && getTextCount(source) > 0) {
@@ -1093,7 +205,7 @@ function getOfficialWritingComplianceRisks() {
     getOfficialWritingStandardRules(standard).forEach(rule => {
         let hit = false;
         try {
-            hit = rule.test(draft, ruleContext);
+            hit = rule.test([draft, officialWritingState.meta?.issueNumber, officialWritingState.meta?.issuer ? '签发人：' + officialWritingState.meta.issuer : '', officialWritingState.meta?.urgency].filter(Boolean).join('\n'), ruleContext);
         } catch (e) {
             hit = false;
         }
@@ -1136,7 +248,7 @@ function officialWritingFeatureOverlap(sourceFeatures, draftFeatures) {
     return { ratio, numberHit };
 }
 
-function getOfficialWritingReferenceMatches() {
+function computeOfficialWritingReferenceMatches() {
     const draft = String(officialWritingState.draft || '');
     const source = String(officialWritingState.source || '');
     if (!draft.trim() || !source.trim()) return [];
@@ -1251,64 +363,9 @@ function renderOfficialWritingCompliance() {
     `).join('') || '<div class="official-writing-empty-note">未识别明显规范风险</div>');
 }
 
-function renderOfficialWritingSuggestions() {
-    const list = document.getElementById('official-writing-suggestion-list');
-    const pending = officialWritingState.suggestions.filter(item => item.status !== 'accepted' && item.status !== 'rejected');
-    setText('official-writing-suggestion-count', `${pending.length} 条待处理`);
-    if (!list) return;
-    if (officialWritingAiBusy && !officialWritingState.suggestions.length) {
-        const busyLabel = typeof officialWritingAiBusyLabel === 'string' && officialWritingAiBusyLabel ? officialWritingAiBusyLabel : 'AI 处理中…';
-        PivotSafeHtml.setHtml(list, `
-            <div class="official-writing-empty-note official-writing-ai-empty-state">
-                <span class="official-writing-ai-indicator">${escapeAppsHtml(busyLabel)}</span>
-                <em>正在分析正文并生成可应用修改意见</em>
-            </div>
-        `);
-        return;
-    }
-    PivotSafeHtml.setHtml(list, officialWritingState.suggestions.map(suggestion => {
-        // 流式生成中：展示“AI 生成中…”指示，隐藏操作按钮（避免对未完成文本执行接受/替换）。
-        const streaming = !!suggestion.streaming;
-        const statusLabel = streaming
-            ? 'AI 生成中…'
-            : (suggestion.status === 'accepted' ? '已接受' : suggestion.status === 'rejected' ? '已拒绝' : '待处理');
-        const statusClass = streaming ? 'streaming' : (suggestion.status || 'pending');
-        const actions = streaming ? '' : `
-            <div class="official-writing-suggestion-actions">
-                <button type="button" class="btn-primary" data-suggestion-action="replace">替换正文</button>
-                <button type="button" class="btn-secondary" data-suggestion-action="insert">插入下方</button>
-                <button type="button" class="btn-secondary" data-suggestion-action="reject">忽略</button>
-            </div>`;
-        return `
-        <article class="official-writing-suggestion-item is-${escapeAppsHtml(suggestion.status || 'pending')}${streaming ? ' is-streaming' : ''}" data-suggestion-id="${escapeAppsHtml(suggestion.id)}">
-            <div>
-                <strong>${escapeAppsHtml(suggestion.title || '审校建议')}</strong>
-                <span>${escapeAppsHtml(suggestion.type || '建议')}</span>
-            </div>
-            <div class="official-writing-suggestion-meta">
-                <span class="official-writing-suggestion-status is-${escapeAppsHtml(statusClass)}">${escapeAppsHtml(statusLabel)}</span>
-                <span>${escapeAppsHtml(formatVersionTime(suggestion.resolvedAt || suggestion.createdAt))}</span>
-            </div>
-            ${suggestion.original ? `<p class="official-writing-suggestion-original">${escapeAppsHtml(suggestion.original)}</p>` : ''}
-            <p class="official-writing-suggestion-text">${escapeAppsHtml(suggestion.replacement || suggestion.detail || '')}</p>
-            ${actions}
-        </article>`;
-    }).join('') || '<div class="official-writing-empty-note">暂无 AI 审校建议，可先全文起草、选中文字处理，或点击“开始审校”生成修改意见。</div>');
-}
 
-function renderOfficialWritingReferences() {
-    const list = document.getElementById('official-writing-reference-list');
-    const matches = getOfficialWritingReferenceMatches();
-    setText('official-writing-reference-count', `${matches.length} 处引用`);
-    if (!list) return;
-    PivotSafeHtml.setHtml(list, matches.map(match => `
-        <article class="official-writing-reference-item">
-            <span>原文材料${match.kind === 'fuzzy' ? `（相近 ${Math.round((match.score || 0) * 100)}%）` : ''}</span>
-            <p>${escapeAppsHtml(match.source)}</p>
-            <strong>正文引用：${escapeAppsHtml(match.draft)}</strong>
-        </article>
-    `).join('') || '<div class="official-writing-empty-note">暂未识别到正文与原文材料的直接引用</div>');
-}
+
+
 
 function setOfficialWritingMaterialEditorOpenState(isOpen) {
     document.getElementById('official-writing-left-rail')?.classList.toggle('is-material-editor-open', Boolean(isOpen));
@@ -1388,16 +445,14 @@ function renderOfficialWritingMaterials() {
 }
 
 function renderOfficialWritingWorkspace() {
-    updateOfficialWritingSurfaceVisibility();
-    resizeOfficialWritingDraftPage();
-    renderOfficialWritingStats();
-    renderOfficialWritingComments();
-    renderOfficialWritingVersions();
-    renderOfficialWritingCompliance();
-    renderOfficialWritingSuggestions();
-    renderOfficialWritingReferences();
-    renderOfficialWritingMaterials();
-    renderOfficialWritingProofread();
+    updateOfficialWritingSurfaceVisibility(); resizeOfficialWritingDraftPage();
+    renderOfficialWritingStats(); renderOfficialWritingSaveStatus(); renderOfficialWritingDetailHeader();
+    if (isOfficialWritingDrawerOpen()) {
+        const renderers = { suggestions: () => { renderOfficialWritingProofread(); renderOfficialWritingSuggestions(); }, comments: renderOfficialWritingComments,
+            versions: renderOfficialWritingVersions, compliance: renderOfficialWritingCompliance, references: renderOfficialWritingReferences };
+        renderers[officialWritingUiState.drawerTab]?.();
+    }
+    if (!officialWritingUiState.leftCollapsed) renderOfficialWritingMaterials();
 }
 
 function resizeOfficialWritingDraftPage() {
@@ -1414,3 +469,20 @@ function resizeOfficialWritingDraftPage() {
     editorStack.style.height = `${Math.max(minHeight, surface.scrollHeight + 168)}px`;
 }
 
+
+let officialWritingComplianceCache = null;
+let officialWritingReferenceCache = null;
+function getOfficialWritingComplianceRisks() {
+    const keys = [officialWritingState.draft, officialWritingState.source, getOfficialWritingDocType(), getOfficialWritingStandard(), JSON.stringify(officialWritingState.meta)];
+    if (officialWritingComplianceCache && keys.every((key, index) => key === officialWritingComplianceCache.keys[index])) return officialWritingComplianceCache.value;
+    const value = computeOfficialWritingComplianceRisks();
+    officialWritingComplianceCache = { keys, value };
+    return value;
+}
+function getOfficialWritingReferenceMatches() {
+    const keys = [officialWritingState.draft, officialWritingState.source];
+    if (officialWritingReferenceCache && keys.every((key, index) => key === officialWritingReferenceCache.keys[index])) return officialWritingReferenceCache.value;
+    const value = computeOfficialWritingReferenceMatches();
+    officialWritingReferenceCache = { keys, value };
+    return value;
+}

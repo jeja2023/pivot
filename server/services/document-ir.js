@@ -15,6 +15,7 @@
  */
 const crypto = require('crypto');
 const { canonicalJson } = require('./canonical-json');
+const officialFormat = require('../../client/common/official-writing-format');
 
 const IR_VERSION = '1';
 
@@ -26,18 +27,14 @@ const ALIGNMENTS = Object.freeze(['left', 'center', 'right', 'justify']);
 
 /** 各 doc_type 允许的 block 与必填 meta。 */
 const DOC_TYPE_RULES = Object.freeze({
-    official_document: { blocks: BLOCK_TYPES, requiredMeta: ['title', 'issuer'] },
+    official_document: { blocks: BLOCK_TYPES, requiredMeta: ['title'] },
     report: { blocks: BLOCK_TYPES, requiredMeta: ['title'] },
     table: { blocks: ['heading', 'paragraph', 'table', 'page_break'], requiredMeta: ['title'] },
     memo: { blocks: ['heading', 'paragraph', 'list'], requiredMeta: ['title'] }
 });
 
-/** 公文默认页面设置（GB/T 9704 常用值，单位毫米）。 */
-const OFFICIAL_PAGE_DEFAULT = Object.freeze({
-    size: 'A4',
-    orientation: 'portrait',
-    margin_mm: Object.freeze({ top: 37, bottom: 35, left: 28, right: 26 })
-});
+/** 公文页面按用户截图固定：上37、下35、左右27毫米。 */
+const OFFICIAL_PAGE_DEFAULT = officialFormat.PAGE;
 
 const GENERAL_PAGE_DEFAULT = Object.freeze({
     size: 'A4',
@@ -54,9 +51,10 @@ const MAX_LIST_ITEMS = 500;
 const CAS_REF_PATTERN = /^artifact-cas:\/\/[0-9a-f]{16,64}$/;
 
 const ALLOWED_TOP_FIELDS = Object.freeze(new Set(['ir_version', 'doc_type', 'meta', 'blocks', 'footer']));
-const ALLOWED_META_FIELDS = Object.freeze(new Set(['title', 'doc_number', 'issuer', 'issued_at', 'security_level', 'page', 'subtitle', 'recipient', 'signoff']));
+const OFFICIAL_META_FIELDS = ['security_period', 'urgency', 'signer', 'cc', 'printer', 'printed_at', 'layout'];
+const ALLOWED_META_FIELDS = Object.freeze(new Set(['title', 'doc_number', 'issuer', 'issued_at', 'security_level', 'page', 'subtitle', 'recipient', 'signoff', ...OFFICIAL_META_FIELDS]));
 const ALLOWED_PAGE_FIELDS = Object.freeze(new Set(['size', 'orientation', 'margin_mm']));
-const ALLOWED_STYLE_FIELDS = Object.freeze(new Set(['indent_chars', 'line_height', 'align', 'font', 'space_after_pt']));
+const ALLOWED_STYLE_FIELDS = Object.freeze(new Set(['indent_chars', 'line_height', 'align', 'font', 'space_after_pt', 'official_role', 'attachment_prefix']));
 const ALLOWED_FONT_FIELDS = Object.freeze(new Set(['eastAsia', 'ascii', 'size_pt', 'bold', 'color', 'family_chain']));
 const ALLOWED_RUN_FIELDS = Object.freeze(new Set(['text', 'bold', 'italic', 'underline', 'color', 'font', 'revision']));
 const ALLOWED_FOOTER_FIELDS = Object.freeze(new Set(['page_number', 'format']));
@@ -86,6 +84,12 @@ function validateMeta(meta, docType, errors) {
         return;
     }
     unknownFields(meta, ALLOWED_META_FIELDS).forEach(key => errors.push(`meta 含未知字段：${key}`));
+    for (const field of OFFICIAL_META_FIELDS) {
+        if (meta[field] !== undefined && (typeof meta[field] !== 'string' || meta[field].length > 1000)) errors.push(`meta.${field} 必须是不超过 1000 字符的文本。`);
+    }
+    if (meta.layout !== undefined && !['plain', 'red_header'].includes(meta.layout)) errors.push('meta.layout 仅支持 plain/red_header。');
+    if (docType === 'official_document' && meta.layout !== 'plain' && !String(meta.issuer || '').trim()) errors.push('红头公文要求 meta.issuer 发文机关。');
+    if (meta.printed_at && !require('../../client/common/official-writing-document').isoDate(meta.printed_at)) errors.push('印发日期不是有效日期。');
     (DOC_TYPE_RULES[docType]?.requiredMeta || []).forEach(field => {
         if (!String(meta[field] ?? '').trim()) errors.push(`doc_type=${docType} 要求 meta.${field} 不能为空。`);
     });
@@ -93,8 +97,8 @@ function validateMeta(meta, docType, errors) {
         errors.push(`meta.security_level 只能是 ${SECURITY_LEVELS.join('、')}。`);
     }
     if (meta.issued_at !== undefined && meta.issued_at !== null && meta.issued_at !== ''
-        && !/^\d{4}-\d{2}-\d{2}$/.test(String(meta.issued_at))) {
-        errors.push('meta.issued_at 必须是 YYYY-MM-DD 格式。');
+        && (!/^\d{4}-\d{2}-\d{2}$/.test(String(meta.issued_at)) || !require('../../client/common/official-writing-document').isoDate(meta.issued_at))) {
+        errors.push('meta.issued_at 必须是有效的 YYYY-MM-DD 日期。');
     }
     if (meta.page !== undefined) {
         if (!isPlainObject(meta.page)) {
@@ -121,6 +125,8 @@ function validateStyle(style, location, errors) {
         return;
     }
     unknownFields(style, ALLOWED_STYLE_FIELDS).forEach(key => errors.push(`${location}.style 含未知字段：${key}`));
+    if (style.official_role !== undefined && !['body', 'attachment_note', 'attachment_label', 'attachment_title'].includes(style.official_role)) errors.push(`${location}.style.official_role 不受支持。`);
+    if (style.attachment_prefix !== undefined && (typeof style.attachment_prefix !== 'string' || style.attachment_prefix.length > 30)) errors.push(`${location}.style.attachment_prefix 无效。`);
     if (style.align !== undefined && !ALIGNMENTS.includes(String(style.align))) {
         errors.push(`${location}.style.align 只能是 ${ALIGNMENTS.join('、')}。`);
     }
@@ -272,6 +278,8 @@ function validateDocumentIr(input) {
 function canonicalizeStyle(style) {
     if (!isPlainObject(style)) return undefined;
     const result = {};
+    if (style.official_role !== undefined) result.official_role = String(style.official_role);
+    if (style.attachment_prefix !== undefined) result.attachment_prefix = String(style.attachment_prefix);
     if (style.indent_chars !== undefined) result.indent_chars = clampNumber(style.indent_chars, 0, 0, 20);
     if (style.line_height !== undefined) result.line_height = clampNumber(style.line_height, 1.5, 0.5, 5);
     if (style.space_after_pt !== undefined) result.space_after_pt = clampNumber(style.space_after_pt, 0, 0, 200);
@@ -366,9 +374,10 @@ function canonicalizeDocumentIr(input) {
             }
         }
     };
-    ['subtitle', 'recipient', 'signoff'].forEach(field => {
+    ['subtitle', 'recipient', 'signoff', ...OFFICIAL_META_FIELDS].forEach(field => {
         if (input.meta?.[field] !== undefined) meta[field] = normalizeText(input.meta[field]);
     });
+    if (docType === 'official_document') meta.page = { ...officialFormat.PAGE, margin_mm: { ...officialFormat.PAGE.margin_mm } };
     const footerSource = isPlainObject(input.footer) ? input.footer : {};
     return {
         ir_version: IR_VERSION,
@@ -376,8 +385,8 @@ function canonicalizeDocumentIr(input) {
         meta,
         blocks: input.blocks.map(canonicalizeBlock),
         footer: {
-            page_number: footerSource.page_number === undefined ? docType === 'official_document' : Boolean(footerSource.page_number),
-            format: String(footerSource.format || '— {page} —')
+            page_number: docType === 'official_document' ? true : Boolean(footerSource.page_number),
+            format: docType === 'official_document' ? '— {page} —' : String(footerSource.format || '— {page} —')
         }
     };
 }

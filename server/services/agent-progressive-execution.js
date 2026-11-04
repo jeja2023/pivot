@@ -23,9 +23,15 @@ async function resolveProgressiveExecution({ toolName, input = {}, user, toolLis
     if (!selectedTool) throw progressiveExecutionError(`工具不可用或无权访问：${name || '-'}`, 'TOOL_NOT_AVAILABLE');
     if (name !== 'tools.execute') return { selectedTool, approvalTool: selectedTool, approvalToolName: name, approvalInput: input };
     const actualInput = input.input === undefined ? {} : input.input;
-    if (!actualInput || typeof actualInput !== 'object' || Array.isArray(actualInput)) throw progressiveExecutionError('tools.execute 的 input 必须是对象。', 'TOOL_DISCOVERY_INPUT_INVALID');
+    if (!actualInput || typeof actualInput !== 'object' || Array.isArray(actualInput)) {
+        throw new (require('./tool-input-validation').ToolInputValidationError)(selectedTool, ['tools.execute 输入.input 应为对象。']);
+    }
     input.input = actualInput;
     const reference = normalizeToolReference(input);
+    if (!reference.toolName) {
+        delete input.toolRef;
+        return { selectedTool, approvalTool: selectedTool, approvalToolName: name, approvalInput: input, discoveryRequired: 'TOOL_DISCOVERY_REFERENCE_REQUIRED' };
+    }
     input.toolRef = reference;
     let described;
     let currentTools;

@@ -1,6 +1,7 @@
 const { normalizeTaskBudget } = require('./agent-budget');
 const { getModelContextBudget, estimateMessagesTokens } = require('./context-budget');
 const { classifyChatAutoExecution } = require('./chat-auto-execution');
+const { profileRoundPolicy, selectChatRoundProfile } = require('./agent-round-policy');
 
 const MAX_AUTOMATIC_TOKEN_BUDGET = 10000000;
 const MIN_AUTOMATIC_TOKEN_BUDGET = 500000;
@@ -31,7 +32,11 @@ function resolveChatAgentBudget({ modelCfg = {}, decision = {}, ragEnabled = fal
             ? capabilities.some(cap => /^knowledge\./.test(cap)) && capabilities.every(cap => /^(?:knowledge\.|agent\.execute$|conversation\.read_source$)/.test(cap))
             : classifyChatAutoExecution({ prompt: content }).action === 'direct_answer');
     const generalLimit = resolveModelTaskTokenBudget(modelCfg);
-    if (!knowledgeOnly) return { profile: 'standard', history, budget: { max_steps: 30, max_tokens_total: generalLimit, max_runtime_seconds: 600 } };
+    if (!knowledgeOnly) {
+        const profile = selectChatRoundProfile({ decision, content }), policy = profileRoundPolicy(profile, generalLimit);
+        return { profile, policy, segmentMaxSteps: policy.segmentSteps, runMode: profile === 'complex' ? 'deep' : 'standard', history,
+            budget: { max_steps: policy.totalSteps, max_tokens_total: generalLimit, max_runtime_seconds: policy.totalRuntimeSeconds } };
+    }
     const recentHistory = history.slice(-6);
     const inputTokens = estimateMessagesTokens([
         { role: 'system', content: systemPrompt }, ...recentHistory,
@@ -39,7 +44,8 @@ function resolveChatAgentBudget({ modelCfg = {}, decision = {}, ragEnabled = fal
     ]);
     // 简单问答按实际资料量预留少量回合，不按大模型窗口一次分配八轮额度。
     const tokenLimit = Math.min(generalLimit, 131072, Math.max(32768, inputTokens * 3 + 8192));
-    return { profile: 'knowledge_qa', history: recentHistory, budget: { max_steps: 6, max_tool_calls: 6, max_tokens_total: tokenLimit, max_runtime_seconds: 600 } };
+    return { profile: 'knowledge_qa', policy: profileRoundPolicy('knowledge_qa', tokenLimit), segmentMaxSteps: 6, runMode: 'standard', history: recentHistory,
+        budget: { max_steps: 6, max_tool_calls: 6, max_tokens_total: tokenLimit, max_runtime_seconds: 600 } };
 }
 
 module.exports = { normalizeModelTaskBudget, resolveModelTaskTokenBudget, resolveChatAgentBudget };

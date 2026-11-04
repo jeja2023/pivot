@@ -117,7 +117,7 @@ function createAttachmentsRouter({
         }
 
         const expectedPath = `uploads/${requestedUserId}/${sessionId}/${filename}`;
-        const attachment = await queryOne('SELECT id, deleted_at FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?', [
+        const attachment = await queryOne('SELECT id, file_name, deleted_at FROM attachments WHERE user_id = ? AND session_id = ? AND file_path = ?', [
             requestedUserId, sessionId, expectedPath
         ]);
         if (!attachment || (attachment.deleted_at && !isSuperAdmin(req.user))) {
@@ -135,6 +135,10 @@ function createAttachmentsRouter({
         res.setHeader('X-Content-Type-Options', 'nosniff');
         if (['.html', '.htm'].includes(path.extname(target).toLowerCase())) {
             res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+        } else if (path.extname(target).toLowerCase() === '.pdf') {
+            const downloadName = path.basename(String(attachment?.file_name || filename || 'document.pdf'));
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
         }
         res.sendFile(target);
     }));
@@ -433,14 +437,15 @@ function createAttachmentsRouter({
         }
 
         if (isWord) {
+            const { extractDocPreview } = require('../services/doc-preview');
             try {
-                const text = await extractDocumentText(target, attachment.file_type, attachment.file_name, { maxChars: 15000 });
+                const preview = await extractDocPreview(target, attachment.file_type, attachment.file_name);
                 return res.json({
                     success: true,
-                    mode: 'text',
+                    mode: 'doc',
                     format: ext,
-                    text,
-                    notice: '当前未连接 ONLYOFFICE 服务，已为你展示文档抽取文本预览。'
+                    html: preview.html,
+                    text: preview.text
                 });
             } catch (wordErr) {
                 return res.status(422).json({ error: wordErr.message || 'Word 文档读取失败' });

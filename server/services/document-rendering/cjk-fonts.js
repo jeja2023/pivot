@@ -117,8 +117,15 @@ function loadFontFace(buffer, faceName) {
         return { error: `字体文件解析失败：${error.message}。文件可能已损坏或不是受支持的字体容器。` };
     }
     if (!parsed) return { error: '字体文件解析结果为空，无法用于 PDF 嵌入。' };
+    const selectVariation = font => {
+        // 可变 TrueType 默认常是 Thin；直接对子集编码会丢失复合字形的 gvar 轮廓。
+        // 先实例化正规字重，再交给 pdf-lib，保留组合字形且不引入运行时下载/字体转换依赖。
+        const weight = font.variationAxes?.wght;
+        return weight && typeof font.getVariation === 'function'
+            ? font.getVariation({ wght: Math.min(weight.max, Math.max(weight.min, 400)) }) : font;
+    };
     if (!Array.isArray(parsed.fonts)) {
-        return { font: parsed, faceName: String(parsed.postscriptName || '') };
+        return { font: selectVariation(parsed), faceName: String(parsed.postscriptName || '') };
     }
     const names = parsed.fonts.map(item => String(item.postscriptName || '')).filter(Boolean);
     if (faceName) {
@@ -126,11 +133,11 @@ function loadFontFace(buffer, faceName) {
         if (!picked) {
             return { error: `字体集合内没有 ${FONT_FACE_ENV_KEY} 指定的字面 ${faceName}，可选字面：${names.join('、') || '(无)'}。` };
         }
-        return { font: picked, faceName };
+        return { font: selectVariation(picked), faceName };
     }
     const first = parsed.fonts[0];
     if (!first) return { error: '字体集合内没有可用字面。' };
-    return { font: first, faceName: String(first.postscriptName || '') };
+    return { font: selectVariation(first), faceName: String(first.postscriptName || '') };
 }
 
 function runSelfcheck() {

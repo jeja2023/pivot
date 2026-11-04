@@ -8,7 +8,7 @@ function autoContinuationState(run = {}, getRunMetadata) {
     return value && typeof value === 'object' ? value : {};
 }
 
-async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'timeout' }, deps = {}) {
+async function continueRunFromCheckpoint({ run, runId, user, taskBudget = null, error, reason = 'timeout' }, deps = {}) {
     const {
         AGENT_AUTO_CONTINUE_ON_STEP_LIMIT,
         AGENT_AUTO_CONTINUE_ON_TIMEOUT,
@@ -29,6 +29,20 @@ async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'ti
     } = deps;
 
     if (getRunMetadata?.(run)?.chatBridge?.executionProfile === 'knowledge_qa') return false;
+    const snapshot = taskBudget?.snapshot?.() || require('../agent-validators').parseJsonObject(run.usage_stats) || {};
+    const policy = require('../agent-round-policy').runRoundPolicy(run);
+    const counts = snapshot.counts || {}, progress = snapshot.progress || {};
+    const hasNewProgress = Number(progress.count || 0) > Number(snapshot.segment?.startProgress || 0);
+    let stopCode = '';
+    if (Number(counts.steps || 0) >= policy.totalSteps) stopCode = 'AGENT_TOTAL_ROUND_LIMIT';
+    else if (Number(counts.tool_calls || 0) >= Number(snapshot.limits?.max_tool_calls ?? Infinity)) stopCode = 'AGENT_TOTAL_TOOL_LIMIT';
+    else if (Number(counts.tokens_total || 0) >= Number(snapshot.limits?.max_tokens_total ?? Infinity)) stopCode = 'AGENT_TOTAL_TOKEN_LIMIT';
+    else if (Number(snapshot.elapsed_seconds || 0) >= Number(snapshot.limits?.max_runtime_seconds ?? Infinity) - 30) stopCode = 'AGENT_TOTAL_RUNTIME_LIMIT';
+    else if (!hasNewProgress) stopCode = 'AGENT_NO_PROGRESS';
+    if (stopCode) {
+        await setRunMetadata?.(runId, { continuationStop: { code: stopCode, steps: Number(counts.steps || 0), progressCount: Number(progress.count || 0) } });
+        return false;
+    }
     const enabled = reason === 'step_limit' ? AGENT_AUTO_CONTINUE_ON_STEP_LIMIT : AGENT_AUTO_CONTINUE_ON_TIMEOUT;
     if (!enabled || AGENT_MAX_AUTO_CONTINUATIONS <= 0) return false;
     const prior = autoContinuationState(run, getRunMetadata);
@@ -66,6 +80,7 @@ async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'ti
             lastAt: now
         }
     });
+    await taskBudget?.persistUsageSnapshot?.();
     await updateRun(runId, {
         status: 'queued',
         error_message: '',
@@ -82,10 +97,13 @@ async function continueRunFromCheckpoint({ run, runId, user, error, reason = 'ti
             resumeFromStep,
             checkpointCount: Number(resumeContext.checkpointCount || 0),
             elapsedMs,
+            cumulativeRounds: Number(counts.steps || 0),
+            totalRoundLimit: policy.totalSteps,
             totalRuntimeLimitMs: AGENT_MAX_TOTAL_RUNTIME_MS
         }
     });
     await createAgentNotification(user.id, runId, 'info', '任务将从安全检查点继续', `${title}，已准备第 ${nextCount} 次自动续跑。`);
+    if (taskBudget) taskBudget.requeued = true;
     enqueueAgentRun(runId, user);
     return true;
 }

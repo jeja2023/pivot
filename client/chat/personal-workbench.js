@@ -301,6 +301,7 @@
             if (artifactType) row.dataset.personalRecentArtifactType = artifactType;
             if (item.targetId) row.dataset.personalRecentTargetId = item.targetId;
             if (item.runId) row.dataset.personalRecentRunId = item.runId;
+            if (item.documentId) row.dataset.personalRecentDocumentId = item.documentId;
 
             const iconBox = document.createElement('span');
             const isPpt = kind === 'presentation' || artifactType === 'presentation';
@@ -626,9 +627,11 @@
             });
         }
         if (artifactType === 'official_writing') {
+            const documentId = button.dataset.personalRecentDocumentId;
+            if (!documentId) return window.Pivot.moduleApi('agent.artifacts')?.openVersions?.(id);
             return window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench?.({
                 app: 'official-writing',
-                docId: targetId
+                docId: documentId
             });
         }
         if (artifactType === 'mindmap') {

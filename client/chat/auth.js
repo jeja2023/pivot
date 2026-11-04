@@ -216,6 +216,8 @@ document.getElementById('auth-submit')?.addEventListener('click', async (e) => {
 });
 
 window.Pivot.legacy.logout = async () => {
+    await window.Pivot?.moduleApi?.('apps.officialWriting')?.flush?.();
+    window.Pivot?.moduleApi?.('apps.officialWriting')?.reset?.();
     await window.Pivot.moduleApi('apps.mindmaps').logout?.();
     if (window.Pivot.legacy.closeAgentRealtime) window.Pivot.legacy.closeAgentRealtime();
     if (window.Pivot.legacy.stopAnnouncements) window.Pivot.legacy.stopAnnouncements();

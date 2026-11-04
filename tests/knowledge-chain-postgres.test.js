@@ -35,11 +35,18 @@ test('统一知识结果使用当前 ACL 和版本，变更、停用和跨用户
         });
         assert.equal(result.sources.length, 1);
         assert.equal(await revalidateKnowledgeToolEvidence([{ output: result }], user), true);
+        const batch = { type: 'tools_batch_read', count: 1, results: [{ toolName: 'rag.search', output: result }] };
+        const observation = { tool: 'tools.batch_read', output: batch };
+        const boundary = require('../server/services/agent-knowledge-boundary').assertAgentKnowledgeCurrent;
+        await boundary({ run: {}, user, observations: [observation] });
         const presentSteps = require('../server/services/knowledge-tool-results').presentKnowledgeSteps;
         const step = { tool_name: 'rag.search', output: result, error_message: null };
         assert.equal((await presentSteps([step], user))[0].output.sources[0].title, '测试制度.txt');
         assert.doesNotMatch(JSON.stringify(await presentSteps([step], { id: Number(user.id) + 99999, role: 'user' })), /测试制度|报销应在/);
         await execute("INSERT INTO agent_runs(id,user_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,'制度报告','根据制度生成文档','running','{}',NOW(),NOW())", [runId, user.id]);
+        await execute("INSERT INTO agent_steps(run_id,step_index,type,tool_name,status,output,created_at) VALUES (?,1,'tool','tools.batch_read','success',?,NOW())", [runId, JSON.stringify(batch)]);
+        const access = require('../server/services/knowledge-run-access').inspectRunKnowledgeAccess;
+        assert.equal((await access(runId, user)).current, true);
         const delivery = await require('../server/services/agent-tools-artifacts').executeArtifactTool('artifact.render', {
             format: 'docx', ir: { ir_version: '1', doc_type: 'report', meta: { title: '制度报告' }, blocks: [{ type: 'paragraph', runs: [{ text: `${result.matches[0].content} [引用 1 | citation:${result.sources[0].citationKey}]` }] }] }
         }, user, { runId, stepId: `${runId}:1` });
@@ -53,6 +60,9 @@ test('统一知识结果使用当前 ACL 和版本，变更、停用和跨用户
         assert.equal(require('../server/services/agent-verification').verifyTaskOutcome({ taskContract: contract, answer: '已生成制度报告', observations: [{ output: result }], semanticVerification: verification }).outcomeStatus, 'verified');
         await execute('UPDATE knowledge_chunks SET content = ? WHERE id = ?', ['新内容', chunk.id]);
         assert.equal(await revalidateKnowledgeToolEvidence([{ output: result }], user), false);
+        assert.equal(await revalidateKnowledgeToolEvidence([observation], user), false);
+        await assert.rejects(boundary({ run: {}, user, observations: [observation] }), error => error.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE');
+        assert.equal((await access(runId, user)).current, false);
         assert.doesNotMatch(JSON.stringify(await presentSteps([step], user)), /测试制度|报销应在/);
         const stale = await verify({ run: { id: runId }, user, contract, answer: '已生成制度报告', observations: [{ output: result }] });
         assert.equal(stale.reason, 'source_revoked');

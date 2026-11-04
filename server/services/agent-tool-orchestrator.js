@@ -129,6 +129,11 @@ function createToolOrchestrator(overrides = {}) {
         }
         let policy;
         if (executionPlan?.policy?.decision === 'denied') {
+            const inputError = require('./tool-input-validation').inputErrorForDecision({ ...executionPlan.policy, tool });
+            if (inputError) {
+                await event('tool.denied', request, { errorCode: inputError.code, reasonCodes: ['tool_input_invalid'] });
+                throw inputError;
+            }
             const error = Object.assign(new Error(executionPlan.policy.reasons?.join('；') || '工具执行前策略复核拒绝。'), { code: 'AGENT_POLICY_DENIED', category: 'policy' });
             error.details = { reasonCodes: executionPlan.policy.reasonCodes || [] };
             await event('tool.denied', request, { errorCode: error.code, reasonCodes: executionPlan.policy.reasonCodes || [] });
@@ -166,6 +171,7 @@ function createToolOrchestrator(overrides = {}) {
             throw error;
         }
         const effectiveInput = policy?.input || input;
+        await context.budget?.persistUsageSnapshot?.();
         const operationKey = operationKeyFor({ run, tool, input: effectiveInput, context });
         const requestWithKey = { ...request, operationKey };
         const hooksEnabled = context.lifecycleHooksEnabled === true

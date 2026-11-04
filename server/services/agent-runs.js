@@ -1,7 +1,3 @@
-const {
-    ACTIVE_STATUSES,
-    normalizeMaxSteps
-} = require('./agent-validators');
 const { isSuperAdmin } = require('../permissions');
 const { getAgentTraceForUser } = require('./agent-traces');
 const { summarizeAgentCheckpoints } = require('./agent-checkpoints');
@@ -372,48 +368,31 @@ async function getDagNodeCompleteOutputForUser(runId, nodeId, user) {
 }
 
 function getRunProgress(run, steps = []) {
-    const maxSteps = normalizeMaxSteps(run?.max_steps, run?.run_mode);
-    const planCount = steps.filter(step => step.type === 'plan').length;
-    const toolCount = steps.filter(step => step.type === 'tool').length;
-    const errorCount = steps.filter(step => step.status === 'error').length;
-    const totalDurationMs = steps.reduce((sum, step) => sum + (Number(step.duration_ms) || 0), 0);
-    const active = run && ACTIVE_STATUSES.has(run.status);
-    const isDag = String(run?.run_mode || '') === 'dag';
-    const roundCount = isDag ? 0 : (planCount || Math.min(toolCount, maxSteps));
-    const progressCount = isDag ? Math.max(planCount, toolCount) : roundCount;
-    return {
-        maxSteps,
-        planCount,
-        roundCount,
-        toolCount,
-        errorCount,
-        stepCount: steps.length,
-        totalDurationMs,
-        isLimitReached: !isDag && progressCount >= maxSteps,
-        percent: active ? Math.min(Math.round((progressCount / maxSteps) * 100), 95) : (['completed', 'completed_with_errors', 'partial', 'needs_input'].includes(run?.status) ? 100 : 0)
-    };
+    return require('./agent-round-progress').buildRunProgress(run, steps);
 }
 
-async function getRunDetailForUser(runId, user) {
+async function getRunDetailForUser(runId, user, options = {}) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
     const access = await require('./knowledge-run-access').inspectRunKnowledgeAccess(run.id, user);
     if (!access.current) return require('./knowledge-run-access').blockedRunDetail(run, access);
-    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence, transactions, workingMemoryRevisions, promptInvocations, browserActionEvidence, browserSessions] = await Promise.all([
-        listSteps(run.id),
-        listDagNodes(run.id),
-        listWorkflowInvocationsForUser(run.id, user),
-        listWorkflowIterationItemsForUser(run.id, user),
-        getAgentTraceForUser(run.id, user),
-        summarizeAgentCheckpoints(run.id),
-        getTaskVerificationForUser(run.id, user),
-        listAgentEvidenceForUser(run.id, user),
-        listTaskTransactionsForRun(run.id, user, { limit: 20 }),
-        listWorkingMemoryRevisionsForUser(run.id, user, { limit: 12 }),
-        listPromptInvocationsForUser(run.id, user, { limit: 20 }),
-        listBrowserActionEvidenceForRun(run.id, user, { limit: 50 }),
-        listAgentBrowserSessionsForRun(run.id, user, { limit: 20 })
+    if (options.view === 'overview') return require('./agent-run-overview').getRunOverview(run, user);
+    const parts = await require('./agent-run-detail-parts').readRunDetailParts([
+        () => listSteps(run.id),
+        () => listDagNodes(run.id),
+        () => listWorkflowInvocationsForUser(run.id, user),
+        () => listWorkflowIterationItemsForUser(run.id, user),
+        () => getAgentTraceForUser(run.id, user),
+        () => summarizeAgentCheckpoints(run.id),
+        () => getTaskVerificationForUser(run.id, user),
+        () => listAgentEvidenceForUser(run.id, user),
+        () => listTaskTransactionsForRun(run.id, user, { limit: 20 }),
+        () => listWorkingMemoryRevisionsForUser(run.id, user, { limit: 12 }),
+        () => listPromptInvocationsForUser(run.id, user, { limit: 20 }),
+        () => listBrowserActionEvidenceForRun(run.id, user, { limit: 50 }),
+        () => listAgentBrowserSessionsForRun(run.id, user, { limit: 20 })
     ]);
+    const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence, transactions, workingMemoryRevisions, promptInvocations, browserActionEvidence, browserSessions] = parts.values;
     let effectiveDagNodes = dagNodes || [];
     if (String(run.run_mode || '').toLowerCase() === 'dag' && effectiveDagNodes.length === 0) {
         let metadata = run.metadata;
@@ -442,6 +421,7 @@ async function getRunDetailForUser(runId, user) {
     }
     return {
         run,
+        warnings: parts.warnings,
         steps: await require('./knowledge-tool-results').presentKnowledgeSteps(steps, user),
         dagNodes: await require('./knowledge-tool-results').presentKnowledgeSteps(effectiveDagNodes, user),
         invocations: invocations || [],

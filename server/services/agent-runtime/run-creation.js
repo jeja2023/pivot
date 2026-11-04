@@ -293,6 +293,9 @@ function createAgentRunFactory(deps = {}) {
             }
         }
         const effectiveTaskBudget = normalizeModelTaskBudget(budgetConfig, modelCfg || {});
+        if (budgetConfig?.max_steps == null && budgetConfig?.maxSteps == null) {
+            effectiveTaskBudget.max_steps = normalizedRunMode === 'dag' ? Math.max(effectiveMaxSteps, runMetadata.dagSpec?.nodes?.length || 0) : Math.min(120, effectiveMaxSteps * 2);
+        }
         if (parentRunId && effectiveChildTokenBudget > 0) {
             // 子运行的两层 Token 限额保持一致或更紧，不能沿用父运行的完整总额。
             effectiveTaskBudget.max_tokens_total = Math.min(effectiveTaskBudget.max_tokens_total, effectiveChildTokenBudget);

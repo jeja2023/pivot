@@ -3,8 +3,8 @@
  * 公文版式常量与单位换算
  *
  * 落地方案 v1.2 §7.2、§10.2、阶段 2.3：
- * 1. 服务端此前没有公文版式能力，事实实现散落在前端 client/chat/apps-workbench-export.js；
- *    本文件把前端硬编码的版式参数集中复刻为服务端常量，避免形成第二套版式体系（开发规范第 8 条）；
+ * 1. 公文标准参数由 client/common/official-writing-format.js 共享，以用户提供截图为准；
+ *    通用报告、表格和备忘录使用本文件的通用规格，避免更改公文时影响其他文档；
  * 2. 只放常量与纯函数，不依赖 docx 库，便于单独断言度量值（§10.2 的度量断言）；
  * 3. DOCX 只写字体名、不嵌入字体文件，因此这里出现的中文字体名是「排版意图」而非分发的字体资产，
  *    不涉及 §7.2 的字体授权约束；
@@ -13,6 +13,7 @@
 
 /** 一英寸等于 25.4 毫米。 */
 const MM_PER_INCH = 25.4;
+const screenshot = require('../../../client/common/official-writing-format');
 /** 一英寸等于 1440 缇（twip），即 20 缇每磅。 */
 const TWIP_PER_INCH = 1440;
 /** 一英寸按 96 像素折算，供 docx 图片尺寸（像素）换算使用。 */
@@ -145,40 +146,33 @@ function fontPair(eastAsia, ascii = ASCII_FALLBACK_FONT) {
 }
 
 const HEI_FONT = fontPair(FONT_FAMILY.HEI, FONT_FAMILY.HEI);
-const FANG_SONG_FONT = fontPair(FONT_FAMILY.FANG_SONG);
 const SONG_FONT = fontPair(FONT_FAMILY.SONG);
 
-/**
- * 公文版式（doc_type=official_document）。
- * 各元素的对齐、字体、字号、首行缩进逐条复刻 client/chat/apps-workbench-export.js 的既有实现：
- * 大标题居中黑体加粗二号、主送机关左对齐三号、一级标题首行缩进 2 字符黑体加粗三号、
- * 二级标题加粗三号、三级标题与正文三号、落款与成文日期右对齐三号、版头与版记小三。
- * 行距不设默认值：前端未设置行距（沿用阅读器单倍行距），仅当 IR 的 style.line_height 显式给出时才写 w:spacing。
- */
+/** 用户截图公文版式：22行/28字、28磅行距、指定方正字体与独立附件。 */
 const OFFICIAL_PROFILE = Object.freeze({
-    doc_type: 'official_document',
-    body_font: FANG_SONG_FONT,
-    heading_font: HEI_FONT,
-    red_header: Object.freeze({ size: FONT_SIZE_HALF_POINT.YI_HAO, bold: true, color: OFFICIAL_RED, align: 'center', font: HEI_FONT }),
-    red_line: Object.freeze({ size: 2, space_after_pt: 12, border: RED_LINE_BORDER }),
-    masthead: Object.freeze({ size: FONT_SIZE_HALF_POINT.XIAO_SAN, align: 'center', font: FANG_SONG_FONT }),
-    security_mark: Object.freeze({ size: FONT_SIZE_HALF_POINT.XIAO_SAN, align: 'right', font: HEI_FONT }),
-    title: Object.freeze({ size: FONT_SIZE_HALF_POINT.ER_HAO, bold: true, align: 'center', space_after_pt: 12, font: HEI_FONT }),
-    subtitle: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, align: 'center', space_after_pt: 6, font: FANG_SONG_FONT }),
-    recipient: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, align: 'left', font: FANG_SONG_FONT }),
-    heading1: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, bold: true, indent_chars: 2, font: HEI_FONT }),
-    heading2: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, bold: true, indent_chars: 2, font: FANG_SONG_FONT }),
-    heading3: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, indent_chars: 2, font: FANG_SONG_FONT }),
-    heading4: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, indent_chars: 2, font: FANG_SONG_FONT }),
-    body: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, indent_chars: 2, font: FANG_SONG_FONT }),
-    list_item: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, font: FANG_SONG_FONT }),
-    signoff: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, align: 'right', font: FANG_SONG_FONT }),
-    issued_date: Object.freeze({ size: FONT_SIZE_HALF_POINT.SAN_HAO, align: 'right', font: FANG_SONG_FONT }),
-    version_record_separator: Object.freeze({ size: 2, space_before_pt: 18, border: VERSION_RECORD_BORDER }),
-    version_record: Object.freeze({ size: FONT_SIZE_HALF_POINT.XIAO_SAN, align: 'left', font: FANG_SONG_FONT }),
-    table_header_cell: Object.freeze({ size: FONT_SIZE_HALF_POINT.XIAO_SI, bold: true, align: 'center', font: HEI_FONT }),
-    table_body_cell: Object.freeze({ size: FONT_SIZE_HALF_POINT.XIAO_SI, align: 'left', font: FANG_SONG_FONT }),
-    footer: Object.freeze({ size: FONT_SIZE_HALF_POINT.SI_HAO, align: 'center', font: SONG_FONT }),
+    doc_type: 'official_document', strict: true,
+    body_font: fontPair(screenshot.FONT.body), heading_font: fontPair(screenshot.FONT.heading1),
+    red_header: Object.freeze({ size: FONT_SIZE_HALF_POINT.YI_HAO, color: OFFICIAL_RED, align: 'center', font: fontPair(screenshot.FONT.heading1) }),
+    red_line: Object.freeze({ size: 2, space_after_pt: 0, border: RED_LINE_BORDER }),
+    masthead: Object.freeze({ size: 32, align: 'center', font: fontPair(screenshot.FONT.body) }),
+    security_mark: Object.freeze({ size: 32, align: 'right', font: fontPair(screenshot.FONT.heading1) }),
+    title: Object.freeze({ size: 44, bold: false, align: 'center', font: fontPair(screenshot.FONT.title) }),
+    subtitle: Object.freeze({ size: 32, align: 'center', font: fontPair(screenshot.FONT.body) }),
+    recipient: Object.freeze({ size: 32, align: 'left', font: fontPair(screenshot.FONT.body) }),
+    heading1: Object.freeze({ size: 32, bold: false, indent_chars: 2, font: fontPair(screenshot.FONT.heading1) }),
+    heading2: Object.freeze({ size: 32, bold: false, indent_chars: 2, font: fontPair(screenshot.FONT.heading2) }),
+    heading3: Object.freeze({ size: 32, bold: false, indent_chars: 2, font: fontPair(screenshot.FONT.body) }),
+    heading4: Object.freeze({ size: 32, bold: false, indent_chars: 2, font: fontPair(screenshot.FONT.body) }),
+    body: Object.freeze({ size: 32, indent_chars: 2, font: fontPair(screenshot.FONT.body) }),
+    attachment_label: Object.freeze({ size: 32, align: 'left', font: fontPair(screenshot.FONT.heading1) }),
+    list_item: Object.freeze({ size: 32, font: fontPair(screenshot.FONT.body) }),
+    signoff: Object.freeze({ size: 32, align: 'center', font: fontPair(screenshot.FONT.body) }),
+    issued_date: Object.freeze({ size: 32, align: 'right', font: fontPair(screenshot.FONT.body) }),
+    version_record_separator: Object.freeze({ size: 2, space_before_pt: 28, border: VERSION_RECORD_BORDER }),
+    version_record: Object.freeze({ size: 32, align: 'left', font: fontPair(screenshot.FONT.body) }),
+    table_header_cell: Object.freeze({ size: 32, align: 'center', font: fontPair(screenshot.FONT.heading1) }),
+    table_body_cell: Object.freeze({ size: 32, align: 'left', font: fontPair(screenshot.FONT.body) }),
+    footer: Object.freeze({ size: 28, align: 'center', font: fontPair(screenshot.FONT.footer, screenshot.FONT.footer) }),
     image: Object.freeze({ align: 'center' })
 });
 

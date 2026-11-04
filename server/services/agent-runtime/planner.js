@@ -203,6 +203,8 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     const activeSummaryCore = user ? await resolveActivePromptSection('agent_summary_core', summaryCoreSection(), user) : summaryCoreSection();
     const sections = [
         activeSummaryCore,
+        ...(options.capabilityFallback ? [createPromptSection({ key: 'agent_capability_fallback', version: '1', owner: 'platform.runtime', stability: 'dynamic',
+            content: options.capabilityFallback.instruction, changeReason: '工具能力受限后的受控答复' })] : []),
         createPromptSection({
             key: 'agent_summary_runtime', version: 'summary-runtime-v1', owner: 'platform.runtime', stability: 'dynamic',
             content: `任务目标：${goal}\n观察数量：${observations.length}`,
@@ -235,6 +237,7 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     // 最终答案是面向用户的完整回复，不能沿用规划一步的 1200 兜底预算，否则综合
     // 多步观察的答案会被直接截断。minMaxTokens 只抬下限，模型配置更高时不被压低。
     const content = await callModelText(modelCfg, fitted.messages, {
+        budget: options.budget,
         user,
         signal: options.signal || null,
         usageRef,

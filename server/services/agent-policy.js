@@ -66,7 +66,7 @@ function normalizeModelReference(value) {
 }
 
 function normalizeToolInput(toolName, input = {}, run = {}) {
-    const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const source = input && typeof input === 'object' && !Array.isArray(input) ? require('./tool-reference-input').normalizeDiscoveryInput(toolName, input) : {};
     const normalized = { ...source };
     // `queryBuilder` is editor-only state emitted by the visual SQL workflow
     // form.  It must remain in the persisted DAG for subsequent editing, but
@@ -205,6 +205,7 @@ function evaluateSkillConstraints(skillContext, tool, input = {}, inspectOnly = 
 function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = null, budget = null, allowApproval = false, inspectOnly = false } = {}) {
     const tool = normalizeToolContract(rawTool);
     const discoveryControl = isDiscoveryMetaTool(tool);
+    const rawInput = input;
     input = normalizeToolInput(tool.name, input, run);
     const policy = String(run.tool_policy || run.toolPolicy || 'all');
     const allowlist = normalizeAllowlist(run.tool_allowlist || run.toolAllowlist);
@@ -212,7 +213,7 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     const reasonCodes = [];
     const deny = (code, message) => { reasonCodes.push(code); reasons.push(message); };
     if (!tool.name) deny('tool_name_missing', '工具契约缺少名称。');
-    const inputIssues = inspectOnly ? [] : validateToolInput(tool, input);
+    const inputIssues = inspectOnly ? [] : validateToolInput(tool, rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput) ? input : rawInput);
     if (inputIssues.length) deny('tool_input_invalid', `工具输入契约校验失败：${inputIssues[0]}`);
     if (policy === 'builtin_only' && tool.source === 'mcp') deny('tool_policy_builtin_only', '当前任务仅允许内置工具。');
     // 任务级 allowlist 保持「未设置表示不额外收窄」语义，与 Skill 级默认拒绝语义相互独立。
@@ -247,7 +248,7 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     if (tool.network && run.network_policy?.enabled === false) deny('network_policy_disabled', '任务网络策略已禁用网络访问。');
     if (reasons.length) {
         recordPolicyDecision({ decision: 'denied', reason: reasonCodes[0] });
-        return { decision: 'denied', tool, reasons, reasonCodes, skillContext, input, userId: user?.id || null };
+        return { decision: 'denied', tool, reasons, reasonCodes, inputIssues, skillContext, input, userId: user?.id || null };
     }
 
     const risk = tool.risk_level;
@@ -281,7 +282,9 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
 function enforceToolPolicy(options = {}) {
     const result = evaluateToolPolicy(options);
     if (result.decision === 'denied') {
-        throw new PolicyError(`工具调用被策略拦截：${result.reasons.join('；')}`, result);
+        if (['AGENT_BUDGET_EXCEEDED', 'AGENT_FINALIZATION_REQUIRED'].includes(result.error?.code)) throw result.error;
+        throw require('./tool-input-validation').inputErrorForDecision(result)
+            || new PolicyError(`工具调用被策略拦截：${result.reasons.join('；')}`, result);
     }
     if (result.decision === 'require_approval' && options.allowApproval !== true) {
         const error = new PolicyError(`工具调用需要人工审批：${result.tool.title || result.tool.name}`, result);

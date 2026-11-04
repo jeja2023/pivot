@@ -207,10 +207,10 @@
                                     </select>
                                 </label>
                                 <label>
-                                    <span>最大执行轮次</span>
+                                    <span>单段执行轮次</span>
                                     <input id="agent-max-steps" class="form-input" type="number" min="1" max="60"
                                         placeholder="自动" aria-describedby="agent-max-steps-help"
-                                        title="留空时自动设置：标准模式 30 轮，深度模式 50 轮，审查模式 60 轮；达到上限后将基于已有结果生成总结。">
+                                        title="留空时单段设置为标准 30 轮、深度 50 轮、审查 60 轮。只有取得新结果且累计预算允许时才自动续跑；恢复不会重置累计额度。">
                                 </label>
                                 <label>
                                     <span>失败重试</span>

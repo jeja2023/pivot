@@ -67,6 +67,7 @@ function presentKnowledgeResult(query, result, rows) {
 }
 
 function knowledgeEvidenceManifest(value) {
+    if (value?.type === 'tools_batch_read') return require('./knowledge-evidence-lineage').evidenceOf(value);
     if (value?.knowledgeEvidence) return knowledgeEvidenceManifest(value.knowledgeEvidence);
     if (value?.knowledgeSourceVersion !== 1 || !Array.isArray(value.sources)) return null;
     return { knowledgeSourceVersion: 1, sources: value.sources, retrieval: value.retrieval,
@@ -89,12 +90,14 @@ async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
 
 async function revalidateKnowledgeToolEvidence(observations, user, deps = {}) {
     observations = (observations || []).map(item => ({ ...item, output: typeof item.output === 'string' ? parseJsonObject(item.output) : item.output }));
+    observations = observations.map(item => ({ ...item, knowledgeEvidence: require('./knowledge-evidence-lineage').mergeKnowledgeEvidence(item.knowledgeEvidence, item.output) }));
     if ((observations || []).some(item => item.output?.knowledgeEvidenceIncomplete === true || item.knowledgeEvidence?.knowledgeEvidenceIncomplete || item.output?.knowledgeEvidence?.knowledgeEvidenceIncomplete)) return false;
     if (observations.some(item => item.output?.knowledgeSourceVersion === 1 && !item.output.sources?.length
         && (item.output.matches?.length || item.output.context || item.output.paths?.length || item.output.relations?.length || item.output.entities?.length))) return false;
-    const sources = (observations || []).flatMap(item => item.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.knowledgeEvidence.sources || []
+    const allSources = (observations || []).flatMap(item => item.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.knowledgeEvidence.sources || []
         : item.output?.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.output.knowledgeEvidence.sources || []
             : item.output?.knowledgeSourceVersion === 1 ? item.output.sources || [] : []);
+    const sources = [...new Map(allSources.map(source => [JSON.stringify(source), source])).values()];
     if (!sources.length) return true;
     if (sources.length > 1000) return false;
     if (sources.some(source => !source.citationKey || !source.contentDigest || !source.chunkId)) return false;

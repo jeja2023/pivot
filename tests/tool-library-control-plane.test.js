@@ -87,7 +87,7 @@ test('统一 PEP 在执行前拒绝无效输入，并验证工具输出', async 
     });
     await assert.rejects(
         () => engine.invoke({ actor: { id: 7 }, toolName: 'echo.read', input: {} }, async () => ({ text: 'ignored' })),
-        error => error.code === 'TOOL_POLICY_DENIED'
+        error => error.code === 'TOOL_INPUT_INVALID' && error.details.inputValidation.executed === false
     );
     const output = await engine.invoke({ actor: { id: 7 }, toolName: 'echo.read', input: { text: 'ok' }, source: 'manual_test' }, async evaluation => ({ text: evaluation.input.text }));
     assert.deepEqual(output, { text: 'ok' });

@@ -72,7 +72,7 @@ test('三个应用的 AI 请求均使用应用内模型选择器，而不读取�
     const officialWriting = read('client/chat/apps-workbench-ai.js');
     const dataAnalysis = read('client/chat/data-analysis/ai.js');
     const regulations = read('client/chat/regulations/core.js');
-    const officialEditor = read('client/chat/apps-workbench-editor.js');
+    const officialEditor = read('client/chat/apps-workbench-library-ui.js');
     const officialRewrite = read('client/chat/apps-workbench-rewrite.js');
     const dataView = read('client/chat/data-analysis/view.js');
     const regulationsShell = read('client/chat/regulations/render-shell.js');
@@ -97,7 +97,7 @@ test('三个应用的 AI 请求均使用应用内模型选择器，而不读取�
     assert.match(officialWriting, /review: \['official-writing-review', 'official-writing-review-model'\]/);
     assert.match(officialWriting, /selection: \['official-writing-selection', 'official-writing-selection-model'\]/);
     assert.match(officialEditor, /refresh\?\.\('official-writing-draft', 'official-writing-draft-model'\)/);
-    assert.match(officialRewrite, /modelId: getOfficialWritingTaskModelId\('selection'\)/);
+    assert.match(officialRewrite, /runOfficialWritingAiTask\('rewrite_stream'/);
     assert.match(dataView, /id="data-analysis-ai-model"/);
     assert.match(regulationsShell, /id="regulations-ai-model"/);
 });
@@ -115,15 +115,16 @@ test('公文审校弹窗提供模型切换，并可中止正在进行的请求',
     assert.match(ai, /function stopOfficialWritingReview\(\)/);
     assert.match(ai, /officialWritingAiAbortController\.abort\(\)/);
     assert.match(ai, /signal:\s*abortController\?\.signal/);
-    assert.match(ai, /result\.aborted/);
+    assert.match(ai, /aborted: status === 'cancelled'/);
 });
 
-test('选区润色、扩写、压缩不会自动打开审校建议弹窗', () => {
+test('选区改写统一生成预览，采纳前不直接修改正文', () => {
     const ai = read('client/chat/apps-workbench-ai.js');
     const proofread = read('client/chat/apps-workbench-proofread.js');
 
     assert.match(proofread, /function addOfficialWritingSuggestion\(payload, \{ openDrawer = true \} = \{\}\)/);
     assert.match(proofread, /if \(openDrawer\) openOfficialWritingDrawer\('suggestions'\)/);
-    const selectionSection = ai.slice(ai.indexOf('async function runOfficialWritingSelectionCustomAi'));
-    assert.equal((selectionSection.match(/\{ openDrawer: false \}/g) || []).length, 2);
+    assert.match(ai, /runOfficialWritingAiTask\('selection', \{ selection/);
+    assert.match(ai, /openOfficialWritingResultPreview/);
+    assert.match(ai, /canApply: complete, partial: !complete/);
 });

@@ -9,8 +9,7 @@
 // 导出提示的级别名集中声明一次，调用处只传中文语义。
 const OFFICIAL_WRITING_TOAST_LEVELS = { '提示': '', '警告': 'warning', '错误': 'error' };
 
-// 需要服务端渲染的导出类型。服务端公文版式对 official_document 固定套红头，
-// 因此「导出 DOCX」与「红头模板」走同一条渲染路径，只是提示文案不同。
+// 需要服务端渲染的导出类型，普通与红头版式在预览中明确选择。
 const OFFICIAL_WRITING_RENDER_TARGETS = {
     doc: { format: 'docx', extension: 'docx', label: 'DOCX' },
     'red-header': { format: 'docx', extension: 'docx', label: '红头 DOCX' },
@@ -36,9 +35,6 @@ const OFFICIAL_WRITING_RENDER_TIMEOUT_MS = 120000;
 // 同一时刻只允许一个导出任务，避免连点触发重复渲染与重复令牌。
 let officialWritingRenderBusy = false;
 
-// 本模块内的产物绑定值，由结果沉淀流程通过 bindOfficialWritingExportArtifact 回填。
-let officialWritingExportArtifactId = '';
-
 function showOfficialWritingExportToast(message, level = '提示') {
     const type = OFFICIAL_WRITING_TOAST_LEVELS[level] || '';
     if (type) showToast(message, type);
@@ -48,18 +44,14 @@ function showOfficialWritingExportToast(message, level = '提示') {
 // 识别公文段落层级，用于映射 Document IR 时套用不同块类型与版式。
 function classifyOfficialWritingParagraph(text, index, total) {
     if (index === 0) return 'title';
-    const trimmed = text.trim();
-    // 主送机关：以中文冒号结尾的短行（如“各部门：”）。
-    if (index <= 2 && /[：:]\s*$/.test(trimmed) && trimmed.length <= 30) return 'recipient';
-    // 一级标题：一、二、… 或（一）（二）…
-    if (/^[一二三四五六七八九十]+、/.test(trimmed)) return 'h1';
-    if (/^（[一二三四五六七八九十]+）/.test(trimmed)) return 'h2';
-    // 三级：1. 2. （阿拉伯数字）
-    if (/^\d+[.、]/.test(trimmed)) return 'h3';
-    // 落款单位与日期：靠近文末，且形如单位名或日期。
+    const value = text.trim();
+    if (index <= 2 && /[：:]$/.test(value) && value.length <= 120) return 'recipient';
+    const level = officialWritingFormat.headingLevel(value);
+    if (level) return 'h' + level;
+    if (/^附件[：:]/.test(value)) return 'attachment-note';
     if (index >= total - 3) {
-        if (/^\d{4}\s*年.*[日号]?\s*$|^\d{4}[.-]\d{1,2}[.-]\d{1,2}\s*$/.test(trimmed)) return 'date';
-        if (trimmed.length <= 30 && /(单位|部门|科室|中心|办公室|公司|集团|党委|支部|政府|局|厅|委)\s*$/.test(trimmed)) return 'signoff';
+        if (officialWritingDocument.isoDate(value)) return 'date';
+        if (value.length <= 60 && /(单位|部门|科室|中心|办公室|公司|集团|党委|支部|政府|局|厅|委)$/.test(value)) return 'signoff';
     }
     return 'body';
 }
@@ -156,21 +148,14 @@ function buildOfficialWritingFormattedText() {
 }
 
 // 把「2026年6月12日」「2026-6-12」「2026.6.12」归一化为 IR 要求的 YYYY-MM-DD；无法识别时返回空串。
-function parseOfficialWritingIsoDate(value) {
-    const matched = /^(\d{4})\s*[年.\-/]\s*(\d{1,2})\s*[月.\-/]\s*(\d{1,2})\s*[日号]?$/.exec(String(value || '').trim());
-    if (!matched) return '';
-    const month = Number(matched[2]);
-    const day = Number(matched[3]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return '';
-    return `${matched[1]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
+function parseOfficialWritingIsoDate(value) { return officialWritingDocument.isoDate(value); }
 
 // 密级文本转 IR 枚举，返回 { level, hasPeriod, reason }：level 为空表示不能导出，reason 是中文原因。
 function resolveOfficialWritingSecurityLevel(secrecy) {
     const text = String(secrecy || '').trim();
     // 未填密级时按公开处理：服务端只给非公开文件逐页加密级标识，避免凭空标注密级。
     if (!text) return { level: 'public', hasPeriod: false, reason: '' };
-    const matched = OFFICIAL_WRITING_SECURITY_KEYWORDS.find(item => text.includes(item.keyword));
+    const matched = OFFICIAL_WRITING_SECURITY_KEYWORDS.find(item => text.startsWith(item.keyword));
     if (!matched) {
         return { level: '', hasPeriod: false, reason: '密级只能填写公开、内部、秘密或机密（可附保密期限），请修改“密级与保密期限”后重试' };
     }
@@ -192,31 +177,30 @@ function buildOfficialWritingIrParagraph(text, style) {
 // 单个段落转 IR 块：一级「一、」为 heading 1，二级「（一）」为 heading 2，三级「1.」为 heading 3，其余为 paragraph。
 function buildOfficialWritingIrBlock(entry) {
     if (entry.level === 'page-break') return { type: 'page_break' };
-    const text = String(entry.text || '').trim();
+    const text = entry.level === 'attachment-note' ? String(entry.text || '') : String(entry.text || '').trim();
     if (!text) return null;
-    if (entry.level === 'h1') return { type: 'heading', level: 1, text };
-    if (entry.level === 'h2') return { type: 'heading', level: 2, text };
-    if (entry.level === 'h3') return { type: 'heading', level: 3, text };
-    // 未被 meta 收走的落款与成文日期右对齐且不缩进；标题行与主送机关不缩进。
-    if (entry.level === 'signoff' || entry.level === 'date') {
-        return buildOfficialWritingIrParagraph(text, { indent_chars: 0, line_height: 1.5, align: 'right' });
-    }
-    if (entry.level === 'recipient' || entry.level === 'title') {
-        return buildOfficialWritingIrParagraph(text, { indent_chars: 0, line_height: 1.5 });
-    }
-    return buildOfficialWritingIrParagraph(text, { indent_chars: 2, line_height: 1.5 });
+    if (/^h[1-4]$/.test(entry.level)) return { type: 'heading', level: Number(entry.level.slice(1)), text: officialWritingFormat.normalizeHeading(text, Number(entry.level.slice(1))) };
+    if (entry.level === 'attachment-note') return buildOfficialWritingIrParagraph(text.replace(/^附件[:：]\s*/, '附件：').replace(/[。；;]+$/, ''), {
+        official_role: 'attachment_note', attachment_prefix: entry.attachmentPrefix || /^附件[:：]\s*(?:\d+[.．]\s*)?/.exec(text)?.[0].replace(':', '：') || '附件：'
+    });
+    return buildOfficialWritingIrParagraph(text, { indent_chars: ['recipient', 'title', 'signoff', 'date'].includes(entry.level) ? 0 : 2 });
 }
 
 // 逐段标注层级；分页标记优先于层级识别。
 function collectOfficialWritingIrEntries(draft) {
     const items = splitOfficialWritingParagraphs(draft);
     const total = items.length;
-    return items.map((item, index) => ({
-        text: item.text.trim(),
-        level: isOfficialWritingPageBreak(item.text)
-            ? 'page-break'
-            : classifyOfficialWritingParagraph(item.text, index, total)
-    }));
+    let attachmentNotes = false;
+    return items.map((item, index) => {
+        const text = item.text.trim();
+        const level = isOfficialWritingPageBreak(text) ? 'page-break' : classifyOfficialWritingParagraph(text, index, total);
+        if (level === 'attachment-note') attachmentNotes = true;
+        else if (attachmentNotes && /^\d+[.．]\s*/.test(text)) {
+            const number = /^\d+[.．]\s*/.exec(text)[0];
+            return { text: '　　　' + text, level: 'attachment-note', attachmentPrefix: '　　　' + number };
+        } else attachmentNotes = false;
+        return { text, level };
+    });
 }
 
 // 从文末回收落款单位与成文日期，各只取一处。日期必须能解析为 YYYY-MM-DD，
@@ -244,61 +228,51 @@ function takeOfficialWritingTailMeta(entries) {
 
 // 编辑器状态映射为 Document IR（doc_type 固定 official_document）。
 // 返回 { ir, error, notes }：error 非空表示要素不全、不提交渲染；notes 是需要一并告知用户的中文说明。
-function buildOfficialWritingDocumentIr() {
-    const meta = getOfficialWritingMetaForExport();
-    const entries = collectOfficialWritingIrEntries(officialWritingState.draft || '');
+function buildOfficialWritingDocumentIr(state = officialWritingState, { layout = 'plain' } = {}) {
+    if ((state.attachments || []).some(item => item.content.trim() && !item.name.trim())) return { ir: null, error: '请填写有正文的附件名称', notes: [] };
+    const meta = normalizeOfficialWritingMeta(state.meta);
+    const entries = collectOfficialWritingIrEntries(state.draft || '');
     if (!entries.length) return { ir: null, error: '正文为空，无法导出', notes: [] };
-    const notes = [];
-    // 标题取正文首段，主送机关取靠前的「……：」行，两者都移出正文块，交给服务端版式排布。
-    const titleEntry = entries.find(item => item.level === 'title');
-    const recipientEntry = entries.find(item => item.level === 'recipient');
-    if (titleEntry) titleEntry.level = 'meta';
-    if (recipientEntry) recipientEntry.level = 'meta';
+    const title = entries.find(entry => entry.level === 'title');
+    const recipient = entries.find(entry => entry.level === 'recipient');
+    if (title) title.level = 'meta'; if (recipient) recipient.level = 'meta';
     const tail = takeOfficialWritingTailMeta(entries);
-    let issuedAt = tail.issuedAt;
-    if (!issuedAt && meta.printDate) {
-        issuedAt = parseOfficialWritingIsoDate(meta.printDate);
-        if (!issuedAt) notes.push('印发日期格式无法识别，已按无成文日期排版');
-    }
-    // 服务端把 meta.issuer 同时用作红头机关与版记印发机关，与旧版红头模板取“印发机关”一致；
-    // 未填印发机关时退回落款单位，两者都没有就不能出 official_document。
-    const issuingOrg = meta.printer || tail.signoff || '';
-    if (!issuingOrg) {
-        return {
-            ir: null,
-            error: '服务端公文版式需要发文机关名称，请在“发文要素”填写印发机关，或在正文末尾写明落款单位',
-            notes
-        };
-    }
-    if (!meta.printer) notes.push('红头机关取自落款单位');
+    const issuedAt = parseOfficialWritingIsoDate(meta.issuedAt) || tail.issuedAt;
+    const printedAt = parseOfficialWritingIsoDate(meta.printDate);
+    if (meta.issuedAt && !parseOfficialWritingIsoDate(meta.issuedAt)) return { ir: null, error: '成文日期不是有效日期', notes: [] };
+    if (meta.printDate && !printedAt) return { ir: null, error: '印发日期不是有效日期', notes: [] };
+    const signoff = meta.signoff || tail.signoff;
+    const issuingOrg = meta.issuingOrg || signoff;
+    if (layout === 'red_header' && !issuingOrg) return { ir: null, error: '红头公文需要填写发文机关或落款单位', notes: [] };
     const security = resolveOfficialWritingSecurityLevel(meta.secrecy);
-    if (!security.level) return { ir: null, error: security.reason, notes };
-    if (security.hasPeriod) notes.push('保密期限未纳入服务端密级标识');
-    if (meta.cc) notes.push('抄送机关未纳入服务端版记');
-    // IR 版头只有 doc_number 一个字段，按公文习惯把紧急程度、发文字号与签发人排在同一行，避免要素丢失。
-    const docNumber = [meta.urgency, meta.issueNumber, meta.issuer ? `签发人：${meta.issuer}` : '']
-        .filter(Boolean)
-        .join('　');
-    const blocks = entries
-        .filter(item => item.level !== 'meta')
-        .map(buildOfficialWritingIrBlock)
-        .filter(Boolean);
-    if (!blocks.length) return { ir: null, error: '正文只有标题或落款，缺少正文内容，无法导出', notes };
-    const ir = {
-        ir_version: '1',
-        doc_type: 'official_document',
-        meta: {
-            title: titleEntry ? titleEntry.text : getOfficialWritingDocType(),
-            doc_number: docNumber,
-            issuer: issuingOrg,
-            issued_at: issuedAt,
-            security_level: security.level,
-            recipient: recipientEntry ? recipientEntry.text : '',
-            signoff: tail.signoff
-        },
-        blocks
-    };
-    return { ir, error: '', notes };
+    if (!security.level) return { ir: null, error: security.reason, notes: [] };
+    const hasAttachments = (state.attachments || []).some(item => item.name.trim());
+    const blocks = entries.filter(entry => entry.level !== 'meta' && !(hasAttachments && entry.level === 'attachment-note')).map(buildOfficialWritingIrBlock).filter(Boolean);
+    if (!blocks.length) return { ir: null, error: '缺少正文内容', notes: [] };
+    const attachments = (state.attachments || []).filter(item => item.name.trim());
+    for (const note of officialWritingFormat.attachmentNotes(attachments)) blocks.push(buildOfficialWritingIrParagraph(note.text, { official_role: 'attachment_note', attachment_prefix: note.prefix }));
+    for (const [index, attachment] of attachments.entries()) {
+        blocks.push({ type: 'page_break' });
+        blocks.push(buildOfficialWritingIrParagraph(attachments.length > 1 ? '附件' + (index + 1) : '附件', { official_role: 'attachment_label' }));
+        blocks.push(buildOfficialWritingIrParagraph(attachment.name.replace(/[。；;]+$/, ''), { official_role: 'attachment_title' }));
+        for (const entry of collectOfficialWritingIrEntries(attachment.content || '')) {
+            if (!entry.text) continue;
+            const level = officialWritingFormat.headingLevel(entry.text);
+            blocks.push(level ? { type: 'heading', level, text: officialWritingFormat.normalizeHeading(entry.text, level) } : buildOfficialWritingIrParagraph(entry.text, { indent_chars: 2 }));
+        }
+    }
+    const notes = [...officialWritingDocument.summary(state).issues];
+    const originalTitle = title?.text || state.docType || '公文';
+    const customTitle = meta.titleBreaks.trim();
+    if (customTitle && customTitle.replace(/\s/g, '') !== originalTitle.replace(/\s/g, '')) return { ir: null, error: '标题分行文字与正文标题不一致，请仅调整换行位置', notes: [] };
+    if (attachments.some(item => !item.content.trim())) notes.push('有附件正文未填写，请核对附件内容');
+    return { error: '', notes, ir: { ir_version: '1', doc_type: 'official_document', meta: {
+        title: customTitle || originalTitle, issuer: issuingOrg, issued_at: issuedAt || '',
+        doc_number: meta.issueNumber, signer: meta.issuer, urgency: meta.urgency, security_level: security.level,
+        security_period: security.hasPeriod ? meta.secrecy.replace(/^(公开|内部|秘密|机密)/, '').trim() : '',
+        recipient: recipient?.text || '', signoff, cc: meta.cc, printer: meta.printer, printed_at: printedAt, layout,
+        page: { ...officialWritingFormat.PAGE, margin_mm: { ...officialWritingFormat.PAGE.margin_mm } }
+    }, blocks } };
 }
 
 // 服务端渲染以 Agent 产物为载体，产物 ID 必须是正整数，其他形态一律视为未绑定。
@@ -309,47 +283,34 @@ function normalizeOfficialWritingArtifactId(value) {
 
 // 依次从本模块绑定值、当前公文状态与文档库记录里找产物 ID；找不到返回空串。
 function resolveOfficialWritingArtifactId() {
-    const candidates = [
-        officialWritingExportArtifactId,
-        officialWritingState?.artifactId,
-        officialWritingState?.agentArtifactId
-    ];
-    if (typeof getActiveOfficialWritingDoc === 'function') {
-        const doc = getActiveOfficialWritingDoc();
-        candidates.push(doc?.artifactId, doc?.state?.artifactId);
-    }
-    return candidates.map(normalizeOfficialWritingArtifactId).find(Boolean) || '';
+    return normalizeOfficialWritingArtifactId(getActiveOfficialWritingDoc()?.artifactId || officialWritingState.artifactId);
 }
 
 // 供结果沉淀流程回填：公文与 Agent 产物绑定后，DOCX / PDF 才能走服务端渲染器。
-function bindOfficialWritingExportArtifact(artifactId) {
-    officialWritingExportArtifactId = normalizeOfficialWritingArtifactId(artifactId);
-    if (officialWritingState) officialWritingState.artifactId = officialWritingExportArtifactId;
-    if (typeof saveOfficialWritingState === 'function') saveOfficialWritingState();
-    return officialWritingExportArtifactId;
+function bindOfficialWritingExportArtifact(artifactId, documentId = officialWritingLibrary.activeId) {
+    const doc = officialWritingLibrary.docs.find(item => item.id === documentId);
+    if (!doc) return '';
+    const normalized = normalizeOfficialWritingArtifactId(artifactId);
+    doc.artifactId = normalized;
+    if (doc._loaded) doc.state.artifactId = normalized;
+    return normalized;
 }
 
 /** 导出前把当前本地编辑稿同步为用户独立 Artifact，保证服务端 Renderer 有权威输入。 */
-async function ensureOfficialWritingArtifact() {
-    if (typeof apiFetch !== 'function') return '';
-    const currentId = resolveOfficialWritingArtifactId();
-    const res = await apiFetch(`${API_BASE}/agents/artifacts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            artifactId: currentId || undefined,
-            type: 'official_writing',
-            title: getOfficialWritingDocType() || '未命名公文',
-            content: JSON.stringify({ draft: officialWritingState.draft || '', source: officialWritingState.source || '', meta: officialWritingState.meta || {} }),
-            note: '公文工作台导出前自动沉淀'
-        })
+async function ensureOfficialWritingArtifact(doc = getActiveOfficialWritingDoc()) {
+    if (!doc?._loaded) throw new Error('请先打开公文');
+    const owner = getOfficialWritingOwner();
+    if (!await scheduleOfficialWritingDocumentSave(doc, { immediate: true })) throw new Error('请先解决保存失败或版本冲突');
+    const res = await apiFetch(OFFICIAL_WRITING_DOCUMENTS_API + '/' + encodeURIComponent(doc.id) + '/export-artifact', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: doc.version })
     });
     if (!res.ok) throw new Error(await readOfficialWritingApiError(res, '公文产物保存失败'));
-    const data = await res.json().catch(() => ({}));
-    const artifactId = normalizeOfficialWritingArtifactId(data?.artifact?.id);
-    if (!artifactId) throw new Error('服务端未返回有效的公文产物标识。');
-    bindOfficialWritingExportArtifact(artifactId);
-    return artifactId;
+    const data = await res.json();
+    if (owner !== getOfficialWritingOwner() || !officialWritingLibrary.docs.includes(doc)) throw new Error('当前账号或文档已切换，请重新导出');
+    const id = normalizeOfficialWritingArtifactId(data.artifactId);
+    if (!id) throw new Error('服务端未返回公文产物标识');
+    bindOfficialWritingExportArtifact(id, doc.id);
+    return id;
 }
 
 // 统一取服务端给出的中文错误说明；服务端未给说明时退回带状态码的中文提示。
@@ -443,39 +404,7 @@ async function verifyOfficialWritingRenditionDigest(blob, expectedDigest) {
 
 // DOCX 与 PDF 导出：渲染、换令牌、下载三步，任一步失败都给中文提示，不静默失败。
 async function exportOfficialWritingByRenderer(target, safeType) {
-    if (officialWritingRenderBusy) {
-        showOfficialWritingExportToast('正在生成导出文件，请稍候', '警告');
-        return;
-    }
-    const mapped = buildOfficialWritingDocumentIr();
-    if (!mapped.ir) {
-        showOfficialWritingExportToast(mapped.error || '公文要素不完整，无法导出', '警告');
-        return;
-    }
-    officialWritingRenderBusy = true;
-    showOfficialWritingExportToast(`正在按服务端公文版式生成 ${target.label}，请稍候`);
-    try {
-        const artifactId = await ensureOfficialWritingArtifact();
-        if (!artifactId) throw new Error('无法创建公文产物。');
-        const rendition = await createOfficialWritingRendition(artifactId, mapped.ir, target.format);
-        if (!rendition) return;
-        const issued = await requestOfficialWritingDownloadToken(rendition.id);
-        if (!issued) return;
-        const blob = await fetchOfficialWritingRenditionBlob(rendition.id, issued.token);
-        if (!blob) return;
-        const digestMatched = await verifyOfficialWritingRenditionDigest(blob, issued.contentDigest || rendition.content_digest);
-        if (!digestMatched) {
-            showOfficialWritingExportToast('下载内容与服务端摘要不一致，已取消保存，请重新导出', '错误');
-            return;
-        }
-        downloadOfficialWritingBlob(`${safeType || '公文'}-${Date.now()}.${target.extension}`, blob);
-        const note = mapped.notes.length ? `（${mapped.notes.join('；')}）` : '';
-        showOfficialWritingExportToast(`已按服务端公文版式导出 ${target.label}${note}`);
-    } catch (error) {
-        showOfficialWritingExportToast(error?.message || '公文产物保存失败，请稍后重试', '错误');
-    } finally {
-        officialWritingRenderBusy = false;
-    }
+    return openOfficialWritingExportPreview(target, safeType);
 }
 
 function exportOfficialWriting(type) {
@@ -542,3 +471,131 @@ window.Pivot?.exposeModule?.('apps.officialWritingExport', {
     buildDocumentIr: buildOfficialWritingDocumentIr,
     exportDocument: exportOfficialWriting
 });
+
+
+let officialWritingExportPreview = null;
+let officialWritingExportSequence = 0;
+
+function closeOfficialWritingExportPreview() {
+    ++officialWritingExportSequence;
+    hideOfficialWritingModal('official-writing-export-modal');
+    document.getElementById('official-writing-export-frame')?.replaceChildren();
+    officialWritingExportPreview = null;
+}
+
+async function openOfficialWritingExportPreview(target, _safeType) {
+    syncOfficialWritingStateFromInputs();
+    const doc = getActiveOfficialWritingDoc();
+    officialWritingExportPreview = { docId: doc.id, title: doc.title, target, state: sanitizeOfficialWritingState(doc.state),
+        fingerprint: computeOfficialWritingDocFingerprint(doc), owner: getOfficialWritingOwner() };
+    showOfficialWritingModal('official-writing-export-modal');
+    await refreshOfficialWritingExportPreview();
+}
+
+async function downloadOfficialWritingRendition(rendition) {
+    const token = await requestOfficialWritingDownloadToken(rendition.id);
+    if (!token) throw new Error('无法获取下载凭证');
+    const blob = await fetchOfficialWritingRenditionBlob(rendition.id, token.token);
+    if (!blob || !await verifyOfficialWritingRenditionDigest(blob, token.contentDigest || rendition.content_digest)) throw new Error('下载内容摘要不一致');
+    return blob;
+}
+
+async function refreshOfficialWritingExportPreview() {
+    const preview = officialWritingExportPreview;
+    if (!preview || officialWritingRenderBusy) return;
+    const sequence = ++officialWritingExportSequence;
+    officialWritingRenderBusy = true;
+    const button = document.getElementById('official-writing-export-confirm-btn');
+    if (button) button.disabled = true;
+    for (const id of ['official-writing-export-layout', 'official-writing-export-preview-btn']) {
+        const control = document.getElementById(id); if (control) control.disabled = true;
+    }
+    setText('official-writing-export-status', '正在生成实际版式预览…');
+    try {
+        const layout = document.getElementById('official-writing-export-layout')?.value || 'plain';
+        const mapped = buildOfficialWritingDocumentIr(preview.state, { layout });
+        if (!mapped.ir) throw new Error(mapped.error);
+        preview.ir = mapped.ir;
+        setText('official-writing-export-elements', [
+            '版式：截图标准 · 22行×28字 · 固定28磅行距',
+            '字体：2号方正小标宋 / 3号方正仿宋、黑体、楷体 / 4号宋体页码',
+            '标题：' + mapped.ir.meta.title, '发文机关：' + (mapped.ir.meta.issuer || '未填写'),
+            '签发人：' + (mapped.ir.meta.signer || '未填写'), '落款：' + (mapped.ir.meta.signoff || '未填写'),
+            '成文日期：' + (mapped.ir.meta.issued_at || '未填写'), '抄送：' + (mapped.ir.meta.cc || '未填写'),
+            '印发机关：' + (mapped.ir.meta.printer || '未填写'), '印发日期：' + (mapped.ir.meta.printed_at || '未填写'),
+            '密级及期限：' + (preview.state.meta.secrecy || '公开'), ...mapped.notes.map(note => '需核对：' + note)
+        ].join('\n'));
+        const doc = officialWritingLibrary.docs.find(item => item.id === preview.docId);
+        if (!doc || preview.owner !== getOfficialWritingOwner() || computeOfficialWritingDocFingerprint(doc) !== preview.fingerprint) throw new Error('正文已变化，请关闭后重新预览');
+        const artifactId = await ensureOfficialWritingArtifact(doc);
+        if (computeOfficialWritingDocFingerprint(doc) !== preview.fingerprint) throw new Error('正文在预览生成期间变化，请重新预览');
+        preview.artifactId = artifactId;
+        preview.fingerprint = computeOfficialWritingDocFingerprint(doc);
+        const rendition = await createOfficialWritingRendition(artifactId, mapped.ir, 'pdf');
+        if (!rendition) throw new Error('PDF 预览生成失败，请检查字体及渲染服务后重试');
+        const blob = await downloadOfficialWritingRendition(rendition);
+        if (sequence !== officialWritingExportSequence || officialWritingExportPreview !== preview) return;
+        preview.pdfBlob = blob;
+        const frame = document.getElementById('official-writing-export-frame');
+        const pages = frame ? await renderOfficialWritingPdfPreview(blob, frame, sequence) : 0;
+        if (sequence !== officialWritingExportSequence) return;
+        const note = preview.target.format === 'docx' ? 'Word 参考预览，具体换行以本机 Word 为准。' : 'PDF 实际页面预览。';
+        setText('official-writing-export-status', note + (pages > 20 ? '预览前 20 页，下载文件包含全部页面。' : '') + (mapped.notes.length ? '请核对以上待补齐项后下载。' : '可下载文件。'));
+        if (button) button.disabled = false;
+    } catch (error) {
+        if (sequence === officialWritingExportSequence) setText('official-writing-export-status', error.message || '预览失败，请重试');
+    } finally {
+        officialWritingRenderBusy = false;
+        for (const id of ['official-writing-export-layout', 'official-writing-export-preview-btn']) {
+            const control = document.getElementById(id); if (control) control.disabled = false;
+        }
+        if (officialWritingExportPreview && officialWritingExportPreview !== preview) void refreshOfficialWritingExportPreview();
+    }
+}
+
+async function renderOfficialWritingPdfPreview(blob, container, sequence) {
+    const revision = typeof APP_VERSION === 'string' ? encodeURIComponent(APP_VERSION) : 'dev';
+    const pdfjs = await import('/common/vendor/pdfjs/pdf.mjs?v=' + revision);
+    pdfjs.GlobalWorkerOptions.workerSrc = '/common/vendor/pdfjs/pdf.worker.mjs?v=' + revision;
+    const task = pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false, useSystemFonts: true });
+    let pdfDocument = null;
+    try {
+        pdfDocument = await task.promise;
+        container.replaceChildren();
+        for (let number = 1; number <= Math.min(pdfDocument.numPages, 20); number++) {
+            if (sequence !== officialWritingExportSequence) break;
+            const page = await pdfDocument.getPage(number);
+            const base = page.getViewport({ scale: 1 });
+            const scale = Math.min(1.7, Math.max(0.5, (container.clientWidth || 850) / base.width));
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+            canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', `公文第 ${number} 页`);
+            container.appendChild(canvas);
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+            page.cleanup();
+        }
+        return document.numPages;
+    } finally { if (pdfDocument) await pdfDocument.destroy(); else await task.destroy(); }
+}
+
+async function downloadOfficialWritingPreview() {
+    const preview = officialWritingExportPreview;
+    if (!preview?.pdfBlob || officialWritingRenderBusy) return;
+    officialWritingRenderBusy = true;
+    try {
+        const doc = officialWritingLibrary.docs.find(item => item.id === preview.docId);
+        if (!doc || preview.owner !== getOfficialWritingOwner() || preview.fingerprint !== computeOfficialWritingDocFingerprint(doc)) throw new Error('正文已变化，请重新预览');
+        let blob = preview.pdfBlob;
+        if (preview.target.format !== 'pdf') {
+            const rendition = await createOfficialWritingRendition(preview.artifactId, preview.ir, preview.target.format);
+            if (!rendition) throw new Error('文件生成失败');
+            blob = await downloadOfficialWritingRendition(rendition);
+        }
+        if (preview.owner !== getOfficialWritingOwner() || !officialWritingLibrary.docs.includes(doc) || officialWritingDeletedDocumentIds.has(doc.id)) return;
+        const name = preview.title.replace(/[\/:*?"<>|]/g, '').slice(0, 100) || '公文';
+        downloadOfficialWritingBlob(name + '.' + preview.target.extension, blob);
+        showToast('已导出 ' + preview.target.label);
+    } catch (error) { showToast(error.message || '导出失败', 'error'); }
+    finally { officialWritingRenderBusy = false; }
+}

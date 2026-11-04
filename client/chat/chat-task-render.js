@@ -130,6 +130,7 @@
             : tools > 0 ? `${tools} 项操作`
             : `${rows.length} 步记录`;
         const html = `<header class="chat-task-status" role="status" aria-live="polite" aria-atomic="true">
+                ${state.progress?.totalRoundLimit && state.run.run_mode !== 'dag' ? `<small>本段 ${Number(state.progress.segmentRoundCount || 0)}/${Number(state.progress.segmentRoundLimit)} 轮 · 累计 ${Number(state.progress.totalRoundCount || 0)}/${Number(state.progress.totalRoundLimit)} 轮</small>` : ''}
                 <div class="chat-task-heading"><span class="chat-task-sparkle" aria-hidden="true">✦</span><strong>${escape(state.run.title || '对话任务')}</strong><span class="chat-task-status-summary chat-task-status-badge">${escape(statusLabel)}</span></div>
                 ${summary !== statusLabel ? `<span class="chat-task-current-action">${escape(summary)}</span>` : ''}
                 ${connectionProblem && state.highWater >= 0 ? `<small>最后确认：${escape(state.run.statusText || model().labels[state.run.status] || '')}</small>` : ''}

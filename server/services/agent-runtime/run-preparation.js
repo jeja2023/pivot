@@ -24,10 +24,10 @@ function createRunPreparation(deps = {}) {
             : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState };
     }
     function createOutcomeVerifier({ runId, run, user, getTaskContract, getObservations, signal, budget }) {
-        return async (answer, partial = false, reason = '', repairOptions = null) => await verifyAgentOutcome({
+        return async (answer, partial = false, reason = '', repairOptions = null) => await budget.withFinalization(() => verifyAgentOutcome({
             runId, run, user, taskContract: getTaskContract(), answer,
             observations: getObservations(), partial, reason, signal, budget, repairOptions
-        });
+        }));
     }
     return { prepareTools, buildPlannerContext, createOutcomeVerifier };
 }

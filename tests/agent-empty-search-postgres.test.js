@@ -7,7 +7,7 @@ const { queryOne, query, execute } = require('../server/db/client');
 const { createAgentRunFactory } = require('../server/services/agent-runtime/run-creation');
 const { runs: { runAgent } } = require('../server/services/agent-runtime');
 
-test('普通和流式真实运行器在四次空搜索后暂停，保留目标并等待工具范围修订', async () => {
+test('普通和流式真实运行器在四次空搜索后停止检索并交付能力受限答复', async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
     const keys = ['AGENT_STREAMING_TOOLS', 'ALLOW_SENSITIVE_OUTBOUND_URLS', 'AGENT_NATIVE_TOOL_CALLS'];
     const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
@@ -22,6 +22,11 @@ test('普通和流式真实运行器在四次空搜索后暂停，保留目标�
             const count = (counts.get(payload.model) || 0) + 1;
             counts.set(payload.model, count);
             const input = { query: `zzzz_absent_tool_${count}` };
+            if (JSON.stringify(payload.messages).includes('本次工具能力不可用')) {
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '绘图工具暂时不可用，可先整理流程步骤并提供文字方案；本次没有生成图形文件。' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }));
+                return;
+            }
             if (payload.stream) {
                 res.writeHead(200, { 'content-type': 'text/event-stream' });
                 res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `search-${count}`, type: 'function', function: { name: 'tools.search', arguments: JSON.stringify(input) } }] }, finish_reason: null }] })}\n\n`);
@@ -43,10 +48,11 @@ test('普通和流式真实运行器在四次空搜索后暂停，保留目标�
             try {
                 run = await createAgentRunFactory({ enqueueAgentRun() {} })({ user, modelId: model.id, goal: '找到并调用绘图工具', maxSteps: 8, toolAllowlist: ['models.list'], metadata: { autoPersonalSkill: false }, retryLimit: 0 });
                 await runAgent(run.id, user);
-                const row = await queryOne('SELECT status,error_message FROM agent_runs WHERE id = ?', [run.id]);
-                assert.equal(row.status, 'needs_input', `${mode}: ${row.error_message}`);
-                assert.match(row.error_message, /停止重复搜索/);
-                assert.equal(counts.get(modelName), 4);
+                const row = await queryOne('SELECT status,error_message,final_answer FROM agent_runs WHERE id = ?', [run.id]);
+                assert.equal(row.status, 'partial', `${mode}: ${row.error_message}`);
+                assert.match(row.final_answer, /文字方案/);
+                assert.match(row.final_answer, /没有生成图形文件/);
+                assert.equal(counts.get(modelName), 5);
                 const steps = await query("SELECT output FROM agent_steps WHERE run_id = ? AND status = 'error'", [run.id]);
                 assert.ok(steps.some(step => JSON.stringify(step.output).includes('TOOL_DISCOVERY_NO_PROGRESS')));
             } finally {

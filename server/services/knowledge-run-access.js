@@ -7,7 +7,7 @@ const { revalidateKnowledgeToolEvidence } = require('./knowledge-tool-results');
 const BLOCKED_MESSAGE = '资料来源已变化或不可访问，请重新选择资料并重新运行。';
 function blockedAccess() { return { current: false, reasonCode: 'KNOWLEDGE_SOURCE_UNAVAILABLE', message: BLOCKED_MESSAGE }; }
 
-async function inspectRunKnowledgeAccess(runId, user, deps = {}) {
+async function readRunKnowledgeAccess(runId, user, deps = {}) {
     if (!runId) return { current: true, tracked: false };
     try {
         const evidence = await (deps.read || require('../repositories/knowledge-run-evidence').readRunKnowledgeEvidence)(runId, user?.id);
@@ -36,6 +36,15 @@ async function inspectRunKnowledgeAccess(runId, user, deps = {}) {
         if (!await (deps.revalidate || revalidateKnowledgeToolEvidence)(observations, evidence.actor, { ...deps.knowledge, scope })) return blockedAccess();
         return { current: true, tracked: observations.length > 0 || Boolean(snapshot), knowledgeEvidence: mergeKnowledgeEvidence(observations.map(item => item.knowledgeEvidence)) };
     } catch (_) { return blockedAccess(); }
+}
+
+function inspectRunKnowledgeAccess(runId, user, deps = {}) {
+    const context = require('./request-context').getRequestContext();
+    if (!context.requestId || Object.keys(deps).length) return readRunKnowledgeAccess(runId, user, deps);
+    const checks = context.knowledgeAccessChecks ||= new Map();
+    const key = `${user?.id}:${runId}`;
+    if (!checks.has(key)) checks.set(key, Promise.resolve().then(async () => await readRunKnowledgeAccess(runId, user, deps)));
+    return checks.get(key);
 }
 
 async function assertRunKnowledgeAccess(runId, user, deps = {}) {

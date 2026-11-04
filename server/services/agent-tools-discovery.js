@@ -20,21 +20,7 @@ function isReadOnlyDescription(description = {}) {
 }
 
 function normalizeToolReference(input = {}) {
-    if (!input) return {};
-    if (typeof input === 'string') return { toolName: input.trim() };
-    const candidate = input.toolRef || input.tool_ref || input.reference || (input.toolName || input.tool_name || input.name ? input : null);
-    if (typeof candidate === 'string') return { toolName: candidate.trim() };
-    if (candidate && typeof candidate === 'object') {
-        const toolName = String(candidate.toolName || candidate.tool_name || candidate.name || '').trim();
-        const releaseId = candidate.releaseId ?? candidate.release_id ?? null;
-        const definitionDigest = String(candidate.definitionDigest || candidate.definition_digest || '').trim();
-        return {
-            toolName,
-            ...(releaseId !== null && releaseId !== undefined && releaseId !== '' ? { releaseId: Number(releaseId) } : {}),
-            ...(definitionDigest ? { definitionDigest } : {})
-        };
-    }
-    return {};
+    return require('./tool-reference-input').canonicalReference(input);
 }
 
 async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = {}) {
@@ -83,14 +69,25 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
     const { executeToolCallsInOrder } = require('./agent-tool-scheduler');
     const results = await executeToolCallsInOrder(items.map((item, index) => ({ tool: descriptions[index], item })), async entry => {
         const reference = normalizeToolReference(entry.item);
-        return await executeDiscoveredTool(user, {
-            toolRef: reference,
-            input: entry.item.input && typeof entry.item.input === 'object' ? entry.item.input : {}
-        }, { ...context, budgetAlreadyConsumed: false }, { ...deps.toolDiscovery, requireReadOnly: true });
+        try {
+            return await executeDiscoveredTool(user, {
+                toolRef: reference,
+                input: entry.item.input && typeof entry.item.input === 'object' ? entry.item.input : {}
+            }, { ...context, budgetAlreadyConsumed: false }, { ...deps.toolDiscovery, requireReadOnly: true });
+        } catch (error) {
+            if (require('./agent-execution-control').isExecutionControlError(error)
+                || ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED', 'TOOL_BATCH_READ_FORBIDDEN'].includes(error.code)) throw error;
+            const feedback = require('./tool-input-validation').toolInputFeedback(error);
+            return { isError: true, code: error.code || 'TOOL_BATCH_ITEM_FAILED',
+                message: '本项读取未完成，请核对工具状态与参数后单独重试。', ...(feedback ? { inputValidation: feedback } : {}) };
+        }
     }, { signal: context.signal, maxReadConcurrency: context.maxReadConcurrency });
+    const knowledgeEvidence = require('./knowledge-evidence-lineage').mergeKnowledgeEvidence(results);
     return {
         type: 'tools_batch_read',
         count: results.length,
+        ...(results.some(output => output?.isError) ? { partial: true } : {}),
+        ...(knowledgeEvidence ? { knowledgeEvidence } : {}),
         results: results.map((output, index) => ({ toolName: descriptions[index].name, output }))
     };
 }
@@ -139,7 +136,7 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
                 toolRef: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: ['integer', 'null'] }, definitionDigest: { type: 'string' } }, required: ['toolName'] },
                 toolName: { type: 'string' }
             }, []),
-            output_schema: { type: 'object', required: ['toolRef', 'name', 'inputSchema'], properties: { toolRef: { type: 'object' }, name: { type: 'string' }, inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, referenceRefresh: { type: 'object' } } }
+            output_schema: { type: 'object', anyOf: [{ required: ['toolRef', 'name', 'inputSchema'] }, { required: ['type', 'executed', 'reason', 'message'] }], properties: { toolRef: { type: 'object' }, name: { type: 'string' }, inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, referenceRefresh: { type: 'object' }, type: { type: 'string' }, executed: { type: 'boolean' }, reason: { type: 'string' }, message: { type: 'string' }, candidates: { type: 'array' } } }
         },
         {
             name: 'tools.execute',
@@ -203,6 +200,7 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
     if (name === 'tools.describe') {
         const { catalogVersion, describeToolForUser } = require('./tool-discovery');
         const reference = normalizeToolReference(input);
+        if (!reference.toolName) return { handled: true, value: require('./tool-reference-input').missingReferenceResult(state) };
         let refreshReason = '';
         try {
             assertSearched(state, reference);
@@ -246,6 +244,7 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
     if (name === 'tools.execute') {
         const { executeDiscoveredTool } = require('./tool-discovery');
         const reference = normalizeToolReference(input);
+        if (!reference.toolName) return { handled: true, value: require('./tool-reference-input').missingReferenceResult(state) };
         const effectiveInput = {
             ...input,
             toolRef: reference,

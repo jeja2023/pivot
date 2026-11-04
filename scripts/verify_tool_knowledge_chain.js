@@ -6,11 +6,17 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const GROUPS = {
-    unit: ['knowledge-tool-chain', 'knowledge-graph-tool-chain', 'knowledge-workflow-chain', 'knowledge-lineage-access', 'tool-chain-remaining', 'knowledge-benchmark', 'workflow-iteration', 'knowledge-stream-fencing', 'knowledge-retrieval-faults', 'knowledge-ai-grounding', 'knowledge-retrieval-relevance', 'knowledge-business-fixtures', 'tool-routing-completion', 'agent-discovery-policy', 'agent-discovery-execution-recovery', 'agent-progressive-tool-discovery', 'agent-provider-sse-harness', 'tool-result-flow', 'chat-diagram-verification', 'client-agent-chinese-ui'],
-    integration: ['knowledge-chain-postgres', 'knowledge-graph-workflow-postgres', 'tool-chain-files-postgres', 'knowledge-content', 'knowledge-pdf-coverage', 'knowledge-ingestion-lease-fencing', 'knowledge-ingestion-jobs', 'knowledge-sources', 'chat-knowledge-catalog', 'chat-conversation-product', 'agent-full-run-discovery', 'agent-non-idempotent-fault-matrix', 'agent-execution-approval-flow', 'offline-artifact-persistence', 'docx-preview-integration', 'onlyoffice-preview', 'chat-task-feed', 'workflow-iteration-persistence', 'agent-idle-chat-tasks-postgres'],
+    unit: ['knowledge-tool-chain', 'knowledge-graph-tool-chain', 'knowledge-workflow-chain', 'knowledge-lineage-access', 'tool-chain-remaining', 'knowledge-benchmark', 'workflow-iteration', 'knowledge-stream-fencing', 'knowledge-retrieval-faults', 'knowledge-ai-grounding', 'knowledge-retrieval-relevance', 'knowledge-business-fixtures', 'tool-routing-completion', 'agent-discovery-policy', 'agent-discovery-execution-recovery', 'agent-progressive-tool-discovery', 'agent-provider-sse-harness', 'tool-result-flow', 'chat-diagram-verification', 'client-agent-chinese-ui', 'agent-round-budgets', 'agent-round-runtime', 'agent-token-policy', 'agent-auto-continuation'],
+    integration: ['knowledge-chain-postgres', 'knowledge-graph-workflow-postgres', 'tool-chain-files-postgres', 'knowledge-content', 'knowledge-pdf-coverage', 'knowledge-ingestion-lease-fencing', 'knowledge-ingestion-jobs', 'knowledge-sources', 'chat-knowledge-catalog', 'chat-conversation-product', 'agent-full-run-discovery', 'agent-non-idempotent-fault-matrix', 'agent-execution-approval-flow', 'offline-artifact-persistence', 'docx-preview-integration', 'onlyoffice-preview', 'chat-task-feed', 'workflow-iteration-persistence', 'agent-idle-chat-tasks-postgres', 'agent-round-budget-postgres'],
     recovery: ['agent-residency-multiprocess', 'agent-checkpoint-output-recovery', 'agent-control-plane-recovery', 'document-job-recovery', 'agent-browser-network-proxy', 'security-mcp', 'safe-http-status'],
-    browser: ['docx-preview-browser', 'knowledge-task-detail-browser', 'tool-chain-quality-browser']
+    browser: ['docx-preview-browser', 'knowledge-task-detail-browser', 'tool-chain-quality-browser', 'agent-round-browser']
 };
+GROUPS.unit.push('agent-capability-fallback', 'agent-run-overview');
+GROUPS.integration.push('agent-empty-search-postgres', 'agent-run-detail-overview-postgres');
+GROUPS.browser.push('agent-run-detail-loader-browser');
+GROUPS.unit.push('tool-input-validation', 'tool-library-control-plane');
+GROUPS.integration.push('agent-input-repair-postgres');
+GROUPS.unit.push('tool-knowledge-deep-audit');
 
 async function runGroup(group) {
     const files = GROUPS[group].map(name => `tests/${name}.test.js`);

@@ -24,25 +24,15 @@ function loadAgentQueueModule(setImmediateMock) {
     return module.exports;
 }
 
-test('agent queue coalesces repeated wakeups into one scheduled drain', () => {
+test('agent queue coalesces repeated wakeups into one scheduled drain', async () => {
     const scheduled = [];
     const { createAgentQueue } = loadAgentQueueModule((fn) => {
         scheduled.push(fn);
         return scheduled.length;
     });
 
-    const db = {
-        prepare() {
-            return {
-                all() { return []; },
-                run() { return { changes: 0 }; },
-                get() { return { count: 0 }; }
-            };
-        }
-    };
-
     const queue = createAgentQueue({
-        db,
+        dbRunner: { query: async () => [], queryOne: async () => ({ count: 0 }), execute: async () => 0 },
         logger: { info() {}, warn() {}, error() {} },
         instanceId: 'agent-test',
         maxConcurrent: 1,
@@ -55,10 +45,10 @@ test('agent queue coalesces repeated wakeups into one scheduled drain', () => {
     queue.enqueueRun('run-1');
     queue.enqueueRun('run-2');
     queue.updateMaxConcurrent(2);
-    queue.recoverQueued(10);
+    await queue.recoverQueued(10);
 
     assert.equal(scheduled.length, 1);
-    scheduled[0]();
+    await scheduled[0]();
     assert.equal(scheduled.length, 1);
 });
 

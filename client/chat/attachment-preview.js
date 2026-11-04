@@ -1,4 +1,4 @@
-/* global DocsAPI */
+/* global DocsAPI, apiFetch, authHeaders, PivotSafeHtml */
 /* 附件预览 */
 const ATTACHMENT_TEXT_LIMIT = 12000;
 let activeAttachmentOfficeEditor = null;
@@ -7,22 +7,30 @@ const escapePreviewHtml = (value) => window.Pivot.legacy.PivotSafeHtml
     ? window.Pivot.legacy.PivotSafeHtml.escapeHtml(value)
     : String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-function guessAttachmentKind(url = '', mimeType = '') {
+let currentAttachmentUrl = '';
+let currentAttachmentName = '';
+
+function guessAttachmentKind(url = '', mimeType = '', filename = '') {
     const lowerUrl = String(url || '').toLowerCase().split('?')[0];
     const lowerMime = String(mimeType || '').toLowerCase();
-    if (lowerMime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(lowerUrl)) return 'image';
-    if (lowerMime === 'application/pdf' || /\.pdf$/i.test(lowerUrl)) return 'pdf';
-    if (/\.(docx?|rtf)$/i.test(lowerUrl) || lowerMime.includes('word') || lowerMime === 'application/msword' || lowerMime.includes('officedocument.wordprocessingml')) return 'word';
-    if (/\.(xlsx?|ods)$/i.test(lowerUrl) || lowerMime.includes('excel') || lowerMime.includes('spreadsheet') || lowerMime.includes('officedocument.spreadsheetml')) return 'excel';
-    if (/\.(pptx?|odp)$/i.test(lowerUrl) || lowerMime.includes('powerpoint') || lowerMime.includes('presentation')) return 'slide';
-    if (lowerMime.startsWith('text/') || /\.(txt|md|csv|json|log|xml|yaml|yml|html?)$/i.test(lowerUrl)) return 'text';
+    const lowerName = String(filename || '').toLowerCase().split('?')[0];
+    const target = lowerName || lowerUrl;
+
+    if (lowerMime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(target) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(lowerUrl)) return 'image';
+    if (lowerMime === 'application/pdf' || lowerMime.includes('pdf') || /\.pdf$/i.test(target) || /\.pdf$/i.test(lowerUrl)) return 'pdf';
+    if (/\.(docx?|rtf)$/i.test(target) || /\.docx?$/i.test(lowerUrl) || lowerMime.includes('word') || lowerMime === 'application/msword' || lowerMime.includes('officedocument.wordprocessingml')) return 'word';
+    if (/\.(xlsx?|ods)$/i.test(target) || /\.xlsx?$/i.test(lowerUrl) || lowerMime.includes('excel') || lowerMime.includes('spreadsheet') || lowerMime.includes('officedocument.spreadsheetml')) return 'excel';
+    if (/\.(pptx?|odp)$/i.test(target) || /\.pptx?$/i.test(lowerUrl) || lowerMime.includes('powerpoint') || lowerMime.includes('presentation')) return 'slide';
+    if (lowerMime.startsWith('text/') || /\.(txt|md|csv|json|log|xml|yaml|yml|html?)$/i.test(target) || /\.(txt|md|csv|json|log|xml|yaml|yml|html?)$/i.test(lowerUrl)) return 'text';
     return 'other';
 }
 
 function setAttachmentPreviewMeta(modal, title, url, kind, mimeType) {
+    currentAttachmentUrl = url || '';
+    currentAttachmentName = title || '';
     const titleEl = modal.querySelector('#attachment-preview-title');
     const metaEl = modal.querySelector('#attachment-preview-meta');
-    const openLink = modal.querySelector('#attachment-preview-open');
+    const downloadBtn = modal.querySelector('#attachment-preview-download') || modal.querySelector('#attachment-preview-open');
     if (titleEl) titleEl.textContent = title || '附件预览';
     if (metaEl) {
         const kindLabel = kind === 'image' ? '图片'
@@ -34,9 +42,38 @@ function setAttachmentPreviewMeta(modal, title, url, kind, mimeType) {
             : '文件';
         metaEl.textContent = [kindLabel, mimeType || ''].filter(Boolean).join(' / ');
     }
-    if (openLink) {
-        openLink.href = url || '#';
-        openLink.classList.toggle('hidden', !url);
+    if (downloadBtn) {
+        downloadBtn.title = `下载附件：${title || '文件'}`;
+        downloadBtn.classList.toggle('hidden', !url);
+    }
+}
+
+async function downloadCurrentAttachment() {
+    if (!currentAttachmentUrl) return;
+    const filename = currentAttachmentName || 'attachment';
+    try {
+        const response = await apiFetch(currentAttachmentUrl, {
+            headers: typeof authHeaders === 'function' ? authHeaders() : {}
+        });
+        if (!response.ok) throw new Error(`下载失败 (${response.status})`);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1500);
+    } catch (_) {
+        const a = document.createElement('a');
+        a.href = currentAttachmentUrl;
+        a.download = filename;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     }
 }
 
@@ -58,7 +95,7 @@ async function renderAttachmentOfficePreview(content, config) {
             const script = document.createElement('script');
             script.src = config.scriptUrl;
             script.onload = resolve;
-            script.onerror = () => { script.remove(); reject(new Error('文档服务无法连接，请检查 ONLYOFFICE 代理配置。')); };
+            script.onerror = () => { script.remove(); reject(new Error('文档服务无法连接，请检查文档预览配置。')); };
             document.head.appendChild(script);
         });
         docsApi = resolveDocsApi();
@@ -147,10 +184,32 @@ async function renderOfficeOrDocPreview(content, url) {
         renderAttachmentExcelPreview(content, data.excel);
         return;
     }
+    if ((data.mode === 'doc' || data.mode === 'html') && typeof data.html === 'string') {
+        const frame = document.createElement('iframe');
+        frame.className = 'attachment-preview-frame';
+        frame.title = '文档预览';
+        frame.setAttribute('sandbox', '');
+        content.replaceChildren(frame);
+        PivotSafeHtml.setSrcdoc(frame, data.html);
+        return;
+    }
     if (data.mode === 'text' && typeof data.text === 'string') {
+        const hasNotice = data.notice && !/onlyoffice/i.test(data.notice);
+        const isDocFormat = ['docx', 'doc', 'word'].includes(data.format);
+        if (isDocFormat) {
+            PivotSafeHtml.setHtml(content, `
+                <div class="attachment-preview-doc-wrapper">
+                    ${hasNotice ? `<div class="attachment-preview-notice">${escapePreviewHtml(data.notice)}</div>` : ''}
+                    <div class="attachment-preview-doc-sheet">
+                        <pre class="attachment-preview-doc-text">${escapePreviewHtml(data.text)}</pre>
+                    </div>
+                </div>
+            `);
+            return;
+        }
         PivotSafeHtml.setHtml(content, `
             <div class="attachment-preview-text-wrapper">
-                ${data.notice ? `<div class="attachment-preview-notice">${escapePreviewHtml(data.notice)}</div>` : ''}
+                ${hasNotice ? `<div class="attachment-preview-notice">${escapePreviewHtml(data.notice)}</div>` : ''}
                 <pre class="attachment-preview-text">${escapePreviewHtml(data.text)}</pre>
             </div>
         `);
@@ -165,23 +224,45 @@ async function renderOfficeOrDocPreview(content, url) {
     `);
 }
 
-async function renderAttachmentTextPreview(content, url) {
+function renderAttachmentPdfPreview(content, url, title = 'PDF 预览') {
+    const frame = document.createElement('iframe');
+    frame.className = 'attachment-preview-frame';
+    frame.title = title || 'PDF 预览';
+    frame.src = url;
+    content.replaceChildren(frame);
+}
+
+async function renderAttachmentTextPreview(content, url, name = '') {
     renderAttachmentPreviewLoading(content);
     const response = await apiFetch(url, {
         headers: typeof authHeaders === 'function' ? authHeaders() : {}
     });
     if (!response.ok) throw new Error(`预览失败 (${response.status})`);
     const text = (await response.text()).slice(0, ATTACHMENT_TEXT_LIMIT);
-    PivotSafeHtml.setHtml(content, `<pre class="attachment-preview-text">${escapePreviewHtml(text)}</pre>`);
+    const isMarkdown = /\.(md|markdown)$/i.test(name || url);
+    if (isMarkdown && typeof marked !== 'undefined') {
+        const rawHtml = marked.parse(text);
+        PivotSafeHtml.setHtml(content, `
+            <div class="attachment-preview-text-wrapper">
+                <div class="attachment-preview-text attachment-preview-markdown markdown-body">${rawHtml}</div>
+            </div>
+        `);
+        return;
+    }
+    PivotSafeHtml.setHtml(content, `
+        <div class="attachment-preview-text-wrapper">
+            <pre class="attachment-preview-text">${escapePreviewHtml(text)}</pre>
+        </div>
+    `);
 }
 
-async function renderAttachmentPreview(content, url, kind) {
+async function renderAttachmentPreview(content, url, kind, title = '') {
     if (kind === 'image') {
         PivotSafeHtml.setHtml(content, `<img class="attachment-preview-image" src="${escapePreviewHtml(url)}" alt="Attachment preview">`);
         return;
     }
     if (kind === 'pdf') {
-        PivotSafeHtml.setHtml(content, `<iframe class="attachment-preview-frame" src="${escapePreviewHtml(url)}" title="Attachment preview" loading="lazy"></iframe>`);
+        renderAttachmentPdfPreview(content, url, title);
         return;
     }
     if (['word', 'excel', 'slide'].includes(kind)) {
@@ -189,7 +270,7 @@ async function renderAttachmentPreview(content, url, kind) {
         return;
     }
     if (kind === 'text') {
-        await renderAttachmentTextPreview(content, url);
+        await renderAttachmentTextPreview(content, url, title);
         return;
     }
     PivotSafeHtml.setHtml(content, `
@@ -204,12 +285,12 @@ const openAttachmentPreview = async function(url, title = '', mimeType = '') {
     const modal = document.getElementById('attachment-preview-modal');
     const content = document.getElementById('attachment-preview-content');
     if (!modal || !content || !url) return;
-    const kind = guessAttachmentKind(url, mimeType);
+    const kind = guessAttachmentKind(url, mimeType, title);
     setAttachmentPreviewMeta(modal, title, url, kind, mimeType);
     modal.classList.remove('hidden');
     renderAttachmentPreviewLoading(content);
     try {
-        await renderAttachmentPreview(content, url, kind);
+        await renderAttachmentPreview(content, url, kind, title);
     } catch (e) {
         PivotSafeHtml.setHtml(content, `
             <div class="attachment-preview-empty">
@@ -244,14 +325,26 @@ document.addEventListener('click', (event) => {
     );
 });
 
-document.addEventListener('DOMContentLoaded', () => {
+function bindAttachmentPreviewEvents() {
     document.getElementById('attachment-preview-close')?.addEventListener('click', closeAttachmentPreview);
+    document.getElementById('attachment-preview-download')?.addEventListener('click', downloadCurrentAttachment);
+    document.getElementById('attachment-preview-open')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        downloadCurrentAttachment();
+    });
     document.getElementById('attachment-preview-modal')?.addEventListener('click', (event) => {
         if (event.target.id === 'attachment-preview-modal') closeAttachmentPreview();
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindAttachmentPreviewEvents);
+} else {
+    bindAttachmentPreviewEvents();
+}
 
 Pivot.exposeModule('attachmentPreview', {
     openAttachmentPreview,
-    closeAttachmentPreview
-}, ['openAttachmentPreview', 'closeAttachmentPreview']);
+    closeAttachmentPreview,
+    downloadCurrentAttachment
+}, ['openAttachmentPreview', 'closeAttachmentPreview', 'downloadCurrentAttachment']);

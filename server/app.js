@@ -188,7 +188,7 @@ app.use(helmet({
             "script-src-attr": ["'none'"],
             "img-src": ["'self'", "data:", "blob:", ...getWorkflowEmbedAllowedOrigins()],
             "media-src": ["'self'", ...getWorkflowEmbedAllowedOrigins()],
-            "frame-src": ["'self'", ...getWorkflowEmbedAllowedOrigins()],
+            "frame-src": ["'self'", "blob:", ...getWorkflowEmbedAllowedOrigins()],
             "style-src": ["'self'", "'unsafe-inline'"],
             "connect-src": ["'self'"],
             "upgrade-insecure-requests": null
@@ -448,6 +448,7 @@ const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
 </html>`;
 
 // 第三方库 vendor 目录长期缓存（内容几乎不变）
+require('./routes/document-preview-assets').registerDocumentPreviewAssets(app);
 app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/vendor'), {
     maxAge: appConfig.vendorMaxAge,
     immutable: true

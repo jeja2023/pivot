@@ -206,7 +206,7 @@
                 const script = document.createElement('script');
                 script.src = config.scriptUrl;
                 script.onload = resolve;
-                script.onerror = () => { script.remove(); reject(new Error('文档服务无法连接，请检查 ONLYOFFICE 代理配置。')); };
+                script.onerror = () => { script.remove(); reject(new Error('文档服务无法连接，请检查文档预览配置。')); };
                 document.head.appendChild(script);
             });
             docsApi = resolveDocsApi();

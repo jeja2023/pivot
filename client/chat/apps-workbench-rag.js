@@ -6,11 +6,13 @@ const officialWritingRagResults = { history: [] };
 let officialWritingRagCollectionsLoaded = false;
 
 async function ensureOfficialWritingRagCollections() {
+    const owner = getOfficialWritingOwner();
     if (officialWritingRagCollectionsLoaded) return;
     if (typeof window.Pivot.legacy.loadKnowledgeCollections !== 'function') return;
     let collections = [];
     try {
         collections = await window.Pivot.legacy.loadKnowledgeCollections();
+        if (owner !== getOfficialWritingOwner()) return;
     } catch (e) {
         // 加载失败时保持标记为 false，便于后续调用重试。
         return;
@@ -49,6 +51,7 @@ function renderOfficialWritingRagResults(scopeKey) {
 }
 
 async function runOfficialWritingRagSearch(scopeKey) {
+    const owner = getOfficialWritingOwner();
     const query = document.getElementById(`official-writing-kb-${scopeKey}-query`)?.value.trim() || '';
     if (!query) {
         showToast('请输入检索关键词', 'warning');
@@ -77,6 +80,7 @@ async function runOfficialWritingRagSearch(scopeKey) {
             return;
         }
         const data = await res.json();
+        if (owner !== getOfficialWritingOwner()) return;
         officialWritingRagResults[scopeKey] = Array.isArray(data?.matches) ? data.matches : [];
         renderOfficialWritingRagResults(scopeKey);
         if (!officialWritingRagResults[scopeKey].length) {
@@ -119,6 +123,7 @@ function appendOfficialWritingReferenceToMaterials(match) {
     const materialEditor = document.getElementById('official-writing-material-editor');
     const editorOpen = Boolean(materialEditorCard && !materialEditorCard.classList.contains('hidden'));
     const current = String((editorOpen ? materialEditor?.value : '') || getOfficialWritingTextarea('source')?.value || officialWritingState.source || '').trim();
+    if (!recordOfficialWritingRagReference(match)) return 'limit';
     if (current.includes(text)) return 'exists';
     const next = [current, block].filter(Boolean).join('\n\n');
     pushOfficialWritingUndoSnapshot();
@@ -136,7 +141,7 @@ function referenceOfficialWritingRagMatch(index, scopeKey) {
     const match = findOfficialWritingRagMatch(index, scopeKey);
     if (!match) return;
     const status = appendOfficialWritingReferenceToMaterials(match);
-    if (status === 'empty') return;
+    if (status === 'empty' || status === 'limit') return;
     const sourceLabel = String(match.source || '知识库').trim() || '知识库';
     appendOfficialWritingRequirement(`优先参考本篇材料中的“知识库引用：${sourceLabel}”`, { silent: true });
     showToast(status === 'exists' ? '该知识库内容已在本篇材料中，AI 会自动参考' : '已加入本篇材料，AI 会自动参考');
@@ -147,6 +152,7 @@ function appendOfficialWritingRequirement(text, options = {}) {
     if (!input) return;
     const value = input.value.trim();
     input.value = value ? `${value}；${text}` : text;
+    syncOfficialWritingStateFromInputs();
     renderOfficialWritingWorkspace();
     if (!options.silent) showToast('已加入 AI 指令');
 }
@@ -166,38 +172,7 @@ function applyOfficialWritingTemplate(templateId) {
     showToast('模板已加入正文稿');
 }
 
-async function importOfficialWritingMaterialFiles(fileList) {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-    const chunks = [];
-    for (const file of files) {
-        try {
-            const text = await file.text();
-            const clean = String(text || '').trim();
-            if (clean) chunks.push(`【${file.name || '素材'}】\n${clean}`);
-        } catch (e) {
-            // 单个文件读取失败不阻断其他素材导入。
-        }
-    }
-    if (!chunks.length) {
-        showToast('未读取到可用文本，请上传 TXT、Markdown、CSV 或 JSON 等文本文件', 'warning');
-        return;
-    }
-    pushOfficialWritingUndoSnapshot();
-    const materialEditorCard = document.getElementById('official-writing-material-editor-card');
-    const materialEditor = document.getElementById('official-writing-material-editor');
-    const editorOpen = Boolean(materialEditorCard && !materialEditorCard.classList.contains('hidden'));
-    const current = String((editorOpen ? materialEditor?.value : '') || getOfficialWritingTextarea('source')?.value || officialWritingState.source || '').trim();
-    const next = [current, ...chunks].filter(Boolean).join('\n\n');
-    setOfficialWritingTextareaValue('source', next);
-    officialWritingState.source = next;
-    setOfficialWritingMaterialTab('materials');
-    syncOfficialWritingStateFromInputs();
-    saveOfficialWritingState();
-    renderOfficialWritingWorkspace();
-    syncOfficialWritingMaterialEditor(next, { force: true });
-    showToast(`已导入 ${chunks.length} 个本篇材料`);
-}
+
 function focusOfficialWritingSource() {
     closeOfficialWritingMaterialModal();
     applyOfficialWritingViewMode('compare');
@@ -245,6 +220,7 @@ function bindAppsWorkbenchEvents() {
     const panel = document.getElementById('apps-workbench-modal');
     if (!panel || panel.dataset.appsBound === '1') return;
     panel.dataset.appsBound = '1';
+    bindOfficialWritingProductEvents(panel);
     document.getElementById('apps-back-btn')?.addEventListener('click', showAppsHome);
     document.getElementById('apps-modal-close')?.addEventListener('click', () => window.Pivot.legacy.closeAppsWorkbench?.());
     document.getElementById('official-writing-toggle-left-btn')?.addEventListener('click', () => {
@@ -590,6 +566,7 @@ function openAppsWorkbench(options = {}) {
         return;
     }
     const targetApp = options?.app || getStoredAppsActiveApp();
+    if (targetApp !== 'official-writing') void window.Pivot.moduleApi('apps.officialWriting')?.suspend?.();
     window.Pivot.moduleApi('apps.mindmaps')?.suspend?.();
     document.getElementById('mindmaps-view')?.classList.add('hidden');
     if (targetApp === 'mindmaps') {
@@ -630,5 +607,3 @@ window.Pivot.legacy.closeAppsWorkbench = function() {
     window.Pivot.moduleApi('workspaces.navigation').returnFromWorkspace?.('personal');
 }
 window.Pivot.exposeModule('workspaces.implementations', { openAppsWorkbench });
-
-window.Pivot.legacy.PIVOT_APP_REGISTRY = PIVOT_APP_REGISTRY;

@@ -547,6 +547,8 @@ body.dark-mode .chat-task-suggestion-dismiss:hover,
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-width: 0;
+    max-width: 100%;
 }
 .message-attachment {
     margin: 0;
@@ -603,6 +605,7 @@ body.dark-mode .chat-task-suggestion-dismiss:hover,
 }
 
 .message.user .message-content { 
+    max-width: min(85%, 480px);
     background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
     color: white; 
     border-bottom-right-radius: 4px;

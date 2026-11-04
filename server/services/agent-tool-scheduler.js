@@ -16,16 +16,21 @@ async function runReadBatch(entries, runOne, options = {}) {
     const concurrency = Math.min(Math.max(Number(options.maxReadConcurrency) || DEFAULT_READ_CONCURRENCY, 1), 16);
     const results = new Array(entries.length);
     let nextIndex = 0;
+    let failed = false, firstError;
     const workers = Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
         while (true) {
-            if (options.signal?.aborted) throw cancellationError();
+            if (failed) return;
+            if (options.signal?.aborted) { failed = true; firstError = cancellationError(); return; }
             const index = nextIndex;
             nextIndex += 1;
             if (index >= entries.length) return;
-            results[index] = await runOne(entries[index], index);
+            try { results[index] = await runOne(entries[index], index); }
+            catch (error) { if (!failed) { failed = true; firstError = error; } return; }
         }
     });
     await Promise.all(workers);
+    // 等待已开始的调用全部结束再交还控制权，避免旧批次与下一轮并发执行。
+    if (failed) throw firstError;
     return results;
 }
 

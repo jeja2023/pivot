@@ -84,6 +84,7 @@ async function createChatAgentHandoff({
             ? '这是用户显式选择的聊天 Agent 执行模式。遵守当前会话的 MCP 授权和工具白名单。'
             : '这是用户显式选择的聊天 Agent 执行模式。当前会话未授权外部 MCP，只能使用内置安全能力。';
     const metadata = {
+        executionPolicy: taskBudget.policy,
         conversationTaskId,
         projectId: project.projectId,
         conversationMessageIds: [userMessageId].filter(Boolean),
@@ -158,10 +159,10 @@ async function createChatAgentHandoff({
         modelId: modelCfg.id,
         sessionId,
         title: visibleContent || modelContent,
-        maxSteps: budget.max_steps,
+        maxSteps: taskBudget.segmentMaxSteps,
         dedupeKey: regenerate ? (requestKey ? `chat-regenerate:${sessionId}:${requestKey}` : null) : userMessageId ? `chat:${sessionId}:${userMessageId}` : null,
-        ...((automatic || taskBudget.profile === 'knowledge_qa') ? { maxTokenBudget: budget.max_tokens_total, budgetConfig: budget } : {}),
-        runMode: 'standard',
+        maxTokenBudget: budget.max_tokens_total, budgetConfig: budget,
+        runMode: taskBudget.runMode,
         toolPolicy: effectiveMcpEnabled ? 'all' : 'builtin_only',
         toolAllowlist: selection.names.length ? [...(selection.executionNames || selection.names), 'chat.read_source', ...(ragEnabled && knowledgeSelected ? ['rag.search', 'knowledge.list', 'knowledge.graph.query'] : [])] : [],
         approvalPolicy: 'safe_mcp_auto',

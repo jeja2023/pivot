@@ -106,7 +106,7 @@ function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {} }, deps) {
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, planningDeadline = deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {} }, deps) {
     let roundsUsed = 0;
     let finalizingAnswer = false;
     try {
@@ -119,7 +119,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const taskBudget = deps.taskBudget || null;
         const verifyOutcome = async (answer, partial = false, reason = '', repairOptions = null) => {
             const verify = deps.verifyAgentOutcome || (options => verifyTaskOutcome(options));
-            return await verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget, repairOptions });
+            const operation = () => verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget, repairOptions });
+            return taskBudget?.withFinalization ? await taskBudget.withFinalization(operation) : await operation();
         };
         const tools = buildAgentToolSchemas(plannerToolList);
         const systemPrompt = `你是 Pivot Agent。目标：${run.goal || ''}
@@ -175,37 +176,21 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const lastStep = Math.max(Number(run.resume_from_step || 0) || 0, 0);
         let previousWorldState = null;
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
-        const sliceEndStep = lastStep + maxSteps;
+        const sliceEndStep = lastStep + (taskBudget?.remainingSegmentRounds?.() ?? maxSteps);
         roundsUsed = lastStep;
-        let lastOperationSignature = '';
-        let stagnantRounds = 0;
         let capabilityRecorded = false;
-        const completeWithWarning = async (reason) => {
-            let answer = '';
-            try {
-                answer = await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
-                    budget: taskBudget,
-                    allowBudgetExceeded: true
-                });
-            } catch (_) {
-                answer = observations.length ? '已完成部分执行，但未能生成完整总结。' : '任务在生成完整结果前被中止。';
-            }
-            await deps.updateRun(runId, {
-                status: 'completed_with_errors',
-                final_answer: `注意：${reason}\n\n${answer}`,
-                error_message: reason,
-                completed_at: getBeijingTimestamp(),
-                last_heartbeat_at: getBeijingTimestamp(),
-                updated_at: getBeijingTimestamp()
-            });
-            await deps.createAgentNotification(user.id, runId, 'warning', '任务已生成部分结果', reason);
-            return { completed: true, roundsUsed, partial: true };
-        };
+        let budgetHint = null;
         for (let step = lastStep + 1; step <= sliceEndStep; step += 1) {
-            if (taskBudget) taskBudget.consumeStep();
+            await require('./agent-runtime/execution-budget').beginPlanningRound(taskBudget);
+            roundsUsed = step;
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
+            await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
             const controlMessages = await deps.pollAgentControlMessages?.(runId, user, { limit: 20 });
+            if (taskBudget?.planningHint) {
+                if (budgetHint) budgetHint.content = taskBudget.planningHint();
+                else { budgetHint = { role: 'system', content: taskBudget.planningHint() }; conversation.push(budgetHint); }
+            }
             if (Array.isArray(controlMessages)) {
                 controlMessages.forEach(message => conversation.push({
                     role: 'user',
@@ -338,7 +323,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             }
             conversationForModel = conversationForModel.messages;
             const providerEvents = [];
-            const remainingModelMs = Math.max(deadline - Date.now(), 1_000);
+            const remainingModelMs = Math.max(planningDeadline - Date.now(), 1_000);
             const modelRequestTimeoutMs = Math.min(resolveAgentRequestTimeoutMs(), remainingModelMs);
             try {
                 try {
@@ -359,6 +344,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 });
                 result = await deps.withTimeout(
                     signal => callStreamingModel(modelCfg, conversationForModel, tools, {
+                        budget: taskBudget,
                         temperature: 0.2,
                         enableThinking: resolveAgentPlanningThinking(modelCfg),
                         timeoutMs: modelRequestTimeoutMs,
@@ -493,7 +479,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             const completedSnapshot = {
                 runId,
                 step,
-                content: sanitizeUserVisibleText(result?.content || ''),
+                content: require('./knowledge-output-guard').holdKnowledgeOutput(run, observations) ? '' : sanitizeUserVisibleText(result?.content || ''),
                 partialToolCalls: (result?.toolCalls || []).map(c => ({ id: c.id, name: c.name, argumentsRaw: c.argumentsRaw })),
                 finishReason: result?.finishReason || null,
                 completed: true
@@ -522,6 +508,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
 
             if (!result?.hasToolCalls) {
                 finalizingAnswer = true;
+                if (taskBudget) taskBudget.phase = 'finalization';
                 let answer = sanitizeUserVisibleText(result?.content || '') || (usageResult?.budgetExceeded ? '当前额度已用完，本次尚未生成可用答案。' : await deps.synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     budget: deps.taskBudget,
                     allowBudgetExceeded: true
@@ -532,6 +519,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning, { allowed: !budgetWarning, remainingSteps: sliceEndStep - step });
                 answer = require('./knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
+                await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 if (verification.repair?.allowed) {
                     const metadata = deps.getRunMetadata?.(run) || {};
                     run.metadata = { ...metadata, taskContract: verification.taskContract };
@@ -539,6 +527,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     observations.push({ type: 'verification_repair', step, tool: 'task.verification', output: { executed: false, message } });
                     conversation.push({ role: 'assistant', content: answer }, { role: 'user', content: message });
                     finalizingAnswer = false;
+                    if (taskBudget) taskBudget.phase = 'execution';
                     continue;
                 }
                 const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
@@ -611,6 +600,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         state: toolDiscoveryState, run
                     });
                 } catch (error) {
+                    if (require('./agent-execution-control').isExecutionControlError(error)) throw error;
                     preparedCalls.push({ call, tool: selectedTool, input: args, unavailable: error.message, error });
                     continue;
                 }
@@ -638,8 +628,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 }
                 const delegatedBudget = call.name === 'tools.execute' && !prepared.discoveryRequired;
                 if (taskBudget && !delegatedBudget) taskBudget.consumeTool(prepared.approvalTool || prepared.tool || { name: call?.name || '' });
+                await taskBudget?.persistUsageSnapshot?.();
                 const callStart = Date.now();
                 await assertRunNotCancelled(runId);
+                await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 assertRunWithinBudget();
                 const toolSpanId = await deps.startAgentTraceSpan?.(runId, {
                     type: 'tool',
@@ -677,7 +669,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     );
                     return { ...prepared, status: 'success', output, toolSpanId, durationMs: Date.now() - callStart };
                 } catch (toolErr) {
-                    if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(toolErr.code)) throw toolErr;
+                    if (require('./agent-execution-control').isExecutionControlError(toolErr)) throw toolErr;
                     return { ...prepared, status: 'error', error: toolErr, toolSpanId, durationMs: Date.now() - callStart };
                 }
             }, { signal: deps.signal, maxReadConcurrency: deps.streamingReadConcurrency });
@@ -685,17 +677,17 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             // Persist results and return them to the model in exactly the original tool-call order.
             for (const executed of executedCalls) {
                 const { call, input: args } = executed;
-                const operationSignature = `${call.name}:${JSON.stringify(args || {})}`;
-                stagnantRounds = operationSignature === lastOperationSignature ? stagnantRounds + 1 : 1;
-                lastOperationSignature = operationSignature;
                 if (executed.status === 'unavailable') {
                     const message = executed.unavailable;
+                    const inputFeedback = require('./tool-input-validation').toolInputFeedback(executed.error);
+                    const failureOutput = { error: message, ...(inputFeedback || {}) };
+                    if (inputFeedback) observations.push({ step, tool: call.name, input: args, error: message, output: inputFeedback });
                     await deps.insertStep(runId, step, {
                         type: 'tool',
                         title: `工具不可用：${call.name || '-'}`,
                         toolName: call.name || '',
                         input: args,
-                        output: { error: message },
+                        output: failureOutput,
                         errorMessage: message,
                         status: 'error',
                         durationMs: 0,
@@ -709,18 +701,18 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         operationKey: `${runId}:${step}:${call.id || call.name}`,
                         toolName: call.name,
                         input: args,
-                        output: { error: message },
+                        output: failureOutput,
                         policyDecision: 'allow',
                         status: 'error',
-                        errorCategory: 'permission',
+                        errorCategory: inputFeedback ? 'schema' : 'permission',
                         errorMessage: message,
                         durationMs: 0,
                         contextHash: stepContext?.contextHash || '',
                         stepContext,
                         entrypoint: 'agent'
                     });
-                    if (taskBudget) taskBudget.recordError();
-                    conversation.push(buildToolResultMessage(call.id, { error: message }));
+                    if (taskBudget && !inputFeedback) taskBudget.recordError();
+                    conversation.push(buildToolResultMessage(call.id, failureOutput));
                     continue;
                 }
                 if (executed.status === 'success') {
@@ -744,37 +736,37 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         output: compactOutput, durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                     });
                     if (taskBudget) taskBudget.recordSuccess();
+                    taskBudget?.recordProgress?.(executed.approvalToolName || call.name, executed.approvalInput || args, executed.output);
+                    await taskBudget?.persistUsageSnapshot?.();
                     continue;
                 }
                 const toolErr = executed.error || new Error('工具执行失败');
-                observations.push({ step, tool: call.name, input: args, error: toolErr.message });
+                const inputFeedback = require('./tool-input-validation').toolInputFeedback(toolErr);
+                const failureOutput = { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes, ...(inputFeedback || {}) };
+                observations.push({ step, tool: call.name, input: args, error: toolErr.message, ...(inputFeedback ? { output: inputFeedback } : {}) });
                 await deps.insertStep(runId, step, {
                     type: 'tool', title: `工具执行失败：${call.name}`, toolName: call.name,
-                    input: args, output: { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes }, errorMessage: toolErr.message,
+                    input: args, output: failureOutput, errorMessage: toolErr.message,
                     status: 'error', durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                 });
                 await recordToolCall({
                     runId, stepId: `${runId}:${step}:${call.id || call.name}`,
                     operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
-                    input: args, output: { error: toolErr.message },
+                    input: args, output: failureOutput,
                     policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(toolErr.code) ? 'denied' : 'allow',
                     status: 'error', errorCategory: toolErr.category || 'unknown', errorMessage: toolErr.message,
                     durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                     ,stepContext, entrypoint: 'agent'
                 });
-                conversation.push(buildToolResultMessage(call.id, { error: toolErr.message }));
+                conversation.push(buildToolResultMessage(call.id, failureOutput));
                 await deps.finishAgentTraceSpan?.(executed.toolSpanId, {
                     status: 'error', errorMessage: toolErr.message,
                     durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                 });
-                if (taskBudget) taskBudget.recordError();
+                if (taskBudget && !inputFeedback) taskBudget.recordError();
                 if (toolErr.code === 'TOOL_DISCOVERY_NO_PROGRESS') {
-                    await require('./agent-discovery-progress').pauseForMissingTool(deps, runId, user.id, toolErr);
-                    return { completed: true, roundsUsed, needsInput: true };
+                    throw toolErr;
                 }
-            }
-            if (stagnantRounds >= 3) {
-                return completeWithWarning(`检测到工具 ${lastOperationSignature.split(':')[0] || '调用'} 连续重复且没有进展，已提前停止。`);
             }
         }
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。
@@ -782,7 +774,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
     } catch (streamErr) {
         // 答案生成后的验收或落库失败属于收尾故障，不能误判为原生工具不兼容再规划一遍。
         if (finalizingAnswer) throw streamErr;
-        if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
+        if (require('./agent-execution-control').isExecutionControlError(streamErr)) throw streamErr;
+        if (['KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_FINALIZATION_REQUIRED', 'AGENT_NO_PROGRESS', 'TOOL_DISCOVERY_NO_PROGRESS', 'AGENT_BUDGET_PERSIST_FAILED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);
         try {
             await (deps.recordNativeToolCallCapability || recordNativeToolCallCapability)(modelCfg, fallback);

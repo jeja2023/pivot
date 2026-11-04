@@ -6,6 +6,18 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/agent-run-overview.js",
+      "count": 2,
+      "rationale": "任务详情首屏只读仓储按运行 ID 参数查询最近步骤和节点，限制行数与单字段体积；调用前检查运行归属和当前知识来源，完整诊断沿用独立受控读取。",
+      "verification": "agent-run-detail-overview-postgres 验证首屏、截断、跨用户和来源失效保护；浏览器测试验证分段加载、超时与迟到响应。"
+    },
+    {
+      "file": "server/repositories/agent-budget-quality.js",
+      "count": 1,
+      "rationale": "按当前用户和时间参数聚合任务预算停止原因及后续完成样本，仅返回原因码和计数，不读取业务正文或工具参数。",
+      "verification": "agent-round-runtime、agent-round-budget-postgres 验证累计边界记录与样本隔离，配合类型、架构及 SQL 门禁。"
+    },
+    {
       "file": "server/repositories/sessions.js",
       "count": 18,
       "rationale": "新增只读消息来源元数据查询，按用户和会话绑定参数；不读取正文，用于列表、搜索、快照及分支入口复核来源，不在路由新增 SQL。",
@@ -457,6 +469,12 @@
       "count": 4,
       "rationale": "仅在任务锁和任务行锁保护下，以绑定参数检查任务、未完成导出和全部文档文件引用；数据库异常时清理失败关闭。",
       "verification": "tests/document-orphan-cleanup.test.js 使用隔离 PostgreSQL 验证引用、活跃任务、持锁与故障情况下的文件保护。"
+    },
+    {
+      "file": "server/repositories/official-writing-library.js",
+      "count": 11,
+      "rationale": "公文摘要按当前用户及固定排序白名单服务端分页；导出以文档行锁和产物行锁在同一事务内维护独立绑定及版本，全部值使用参数绑定。",
+      "verification": "tests/e2e/official-writing-library.spec.js 验证真实 PostgreSQL 分页、筛选、跨账号详情隔离、两篇文档独立绑定及版本冲突；official-writing-save.spec.js 验证保存与删除竞态。"
     }
   ]
 }

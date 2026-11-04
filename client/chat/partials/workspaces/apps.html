@@ -26,10 +26,16 @@
                         <div id="official-writing-library-home" class="official-writing-library-home">
                             <div class="workspace-toolbar official-writing-home-toolbar">
                                 <div class="official-writing-home-actions">
+                                    <input id="official-writing-library-query" class="form-input" type="search" placeholder="搜索公文名称" aria-label="搜索公文名称" maxlength="120">
+                                    <select id="official-writing-library-type" class="form-input" aria-label="按文种筛选"><option value="">全部文种</option><option>通知</option><option>请示</option><option>报告</option><option>函</option><option>会议纪要</option><option>通报</option><option>意见</option><option>其他公文</option></select>
+                                    <select id="official-writing-library-sort" class="form-input" aria-label="公文排序"><option value="updated">最近更新</option><option value="oldest">最早更新</option><option value="title">名称排序</option></select>
+                                    <button id="official-writing-import-backup-btn" class="btn-secondary" type="button">导入备份</button>
+                                    <input id="official-writing-backup-input" type="file" class="hidden" accept=".json,application/json">
                                     <button id="official-writing-create-doc-btn" class="btn-primary" type="button">创建公文</button>
                                     <button id="official-writing-refresh-docs-btn" class="btn-secondary" type="button">刷新</button>
                                 </div>
                             </div>
+                            <p id="official-writing-library-status" role="status" aria-live="polite"></p>
                             <div id="official-writing-home-summary" class="official-writing-home-summary regulations-summary"></div>
                             <div class="table-container workspace-table-wrap official-writing-doc-table-wrap">
                                 <table class="data-table official-writing-doc-table">
@@ -109,10 +115,27 @@
                                 </form>
                             </div>
                         </div>
+                        <div id="official-writing-result-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="official-writing-result-title">
+                            <div class="workspace-modal official-writing-preview-modal"><div class="workspace-modal-header"><h4 id="official-writing-result-title">AI 结果预览</h4><button id="official-writing-result-stop-btn" class="btn-secondary hidden" type="button">停止生成</button><button id="official-writing-result-close-btn" class="btn-secondary" type="button">关闭</button></div>
+                            <div class="workspace-modal-body"><p id="official-writing-result-status" role="status"></p><div class="official-writing-preview-columns"><section><h4>原文</h4><pre id="official-writing-result-original"></pre></section><section><h4>生成结果</h4><pre id="official-writing-result-text"></pre></section></div><div id="official-writing-result-diff"></div></div>
+                            <div class="workspace-modal-footer official-writing-create-dialog-actions"><button id="official-writing-result-copy-btn" class="btn-secondary" type="button">复制结果</button><button id="official-writing-result-apply-btn" class="btn-primary" type="button" disabled>采纳到正文</button></div></div>
+                        </div>
+                        <div id="official-writing-export-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="official-writing-export-title">
+                            <div class="workspace-modal official-writing-preview-modal"><div class="workspace-modal-header"><h4 id="official-writing-export-title">导出预览</h4><button id="official-writing-export-close-btn" class="btn-secondary" type="button">关闭</button></div>
+                            <div class="workspace-modal-body"><label for="official-writing-export-layout">版式</label><select id="official-writing-export-layout" class="form-input"><option value="plain">普通公文</option><option value="red_header">红头公文</option></select><p id="official-writing-export-status" role="status"></p><pre id="official-writing-export-elements"></pre><div id="official-writing-export-frame" role="region" aria-label="公文实际 PDF 页面预览"></div></div>
+                            <div class="workspace-modal-footer official-writing-create-dialog-actions"><button id="official-writing-export-preview-btn" class="btn-secondary" type="button">刷新版式预览</button><button id="official-writing-export-confirm-btn" class="btn-primary" type="button" disabled>下载文件</button></div></div>
+                        </div>
                         <div id="official-writing-detail-header" class="official-writing-detail-header">
                             <button id="official-writing-back-to-library-btn" class="btn-secondary" type="button">返回列表</button>
                             <div class="official-writing-detail-title">
                                 <strong id="official-writing-active-doc-title">未命名公文</strong>
+                                <span id="official-writing-save-status" role="status" aria-live="polite"></span>
+                                <button id="official-writing-retry-save-btn" class="btn-secondary hidden" type="button" hidden>重试保存</button>
+                                <div id="official-writing-conflict-actions" class="hidden" hidden>
+                                    <button id="official-writing-conflict-copy-btn" class="btn-secondary" type="button">另存为副本</button>
+                                    <button id="official-writing-conflict-compare-btn" class="btn-secondary" type="button">比较服务端版本</button>
+                                    <button id="official-writing-conflict-copy-text-btn" class="btn-secondary" type="button">复制当前稿</button>
+                                </div>
                             </div>
                             <div class="official-writing-status-metrics" aria-label="公文状态指标">
                                 <span class="official-writing-status-pill">审校 <b id="official-writing-status-risk">0</b></span>
@@ -125,9 +148,19 @@
                                         <option value="">加载模型中…</option>
                                     </select>
                                 </label>
+
+
+                                <button id="official-writing-stop-ai-btn" class="btn-secondary hidden" type="button">停止生成</button>
                                 <button id="official-writing-open-draft-modal-btn" class="btn-primary official-writing-command-action" type="button">AI全文起草</button>
                                 <button id="official-writing-review-suggestions-btn" class="btn-secondary official-writing-command-action" type="button">审校建议</button>
                                 <button id="official-writing-toggle-left-btn" class="btn-secondary official-writing-command-action" type="button" aria-pressed="false">写作资源</button>
+                                <details class="official-writing-command-menu"><summary class="btn-secondary">更多</summary><div class="official-writing-command-menu-panel"><button id="official-writing-undo-btn" class="btn-secondary" type="button" disabled title="撤销 Ctrl+Z">撤销</button><button id="official-writing-redo-btn" class="btn-secondary" type="button" disabled title="重做 Ctrl+Y">重做</button>
+                                    <button id="official-writing-elements-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="elements">公文设置与发文要素</button>
+                                    <button id="official-writing-versions-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="versions">历史版本</button>
+                                    <button id="official-writing-references-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="references">材料来源</button>
+                                    <button id="official-writing-compliance-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="compliance">规范检查与说明</button>
+                                    <button id="official-writing-comments-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="comments">批注</button><button id="official-writing-backup-btn" class="btn-secondary" type="button">导出公文备份</button>
+                                </div></details>
                                 <span id="official-writing-ai-indicator" class="official-writing-ai-indicator hidden" role="status" aria-live="polite"></span>
                                 <details id="official-writing-command-more-menu" class="official-writing-command-menu">
                                     <summary class="btn-secondary official-writing-command-action official-writing-command-more-trigger" aria-label="展开导出操作">导出</summary>
@@ -138,30 +171,7 @@
                                     </div>
                                 </details>
                             </div>
-                            <div class="official-writing-hidden-config hidden" aria-hidden="true">
-                                <select id="official-writing-type" class="form-input" tabindex="-1">
-                                    <option value="通知">通知</option>
-                                    <option value="请示">请示</option>
-                                    <option value="报告">报告</option>
-                                    <option value="函">函</option>
-                                    <option value="会议纪要">会议纪要</option>
-                                    <option value="通报">通报</option>
-                                    <option value="意见">意见</option>
-                                    <option value="其他公文">其他公文</option>
-                                </select>
-                                <select id="official-writing-standard" class="form-input" tabindex="-1">
-                                    <option value="通用公文规范">通用公文规范</option>
-                                    <option value="党政机关公文格式">党政机关公文格式</option>
-                                    <option value="会议纪要规范">会议纪要规范</option>
-                                    <option value="单位内部规范">单位内部规范</option>
-                                </select>
-                                <select id="official-writing-material-source" class="form-input" tabindex="-1">
-                                    <option value="粘贴材料">本篇材料</option>
-                                    <option value="知识库">知识库</option>
-                                    <option value="常用模板">公文模板</option>
-                                </select>
-                                <input id="official-writing-requirements" class="form-input" tabindex="-1">
-                            </div>
+
                         </div>
                         <div class="official-writing-workbench is-left-rail-hidden">
                             <aside id="official-writing-left-rail" class="workspace-modal official-writing-left-rail">
@@ -195,7 +205,7 @@
                                             <button id="official-writing-edit-source-btn" class="official-writing-material-action" type="button">粘贴/编辑材料</button>
                                             <button id="official-writing-upload-material-btn" class="official-writing-material-action" type="button">上传材料</button>
                                         </div>
-                                        <input id="official-writing-material-upload-input" class="hidden" type="file" multiple accept=".txt,.md,.csv,.json,.html,.htm,.log,text/*">
+                                        <input id="official-writing-material-upload-input" class="hidden" type="file" multiple accept=".txt,.md,.csv,.json,.doc,.docx,.pdf,.png,.jpg,.jpeg">
                                         <div id="official-writing-material-editor-card" class="official-writing-material-editor-card hidden">
                                             <div class="official-writing-material-editor-head">
                                                 <strong>编辑本篇材料</strong>
@@ -212,7 +222,7 @@
                                             <strong>材料预览</strong>
                                             <p id="official-writing-material-preview">暂无材料</p>
                                         </div>
-                                        <div id="official-writing-material-card-list" class="official-writing-material-card-list"></div>
+                                        <p id="official-writing-material-import-status" role="status" aria-live="polite"></p><div id="official-writing-material-card-list" class="official-writing-material-card-list"></div>
                                     </section>
                                     <section id="official-writing-history-panel" class="official-writing-material-panel hidden">
                                         <div class="official-writing-kb-search">
@@ -330,9 +340,35 @@
                                                     <span>版头与版记，导出时自动排版</span>
                                                 </div>
                                             </div>
-                                            <div class="official-writing-elements-form">
+                                            <p class="official-writing-elements-note">当前统一采用截图标准：A4，上37/下35/左右27毫米；每页22行、每行28字，固定行距28磅。标题2号方正小标宋，正文3号方正仿宋，页码4号宋体。导出时检查原字体，缺失会明确提示。</p><div class="official-writing-elements-form"><fieldset class="official-writing-elements-group"><legend>公文设置</legend>
+                                <label for="official-writing-type">文种</label><select id="official-writing-type" class="form-input">
+                                    <option value="通知">通知</option>
+                                    <option value="请示">请示</option>
+                                    <option value="报告">报告</option>
+                                    <option value="函">函</option>
+                                    <option value="会议纪要">会议纪要</option>
+                                    <option value="通报">通报</option>
+                                    <option value="意见">意见</option>
+                                    <option value="其他公文">其他公文</option>
+                                </select>
+                                <label for="official-writing-standard">检查规则</label><select id="official-writing-standard" class="form-input">
+                                    <option value="通用公文规范">通用公文规范</option>
+                                    <option value="党政机关公文格式">党政机关公文格式</option>
+                                    <option value="会议纪要规范">会议纪要规范</option>
+                                    <option value="单位内部规范">单位内部规范</option>
+                                </select>
+                                <label for="official-writing-material-source">材料来源</label><select id="official-writing-material-source" class="form-input">
+                                    <option value="粘贴材料">本篇材料</option>
+                                    <option value="知识库">知识库</option>
+                                    <option value="常用模板">公文模板</option>
+                                </select>
+                                <label for="official-writing-requirements">AI 处理要求</label><input id="official-writing-requirements" class="form-input">
+                            </fieldset>
                                                 <fieldset class="official-writing-elements-group">
-                                                    <legend>版头</legend>
+                                                    <legend>版头</legend><label for="official-writing-meta-title-breaks">标题分行（可选）</label><textarea id="official-writing-meta-title-breaks" class="form-input" rows="3" placeholder="默认按梯形或菱形分行；可仅调整换行位置，保持词意完整"></textarea>
+                                                    <label for="official-writing-meta-issuing-org">发文机关</label><input id="official-writing-meta-issuing-org" class="form-input" maxlength="250" placeholder="红头版式使用的发文机关">
+                                                    <label for="official-writing-meta-signoff">落款单位</label><input id="official-writing-meta-signoff" class="form-input" maxlength="250" placeholder="未填时从正文末尾识别">
+                                                    <label for="official-writing-meta-issued-at">成文日期</label><input id="official-writing-meta-issued-at" class="form-input" type="date">
                                                     <label for="official-writing-meta-secrecy">密级与保密期限</label>
                                                     <input id="official-writing-meta-secrecy" class="form-input" placeholder="如：秘密★1年（无则留空）">
                                                     <label for="official-writing-meta-urgency">紧急程度</label>
@@ -356,7 +392,7 @@
                                                     <label for="official-writing-meta-print-date">印发日期</label>
                                                     <input id="official-writing-meta-print-date" class="form-input" placeholder="如：2026年6月12日">
                                                 </fieldset>
-                                                <p class="official-writing-elements-note">发文要素仅在导出 DOCX / 红头模板 / 带版式文本时自动排版，不影响正文编辑区。</p>
+                                                <fieldset class="official-writing-elements-group"><legend>附件说明与附件正文</legend><p>附件名称不加末尾标点，多份附件自动编号。每份附件从新页开始，页码与正文连续。</p><button id="official-writing-add-attachment-btn" class="btn-secondary" type="button">添加附件</button><div id="official-writing-attachments-editor"></div></fieldset><p class="official-writing-elements-note">发文机关与印发机关分别填写，成文日期与印发日期分别排版；导出前可查看预览。</p>
                                             </div>
                                         </section>
                                     </div>
@@ -396,11 +432,11 @@
                                                 <select id="official-writing-target-version" class="form-input" aria-label="对比目标"></select>
                                                 <button id="official-writing-compare-btn" class="btn-primary" type="button">对比</button>
                                             </div>
-                                            <div class="official-writing-version-history-head">
+                                            <label><input id="official-writing-restore-materials" type="checkbox">载入版本时同时恢复该版本材料</label><p>历史按数量和体积保留最近记录，重要稿件可导出备份。</p><div class="official-writing-version-history-head">
                                                 <strong>历史版本</strong>
                                                 <span>点击版本可载入正文稿</span>
                                             </div>
-                                            <div id="official-writing-version-list" class="official-writing-version-list"></div>
+                                            <button id="official-writing-clear-history-btn" class="btn-secondary" type="button">清理历史，保留当前稿</button><div id="official-writing-version-list" class="official-writing-version-list"></div>
                                             <div id="official-writing-diff-summary" class="official-writing-diff-summary">选择基准和目标后点击“对比”查看差异</div>
                                             <div id="official-writing-diff-result" class="official-writing-diff-result">
                                                 <div class="official-writing-empty-note">暂无对比结果</div>
@@ -415,7 +451,7 @@
                                                     <span id="official-writing-compliance-count">0 项风险</span>
                                                 </div>
                                             </div>
-                                            <div id="official-writing-compliance-list" class="official-writing-compliance-list"></div>
+                                            <p id="official-writing-standard-description"></p><div id="official-writing-compliance-list" class="official-writing-compliance-list"></div>
                                         </section>
                                     </div>
                                     <div id="official-writing-references-drawer" class="official-writing-drawer-section hidden" role="tabpanel" aria-labelledby="official-writing-references-toggle-btn">
@@ -426,7 +462,7 @@
                                                     <span id="official-writing-reference-count">0 处引用</span>
                                                 </div>
                                             </div>
-                                            <div id="official-writing-reference-list" class="official-writing-reference-list"></div>
+                                            <button id="official-writing-reference-check-btn" class="btn-secondary" type="button">检查来源有效性</button><div id="official-writing-reference-list" class="official-writing-reference-list"></div>
                                         </section>
                                     </div>
                                 </aside>
@@ -744,7 +780,7 @@
                                             <button id="presentation-upload-image-btn" class="btn-secondary" type="button">插入图片</button>
                                             <input id="presentation-image-input" class="hidden" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif">
                                             <input id="presentation-replace-image-input" class="hidden" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif">
-                                            <input id="presentation-rich-asset-input" class="hidden" type="file" accept=".ttf,.otf,.woff,.woff2,.mp3,.wav,.ogg,.aac,.m4a,.mp4,.webm,.mov,.pdf,.docx,.xlsx,.txt,.md,.bas,.vba,.pptm,.ppsm,audio/*,video/*,font/*">
+                                            <input id="presentation-rich-asset-input" class="hidden" type="file" accept=".txt,.md,.csv,.json,.doc,.docx,.pdf,.png,.jpg,.jpeg">
                                         </div>
                                     </div>
                                     <div id="presentation-template-panel" class="presentation-inspector-panel hidden">
@@ -1143,7 +1179,7 @@
                                                     <span class="presentation-label-hint">Word / PDF / 表格 / Markdown</span>
                                                 </div>
                                                 <div class="presentation-file-upload-box">
-                                                    <input id="presentation-create-material-file" class="form-input presentation-file-input" type="file" accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.json,.html,.htm">
+                                                    <input id="presentation-create-material-file" class="form-input presentation-file-input" type="file" accept=".txt,.md,.csv,.json,.doc,.docx,.pdf,.png,.jpg,.jpeg">
                                                 </div>
                                             </label>
                                         </div>

@@ -47,17 +47,16 @@ function resolveToolContractCapabilities(definition = {}, toolName = '', source 
 }
 
 
-function enforceStrictInputSchema(schema, _isRoot = false) {
+function enforceStrictInputSchema(schema, _isRoot = false, compositionBranch = false) {
     if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
     const next = { ...schema };
     if (next.type === 'object' || next.properties) {
-        const hasDeclaredFields = (next.properties && typeof next.properties === 'object' && Object.keys(next.properties).length > 0)
-            || (Array.isArray(next.required) && next.required.length > 0);
+        const hasDeclaredFields = next.properties && typeof next.properties === 'object' && Object.keys(next.properties).length > 0;
         const hasDynamicMapSchema = Object.prototype.hasOwnProperty.call(next, 'additionalProperties')
             && next.additionalProperties !== false;
         // 有明确字段定义的对象严格拒绝未知字段；没有 properties 的嵌套对象视为动态 Map，
         // 由工具作者自行决定其 additionalProperties 约束，避免破坏 fields/headers/sections。
-        if (hasDeclaredFields) {
+        if (hasDeclaredFields && !compositionBranch) {
             if (!hasDynamicMapSchema) next.additionalProperties = false;
         }
         if (next.properties && typeof next.properties === 'object') {
@@ -66,9 +65,10 @@ function enforceStrictInputSchema(schema, _isRoot = false) {
         if (next.additionalProperties && typeof next.additionalProperties === 'object') next.additionalProperties = enforceStrictInputSchema(next.additionalProperties, false);
     }
     if (next.items && typeof next.items === 'object') next.items = enforceStrictInputSchema(next.items, false);
-    if (Array.isArray(next.anyOf)) next.anyOf = next.anyOf.map(value => enforceStrictInputSchema(value, false));
-    if (Array.isArray(next.oneOf)) next.oneOf = next.oneOf.map(value => enforceStrictInputSchema(value, false));
-    if (Array.isArray(next.allOf)) next.allOf = next.allOf.map(value => enforceStrictInputSchema(value, false));
+    // 组合分支的字段约束可跨分支补充，不能给每个分支隐式封闭其他分支的字段。
+    if (Array.isArray(next.anyOf)) next.anyOf = next.anyOf.map(value => enforceStrictInputSchema(value, false, true));
+    if (Array.isArray(next.oneOf)) next.oneOf = next.oneOf.map(value => enforceStrictInputSchema(value, false, true));
+    if (Array.isArray(next.allOf)) next.allOf = next.allOf.map(value => enforceStrictInputSchema(value, false, true));
     return next;
 }
 
@@ -125,7 +125,7 @@ function normalizeToolContract(definition = {}) {
 function validateToolInput(contract, input) {
     const issues = [];
     const schema = contract?.input_schema || { type: 'object' };
-    validateValueAgainstSchema(input && typeof input === 'object' ? input : {}, schema, {}, `${contract?.name || '工具'} 输入`, issues);
+    validateValueAgainstSchema(input, schema, {}, `${contract?.name || '工具'} 输入`, issues);
     return issues;
 }
 

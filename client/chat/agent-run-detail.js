@@ -6,14 +6,6 @@ function isAgentRunDetailModalOpen() {
     const modal = document.getElementById('agent-run-detail-modal');
     return Boolean(modal && !modal.closest('.hidden, [hidden], [aria-hidden="true"]'));
 }
-function ensureAgentRunDetailModalVisible() {
-    const modal = document.getElementById('agent-run-detail-modal');
-    if (modal) {
-        modal.style.zIndex = '2000';
-        if (modal.parentElement !== document.body) document.body.appendChild(modal);
-    }
-    return modal;
-}
 function agentRunActionMarkup(run = {}, options = {}) {
     const { isPreview = false, canCancel = false, canApprove = false, canRerun = false,
         canCreateWorkflowDraft = false, checkpoints = {}, isActive = false } = options;
@@ -159,6 +151,7 @@ document.addEventListener('keydown', event => {
 
 
 function closeAgentRunDetailModal() {
+    agentRunDetailRequestId++; window.Pivot.moduleApi('agent.detailLoader')?.cancel();
     const modal = document.getElementById('agent-run-detail-modal');
     const detail = document.getElementById('agent-run-detail');
     const closingPreview = activeAgentRunId === activeAgentWorkflowPreviewRunId;
@@ -580,7 +573,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         activeAgentRunReturnContext = null;
     }
     bindAgentRunSubtabs();
-    const modal = ensureAgentRunDetailModalVisible();
+    const modal = window.Pivot.moduleApi('agent.detailLoader').ensureVisible();
     const detail = document.getElementById('agent-run-detail');
     const workbenchDetailContainer = document.getElementById('agent-tasks-detail-container');
     const activeWorkspace = document.body?.dataset.activeWorkspace || '';
@@ -609,8 +602,9 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         if (detail) PivotSafeHtml.setHtml(detail, '<div class="empty-state agent-empty-state">正在加载任务详情...</div>');
     }
 
-    const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
-    const data = await res.json();
+    const loaded = await window.Pivot.moduleApi('agent.detailLoader').readOrShowFailure(runId, options, currentContainer, () => requestId === agentRunDetailRequestId && activeAgentRunId === runId);
+    if (!loaded) return null;
+    const { response: res, data } = loaded;
     if (requestId !== agentRunDetailRequestId || activeAgentRunId !== runId) return null;
     if (!res.ok) {
         if (typeof showToast === 'function') showToast(data.error || '任务详情加载失败', 'error');
@@ -756,7 +750,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         // Pane 1: Overview
         const paneOverview = document.getElementById('agent-pane-overview');
         if (paneOverview) {
-            PivotSafeHtml.setHtml(paneOverview, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div class="agent-run-status-text"><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4></div></div></div>${friendlySummary ? `<div class="agent-run-status-desc">${agentEscape(friendlySummary)}</div>` : ''}<div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span class="agent-progress-fill"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section>${run.final_answer ? renderAgentFinalAnswer(run.final_answer, run.id) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}`);
+            PivotSafeHtml.setHtml(paneOverview, `<section class="agent-run-overview ${agentEscape(runStatus)}"><div class="agent-run-overview-top"><div class="agent-run-status-copy"><span class="agent-run-status-icon" aria-hidden="true"></span><div class="agent-run-status-text"><span class="agent-run-kicker">${isPreview ? '工作流预览' : '任务执行'}</span><h4>${agentEscape(statusLabel)}</h4></div></div></div>${friendlySummary ? `<div class="agent-run-status-desc">${agentEscape(friendlySummary)}</div>` : ''}<div class="agent-run-goal-box"><div class="agent-run-meta-item"><span class="agent-run-meta-label">任务标题</span><strong class="agent-run-title-val">${agentEscape(displayTitle)}</strong></div><div class="agent-run-meta-item agent-run-goal-item"><div class="agent-run-goal-head"><span class="agent-run-meta-label">任务目标</span><div class="agent-run-goal-actions">${goalText ? `<button type="button" class="btn-secondary btn-xs" data-agent-copy-goal="${agentEscapeAttr(goalText)}">复制目标</button>` : ''}<button type="button" class="btn-secondary btn-xs" data-agent-edit-run="${agentEscape(run.id)}">修改任务</button></div></div><div class="agent-run-goal-body">${agentEscape(goalText || '-')}</div></div></div><div class="agent-progress-bar" aria-label="执行进度"><span class="agent-progress-fill"></span></div><dl class="agent-run-key-metrics">${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>累计轮次</dt><dd>${agentRunRoundUsage(progress)}</dd></div>`}<div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div><div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div></dl></section>${run.final_answer ? renderAgentFinalAnswer(run.final_answer, run.id) : ''}${!isPreview && !isAgentRunActive(run.status) ? renderAgentFeedbackBlock(run) : ''}`);
             const progressFill = paneOverview.querySelector('.agent-progress-fill');
             if (progressFill) progressFill.style.width = `${progressPercent}%`;
             appendAgentVerificationViews(paneOverview, `${transactionMarkup}${workingMemoryMarkup}${promptProvenanceMarkup}${browserEvidenceMarkup}${verificationMarkup}${evidenceMarkup}`);
@@ -891,7 +885,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
                 </div>
                 <div class="agent-progress-bar" aria-label="执行进度"><span class="agent-progress-fill"></span></div>
                 <dl class="agent-run-key-metrics">
-                    ${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>执行轮次</dt><dd>${Number(progress.roundCount || 0)}${progress.maxSteps ? ` / ${Number(progress.maxSteps)}` : ''}</dd></div>`}
+                    ${String(run.run_mode || '') === 'dag' ? `<div><dt>执行记录</dt><dd>${Number(progress.stepCount || 0)}</dd></div>` : `<div><dt>累计轮次</dt><dd>${agentRunRoundUsage(progress)}</dd></div>`}
                     <div><dt>总耗时</dt><dd>${agentEscape(durationLabel)}</dd></div>
                     <div><dt>异常数量</dt><dd class="${Number(progress.errorCount || 0) ? 'has-error' : ''}">${Number(progress.errorCount || 0)}</dd></div>
                 </dl>
@@ -924,6 +918,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         bindAgentRunDetailDomEvents(detail, run, isPreview);
     }
 
+    window.Pivot.moduleApi('agent.detailLoader').offerFull(currentContainer, runId, data);
     if (isAgentRunActive(run.status)) {
         startAgentWorkflowPreviewPolling(run.id, isPreview);
     } else {

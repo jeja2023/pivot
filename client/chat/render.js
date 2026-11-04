@@ -18,6 +18,47 @@ const escapeCodeHtml = (value) => window.Pivot.legacy.PivotSafeHtml
 const escapeAttrValue = (value) => window.Pivot.legacy.PivotSafeHtml
     ? window.Pivot.legacy.PivotSafeHtml.escapeAttr(value)
     : escapeCodeHtml(value).replace(/"/g, '&quot;');
+
+function getAttachmentFormatBadge(filename = '', mimeType = '') {
+    const rawName = String(filename || '').split('?')[0].split('#')[0];
+    const ext = rawName.includes('.') ? rawName.split('.').pop().toLowerCase() : '';
+    const mime = String(mimeType || '').toLowerCase();
+
+    if (/^(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(ext) || mime.startsWith('image/')) {
+        return { text: ext ? ext.toUpperCase() : 'IMG', type: 'image' };
+    }
+    if (/^(docx?|dotx?)$/.test(ext) || mime.includes('word') || mime === 'application/msword') {
+        return { text: ext ? ext.toUpperCase() : 'DOC', type: 'doc' };
+    }
+    if (/^pdf$/.test(ext) || mime === 'application/pdf') {
+        return { text: 'PDF', type: 'pdf' };
+    }
+    if (/^(xlsx?|xls|csv|xlsm|tsv)$/.test(ext) || mime.includes('excel') || mime.includes('spreadsheet')) {
+        return { text: ext ? ext.toUpperCase() : 'XLS', type: 'excel' };
+    }
+    if (/^(pptx?|ppt|potx?)$/.test(ext) || mime.includes('powerpoint') || mime.includes('presentation')) {
+        return { text: ext ? ext.toUpperCase() : 'PPT', type: 'ppt' };
+    }
+    if (/^(txt|text|log|ini|conf)$/.test(ext) || mime.startsWith('text/plain')) {
+        return { text: ext ? ext.toUpperCase() : 'TXT', type: 'text' };
+    }
+    if (/^(md|markdown)$/.test(ext)) {
+        return { text: 'MD', type: 'md' };
+    }
+    if (/^(zip|rar|7z|tar|gz|bz2|xz)$/.test(ext) || mime.includes('zip') || mime.includes('compressed') || mime.includes('archive')) {
+        return { text: ext ? ext.toUpperCase() : 'ZIP', type: 'zip' };
+    }
+    if (/^(js|ts|jsx|tsx|py|java|c|cpp|cs|go|rs|php|rb|swift|kt|sh|bat|cmd|sql|html?|css|json|xml|yaml|yml)$/.test(ext)) {
+        return { text: ext.toUpperCase().slice(0, 4), type: 'code' };
+    }
+    if (ext && ext.length <= 4) {
+        return { text: ext.toUpperCase(), type: 'other' };
+    }
+    return { text: 'FILE', type: 'other' };
+}
+if (typeof window !== 'undefined' && window.Pivot?.legacy) {
+    window.Pivot.legacy.getAttachmentFormatBadge = getAttachmentFormatBadge;
+}
 const PROSE_CODE_LANGUAGES = new Set([
     'markdown', 'md', 'mdown', 'gfm', 'commonmark',
     'text', 'txt', 'plain', 'plaintext', 'text/plain'
@@ -328,21 +369,25 @@ customRenderer.code = (code, infostring, _escaped) => {
     `;
 };
 
-customRenderer.link = function(href, title, text) {
+customRenderer.link = function (href, title, text) {
     let labelHtml;
     if (typeof href === 'object' && href !== null) {
         labelHtml = this.parser.parseInline(href.tokens || []);
         text = href.text; title = href.title; href = href.href;
     }
     const safeText = text || ''; const safeHref = escapeAttrValue(href || '#'); const safeTitle = escapeAttrValue(title || '');
-    const isDoc = safeText.includes('附件:') || safeText.includes('文件:') || /\.(pdf|doc|docx|xls|xlsx|txt|zip|rar)$/i.test(safeText);
+    const isDoc = safeText.includes('附件:') || safeText.includes('文件:') || /\.(pdf|docx?|xlsx?|xls|csv|pptx?|ppt|txt|log|md|markdown|zip|rar|7z|tar|gz|json|ya?ml|py|js|ts|sh|sql|png|jpe?g|gif|webp|bmp|avif)$/i.test(safeText) || /\.(pdf|docx?|xlsx?|xls|csv|pptx?|ppt|txt|log|md|markdown|zip|rar|7z|tar|gz|json|ya?ml|py|js|ts|sh|sql|png|jpe?g|gif|webp|bmp|avif)$/i.test(safeHref);
     if (isDoc) {
-        const docName = escapeCodeHtml(safeText.replace('附件:', '').replace('文件:', '').trim());
+        const rawDocName = safeText.replace('附件:', '').replace('文件:', '').trim();
+        const docName = escapeCodeHtml(rawDocName);
+        const safeDocTitle = escapeAttrValue(rawDocName);
+        const badge = getAttachmentFormatBadge(rawDocName);
+        const isImage = badge.type === 'image';
         return `
-            <a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="doc-card-link" data-attachment-preview data-attachment-url="${safeHref}" data-attachment-name="${escapeAttrValue(safeText)}">
+            <a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="doc-card-link" title="${safeDocTitle}" data-attachment-preview data-attachment-url="${safeHref}" data-attachment-name="${safeDocTitle}" data-attachment-type="${escapeAttrValue(badge.type === 'pdf' ? 'application/pdf' : (isImage ? 'image' : ''))}">
                 <div class="doc-card">
-                    <div class="doc-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-                    <div class="doc-info"><div class="doc-name">${docName}</div><div class="doc-action">点击下载/预览</div></div>
+                    <span class="doc-format-tag doc-format-${escapeAttrValue(badge.type)}">${escapeCodeHtml(badge.text)}</span>
+                    <div class="doc-info"><div class="doc-name" title="${safeDocTitle}">${docName}</div></div>
                 </div>
             </a>
         `;
@@ -354,7 +399,23 @@ customRenderer.image = (href, title, text) => {
     if (typeof href === 'object' && href !== null) { text = href.text; title = href.title; href = href.href; }
     const safeHref = escapeAttrValue(href || '');
     const safeTitle = escapeAttrValue(title || '');
-    const safeText = escapeAttrValue(text || '图片附件');
+    const rawText = String(text || '').trim();
+    const isAttachment = safeHref.includes('/api/attachments/') || safeHref.includes('/upload') || /\.(png|jpe?g|gif|webp|bmp|avif)(?:[?#].*)?$/i.test(safeHref);
+    if (isAttachment) {
+        const imageName = rawText || '图片附件';
+        const docName = escapeCodeHtml(imageName);
+        const safeDocTitle = escapeAttrValue(imageName);
+        const badge = getAttachmentFormatBadge(imageName, 'image');
+        return `
+            <a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="doc-card-link" title="${safeDocTitle}" data-attachment-preview data-attachment-url="${safeHref}" data-attachment-name="${safeDocTitle}" data-attachment-type="image">
+                <div class="doc-card">
+                    <span class="doc-format-tag doc-format-${escapeAttrValue(badge.type)}">${escapeCodeHtml(badge.text)}</span>
+                    <div class="doc-info"><div class="doc-name" title="${safeDocTitle}">${docName}</div></div>
+                </div>
+            </a>
+        `;
+    }
+    const safeText = escapeAttrValue(rawText || '图片附件');
     const titleAttr = safeTitle ? ` title="${safeTitle}"` : '';
     return `<img class="message-image" src="${safeHref}" alt="${safeText}" loading="lazy"${titleAttr}>`;
 };
@@ -362,7 +423,12 @@ customRenderer.image = (href, title, text) => {
 // 移除 customRenderer.table，让 marked 默认处理表格生成
 
 function stripInternalReferenceText(content) {
-    return String(content ?? '').replace(/\n{0,2}---\n【参考文档:[^\n]*】\n[\s\S]*?\n---(?=\n|$)/g, '').trim();
+    if (!content) return '';
+    let text = String(content);
+    text = text.replace(/\n{0,2}---\n【参考文档:[^\n]*】[\s\S]*?(?=(?:\n{1,2}---\n【参考文档:|$))/g, '');
+    text = text.replace(/\n{0,2}---\s*$/g, '');
+    text = text.replace(/\*?本审计包由\s*Pivot\s*自动化控制面于[^*]*?受控于平台访问审计。\*?/g, '');
+    return text.trim();
 }
 
 function getDisplayContent(role, content) {

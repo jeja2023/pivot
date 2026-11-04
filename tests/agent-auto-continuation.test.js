@@ -9,7 +9,7 @@ const { executeAutomaticModelFailover, resolveAutomaticModelFailover } = require
 const { TaskBudget, normalizeTaskBudget } = require('../server/services/agent-budget');
 const { TERMINAL_STATUSES } = require('../server/services/agent-runtime/state-machine');
 
-test('模型时间片结束且没有在途工具时，Agent 自动从安全检查点续跑', async () => {
+test('模型超时但没有实际进展时，保留部分结果而不自动重复续跑', async () => {
     const activeRunControllers = new Map();
     const updates = [];
     const controls = [];
@@ -121,11 +121,11 @@ test('模型时间片结束且没有在途工具时，Agent 自动从安全检�
     });
 
     await runAgent(run.id, { id: 7 });
-    assert.equal(run.status, 'queued');
-    assert.equal(enqueued, 1);
-    assert.equal(metadata.autoContinuation.count, 1);
-    assert.equal(controls.some(step => /自动续跑/.test(step.title)), true);
-    assert.equal(updates.some(fields => fields.status === 'completed_with_errors'), false);
+    assert.equal(run.status, 'completed_with_errors');
+    assert.equal(enqueued, 0);
+    assert.equal(metadata.continuationStop.code, 'AGENT_NO_PROGRESS');
+    assert.equal(controls.some(step => /自动续跑/.test(step.title)), false);
+    assert.equal(updates.some(fields => fields.status === 'completed_with_errors'), true);
 });
 
 test('知识问答的六轮上限不会通过自动续跑再次扩展', async () => {
@@ -145,7 +145,7 @@ test('轮次时间片耗尽会复用安全检查点续跑，而不是直接生�
     const streaming = fs.readFileSync(path.join(__dirname, '..', 'server', 'services', 'agent-streaming-runtime.js'), 'utf8');
     assert.match(source, /AGENT_AUTO_CONTINUE_ON_STEP_LIMIT/);
     assert.match(source, /reason: 'step_limit'/);
-    assert.match(source, /roundsUsed \+ maxSteps/);
+    assert.match(source, /roundsUsed \+ taskBudget.remainingSegmentRounds/);
     assert.match(streaming, /stepLimitReached: roundsUsed >= sliceEndStep/);
 });
 

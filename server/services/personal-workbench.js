@@ -42,12 +42,18 @@ function toRecentWork(kind, record, extra = {}) {
         const isPresentation = artifactType === 'presentation';
         const isOfficialWriting = artifactType === 'official_writing';
         const isMindmap = artifactType === 'mindmap';
-        const targetId = extra.presentationClientId || record.presentation_client_id || (isPresentation ? record.client_id : null) || record.id;
+        let writingDocumentId = '';
+        if (isOfficialWriting) {
+            try { writingDocumentId = String(JSON.parse(record.content || '{}').documentId || ''); } catch (_) {}
+            if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(writingDocumentId)) writingDocumentId = '';
+        }
+        const targetId = writingDocumentId || extra.presentationClientId || record.presentation_client_id || (isPresentation ? record.client_id : null) || record.id;
         return {
             id: record.id,
             kind: isPresentation ? 'presentation' : kind,
             artifactType,
             targetId,
+            documentId: isOfficialWriting ? writingDocumentId || undefined : undefined,
             presentationId: isPresentation ? targetId : undefined,
             runId: record.run_id || null,
             title: record.title || (isPresentation ? '未命名演示文稿' : (isOfficialWriting ? '未命名公文' : '未命名成果')),

@@ -1,16 +1,21 @@
 // 任务结果状态与证据渲染器，独立于页面交互事件绑定。
 /* eslint-disable no-undef */
+function agentRunRoundUsage(progress = {}) {
+    return `${Number(progress.totalRoundCount ?? progress.roundCount ?? 0)} / ${Number(progress.totalRoundLimit || progress.maxSteps || 0)}`;
+}
+
 function agentRunFriendlySummary(run = {}, progress = {}) {
     const status = String(run.status || '').toLowerCase();
     const continuation = agentRunMetadata(run).autoContinuation || {};
     const records = Number(progress.stepCount || 0);
-    const rounds = Number(progress.roundCount || 0);
+    const rounds = Number(progress.totalRoundCount ?? progress.roundCount ?? 0);
     const maxSteps = Number(progress.maxSteps || run.max_steps || 0);
     const isDag = String(run.run_mode || '') === 'dag';
     const limitMessage = String(run.error_message || '').trim();
     if (status === 'queued' && Number(continuation.count || 0) > 0) return `上一时间片已结束，正在从安全检查点自动续跑（第 ${Number(continuation.count)}/${Number(continuation.max || 0)} 次）。`;
     if (status === 'queued') return '任务已进入队列，稍后将自动开始。';
-    if (status === 'running') return isDag ? `工作流正在运行，当前已有 ${records} 条执行记录。` : (maxSteps > 0 ? `正在执行第 ${Math.min(rounds + 1, maxSteps)} 轮，上限 ${maxSteps} 轮。` : `正在执行第 ${rounds + 1} 轮。`);
+    if (['running', 'planning', 'executing', 'observing', 'replanning'].includes(status)) return isDag ? `工作流正在运行，当前已有 ${records} 条执行记录。`
+        : `本段已执行 ${Number(progress.segmentRoundCount ?? rounds)}/${Number(progress.segmentRoundLimit || maxSteps)} 轮，任务累计 ${rounds}/${Number(progress.totalRoundLimit || maxSteps)} 轮。`;
     if (status === 'approval_required') return '任务需要确认工具权限，确认后才会继续。';
     if (status === 'verifying') return '正在检查任务结果、产物和约束是否满足要求。';
     if (status === 'awaiting_commit') return '结果已通过验收，但外部副作用仍等待提交证据；尚未完成交付。';

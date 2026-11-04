@@ -1,4 +1,6 @@
 const { query, queryOne, execute } = require('../db/client');
+const model = require('../../client/common/official-writing-document');
+const library = require('../repositories/official-writing-library');
 
 const MAX_CLIENT_ID_LENGTH = 96;
 const MAX_TITLE_LENGTH = 120;
@@ -30,7 +32,9 @@ function normalizeState(value) {
     }
     let serialized;
     try {
-        serialized = JSON.stringify(value);
+        const state = model.normalize(value);
+        state.artifactId = '';
+        serialized = JSON.stringify(state);
     } catch (_) {
         throw documentError('公文内容无法保存。');
     }
@@ -58,14 +62,16 @@ function toPublicDocument(row) {
         updatedAt: row.updated_at,
         createdAt: row.created_at,
         version: Number(row.version || 1),
-        state: parseState(row.state)
+        artifactId: row.artifact_id ? String(row.artifact_id) : '',
+        summary: row.summary && typeof row.summary === 'object' ? row.summary : model.summary(parseState(row.state)),
+        ...(row.state === undefined ? {} : { state: { ...model.normalize(parseState(row.state)), artifactId: row.artifact_id ? String(row.artifact_id) : '' } })
     };
 }
 
 async function listOfficialWritingDocuments(user) {
     if (!user?.id) throw documentError('未授权访问。', 401, 'AUTH_REQUIRED');
     const rows = await query(`
-        SELECT client_id, title, manual_title, state, version, created_at, updated_at
+        SELECT client_id, title, manual_title, state, summary, artifact_id, version, created_at, updated_at
         FROM official_writing_documents
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY updated_at DESC, id DESC
@@ -84,12 +90,13 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
 
     const row = await queryOne(`
         INSERT INTO official_writing_documents
-            (user_id, client_id, title, manual_title, state, version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW())
+            (user_id, client_id, title, manual_title, state, summary, version, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?::jsonb, 1, NOW(), NOW())
         ON CONFLICT (user_id, client_id) DO UPDATE
         SET title = EXCLUDED.title,
             manual_title = EXCLUDED.manual_title,
             state = EXCLUDED.state,
+            summary = EXCLUDED.summary,
             version = CASE
                 WHEN official_writing_documents.title = EXCLUDED.title
                  AND official_writing_documents.manual_title = EXCLUDED.manual_title
@@ -109,8 +116,8 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
               (official_writing_documents.title = EXCLUDED.title
                AND official_writing_documents.manual_title = EXCLUDED.manual_title
                AND official_writing_documents.state = EXCLUDED.state))
-        RETURNING client_id, title, manual_title, state, version, created_at, updated_at
-    `, [user.id, clientId, title, manualTitle, state, Object.hasOwn(body, 'version') ? 1 : 0, clientVersion]);
+        RETURNING client_id, title, manual_title, state, summary, artifact_id, version, created_at, updated_at
+    `, [user.id, clientId, title, manualTitle, state, JSON.stringify(model.summary(JSON.parse(state))), Object.hasOwn(body, 'version') ? 1 : 0, clientVersion]);
     if (!row) {
         const existing = await queryOne('SELECT version FROM official_writing_documents WHERE user_id = ? AND client_id = ? AND deleted_at IS NULL', [user.id, clientId]);
         if (existing) throw documentError('公文已在其他窗口更新。请保留本页内容并复制正文，再刷新查看最新版本。', 409, 'OFFICIAL_WRITING_DOCUMENT_CONFLICT');
@@ -120,6 +127,33 @@ async function saveOfficialWritingDocument(user, clientIdInput, body = {}) {
     // 当客户端显式传入了当前版本号且更新后版本未自增时，判定为内容无变动
     publicDoc.isModified = clientVersion > 0 ? Number(row.version) !== clientVersion : true;
     return publicDoc;
+}
+
+async function getOfficialWritingDocument(user, input) {
+    if (!user?.id) throw documentError('未授权访问。', 401, 'AUTH_REQUIRED');
+    const row = await library.getDocument(user.id, normalizeClientId(input));
+    if (!row) throw documentError('公文不存在或已删除。', 404, 'OFFICIAL_WRITING_DOCUMENT_NOT_FOUND');
+    return toPublicDocument(row);
+}
+
+async function listOfficialWritingDocumentPage(user, input = {}) {
+    if (!user?.id) throw documentError('未授权访问。', 401, 'AUTH_REQUIRED');
+    const limit = Math.min(50, Math.max(1, Number.parseInt(input.limit, 10) || 10));
+    const page = Math.min(1000000, Math.max(1, Number.parseInt(input.page, 10) || 1));
+    const docType = String(input.docType || '');
+    if (docType && !model.TYPES.includes(docType)) throw documentError('公文文种无效。');
+    const result = await library.pageDocuments(user.id, { page, limit, query: String(input.query || '').trim().slice(0, 120), docType, sort: String(input.sort || 'updated') });
+    return { data: result.rows.map(toPublicDocument), total: result.total, page: result.page, limit };
+}
+
+async function ensureOfficialWritingExportArtifact(user, input, body = {}) {
+    if (!user?.id) throw documentError('未授权访问。', 401, 'AUTH_REQUIRED');
+    const version = Number(body.version);
+    if (!Number.isSafeInteger(version) || version < 1) throw documentError('请先保存公文再导出。');
+    const result = await library.saveExportArtifact(user, normalizeClientId(input), version);
+    if (result.missing) throw documentError('公文不存在或已删除。', 404, 'OFFICIAL_WRITING_DOCUMENT_NOT_FOUND');
+    if (result.conflict) throw documentError('公文已更新，请重新预览并导出。', 409, 'OFFICIAL_WRITING_DOCUMENT_CONFLICT');
+    return result;
 }
 
 async function deleteOfficialWritingDocument(user, clientIdInput) {
@@ -134,6 +168,9 @@ async function deleteOfficialWritingDocument(user, clientIdInput) {
 
 module.exports = {
     MAX_STATE_BYTES,
+    ensureOfficialWritingExportArtifact,
+    getOfficialWritingDocument,
+    listOfficialWritingDocumentPage,
     deleteOfficialWritingDocument,
     listOfficialWritingDocuments,
     normalizeClientId,

@@ -146,6 +146,20 @@ test('聊天图片附件预览不会暴露浏览器破损图标', () => {
     assert.match(attachmentsCss, /\.preview-image-frame\.is-error \.preview-image-fallback/);
 });
 
+test('聊天文档附件卡片保持边界约束并在超长时省略截断且提供完整标题提示', () => {
+    const renderMessages = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'render-messages.js'), 'utf8');
+    const render = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'render.js'), 'utf8');
+    const attachmentsCss = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'styles', 'base', 'attachments.css'), 'utf8');
+
+    assert.match(attachmentsCss, /\.doc-card-link\s*\{[^}]*max-width:\s*100%/);
+    assert.match(attachmentsCss, /\.doc-card\s*\{[^}]*overflow:\s*hidden/);
+    assert.match(attachmentsCss, /\.doc-info\s*\{[^}]*min-width:\s*0/);
+    assert.match(attachmentsCss, /\.doc-name\s*\{[^}]*text-overflow:\s*ellipsis/);
+    assert.match(attachmentsCss, /\.doc-name\s*\{[^}]*min-width:\s*0/);
+    assert.match(renderMessages, /class="doc-name"\s+title="\$\{safeAttrName\}"/);
+    assert.match(render, /class="doc-name"\s+title="\$\{safeDocTitle\}"/);
+});
+
 test('知识库和工具库工作台入口保持可点击', () => {
     const ragPanels = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-documents-panels.js'), 'utf8');
     const ragDocs = fs.readFileSync(path.resolve(__dirname, '..', '..', 'client', 'chat', 'rag-documents.js'), 'utf8');

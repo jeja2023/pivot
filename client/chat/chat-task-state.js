@@ -49,6 +49,7 @@
         [...(feed.legacySteps || []), ...(feed.events || [])].forEach(record => mergeRecord(state, record));
         if (!oldSnapshot && !history) {
             state.run = { ...feed.run };
+            state.progress = feed.progress || null;
             state.highWater = highWater;
             if (!history) state.after = Number(feed.nextAfter ?? highWater);
             state.approval = feed.approval || null;

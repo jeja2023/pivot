@@ -635,9 +635,11 @@ const RESTORABLE_WORKSPACES = new Set(['personal', 'chat', 'apps', 'agent', 'age
 
 const WORKSPACE_SCRIPT_GROUPS = {
     apps: [
-        '/chat/apps-workbench-core.js', '/chat/apps-workbench-editor.js',
+        '/common/official-writing-document.js', '/common/official-writing-format.js', '/chat/apps-workbench-core.js',
+        '/chat/apps-workbench-library.js', '/chat/apps-workbench-library-ui.js',
+        '/chat/apps-workbench-surface.js', '/chat/apps-workbench-history.js', '/chat/apps-workbench-editor.js', '/chat/apps-workbench-suggestions.js',
         '/chat/apps-workbench-proofread.js', '/chat/apps-workbench-ai.js', '/chat/apps-workbench-rewrite.js',
-        '/chat/apps-workbench-export.js', '/chat/apps-workbench-rag.js'
+        '/chat/apps-workbench-export.js', '/chat/apps-workbench-materials.js', '/chat/apps-workbench-attachments.js', '/chat/apps-workbench-rag.js', '/chat/apps-workbench-product.js'
     ],
     agent: [
         '/chat/dag-definition.js', '/chat/dag-editor-history.js', '/chat/dag-core.js', '/chat/dag-render.js', '/chat/dag-node-presets.js', '/chat/dag-interaction.js',
@@ -645,7 +647,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/dag-toolbar-fields.js', '/chat/dag-wizard-db.js', '/chat/dag-query-builder.js', '/chat/dag-wizard-input.js',
         '/chat/dag-wizard-fields.js', '/chat/dag-wizard-special-fields.js', '/chat/dag-wizard-report-assist.js', '/chat/dag-wizard-stats.js', '/chat/dag-wizard.js', '/chat/dag-variable-picker.js', '/chat/dag-timeline-waterfall.js', '/chat/dag-governance.js', '/chat/dag-readiness.js', '/chat/dag-empty-canvas.js', '/chat/dag-inspector-special-fields.js', '/chat/dag-inspector-testing.js', '/chat/dag-inspector-json-editor.js', '/chat/dag-inspector-runtime-actions.js', '/chat/dag-inspector.js',
         '/chat/dag-timeline-source.js', '/chat/agent-dag-node-library.js', '/chat/agents-dag-editor.js', '/chat/agents.js', '/chat/agent-run-renderers.js',
-        '/chat/agent-run-utils.js', '/chat/agent-control-plane-recovery.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
+        '/chat/agent-run-utils.js', '/chat/agent-run-detail-loader.js', '/chat/agent-control-plane-recovery.js', '/chat/agent-run-tool-labels.js', '/chat/agent-run-embed-renderers.js', '/chat/agent-run-step-renderers.js', '/chat/agent-run-visuals.js',
         '/chat/agent-run-loaders.js', '/chat/agent-run-dag-focus.js', '/chat/agent-run-invocations.js', '/chat/agent-run-personal-context.js', '/chat/agent-run-status-views.js', '/chat/agent-run-trace-view.js', '/chat/agent-run-detail.js', '/chat/agent-runtime-packs-console.js', '/chat/agent-personal-experience.js', '/chat/agent-profile-preferences.js', '/chat/agent-run-diagnostics.js', '/chat/agent-delegation-role-policies-ui.js', '/chat/agent-lifecycle-hook-packages-ui.js', '/chat/agent-acceptance-evidence-ui.js', '/chat/agent-quality-metrics.js', '/chat/agent-harness.js',
         '/chat/agent-skill-management.js', '/chat/agent-skill-import.js', '/chat/agent-run-realtime.js', '/chat/agent-run-actions.js', '/chat/agent-runs-list.js',
         '/chat/agent-workflow-library.js', '/chat/agent-automation-resources.js', '/chat/agent-workflow-versions.js',
@@ -789,6 +791,7 @@ function showMainWorkspace(view = 'personal') {
         setStoredSessionValue(RETURN_WORKSPACE_STORAGE_KEY, current);
     }
     if (document.body?.dataset.activeWorkspace === 'apps' && target !== 'apps') {
+        void window.Pivot.moduleApi('apps.officialWriting')?.suspend?.();
         window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
     }
     const chatContainer = document.querySelector('.chat-container');

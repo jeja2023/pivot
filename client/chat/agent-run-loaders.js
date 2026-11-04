@@ -283,7 +283,7 @@ function renderAgentPreflight(data) {
             <span>评分 ${Number(summary.readinessScore ?? 0)} · 工具 ${Number(summary.toolCount || 0)} · 工具库 ${Number(summary.mcpToolCount || 0)} · 知识分块 ${Number(summary.knowledgeChunks || 0)}</span>
         </div>
         <div class="governance-metrics">
-            ${summary.runMode === 'dag' ? '' : `<span><b>${agentEscape(maxStepsLabel)}</b>最大执行轮次</span>`}
+            ${summary.runMode === 'dag' ? '' : `<span><b>${agentEscape(maxStepsLabel)}</b>单段执行轮次</span>`}
             <span><b>${Number(summary.estimatedInputTokens || 0)}</b>预估输入用量</span>
             <span><b>${Number(summary.highRiskToolCount || 0)}</b>高风险工具</span>
             <span><b>${Number(summary.mcpErrorServers || 0)}</b>异常能力</span>

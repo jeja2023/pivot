@@ -25,11 +25,12 @@ const {
     setTextRenderingMode
 } = require('pdf-lib');
 const { computeIrDigest } = require('../document-ir');
+const { formatChineseDate } = require('./official-styles');
 const { FONT_SUBSET_NAME, createCjkFontkit, getCjkFontBuffer, isCjkFontAvailable } = require('./cjk-fonts');
 const layout = require('./pdf-text-layout');
 
 /** 渲染器语义版本。改版式必须升版本，否则历史 rendition 不可复现（§7.3 去重键）。 */
-const RENDERER_VERSION = 'pdf-1.0.0';
+const RENDERER_VERSION = 'pdf-2.0.1';
 const MIME_TYPE = 'application/pdf';
 
 const BLACK = rgb(0, 0, 0);
@@ -258,7 +259,7 @@ function addSpaceBefore(ctx, amount) {
 }
 
 function renderHeading(ctx, block) {
-    const preset = HEADING_PRESETS[block.level] || HEADING_PRESETS[4];
+    const preset = ctx.docType === 'official_document' ? { size: 16, bold: block.level <= 2, align: 'left', spaceBefore: 8, spaceAfter: 0, lineHeight: 1.5 } : HEADING_PRESETS[block.level] || HEADING_PRESETS[4];
     const base = baseStyleFor(ctx, block.style, preset.size);
     const style = { ...base, bold: block.style?.font?.bold !== undefined ? Boolean(block.style.font.bold) : preset.bold };
     addSpaceBefore(ctx, preset.spaceBefore);
@@ -266,7 +267,7 @@ function renderHeading(ctx, block) {
         align: block.style?.align || preset.align,
         baseSize: style.size,
         lineHeight: lineHeightOf(block.style, preset.lineHeight),
-        indentPt: 0
+        indentPt: ctx.docType === 'official_document' ? 2 * style.size : 0
     });
     ctx.cursorY -= spaceAfterOf(block.style, preset.spaceAfter);
 }
@@ -445,85 +446,42 @@ async function renderImage(ctx, block, options) {
 function renderDocumentHead(ctx, ir) {
     const meta = ir.meta || {};
     const official = ctx.docType === 'official_document';
-    const securityLabel = SECURITY_LABELS[meta.security_level];
-    if (official && meta.security_level && meta.security_level !== 'public' && securityLabel) {
-        drawTextFlow(ctx, [{ text: securityLabel, style: { size: 16, bold: true, italic: false, underline: false, color: BLACK } }], {
-            align: 'right',
-            baseSize: 16,
-            lineHeight: 1.4,
-            indentPt: 0
-        });
-        ctx.cursorY -= 4;
-    }
-    if (meta.title) {
-        drawTextFlow(ctx, [{ text: meta.title, style: { size: 22, bold: true, italic: false, underline: false, color: BLACK } }], {
-            align: 'center',
-            baseSize: 22,
-            lineHeight: 1.4,
-            indentPt: 0
-        });
-        ctx.cursorY -= 6;
-    }
-    if (meta.subtitle) {
-        drawTextFlow(ctx, [{ text: meta.subtitle, style: { size: 16, bold: false, italic: false, underline: false, color: META_TEXT_COLOR } }], {
-            align: 'center',
-            baseSize: 16,
-            lineHeight: 1.4,
-            indentPt: 0
-        });
-        ctx.cursorY -= 4;
-    }
-    const metaLine = [meta.doc_number, official ? '' : meta.issuer, meta.issued_at].filter(Boolean).join('　　');
-    if (metaLine) {
-        drawTextFlow(ctx, [{ text: metaLine, style: { size: 14, bold: false, italic: false, underline: false, color: META_TEXT_COLOR } }], {
-            align: 'center',
-            baseSize: 14,
-            lineHeight: 1.4,
-            indentPt: 0
-        });
+    const line = (text, { size = 16, bold = false, align = 'center', color = BLACK, after = 0 } = {}) => {
+        if (!text) return;
+        drawTextFlow(ctx, [{ text, style: { size, bold, italic: false, underline: false, color } }], { align, baseSize: size, lineHeight: 1.4, indentPt: 0 });
+        ctx.cursorY -= after;
+    };
+    if (official && meta.layout !== 'plain' && meta.issuer) {
+        line(meta.issuer, { size: 26, bold: true, color: OFFICIAL_RULE_COLOR, after: 6 });
+        ensureSpace(ctx, 12);
+        ctx.page.drawLine({ start: { x: ctx.box.contentLeft, y: ctx.cursorY }, end: { x: ctx.box.contentRight, y: ctx.cursorY }, thickness: 1.6, color: OFFICIAL_RULE_COLOR });
+        ctx.cursorY -= 12;
     }
     if (official) {
-        ctx.cursorY -= 6;
-        ensureSpace(ctx, 8);
-        ctx.page.drawLine({
-            start: { x: ctx.box.contentLeft, y: ctx.cursorY },
-            end: { x: ctx.box.contentRight, y: ctx.cursorY },
-            thickness: 1.6,
-            color: OFFICIAL_RULE_COLOR
-        });
-        ctx.cursorY -= 12;
-    } else {
-        ctx.cursorY -= 8;
+        line(meta.urgency, { size: 15 });
+        line(meta.signer ? '签发人：' + meta.signer : '', { size: 15 });
+        line(meta.doc_number, { size: 15 });
     }
-    if (meta.recipient) {
-        drawTextFlow(ctx, [{ text: meta.recipient, style: baseStyleFor(ctx, null, BODY_SIZE_PT) }], {
-            align: 'left',
-            baseSize: BODY_SIZE_PT,
-            lineHeight: BODY_LINE_HEIGHT,
-            indentPt: 0
-        });
-        ctx.cursorY -= 4;
-    }
+    line(meta.title, { size: 22, bold: true, after: 12 });
+    line(meta.subtitle, { size: 16, after: 6 });
+    if (!official) line([meta.doc_number, meta.issuer, meta.issued_at].filter(Boolean).join('　　'), { size: 14, color: META_TEXT_COLOR, after: 8 });
+    line(meta.recipient, { align: 'left', after: 4 });
 }
 
 /** 文尾落款：优先用 meta.signoff；公文缺省时按发文单位 + 成文日期右对齐排版。 */
 function renderDocumentTail(ctx, ir) {
     const meta = ir.meta || {};
-    const texts = [];
-    if (meta.signoff) texts.push(meta.signoff);
-    else if (ctx.docType === 'official_document') {
-        if (meta.issuer) texts.push(meta.issuer);
-        if (meta.issued_at) texts.push(meta.issued_at);
-    }
-    if (!texts.length) return;
-    ctx.cursorY -= 20;
+    const texts = [meta.signoff, meta.issued_at ? formatChineseDate(meta.issued_at) : ''].filter(Boolean);
     const style = { size: BODY_SIZE_PT, bold: false, italic: false, underline: false, color: BLACK };
-    texts.forEach(text => drawTextFlow(ctx, [{ text, style }], {
-        align: 'right',
-        baseSize: BODY_SIZE_PT,
-        lineHeight: BODY_LINE_HEIGHT,
-        indentPt: 0
-    }));
+    if (texts.length) ctx.cursorY -= 20;
+    texts.forEach(text => drawTextFlow(ctx, [{ text, style }], { align: 'right', baseSize: BODY_SIZE_PT, lineHeight: BODY_LINE_HEIGHT, indentPt: 0 }));
+    const footer = [meta.cc ? '抄送：' + meta.cc : '', meta.printer ? '印发机关：' + meta.printer : '', meta.printed_at ? '印发日期：' + formatChineseDate(meta.printed_at) : ''].filter(Boolean);
+    if (!footer.length) return;
+    ensureSpace(ctx, footer.length * 24 + 20);
+    ctx.cursorY -= 12;
+    ctx.page.drawLine({ start: { x: ctx.box.contentLeft, y: ctx.cursorY }, end: { x: ctx.box.contentRight, y: ctx.cursorY }, thickness: 0.5, color: BLACK });
+    ctx.cursorY -= 10;
+    footer.forEach(text => drawTextFlow(ctx, [{ text, style: { ...style, size: 12 } }], { align: 'left', baseSize: 12, lineHeight: 1.4, indentPt: 0 }));
 }
 
 /**
@@ -597,6 +555,7 @@ async function renderPdf(ir, options = {}) {
     if (!ir || typeof ir !== 'object' || !ir.meta || !Array.isArray(ir.blocks)) {
         throw renderFailure('PDF 渲染要求传入规范化后的 Document IR（至少包含 meta 与 blocks）。', 'PDF_IR_INVALID', 422);
     }
+    if (ir.doc_type === 'official_document') return require('./official-pdf').renderOfficialPdf(ir, options, applyDeterministicMetadata);
     const fontBuffer = getCjkFontBuffer();
     const doc = await PDFDocument.create();
     doc.registerFontkit(createCjkFontkit());
@@ -620,6 +579,7 @@ async function renderPdf(ir, options = {}) {
     }
     renderDocumentTail(ctx, ir);
     drawFooters(ctx, ir.footer);
+    drawOfficialSecurityMarks(ctx, ir.meta);
     applyDeterministicMetadata(doc, ir);
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
     return Buffer.from(bytes);
@@ -631,3 +591,16 @@ module.exports = {
     isPdfRenderingAvailable,
     renderPdf
 };
+
+
+// 与 DOCX 页眉一致，每页标识密级与期限；不占用正文排版空间。
+function drawOfficialSecurityMarks(ctx, meta) {
+    if (ctx.docType !== 'official_document' || !meta.security_level || meta.security_level === 'public') return;
+    const label = (SECURITY_LABELS[meta.security_level] || '') + (meta.security_period || '');
+    if (!label) return;
+    const size = 15, width = ctx.measurer.widthOf(label, size);
+    const style = { size, bold: false, italic: false, underline: false, color: BLACK };
+    const currentPage = ctx.page;
+    ctx.pages.forEach(page => { ctx.page = page; drawSegmentAt(ctx, { text: label, style, width }, ctx.box.contentRight - width, ctx.box.contentTop + 24); });
+    ctx.page = currentPage;
+}

@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('node:http');
 const fs = require('fs');
 const path = require('path');
+const JSZip = require('jszip');
 const XLSX = require('@e965/xlsx');
 const { queryOne, execute } = require('../server/db/client');
 const { createAttachmentsRouter } = require('../server/routes/attachments');
@@ -15,6 +16,7 @@ test('附件支持 ONLYOFFICE 和内置 Excel 在线预览，并对回源票据�
     let service = null;
     let xlsxAttachment = null;
     let docxAttachment = null;
+    let docxBuffer = null;
     let xlsxPath = null;
     let docxPath = null;
     let targetDir = null;
@@ -52,13 +54,16 @@ test('附件支持 ONLYOFFICE 和内置 Excel 在线预览，并对回源票据�
         // 2. 创建测试 Word 文件
         const docxFilename = `test_word_${suffix}.docx`;
         docxPath = path.join(targetDir, docxFilename);
-        fs.writeFileSync(docxPath, Buffer.from('fake-docx-content-0123456789'));
+        const docxZip = new JSZip();
+        docxZip.file('word/document.xml', '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>hello world from docx</w:t></w:r></w:p></w:body></w:document>');
+        docxBuffer = await docxZip.generateAsync({ type: 'nodebuffer' });
+        fs.writeFileSync(docxPath, docxBuffer);
         const relativeDocxPath = `uploads/${owner.id}/${sessionId}/${docxFilename}`;
         docxAttachment = await queryOne(`
             INSERT INTO attachments (user_id, session_id, file_name, file_path, file_type, file_size, access_token)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             RETURNING id
-        `, [owner.id, sessionId, '测试文档.docx', relativeDocxPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 28, 'token_2']);
+        `, [owner.id, sessionId, '测试文档.docx', relativeDocxPath, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', docxBuffer.length, 'token_2']);
 
         for (const key of ['PIVOT_ONLYOFFICE_PATH', 'PIVOT_ONLYOFFICE_PIVOT_URL', 'PIVOT_ONLYOFFICE_JWT_SECRET']) {
             priorEnv[key] = process.env[key];
@@ -105,7 +110,7 @@ test('附件支持 ONLYOFFICE 和内置 Excel 在线预览，并对回源票据�
         const wordFileUrl = new URL(wordData.onlyoffice.editor.document.url);
         const wordFetched = await fetch(`${base}/api/attachments/onlyoffice/file${wordFileUrl.search}`);
         assert.equal(wordFetched.status, 200);
-        assert.equal((await wordFetched.text()), 'fake-docx-content-0123456789');
+        assert.equal(Buffer.from(await wordFetched.arrayBuffer()).equals(docxBuffer), true);
 
         // B. 开启 ONLYOFFICE 时，Excel 附件返回 cell 类型配置
         const excelRes = await fetch(`${base}/api/attachments/preview-config`, {
@@ -118,7 +123,7 @@ test('附件支持 ONLYOFFICE 和内置 Excel 在线预览，并对回源票据�
         assert.equal(excelData.mode, 'onlyoffice');
         assert.equal(excelData.onlyoffice.editor.documentType, 'cell');
 
-        // C. 未配置 ONLYOFFICE 时，Excel 附件回退到内置表格数据解析
+        // C. 未配置 ONLYOFFICE 时，Excel 附件回退到内置表格数据解析，Word 附件回退到纯净文本预览且不提示 ONLYOFFICE
         delete process.env.PIVOT_ONLYOFFICE_PATH;
         const excelDirectRes = await fetch(`${base}/api/attachments/preview-config`, {
             method: 'POST',
@@ -131,6 +136,18 @@ test('附件支持 ONLYOFFICE 和内置 Excel 在线预览，并对回源票据�
         assert.deepEqual(excelDirectData.excel.sheetNames, ['预算表']);
         assert.deepEqual(excelDirectData.excel.sheets[0].rows[0], ['项目', '预算']);
         assert.deepEqual(excelDirectData.excel.sheets[0].rows[1], ['服务器', '5000']);
+
+        const wordDirectRes = await fetch(`${base}/api/attachments/preview-config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-test-user': 'owner' },
+            body: JSON.stringify({ attachmentId: docxAttachment.id })
+        });
+        assert.equal(wordDirectRes.status, 200);
+        const wordDirectData = await wordDirectRes.json();
+        assert.equal(wordDirectData.mode, 'doc');
+        assert.equal(wordDirectData.notice, undefined);
+        assert.match(wordDirectData.html, /hello world from docx/);
+        assert.match(wordDirectData.text, /hello world from docx/);
 
         // D. 权限阻断校验：无权用户请求附件预览返回 403
         const forbiddenRes = await fetch(`${base}/api/attachments/preview-config`, {

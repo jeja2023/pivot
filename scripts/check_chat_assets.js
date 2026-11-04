@@ -361,10 +361,11 @@ const appsWorkbenchSlices = [
     'apps-model-selector.js',
     'apps-workbench-core.js',
     'apps-workbench-editor.js',
+    'apps-workbench-library.js', 'apps-workbench-library-ui.js', 'apps-workbench-surface.js', 'apps-workbench-history.js', 'apps-workbench-suggestions.js',
     'apps-workbench-proofread.js',
     'apps-workbench-ai.js',
     'apps-workbench-rewrite.js',
-    'apps-workbench-export.js',
+    'apps-workbench-export.js', 'apps-workbench-materials.js', 'apps-workbench-attachments.js', 'apps-workbench-product.js',
     'apps-workbench-rag.js',
     'apps-workbench-data-analysis.js',
     'apps-workbench-regulations.js'

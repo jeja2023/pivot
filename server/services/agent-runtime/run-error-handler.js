@@ -6,7 +6,7 @@ function createAgentRunErrorHandler(deps = {}) {
         updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
         getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
         setRunMetadata, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
-        loadRetryRow, TERMINAL_STATUSES
+        loadRetryRow, TERMINAL_STATUSES, verifyAgentOutcome
     } = deps;
 
     async function handle(error, context = {}) {
@@ -43,18 +43,30 @@ function createAgentRunErrorHandler(deps = {}) {
         }
         // 暂停、审批、提交和终态已经接管控制权，旧执行器的迟到异常不能重新排队。
         if (TERMINAL_STATUSES.has(currentStatus) || ['needs_input', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit'].includes(currentStatus)) return;
-        if (['KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_STALE', 'AGENT_APPROVAL_EXPIRED'].includes(e.code)) {
+        const gapError = e.code === 'AGENT_BUDGET_EXCEEDED' && e.details?.key === 'max_consecutive_errors'
+            ? Object.assign(new Error('连续工具调用未成功，已停止重复调用。'), { code: 'AGENT_NO_PROGRESS' }) : e;
+        if (runForSummary && await require('../agent-capability-fallback').finishCapabilityFallback({ run: runForSummary, runId, user, modelCfg: modelCfgForSummary,
+            observations, error: gapError, budget: taskBudget }, { ...deps, assertRunNotCancelled: deps.assertRunNotCancelled })) return;
+        if (['KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_DISCOVERY_SCOPE_REVOKED', 'AGENT_APPROVAL_STALE', 'AGENT_APPROVAL_EXPIRED'].includes(e.code)) {
             await updateRun(runId, { status: 'needs_input', final_answer: '', error_message: e.message, updated_at: getBeijingTimestamp() });
             await insertStep(runId, (await listSteps(runId)).length + 1, { type: 'control', title: '资料或授权需要重新确认',
                 status: 'error', output: require('../tool-chain-status').failureStage(e) });
             return;
         }
-        if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
-            if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, error: e, reason: 'timeout' })) {
+        if (['AGENT_NO_PROGRESS', 'AGENT_BUDGET_PERSIST_FAILED'].includes(e.code)) {
+            if (taskBudget) await setRunMetadata(runId, { budgetStop: taskBudget.stopSummary(e.code) });
+            await updateRun(runId, { status: 'needs_input', error_message: e.message, updated_at: getBeijingTimestamp() });
+            await insertStep(runId, (await listSteps(runId)).length + 1, { type: 'control', title: '任务暂停等待处理', status: 'error', output: { reasonCode: e.code } });
+            return;
+        }
+        if (['AGENT_BUDGET_EXCEEDED', 'AGENT_TIMEOUT', 'AGENT_FINALIZATION_REQUIRED'].includes(e.code)) {
+            if (['AGENT_TIMEOUT', 'AGENT_FINALIZATION_REQUIRED'].includes(e.code) && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, taskBudget, error: e, reason: 'timeout' })) {
                 return;
             }
+            if (taskBudget) taskBudget.phase = 'finalization';
+            if (taskBudget) await setRunMetadata(runId, { budgetStop: taskBudget.stopSummary(e.code === 'AGENT_BUDGET_EXCEEDED' ? String(e.details?.key || e.code) : e.code) });
             const isModelRequestTimeout = /(?:智能体规划|流式工具规划|final summary|escalated final summary)执行超时/i.test(String(e.message || ''));
-            const reason = e.code === 'AGENT_TIMEOUT'
+            const reason = e.code === 'AGENT_FINALIZATION_REQUIRED' ? '已保留结果整理与核验额度，以下为已完成的部分结果。' : e.code === 'AGENT_TIMEOUT'
                 ? (isModelRequestTimeout
                     ? '模型响应超过单次调用时限，以下为已完成的部分结果。'
                     : '任务已达到运行时间上限，以下为已完成的部分结果。')
@@ -80,6 +92,10 @@ function createAgentRunErrorHandler(deps = {}) {
                 answer = observations.length
                     ? `已完成 ${observations.length} 项执行观察，但未能生成完整总结。`
                     : '任务在产生可用总结前被中止。';
+            }
+            if (verifyAgentOutcome && runForSummary) {
+                const verification = await verifyAgentOutcome({ runId, run: runForSummary, user, answer, observations, partial: true, reason, budget: taskBudget });
+                answer = require('../knowledge-output-guard').safeFinalAnswer(answer, verification);
             }
             if (!TERMINAL_STATUSES.has(currentStatus)) {
                 await updateRun(runId, {

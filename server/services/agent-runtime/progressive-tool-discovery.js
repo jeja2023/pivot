@@ -7,7 +7,7 @@ const {
 } = require('../agent-tool-progressive-discovery');
 
 function prepareProgressiveToolDiscovery(toolList = []) {
-    if (!toolList.length) throw new Error('没有可用工具符合当前任务配置。');
+    if (!toolList.length) throw Object.assign(new Error('没有可用工具符合当前任务配置。'), { code: 'TOOL_NOT_AVAILABLE' });
     const plannerToolList = buildProgressivePlannerToolList(toolList);
     const names = new Set(plannerToolList.map(tool => String(tool.name || '')));
     if (!['tools.search', 'tools.describe', 'tools.execute'].every(name => names.has(name))) {

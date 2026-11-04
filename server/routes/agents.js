@@ -762,7 +762,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
         cancelAgentRun, approveAgentTool, revokeApprovedAgentTool, resumeAgentRun, listSteps });
 
     router.get('/agents/runs/:id', authMiddleware, asyncHandler(async (req, res) => {
-        const detail = await getRunDetailForUser(req.params.id, req.user);
+        const detail = await getRunDetailForUser(req.params.id, req.user, { view: req.query.view === 'overview' ? 'overview' : 'full' });
         if (!detail) return res.status(404).json({ error: '智能体任务不存在。' });
         res.json(detail);
     }));

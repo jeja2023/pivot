@@ -83,6 +83,14 @@ function resolveAgentRequestTimeoutMs(options = {}) {
     return Math.max(1_000, Math.min(source, 60 * 60 * 1000));
 }
 
+function budgetedMaxTokens(modelCfg, messages, options, tools = []) {
+    const requested = resolveAgentMaxTokens(modelCfg, options);
+    if (!options.budget?.modelOutputAllowance) return requested;
+    const estimator = require('./context-budget');
+    const inputTokens = estimator.estimateMessagesTokens(messages) + (tools.length ? estimator.estimateContentTokens(JSON.stringify(tools)) : 0);
+    return options.budget.modelOutputAllowance(inputTokens, requested);
+}
+
 function resolveAgentFirstResponseTimeoutMs(options = {}) {
     const requested = Number.parseInt(options.firstResponseTimeoutMs, 10);
     const source = Number.isFinite(requested) && requested > 0 ? requested : AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
@@ -163,7 +171,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
         assertProviderSafe(providerMessages);
         const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
-        const maxTokens = resolveAgentMaxTokens(modelCfg, options);
+        const maxTokens = budgetedMaxTokens(modelCfg, messages, options);
         const data = {
             model: modelCfg.model_name || modelCfg.name,
             messages: providerMessages,
@@ -264,7 +272,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             messages: providerMessages,
             stream: true,
             temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
-            max_tokens: resolveAgentMaxTokens(modelCfg, options)
+            max_tokens: budgetedMaxTokens(modelCfg, messages, options, tools)
         };
         const toolsPayload = buildOpenAiToolsPayload(tools);
         if (toolsPayload.length > 0) {
@@ -418,6 +426,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 budgetExceeded = true;
                 budgetError = error;
             }
+            await options.budget.persistUsageSnapshot?.();
         }
         if (run && Number(run.max_token_budget || 0) > 0 && Number(run.total_tokens || 0) > Number(run.max_token_budget || 0)) {
             budgetExceeded = true;

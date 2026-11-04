@@ -6,6 +6,7 @@ const { query, queryOne } = require('../db/client');
 async function getTaskSnapshot(runId, userId) {
     return queryOne(`
         SELECT r.id, r.user_id, r.session_id, r.title, r.status, r.final_answer, r.error_message,
+               r.max_steps,r.run_mode,r.budget_config,r.usage_stats,
                r.created_at, r.updated_at, r.started_at, r.completed_at, r.last_heartbeat_at,
                r.input_tokens, r.output_tokens, r.total_tokens, r.event_seq,
                COALESCE(cm.name, m.name, '') AS model_name,

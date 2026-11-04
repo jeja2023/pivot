@@ -58,7 +58,8 @@ test('公文保存期间继续编辑不会丢失正文，刷新后可导出', as
         release();
         await expect.poll(async () => {
             const data = await (await page.request.get('/api/apps/official-writing/documents')).json();
-            return data.data?.find(doc => doc.title === '保存竞态回归')?.state?.draft;
+            const id = data.data?.find(doc => doc.title === '保存竞态回归')?.id;
+            return id ? (await (await page.request.get(`/api/apps/official-writing/documents/${id}`)).json()).document?.state?.draft : '';
         }, { timeout: 15_000 }).toBe('保存期间修改后的最终正文');
         await page.reload();
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'official-writing' }));
@@ -90,21 +91,24 @@ test('其他窗口更新后拒绝覆盖，保留当前页面正文', async ({ pa
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'official-writing' }));
     const row = page.locator('#official-writing-home-doc-table-body tr').filter({ hasText: '窗口冲突回归' });
     await row.getByRole('button', { name: '编辑' }).click();
-    const updated = await page.request.put(url, { headers, data: { title: document.title, manualTitle: true, state: { draft: '另一窗口的正文' }, version: document.version } });
+    await expect(page.locator('#official-writing-draft-surface')).toContainText('初稿');
+    const updated = await page.request.put(url, { headers, data: { title: document.title, manualTitle: true, state: { schemaVersion: 2, draft: '另一窗口的正文' }, version: document.version } });
     expect(updated.ok()).toBeTruthy();
-    const replay = await page.request.put(url, { headers, data: { title: document.title, manualTitle: true, state: { draft: '另一窗口的正文' }, version: document.version } });
+    const replay = await page.request.put(url, { headers, data: { title: document.title, manualTitle: true, state: { schemaVersion: 2, draft: '另一窗口的正文' }, version: document.version } });
     expect(replay.ok()).toBeTruthy();
     expect((await replay.json()).document.version).toBe((await updated.json()).document.version);
     const staleCreate = await page.request.put(url, { headers, data: { title: document.title, manualTitle: true, state: { draft: '不应覆盖' }, version: 0 } });
     expect(staleCreate.status()).toBe(409);
-    const conflict = page.waitForResponse(response => response.url().endsWith(url) && response.request().method() === 'PUT');
+    const conflict = page.waitForResponse(response => response.url().endsWith(url) && response.request().method() === 'PUT'
+        && response.request().postDataJSON()?.state?.draft === '当前窗口未保存正文');
     const draft = page.locator('#official-writing-draft-surface');
     await draft.fill('当前窗口未保存正文');
     expect((await conflict).status()).toBe(409);
     await expect(page.locator('#toast-container')).toContainText('公文已在其他窗口更新');
     await expect(draft).toContainText('当前窗口未保存正文');
     const documents = (await (await page.request.get('/api/apps/official-writing/documents')).json()).data;
-    expect(documents.find(item => item.id === id).state.draft).toBe('另一窗口的正文');
+    expect(documents.find(item => item.id === id)).toBeTruthy();
+    expect((await (await page.request.get(url)).json()).document.state.draft).toBe('另一窗口的正文');
 });
 
 test('公文首次保存尚未到达服务器时删除不会复活文档', async ({ page }) => {

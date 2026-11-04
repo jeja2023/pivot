@@ -35,6 +35,7 @@ async function getAgentQualityDashboard(user, options = {}) {
     const verificationTotal = Number(verifications?.total || 0);
     return {
         toolChain: await require('./tool-chain-metrics').getToolChainMetrics(user, { days }),
+        roundBudgetStops: await require('../repositories/agent-budget-quality').readBudgetStopSummary(user, cutoff),
         generatedAt: getBeijingTimestamp(),
         days,
         tenantId,

@@ -77,8 +77,19 @@ function readableType(types = []) {
 }
 
 function validateValueAgainstSchema(value, schema, options = {}, path = '值', issues = [], depth = 0) {
-    if (!schemaHasRules(schema) || depth > 16 || issues.length >= 30) return issues;
+    if (schema === false) { issues.push(`${path} 不允许提供值。`); return issues; }
+    if (!schemaHasRules(schema) || issues.length >= 30) return issues;
+    if (depth > 16) { issues.push(`${path} 层级超过校验上限。`); return issues; }
     if (options.allowTemplates && typeof value === 'string' && TEMPLATE_RE.test(value)) return issues;
+    for (const key of ['allOf', 'anyOf', 'oneOf']) {
+        if (!Array.isArray(schema[key])) continue;
+        const branches = schema[key];
+        if (!branches.length || branches.length > 50) { issues.push(`${path}.${key} 的分支数量不符合校验限制。`); continue; }
+        const passed = branches.map(branch => validateValueAgainstSchema(value, branch, options, path, [], depth + 1).length === 0);
+        if ((key === 'allOf' && passed.some(item => !item)) || (key === 'anyOf' && !passed.some(Boolean))
+            || (key === 'oneOf' && passed.filter(Boolean).length !== 1)) issues.push(`${path} 不符合 ${key} 组合约束。`);
+    }
+    if (Object.prototype.hasOwnProperty.call(schema, 'const') && JSON.stringify(schema.const) !== JSON.stringify(value)) issues.push(`${path} 不符合固定值约束。`);
     if (Array.isArray(schema.enum) && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) {
         issues.push(`${path} 不在允许值范围内。`);
         return issues;
@@ -102,14 +113,16 @@ function validateValueAgainstSchema(value, schema, options = {}, path = '值', i
     if (Array.isArray(value)) {
         if (Number.isFinite(Number(schema.minItems)) && value.length < Number(schema.minItems)) issues.push(`${path} 至少需要 ${schema.minItems} 项。`);
         if (Number.isFinite(Number(schema.maxItems)) && value.length > Number(schema.maxItems)) issues.push(`${path} 最多允许 ${schema.maxItems} 项。`);
-        if (schema.items && typeof schema.items === 'object') {
-            value.slice(0, 100).forEach((item, index) => validateValueAgainstSchema(item, schema.items, options, `${path}[${index}]`, issues, depth + 1));
+        if (value.length > 10000) { issues.push(`${path} 项数超过契约校验上限。`); return issues; }
+        if (schema.uniqueItems === true && new Set(value.map(item => JSON.stringify(item))).size !== value.length) issues.push(`${path} 不允许重复项。`);
+        if (schema.items !== undefined) {
+            for (let index = 0; index < value.length && issues.length < 30; index++) validateValueAgainstSchema(value[index], schema.items, options, `${path}[${index}]`, issues, depth + 1);
         }
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
         const required = Array.isArray(schema.required) ? schema.required : [];
         required.forEach(key => {
-            if (!Object.prototype.hasOwnProperty.call(value, key) || value[key] === undefined || value[key] === '') issues.push(`${path}.${key} 为必填项。`);
+            if (!Object.prototype.hasOwnProperty.call(value, key) || value[key] === undefined) issues.push(`${path}.${key} 为必填项。`);
         });
         if (schema.properties && typeof schema.properties === 'object') {
             Object.entries(schema.properties).forEach(([key, child]) => {
@@ -118,8 +131,15 @@ function validateValueAgainstSchema(value, schema, options = {}, path = '值', i
                 }
             });
         }
-        if (schema.additionalProperties === false && schema.properties && typeof schema.properties === 'object') {
-            Object.keys(value).filter(key => !Object.prototype.hasOwnProperty.call(schema.properties, key)).forEach(key => issues.push(`${path}.${key} 不是契约允许的字段。`));
+        const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+        const additional = Object.keys(value).filter(key => !Object.prototype.hasOwnProperty.call(properties, key));
+        if (schema.additionalProperties === false) {
+            additional.slice(0, Math.max(0, 30 - issues.length)).forEach(key => issues.push(`${path}.${key} 不是契约允许的字段。`));
+        } else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+            for (const key of additional) {
+                if (issues.length >= 30) break;
+                validateValueAgainstSchema(value[key], schema.additionalProperties, options, `${path}.${key}`, issues, depth + 1);
+            }
         }
     }
     return issues;

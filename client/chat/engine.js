@@ -52,16 +52,8 @@ async function steerChatAgentRun(runId) {
 
 async function openChatAgentRunDetail(runId) {
     if (!runId) return null;
-    if (typeof window.Pivot.legacy.openAgentRun !== 'function') {
-        if (typeof window.Pivot.legacy.ensureWorkspaceScripts !== 'function') {
-            throw new Error('任务详情模块尚未初始化，请刷新页面后重试');
-        }
-        await window.Pivot.legacy.ensureWorkspaceScripts('agent');
-    }
-    if (typeof window.Pivot.legacy.openAgentRun !== 'function') {
-        throw new Error('任务详情模块加载失败，请刷新页面后重试');
-    }
-    return window.Pivot.legacy.openAgentRun(runId);
+    await window.Pivot.loadScriptOnce('/chat/agent-run-detail-loader.js');
+    return window.Pivot.moduleApi('agent.detailLoader').openFromChat(runId);
 }
 
 function parseChatAgentStepPayload(value) {

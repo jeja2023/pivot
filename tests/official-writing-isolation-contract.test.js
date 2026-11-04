@@ -35,12 +35,12 @@ test('公文写作文档迁移建立按用户归属的 PostgreSQL 服务端表',
 });
 
 test('公文写作前端不再读取或写入跨账号 localStorage，并清除旧缓存', () => {
-    const core = read('client/chat/apps-workbench-core.js');
+    const core = read('client/chat/apps-workbench-core.js') + read('client/chat/apps-workbench-library.js');
     const auth = read('client/chat/auth.js');
     const config = read('client/chat/config.js');
 
     assert.match(core, /const OFFICIAL_WRITING_DOCUMENTS_API = `\$\{API_BASE\}\/apps\/official-writing\/documents`;/);
-    assert.match(core, /await apiFetch\(OFFICIAL_WRITING_DOCUMENTS_API\)/);
+    assert.match(core, /await apiFetch\(`\$\{OFFICIAL_WRITING_DOCUMENTS_API\}/);
     assert.match(core, /method: 'PUT'/);
     assert.match(core, /method: 'DELETE'/);
     assert.doesNotMatch(core, /localStorage\.getItem\(OFFICIAL_WRITING_LIBRARY_KEY\)/);
@@ -52,7 +52,7 @@ test('公文写作前端不再读取或写入跨账号 localStorage，并清除�
 
 test('公文写作服务端 API 对文档读写删除均以当前 user_id 作为边界', () => {
     const service = read('server/services/official-writing-documents.js');
-    const routes = read('server/routes/apps/index.js');
+    const routes = read('server/routes/apps/official-writing.js');
 
     assert.match(service, /WHERE user_id = \? AND deleted_at IS NULL/);
     assert.match(service, /ON CONFLICT \(user_id, client_id\) DO UPDATE/);

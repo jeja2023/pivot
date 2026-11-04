@@ -5,8 +5,7 @@ function splitOfficialWritingSentences(text) {
     const result = [];
     const parts = String(text || '').split(/(?<=[。！？!?；;\n])/);
     parts.forEach(part => {
-        const trimmed = part.trim();
-        if (trimmed) result.push(trimmed);
+        if (part) result.push(part);
     });
     return result.length ? result : (String(text || '').trim() ? [String(text).trim()] : []);
 }
@@ -17,6 +16,7 @@ function buildOfficialWritingSentenceDiff(originalText, rewrittenText) {
     const b = splitOfficialWritingSentences(rewrittenText);
     const n = a.length;
     const m = b.length;
+    if (n * m > 40000) return [{ type: originalText === rewrittenText ? 'same' : 'changed', original: originalText, rewritten: rewrittenText }];
     const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
     for (let i = n - 1; i >= 0; i -= 1) {
         for (let j = m - 1; j >= 0; j -= 1) {
@@ -46,53 +46,7 @@ function buildOfficialWritingSentenceDiff(originalText, rewrittenText) {
 
 let officialWritingDiffState = null;
 
-async function runOfficialWritingStreamRewrite(selection) {
-    if (officialWritingAiBusy) return;
-
-    openOfficialWritingDiffModal(selection);
-    setOfficialWritingDiffStreaming(true);
-    setOfficialWritingAiBusy(true, 'AI 流式改写中…');
-    try {
-        const preview = document.getElementById('official-writing-diff-stream-preview');
-        const result = await requestOfficialWritingAi(
-            {
-                mode: 'rewrite_stream',
-                docType: getOfficialWritingDocType(),
-                standard: getOfficialWritingStandard(),
-                requirements: getOfficialWritingRequirements(),
-                selection: { text: selection.text }
-            },
-            {
-                stream: true,
-                modelId: getOfficialWritingTaskModelId('selection'),
-                onDelta(full) {
-                    if (preview) preview.textContent = full;
-                }
-            }
-        );
-        if (result == null) {
-            closeOfficialWritingDiffModal();
-            return;
-        }
-        const rewritten = String(result.content || '').trim();
-        if (!rewritten) {
-            showToast('AI 未返回有效内容，请重试', 'warning');
-            closeOfficialWritingDiffModal();
-            return;
-        }
-        const rows = buildOfficialWritingSentenceDiff(selection.text, rewritten).map((row, index) => ({
-            ...row,
-            id: `diff-${index}`,
-            // 默认：改写/新增句默认接受新版，相同句保留，删除句默认接受删除。
-            accepted: row.type !== 'removed'
-        }));
-        officialWritingDiffState = { selection, rows, rewritten };
-        setOfficialWritingDiffStreaming(false);
-        renderOfficialWritingDiffRows();
-    } finally {
-        setOfficialWritingAiBusy(false);
-    }
-}
+async function runOfficialWritingStreamRewrite(selection) { return runOfficialWritingAiTask('rewrite_stream', { selection }); }
 
 function setOfficialWritingDiffStreaming(streaming) {
     document.getElementById('official-writing-diff-stream')?.classList.toggle('hidden', !streaming);
@@ -100,7 +54,9 @@ function setOfficialWritingDiffStreaming(streaming) {
 }
 
 function openOfficialWritingDiffModal(selection) {
-    officialWritingDiffState = { selection, rows: [], rewritten: '' };
+    const editor = getOfficialWritingTextarea(selection.target || 'draft');
+    officialWritingDiffState = { selection, documentId: officialWritingLibrary.activeId,
+        anchor: officialWritingDocument.anchor(editor?.value || '', selection.start, selection.end), rows: [], rewritten: '' };
     const modal = document.getElementById('official-writing-diff-modal');
     if (modal) {
         modal.classList.remove('hidden');
@@ -171,10 +127,13 @@ function assembleOfficialWritingDiffResult() {
 
 function applyOfficialWritingDiffResult() {
     if (!officialWritingDiffState) return;
-    const { selection } = officialWritingDiffState;
+    const { selection, documentId, anchor } = officialWritingDiffState;
+    if (documentId !== officialWritingLibrary.activeId) return showToast('当前公文已切换，请返回原文档重新审改', 'warning');
     const finalText = assembleOfficialWritingDiffResult();
     const textarea = getOfficialWritingTextarea(selection.target || 'draft');
-    replaceTextareaRange(textarea, selection.start, selection.end, finalText);
+    const range = officialWritingDocument.locate(textarea?.value || '', anchor);
+    if (!range) return showToast('原文已变化，请重新选择片段并生成改写', 'warning');
+    replaceTextareaRange(textarea, range.start, range.end, finalText);
     renderOfficialWritingWorkspace();
     closeOfficialWritingDiffModal();
     showToast('已按逐句选择应用改写');

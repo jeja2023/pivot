@@ -1,18 +1,21 @@
 'use strict';
 
-function createRunBudgetGuard({ deadline, taskBudget }) {
+function createRunBudgetGuard({ deadline, executionDeadline = deadline, taskBudget }) {
     return () => {
         if (Date.now() > deadline) {
             const err = new Error('任务执行超时。');
             err.code = 'AGENT_TIMEOUT';
             throw err;
         }
+        if (taskBudget.phase !== 'finalization' && Date.now() > executionDeadline) {
+            throw Object.assign(new Error('本段执行时间已用完，已预留结果整理与核验时间。'), { code: 'AGENT_FINALIZATION_REQUIRED', category: 'resource' });
+        }
         taskBudget.assertCanRequestModel();
     };
 }
 
-function createRemainingModelRequestMs({ deadline, resolveAgentRequestTimeoutMs }) {
-    return () => Math.min(resolveAgentRequestTimeoutMs(), Math.max(deadline - Date.now(), 1_000));
+function createRemainingModelRequestMs({ deadline, executionDeadline = deadline, getPhase = () => 'execution', resolveAgentRequestTimeoutMs }) {
+    return () => Math.min(resolveAgentRequestTimeoutMs(), Math.max((getPhase() === 'finalization' ? deadline : executionDeadline) - Date.now(), 1_000));
 }
 
 function createRunDeadlineTimer({ deadline, runController }) {

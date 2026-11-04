@@ -49,8 +49,9 @@ test('继续工作区域各类条目具备精准分流：未命名演示文稿�
     // 2. 演示文稿：优先匹配，绝不被后面的 runId 捕获进任务面板
     assert.match(clientCode, /if \(kind === 'presentation' \|\| artifactType === 'presentation'\) \{\s*return window\.Pivot\.moduleApi\('workspaces\.navigation'\)\.openAppsWorkbench\?\.\(\{\s*app:\s*'presentations',\s*presentationId:\s*targetId\s*\}\);\s*\}/);
 
-    // 3. 公文写作：直达公文单篇编辑
-    assert.match(clientCode, /if \(artifactType === 'official_writing'\) \{\s*return window\.Pivot\.moduleApi\('workspaces\.navigation'\)\.openAppsWorkbench\?\.\(\{\s*app:\s*'official-writing',\s*docId:\s*targetId\s*\}\);\s*\}/);
+    // 公文使用服务端绑定的稳定文档标识；无绑定的历史产物保留查看入口。
+    assert.match(clientCode, /if \(artifactType === 'official_writing'\) \{[\s\S]*?const documentId = button\.dataset\.personalRecentDocumentId;[\s\S]*?docId:\s*documentId/);
+    assert.match(clientCode, /if \(!documentId\) return window\.Pivot\.moduleApi\('agent\.artifacts'\)\?\.openVersions\?\.\(id\)/);
 
     // 思维导图产物进入独立应用并保留同一产物标识。
     assert.match(clientCode, /if \(artifactType === 'mindmap'\)[\s\S]*?openAppsWorkbench\?\.\(\{ app: 'mindmaps', artifactId \}\)/);

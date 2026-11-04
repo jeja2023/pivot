@@ -152,6 +152,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     const attachmentEvidence = buildChatAttachmentEvidenceObservation(chatBridge);
     observations = [
         ...(Array.isArray(observations) ? observations : []),
+        ...(run?.knowledgeBoundaryEvidence ? [{ tool: 'agent.history', knowledgeEvidence: run.knowledgeBoundaryEvidence }] : []),
         ...(ragEvidence ? [ragEvidence] : []),
         ...(attachmentEvidence ? [attachmentEvidence] : [])
     ];

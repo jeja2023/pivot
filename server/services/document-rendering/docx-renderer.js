@@ -12,17 +12,19 @@
  *    同一 IR 连续渲染两次内容摘要必须一致（§10.2 的渲染幂等性指标）；
  * 4. 渲染器不接触 CAS：图片一律通过 options.imageResolver 取字节，取不到就跳过该图片而不报错。
  *
- * 与前端既有实现的一处不一致已核实并按 IR 契约处理：前端 pgMar 把 28 毫米写给了 right、
- * 26 毫米写给了 left，与 GB/T 9704 及 document-ir.js 的 OFFICIAL_PAGE_DEFAULT（left 28、right 26）相反；
- * 渲染器按 IR 的字段名落位，即 left 用 margin_mm.left、right 用 margin_mm.right。
+ * 公文使用用户截图指定版式：上37、下35、左右27毫米，22行/28字文档网格，
+ * 固定28磅行距；通用报告继续使用独立的通用规格。
  */
 const docx = require('docx');
 const { computeIrDigest } = require('../document-ir');
 const styleConstants = require('./official-styles');
+const screenshot = require('../../../client/common/official-writing-format');
+const { loadOfficialFonts } = require('./official-fonts');
+const officialLayout = require('./official-layout');
 const { deriveDeterministicTimestamp, repackDeterministic } = require('./docx-package');
 
 /** 渲染器语义版本：参与 rendition 去重键，改版式必须升版本，否则历史交付不可复现。 */
-const RENDERER_VERSION = 'docx-1.1.0';
+const RENDERER_VERSION = 'docx-2.0.1';
 
 /** DOCX 的 MIME 类型。 */
 const MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -89,22 +91,17 @@ function resolveFont(baseFont, irFont) {
  * IR 显式给出的值优先于版式默认值；未给出的沿用版式默认值。
  */
 function resolveSpec(spec, irStyle) {
-    const irFont = irStyle && irStyle.font ? irStyle.font : null;
-    const size = irFont && irFont.size_pt !== undefined
-        ? styleConstants.ptToHalfPoint(irFont.size_pt)
-        : Number(spec.size || styleConstants.FONT_SIZE_HALF_POINT.XIAO_SI);
+    const strict = Object.values(screenshot.FONT).includes(spec.font?.eastAsia);
+    const irFont = !strict && irStyle?.font || null;
     return {
-        size,
-        bold: irFont && irFont.bold !== undefined ? Boolean(irFont.bold) : Boolean(spec.bold),
-        color: (irFont && irFont.color) || spec.color || undefined,
-        align: (irStyle && irStyle.align) || spec.align || undefined,
-        indentChars: irStyle && irStyle.indent_chars !== undefined
-            ? Number(irStyle.indent_chars)
-            : Number(spec.indent_chars || 0),
-        lineHeight: irStyle && irStyle.line_height !== undefined ? Number(irStyle.line_height) : undefined,
-        spaceAfterPt: irStyle && irStyle.space_after_pt !== undefined
-            ? Number(irStyle.space_after_pt)
-            : Number(spec.space_after_pt || 0),
+        strict,
+        size: irFont?.size_pt !== undefined ? styleConstants.ptToHalfPoint(irFont.size_pt) : Number(spec.size || styleConstants.FONT_SIZE_HALF_POINT.XIAO_SI),
+        bold: irFont?.bold !== undefined ? !!irFont.bold : !!spec.bold,
+        color: irFont?.color || spec.color,
+        align: strict ? spec.align || 'left' : irStyle?.align || spec.align,
+        indentChars: irStyle?.indent_chars !== undefined ? Number(irStyle.indent_chars) : Number(spec.indent_chars || 0),
+        lineHeight: !strict && irStyle?.line_height !== undefined ? Number(irStyle.line_height) : undefined,
+        spaceAfterPt: strict ? Number(spec.space_after_pt || 0) : Number(irStyle?.space_after_pt ?? spec.space_after_pt ?? 0),
         spaceBeforePt: Number(spec.space_before_pt || 0),
         font: resolveFont(spec.font, irFont)
     };
@@ -112,19 +109,20 @@ function resolveSpec(spec, irStyle) {
 
 /** 生成一个文字 run；runOverride 是 IR paragraph 里单个 run 的行内属性。 */
 function buildTextRun(text, resolved, runOverride) {
-    const runFont = runOverride && runOverride.font ? runOverride.font : null;
+    const runFont = !resolved.strict && runOverride?.font || null;
     const options = {
         text: String(text ?? ''),
         size: runFont && runFont.size_pt !== undefined ? styleConstants.ptToHalfPoint(runFont.size_pt) : resolved.size,
         font: runFont ? resolveFont(resolved.font, runFont) : resolved.font
     };
-    const bold = runOverride && runOverride.bold !== undefined
+    const bold = !resolved.strict && runOverride && runOverride.bold !== undefined
         ? Boolean(runOverride.bold)
         : (runFont && runFont.bold !== undefined ? Boolean(runFont.bold) : resolved.bold);
     if (bold) options.bold = true;
-    if (runOverride && runOverride.italic) options.italics = true;
-    if (runOverride && runOverride.underline) options.underline = { type: docx.UnderlineType.SINGLE };
-    const color = (runOverride && runOverride.color) || (runFont && runFont.color) || resolved.color;
+    if (!resolved.strict && runOverride && runOverride.italic) options.italics = true;
+    if (!resolved.strict && runOverride && runOverride.underline) options.underline = { type: docx.UnderlineType.SINGLE };
+    if (resolved.strict) options.snapToGrid = true;
+    const color = (!resolved.strict && runOverride && runOverride.color) || (runFont && runFont.color) || resolved.color;
     if (color) options.color = String(color);
     if (runOverride?.revision) {
         const revision = runOverride.revision;
@@ -136,33 +134,38 @@ function buildTextRun(text, resolved, runOverride) {
 
 /**
  * 按合并后的排版参数生成段落。
- * 首行缩进同时写 w:firstLineChars 与 w:firstLine，行距写 w:line 配 lineRule=auto。
+ * 公文首行缩进与网格对齐，同时写固定28磅行距；通用段落保留倍数行距语义。
  */
 function buildParagraph(resolved, children, extra = {}) {
     const options = { children, ...extra };
     const alignment = alignmentOf(resolved.align);
     if (alignment) options.alignment = alignment;
     const spacing = {};
-    if (Number.isFinite(resolved.lineHeight) && resolved.lineHeight > 0) {
-        spacing.line = styleConstants.lineHeightToSpacingLine(resolved.lineHeight);
-        spacing.lineRule = docx.LineRuleType.AUTO;
-    }
+    if (resolved.strict) { spacing.line = screenshot.LINE_PT * 20; spacing.lineRule = docx.LineRuleType.EXACT; spacing.before = 0; spacing.after = 0; }
+    else if (resolved.lineHeight > 0) { spacing.line = styleConstants.lineHeightToSpacingLine(resolved.lineHeight); spacing.lineRule = docx.LineRuleType.AUTO; }
     if (resolved.spaceAfterPt > 0) spacing.after = styleConstants.ptToTwip(resolved.spaceAfterPt);
     if (resolved.spaceBeforePt > 0) spacing.before = styleConstants.ptToTwip(resolved.spaceBeforePt);
-    if (Object.keys(spacing).length) options.spacing = spacing;
-    if (resolved.indentChars > 0) {
-        options.indent = {
-            firstLineChars: styleConstants.indentCharsToFirstLineChars(resolved.indentChars),
-            firstLine: styleConstants.indentCharsToTwip(resolved.indentChars, resolved.size)
-        };
+    if (Object.keys(spacing).length) options.spacing = { ...spacing, ...(extra.spacing || {}) };
+    if (resolved.indentChars > 0 && !extra.indent) options.indent = { firstLineChars: styleConstants.indentCharsToFirstLineChars(resolved.indentChars),
+        firstLine: Math.round(resolved.indentChars * screenshot.CHAR_PITCH_PT * 20) };
+    const paragraph = new docx.Paragraph(options);
+    if (resolved.strict) {
+        const index = paragraph.properties.root.findIndex(child => child.rootKey === 'w:spacing');
+        paragraph.properties.root.splice(index >= 0 ? index : 0, 0, new docx.OnOffElement('w:adjustRightInd', true), new docx.OnOffElement('w:snapToGrid', true),
+            new docx.OnOffElement('w:autoSpaceDE', false), new docx.OnOffElement('w:autoSpaceDN', false));
     }
-    return new docx.Paragraph(options);
+    return paragraph;
 }
 
 /** 单行文本段落：版式元素（大标题、主送机关、落款等）的通用出口。 */
 function buildTextParagraph(text, spec, irStyle, extra = {}) {
     const resolved = resolveSpec(spec, irStyle);
     return buildParagraph(resolved, [buildTextRun(text, resolved, null)], extra);
+}
+
+// 使用真实的空白行并与下一段保持同页，避免段前距在页首被 Word 自动压掉。
+function buildOfficialBlankLines(count, profile) {
+    return Array.from({ length: count }, () => buildTextParagraph('', profile.body, { indent_chars: 0 }, { keepNext: true }));
 }
 
 /**
@@ -184,17 +187,39 @@ function buildRuleParagraph(spec, side) {
 function buildHeadingBlock(block, profile) {
     const level = Math.min(Math.max(Number.parseInt(block.level, 10) || 1, 1), 4);
     const spec = profile[`heading${level}`] || profile.body;
-    return buildTextParagraph(block.text, spec, block.style);
+    return buildTextParagraph(profile.strict ? screenshot.normalizeHeading(block.text, level) : block.text, spec, block.style, profile.strict ? { keepNext: true, keepLines: true } : {});
 }
 
 /** IR paragraph 块转段落：逐个 run 保留行内加粗、倾斜、下划线、颜色与字体。 */
 function buildParagraphBlock(block, profile) {
-    const resolved = resolveSpec(profile.body, block.style);
-    const runs = (block.runs || []).map(run => buildTextRun(run.text, resolved, run));
+    const role = block.style?.official_role;
+    const spec = role === 'attachment_label' ? profile.attachment_label || profile.body : role === 'attachment_title' ? profile.title : profile.body;
+    const resolved = resolveSpec(spec, block.style);
+    if (profile.strict && !['attachment_label', 'attachment_title', 'attachment_note'].includes(role)) resolved.indentChars = 2;
+    if (profile.strict && role === 'attachment_label') resolved.indentChars = 0;
+    if (profile.strict && role === 'attachment_title') { resolved.indentChars = 0; resolved.align = 'center'; }
+    let runs = (block.runs || []).map(run => buildTextRun(run.text, resolved, run));
+    if (profile.strict && role === 'attachment_title') {
+        runs = [];
+        screenshot.arrangeTitle((block.runs || []).map(run => run.text || '').join('')).forEach((line, index) => {
+            if (index) runs.push(new docx.TextRun({ break: 1 }));
+            runs.push(buildTextRun(line, resolved, null));
+        });
+    }
+    const extra = {};
+    if (profile.strict && role === 'attachment_note') {
+        const prefix = block.style?.attachment_prefix || '附件：';
+        const prefixPt = officialLayout.widthOf(prefix, 'body', profile.fontSources);
+        const left = (2 * screenshot.CHAR_PITCH_PT + prefixPt) * 20;
+        extra.indent = { left: Math.round(left), hanging: Math.round(prefixPt * 20) };
+        extra.spacing = { before: 0 };
+        extra.keepNext = true;
+        extra.keepLines = true;
+    }
+    if (profile.strict && ['attachment_label', 'attachment_title'].includes(role)) { extra.keepNext = true; extra.keepLines = true; }
     const revision = block.paragraphRevision;
-    return buildParagraph(resolved, runs.length ? runs : [buildTextRun('', resolved, null)], revision ? {
-        run: { [revision.type === 'insert' ? 'insertion' : 'deletion']: { id: revision.id, author: revision.author, date: revision.date } }
-    } : {});
+    if (revision) extra.run = { [revision.type === 'insert' ? 'insertion' : 'deletion']: { id: revision.id, author: revision.author, date: revision.date } };
+    return buildParagraph(resolved, runs.length ? runs : [buildTextRun('', resolved, null)], extra);
 }
 
 /**
@@ -393,7 +418,11 @@ async function buildBlocks(ir, profile, metrics, options, numberingConfigs) {
         if (type === 'heading') {
             children.push(buildHeadingBlock(block, profile));
         } else if (type === 'paragraph') {
+            if (profile.strict && block.style?.official_role === 'attachment_note' && block.style?.attachment_prefix?.startsWith('附件')) {
+                children.push(...buildOfficialBlankLines(screenshot.GAP_LINES.beforeAttachment, profile));
+            }
             children.push(buildParagraphBlock(block, profile));
+            if (profile.strict && block.style?.official_role === 'attachment_title') children.push(...buildOfficialBlankLines(screenshot.GAP_LINES.afterTitle, profile));
         } else if (type === 'table') {
             children.push(buildTableBlock(block, profile, metrics));
         } else if (type === 'list') {
@@ -414,48 +443,48 @@ async function buildBlocks(ir, profile, metrics, options, numberingConfigs) {
  * 通用文档只排「大标题 + 副标题 + 主送机关」，不套红头。
  */
 function buildLeadingParagraphs(ir, profile) {
-    const meta = ir.meta || {};
-    const paragraphs = [];
-    if (profile.red_header && String(meta.issuer || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.issuer, profile.red_header, null));
-        paragraphs.push(buildRuleParagraph(profile.red_line, 'bottom'));
+    const meta = ir.meta || {}, paragraphs = [];
+    if (meta.layout !== 'plain' && profile.red_header && meta.issuer) {
+        paragraphs.push(buildTextParagraph(meta.issuer, profile.red_header, null)); paragraphs.push(buildRuleParagraph(profile.red_line, 'bottom'));
     }
-    if (String(meta.doc_number || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.doc_number, profile.masthead, null));
+    if (meta.urgency) paragraphs.push(buildTextParagraph(meta.urgency, profile.masthead, null));
+    if (meta.signer) paragraphs.push(buildTextParagraph('签发人：' + meta.signer, profile.masthead, null));
+    if (meta.doc_number) paragraphs.push(buildTextParagraph(meta.doc_number, profile.masthead, null));
+    if (meta.title) {
+        const resolved = resolveSpec(profile.title, null);
+        const lines = profile.strict ? screenshot.arrangeTitle(meta.title) : [meta.title];
+        const runs = [];
+        lines.forEach((line, index) => {
+            if (index) runs.push(new docx.TextRun({ break: 1 }));
+            runs.push(buildTextRun(line, resolved, null));
+        });
+        paragraphs.push(buildParagraph(resolved, runs, { keepNext: true, keepLines: true }));
     }
-    if (String(meta.title || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.title, profile.title, null));
-    }
-    if (String(meta.subtitle || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.subtitle, profile.subtitle, null));
-    }
-    if (String(meta.recipient || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.recipient, profile.recipient, null));
-    }
+    if (meta.subtitle) paragraphs.push(buildTextParagraph(meta.subtitle, profile.subtitle, null));
+    if (profile.strict && (meta.title || meta.subtitle)) paragraphs.push(...buildOfficialBlankLines(screenshot.GAP_LINES.afterTitle, profile));
+    if (meta.recipient) paragraphs.push(buildTextParagraph(profile.strict ? String(meta.recipient).replace(/[:：]\s*$/, '') + '：' : meta.recipient, profile.recipient, null, { keepNext: true }));
     return paragraphs;
 }
 
 /**
  * 正文之后的版式元素：落款单位、成文日期与公文版记。
- * IR 没有抄送与印发机关字段，版记只用已有的发文机关与成文日期组成，不凭空编造内容；
- * 没有成文日期时不排版记。
+ * 署名围绕日期中心排布，日期右空四字；抄送和印发信息按独立字段输出。
  */
-function buildTrailingParagraphs(ir, profile) {
-    const meta = ir.meta || {};
-    const paragraphs = [];
-    if (String(meta.signoff || '').trim()) {
-        paragraphs.push(buildTextParagraph(meta.signoff, profile.signoff, null));
-    }
+function buildTrailingParagraphs(ir, profile, { recordOnly = false, noRecord = false, contentWidthPt = 442 } = {}) {
+    const meta = ir.meta || {}, paragraphs = [];
+    const box = profile.strict ? officialLayout.signatureBox(meta, contentWidthPt, profile.fontSources) : null;
+    if (profile.strict && !recordOnly && (meta.signoff || meta.issued_at)) paragraphs.push(...buildOfficialBlankLines(screenshot.GAP_LINES.beforeSignature, profile));
+    if (!recordOnly && meta.signoff) paragraphs.push(buildTextParagraph(meta.signoff, profile.signoff, null, box ? {
+        indent: { left: Math.round(box.left * 20), right: Math.round(box.rightInset * 20) }, keepNext: !!box.date, keepLines: true
+    } : {}));
     const issuedDate = styleConstants.formatChineseDate(meta.issued_at);
-    if (issuedDate) {
-        paragraphs.push(buildTextParagraph(issuedDate, profile.issued_date, null));
-    }
-    if (profile.version_record && profile.version_record_separator && issuedDate) {
+    if (!recordOnly && issuedDate) paragraphs.push(buildTextParagraph(issuedDate, profile.issued_date, null, box ? { indent: { right: Math.round(box.right * 20) } } : {}));
+    const printedDate = styleConstants.formatChineseDate(meta.printed_at);
+    if (!noRecord && profile.version_record && (meta.cc || meta.printer || printedDate)) {
         paragraphs.push(buildRuleParagraph(profile.version_record_separator, 'top'));
-        if (String(meta.issuer || '').trim()) {
-            paragraphs.push(buildTextParagraph(`印发机关：${meta.issuer}`, profile.version_record, null));
-        }
-        paragraphs.push(buildTextParagraph(`印发日期：${issuedDate}`, profile.version_record, null));
+        if (meta.cc) paragraphs.push(buildTextParagraph('抄送：' + meta.cc, profile.version_record, null));
+        if (meta.printer) paragraphs.push(buildTextParagraph('印发机关：' + meta.printer, profile.version_record, null));
+        if (printedDate) paragraphs.push(buildTextParagraph('印发日期：' + printedDate, profile.version_record, null));
     }
     return paragraphs;
 }
@@ -467,7 +496,7 @@ function buildTrailingParagraphs(ir, profile) {
 function buildDocumentHeader(ir, profile) {
     const level = String(ir.meta?.security_level || '');
     if (!level || level === 'public') return null;
-    const label = styleConstants.SECURITY_LEVEL_LABELS[level];
+    const label = (styleConstants.SECURITY_LEVEL_LABELS[level] || '') + String(ir.meta?.security_period || '');
     if (!label) return null;
     return new docx.Header({ children: [buildTextParagraph(label, profile.security_mark, null)] });
 }
@@ -521,8 +550,9 @@ function buildStylesOptions(profile) {
  * 纸张传纵向标称尺寸：docx 库在 w:orient=landscape 时会自行交换 w:w 与 w:h，
  * 若这里先换过一次，横向页会被旋转两次退回纵向。
  */
-function buildSectionProperties(metrics) {
+function buildSectionProperties(metrics, strict = false) {
     return {
+        ...(strict ? { grid: { type: docx.DocumentGridType.LINES_AND_CHARS, linePitch: 560, charSpace: Math.round((screenshot.CHAR_PITCH_PT - 16) * 4096) } } : {}),
         page: {
             size: {
                 width: metrics.sheetWidthTwip,
@@ -534,8 +564,8 @@ function buildSectionProperties(metrics) {
                 right: metrics.marginTwip.right,
                 bottom: metrics.marginTwip.bottom,
                 left: metrics.marginTwip.left,
-                header: styleConstants.mmToTwip(HEADER_DISTANCE_MM),
-                footer: styleConstants.mmToTwip(FOOTER_DISTANCE_MM),
+                header: styleConstants.mmToTwip(strict ? screenshot.HEADER_MM : HEADER_DISTANCE_MM),
+                footer: styleConstants.mmToTwip(strict ? screenshot.FOOTER_MM : FOOTER_DISTANCE_MM),
                 gutter: 0
             }
         }
@@ -554,17 +584,22 @@ async function renderDocx(ir, options = {}) {
     if (!ir || typeof ir !== 'object' || !Array.isArray(ir.blocks)) {
         throw renderError('待渲染的 Document IR 无效：缺少 blocks 数组。', 'DOCX_RENDER_IR_INVALID');
     }
-    const profile = styleConstants.resolveProfile(ir.doc_type);
+    const baseProfile = styleConstants.resolveProfile(ir.doc_type);
+    const profile = baseProfile.strict ? { ...baseProfile, fontSources: await loadOfficialFonts() } : baseProfile;
     const metrics = styleConstants.resolvePageMetrics(ir.meta?.page);
     const numberingConfigs = [];
+    const parts = profile.strict ? officialLayout.splitAttachments(ir) : { main: ir.blocks, attachments: [] };
+    const tailOptions = { contentWidthPt: metrics.contentWidthTwip / 20, noRecord: !!parts.attachments.length };
     const children = [
         ...buildLeadingParagraphs(ir, profile),
-        ...await buildBlocks(ir, profile, metrics, options, numberingConfigs),
-        ...buildTrailingParagraphs(ir, profile)
+        ...await buildBlocks({ ...ir, blocks: parts.main }, profile, metrics, options, numberingConfigs),
+        ...buildTrailingParagraphs(ir, profile, tailOptions),
+        ...await buildBlocks({ ...ir, blocks: parts.attachments }, profile, metrics, options, numberingConfigs),
+        ...(parts.attachments.length ? buildTrailingParagraphs(ir, profile, { recordOnly: true, contentWidthPt: metrics.contentWidthTwip / 20 }) : [])
     ];
     const header = buildDocumentHeader(ir, profile);
     const footer = buildDocumentFooter(ir, profile);
-    const section = { properties: buildSectionProperties(metrics), children };
+    const section = { properties: buildSectionProperties(metrics, profile.strict), children };
     if (header) section.headers = { default: header };
     if (footer) section.footers = { default: footer };
     const documentOptions = {

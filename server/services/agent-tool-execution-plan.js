@@ -50,7 +50,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
     const policy = policyEvaluator({
         run,
         tool,
-        input: normalizedInput,
+        input: input && typeof input === 'object' && !Array.isArray(input) ? normalizedInput : input,
         user,
         budget: context.consumeBudget === true ? context.budget || null : null,
         allowApproval: context.allowApproval === true
@@ -63,6 +63,7 @@ async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}
             decision: policy.decision,
             reasons: policy.reasons || [],
             reasonCodes: policy.reasonCodes || [],
+            inputIssues: policy.inputIssues || [],
             riskLevel: Number(tool.risk_level || 0) || 0
         },
         approval: {

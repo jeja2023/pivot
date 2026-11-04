@@ -198,13 +198,14 @@ function wrapTokens(tokens, options) {
     const measurer = options.measurer;
     const maxWidth = Math.max(Number(options.maxWidth) || 0, 1);
     const indentPt = Math.max(Number(options.indentPt) || 0, 0);
+    const continuationIndentPt = Math.max(Number(options.continuationIndentPt) || 0, 0);
     const lines = [];
     let current = [];
     let currentWidth = 0;
     const extra = [];
     let cursor = 0;
 
-    const limitFor = () => (lines.length === 0 ? Math.max(maxWidth - indentPt, 1) : maxWidth);
+    const limitFor = () => Math.max(maxWidth - (lines.length === 0 ? indentPt : continuationIndentPt), 1);
     const flush = force => {
         const kept = current.slice();
         while (kept.length && kept[kept.length - 1].kind === 'space') kept.pop();
@@ -216,7 +217,7 @@ function wrapTokens(tokens, options) {
         lines.push({
             tokens: kept,
             width: kept.reduce((sum, token) => sum + token.width, 0),
-            indent: lines.length === 0 ? indentPt : 0,
+            indent: lines.length === 0 ? indentPt : continuationIndentPt,
             forced: Boolean(force)
         });
         current = [];

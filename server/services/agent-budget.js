@@ -74,18 +74,34 @@ class TaskBudget {
         };
         this.lastTool = '';
         this.tripped = null;
+        this.phase = 'execution';
+        this.policy = options.policy || null;
+        this.priorElapsedSeconds = Math.max(0, Number(options.priorElapsedSeconds) || 0);
+        for (const key of Object.keys(this.counts)) this.counts[key] = Math.max(0, Number(options.counts?.[key]) || 0);
+        this.progress = { count: 0, lastProgressRound: this.counts.steps, fingerprints: [], ...(options.progress || {}) };
+        this.segmentStartSteps = Math.min(this.counts.steps, Math.max(0, Number(options.segmentStartSteps ?? this.counts.steps) || 0));
+        this.segmentStartProgress = Math.min(Number(this.progress.count) || 0, Math.max(0, Number(options.segmentStartProgress ?? this.progress.count) || 0));
+        this.segmentNumber = Math.max(1, Number(options.segmentNumber) || 1);
+        this.segmentStartElapsed = Math.max(0, Number(options.segmentStartElapsed ?? this.priorElapsedSeconds) || 0);
+        this.persist = options.persist || null;
+        this.persistQueue = Promise.resolve();
     }
 
     elapsedSeconds(now = Date.now()) {
-        return Math.max((Number(now) - this.startedAt) / 1000, 0);
+        return this.priorElapsedSeconds + Math.max((Number(now) - this.startedAt) / 1000, 0);
     }
 
     snapshot(now = Date.now()) {
         return {
+            accountingVersion: 2,
             limits: { ...this.limits },
             counts: { ...this.counts },
             elapsed_seconds: this.elapsedSeconds(now),
-            tripped: this.tripped ? { ...this.tripped } : null
+            tripped: this.tripped ? { ...this.tripped } : null,
+            progress: { ...this.progress, fingerprints: this.progress.fingerprints.slice(-128) },
+            segment: { number: this.segmentNumber, startSteps: this.segmentStartSteps, startProgress: this.segmentStartProgress,
+                startElapsedSeconds: this.segmentStartElapsed, maxSteps: this.policy?.segmentSteps || this.limits.max_steps },
+            phase: this.phase
         };
     }
 
@@ -105,7 +121,7 @@ class TaskBudget {
         this._assertLimit('max_runtime_seconds', this.elapsedSeconds(now), '任务运行时间超过预算。');
         this._assertLimit('max_steps', this.counts.steps, '任务步骤数超过预算。');
         this._assertLimit('max_tool_calls', this.counts.tool_calls, '工具调用次数超过预算。');
-        this._assertLimit('max_consecutive_errors', this.counts.consecutive_errors, '连续错误次数超过预算。');
+        if (this.phase !== 'finalization') this._assertLimit('max_consecutive_errors', this.counts.consecutive_errors, '连续错误次数超过预算。');
         this._assertLimit('max_tokens_total', this.counts.tokens_total, '任务 Token 用量超过预算。');
         this._assertLimit('risk_budget', this.counts.risk, '任务风险预算已耗尽。');
         this._assertLimit('max_external_side_effects', this.counts.external_side_effects, '外部副作用次数超过预算。');
@@ -120,10 +136,18 @@ class TaskBudget {
         if (this.enabled && Number.isFinite(limit) && this.counts.tokens_total >= limit) {
             this._trip('max_tokens_total', this.counts.tokens_total, limit, '任务 Token 预算已用完，不能继续调用模型。');
         }
+        if (this.enabled && this.policy && this.phase !== 'finalization') {
+            const tokens = Math.min(this.policy.reserveTokens || 0, Math.floor(limit * .1));
+            const seconds = Math.min(this.policy.reserveRuntimeSeconds || 0, Math.floor(this.limits.max_runtime_seconds / 4));
+            if (this.counts.tokens_total >= limit - tokens || this.elapsedSeconds() >= this.limits.max_runtime_seconds - seconds) {
+                throw Object.assign(new Error('已预留结果整理与核验额度，正在结束本段执行。'), { code: 'AGENT_FINALIZATION_REQUIRED', category: 'resource' });
+            }
+        }
     }
 
     consumeStep() {
         if (!this.enabled) return this.snapshot();
+        this._assertLimit('max_steps', this.counts.steps + 1, '任务累计轮次已达到上限。');
         this.counts.steps += 1;
         this.assertWithin();
         return this.snapshot();
@@ -131,6 +155,11 @@ class TaskBudget {
 
     consumeTool(tool = {}) {
         if (!this.enabled) return this.snapshot();
+        if (this.policy && this.phase !== 'finalization' && !/^(?:artifact\.render|tools\.execute)$/.test(String(tool.name || ''))
+            && this.counts.tool_calls >= this.limits.max_tool_calls - Math.min(this.policy.reserveToolCalls || 0, Math.floor(this.limits.max_tool_calls / 4))) {
+            throw Object.assign(new Error('已预留结果文件登记与核验所需调用额度。'), { code: 'AGENT_FINALIZATION_REQUIRED', category: 'resource' });
+        }
+        this._assertLimit('max_tool_calls', this.counts.tool_calls + 1, '任务累计工具调用次数已达到上限。');
         const risk = Number(tool.risk_level ?? tool.riskLevel ?? 0) || 0;
         this.counts.tool_calls += 1;
         this.counts.risk += Math.max(risk, 0);
@@ -143,6 +172,63 @@ class TaskBudget {
         this.lastTool = String(tool.name || '');
         this.assertWithin();
         return this.snapshot();
+    }
+
+    async persistUsageSnapshot() {
+        if (!this.persist || this.requeued) return;
+        const snapshot = this.snapshot();
+        this.persistQueue = this.persistQueue.then(() => this.persist(snapshot));
+        try { await this.persistQueue; }
+        catch (error) {
+            if (['AGENT_RUN_LEASE_LOST', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED'].includes(error.code)) throw error;
+            throw Object.assign(new Error('任务累计用量无法保存，已停止继续执行，请检查存储后重试。'), { code: 'AGENT_BUDGET_PERSIST_FAILED', category: 'resource' });
+        }
+    }
+
+    recordProgress(tool, input, output) {
+        const fingerprint = require('./agent-execution-progress').progressFingerprint(tool, input, output);
+        if (!fingerprint || this.progress.fingerprints.includes(fingerprint)) return false;
+        this.progress.count += 1;
+        this.progress.lastProgressRound = this.counts.steps;
+        this.progress.fingerprints = [...this.progress.fingerprints, fingerprint].slice(-128);
+        return true;
+    }
+
+    stopSummary(code) {
+        return { code, cumulativeRounds: this.counts.steps, totalRoundLimit: this.limits.max_steps,
+            toolCalls: this.counts.tool_calls, tokens: this.counts.tokens_total, progressCount: this.progress.count };
+    }
+
+    async beginPlanningRound() {
+        this.assertCanRequestModel();
+        if (this.policy && this.counts.steps - this.progress.lastProgressRound >= this.policy.noProgressRounds) {
+            this.tripped = { key: 'no_progress', actual: this.counts.steps - this.progress.lastProgressRound, limit: this.policy.noProgressRounds };
+            throw Object.assign(new Error('连续多轮未取得新的资料或执行结果，已停止重复处理，请补充要求或检查工具。'), { code: 'AGENT_NO_PROGRESS', category: 'capability' });
+        }
+        this.consumeStep();
+        await this.persistUsageSnapshot();
+    }
+
+    remainingSegmentRounds() {
+        return Math.max(0, Math.min((this.policy?.segmentSteps || this.limits.max_steps) - (this.counts.steps - this.segmentStartSteps), this.limits.max_steps - this.counts.steps));
+    }
+
+    planningHint() {
+        return `本段剩余 ${this.remainingSegmentRounds()} 轮，任务累计已用 ${this.counts.steps}/${this.limits.max_steps} 轮；工具已用 ${this.counts.tool_calls}/${this.limits.max_tool_calls} 次。先完成必要文件登记，再核验与返回最终答案。剩余很少时不要开启新的支线，不得声称未执行的操作已完成。`;
+    }
+
+    async withFinalization(operation) {
+        const previous = this.phase;
+        this.phase = 'finalization';
+        try { return await operation(); } finally { this.phase = previous; }
+    }
+
+    modelOutputAllowance(inputTokens, requestedTokens) {
+        this.assertCanRequestModel();
+        const reserve = this.phase === 'finalization' ? 0 : Math.min(this.policy?.reserveTokens || 0, Math.floor(this.limits.max_tokens_total * .1));
+        const available = this.limits.max_tokens_total - this.counts.tokens_total - Math.max(0, inputTokens) - reserve;
+        if (available < 1) throw Object.assign(new Error('剩余额度不足以读取上下文并生成结果。'), { code: this.phase === 'finalization' ? 'AGENT_BUDGET_EXCEEDED' : 'AGENT_FINALIZATION_REQUIRED', category: 'resource' });
+        return Math.min(requestedTokens, Math.floor(available));
     }
 
     recordError() {

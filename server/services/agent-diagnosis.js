@@ -23,7 +23,8 @@ function normalizeError(error) {
 
 function diagnoseError(error, context = {}) {
     const message = normalizeError(error);
-    const category = RULES.find(([, pattern]) => pattern.test(message))?.[0] || 'unknown';
+    const inputFeedback = require('./tool-input-validation').toolInputFeedback(error);
+    const category = inputFeedback ? 'schema' : RULES.find(([, pattern]) => pattern.test(message))?.[0] || 'unknown';
     const remediation = {
         syntax: '定位报错行并修复语法、缩进或 SQL 语句后重试。',
         schema: '先读取实际字段/表结构，再校正字段名、表名或输入契约。',
@@ -56,9 +57,10 @@ function diagnoseError(error, context = {}) {
         category,
         message: message.slice(0, 2000),
         code: error?.code || '',
-        retryable: ['network', 'rate_limit', 'browser', 'timeout', 'resource', 'data_quality', 'schema'].includes(category),
-        remediation,
-        actionableSteps,
+        retryable: !inputFeedback && ['network', 'rate_limit', 'browser', 'timeout', 'resource', 'data_quality', 'schema'].includes(category),
+        ...(inputFeedback ? { repairable: true } : {}),
+        remediation: inputFeedback ? inputFeedback.message : remediation,
+        actionableSteps: inputFeedback ? [{ action: 'inspect_schema', label: '核对工具输入契约' }, { action: 'fix_mapping', label: '修正参数后重试' }] : actionableSteps,
         context: { tool: context.tool || '', step: context.step || 0 }
     };
 }

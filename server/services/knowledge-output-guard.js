@@ -12,4 +12,13 @@ function safeFinalAnswer(answer, verification) {
         ? '本次资料来源已变化或不可访问，请重新选择资料后继续。已生成文件的可用状态请在结果文件中查看。' : answer;
 }
 
-module.exports = { holdKnowledgeOutput, safeFinalAnswer };
+function collectKnowledgeContexts(observations = []) {
+    return observations.flatMap(item => {
+        const output = item.output;
+        if (output?.type === 'tools_batch_read') return collectKnowledgeContexts((output.results || []).slice(0, 8).map(result => ({ output: result.output?.type === 'tools_batch_read' ? null : result.output })));
+        return output?.knowledgeSourceVersion === 1 && output.context ? [output.context]
+            : output?.knowledgeContextVersion === 1 && output.content ? [output.content] : [];
+    });
+}
+
+module.exports = { collectKnowledgeContexts, holdKnowledgeOutput, safeFinalAnswer };

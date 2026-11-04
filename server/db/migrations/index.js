@@ -28,6 +28,7 @@ const migrationModules = [
     require('./agent-local-connector'),
     require('./agent-learning'),
     require('./official-writing-documents'),
+    require('./official-writing-library'),
     require('./agent-goal-dispatch-lease'),
     require('./agent-context-audit-contract'),
     require('./model-tool-call-capabilities'),

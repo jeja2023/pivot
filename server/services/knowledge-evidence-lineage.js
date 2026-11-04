@@ -5,6 +5,12 @@ const { parseJsonObject } = require('./agent-validators');
 function parseValue(value) { return typeof value === 'string' ? parseJsonObject(value) || value : value; }
 function evidenceOf(value) {
     value = parseValue(value);
+    if (value?.type === 'tools_batch_read' && Array.isArray(value.results)) {
+        const nested = value.results.slice(0, 8).map(item => item.output?.type === 'tools_batch_read'
+            ? { knowledgeSourceVersion: 1, sources: [], knowledgeEvidenceIncomplete: true } : item.output);
+        if (value.results.length > 8) nested.push({ knowledgeSourceVersion: 1, sources: [], knowledgeEvidenceIncomplete: true });
+        return mergeKnowledgeEvidence(value.knowledgeEvidence, nested);
+    }
     return value?.knowledgeEvidence || value?.knowledge_evidence || (value?.knowledgeSourceVersion === 1 ? value : null);
 }
 

@@ -15,6 +15,7 @@ const { createRunFinalizer } = require('./run-finalizer');
 const { executeAutomaticModelFailover } = require('./model-failover');
 const { recordPlannerModelEvent } = require('./planning-lifecycle');
 const { resolveApprovalKey } = require('../agent-approval-grants');
+const { prepareExecutionBudget, beginPlanningRound } = require('./execution-budget');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -64,8 +65,6 @@ const {
     normalizeRunMode,
     normalizePositiveInt,
     parseJsonObject,
-    normalizeTaskBudget,
-    TaskBudget,
     recordAgentToolCall,
     recordAgentTraceSpan,
     ensureAgentTrace,
@@ -113,7 +112,7 @@ const {
         updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
         getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
         setRunMetadata, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
-        loadRetryRow, TERMINAL_STATUSES
+        loadRetryRow, TERMINAL_STATUSES, verifyAgentOutcome, assertRunNotCancelled
     });
     const preparation = createRunPreparation({ formatToolList, listToolReliability, selectToolOrder, setRunMetadata, logger, verifyAgentOutcome });
     const { finalize: finalizeRun } = createRunFinalizer({ activeRunControllers, updateRun, getBeijingTimestamp, syncAgentTraceFromRun });
@@ -134,6 +133,7 @@ const {
         runForSummary = run;
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
+        await require('../agent-knowledge-boundary').prepareAgentKnowledgeBoundary(run, user, deps);
         // 恢复路径先确认已持久化的控制应用；不会重放其指令。
         try { await acknowledgeAppliedAgentControlMessages(runId, user); } catch (error) {
             logger.warn({ runId, err: error.message }, '控制消息确认恢复失败，将在后续轮询重试');
@@ -145,28 +145,11 @@ const {
         });
         await assertRunNotCancelled(runId);
         const maxSteps = normalizeMaxSteps(run.max_steps, run.run_mode);
-        const budgetConfig = parseJsonObject(run.budget_config) || {};
-        const effectiveBudgetConfig = { ...budgetConfig };
-        if (effectiveBudgetConfig.max_steps === undefined && effectiveBudgetConfig.maxSteps === undefined) {
-            // Run-mode limits (deep/audit) may be higher than the historical
-            // generic default. Keep the default budget aligned with this run.
-            effectiveBudgetConfig.max_steps = maxSteps;
-        }
-        const normalizedBudget = normalizeTaskBudget(effectiveBudgetConfig);
-        if (Number(run.max_token_budget) > 0) normalizedBudget.max_tokens_total = Math.min(normalizedBudget.max_tokens_total, Number(run.max_token_budget));
-        const normalizedRunTimeout = normalizePositiveInt(run.timeout_ms, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000);
-        const configuredRuntimeMs = Number.isFinite(normalizedBudget.max_runtime_seconds)
-            ? Number(normalizedBudget.max_runtime_seconds) * 1000
-            : Infinity;
-        const deadline = Date.now() + Math.min(normalizedRunTimeout, configuredRuntimeMs);
-        const remainingModelRequestMs = createRemainingModelRequestMs({ deadline, resolveAgentRequestTimeoutMs });
-        taskBudget = new TaskBudget(normalizedBudget, {
-            startedAt: Date.now(),
-            enabled: true
-        });
-        // 同一任务从检查点恢复时，已付费的模型用量必须继续计入累计额度。
-        taskBudget.counts.tokens_total = Math.max(Number(run.total_tokens) || 0, 0);
-        const assertRunWithinBudget = createRunBudgetGuard({ deadline, taskBudget });
+        const preparedBudget = await prepareExecutionBudget(run, { updateRun, listSteps, assertRunNotCancelled, defaultTimeoutMs: AGENT_DEFAULT_TIMEOUT_MS, maxTotalRuntimeMs: deps.AGENT_MAX_TOTAL_RUNTIME_MS });
+        const { deadline, executionDeadline } = preparedBudget;
+        const remainingModelRequestMs = createRemainingModelRequestMs({ deadline, executionDeadline, getPhase: () => taskBudget?.phase, resolveAgentRequestTimeoutMs });
+        taskBudget = preparedBudget.taskBudget;
+        const assertRunWithinBudget = createRunBudgetGuard({ deadline, executionDeadline, taskBudget });
         taskBudgetsBySignal.set(runController.signal, taskBudget);
         deadlineTimer = createRunDeadlineTimer({ deadline, runController });
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
@@ -357,6 +340,7 @@ const {
                 plannerToolNames: progressivePlannerToolNames,
                 runId,
                 deadline,
+                planningDeadline: executionDeadline,
                 assertRunWithinBudget,
                 assertRunNotCancelled,
                 observations,
@@ -367,23 +351,22 @@ const {
             roundsUsed = Math.max(Number(streamingResult?.roundsUsed || 0), roundsUsed, 0);
             if (streamingResult?.stepLimitReached) {
                 const stepLimitError = Object.assign(new Error(`当前时间片已执行 ${maxSteps} 轮`), { code: 'AGENT_STEP_LIMIT' });
-                if (await continueRunFromCheckpoint({ run, runId, user, error: stepLimitError, reason: 'step_limit' })) return;
+                if (await continueRunFromCheckpoint({ run, runId, user, taskBudget, error: stepLimitError, reason: 'step_limit' })) return;
                 stopReason = stepLimitError.message;
             }
             // 流式调用已产生部分工作但未完成，继续走 JSON 规划器路径。
         }
 
         let previousWorldState = null;
-        let lastOperationSignature = '';
-        let stagnantRounds = 0;
-        const sliceEndStep = stopReason ? roundsUsed : roundsUsed + maxSteps;
+        const sliceEndStep = stopReason ? roundsUsed : roundsUsed + taskBudget.remainingSegmentRounds();
         let lastExecutedStep = roundsUsed;
         for (let step = roundsUsed + 1; step <= sliceEndStep; step += 1) {
             lastExecutedStep = step;
-            taskBudget.consumeStep();
+            await beginPlanningRound(taskBudget);
             await updateRun(runId, { status: 'planning', updated_at: getBeijingTimestamp() });
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
+            await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const claimedControlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
             const controlMessages = claimedControlMessages.length && typeof applyAgentControlMessages === 'function'
@@ -520,6 +503,7 @@ const {
                 logger.warn({ runId, step, err: promptAuditError.message }, 'Agent Prompt Section 审计写入失败');
             }
             await recordPlannerMemoryUsage(plannerMessages);
+            plannerMessages.push({ role: 'system', content: taskBudget.planningHint() });
             const plannerStartedAt = Date.now();
             const plannerSpanId = await startAgentTraceSpan(runId, {
                 type: 'model',
@@ -538,6 +522,7 @@ const {
                 // 那段 answer 同样受本次调用的输出预算限制，因此按最终答案的下限给足。
                 const modelRequestTimeoutMs = remainingModelRequestMs();
                 plannedText = await withTimeout(signal => callModelText(modelCfg, plannerMessages, {
+                    budget: taskBudget,
                     user,
                     signal,
                     usageRef,
@@ -612,7 +597,7 @@ const {
                 usageRef: plannedTextUsageRef,
                 allowBudgetExceeded: true
             });
-            if (!plannedUsageResult?.budgetExceeded) assertRunWithinBudget();
+            if (!plannedUsageResult?.budgetExceeded) taskBudget.assertWithin();
             await assertRunNotCancelled(runId);
             const plan = parseJsonObject(plannedText) || {};
             await insertStep(runId, step, {
@@ -642,17 +627,21 @@ const {
             }
 
             if (plan.action === 'final' || !plan.tool) {
+                taskBudget.phase = 'finalization';
                 let answer = sanitizeUserVisibleText(plan.answer) || await synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
                     signal: runController.signal,
                     budget: taskBudget,
                     ...plannerChatContext
                 });
                 await assertRunNotCancelled(runId);
+                await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
                 const verification = await verifyOutcome(answer, false, '', { allowed: true, remainingSteps: sliceEndStep - step });
                 answer = require('../knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
+                await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 if (verification.repair?.allowed) {
+                    taskBudget.phase = 'execution';
                     taskContract = verification.taskContract;
                     run.metadata = { ...getRunMetadata(run), taskContract };
                     observations.push({ type: 'verification_repair', step, tool: 'task.verification', output: {
@@ -693,31 +682,17 @@ const {
             let progressiveExecution; try {
                 progressiveExecution = await require('../agent-progressive-execution').resolveProgressiveExecution({ toolName: plan.tool, input: effectivePlanInput, user, toolList, state: toolDiscoveryState, run });
             } catch (toolResolutionError) {
-                observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: toolResolutionError.message });
-                await insertStep(runId, step, { type: 'tool', title: `工具发现未完成：${plan.tool}`, toolName: plan.tool, input: effectivePlanInput, errorMessage: toolResolutionError.message, status: 'error', contextHash: stepContext.contextHash });
+                if (require('../agent-execution-control').isExecutionControlError(toolResolutionError)) throw toolResolutionError;
+                const feedback = require('../tool-input-validation').toolInputFeedback(toolResolutionError);
+                observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: toolResolutionError.message, ...(feedback ? { output: feedback } : {}) });
+                await insertStep(runId, step, { type: 'tool', title: `工具发现未完成：${plan.tool}`, toolName: plan.tool, input: effectivePlanInput, ...(feedback ? { output: feedback } : {}), errorMessage: toolResolutionError.message, status: 'error', contextHash: stepContext.contextHash });
                 continue;
-            }
-            const operationSignature = `${progressiveExecution.approvalToolName}:${approvalInputHash(progressiveExecution.approvalInput)}`;
-            stagnantRounds = operationSignature === lastOperationSignature ? stagnantRounds + 1 : 1;
-            lastOperationSignature = operationSignature;
-            if (stagnantRounds >= 3) {
-                stopReason = `检测到工具 ${plan.tool} 连续重复调用且没有进展，已提前停止。`;
-                observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: stopReason });
-                await insertStep(runId, step, {
-                    type: 'control',
-                    title: '检测到重复工具调用',
-                    input: effectivePlanInput,
-                    output: { tool: plan.tool, message: stopReason },
-                    errorMessage: stopReason,
-                    status: 'error',
-                    contextHash: stepContext.contextHash
-                });
-                break;
             }
             try {
                 await updateRun(runId, { status: 'executing', updated_at: getBeijingTimestamp() });
                 await assertRunUserActive(user);
                 await assertRunNotCancelled(runId);
+                await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = progressiveExecution.approvalTool;
@@ -809,8 +784,10 @@ const {
                     throw auditError;
                 }
                 taskBudget.recordSuccess();
+                taskBudget.recordProgress(progressiveExecution.approvalToolName || plan.tool, progressiveExecution.approvalInput, output);
+                await taskBudget.persistUsageSnapshot();
             } catch (toolErr) {
-                if (toolErr.code === 'AGENT_APPROVAL_REQUIRED' || toolErr.code === 'AGENT_RUN_CANCELLED' || isRunCancelled(runId)) throw toolErr;
+                if (require('../agent-execution-control').isExecutionControlError(toolErr) || isRunCancelled(runId)) throw toolErr;
                 if (toolErr.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {
                     const now = getBeijingTimestamp();
                     await setRunMetadata(runId, {
@@ -829,20 +806,23 @@ const {
                     return;
                 }
                 await updateRun(runId, { status: 'diagnosing', updated_at: getBeijingTimestamp() });
+                const inputFeedback = require('../tool-input-validation').toolInputFeedback(toolErr);
                 observations.push({
                     step,
                     tool: plan.tool,
                     input: effectivePlanInput,
-                    error: toolErr.message
+                    error: toolErr.message,
+                    ...(inputFeedback ? { output: inputFeedback } : {})
                 });
                 const diagnosis = diagnoseError(toolErr, { tool: plan.tool, step });
-                taskBudget.recordError();
+                // 执行前参数修正占用正常规划轮次，不挤占业务工具连续失败额度。
+                if (!inputFeedback) taskBudget.recordError();
                 await insertStep(runId, step, {
                     type: 'tool',
                     title: `工具执行失败：${plan.tool}`,
                     toolName: plan.tool,
                     input: effectivePlanInput,
-                    output: { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes, diagnosis },
+                    output: { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes, diagnosis, ...(inputFeedback || {}) },
                     errorMessage: toolErr.message,
                     status: 'error',
                     durationMs: Date.now() - startedAt,
@@ -854,7 +834,7 @@ const {
                         stepId: `${runId}:${step}`,
                         toolName: plan.tool,
                         input: effectivePlanInput,
-                        output: { error: toolErr.message, diagnosis },
+                        output: { error: toolErr.message, diagnosis, ...(inputFeedback || {}) },
                         policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(toolErr.code) ? 'denied' : 'allow',
                         status: 'error',
                         errorCategory: diagnosis.category,
@@ -872,20 +852,23 @@ const {
                     throw auditError;
                 }
                 if (toolErr.code === 'TOOL_DISCOVERY_NO_PROGRESS') {
-                    await require('../agent-discovery-progress').pauseForMissingTool({ updateRun, createAgentNotification }, runId, user.id, toolErr);
-                    return;
+                    throw toolErr;
                 }
                 if (step < sliceEndStep) await updateRun(runId, { status: 'replanning', updated_at: getBeijingTimestamp() });
             }
         }
 
         await assertRunNotCancelled(runId);
-        assertRunWithinBudget();
+        await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+        taskBudget.assertWithin();
         if (!stopReason && lastExecutedStep >= sliceEndStep) {
             const stepLimitError = Object.assign(new Error(`当前时间片已执行 ${maxSteps} 轮`), { code: 'AGENT_STEP_LIMIT' });
-            if (await continueRunFromCheckpoint({ run, runId, user, error: stepLimitError, reason: 'step_limit' })) return;
+            if (await continueRunFromCheckpoint({ run, runId, user, taskBudget, error: stepLimitError, reason: 'step_limit' })) return;
         }
-        const limitMessage = stopReason || `已达到最大执行轮次 ${maxSteps}，结果可能不完整。`;
+        const limitMessage = `本段执行已结束，累计使用 ${taskBudget.counts.steps}/${taskBudget.limits.max_steps} 轮；${stopReason || '已达到本段或累计轮次边界'}，结果可能不完整。`;
+        await setRunMetadata(runId, { budgetStop: taskBudget.stopSummary(taskBudget.counts.steps >= taskBudget.limits.max_steps ? 'AGENT_TOTAL_ROUND_LIMIT'
+            : taskBudget.progress.count <= taskBudget.segmentStartProgress ? 'AGENT_NO_PROGRESS' : 'AGENT_SEGMENT_LIMIT') });
+        taskBudget.phase = 'finalization';
         await insertStep(runId, (await listSteps(runId)).length + 1, {
             type: 'control',
             title: '已达到最大执行轮次',
@@ -959,6 +942,9 @@ const {
         }
         await assertRunNotCancelled(runId);
         answer = `注意：${limitMessage}\n\n${answer}`;
+        const partialVerification = await verifyOutcome(answer, true, limitMessage);
+        answer = require('../knowledge-output-guard').safeFinalAnswer(answer, partialVerification);
+        await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
         await updateRun(runId, {
             status: 'completed_with_errors',
             final_answer: answer,

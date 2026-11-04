@@ -280,7 +280,8 @@ function openOfficialWritingDrawer(view = 'suggestions') {
     renderOfficialWritingSuggestions();
     renderOfficialWritingReferences();
     renderOfficialWritingProofread();
-    if (tab === 'elements') hydrateOfficialWritingMetaForm();
+    if (tab === 'elements') { hydrateOfficialWritingMetaForm(); renderOfficialWritingAttachments(); }
+    setText('official-writing-standard-description', getOfficialWritingStandard() + ' · 基础检查规则 ' + officialWritingDocument.STANDARD_VERSION + '。检查范围：标题、占位、日期、表达及所选文种要素；请结合本单位要求核对。');
     if (tab === 'suggestions') {
         void window.Pivot.legacy.PivotAppModels?.refresh?.('official-writing-review', 'official-writing-review-model');
     }
@@ -473,6 +474,15 @@ function saveOfficialWritingVersion(stage = '') {
         createdAt: new Date().toISOString()
     });
     if (nameInput) nameInput.value = '';
+    const compact = sanitizeOfficialWritingState(officialWritingState);
+    if (!compact.versions.some(version => version.id === officialWritingState.versions[0]?.id)) {
+        officialWritingState.versions.shift();
+        showToast('本稿较大，无法保留完整历史版本；当前稿仍可保存，请导出备份留存。', 'warning');
+        return;
+    }
+    officialWritingState.versions = compact.versions;
+    officialWritingState.autoSaves = compact.autoSaves;
+    officialWritingState.materialVersions = compact.materialVersions;
     saveOfficialWritingState();
     renderOfficialWritingWorkspace();
     showToast(stageLabel ? `${stageLabel}已生成` : '版本已保存');
@@ -481,8 +491,12 @@ function saveOfficialWritingVersion(stage = '') {
 function loadOfficialWritingVersion(versionId) {
     const version = [...officialWritingState.versions, ...(officialWritingState.autoSaves || [])].find(item => item.id === versionId);
     if (!version) return;
+    recordOfficialWritingAutoSave({ force: true });
     pushOfficialWritingUndoSnapshot();
     setOfficialWritingTextareaValue('draft', version.draft || '');
+    if (document.getElementById('official-writing-restore-materials')?.checked && (Object.hasOwn(version, 'sourceRef') || typeof version.source === 'string')) {
+        setOfficialWritingTextareaValue('source', resolveOfficialWritingVersionSource(version));
+    }
     syncOfficialWritingStateFromInputs();
     renderOfficialWritingWorkspace();
     showToast('已载入版本到正文稿');

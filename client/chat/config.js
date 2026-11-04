@@ -262,6 +262,7 @@ async function checkLogin(hasRetried = false) {
 }
 
 function handleUnauthorized() {
+    window.Pivot?.moduleApi?.('apps.officialWriting')?.reset?.();
     currentUser = null;
     currentSessionId = null;
     localStorage.removeItem('pivot_token');

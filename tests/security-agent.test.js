@@ -82,6 +82,7 @@ function readAgentSourceBundle() {
         'agent-run-dag-focus.js',
         'agent-run-trace-view.js',
         'agent-run-detail.js',
+        'agent-run-detail-loader.js',
         'agent-run-realtime.js',
         'agent-run-actions.js',
         'agent-runs-list.js',
@@ -242,10 +243,10 @@ test('agent execution rounds support automatic mode defaults and mode-specific c
     assert.match(streamingSource, /roundsUsed\s*=\s*(?:step|lastStep|\w+)/);
     // v0.1.97 将 maxSteps 定义为单个执行时间片上限；续跑时从
     // roundsUsed 继续计数，因此循环终点是 sliceEndStep，而不是旧的 maxSteps。
-    assert.match(executionSource, /const sliceEndStep = stopReason \? roundsUsed : roundsUsed \+ maxSteps/);
+    assert.match(executionSource, /const sliceEndStep = stopReason \? roundsUsed : roundsUsed \+ taskBudget.remainingSegmentRounds/);
     assert.match(executionSource, /for \(let step = roundsUsed \+ 1; step <= sliceEndStep; step \+= 1\)/);
     assert.match(executionSource, /status: 'completed_with_errors'[\s\S]*error_message: limitMessage/);
-    assert.match(taskEditor, /最大执行轮次/);
+    assert.match(taskEditor, /单段执行轮次/);
     assert.match(taskEditor, /id="agent-max-steps"[^>]*placeholder="自动"/);
     assert.doesNotMatch(taskEditor, /id="agent-max-steps"[^>]*value="10"/);
 });
@@ -787,7 +788,8 @@ test('agent workflow workbench exposes preview and published-version run control
     assert.match(source, /payload\.workflowVersion = sourceMode === 'published' \? 'published' : 'current'/);
     assert.match(source, /workflowRunSource: sourceMode === 'published' \? 'published' : 'current'/);
     assert.match(source, /await window\.Pivot\.legacy\.openAgentRun\(data\.run\.id, \{ workflowPreview: true \}\)/);
-    assert.match(source, /function ensureAgentRunDetailModalVisible/);
+    assert.match(source, /moduleApi\('agent\.detailLoader'\)\.ensureVisible\(\)/);
+    assert.match(source, /if \(modal && modal\.parentElement !== document\.body\) document\.body\.appendChild\(modal\)/);
     assert.match(source, /function startAgentWorkflowPreviewPolling/);
     assert.match(source, /window\.Pivot\.legacy\.cancelAgentWorkflowPreviewRun/);
     assert.match(source, /function agentDagNodeReadableOutputMarkup/);

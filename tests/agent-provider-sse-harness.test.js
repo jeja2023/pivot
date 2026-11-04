@@ -16,6 +16,7 @@ test('知识任务在来源核验完成前不公开流式正文，撤权后只�
     const events = [];
     const updates = [];
     const deps = streamingDeps({ run, steps, events });
+    deps.publishUserEvent = (_id, type, payload) => events.push({ type, payload });
     deps.callModelStreamingWithTools = async (_model, _messages, _tools, options) => {
         options.onDelta({ content: '不应公开的资料正文', reasoning: '', partialToolCalls: [] });
         return { content: '不应公开的资料正文', hasToolCalls: false, toolCalls: [] };
@@ -41,6 +42,51 @@ test('streaming sampler merges UI updates and reserves one audit snapshot for co
     assert.equal(sampler.sampleAudit({ content: 'abcdefg' }, { now: 40 }).index, 3);
     assert.equal(sampler.sampleAudit({ content: 'abcdef', finishReason: 'stop' }, { completed: true, now: 50 }).index, 4);
     assert.equal(sampler.getAuditCount(), 4);
+});
+
+test('流式工具审批失效立即交还运行控制，不记作模型不支持工具或继续调用', async () => {
+    const run = { id: 'stale-approval-stream', user_id: 7, goal: '查询', max_steps: 3, run_mode: 'standard' };
+    for (const code of ['AGENT_APPROVAL_STALE', 'AGENT_APPROVAL_EXPIRED', 'AGENT_DISCOVERY_SCOPE_REVOKED']) {
+        const events = [], steps = [];
+        let calls = 0;
+        const deps = streamingDeps({ run, steps, events, maybePauseForApproval: async () => false,
+            executeToolByName: async () => { throw Object.assign(new Error('授权需要重新确认'), { code }); } });
+        deps.callModelStreamingWithTools = async () => { calls++; return { hasToolCalls: true, toolCalls: [{ id: 'health', name: 'system.health', arguments: {} }] }; };
+        await assert.rejects(tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id,
+            toolList: [{ name: 'system.health' }], plannerToolList: [{ name: 'system.health' }], deadline: Date.now() + 30000,
+            assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [] }, deps), error => error.code === code);
+        assert.equal(calls, 1);
+        assert.equal(events.some(event => event.type === 'model.native_tool_calls_fallback'), false);
+    }
+});
+
+test('流式读取后与验收期间撤权均阻断下一次模型请求或答案发布', async () => {
+    const row = { chunk_id: 1, doc_id: 2, citation_key: 'kb:4:v5:b6', content: '受限原始内容' };
+    const source = { chunkId: 1, legacyDocumentId: 2, citationKey: row.citation_key, contentDigest: require('../server/services/knowledge-tool-results').digest(row.content) };
+    const output = { knowledgeSourceVersion: 1, sources: [source], context: row.content };
+    for (const duringVerification of [false, true]) {
+        const run = { id: 'revoke-stream', user_id: 7, goal: '依据资料回答', max_steps: 3, run_mode: 'standard' };
+        let allowed = true, calls = 0;
+        const events = [], updates = [];
+        const deps = streamingDeps({ run, steps: [], events, maybePauseForApproval: async () => false,
+            executeToolByName: async () => { allowed = false; return output; } });
+        deps.knowledge = { readSourceChunks: async () => allowed ? [row] : [], validateCitationKeys: async () => true };
+        deps.updateRun = async (_id, patch) => updates.push(patch);
+        deps.publishUserEvent = (_id, type, payload) => events.push({ type, payload });
+        deps.verifyAgentOutcome = async () => { allowed = false; return { outcomeStatus: 'verified', hardFailures: [] }; };
+        deps.callModelStreamingWithTools = async () => {
+            calls++;
+            return duringVerification ? { content: row.content, hasToolCalls: false, toolCalls: [] }
+                : { content: '', hasToolCalls: true, toolCalls: [{ id: 'read', name: 'rag.search', arguments: { query: '制度' } }] };
+        };
+        await assert.rejects(tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id,
+            toolList: [{ name: 'rag.search' }], plannerToolList: [{ name: 'rag.search' }], deadline: Date.now() + 30000,
+            assertRunWithinBudget() {}, assertRunNotCancelled: async () => {},
+            observations: duringVerification ? [{ tool: 'rag.search', output }] : [] }, deps), error => error.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE');
+        assert.equal(calls, 1);
+        assert.equal(updates.some(patch => patch.final_answer), false);
+        assert.doesNotMatch(JSON.stringify(events), /受限原始内容/);
+    }
 });
 
 test('暂停和租约丢失不会触发原生工具降级，验收后的迟到结果不能覆盖暂停', async () => {
@@ -98,9 +144,12 @@ test('流式检查点恢复携带已完成工具结果和已应用指令，避�
     let input;
     const deps = streamingDeps({ run, steps: [], events: [] });
     deps.callModelStreamingWithTools = async (_model, messages) => { input = messages; return { content: '基于已完成检索给出结果', hasToolCalls: false, toolCalls: [] }; };
+    const row = { chunk_id: 1, doc_id: 2, citation_key: 'kb:4:v5:b6', content: '已检索到的真实资料' };
+    const source = { chunkId: 1, legacyDocumentId: 2, citationKey: row.citation_key, contentDigest: require('../server/services/knowledge-tool-results').digest(row.content) };
+    deps.knowledge = { readSourceChunks: async () => [row], validateCitationKeys: async () => true };
     const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], deadline: Date.now() + 30000,
         assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations: [
-            { step: 4, tool: 'rag.search', output: { content: '已检索到的真实资料', sources: ['制度'] } },
+            { step: 4, tool: 'rag.search', output: { knowledgeSourceVersion: 1, content: row.content, sources: [source] } },
             { type: 'agent_control', payload: { instruction: '仅汇总现有结果，不重复检索' }, restored: true }
         ] }, deps);
     assert.equal(result.roundsUsed, 5);

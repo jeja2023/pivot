@@ -47,7 +47,7 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
             { role: 'user', content: JSON.stringify({ contract, answer: String(answer).slice(0, 24000), verifiedArtifacts, observations: observations.slice(-16).map(item => ({ tool: item.tool || item.toolName || item.name, output: JSON.stringify(item.output || item).slice(0, 2400) })) }) }
         ];
         const usageRef = {};
-        const output = await (deps.callModelJson || callModelJson)(model, messages, { user, maxTokens: 800, temperature: 0, enableThinking: false, usageRef, signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, timeoutMs: 20000 });
+        const output = await (deps.callModelJson || callModelJson)(model, messages, { user, budget, maxTokens: 800, temperature: 0, enableThinking: false, usageRef, signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, timeoutMs: 20000 });
         const usage = !deps.callModelJson ? await recordAgentModelUsage(user, model, messages, output, 'chat_verification', run.id, { usageRef, budget, allowBudgetExceeded: true }) : null;
         signal?.throwIfAborted();
         if (usage?.budgetExceeded) return { passed: false, reason: 'budget_exceeded' };

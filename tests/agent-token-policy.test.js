@@ -99,7 +99,8 @@ test('复杂任务保留通用预算，知识问答仍服从管理员更低的�
         const options = { modelCfg: { context_window_tokens: 262144 }, ragEnabled: true, content: '检索资料并交付文件',
             decision: { action: 'agent_run', requiredCapabilities: ['knowledge.search', 'artifact.deliver'] } };
         assert.equal(resolveChatAgentBudget(options).profile, 'standard');
-        assert.equal(resolveChatAgentBudget(options).budget.max_steps, 30);
+        assert.equal(resolveChatAgentBudget(options).segmentMaxSteps, 30);
+        assert.equal(resolveChatAgentBudget(options).budget.max_steps, 60);
         assert.equal(resolveChatAgentBudget({ ...options, mcpEnabled: true }).profile, 'standard');
     });
     const original = process.env.AGENT_TASK_MAX_TOKENS_TOTAL;

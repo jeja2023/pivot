@@ -33,51 +33,142 @@ function normalizeAttachmentSnapshot(items = []) {
     }).filter(Boolean);
 }
 
+function getAttachmentFormatBadge(filename = '', mimeType = '') {
+    const rawName = String(filename || '').split('?')[0].split('#')[0];
+    const ext = rawName.includes('.') ? rawName.split('.').pop().toLowerCase() : '';
+    const mime = String(mimeType || '').toLowerCase();
+
+    if (/^(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(ext) || mime.startsWith('image/')) {
+        return { text: ext ? ext.toUpperCase() : 'IMG', type: 'image' };
+    }
+    if (/^(docx?|dotx?)$/.test(ext) || mime.includes('word') || mime === 'application/msword') {
+        return { text: ext ? ext.toUpperCase() : 'DOC', type: 'doc' };
+    }
+    if (/^pdf$/.test(ext) || mime === 'application/pdf') {
+        return { text: 'PDF', type: 'pdf' };
+    }
+    if (/^(xlsx?|xls|csv|xlsm|tsv)$/.test(ext) || mime.includes('excel') || mime.includes('spreadsheet')) {
+        return { text: ext ? ext.toUpperCase() : 'XLS', type: 'excel' };
+    }
+    if (/^(pptx?|ppt|potx?)$/.test(ext) || mime.includes('powerpoint') || mime.includes('presentation')) {
+        return { text: ext ? ext.toUpperCase() : 'PPT', type: 'ppt' };
+    }
+    if (/^(txt|text|log|ini|conf)$/.test(ext) || mime.startsWith('text/plain')) {
+        return { text: ext ? ext.toUpperCase() : 'TXT', type: 'text' };
+    }
+    if (/^(md|markdown)$/.test(ext)) {
+        return { text: 'MD', type: 'md' };
+    }
+    if (/^(zip|rar|7z|tar|gz|bz2|xz)$/.test(ext) || mime.includes('zip') || mime.includes('compressed') || mime.includes('archive')) {
+        return { text: ext ? ext.toUpperCase() : 'ZIP', type: 'zip' };
+    }
+    if (/^(js|ts|jsx|tsx|py|java|c|cpp|cs|go|rs|php|rb|swift|kt|sh|bat|cmd|sql|html?|css|json|xml|yaml|yml)$/.test(ext)) {
+        return { text: ext.toUpperCase().slice(0, 4), type: 'code' };
+    }
+    if (ext && ext.length <= 4) {
+        return { text: ext.toUpperCase(), type: 'other' };
+    }
+    return { text: 'FILE', type: 'other' };
+}
+
 function renderMessageAttachmentTiles(attachments = []) {
-    return attachments.map(file => {
-        const safeName = escapeCodeHtml(file.name);
-        const safeAttrName = escapeAttrValue(file.name);
-        const safeUrl = escapeAttrValue(file.url);
-        const isImage = typeof window.Pivot.legacy.isChatImageAttachment === 'function'
-            ? window.Pivot.legacy.isChatImageAttachment(file)
-            : String(file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)(?:[?#].*)?$/i.test(file.url);
-        if (isImage) {
-            return `
-                <figure class="message-attachment image-attachment">
-                    <img class="message-image" src="${safeUrl}" alt="${safeAttrName}" loading="lazy">
-                    <figcaption>${safeName}</figcaption>
-                </figure>
-            `;
+    if (!Array.isArray(attachments) || attachments.length === 0) return '';
+    const resolveBadge = typeof getAttachmentFormatBadge === 'function'
+        ? getAttachmentFormatBadge
+        : (window.Pivot?.legacy?.getAttachmentFormatBadge || (() => ({ text: 'FILE', type: 'other' })));
+
+    return `
+        <div class="message-attachments-group message-attachments-files" data-attachment-count="${attachments.length}">
+            ${attachments.map(file => {
+                const safeName = escapeCodeHtml(file.name);
+                const safeAttrName = escapeAttrValue(file.name);
+                const safeUrl = escapeAttrValue(file.url);
+                const isImage = typeof window.Pivot.legacy.isChatImageAttachment === 'function'
+                    ? window.Pivot.legacy.isChatImageAttachment(file)
+                    : String(file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|avif)(?:[?#].*)?$/i.test(file.url);
+                const badge = resolveBadge(file.name, isImage ? 'image' : file.type);
+                return `
+                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="doc-card-link" title="${safeAttrName}" data-attachment-preview data-attachment-url="${safeUrl}" data-attachment-name="${safeAttrName}" data-attachment-type="${escapeAttrValue(isImage ? 'image' : (file.type || ''))}">
+                        <div class="doc-card">
+                            <span class="doc-format-tag doc-format-${escapeAttrValue(badge.type)}">${escapeCodeHtml(badge.text)}</span>
+                            <div class="doc-info"><div class="doc-name" title="${safeAttrName}">${safeName}</div></div>
+                        </div>
+                    </a>
+                `;
+            }).join('')}
+        </div>
+    `;
+}
+
+function extractAttachmentsFromMarkdown(content = '') {
+    const raw = String(content || '');
+    const attachments = [];
+    const ATTACHMENT_LINK_RE = /(?:!\[([^\]]*)\]\(([^)]+)\)|\[(?:附件:\s*|文件:\s*)?([^\]]+)\]\(([^)]+)\))/g;
+    let match;
+    while ((match = ATTACHMENT_LINK_RE.exec(raw)) !== null) {
+        const full = match[0];
+        const isImg = full.startsWith('!');
+        const name = isImg ? match[1] : match[3];
+        const url = isImg ? match[2] : match[4];
+        const cleanName = String(name || '').replace(/\\([\[\]])/g, '$1').trim();
+        const cleanUrl = String(url || '').trim();
+        const isDoc = /\.(docx?|pdf|xlsx?|xls|csv|pptx?|ppt|txt|log|md|markdown|zip|rar|7z|tar|gz|json|ya?ml|py|js|ts|sh|sql)$/i.test(cleanName)
+            || /\.(docx?|pdf|xlsx?|xls|csv|pptx?|ppt|txt|log|md|markdown|zip|rar|7z|tar|gz|json|ya?ml|py|js|ts|sh|sql)$/i.test(cleanUrl)
+            || full.includes('附件:') || full.includes('文件:');
+        const isImage = isImg || String(name || '').startsWith('图片') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(cleanName) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(cleanUrl);
+        if (cleanUrl && (isDoc || isImage)) {
+            attachments.push({
+                name: cleanName || (isImage ? '图片' : '附件'),
+                url: cleanUrl,
+                type: isImage ? 'image' : '',
+                markdown: full
+            });
         }
-        return `
-            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="doc-card-link" data-attachment-preview data-attachment-url="${safeUrl}" data-attachment-name="${safeAttrName}" data-attachment-type="${escapeAttrValue(file.type)}">
-                <div class="doc-card">
-                    <div class="doc-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-                    <div class="doc-info"><div class="doc-name">${safeName}</div><div class="doc-action">点击下载/预览</div></div>
-                </div>
-            </a>
-        `;
-    }).join('');
+    }
+    return attachments;
 }
 
 function stripSnapshotAttachmentMarkdown(content, attachments = []) {
     let output = String(content || '');
     for (const attachment of attachments) {
-        const markdown = String(attachment.markdown || '').trim();
-        if (!markdown) continue;
-        output = output.replace(markdown, '');
+        if (attachment.markdown) {
+            output = output.replace(attachment.markdown, '');
+        }
+        if (attachment.url) {
+            const escapedUrl = String(attachment.url).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`(?:\\[[^\\]]*\\]|!\\[[^\\]]*\\])\\(${escapedUrl}\\)`, 'g');
+            output = output.replace(pattern, '');
+        }
     }
+    output = output.replace(/\*?本审计包由\s*Pivot\s*自动化控制面于[^*]*?受控于平台访问审计。\*?/g, '');
     return output.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function buildUserMessageHtml(content, stats = null) {
-    const attachments = normalizeAttachmentSnapshot(stats?.attachments || stats?.pendingAttachments || []);
+    let attachments = normalizeAttachmentSnapshot(stats?.attachments || stats?.pendingAttachments || []);
+    const userContent = getDisplayContent('user', content);
+
+    const extracted = extractAttachmentsFromMarkdown(userContent);
+    if (extracted.length > 0) {
+        if (attachments.length === 0) {
+            attachments = extracted;
+        } else {
+            const knownUrls = new Set(attachments.map(a => a.url));
+            for (const item of extracted) {
+                if (!knownUrls.has(item.url)) {
+                    attachments.push(item);
+                    knownUrls.add(item.url);
+                }
+            }
+        }
+    }
+
     if (attachments.length === 0) return renderMarkdown(content);
 
-    const textContent = stripSnapshotAttachmentMarkdown(getDisplayContent('user', content), attachments);
+    const textContent = stripSnapshotAttachmentMarkdown(userContent, attachments);
     const textHtml = textContent ? renderMarkdown(textContent) : '';
     const attachmentsHtml = renderMessageAttachmentTiles(attachments);
-    return `<div class="message-user-body">${textHtml}${attachmentsHtml}</div>`;
+    return `<div class="message-user-body">${attachmentsHtml}${textHtml}</div>`;
 }
 
 function attachMessageImageLoadPinning(root) {
