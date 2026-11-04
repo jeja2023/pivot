@@ -150,12 +150,18 @@ async function createRendition(params = {}) {
 }
 
 /** 读取 rendition 并校验归属：租户必须匹配，且 Artifact 必须属于当前用户。 */
-async function getRenditionForUser(renditionId, user) {
+async function getRenditionForUser(renditionId, user, options = {}) {
     const tenant = await assertTenantContext(user);
     const rendition = await queryOne('SELECT * FROM agent_artifact_renditions WHERE id = ? AND tenant_id = ?', [renditionId, tenant.tenantId]);
     if (!rendition) return null;
-    const artifact = await getAgentArtifactForUser(rendition.artifact_id, user);
-    if (!artifact) return null;
+    const artifact = await getAgentArtifactForUser(rendition.artifact_id, user, options);
+    if (!artifact) {
+        if (options.includeExpired && rendition.status === 'expired') {
+            const owned = await getAgentArtifactForUser(rendition.artifact_id, user, { includeDeleted: true });
+            if (owned) return rendition;
+        }
+        return null;
+    }
     return rendition;
 }
 
@@ -174,7 +180,7 @@ async function listRenditionsForArtifact(artifactId, user) {
 
 /** 签发一次性下载令牌。令牌本体只返回一次，库中只保存其 sha256。 */
 async function issueDownloadToken(user, renditionId, options = {}) {
-    const rendition = await getRenditionForUser(renditionId, user);
+    const rendition = await getRenditionForUser(renditionId, user, { includeExpired: true });
     if (!rendition) return null;
     if (rendition.status !== 'ready') throw renditionError('该渲染产物不可下载。', 'ARTIFACT_RENDITION_NOT_READY', 409);
     const token = crypto.randomBytes(32).toString('hex');

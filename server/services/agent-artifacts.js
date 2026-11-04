@@ -59,7 +59,8 @@ async function listAgentArtifacts(user, limit = 30) {
     return visible;
 }
 
-async function getAgentArtifactForUser(artifactId, user) {
+async function getAgentArtifactForUser(artifactId, user, options = {}) {
+    const includeDeleted = options.includeDeleted === true;
     const artifact = await queryOne(`
         SELECT a.*, r.title AS run_title, r.status AS run_status,
                v.version AS current_version,
@@ -67,7 +68,7 @@ async function getAgentArtifactForUser(artifactId, user) {
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.id = ? AND a.user_id = ? AND a.status <> 'deleted'
+        WHERE a.id = ? AND a.user_id = ? ${includeDeleted ? '' : "AND a.status <> 'deleted'"}
     `, [artifactId, user.id]);
     if (artifact && !(await require('./knowledge-run-access').inspectRunKnowledgeAccess(artifact.run_id, user)).current) return null;
     return artifact;
