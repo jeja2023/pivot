@@ -1184,7 +1184,7 @@ body.dark-mode .official-writing-model-selector select,
     background-color: var(--bg-dark-card, #1e293b);
     border-color: var(--border-dark, rgba(148, 163, 184, 0.24));
     color: var(--text-dark, #f1f5f9);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-dark-sm, 0 1px 3px rgba(0, 0, 0, 0.2));
 }
 
 body.dark-mode .official-writing-home-actions .btn-secondary,
@@ -1205,7 +1205,7 @@ body.dark-mode .official-writing-command-menu-panel,
 .dark-mode .official-writing-command-menu-panel {
     background: var(--bg-dark-card, #1e293b);
     border-color: var(--border-dark, rgba(148, 163, 184, 0.2));
-    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--shadow-dark, 0 16px 36px rgba(0, 0, 0, 0.45));
 }
 
 body.dark-mode .official-writing-command-menu-item,
@@ -1226,9 +1226,9 @@ body.dark-mode .official-writing-detail-title strong,
 
 body.dark-mode .official-writing-stat-badge,
 .dark-mode .official-writing-stat-badge {
-    background: rgba(16, 163, 127, 0.16);
-    border-color: rgba(16, 163, 127, 0.35);
-    color: #34d399;
+    background: var(--primary-badge-dark-bg, rgba(16, 163, 127, 0.16));
+    border-color: var(--primary-badge-dark-border, rgba(16, 163, 127, 0.35));
+    color: var(--primary-badge-dark-color, #34d399);
 }
 
 body.dark-mode .official-writing-stat-detail,
