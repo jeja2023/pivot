@@ -364,8 +364,9 @@ function toggleOfficialWritingLeftRail() {
 }
 
 function closeOfficialWritingCommandMenu() {
-    const menu = document.getElementById('official-writing-command-more-menu');
-    if (menu) menu.open = false;
+    document.querySelectorAll('.official-writing-command-menu[open]').forEach(menu => {
+        menu.open = false;
+    });
 }
 
 function setOfficialWritingMaterialTab(tab) {

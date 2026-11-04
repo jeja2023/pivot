@@ -7,22 +7,26 @@ function getOfficialWritingOwner() {
 }
 
 function createEmptyOfficialWritingDoc() {
-    return { id: generateOfficialWritingDocId(), title: '新公文', manualTitle: false, updatedAt: new Date().toISOString(),
-        version: 0, _loaded: true, _owner: getOfficialWritingOwner(), state: createOfficialWritingState() };
+    return {
+        id: generateOfficialWritingDocId(), title: '新公文', manualTitle: false, updatedAt: new Date().toISOString(),
+        version: 0, _loaded: true, _owner: getOfficialWritingOwner(), state: createOfficialWritingState()
+    };
 }
 
 function purgeLegacyOfficialWritingStorage() {
     if (officialWritingLegacyStoragePurged) return;
     officialWritingLegacyStoragePurged = true;
-    try { localStorage.removeItem(OFFICIAL_WRITING_LIBRARY_KEY); localStorage.removeItem(OFFICIAL_WRITING_STORAGE_KEY); } catch (_) {}
+    try { localStorage.removeItem(OFFICIAL_WRITING_LIBRARY_KEY); localStorage.removeItem(OFFICIAL_WRITING_STORAGE_KEY); } catch (_) { }
 }
 
 function normalizeOfficialWritingServerDocument(doc) {
     if (!doc?.id) return null;
-    return { id: String(doc.id), title: String(doc.title || '未命名公文'), manualTitle: doc.manualTitle === true,
+    return {
+        id: String(doc.id), title: String(doc.title || '未命名公文'), manualTitle: doc.manualTitle === true,
         updatedAt: String(doc.updatedAt || new Date().toISOString()), createdAt: doc.createdAt,
         version: Number(doc.version || 1), summary: doc.summary || {}, artifactId: doc.artifactId || '',
-        _owner: getOfficialWritingOwner(), _loaded: !!doc.state, ...(doc.state ? { state: sanitizeOfficialWritingState(doc.state) } : {}) };
+        _owner: getOfficialWritingOwner(), _loaded: !!doc.state, ...(doc.state ? { state: sanitizeOfficialWritingState(doc.state) } : {})
+    };
 }
 
 function ensureOfficialWritingActiveDocument() {
@@ -39,8 +43,10 @@ function getActiveOfficialWritingDoc() {
 
 function computeOfficialWritingDocFingerprint(doc) {
     if (!doc?.state) return '';
-    return officialWritingDocument.digest(JSON.stringify({ title: doc.title, manualTitle: doc.manualTitle === true,
-        state: { ...sanitizeOfficialWritingState(doc.state), artifactId: '' } }));
+    return officialWritingDocument.digest(JSON.stringify({
+        title: doc.title, manualTitle: doc.manualTitle === true,
+        state: { ...sanitizeOfficialWritingState(doc.state), artifactId: '' }
+    }));
 }
 
 function isOfficialWritingStateEmpty(state) {
@@ -57,8 +63,10 @@ async function loadOfficialWritingState() {
     const requestId = ++officialWritingLoadSequence;
     officialWritingUiState.libraryLoading = true;
     setText('official-writing-library-status', '正在加载公文列表…');
-    const params = new URLSearchParams({ view: 'summary', page: String(officialWritingUiState.libraryPage || 1), limit: '10',
-        query: officialWritingUiState.libraryQuery || '', docType: officialWritingUiState.libraryType || '', sort: officialWritingUiState.librarySort || 'updated' });
+    const params = new URLSearchParams({
+        view: 'summary', page: String(officialWritingUiState.libraryPage || 1), limit: '10',
+        query: officialWritingUiState.libraryQuery || '', docType: officialWritingUiState.libraryType || '', sort: officialWritingUiState.librarySort || 'updated'
+    });
     try {
         const res = await apiFetch(`${OFFICIAL_WRITING_DOCUMENTS_API}?${params}`);
         if (!res.ok) throw new Error('加载公文列表失败，请检查网络后重试。');
@@ -77,7 +85,7 @@ async function loadOfficialWritingState() {
         officialWritingUiState.libraryTotal = Number(data.total || 0);
         officialWritingUiState.libraryPage = Number(data.page || 1);
         ensureOfficialWritingActiveDocument();
-        setText('official-writing-library-status', data.total ? `共 ${data.total} 篇，按需加载正文` : '暂无公文，可创建或导入备份');
+        setText('official-writing-library-status', '');
         renderOfficialWritingDocList();
         return true;
     } catch (error) {
@@ -213,7 +221,11 @@ function renderOfficialWritingSaveStatus() {
     const dirty = computeOfficialWritingDocFingerprint(doc) !== doc._savedFingerprint && (doc.manualTitle || !isOfficialWritingStateEmpty(doc.state));
     const status = doc._saveStatus === 'saving' ? 'saving' : ['error', 'conflict'].includes(doc._saveStatus) ? doc._saveStatus : dirty ? 'dirty' : 'saved';
     const labels = { saving: '保存中…', dirty: '有修改，等待保存', saved: doc.version ? `已保存 ${formatVersionTime(doc.updatedAt)}` : '尚未创建', error: '保存失败，正文已保留', conflict: '存在其他窗口的新版本，当前正文已保留' };
-    setText('official-writing-save-status', labels[status]);
+    const statusEl = document.getElementById('official-writing-save-status');
+    if (statusEl) {
+        statusEl.textContent = labels[status] || '';
+        statusEl.setAttribute('data-status', status);
+    }
     const retry = document.getElementById('official-writing-retry-save-btn');
     if (retry) { retry.hidden = status !== 'error'; retry.classList.toggle('hidden', status !== 'error'); }
     const conflict = document.getElementById('official-writing-conflict-actions');
@@ -223,8 +235,10 @@ function renderOfficialWritingSaveStatus() {
 function exportOfficialWritingBackup() {
     syncOfficialWritingStateFromInputs();
     const doc = getActiveOfficialWritingDoc();
-    downloadOfficialWritingFile(`${doc?.title || '公文'}-备份.json`, JSON.stringify({ format: 'pivot-official-writing', version: 2,
-        title: doc?.title, exportedAt: new Date().toISOString(), state: sanitizeOfficialWritingState(officialWritingState) }, null, 2), 'application/json;charset=utf-8');
+    downloadOfficialWritingFile(`${doc?.title || '公文'}-备份.json`, JSON.stringify({
+        format: 'pivot-official-writing', version: 2,
+        title: doc?.title, exportedAt: new Date().toISOString(), state: sanitizeOfficialWritingState(officialWritingState)
+    }, null, 2), 'application/json;charset=utf-8');
     showToast('已导出当前公文备份');
 }
 

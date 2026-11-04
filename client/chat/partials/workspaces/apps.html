@@ -35,8 +35,10 @@
                                     <button id="official-writing-refresh-docs-btn" class="btn-secondary" type="button">刷新</button>
                                 </div>
                             </div>
-                            <p id="official-writing-library-status" role="status" aria-live="polite"></p>
-                            <div id="official-writing-home-summary" class="official-writing-home-summary regulations-summary"></div>
+                            <div class="official-writing-stat-bar">
+                                <p id="official-writing-library-status" class="official-writing-library-status" role="status" aria-live="polite"></p>
+                                <div id="official-writing-home-summary" class="official-writing-home-summary regulations-summary"></div>
+                            </div>
                             <div class="table-container workspace-table-wrap official-writing-doc-table-wrap">
                                 <table class="data-table official-writing-doc-table">
                                     <thead>
@@ -154,13 +156,19 @@
                                 <button id="official-writing-open-draft-modal-btn" class="btn-primary official-writing-command-action" type="button">AI全文起草</button>
                                 <button id="official-writing-review-suggestions-btn" class="btn-secondary official-writing-command-action" type="button">审校建议</button>
                                 <button id="official-writing-toggle-left-btn" class="btn-secondary official-writing-command-action" type="button" aria-pressed="false">写作资源</button>
-                                <details class="official-writing-command-menu"><summary class="btn-secondary">更多</summary><div class="official-writing-command-menu-panel"><button id="official-writing-undo-btn" class="btn-secondary" type="button" disabled title="撤销 Ctrl+Z">撤销</button><button id="official-writing-redo-btn" class="btn-secondary" type="button" disabled title="重做 Ctrl+Y">重做</button>
-                                    <button id="official-writing-elements-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="elements">公文设置与发文要素</button>
-                                    <button id="official-writing-versions-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="versions">历史版本</button>
-                                    <button id="official-writing-references-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="references">材料来源</button>
-                                    <button id="official-writing-compliance-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="compliance">规范检查与说明</button>
-                                    <button id="official-writing-comments-toggle-btn" class="btn-secondary" type="button" data-official-writing-drawer-tab="comments">批注</button><button id="official-writing-backup-btn" class="btn-secondary" type="button">导出公文备份</button>
-                                </div></details>
+                                <details id="official-writing-command-extra-menu" class="official-writing-command-menu">
+                                    <summary class="btn-secondary official-writing-command-action official-writing-command-more-trigger" aria-label="展开更多操作">更多</summary>
+                                    <div class="official-writing-command-menu-panel" role="menu" aria-label="更多操作">
+                                        <button id="official-writing-undo-btn" class="btn-secondary official-writing-command-menu-item" type="button" disabled title="撤销 Ctrl+Z">撤销</button>
+                                        <button id="official-writing-redo-btn" class="btn-secondary official-writing-command-menu-item" type="button" disabled title="重做 Ctrl+Y">重做</button>
+                                        <button id="official-writing-elements-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="elements">公文设置与发文要素</button>
+                                        <button id="official-writing-versions-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="versions">历史版本</button>
+                                        <button id="official-writing-references-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="references">材料来源</button>
+                                        <button id="official-writing-compliance-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="compliance">规范检查与说明</button>
+                                        <button id="official-writing-comments-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="comments">批注</button>
+                                        <button id="official-writing-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出公文备份</button>
+                                    </div>
+                                </details>
                                 <span id="official-writing-ai-indicator" class="official-writing-ai-indicator hidden" role="status" aria-live="polite"></span>
                                 <details id="official-writing-command-more-menu" class="official-writing-command-menu">
                                     <summary class="btn-secondary official-writing-command-action official-writing-command-more-trigger" aria-label="展开导出操作">导出</summary>

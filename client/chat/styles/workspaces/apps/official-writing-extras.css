@@ -662,7 +662,10 @@
 .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-title {
     flex: 1 1 220px;
     min-width: 150px;
-    gap: 0;
+    gap: 3px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header .official-writing-status-metrics {
@@ -1166,7 +1169,77 @@
 .official-writing-editable-surface[data-editing="1"] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .official-writing-home-actions { flex-wrap: wrap; }
 .official-writing-home-actions > .form-input { width: auto; max-width: 240px; }
-#official-writing-save-status { color: var(--text-muted); font-size: inherit; }
+
+/* 深色模式下公文列表与工具栏控件适配 */
+body.dark-mode .official-writing-home-actions .form-input,
+body.dark-mode #official-writing-library-query,
+body.dark-mode #official-writing-library-type,
+body.dark-mode #official-writing-library-sort,
+body.dark-mode .official-writing-model-selector select,
+.dark-mode .official-writing-home-actions .form-input,
+.dark-mode #official-writing-library-query,
+.dark-mode #official-writing-library-type,
+.dark-mode #official-writing-library-sort,
+.dark-mode .official-writing-model-selector select {
+    background-color: var(--bg-dark-card, #1e293b);
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.24));
+    color: var(--text-dark, #f1f5f9);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+body.dark-mode .official-writing-home-actions .btn-secondary,
+body.dark-mode .official-writing-detail-header #official-writing-back-to-library-btn,
+.dark-mode .official-writing-home-actions .btn-secondary,
+.dark-mode .official-writing-detail-header #official-writing-back-to-library-btn {
+    background: var(--bg-dark-card, #1e293b);
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.24));
+    color: var(--text-dark, #f1f5f9);
+}
+
+body.dark-mode .official-writing-home-toolbar,
+.dark-mode .official-writing-home-toolbar {
+    border-bottom-color: var(--border-dark, rgba(148, 163, 184, 0.2));
+}
+
+body.dark-mode .official-writing-command-menu-panel,
+.dark-mode .official-writing-command-menu-panel {
+    background: var(--bg-dark-card, #1e293b);
+    border-color: var(--border-dark, rgba(148, 163, 184, 0.2));
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+body.dark-mode .official-writing-command-menu-item,
+.dark-mode .official-writing-command-menu-item {
+    color: var(--text-dark, #f1f5f9);
+}
+
+body.dark-mode .official-writing-command-menu-item:hover:not(:disabled),
+.dark-mode .official-writing-command-menu-item:hover:not(:disabled) {
+    background: var(--bg-dark-hover, #334155);
+    color: var(--primary-light, #34d399);
+}
+
+body.dark-mode .official-writing-detail-title strong,
+.dark-mode .official-writing-detail-title strong {
+    color: var(--text-dark-head, #f8fafc);
+}
+
+body.dark-mode .official-writing-stat-badge,
+.dark-mode .official-writing-stat-badge {
+    background: rgba(16, 163, 127, 0.16);
+    border-color: rgba(16, 163, 127, 0.35);
+    color: #34d399;
+}
+
+body.dark-mode .official-writing-stat-detail,
+.dark-mode .official-writing-stat-detail {
+    color: var(--text-dark, #cbd5e1);
+}
+
+body.dark-mode .official-writing-stat-detail b,
+.dark-mode .official-writing-stat-detail b {
+    color: var(--text-dark-head, #f8fafc);
+}
 .official-writing-preview-modal { width: min(1100px, 95vw); max-height: 90vh; display: flex; flex-direction: column; }
 .official-writing-preview-modal .workspace-modal-body { overflow: auto; min-height: 0; padding: 16px 20px; }
 .official-writing-preview-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

@@ -49,7 +49,15 @@ function getOfficialWritingLibraryPageInfo(total) {
 }
 
 function renderOfficialWritingHomeSummary(_docs, pageDocs) {
-    setText('official-writing-home-summary', '共 ' + officialWritingUiState.libraryTotal + ' 篇公文 · 本页 ' + pageDocs.length + ' 篇');
+    const summaryEl = document.getElementById('official-writing-home-summary');
+    if (!summaryEl) return;
+    const total = Number(officialWritingUiState.libraryTotal || 0);
+    const pageLength = Array.isArray(pageDocs) ? pageDocs.length : 0;
+    if (total === 0) {
+        PivotSafeHtml.setHtml(summaryEl, '<span class="official-writing-stat-badge empty">暂无公文</span><span class="official-writing-stat-hint">可点击右上角“创建公文”或“导入备份”开始写作</span>');
+        return;
+    }
+    PivotSafeHtml.setHtml(summaryEl, `<span class="official-writing-stat-badge">共 <b>${total}</b> 篇公文</span><span class="official-writing-stat-detail">本页 <b>${pageLength}</b> 篇</span><span class="official-writing-stat-hint">· 按需加载正文</span>`);
 }
 
 function renderOfficialWritingDocTableRows(docs, startIndex = 0) {

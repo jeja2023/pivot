@@ -392,7 +392,7 @@ function bindAppsWorkbenchEvents() {
         surface?.addEventListener('select', handleOfficialWritingSelectionChange);
     });
     panel.addEventListener('click', event => {
-        const commandMenu = event.target.closest('#official-writing-command-more-menu');
+        const commandMenu = event.target.closest('.official-writing-command-menu');
         if (!commandMenu) closeOfficialWritingCommandMenu();
         const commandMenuItem = event.target.closest('.official-writing-command-menu-item');
         const selectionAction = event.target.closest('[data-official-writing-selection-action]');
