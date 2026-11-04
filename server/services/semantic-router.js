@@ -293,6 +293,7 @@ function buildRouteMetadata(plan = {}) {
             toolIntent: plan.taskState.toolIntent || {}
         } : null,
         rag: {
+            ...(plan.rag?.knowledgeEvidence ? { knowledgeEvidence: plan.rag.knowledgeEvidence } : {}),
             action: String(plan.rag?.action || 'skip'),
             confidence: Number(plan.rag?.confidence || 0),
             reasonCode: String(plan.rag?.reasonCode || ''),

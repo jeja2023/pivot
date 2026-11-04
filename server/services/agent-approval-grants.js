@@ -31,7 +31,8 @@ function findApprovalGrant(run, toolName, key, input) {
     const grants = metadataOf(run).approvalGrants || [];
     return Array.isArray(grants) ? grants.find(grant => grant && !grant.consumedAt && grant.tool === toolName
         && approvalExpiryMs(grant.expiresAt) > Date.now()
-        && (grant.rememberForRun === true || (String(grant.key || '') === String(key || '') && approvalInputMatches(grant, input)))) || null : null;
+        && (grant.rememberForRun === true && (!grant.binding || approvalInputMatches(grant, input))
+            || (String(grant.key || '') === String(key || '') && approvalInputMatches(grant, input)))) || null : null;
 }
 
 function resolveApprovalKey(run, toolName, input, proposedKey = '') {

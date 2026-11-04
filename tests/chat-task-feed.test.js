@@ -54,6 +54,7 @@ test('历史 UUID 产物与缺少版本指针字段仍能读取执行结果，�
 
 test('文件列表单独读取失败不会阻断任务状态、执行记录或停止能力', async () => {
     const result = await getChatTaskFeed('task-with-file-error', { id: 1 }, {}, {
+        inspectRunKnowledgeAccess: async () => ({ current: true }),
         resolveTenantContext: async () => ({ tenantId: 1, resolvable: true }),
         repository: {
             getTaskSnapshot: async () => ({ id: 'task-with-file-error', user_id: 1, status: 'running', event_seq: 1, has_tool_events: true }),

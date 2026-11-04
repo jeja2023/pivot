@@ -247,6 +247,7 @@ async function buildDagResumeSpec(originalRun, startNodeId = '', user = null) {
             reusable[node.id] = {
                 status: previous.status,
                 input: previous.input,
+                knowledge_evidence: previous.knowledge_evidence,
                 output: previous.output,
                 error: previous.error_message || '',
                 reusedFromRunId: originalRun.id

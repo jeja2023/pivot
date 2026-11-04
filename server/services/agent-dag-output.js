@@ -33,6 +33,7 @@ function preparePersistedDagOutput(value, options = {}) {
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     if (!rows.length) {
         const truncated = {
+            ...(value?.knowledgeEvidence ? { knowledgeEvidence: value.knowledgeEvidence } : {}),
             __partial: true,
             originalChars: text.length,
             text: `${text.slice(0, maxChars)}\n...[truncated]`,

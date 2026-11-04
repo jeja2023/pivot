@@ -264,6 +264,7 @@ async function listAgentCheckpoints(runId, options = {}) {
 
 async function listAgentCheckpointsForUser(runId, user, options = {}) {
     const run = await queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, user.id]);
+    if (run) await require('./knowledge-run-access').assertRunKnowledgeAccess(runId, user);
     return run ? await listAgentCheckpoints(runId, { ...options, user, hydrateOutput: true }) : null;
 }
 

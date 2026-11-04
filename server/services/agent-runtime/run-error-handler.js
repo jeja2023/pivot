@@ -43,6 +43,12 @@ function createAgentRunErrorHandler(deps = {}) {
         }
         // 暂停、审批、提交和终态已经接管控制权，旧执行器的迟到异常不能重新排队。
         if (TERMINAL_STATUSES.has(currentStatus) || ['needs_input', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit'].includes(currentStatus)) return;
+        if (['KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_STALE', 'AGENT_APPROVAL_EXPIRED'].includes(e.code)) {
+            await updateRun(runId, { status: 'needs_input', final_answer: '', error_message: e.message, updated_at: getBeijingTimestamp() });
+            await insertStep(runId, (await listSteps(runId)).length + 1, { type: 'control', title: '资料或授权需要重新确认',
+                status: 'error', output: require('../tool-chain-status').failureStage(e) });
+            return;
+        }
         if (e.code === 'AGENT_BUDGET_EXCEEDED' || e.code === 'AGENT_TIMEOUT') {
             if (e.code === 'AGENT_TIMEOUT' && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, error: e, reason: 'timeout' })) {
                 return;

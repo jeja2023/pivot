@@ -34,6 +34,7 @@ async function getAgentQualityDashboard(user, options = {}) {
     const total = Number(runs?.total || 0);
     const verificationTotal = Number(verifications?.total || 0);
     return {
+        toolChain: await require('./tool-chain-metrics').getToolChainMetrics(user, { days }),
         generatedAt: getBeijingTimestamp(),
         days,
         tenantId,

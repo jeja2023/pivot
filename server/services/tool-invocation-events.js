@@ -48,7 +48,7 @@ async function recordToolInvocationEvent(data = {}, deps = {}) {
                 policy_decision, policy_reason_codes, approval_id, source, request_digest, input_ref, output_ref,
                 output_digest, attempt, queue_ms, network_ms, execution_ms, total_ms, status, error_class,
                 error_code, retryable, cancelled, input_tokens, output_tokens, estimated_cost, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             id,
             String(data.traceId || data.trace_id || '').slice(0, 128),
@@ -66,7 +66,7 @@ async function recordToolInvocationEvent(data = {}, deps = {}) {
             String(data.toolName || data.tool_name || '').slice(0, 320),
             String(data.definitionDigest || data.definition_digest || '').slice(0, 128),
             String(data.policyDecision || data.policy_decision || (error ? 'denied' : 'allow')).slice(0, 32),
-            JSON.stringify(normalizedReasonCodes(data.reasonCodes || data.reason_codes)),
+            JSON.stringify(normalizedReasonCodes([...normalizedReasonCodes(data.reasonCodes || data.reason_codes), ...require('./tool-chain-observation').toolResultReasonCodes(data)])),
             String(data.approvalId || data.approval_id || '').slice(0, 128),
             String(data.source || 'unknown').slice(0, 64),
             String(data.requestDigest || data.request_digest || hash(input)).slice(0, 128),

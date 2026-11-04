@@ -45,6 +45,7 @@ const { listKnowledgeCollections } = require('../services/rag-documents');
 const { getAgentExperienceSummary, recordAgentExperienceEvent } = require('../services/agent-experience-events');
 const { importTools, prepareSkillImport } = require('../services/agent-skill-import-assistant');
 const { formatToolList } = require('../services/agent-tool-catalog');
+const { getToolChainMetrics } = require('../services/tool-chain-metrics');
 
 function allowedSkillPermissions() {
     const values = String(process.env.AGENT_SKILL_ALLOWED_PERMISSIONS || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -207,6 +208,9 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
     }));
     router.get('/agents/tools/reliability', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await listToolReliability(req.user, { days: req.query.days, scope: req.query.scope === 'tenant' && ['admin', 'root'].includes(String(req.user?.role || '').toLowerCase()) ? 'tenant' : 'user', persist: req.query.persist !== 'false' })) })));
     router.get('/agents/improvements', authMiddleware, asyncHandler(async (req, res) => res.json({ success: true, ...(await getAgentImprovementSuggestions(req.user, { days: req.query.days })) })));
+    router.get('/agents/quality/tool-chain', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ data: await getToolChainMetrics(req.user, req.query) });
+    }));
     router.get('/agents/quality', authMiddleware, asyncHandler(async (req, res) => {
         if (!['admin', 'root'].includes(String(req.user?.role || '').toLowerCase())) return res.status(403).json({ error: '质量仪表盘仅管理员可访问。', code: 'AGENT_QUALITY_ADMIN_REQUIRED' });
         res.json({ success: true, dashboard: await getAgentQualityDashboard(req.user, { days: req.query.days }) });

@@ -41,6 +41,7 @@ function normalizeRetrieval(retrieval = {}, matches = []) {
     const scope = value.scope && typeof value.scope === 'object' ? value.scope : {};
     const sourceSummary = value.sourceSummary && typeof value.sourceSummary === 'object' ? value.sourceSummary : {};
     return {
+        knowledgeEvidence: value.knowledgeEvidence || null,
         candidateCount: normalizeNumber(value.candidateCount, { max: 100_000 }),
         retrievalMode: trimAuditText(value.retrievalMode, 160),
         retrievalModes: (Array.isArray(value.retrievalModes) ? value.retrievalModes : []).map(item => trimAuditText(item, 80)).filter(Boolean).slice(0, 10),
@@ -90,17 +91,23 @@ function normalizeGrounding(grounding = {}) {
     };
 }
 
-function publicAuditRow(row = {}) {
+async function publicAuditRow(row = {}) {
+    const retrieval = parseJson(row.retrieval_json), grounding = parseJson(row.grounding_json);
+    let current = true;
+    if (retrieval.knowledgeEvidence) {
+        try { current = await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence([{ knowledgeEvidence: retrieval.knowledgeEvidence }], { id: row.user_id }); }
+        catch (_) { current = false; }
+    } else if (grounding.sourceCount > 0) current = false;
     return {
         id: Number(row.id),
         sessionId: row.session_id || '',
         surface: row.surface || 'chat',
-        question: row.question || '',
-        rewrittenQuery: row.rewritten_query || '',
-        answer: row.answer || '',
+        question: current ? row.question || '' : '',
+        rewrittenQuery: current ? row.rewritten_query || '' : '',
+        answer: current ? row.answer || '' : '资料来源已变化或无法确认，请重新检索。',
         modelName: row.model_name || '',
-        retrieval: parseJson(row.retrieval_json),
-        grounding: parseJson(row.grounding_json),
+        retrieval: current ? retrieval : { status: 'blocked', reasonCode: 'KNOWLEDGE_SOURCE_UNAVAILABLE' },
+        grounding,
         usage: parseJson(row.usage_json),
         createdAt: row.created_at
     };
@@ -123,6 +130,12 @@ async function recordKnowledgeAiAnswer({
     if (!uid) return null;
     const safeSurface = ['chat', 'workbench', 'evaluation'].includes(surface) ? surface : 'chat';
     const retrievalPayload = normalizeRetrieval(retrieval, matches);
+    if (!retrievalPayload.knowledgeEvidence && matches.some(match => match.selected && match.chunkId)) {
+        const selected = matches.filter(match => match.selected);
+        const rows = await require('../repositories/knowledge').readSourceChunks(selected.map(match => match.chunkId), { id: uid });
+        const result = require('./knowledge-tool-results').presentKnowledgeResult('', { evidence: selected }, rows);
+        retrievalPayload.knowledgeEvidence = require('./knowledge-tool-results').knowledgeEvidenceManifest(result);
+    }
     const row = await queryOne(`
         INSERT INTO knowledge_ai_answer_logs (
             user_id, session_id, surface, question, rewritten_query, answer, model_name,
@@ -157,7 +170,7 @@ async function listKnowledgeAiAnswerLogs(userId, { limit = 30, offset = 0 } = {}
             ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
         `, [uid, safeLimit, safeOffset])
     ]);
-    return { data: rows.map(publicAuditRow), total: Number(total?.count || 0), limit: safeLimit, offset: safeOffset };
+    return { data: await Promise.all(rows.map(publicAuditRow)), total: Number(total?.count || 0), limit: safeLimit, offset: safeOffset };
 }
 
 async function getKnowledgeAiQualityMetrics(userId, { days = 30 } = {}) {

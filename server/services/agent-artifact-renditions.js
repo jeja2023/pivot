@@ -212,6 +212,7 @@ async function consumeDownloadToken(user, token, options = {}) {
  * 摘要不一致直接抛错，不发送残缺文件（§7.5）。
  */
 async function openRenditionContent(rendition, user) {
+    if (!await getRenditionForUser(rendition.id, user)) throw renditionError('产物不存在或不可访问。', 'ARTIFACT_NOT_FOUND', 404);
     const object = await statObject({ ref: rendition.storage_ref, tenantId: rendition.tenant_id });
     if (!object) throw renditionError('渲染产物内容已不可用。', 'ARTIFACT_CONTENT_MISSING', 410);
     if (String(object.content_digest) !== String(rendition.content_digest)) {
@@ -225,6 +226,7 @@ async function openRenditionContent(rendition, user) {
 
 /** 读取 rendition 对应的原始 IR，供版本对比与复现使用。 */
 async function readRenditionIr(rendition, user) {
+    if (!await getRenditionForUser(rendition.id, user)) throw renditionError('产物不存在或不可访问。', 'ARTIFACT_NOT_FOUND', 404);
     const loaded = await readBuffer({ ref: rendition.ir_ref, tenantId: rendition.tenant_id, userId: user.id, tenantScoped: true });
     try {
         return JSON.parse(loaded.buffer.toString('utf8'));

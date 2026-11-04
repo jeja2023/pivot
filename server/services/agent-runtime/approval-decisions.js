@@ -57,12 +57,14 @@ function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimes
             key: pending.key || '',
             inputHash: pending.inputHash || approvalInputHash(pending.input || {}),
             hashVersion: pending.hashVersion || 1,
+            ...(pending.binding ? { binding: pending.binding } : {}),
             rememberForRun,
             grantedAt: now,
             expiresAt: pending.expiresAt || getBeijingTimestamp(new Date(Date.now() + (rememberForRun ? 60 * 60 * 1000 : 15 * 60 * 1000)))
         };
         const approvalGrants = Array.isArray(metadata.approvalGrants)
-            ? metadata.approvalGrants.filter(item => item && !item.consumedAt && approvalExpiryMs(item.expiresAt) > Date.now())
+            ? metadata.approvalGrants.filter(item => item && !item.consumedAt && approvalExpiryMs(item.expiresAt) > Date.now()
+                && !(item.tool === pending.tool && String(item.key || '') === String(pending.key || '')))
             : [];
         approvalGrants.push(approvalGrant);
         const resumeContext = await buildAgentResumeContext(runId);

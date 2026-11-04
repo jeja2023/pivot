@@ -35,12 +35,13 @@ function syncMemoryCompressionConcurrency() {
 }
 
 async function loadSessionMessages(sessionId, userId) {
-    return await query(`
+    const rows = await query(`
         SELECT * FROM messages
         WHERE session_id = ? AND user_id = ?
           AND deleted_at IS NULL
         ORDER BY id ASC
     `, [sessionId, userId]);
+    return require('./services/chat-knowledge-history').presentKnowledgeMessages(rows, { id: userId });
 }
 
 function unwrapGuardedCompressionResult(guardedResult) {
@@ -735,9 +736,10 @@ async function compressMemory(sessionId, userId, messages, modelCfg, options = {
             await execute(`UPDATE messages SET context_archived = 1, compressed_at = ? WHERE id IN (${placeholders})`, [now, ...ids]);
         }
         await execute(`
-            INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, is_summary, context_archived, model_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [sessionId, userId, 'system', summaryText, estimateTokens(summaryText), estimateTokens(summaryText), 1, 0, modelCfg.id, now]);
+            INSERT INTO messages (session_id, user_id, role, content, token_count, context_token_count, is_summary, context_archived, model_id, created_at, route_metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [sessionId, userId, 'system', summaryText, estimateTokens(summaryText), estimateTokens(summaryText), 1, 0, modelCfg.id, now,
+            JSON.stringify({ knowledgeEvidence: require('./services/chat-knowledge-history').collectMessageKnowledgeEvidence([...messages.filter(message => Number(message.is_summary)), ...toSummarize]) })]);
         return { compressed: true, summarizedCount: toSummarize.length, summaryTokens: estimateTokens(summaryText) };
     } catch (e) {
         const { logger } = require('./logger');

@@ -11,6 +11,8 @@ const { assertPreviewToolAllowed, toolHasSideEffectsOrApproval } = require('./ag
 const { inspectDagTopology, normalizeDagSpec } = require('./agent-validators');
 const { normalizeJsonSchema, outputValueForContract, schemaHasRules, validateJsonSchemaDefinition, validateValueAgainstSchema } = require('./agent-dag-contracts');
 const { recordWorkflowInvocationResult, recordWorkflowIterationItemResult } = require('./agent-governance-metrics');
+const { assertDagKnowledgeCurrent, assertKnowledgeNodeOutput } = require('./agent-dag-knowledge');
+const { inheritDagEvidence, mergeKnowledgeEvidence, packKnowledgeOutput, unpackKnowledgeOutput } = require('./knowledge-evidence-lineage');
 
 function buildInvocationId(runId, invocationPath) {
     return crypto.createHash('sha256').update(`${String(runId || '')}\u0000${String(invocationPath || '')}`).digest('hex').slice(0, 64);
@@ -138,6 +140,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
             const persisted = persistedItems.get(index);
             if (persisted?.status === 'completed' && persisted.input_digest === identity.inputDigest && persisted.result_json) {
                 const reused = typeof persisted.result_json === 'string' ? JSON.parse(persisted.result_json) : persisted.result_json;
+                await assertKnowledgeNodeOutput({ tool: 'workflow.iteration', output: reused }, user, run, deps);
                 results[index] = { ...reused, itemId: reused.itemId || identity.itemId, inputIndex: index, status: 'completed', reused: true };
                 recordWorkflowIterationItemResult({ status: 'reused' });
                 return;
@@ -152,7 +155,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                     taskTransactionId: parentContext.taskTransactionId, signal: parentContext.signal,
                     stack: parentContext.stack || [], invocation: { parentInvocationId, callerNodeId: `${callerNodeId}:item:${index}`, executionPath: baseExecutionPath, iterationMode: true, itemId: identity.itemId }
                 });
-                results[index] = { itemId: identity.itemId, inputIndex: index, status: 'completed', value: child.output, outputs: child.outputs, invocationId: child.invocationId, workflowId: child.workflowId, version: child.version, versionId: child.versionId };
+                results[index] = { itemId: identity.itemId, inputIndex: index, status: 'completed', value: child.output, outputs: child.outputs, invocationId: child.invocationId, workflowId: child.workflowId, version: child.version, versionId: child.versionId, ...(child.knowledgeEvidence ? { knowledgeEvidence: child.knowledgeEvidence } : {}) };
                 await writeIterationItem(deps, {
                     runId: run.id, iterationKey, inputIndex: index, itemId: identity.itemId, inputDigest: identity.inputDigest,
                     workflowId: child.workflowId, workflowVersionId: child.versionId, invocationId: child.invocationId,
@@ -160,6 +163,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                 });
                 recordWorkflowIterationItemResult({ status: 'completed' });
             } catch (error) {
+                if (error.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE') throw error;
                 const entry = { itemId: identity.itemId, inputIndex: index, status: 'error', error: String(error?.message || error || '逐项子工作流执行失败').slice(0, 4000) };
                 results[index] = entry; errors.push(entry); recordWorkflowIterationItemResult({ status: 'error' });
                 await writeIterationItem(deps, {
@@ -178,7 +182,8 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
         };
         await Promise.all(Array.from({ length: workerCount }, () => worker()));
         const collected = config.onItemError === 'drop' ? results.filter(item => item?.status === 'completed') : results.slice(0, cursor).map(item => item || null);
-        return { items: collected, count: collected.length, inputCount: config.items.length, processedCount: results.filter(Boolean).length, errors, stoppedOnError, workflowId: config.workflowId, version: errors.length ? null : (collected.find(item => item?.version)?.version || null) };
+        const knowledgeEvidence = mergeKnowledgeEvidence(collected);
+        return { items: collected, count: collected.length, inputCount: config.items.length, processedCount: results.filter(Boolean).length, errors, stoppedOnError, workflowId: config.workflowId, version: errors.length ? null : (collected.find(item => item?.version)?.version || null), ...(knowledgeEvidence ? { knowledgeEvidence } : {}) };
     }
 
     async function executeSubworkflowDag({ input, run, user, modelCfg, toolList, deadline, deps, stack = [], invocation = {}, taskTransactionId = '', signal = null }) {
@@ -228,13 +233,15 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
             }
             dagSpec.nodes.forEach(node => {
                 const existing = persisted.get(node.id);
-                if (existing && terminal.has(existing.status)) states.set(node.id, { status: existing.status, input: existing.input || {}, output: existing.output, error: existing.error_message || '', compactOutput: clampText(existing.output, 12000) });
+                if (existing && terminal.has(existing.status)) states.set(node.id, { status: existing.status, input: existing.input || {}, output: unpackKnowledgeOutput(existing.output).value, knowledgeEvidence: existing.knowledge_evidence || unpackKnowledgeOutput(existing.output).knowledgeEvidence, error: existing.error_message || '', compactOutput: clampText(existing.output, 12000) });
             });
+            await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, childRun, deps);
             while ([...states.values()].some(state => state.status === 'pending')) {
                 await deps.assertRunNotCancelled(run.id);
                 const ready = dagSpec.nodes.filter(node => states.get(node.id)?.status === 'pending' && node.dependsOn.every(dep => ['completed', 'continued_error', 'error', 'skipped'].includes(states.get(dep)?.status)));
                 if (!ready.length) throw new Error(`子工作流“${resolved.workflow.name}”执行停滞。`);
                 for (const node of ready) {
+                    await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, childRun, deps);
                     const depStates = node.dependsOn.map(dep => states.get(dep)?.status), routeState = getDagNodeRouteState(node, dagSpec, states);
                     if (!dagJoinConditionSatisfied(node, depStates, routeState, states)) {
                         const skipReason = node.joinMode === 'any_active' && routeState.routed && !routeState.active ? 'route_not_matched' : 'dependency_not_satisfied';
@@ -275,7 +282,7 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                         }
                         const executionContext = {
                             dagInputs, workflowApprovalResult, workflowDelayResult, budget: deps.taskBudget, approvalKey, taskTransactionId, signal,
-                            approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: true, invocationId, executionPath, itemId: invocation.itemId || null,
+                            approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), allowApproval: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput), invocationId, executionPath, itemId: invocation.itemId || null,
                             executeSubworkflow: childInput => executeSubworkflowDag({ input: childInput, run, user, modelCfg, toolList, deadline, deps, stack: childStack, taskTransactionId, signal, invocation: { parentInvocationId: invocationId, callerNodeId: node.id, executionPath, iterationMode: invocation.iterationMode === true, itemId: invocation.itemId || null } }),
                             executeIteration: iterationInput => executeWorkflowIteration({ input: iterationInput, run, user, modelCfg, toolList, deadline, deps, parentContext: { dagInputs, states, nodeMap, stack: childStack, executionPath, invocationId, callerNodeId: node.id, taskTransactionId, signal } })
                         };
@@ -290,10 +297,13 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
                         }
                     }
                     if (result.ok) {
-                        states.set(node.id, { status: 'completed', input: resolvedInput, output: result.output, compactOutput: clampText(result.output, 12000) });
-                        await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status: 'completed', input: resolvedInput, output: result.output, contractStatus: 'valid', contractIssues: [], attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
+                        const knowledgeEvidence = inheritDagEvidence(node, states, result.output);
+                        await assertKnowledgeNodeOutput({ tool: node.tool, input: resolvedInput, output: result.output, knowledgeEvidence }, user, childRun, deps);
+                        states.set(node.id, { status: 'completed', input: resolvedInput, output: result.output, knowledgeEvidence, compactOutput: clampText(result.output, 12000) });
+                        await writeNode(run.id, node, { nodeKey: invocationNodeKey(node), status: 'completed', input: resolvedInput, output: packKnowledgeOutput(result.output, knowledgeEvidence), contractStatus: 'valid', contractIssues: [], attemptCount: result.attempt, durationMs: result.durationMs, completedAt: getBeijingTimestamp() });
                         continue;
                     }
+                    if (result.error?.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE') throw result.error;
                     const errorInfo = buildDagErrorInfo(result.error, node, { attempt: result.attempt });
                     const fallback = policy.onError === 'fallback' ? prepareDagFallbackOutput(node, outputSchema, errorInfo) : null;
                     if (fallback && !fallback.usable) { errorInfo.fallbackRejected = true; errorInfo.fallbackIssues = fallback.issues; }
@@ -319,7 +329,9 @@ function createSubworkflowRuntime({ executeDagNodeWithPolicy, buildDagErrorInfo,
             }
             const fallback = buildDagFallbackFinalAnswer(dagSpec, states), outputNames = Object.keys(outputs);
             const output = outputNames.length === 1 ? outputs[outputNames[0]] : (outputNames.length ? outputs : fallback);
-            const result = { workflowId, workflowName: resolved.workflow.name, version: resolved.version, versionId: resolved.version_id, invocationId, executionPath, output, outputs, text: extractReadableDagOutput(output) || fallback };
+            await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, childRun, deps);
+            const knowledgeEvidence = mergeKnowledgeEvidence([...states.values()].map(state => state.knowledgeEvidence || state.output));
+            const result = { workflowId, workflowName: resolved.workflow.name, version: resolved.version, versionId: resolved.version_id, invocationId, executionPath, output, outputs, text: extractReadableDagOutput(output) || fallback, ...(knowledgeEvidence ? { knowledgeEvidence } : {}) };
             await writeInvocation(deps, { ...invocationState, status: 'completed', output: result, completedAt: true });
             recordWorkflowInvocationResult({ status: 'completed' });
             return result;

@@ -4,7 +4,7 @@ function holdKnowledgeOutput(run = {}, observations = []) {
     let metadata = run.metadata || {};
     if (typeof metadata === 'string') { try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; } }
     return Boolean(metadata.chatBridge?.ragContext || metadata.capabilityConstraints?.capabilities?.some(cap => String(cap).startsWith('knowledge.'))
-        || observations.some(item => item.tool === 'rag.search' || item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1));
+        || observations.some(item => ['rag.search', 'knowledge.graph.query'].includes(item.tool) || item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1));
 }
 
 function safeFinalAnswer(answer, verification) {

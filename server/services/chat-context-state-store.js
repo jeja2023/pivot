@@ -174,6 +174,7 @@ async function createPersistedChatStepContext({
 async function listChatContextWindowsForUser(sessionId, user, { limit = 100 } = {}) {
     const userId = Number(user?.id || 0);
     if (!sessionId || !userId) return [];
+    if (!(await require('./chat-knowledge-history').inspectSessionKnowledgeAccess(sessionId, user)).current) return [];
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     return await query(`
         SELECT window_id, session_id, user_id, window_version, parent_window_id,
@@ -187,6 +188,7 @@ async function listChatContextWindowsForUser(sessionId, user, { limit = 100 } = 
 async function listChatContextSnapshotsForUser(sessionId, user, { after = 0, limit = 200, windowId = '' } = {}) {
     const userId = Number(user?.id || 0);
     if (!sessionId || !userId) return [];
+    if (!(await require('./chat-knowledge-history').inspectSessionKnowledgeAccess(sessionId, user)).current) return [];
     const clauses = ['session_id = ?', 'user_id = ?', 'snapshot_version > ?'];
     const params = [String(sessionId), userId, Math.max(Number(after) || 0, 0)];
     if (windowId) { clauses.push('window_id = ?'); params.push(String(windowId)); }

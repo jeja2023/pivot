@@ -16,7 +16,8 @@ async function groundChatRagAnswer({
     writeSse,
     routePlan,
     question,
-    validateCitationKeys = require('../repositories/knowledge').validateCitationKeys
+    validateCitationKeys = require('../repositories/knowledge').validateCitationKeys,
+    captureKnowledgeEvidence = require('./chat-knowledge-history').captureChatKnowledgeEvidence
 } = {}) {
     if (!contextResult?.ragGrounding?.required) return { assistantContent, ragGrounding: null };
     releaseSemaphore?.();
@@ -35,7 +36,10 @@ async function groundChatRagAnswer({
         const citationKeys = relevantSources.map(source => source.citationKey).filter(Boolean);
         if (citationKeys.length > 0) {
             let current = false;
-            try { current = await validateCitationKeys(citationKeys, user); } catch (_) { /* 授权核验失败时不公开正文。 */ }
+            try {
+                current = await validateCitationKeys(citationKeys, user);
+                if (current && routePlan?.rag) routePlan.rag.knowledgeEvidence = await captureKnowledgeEvidence(relevantSources, user);
+            } catch (_) { current = false; }
             if (!current) {
                 ragGrounding.answer = '知识库资料已变化或当前不可访问，请重新检索后再试。';
                 ragGrounding.grounding = { ...ragGrounding.grounding, accepted: false, status: 'source_revoked' };
@@ -81,6 +85,7 @@ async function recordChatRagAnswerAudit({
             answer,
             modelName: modelCfg?.name || modelCfg?.model_name || '',
             retrieval: {
+                knowledgeEvidence: routePlan?.rag?.knowledgeEvidence || null,
                 retrievalMode: routePlan?.rag?.mode || '',
                 retrievalPlan: contextResult.retrievalPlan || null,
                 sourceSummary: contextResult.ragSourceSummary || null,

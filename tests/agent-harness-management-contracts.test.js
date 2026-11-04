@@ -76,7 +76,7 @@ test('个人档案偏好编辑器使用标签和主题变量，窄屏时收敛�
 test('质量面板区分验收通过率和执行终态率，空样本不展示为 100%', () => {
     const fs = require('node:fs');
     const path = require('node:path');
-    const source = fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-harness.js'), 'utf8');
+    const source = fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-quality-metrics.js'), 'utf8');
     assert.match(source, /验收通过率/);
     assert.match(source, /executionCompletionRate/);
     assert.match(source, /value === null \|\| value === undefined \? '—'/);

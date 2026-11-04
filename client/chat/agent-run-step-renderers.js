@@ -379,9 +379,9 @@ function agentStepReadableMarkup(step) {
         ? (unwrapAgentStructuredPayload(normalized) || normalized)
         : null;
     if (!structured || typeof structured !== 'object') return '';
-    if (structured.knowledgeSourceVersion === 1) {
-        const sources = structured.knowledgeEvidence?.knowledgeSourceVersion === 1 && Array.isArray(structured.knowledgeEvidence.sources)
-            ? structured.knowledgeEvidence.sources : Array.isArray(structured.sources) ? structured.sources : [];
+    if (structured.knowledgeSourceVersion === 1 || step.knowledge_evidence?.knowledgeSourceVersion === 1) {
+        const sources = step.knowledge_evidence?.sources || (structured.knowledgeEvidence?.knowledgeSourceVersion === 1 && Array.isArray(structured.knowledgeEvidence.sources)
+            ? structured.knowledgeEvidence.sources : Array.isArray(structured.sources) ? structured.sources : []);
         const status = structured.retrieval?.reasonCode === 'KNOWLEDGE_SOURCE_UNAVAILABLE' ? '资料来源已变化、不可访问或无法确认，请重新检索。'
             : structured.retrieval?.status === 'partial' ? '检索已降级，结果仅覆盖部分片段。'
                 : sources.length ? '已获得资料片段，不代表文档全文。' : '未获得可靠资料。';

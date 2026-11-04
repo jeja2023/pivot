@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getRequestId } = require('./request-context');
+const { redactDiagnostic } = require('./diagnostic-redaction');
 
 const TERMINAL_TRACE_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'cancelled', 'deleted']);
 const SECRET_KEY_RE = /(?:password|passwd|secret|token|api[_-]?key|authorization|cookie|credential)/i;
@@ -19,7 +20,7 @@ function safeJsonParse(value, fallback = null) {
 
 function redactTraceValue(value, depth = 0, seen = new WeakSet()) {
     if (value === null || value === undefined) return value;
-    if (typeof value === 'string') return value.length > 2000 ? `${value.slice(0, 2000)}...[已截断]` : value;
+    if (typeof value === 'string') return redactDiagnostic(value.length > 2000 ? `${value.slice(0, 2000)}...[已截断]` : value);
     if (typeof value !== 'object') return value;
     if (depth >= 6) return '[层级已截断]';
     if (seen.has(value)) return '[循环引用]';
@@ -120,7 +121,7 @@ async function finishAgentTraceSpan(spanId, data = {}) {
             serializeTraceValue(data.output),
             serializeTraceValue(data.details),
             serializeTraceValue(data.details),
-            String(data.errorMessage || '').slice(0, 2000),
+            redactDiagnostic(String(data.errorMessage || '').slice(0, 2000)),
             Math.max(Number(data.inputTokens) || 0, 0),
             Math.max(Number(data.outputTokens) || 0, 0),
             completedAt,
@@ -168,6 +169,7 @@ async function syncAgentTraceFromRun(runId) {
 async function getAgentTraceForUser(runId, user) {
     const run = await queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [runId, user.id]);
     if (!run) return null;
+    await require('./knowledge-run-access').assertRunKnowledgeAccess(runId, user);
     await syncAgentTraceFromRun(runId);
     const trace = await queryOne(`
         SELECT run_id, status, metadata, started_at, completed_at, duration_ms, created_at, updated_at

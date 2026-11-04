@@ -86,6 +86,7 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
     router.post('/agents/renditions/:id/onlyoffice-preview', authMiddleware, automationGuard, asyncHandler(async (req, res) => {
         const rendition = await getRenditionForUser(req.params.id, req.user);
         if (!rendition) return res.status(404).json({ error: '渲染产物不存在或无权访问。' });
+        require('../services/tool-chain-observation').trackArtifactResponse(res, rendition, req.user, 'preview_config');
         if (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now()) return res.status(410).json({ error: '结果文件已经过期。' });
         const config = require('../services/onlyoffice-preview').createPreviewConfig(rendition, req.user);
         res.setHeader('Cache-Control', 'no-store');
@@ -166,6 +167,7 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
     router.get('/agents/renditions/:id/document-preview', authMiddleware, asyncHandler(async (req, res) => {
         const rendition = await getRenditionForUser(req.params.id, req.user);
         if (!rendition) return res.status(404).json({ error: '渲染产物不存在或无权访问。' });
+        require('../services/tool-chain-observation').trackArtifactResponse(res, rendition, req.user, 'preview');
         if (rendition.status !== 'ready' || (rendition.expires_at && new Date(rendition.expires_at).getTime() <= Date.now())) {
             return res.status(410).json({ error: '结果文件尚未就绪或已经过期。' });
         }
@@ -200,6 +202,8 @@ function createAgentDeliveryRouter({ authMiddleware, logAction, automationLimite
             });
         }
         const rendition = await consumeDownloadToken(req.user, token, { deviceId: deviceId || null });
+        if (!rendition) return res.status(404).json({ error: '文件已不可访问，请刷新结果后重试。' });
+        require('../services/tool-chain-observation').trackArtifactResponse(res, rendition, req.user, 'download');
         if (String(rendition.id) !== String(req.params.id)) {
             return res.status(403).json({ error: '下载令牌与产物不匹配。' });
         }

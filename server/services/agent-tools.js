@@ -3,7 +3,6 @@ const { chatSourceToolDefinition, executeChatSource } = require('./chat-source-t
 const { searchUserSessions } = require('./agent-session-search');
 const { getSystemHealthSnapshot } = require('./system-health');
 const { getModelEndpointRuntimeStatus } = require('./model-runtime');
-const { queryKnowledgeGraph } = require('./knowledge-graph');
 const { callModelText, recordAgentModelUsage } = require('./agent-model');
 const { getRunnableModelForUserAsync, getUserRunnableModelsAsync } = require('./models');
 const { parsePositiveInt } = require('../number');
@@ -973,18 +972,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
         return await require('../repositories/knowledge').listChatKnowledgeCatalog(user, scope, parsePositiveInt(input.limit, 20, 50));
     }
 
-    if (name === 'knowledge.graph.query') {
-        const graphQuery = String(input.query || '').trim();
-        if (!graphQuery) throw new Error('请填写知识图谱查询问题。');
-        return queryKnowledgeGraph({
-            userId: user.id,
-            user,
-            scope: await require('./knowledge-tool-results').resolveKnowledgeToolScope(user, input, context),
-            query: graphQuery,
-            entityLimit: parsePositiveInt(input.entityLimit, 6, 10),
-            relationLimit: parsePositiveInt(input.relationLimit, 12, 20)
-        });
-    }
+    if (name === 'knowledge.graph.query') return require('./knowledge-graph-tool-results').executeKnowledgeGraphQuery(input, user, context);
 
     if (name === 'models.list') {
         return await getUserAccessibleModels(user);

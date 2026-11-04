@@ -143,6 +143,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         err.status = 403;
         throw err;
     }
+    await require('./tool-approval-binding').assertToolApprovalCurrent({ run: context.run || {}, tool, input, user, key: context.approvalKey });
     const approvedKey = context.approvalGranted === true ? approvedOperationKey(context.run, safeName, context.approvalKey, input) : '';
     if (approvedKey) context = { ...context, operationKey: approvedKey };
     const policyRun = {

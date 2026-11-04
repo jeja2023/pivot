@@ -235,7 +235,8 @@ async function listSteps(runId) {
     return steps.map(step => ({
         ...step,
         input: parseJsonObject(step.input) || step.input,
-        output: parseJsonObject(step.output) || step.output
+        output: require('../services/knowledge-evidence-lineage').unpackKnowledgeOutput(step.output).value,
+        knowledge_evidence: require('../services/knowledge-evidence-lineage').unpackKnowledgeOutput(step.output).knowledgeEvidence
     }));
 }
 
@@ -256,7 +257,8 @@ async function listDagNodes(runId) {
         depends_on: parseJsonObject(node.depends_on) || [],
         error_info: parseJsonObject(node.error_info) || {},
         contract_issues: parseJsonObject(node.contract_issues) || [],
-        output: parseJsonObject(node.output) || node.output
+        output: require('../services/knowledge-evidence-lineage').unpackKnowledgeOutput(node.output).value,
+        knowledge_evidence: require('../services/knowledge-evidence-lineage').unpackKnowledgeOutput(node.output).knowledgeEvidence
     }));
 }
 

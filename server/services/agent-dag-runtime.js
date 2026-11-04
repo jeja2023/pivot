@@ -8,7 +8,7 @@ const { normalizeDagNodePolicy, resolveDagNodeInput, evaluateDagWhen, dagJoinCon
 const { listDagNodes, listSteps } = require('./agent-runs');
 const { recordAgentToolCall } = require('./agent-tool-audit');
 const { diagnoseError } = require('./agent-diagnosis');
-const { clampText, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
+const { executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { buildToolTraceContext } = require('./tool-trace-context');
 const { normalizeToolInput } = require('./agent-policy');
 const { createSubworkflowRuntime } = require('./agent-dag-subworkflow-runtime');
@@ -39,6 +39,9 @@ const {
 } = require('./agent-dag-cache');
 const { verifyTaskOutcome } = require('./agent-verification');
 const { buildDagFallbackFinalAnswer, buildIncompleteDagAnswer, extractReadableDagOutput } = require('./agent-dag-results');
+const { collectDagKnowledgeObservations, assertKnowledgeNodeOutput, assertDagKnowledgeCurrent } = require('./agent-dag-knowledge');
+const { restoreDagStates } = require('./agent-dag-state');
+const { inheritDagEvidence, packKnowledgeOutput, unpackKnowledgeOutput } = require('./knowledge-evidence-lineage');
 
 async function upsertDagNode(runId, node, patch = {}) {
     const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
@@ -269,7 +272,7 @@ async function executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInp
                 e.recoveryApprovalTool = e.recoveryApprovalTool || node.tool;
                 throw e;
             }
-            if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
+            if (['AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'KNOWLEDGE_SOURCE_UNAVAILABLE'].includes(e.code)) throw e;
             lastError = e;
             if (e.code === 'AGENT_NODE_TIMEOUT') break;
             await deps.insertStep(run.id, (await listRunSteps(run.id)).length + 1, {
@@ -349,32 +352,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         await writeDagNode(run.id, node, { status: 'pending' });
     }
     const nodeMap = new Map(dagSpec.nodes.map(node => [node.id, node]));
-    const states = new Map(dagSpec.nodes.map(node => {
-        const existing = persistedDagNodes.get(node.id);
-        if (existing && ['completed', 'continued_error', 'skipped'].includes(existing.status)) {
-            return [node.id, {
-                status: existing.status,
-                input: existing.input || {},
-                output: existing.output,
-                compactOutput: clampText(existing.output, 12000),
-                attemptCount: existing.attempt_count || 0,
-                reused: false
-            }];
-        }
-        return [node.id, { status: 'pending' }];
-    }));
-    Object.entries(reusedDagNodes).forEach(([nodeId, state]) => {
-        states.set(nodeId, {
-            status: state?.status || 'completed',
-            input: state?.input || {},
-            output: state?.output,
-            compactOutput: clampText(state?.output, 12000),
-            error: state?.error || '',
-            skipReason: state?.skipReason || '',
-            reused: Boolean(state?.reusedFromRunId),
-            reusedFromRunId: state?.reusedFromRunId || null
-        });
-    });
+    const states = restoreDagStates(dagSpec.nodes, persistedDagNodes, reusedDagNodes);
+    await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
     for (const [nodeId, state] of states.entries()) {
         if (!Object.prototype.hasOwnProperty.call(reusedDagNodes, nodeId)) continue;
         const node = nodeMap.get(nodeId);
@@ -382,14 +361,14 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         await writeDagNode(run.id, node, {
             status: state.status,
             input: state.input,
-            output: state.output,
+            output: packKnowledgeOutput(state.output, state.knowledgeEvidence),
             errorMessage: state.error || '',
             contractStatus: state.status === 'error' ? 'error' : 'unchecked',
             reusedFromRunId: state.reusedFromRunId,
             completedAt: getBeijingTimestamp()
         });
     }
-    const observations = [];
+    const observations = collectDagKnowledgeObservations(dagSpec.nodes, states);
     let stepIndex = (await readSteps(run.id)).length + 1;
     const rootWorkflowId = Number.parseInt(metadata.workflowId || metadata.workflow_id, 10);
     const subworkflowStack = rootWorkflowId ? [rootWorkflowId] : [];
@@ -403,6 +382,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
     while ([...states.values()].some(state => state.status === 'pending') || activeNodes.size) {
         assertRunWithinBudget();
         await deps.assertRunNotCancelled(run.id);
+        await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
         const readyNodes = dagSpec.nodes.filter(node => {
             const state = states.get(node.id);
             if (state?.status !== 'pending' || activeNodes.has(node.id)) return false;
@@ -631,8 +611,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     approvalKey,
                     // Reaching this point means the approval helper either found
                     // a prior grant or determined that this tool is safe to run.
-                    approvalGranted,
-                    allowApproval: true,
+                    approvalGranted: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
+                    allowApproval: deps.isApprovalGranted(run, selectedTool.name, approvalKey, resolvedInput),
                     stepContext,
                     contextHash: stepContext?.contextHash || '',
                     traceContext: buildToolTraceContext({ runId: run.id, spanId: nodeSpanId || `${run.id}:${node.id}`, requestId: stepContext?.requestId || '' }),
@@ -696,9 +676,10 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 if (cachedHit && cachedHit.hit) {
                     recordDagCacheResult('hit');
                     recordDagNodeResult({ tool: node.tool, status: 'cached' });
+                    const restored = unpackKnowledgeOutput(cachedHit.output);
                     result = {
                         ok: true,
-                        output: cachedHit.output,
+                        output: restored.value, knowledgeEvidence: restored.knowledgeEvidence,
                         attempt: 1,
                         startedAt: Date.now(),
                         startedAtText: getBeijingTimestamp(),
@@ -708,9 +689,6 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                 } else {
                     if (cacheKey) recordDagCacheResult('miss');
                     result = await executeDagNodeWithPolicy({ run, user, modelCfg, node, resolvedInput, toolList, deadline, policy, stepIndex: nodeStepIndex, executionContext }, deps);
-                    if (result?.ok && cacheKey) {
-                        setCachedNodeOutput(cacheKey, result.output);
-                    }
                 }
                 await deps.assertRunNotCancelled(run.id);
                 if (!result.ok) {
@@ -719,6 +697,8 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     throw result.error;
                 }
                 const { output } = result;
+                const knowledgeEvidence = inheritDagEvidence(node, states, output, result.knowledgeEvidence);
+                await assertKnowledgeNodeOutput({ tool: node.tool, input: resolvedInput, output, knowledgeEvidence }, user, run, deps);
                 const outputContractIssues = schemaHasRules(outputSchema)
                     ? validateValueAgainstSchema(outputValueForContract(output, node), outputSchema, {}, `${node.title || node.id} 输出`, [])
                     : [];
@@ -730,12 +710,14 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     contractError.dagDurationMs = result.durationMs;
                     throw contractError;
                 }
-                const preparedOutput = await persistDagOutput(output, { user });
+                if (cacheKey && !result.cached) setCachedNodeOutput(cacheKey, packKnowledgeOutput(output, knowledgeEvidence));
+                const preparedOutput = await persistDagOutput(packKnowledgeOutput(output, knowledgeEvidence), { user });
                 const compactOutput = compactPreparedDagOutput(output, preparedOutput.serialized, 12000);
                 states.set(node.id, {
                     status: 'completed',
                     input: resolvedInput,
                     output,
+                    knowledgeEvidence,
                     compactOutput,
                     attemptCount: result.attempt,
                     cached: Boolean(result.cached),
@@ -758,6 +740,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     tool: node.tool,
                     input: resolvedInput,
                     output: compactOutput,
+                    knowledgeEvidence,
                     attempts: result.attempt,
                     cached: Boolean(result.cached),
                     durationMs: result.durationMs
@@ -768,7 +751,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     title: `${result.cached ? '[快取复用] DAG 节点' : '完成 DAG 节点'}：${node.title || node.id}`,
                     toolName: node.tool,
                     input: resolvedInput,
-                    output: compactOutput,
+                    output: knowledgeEvidence ? packKnowledgeOutput(output, knowledgeEvidence) : compactOutput,
                     durationMs: result.durationMs,
                     contextHash: stepContext?.contextHash || ''
                 });
@@ -816,7 +799,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
                     });
                     throw e;
                 }
-                if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT'].includes(e.code)) throw e;
+                if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'KNOWLEDGE_SOURCE_UNAVAILABLE'].includes(e.code)) throw e;
                 const attemptCount = Number(e.dagAttempt || Math.max(1, Number(policy.retryLimit || 0) + 1));
                 const durationMs = Number(e.dagDurationMs || 0);
                 const timedOut = e.code === 'AGENT_NODE_TIMEOUT';
@@ -938,6 +921,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         });
     }
 
+    await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
     const answer = buildIncompleteDagAnswer(dagSpec, states)
         || buildDagFallbackFinalAnswer(dagSpec, states)
         || `工作流执行完成，共 ${dagSpec.nodes.length} 个节点。`;
@@ -953,6 +937,7 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         partial,
         reason: partial ? '工作流存在失败、未完整或跳过节点。' : ''
     });
+    await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
     const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
     const finalStatus = awaitingCommit
         ? 'awaiting_commit'

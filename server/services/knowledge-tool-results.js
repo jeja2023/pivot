@@ -56,18 +56,21 @@ function presentKnowledgeResult(query, result, rows) {
         matches.push({ docName: source.title, score: Number(match.score || match.denseScore || 0), hit: true, content: text, source });
     }
     const degraded = result.ranking?.mode === 'keyword_fallback' || Boolean(result.ranking?.degradedPaths?.length);
+    const unavailable = selected.slice(0, 10).length > matches.length;
     const context = matches.length ? require('./rag-index/retrieval-context').formatInjectedContext(matches.map(match => ({ text: match.content,
         source: match.docName, citationKey: match.source.citationKey }))) : '';
     return { knowledgeSourceVersion: 1, query, matches, sources, context,
-        retrieval: { status: matches.length ? (degraded ? 'partial' : 'succeeded') : 'blocked',
-            reasonCode: matches.length ? (degraded ? 'KNOWLEDGE_LEXICAL_FALLBACK' : 'KNOWLEDGE_MATCHED') : selected.length ? 'KNOWLEDGE_SOURCE_UNAVAILABLE' : 'KNOWLEDGE_NO_RELIABLE_MATCH',
+        retrieval: { status: matches.length ? (degraded || unavailable ? 'partial' : 'succeeded') : 'blocked',
+            reasonCode: matches.length ? (unavailable ? 'KNOWLEDGE_SOURCE_UNAVAILABLE' : degraded ? 'KNOWLEDGE_LEXICAL_FALLBACK' : 'KNOWLEDGE_MATCHED') : selected.length ? 'KNOWLEDGE_SOURCE_UNAVAILABLE' : 'KNOWLEDGE_NO_RELIABLE_MATCH',
             selectedCount: matches.length, coverage: 'retrieved_excerpts', completeDocument: false },
         metrics: result.metrics || null };
 }
 
 function knowledgeEvidenceManifest(value) {
+    if (value?.knowledgeEvidence) return knowledgeEvidenceManifest(value.knowledgeEvidence);
     if (value?.knowledgeSourceVersion !== 1 || !Array.isArray(value.sources)) return null;
-    return { knowledgeSourceVersion: 1, sources: value.sources, retrieval: value.retrieval };
+    return { knowledgeSourceVersion: 1, sources: value.sources, retrieval: value.retrieval,
+        ...(value.knowledgeEvidenceIncomplete ? { knowledgeEvidenceIncomplete: true } : {}) };
 }
 
 async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
@@ -85,34 +88,45 @@ async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
 }
 
 async function revalidateKnowledgeToolEvidence(observations, user, deps = {}) {
-    if ((observations || []).some(item => item.output?.knowledgeEvidenceIncomplete === true)) return false;
+    observations = (observations || []).map(item => ({ ...item, output: typeof item.output === 'string' ? parseJsonObject(item.output) : item.output }));
+    if ((observations || []).some(item => item.output?.knowledgeEvidenceIncomplete === true || item.knowledgeEvidence?.knowledgeEvidenceIncomplete || item.output?.knowledgeEvidence?.knowledgeEvidenceIncomplete)) return false;
+    if (observations.some(item => item.output?.knowledgeSourceVersion === 1 && !item.output.sources?.length
+        && (item.output.matches?.length || item.output.context || item.output.paths?.length || item.output.relations?.length || item.output.entities?.length))) return false;
     const sources = (observations || []).flatMap(item => item.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.knowledgeEvidence.sources || []
         : item.output?.knowledgeEvidence?.knowledgeSourceVersion === 1 ? item.output.knowledgeEvidence.sources || []
             : item.output?.knowledgeSourceVersion === 1 ? item.output.sources || [] : []);
     if (!sources.length) return true;
+    if (sources.length > 1000) return false;
     if (sources.some(source => !source.citationKey || !source.contentDigest || !source.chunkId)) return false;
     const read = deps.readSourceChunks || require('../repositories/knowledge').readSourceChunks;
-    const rows = await read(sources.map(source => source.chunkId), user);
+    const rows = [], ids = [...new Set(sources.map(source => source.chunkId))];
+    for (let index = 0; index < ids.length; index += 100) rows.push(...await read(ids.slice(index, index + 100), user, deps.scope || {}));
     const current = sources.every(source => rows.some(row => Number(row.chunk_id) === Number(source.chunkId)
         && Number(row.doc_id) === Number(source.legacyDocumentId) && digest(row.content || '') === source.contentDigest
-        && String(row.citation_key || '') === source.citationKey));
+        && String(row.citation_key || '') === source.citationKey
+        && [['documentId', 'document_id'], ['versionId', 'version_id'], ['blockId', 'block_id'], ['collectionId', 'collection_id']]
+            .every(([key, column]) => source[key] == null || Number(source[key]) === Number(row[column]))
+        && (!source.indexVersion || source.indexVersion === String(row.index_fingerprint || '').slice(0, 180))));
     if (!current) return false;
     const verify = deps.validateCitationKeys || require('../repositories/knowledge').validateCitationKeys;
-    return await verify(sources.map(source => source.citationKey).filter(Boolean), user);
+    const keys = [...new Set(sources.map(source => source.citationKey).filter(Boolean))];
+    for (let index = 0; index < keys.length; index += 100) if (!await verify(keys.slice(index, index + 100), user)) return false;
+    return true;
 }
 
 async function presentKnowledgeSteps(steps, user, deps = {}) {
     return await Promise.all((steps || []).map(async step => {
-        const output = step.output;
-        if (step.tool_name !== 'rag.search' && output?.knowledgeSourceVersion !== 1 && !output?.knowledgeEvidence) return step;
-        const manifest = output?.knowledgeEvidence || (output?.knowledgeSourceVersion === 1 ? output : null);
+        const output = typeof step.output === 'string' ? parseJsonObject(step.output) : step.output;
+        if ((step.output == null && !['completed', 'continued_error', 'success'].includes(step.status))
+            || (!['rag.search', 'knowledge.graph.query'].includes(step.tool_name) && output?.knowledgeSourceVersion !== 1 && !output?.knowledgeEvidence && !step.knowledge_evidence)) return step;
+        const manifest = step.knowledge_evidence || output?.knowledgeEvidence || (output?.knowledgeSourceVersion === 1 ? output : null);
         let current = false;
         if (manifest?.knowledgeSourceVersion === 1 && Array.isArray(manifest.sources)) {
-            try { current = await (deps.revalidate || revalidateKnowledgeToolEvidence)([{ output }], user); } catch (_) { /* 无法确认权限时隐藏历史结果。 */ }
+            try { current = await (deps.revalidate || revalidateKnowledgeToolEvidence)([{ output, knowledgeEvidence: manifest }], user); } catch (_) { /* 无法确认权限时隐藏历史结果。 */ }
         }
         if (current) return step;
-        return { ...step, output: { knowledgeSourceVersion: 1, sources: [], retrieval: { status: 'blocked', reasonCode: 'KNOWLEDGE_SOURCE_UNAVAILABLE' } }, error_message: null };
+        return { ...step, input: {}, knowledge_evidence: null, output: { knowledgeSourceVersion: 1, sources: [], retrieval: { status: 'blocked', reasonCode: 'KNOWLEDGE_SOURCE_UNAVAILABLE' } }, error_message: null };
     }));
 }
 
-module.exports = { intersectScopes, resolveKnowledgeToolScope, executeKnowledgeSearch, knowledgeEvidenceManifest, revalidateKnowledgeToolEvidence, presentKnowledgeSteps, digest };
+module.exports = { intersectScopes, resolveKnowledgeToolScope, presentKnowledgeResult, executeKnowledgeSearch, knowledgeEvidenceManifest, revalidateKnowledgeToolEvidence, presentKnowledgeSteps, digest };

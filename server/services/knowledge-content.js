@@ -606,6 +606,7 @@ async function getCitationForUser(citationKey, user) {
     return {
         id: Number(citation.id),
         citationKey: citation.citation_key,
+        chunkId: normalizeId(citation.legacy_chunk_id),
         document: {
             id: Number(document.id),
             title: document.title,

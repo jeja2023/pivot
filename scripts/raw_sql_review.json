@@ -6,6 +6,30 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/sessions.js",
+      "count": 18,
+      "rationale": "新增只读消息来源元数据查询，按用户和会话绑定参数；不读取正文，用于列表、搜索、快照及分支入口复核来源，不在路由新增 SQL。",
+      "verification": "knowledge-lineage-access、knowledge-graph-workflow-postgres 验证会话、历史和后续上下文的来源保护。"
+    },
+    {
+      "file": "server/repositories/knowledge-run-evidence.js",
+      "count": 3,
+      "rationale": "只读仓储聚合任务所有者、当前账号状态及知识来源信封；固定字段查询按任务和用户参数隔离，限制证据行数，不在服务或路由拼接 SQL。",
+      "verification": "knowledge-lineage-access、knowledge-graph-workflow-postgres 与剩余链路隔离数据库回归验证撤权和来源失效保护。"
+    },
+    {
+      "file": "server/repositories/tool-approval-binding.js",
+      "count": 1,
+      "rationale": "只读已选服务的端点及配置用于审批摘要，不返回或记录原始凭据；服务 ID 参数化，执行仍由现有工具策略检查可见性。",
+      "verification": "tool-chain-remaining 验证版本、端点和连接变化触发旧审批阻断。"
+    },
+    {
+      "file": "server/repositories/tool-chain-metrics.js",
+      "count": 2,
+      "rationale": "用户级统计仓储按 actor_id 和起始时间参数聚合调用分母、状态及耗时，仅返回统计值和关联标识，不读取参数正文。",
+      "verification": "tool-chain-remaining 验证分母及分组投影，链路集成验证统计 SQL 可执行及用户隔离。"
+    },
+    {
       "file": "server/services/agent-idle-chat-tasks.js",
       "count": 1,
       "rationale": "会话任务等待补充信息超时巡检使用单条参数化条件更新原子处理，只针对无外部副作用、待审批事务及控制消息的常规任务，避免分布式并发重复更新。",

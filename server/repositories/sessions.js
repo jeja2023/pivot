@@ -6,22 +6,29 @@
  */
 const { query, queryOne, execute } = require('../db/client');
 
-function getSessionById(sessionId, userId) {
-    return queryOne(`
+async function getSessionById(sessionId, userId) {
+    const session = await queryOne(`
         SELECT *
         FROM sessions
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [sessionId, userId]);
+    if (!session) return null;
+    return (await require('../services/chat-knowledge-history').presentKnowledgeSessions([session], { id: userId }))[0];
 }
 
-function listMessages(sessionId, userId) {
-    return query(`
+function listMessageKnowledgeMetadata(sessionId, userId) {
+    return query('SELECT id,role,is_summary,route_metadata,agent_run_id FROM messages WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY id', [sessionId, userId]);
+}
+
+async function listMessages(sessionId, userId) {
+    const rows = await query(`
         SELECT m.*, COALESCE(md.name, md.model_name, '') AS model_name, md.model_name AS model_api_name
         FROM messages m
         LEFT JOIN models md ON md.id = m.model_id
         WHERE m.session_id = ? AND m.user_id = ? AND m.deleted_at IS NULL
         ORDER BY m.id ASC
     `, [sessionId, userId]);
+    return require('../services/chat-knowledge-history').presentKnowledgeMessages(rows, { id: userId });
 }
 
 async function getMessageContextTokenState(sessionId, userId) {
@@ -86,7 +93,7 @@ async function listMessagePage(sessionId, userId, { beforeId = null, limit = 60 
     const hasMore = rows.length > safeLimit;
     const messages = rows.slice(0, safeLimit).reverse();
     return {
-        messages,
+        messages: await require('../services/chat-knowledge-history').presentKnowledgeMessages(messages, { id: userId }),
         page: {
             hasMore,
             beforeId: messages.length ? Number(messages[0].id) : null,
@@ -180,6 +187,7 @@ async function countVisibleConversationMessages(sessionId, userId) {
 }
 
 module.exports = {
+    listMessageKnowledgeMetadata,
     getSessionById,
     listMessages,
     getMessageContextTokenState,

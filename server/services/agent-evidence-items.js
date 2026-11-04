@@ -89,6 +89,7 @@ async function listAgentEvidenceForUser(runId, user, { limit = 100 } = {}) {
     if (!runId || !user?.id) return null;
     const owned = await queryOne('SELECT id FROM agent_runs WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [String(runId), user.id]);
     if (!owned) return null;
+      await require('./knowledge-run-access').assertRunKnowledgeAccess(runId, user);
     const rows = await query(`
         SELECT evidence_id, run_id, tool_name, source_type, source_title, source_url, excerpt, content_digest, created_at
         FROM agent_evidence_items

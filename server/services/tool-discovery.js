@@ -7,6 +7,7 @@ const { getCapabilityDefinition } = require('./agent-capability-registry');
 
 const DEFAULT_DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_DISCOVERY_CACHE_ENTRIES = 100;
+const GENERIC_BUSINESS_TERMS = new Set(['业务', '外部', '工具', '帮我', '一个', '一下', '执行', '功能', '服务']);
 // 业务词只影响当前授权目录内的排序，不创建工具或扩大权限。
 const BUSINESS_ALIASES = Object.freeze({
     'rag.search': '知识库 资料 制度 条款 依据 来源 引用 检索',
@@ -24,7 +25,7 @@ function normalizeTerms(value) {
         .filter(item => item.length > 1);
     const cjkBigrams = [...source.matchAll(/[\u3400-\u9fff]{2,}/g)]
         .flatMap(match => Array.from(match[0]).map((_char, index, chars) => chars.slice(index, index + 2).join('')).filter(item => item.length === 2));
-    return [...new Set([...words, ...cjkBigrams])].slice(0, 30);
+    return [...new Set([...words, ...cjkBigrams])].filter(term => !GENERIC_BUSINESS_TERMS.has(term)).slice(0, 30);
 }
 
 function matchesFilters(tool, filters = {}) {

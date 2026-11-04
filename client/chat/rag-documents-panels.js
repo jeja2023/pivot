@@ -133,6 +133,11 @@ const showRagDetailModal = (data) => {
             { icon: window.Pivot.legacy.RAG_ICONS.time, label: '创建时间', value: window.Pivot.legacy.formatRagDateToCN(doc.created_at) },
             { icon: window.Pivot.legacy.RAG_ICONS.time, label: '更新时间', value: window.Pivot.legacy.formatRagDateToCN(doc.updated_at || doc.processed_at) }
         ];
+        const coverage = typeof doc.extraction_coverage_json === 'object' && doc.extraction_coverage_json ? doc.extraction_coverage_json : {};
+        items.push({ icon: window.Pivot.legacy.RAG_ICONS.progress, label: '正文覆盖', value: typeof coverage.complete === 'boolean'
+            ? `${coverage.complete ? '已完整处理' : '部分可用'} · ${coverage.processedPages ?? '-'} / ${coverage.sourcePageCount ?? '-'} 页${coverage.truncated ? ' · 正文已截断' : ''}` : '暂无覆盖记录' });
+        items.push({ icon: window.Pivot.legacy.RAG_ICONS.status, label: '未处理 / 失败页', value: `${(coverage.omittedPages || []).slice(0, 100).join('、') || '无记录'} / ${(coverage.failedPages || []).slice(0, 100).join('、') || '无记录'}` });
+        items.push({ icon: window.Pivot.legacy.RAG_ICONS.chunks, label: '索引版本', value: doc.index_fingerprint || '暂无版本记录' });
         PivotSafeHtml.setHtml(meta, items.map(item => `
             <div class="rag-meta-card ${item.class || ''}">
                 <div class="rag-meta-label">${item.icon}<span>${window.Pivot.legacy.escapeRagHtml(item.label)}</span></div>

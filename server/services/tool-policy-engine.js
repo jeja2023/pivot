@@ -280,6 +280,7 @@ function createToolPolicyEngine(deps = {}) {
             }
         }
         const resolvedConnection = connection || credential || await resolveConnection({ input: sanitizedInput, item: catalog.item, user, options: effectiveOptions }, deps);
+        await require('./tool-approval-binding').assertToolApprovalCurrent({ run: effectiveRun, tool, input, user, key: effectiveOptions.approvalKey }, deps);
         const executionPlan = await buildPlan({
             run: effectiveRun,
             tool,

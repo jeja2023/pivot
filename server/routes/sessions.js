@@ -202,7 +202,7 @@ function createSessionsRouter({
         }
 
         const payload = {
-            data: sessions,
+            data: await require('../services/chat-knowledge-history').presentKnowledgeSessions(sessions, req.user, { hideUnavailable: Boolean(keyword) }),
             hasMore: includeTotal && !cursor && page > 1 ? (offset + sessions.length) < total : hasMore,
             nextCursor
         };
@@ -345,7 +345,7 @@ function createSessionsRouter({
             LIMIT 50
         `, [req.user.id, `%${keyword}%`, req.user.id]);
 
-        res.json({ data: sessions });
+        res.json({ data: await require('../services/chat-knowledge-history').presentKnowledgeSessions(sessions, req.user, { hideUnavailable: true }) });
     }));
 
     router.get('/sessions/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -435,6 +435,7 @@ function createSessionsRouter({
     router.post('/sessions/:id/fork', authMiddleware, asyncHandler(async (req, res) => {
         const source = await sessionsRepository.getSessionById(req.params.id, req.user.id);
         if (!source) return res.status(404).json({ error: '会话不存在' });
+        if (source.knowledge_access?.current === false) return res.status(403).json({ error: '资料来源已变化，请重新选择资料后创建会话分支。' });
 
         const requestedMessageId = Number.parseInt(req.body?.messageId, 10);
         const fallbackMessage = await queryOne(`
@@ -463,7 +464,7 @@ function createSessionsRouter({
         const forkNote = String(req.body?.note || '').trim().slice(0, 500);
         const rootSessionId = source.fork_root_session_id || source.parent_session_id || source.id;
         const copiedMessages = await query(`
-            SELECT role, content, token_count, context_token_count, is_summary, context_archived, compressed_at, model_id, created_at
+            SELECT role, content, token_count, context_token_count, is_summary, context_archived, compressed_at, model_id, created_at, route_metadata, agent_run_id
             FROM messages
             WHERE session_id = ? AND user_id = ? AND deleted_at IS NULL AND id <= ?
             ORDER BY id ASC
@@ -493,8 +494,8 @@ function createSessionsRouter({
                 await trx.execute(`
                     INSERT INTO messages (
                         session_id, user_id, role, content, token_count, context_token_count, is_summary, context_archived,
-                        compressed_at, model_id, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        compressed_at, model_id, created_at, route_metadata, agent_run_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `, [
                     newSessionId,
                     req.user.id,
@@ -506,7 +507,9 @@ function createSessionsRouter({
                     message.context_archived || 0,
                     message.compressed_at || null,
                     message.model_id || null,
-                    message.created_at || now
+                    message.created_at || now,
+                    message.route_metadata || '{}',
+                    message.agent_run_id || null
                 ]);
             }
         });

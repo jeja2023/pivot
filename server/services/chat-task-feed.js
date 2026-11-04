@@ -52,6 +52,9 @@ async function getChatTaskFeed(runId, user, options = {}, dependencies = {}) {
     const store = dependencies.repository || repository;
     const row = await store.getTaskSnapshot(runId, user?.id);
     if (!row) return null;
+    const access = await (dependencies.inspectRunKnowledgeAccess || require('./knowledge-run-access').inspectRunKnowledgeAccess)(runId, user);
+    if (!access.current) return { version: 1, run: { id: runId, status: row.status, title: '资料来源不可用的任务', final_answer: access.message, error_message: access.message },
+        events: [], artifacts: [], knowledgeAccess: access, cursor: { after: Number(row.event_seq || 0), hasMore: false } };
     const highWater = Math.max(0, Number(row.event_seq || 0));
     if (normalized.after > highWater) throw Object.assign(new Error('任务记录已变化，请重新加载执行过程。'), { status: 409, code: 'CHAT_TASK_CURSOR_AHEAD' });
     const tenant = await (dependencies.resolveTenantContext || resolveTenantContext)(user);

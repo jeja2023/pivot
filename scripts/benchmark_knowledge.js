@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const { performance } = require('node:perf_hooks');
+const { aggregateRetrievalQuality, evaluateRetrievalSample } = require('./test_support/knowledge_quality_metrics');
 
 async function runBenchmark({ baseUrl, authorization, cases, concurrency = 2, timeoutMs = 30000, fetchFn = fetch } = {}) {
     const root = new URL(baseUrl);
@@ -25,10 +26,8 @@ async function runBenchmark({ baseUrl, authorization, cases, concurrency = 2, ti
                 });
                 const body = await response.json();
                 if (!response.ok || body.error) throw new Error('request_failed');
-                const retrieved = (Array.isArray(body.citations) ? body.citations : []).map(citation => Number(citation.document?.id)).filter(Number.isSafeInteger);
-                const expected = (Array.isArray(item.expectedDocumentIds) ? item.expectedDocumentIds : []).map(Number).filter(Number.isSafeInteger);
-                const hit = expected.length ? expected.some(id => retrieved.includes(id)) : null;
-                samples.push({ index, durationMs: Math.round(performance.now() - start), hit });
+                const citations = Array.isArray(body.citations) ? body.citations : [];
+                samples.push({ index, durationMs: Math.round(performance.now() - start), ...evaluateRetrievalSample(item, citations) });
             } catch (_) { samples.push({ index, durationMs: Math.round(performance.now() - start), error: 'request_failed' }); }
         }
     }
@@ -39,7 +38,8 @@ async function runBenchmark({ baseUrl, authorization, cases, concurrency = 2, ti
     return { total: jobs.length, succeeded: durations.length, failed: samples.length - durations.length,
         p50Ms: percentile(0.5), p95Ms: percentile(0.95), p99Ms: percentile(0.99),
         labeledCases: labeled.length, hitRate: labeled.length ? labeled.filter(sample => sample.hit).length / labeled.length : null,
-        note: '仅计算文档级命中率；引用质量、答案正确性、权限隔离和完整性须使用标注集另行验收。' };
+        topK: 5, quality: aggregateRetrievalQuality(samples),
+        note: '质量指标仅依据显式标注与成功请求；失败率另列，不将缺少标注或事实核验计为通过。' };
 }
 
 async function main() {

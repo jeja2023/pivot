@@ -38,12 +38,16 @@ function createApprovalHelpers({
 
     async function maybePauseForApproval(run, tool, input, approvalKey = '') {
         const scopedKey = resolveApprovalKey(run, tool.name, input, String(approvalKey || '').trim());
-        if (!shouldPauseForApproval(run, tool, scopedKey, input)) return false;
+        let stale = false;
+        try { await require('../tool-approval-binding').assertToolApprovalCurrent({ run, tool, input, user: { id: run.user_id }, key: scopedKey }); }
+        catch (error) { if (error.code === 'AGENT_APPROVAL_STALE') stale = true; else throw error; }
+        if (!stale && !shouldPauseForApproval(run, tool, scopedKey, input)) return false;
         const user = { id: run.user_id };
+        const binding = await require('../tool-approval-binding').captureToolApprovalBinding(run, tool, input, user);
         const review = await require('../chat-action-review').reviewChatAction({ run, tool, input, user });
         if (review.allowed) {
             const { updateAgentRunMetadataWithRetry } = require('../agent-run-metadata-patch');
-            const grant = { tool: tool.name, key: scopedKey, inputHash: approvalInputHash(input), hashVersion: 2, expiresAt: getTimestamp(new Date(Date.now() + 2 * 60 * 1000)), source: 'independent_readonly_review', reviewer: review.reviewer };
+            const grant = { tool: tool.name, key: scopedKey, inputHash: approvalInputHash(input), hashVersion: 2, binding, expiresAt: getTimestamp(new Date(Date.now() + 2 * 60 * 1000)), source: 'independent_readonly_review', reviewer: review.reviewer };
             const nextMetadata = await updateAgentRunMetadataWithRetry(run.id, current => ({ ...current, approvalGrants: [...(current.approvalGrants || []), grant].slice(-100) }), { userId: run.user_id });
             run.metadata = nextMetadata;
             await recordAgentEvent?.({ runId: run.id, userId: run.user_id, type: 'approval.auto_reviewed', payload: { tool: tool.name, key: scopedKey, inputHash: grant.inputHash, reviewer: review.reviewer }, eventKey: `auto-review:${scopedKey}:${grant.inputHash}` });
@@ -59,6 +63,7 @@ function createApprovalHelpers({
                 expiresAt: getTimestamp(new Date(Date.now() + 15 * 60 * 1000)),
                 inputHash: approvalInputHash(input),
                 hashVersion: 2,
+                binding,
                 input
             }
         });

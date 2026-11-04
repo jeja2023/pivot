@@ -333,8 +333,6 @@
         }
         if (qualityPanel) {
             const q = state.quality || {};
-            const rate = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) * 100)}%`, minutes = value => value === null || value === undefined ? '—' : `${Math.round(Number(value) / 60)} 分钟`, cache = q.promptCache || {};
-            const observedLabel = cache.observationRate === null || cache.observationRate === undefined ? '未观测' : rate(cache.observationRate); const cacheDetail = cache.observedCalls ? `${Number(cache.cacheReadTokens || 0).toLocaleString()} 读 / ${Number(cache.cacheCreationTokens || 0).toLocaleString()} 写 Token` : '提供方尚未返回缓存字段';
             const acceptance = Array.isArray(state.acceptanceEvidence) ? state.acceptanceEvidence : [], readyDomains = acceptance.filter(item => item.readiness === 'ready_for_committee_score').length;
             const pendingAcceptanceReviews = acceptance.flatMap(item => Array.isArray(item.evidence) ? item.evidence : []).filter(item => item.status === 'submitted');
             // 五分验收台账与委员会就绪度检查 (ready_for_committee_score)
@@ -347,7 +345,7 @@
                 ? acceptanceUi.renderAcceptanceReviews({ pendingAcceptanceReviews, canReview: canReviewOrganizationExperience() })
                 : '';
 
-            setMarkup(qualityPanel, `<div class="agent-quality-metrics-grid"><div class="agent-metric-tile"><span>验收通过率</span><strong>${rate(q.verification?.verifiedRate)}</strong><small>${Number(q.verification?.total || 0)} 个已验收任务</small></div><div class="agent-metric-tile"><span>执行终态率</span><strong>${rate(q.runs?.executionCompletionRate)}</strong><small>近 30 天任务运行</small></div><div class="agent-metric-tile"><span>审批中位数</span><strong>${minutes(q.approvals?.medianSeconds)}</strong><small>人工介入耗时</small></div><div class="agent-metric-tile"><span>工具错误率</span><strong>${rate(q.tools?.errorRate)}</strong><small>外部调用异常率</small></div><div class="agent-metric-tile"><span>Prompt 缓存已观测</span><strong>${observedLabel}</strong><small title="${escapeAttr(cacheDetail)}">${escape(cacheDetail)}</small></div><div class="agent-metric-tile"><span>渠道死信</span><strong>${escape(q.deliveries?.deadLetter || 0)}</strong><small>未送达消息队列</small></div></div>${acceptanceMarkup}${acceptanceReviews}`);
+            setMarkup(qualityPanel, `${window.Pivot?.moduleApi?.('agent.qualityMetrics')?.render(q, escape, escapeAttr) || ''}${acceptanceMarkup}${acceptanceReviews}`);
 
             acceptanceUi?.bindAcceptanceHandlers?.({
                 qualityPanel,

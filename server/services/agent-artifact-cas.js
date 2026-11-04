@@ -202,7 +202,8 @@ async function authorizeForRead(params) {
     const row = await loadObjectRow(objectId);
     if (!row) throw casError('产物对象不存在。', 404, 'ARTIFACT_CAS_NOT_FOUND');
     assertReadAccess(row, params);
-    if (row.kind === KIND_EXPIRED || !String(row.storage_key || '').trim()) {
+    const expiresAt = row.expires_at instanceof Date ? row.expires_at.getTime() : row.expires_at ? require('./agent-approval-grants').approvalExpiryMs(row.expires_at) : Infinity;
+    if (row.kind === KIND_EXPIRED || !String(row.storage_key || '').trim() || (row.expires_at && !Number.isFinite(expiresAt)) || expiresAt <= Date.now()) {
         throw casError('产物对象已过保留期，内容已按保留策略清理。', 410, 'ARTIFACT_CAS_EXPIRED');
     }
     return { row, object: toPublicObject(row) };

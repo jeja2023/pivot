@@ -140,6 +140,7 @@ function allowedSkillPermissions() {
 }
 function createAgentsRouter({ authMiddleware, logAction, automationLimiter, deviceChallengeLimiter, uploadLimiter, skillUpload }) {
     const router = express.Router();
+    router.use('/agents/runs/:id', authMiddleware, require('../services/knowledge-run-access').guardKnowledgeRunRead);
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (req, res, next) => next();
     const residency = createAgentResidencyStore();
     router.use(createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter }));

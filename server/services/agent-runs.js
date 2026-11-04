@@ -22,7 +22,13 @@ async function getRunForUser(runId, user, options = {}) {
 }
 
 async function listRuns(user, options = {}) {
-    return await runRepository.listRuns(user?.id, options);
+    const result = await runRepository.listRuns(user?.id, options);
+    const rows = Array.isArray(result) ? result : result.runs || result.items || result.data;
+    if (Array.isArray(rows)) for (let index = 0; index < rows.length; index++) {
+        const access = await require('./knowledge-run-access').inspectRunKnowledgeAccess(rows[index].id, user);
+        if (!access.current) rows[index] = require('./knowledge-run-access').blockedRunDetail(rows[index], access).run;
+    }
+    return result;
 }
 
 async function listDeletedRunsForAdmin(user, limit = 100) {
@@ -348,14 +354,20 @@ async function getDagNodeCompleteOutputForUser(runId, nodeId, user) {
     if (!nodeKey) return null;
     const node = (await listDagNodes(run.id)).find(item => String(item.node_key || '') === nodeKey);
     if (!node) return null;
+    const access = await require('./knowledge-run-access').inspectRunKnowledgeAccess(run.id, user);
+    if (!access.current) return { nodeId: node.node_key, status: node.status, complete: false, source: 'unavailable',
+        output: { knowledgeSourceVersion: 1, sources: [], retrieval: { status: 'blocked', reasonCode: access.reasonCode } }, outputRef: null };
     const resolved = await resolvePersistedDagOutput(node.output, { user });
+    const restored = require('./knowledge-evidence-lineage').unpackKnowledgeOutput(resolved.value);
+    const [presented] = await require('./knowledge-tool-results').presentKnowledgeSteps([{ ...node, output: restored.value, knowledge_evidence: node.knowledge_evidence || restored.knowledgeEvidence }], user);
+    const available = presented.output === restored.value;
     return {
         nodeId: node.node_key,
         status: node.status,
-        complete: resolved.complete,
-        source: resolved.source,
-        output: resolved.value,
-        outputRef: String(node.output?.outputRef || '').trim() || null
+        complete: available && resolved.complete,
+        source: available ? resolved.source : 'unavailable',
+        output: presented.output,
+        outputRef: available ? String(node.output?.outputRef || '').trim() || null : null
     };
 }
 
@@ -385,6 +397,8 @@ function getRunProgress(run, steps = []) {
 async function getRunDetailForUser(runId, user) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
+    const access = await require('./knowledge-run-access').inspectRunKnowledgeAccess(run.id, user);
+    if (!access.current) return require('./knowledge-run-access').blockedRunDetail(run, access);
     const [steps, dagNodes, invocations, iterationItems, trace, checkpoints, verification, evidence, transactions, workingMemoryRevisions, promptInvocations, browserActionEvidence, browserSessions] = await Promise.all([
         listSteps(run.id),
         listDagNodes(run.id),
@@ -429,7 +443,7 @@ async function getRunDetailForUser(runId, user) {
     return {
         run,
         steps: await require('./knowledge-tool-results').presentKnowledgeSteps(steps, user),
-        dagNodes: effectiveDagNodes,
+        dagNodes: await require('./knowledge-tool-results').presentKnowledgeSteps(effectiveDagNodes, user),
         invocations: invocations || [],
         iterationItems: iterationItems || [],
         progress: getRunProgress(run, steps || []),

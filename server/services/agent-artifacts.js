@@ -43,29 +43,34 @@ async function markAgentNotificationRead(notificationId, user) {
 }
 
 async function listAgentArtifacts(user, limit = 30) {
-    return await query(`
+    const rows = await query(`
         SELECT a.*, r.title AS run_title, r.status AS run_status,
                v.version AS current_version,
                (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.user_id = ? AND (a.type <> 'mindmap' OR a.status <> 'deleted')
+        WHERE a.user_id = ? AND a.status <> 'deleted'
         ORDER BY COALESCE(a.updated_at, a.created_at) DESC, a.id DESC
         LIMIT ?
     `, [user.id, normalizePositiveInt(limit, 30, 1, 100)]);
+    const visible = [];
+    for (const row of rows) if ((await require('./knowledge-run-access').inspectRunKnowledgeAccess(row.run_id, user)).current) visible.push(row);
+    return visible;
 }
 
 async function getAgentArtifactForUser(artifactId, user) {
-    return await queryOne(`
+    const artifact = await queryOne(`
         SELECT a.*, r.title AS run_title, r.status AS run_status,
                v.version AS current_version,
                (SELECT COUNT(*) FROM agent_artifact_versions av WHERE av.artifact_id = a.id) AS version_count
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.id = ? AND a.user_id = ? AND (a.type <> 'mindmap' OR a.status <> 'deleted')
+        WHERE a.id = ? AND a.user_id = ? AND a.status <> 'deleted'
     `, [artifactId, user.id]);
+    if (artifact && !(await require('./knowledge-run-access').inspectRunKnowledgeAccess(artifact.run_id, user)).current) return null;
+    return artifact;
 }
 
 async function listAgentArtifactVersions(artifactId, user) {
@@ -299,7 +304,8 @@ async function saveAgentRunArtifact(runId, user, body = {}) {
 async function exportAgentRun(runId, user, format = 'json') {
     const getRunDetailForUser = ensureGetRunDetailForUser();
     const getAgentRunTitle = ensureGetAgentRunTitle();
-    const detail = await getRunDetailForUser(runId, user);
+    const rawDetail = await getRunDetailForUser(runId, user);
+    const detail = rawDetail ? require('./agent-audit-projection').projectRunAudit(rawDetail) : null;
     if (!detail) return null;
     const payload = {
         exportedAt: getBeijingTimestamp(),

@@ -19,6 +19,9 @@ async function persistAssistantTurn({
     skipMemoryExtraction = false,
     conversationTurnId = null
 }) {
+    const previous = await require('../repositories/sessions').listMessages(sessionId, userId);
+    const evidence = require('./chat-knowledge-history').collectMessageKnowledgeEvidence(previous);
+    if (evidence) routeMetadata = { ...(routeMetadata || {}), knowledgeEvidence: require('./knowledge-evidence-lineage').mergeKnowledgeEvidence(evidence, routeMetadata?.rag?.knowledgeEvidence) };
     const assistantMessageResult = await saveAssistantMessage({
         sessionId,
         userId,

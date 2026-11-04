@@ -6,6 +6,8 @@ Pivot 的会话结果文件支持 DOCX 在线查看。未配置 ONLYOFFICE 时�
 
 v0.7.81 中，DOCX、图片和 ONLYOFFICE 预览使用右侧非模态面板；桌面宽屏下会话区域相应收窄，窄屏下预览占满屏幕。切换或关闭预览会清理当前查看器或临时图片地址。
 
+v0.7.87 增加来源变化后的结果读取保护：任务依赖的知识来源失效或无法确认时，相关受控文件的预览配置、原文读取和下载会被阻断，需重新选择资料并运行。预览和下载响应阶段可单独统计；响应完成不代表已在浏览器显示成功或保存到本机。此改造仍需在实际 ONLYOFFICE、代理和用户浏览器环境验收，详见[发布记录](../releases/v0.7.87-工具与知识库全链路加固.md)。
+
 ## 同机部署配置
 
 1. 在 Pivot 对外的同源反向代理下配置虚拟路径 `/onlyoffice/`，转发到生产机已有的 ONLYOFFICE Docs。应保留 WebSocket 升级，并按 ONLYOFFICE 的虚拟路径配置传递 `X-Forwarded-Host`、`X-Forwarded-Proto`；具体主机、端口和已有网关配置须以现场为准。参考官方 [反向代理说明](https://helpcenter.onlyoffice.com/docs/installation/docs-community-proxy.aspx)及其中的虚拟路径示例。

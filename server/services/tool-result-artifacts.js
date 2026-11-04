@@ -18,10 +18,15 @@ async function materializeToolArtifact(output, user, context = {}) {
     const envelope = output?.structuredContent?.pivotArtifact;
     if (!envelope || output.isError) return output;
     if (!context.stepId && !context.toolCallId) throw new Error('工具产物缺少真实调用标识。');
-    if (Buffer.byteLength(JSON.stringify(envelope)) > 1024 * 1024) throw new Error('工具产物超过大小上限。');
+    if (Buffer.byteLength(JSON.stringify(envelope)) > (envelope.kind === 'file' ? 12 : 1) * 1024 * 1024) throw new Error('工具产物超过大小上限。');
     const { executeArtifactTool } = require('./agent-tools-artifacts');
     let ir, format, assetId;
-    if (envelope.kind === 'audit') {
+    if (envelope.kind === 'document') {
+        if (!['docx', 'pdf', 'xlsx', 'html', 'md'].includes(envelope.format)) throw new Error('工具文档格式未登记。');
+        ir = envelope.ir; format = envelope.format;
+    } else if (envelope.kind === 'file') {
+        ({ ir, format, assetId } = await require('./tool-file-contract').toolFileIr(envelope, user));
+    } else if (envelope.kind === 'audit') {
         ir = auditReportIr(envelope.data);
         format = 'html';
     } else if (envelope.kind === 'diagram') {
@@ -36,7 +41,7 @@ async function materializeToolArtifact(output, user, context = {}) {
     } else throw new Error('工具产物类型未登记。');
     const delivery = await executeArtifactTool('artifact.render', { ir, format, ...(context.targetArtifactId ? { artifactId: context.targetArtifactId } : {}) }, user, context);
     if (assetId && !delivery.reused) await require('./agent-artifact-cas').incrementRefCount(assetId, 1);
-    const { svg: _svg, ...summary } = envelope;
+    const { svg: _svg, content: _content, ir: _ir, ...summary } = envelope;
     // 原始 MCP 文本通常重复携带完整 SVG；渲染结果已保存到受控产物，无需再次发送给模型。
     return { ...output, content: [{ type: 'text', text: delivery.text || '工具产物已生成。' }], structuredContent: { ...output.structuredContent, pivotArtifact: summary }, ...delivery };
 }
