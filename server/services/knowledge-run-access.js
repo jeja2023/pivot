@@ -11,7 +11,7 @@ async function inspectRunKnowledgeAccess(runId, user, deps = {}) {
     if (!runId) return { current: true, tracked: false };
     try {
         const evidence = await (deps.read || require('../repositories/knowledge-run-evidence').readRunKnowledgeEvidence)(runId, user?.id);
-        if (!evidence) return blockedAccess();
+        if (!evidence) return { current: false, notFound: true, reasonCode: 'RUN_NOT_FOUND', message: '智能体任务不存在或无权访问。' };
         if (!evidence.actor || evidence.actor.status === 'disabled' || evidence.actor.deleted_at || evidence.incomplete) return blockedAccess();
         const metadata = parseJsonObject(evidence.run.metadata) || {};
         const observations = [];
@@ -40,7 +40,7 @@ async function inspectRunKnowledgeAccess(runId, user, deps = {}) {
 
 async function assertRunKnowledgeAccess(runId, user, deps = {}) {
     const access = await inspectRunKnowledgeAccess(runId, user, deps);
-    if (!access.current) throw Object.assign(new Error(BLOCKED_MESSAGE), { code: access.reasonCode, status: 403, category: 'policy' });
+    if (!access.current) throw Object.assign(new Error(access.message || BLOCKED_MESSAGE), { code: access.reasonCode, status: access.notFound ? 404 : 403, category: 'policy' });
     return access;
 }
 
@@ -54,8 +54,10 @@ function blockedRunDetail(run, access) {
 
 function guardKnowledgeRunRead(req, res, next) {
     if (req.method !== 'GET' || req.path === '/' || !req.params.id || ['deleted', 'chat-active'].includes(req.params.id)) return next();
-    inspectRunKnowledgeAccess(req.params.id, req.user).then(access => access.current ? next()
-        : res.status(403).json({ error: access.message, code: access.reasonCode })).catch(next);
+    inspectRunKnowledgeAccess(req.params.id, req.user).then(access => {
+        if (access.notFound || access.current) return next();
+        return res.status(403).json({ error: access.message, code: access.reasonCode });
+    }).catch(next);
 }
 
 module.exports = { assertRunKnowledgeAccess, blockedRunDetail, guardKnowledgeRunRead, inspectRunKnowledgeAccess };
