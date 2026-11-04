@@ -128,7 +128,9 @@ test('DOCX 两行标题后空一行、附件前空一行、署名日期整体前
     }
 });
 
-test('PDF 实际坐标验证标题末行后一行、附件前一行、署名日期前三行', async () => {
+test('PDF 实际坐标验证标题末行后一行、附件前一行、署名日期前三行', async (t) => {
+    const status = await require('../server/services/document-rendering/official-fonts').officialFontStatus();
+    if (!status.available) { t.skip('缺少公文原字体，跳过 PDF 坐标验证'); return; }
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     const sources = await require('../server/services/document-rendering/official-fonts').loadOfficialFonts();
     for (const recipient of ['', '各单位：']) {
@@ -162,7 +164,9 @@ test('PDF 实际坐标验证标题末行后一行、附件前一行、署名日�
     }
 });
 
-test('截图标准 PDF 嵌入全部原字体，纯正文22行28字与28磅基线，不带补零日期且附件续页码', async () => {
+test('截图标准 PDF 嵌入全部原字体，纯正文22行28字与28磅基线，不带补零日期且附件续页码', async (t) => {
+    const status = await require('../server/services/document-rendering/official-fonts').officialFontStatus();
+    if (!status.available) { t.skip('缺少公文原字体，跳过 PDF 渲染验证'); return; }
     const ir = fixture();
     ir.blocks.splice(0, 0, { type: 'page_break' }, { type: 'paragraph', runs: [{ text: '甲'.repeat(28 * 23) }], style: { indent_chars: 0 } });
     const bytes = await renderPdf(ir);

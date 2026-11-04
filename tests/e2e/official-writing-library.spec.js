@@ -122,6 +122,8 @@ test('公文 AI 经真实路由调用受控模型并保留流式完成标记', a
 test('公文真实导出预览、PDF 与 DOCX 下载保留发文要素且复用本篇产物', async ({ page }) => {
     test.setTimeout(90_000);
     const headers = await login(page);
+    const fontStatus = await (await page.request.get('/api/apps/official-writing/format')).json();
+    test.skip(!fontStatus.available, '服务端未安装公文指定字体，跳过真实导出预览与 PDF/DOCX 下载');
     const id = `export-${Date.now()}`;
     const saved = await page.request.put(`/api/apps/official-writing/documents/${id}`, { headers, data: { title: '公文导出验收', version: 0, manualTitle: true,
         state: { docType: '通知', draft: '关于年度检查的通知\n各单位：\n请认真落实年度检查工作。\n示例局\n2026年11月4日',

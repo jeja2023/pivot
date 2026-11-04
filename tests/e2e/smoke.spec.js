@@ -1580,7 +1580,7 @@ test.describe('Pivot browser smoke', () => {
             contentType: 'application/json',
             body: JSON.stringify({ data: [{ snapshot_version: 7, state: { detail: '<img src=x onerror=alert(1)>' } }] })
         }));
-        await page.route('**/api/agents/runs/run-lazy-detail', route => route.fulfill({
+        await page.route(/\/api\/agents\/runs\/run-lazy-detail(?:\?.*)?$/, route => route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
                 run: {
