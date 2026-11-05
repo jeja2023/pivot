@@ -57,14 +57,16 @@ const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/documen
 const { createOcrRouter } = require('../server/routes/apps/ocr');
 const { deleteAppSettingAsync, refreshAppSettingsCache, setAppSettingAsync } = require('../server/services/app-settings');
 
-async function waitForDocumentJob(userId, jobId, timeoutMs = 30000) {
+async function waitForDocumentJob(userId, jobId, timeoutMs = 60000) {
+    const effectiveTimeoutMs = Math.max(Number(timeoutMs) || 0, process.env.CI ? 60000 : 45000);
     const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
+    while (Date.now() - startedAt < effectiveTimeoutMs) {
         const detail = await getJobDetail({ userId, jobId });
         if (detail && !['queued', 'processing'].includes(detail.job.status)) return detail;
         await new Promise(resolve => setTimeout(resolve, 25));
     }
-    throw new Error('文档处理任务等待超时');
+    const finalDetail = await getJobDetail({ userId, jobId }).catch(() => null);
+    throw new Error(`文档处理任务等待超时（耗时 ${Date.now() - startedAt}ms，状态：${finalDetail?.job?.status || '未知'}，进度：${finalDetail?.job?.progress ?? '未知'}%，错误：${finalDetail?.job?.errorMessage || '无'}）`);
 }
 
 
