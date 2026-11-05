@@ -1,5 +1,3 @@
-
-
 /* ===== 多文档库 ===== */
 .official-writing-doc-library {
     display: flex;
@@ -434,6 +432,7 @@
     padding: 12px 16px;
     border-top: 1px solid rgba(148, 163, 184, 0.2);
 }
+
 /* ===== 简化编辑详情：正文优先，辅助能力弹窗化 ===== */
 .official-writing-panel[data-official-writing-screen="editor"] {
     display: flex;
@@ -628,6 +627,7 @@
 }
 
 @media (max-width: 720px) {
+
     .official-writing-panel[data-official-writing-screen="editor"] .official-writing-toolbar,
     .official-writing-panel[data-official-writing-screen="editor"] .official-writing-command-row {
         align-items: stretch;
@@ -646,6 +646,7 @@
         height: calc(100vh - 48px);
     }
 }
+
 /* ===== 编辑页单行顶部栏 ===== */
 .official-writing-panel[data-official-writing-screen="editor"] .official-writing-detail-header {
     display: flex;
@@ -741,6 +742,7 @@
         justify-content: flex-start;
     }
 }
+
 .official-writing-drawer-ai-indicator {
     flex: 0 0 auto;
     display: inline-flex;
@@ -784,6 +786,7 @@
     font-style: normal;
     font-weight: 700;
 }
+
 /* ===== 公文写作弹窗统一为全局 modal 风格 ===== */
 .official-writing-draft-modal {
     z-index: 1800;
@@ -928,6 +931,7 @@
         min-height: 220px;
     }
 }
+
 /* 公文写作弹窗细节修正：标题纵向排布，并与全局弹窗盒模型一致。 */
 .official-writing-draft-dialog,
 .official-writing-drawer,
@@ -938,16 +942,17 @@
 .official-writing-draft-dialog-head {
     display: block;
 }
+
 /* 写作资源弹窗头部使用全局弹窗的左右布局：标题在左，关闭在右。 */
-.official-writing-left-rail > .official-writing-rail-head {
+.official-writing-left-rail>.official-writing-rail-head {
     justify-content: space-between;
 }
 
-.official-writing-left-rail > .official-writing-rail-head strong {
+.official-writing-left-rail>.official-writing-rail-head strong {
     flex: 1 1 auto;
 }
 
-.official-writing-left-rail > .official-writing-rail-head .official-writing-modal-close {
+.official-writing-left-rail>.official-writing-rail-head .official-writing-modal-close {
     margin-left: auto;
 }
 
@@ -990,7 +995,7 @@
     font-weight: 800;
 }
 
-.official-writing-review-toolbar > div:first-child > span {
+.official-writing-review-toolbar>div:first-child>span {
     display: block;
     margin-top: 2px;
     color: #64748b;
@@ -1073,6 +1078,7 @@
 }
 
 @media (max-width: 720px) {
+
     .official-writing-review-toolbar,
     .official-writing-review-actions {
         align-items: stretch;
@@ -1166,9 +1172,19 @@
 }
 
 /* 编辑保持文本 DOM，预览复用全局弹窗与表单。 */
-.official-writing-editable-surface[data-editing="1"] { white-space: pre-wrap; overflow-wrap: anywhere; }
-.official-writing-home-actions { flex-wrap: wrap; }
-.official-writing-home-actions > .form-input { width: auto; max-width: 240px; }
+.official-writing-editable-surface[data-editing="1"] {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.official-writing-home-actions {
+    flex-wrap: wrap;
+}
+
+.official-writing-home-actions>.form-input {
+    width: auto;
+    max-width: 240px;
+}
 
 /* 深色模式下公文列表与工具栏控件适配 */
 body.dark-mode .official-writing-home-actions .form-input,
@@ -1240,49 +1256,178 @@ body.dark-mode .official-writing-stat-detail b,
 .dark-mode .official-writing-stat-detail b {
     color: var(--text-dark-head, #f8fafc);
 }
-.official-writing-preview-modal { width: min(1100px, 95vw); max-height: 90vh; display: flex; flex-direction: column; }
-.official-writing-preview-modal .workspace-modal-body { overflow: auto; min-height: 0; padding: 16px 20px; }
-.official-writing-preview-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.official-writing-preview-modal pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
-#official-writing-export-frame { width: 100%; max-height: 54vh; overflow: auto; border: 1px solid var(--border); }
-#official-writing-export-frame canvas { display: block; max-width: 100%; height: auto; margin: 0 auto 12px; }
-@media (max-width: 720px) { .official-writing-preview-columns { grid-template-columns: 1fr; } }
+
+.official-writing-preview-modal {
+    width: min(1100px, 95vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.official-writing-preview-modal .workspace-modal-body {
+    overflow: auto;
+    min-height: 0;
+    padding: 16px 20px;
+}
+
+.official-writing-preview-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.official-writing-preview-modal pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+}
+
+#official-writing-export-frame {
+    width: 100%;
+    max-height: 54vh;
+    overflow: auto;
+    border: 1px solid var(--border);
+}
+
+#official-writing-export-frame canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 12px;
+}
+
+@media (max-width: 720px) {
+    .official-writing-preview-columns {
+        grid-template-columns: 1fr;
+    }
+}
 
 /* 用户截图标准：编辑期保留稳定文本，实际分页由统一版式预览显示。 */
-.official-writing-panel { --official-char-pitch: 15.7930258718pt; }
+.official-writing-panel {
+    --official-char-pitch: 15.7930258718pt;
+}
+
 .official-writing-panel[data-writing-view-mode="document"] .official-writing-draft-pane .official-writing-editor-stack {
-    width: min(100%, 210mm); min-height: 297mm; padding: 37mm 27mm 35mm;
+    width: min(100%, 210mm);
+    min-height: 297mm;
+    padding: 37mm 27mm 35mm;
     font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
-    font-size: 16pt; line-height: 28pt;
+    font-size: 16pt;
+    line-height: 28pt;
 }
+
 .official-writing-panel[data-writing-view-mode="document"] .official-writing-draft-pane .official-writing-document-surface {
-    min-height: 225mm; font-size: 16pt; line-height: 28pt;
+    min-height: 225mm;
+    font-size: 16pt;
+    line-height: 28pt;
     font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
 }
-.official-writing-surface-line, .official-writing-surface-blank { min-height: 28pt; line-height: 28pt; }
-.official-writing-surface-blank { height: 28pt; }
+
+.official-writing-surface-line,
+.official-writing-surface-blank {
+    min-height: 28pt;
+    line-height: 28pt;
+}
+
+.official-writing-surface-blank {
+    height: 28pt;
+}
+
 .official-writing-surface-title {
     font-family: "Times New Roman", "方正小标宋_GBK", "FZXiaoBiaoSong-B05", serif;
-    font-size: 22pt; font-weight: normal; text-align: center; text-indent: 0; line-height: 28pt; margin: 0 0 28pt;
+    font-size: 22pt;
+    font-weight: normal;
+    text-align: center;
+    text-indent: 0;
+    line-height: 28pt;
+    margin: 0 0 28pt;
 }
-.official-writing-surface-title .official-writing-surface-text { white-space: pre-line; }
-.official-writing-title-line { display: block; }
-.official-writing-surface-recipient { margin-top: 0; text-indent: 0; font-size: 16pt; }
-.official-writing-surface-paragraph, .official-writing-surface-heading1, .official-writing-surface-heading2,
-.official-writing-surface-heading3, .official-writing-surface-heading4 { text-indent: calc(2 * var(--official-char-pitch)); margin: 0; font-size: 16pt; line-height: 28pt; font-weight: normal; }
-.official-writing-surface-paragraph, .official-writing-surface-recipient, .official-writing-surface-label, .official-writing-surface-attachment-note {
+
+.official-writing-surface-title .official-writing-surface-text {
+    white-space: pre-line;
+}
+
+.official-writing-title-line {
+    display: block;
+}
+
+.official-writing-surface-recipient {
+    margin-top: 0;
+    text-indent: 0;
+    font-size: 16pt;
+}
+
+.official-writing-surface-paragraph,
+.official-writing-surface-heading1,
+.official-writing-surface-heading2,
+.official-writing-surface-heading3,
+.official-writing-surface-heading4 {
+    text-indent: calc(2 * var(--official-char-pitch));
+    margin: 0;
+    font-size: 16pt;
+    line-height: 28pt;
+    font-weight: normal;
+}
+
+.official-writing-surface-paragraph,
+.official-writing-surface-recipient,
+.official-writing-surface-label,
+.official-writing-surface-attachment-note {
     font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
 }
-.official-writing-surface-heading1 { font-family: "Times New Roman", "方正黑体_GBK", "FZHei-B01", serif; }
-.official-writing-surface-heading2 { font-family: "Times New Roman", "方正楷体_GBK", "FZKai-Z03", serif; }
-.official-writing-surface-heading3, .official-writing-surface-heading4 { font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif; }
-.official-writing-surface-attachment-note { margin-top: 28pt; text-indent: calc(2 * var(--official-char-pitch)); }
-.official-writing-surface-signature { font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif; margin: 0; font-size: 16pt; line-height: 28pt; text-indent: 0; }
-.official-writing-surface-signature-start { margin-top: 84pt; }
-.official-writing-surface-format-gap { min-height: 0; height: 0; line-height: 0; }
-.official-writing-surface-signature[data-signature-kind="date"] { padding-right: calc(4 * var(--official-char-pitch)); text-align: right; }
-.official-writing-surface-signature[data-signature-kind="organization"] { text-align: center; margin-left: 45%; }
-.official-writing-editable-surface[data-editing="1"] { font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif; }
+
+.official-writing-surface-heading1 {
+    font-family: "Times New Roman", "方正黑体_GBK", "FZHei-B01", serif;
+}
+
+.official-writing-surface-heading2 {
+    font-family: "Times New Roman", "方正楷体_GBK", "FZKai-Z03", serif;
+}
+
+.official-writing-surface-heading3,
+.official-writing-surface-heading4 {
+    font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
+}
+
+.official-writing-surface-attachment-note {
+    margin-top: 28pt;
+    text-indent: calc(2 * var(--official-char-pitch));
+}
+
+.official-writing-surface-signature {
+    font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
+    margin: 0;
+    font-size: 16pt;
+    line-height: 28pt;
+    text-indent: 0;
+}
+
+.official-writing-surface-signature-start {
+    margin-top: 84pt;
+}
+
+.official-writing-surface-format-gap {
+    min-height: 0;
+    height: 0;
+    line-height: 0;
+}
+
+.official-writing-surface-signature[data-signature-kind="date"] {
+    padding-right: calc(4 * var(--official-char-pitch));
+    text-align: right;
+}
+
+.official-writing-surface-signature[data-signature-kind="organization"] {
+    text-align: center;
+    margin-left: 45%;
+}
+
+.official-writing-editable-surface[data-editing="1"] {
+    font-family: "Times New Roman", "方正仿宋_GBK", "FZFangSong-Z02", serif;
+}
+
 @media (max-width: 720px) {
-    .official-writing-panel[data-writing-view-mode="document"] .official-writing-draft-pane .official-writing-editor-stack { padding: 24px 20px; }
+    .official-writing-panel[data-writing-view-mode="document"] .official-writing-draft-pane .official-writing-editor-stack {
+        padding: 24px 20px;
+    }
 }

@@ -79,7 +79,8 @@ RUN printf 'registry=%s\n' "$NPM_REGISTRY" > .npmrc && \
   node scripts/prune_optional_database_connectors.js --node-modules /app/node_modules --connectors "$PIVOT_DB_CONNECTORS" && \
   rm .npmrc && npm cache clean --force
 
-FROM python-base AS runtime
+# 基础阶段供无授权字体的源码 CI 验证运行依赖；正式发布使用最后的 runtime 阶段。
+FROM python-base AS runtime-base
 WORKDIR /app
 
 # 运行镜像只安装运行期组件、qpdf、veraPDF JRE、pg_dump 和 Agent Browser 所需 Chromium，
@@ -114,6 +115,7 @@ COPY --from=speech-recognition --chown=node:node /opt/pivot-speech /opt/pivot-sp
 COPY --chown=node:node server ./server
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
+COPY --chown=node:node scripts/official_fonts.js ./scripts/official_fonts.js
 COPY --chown=node:node assets ./assets
 COPY --chown=node:node docs/licenses ./licenses
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
@@ -143,3 +145,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "server/index.js"]
+
+# 字体已由 assets 复制到镜像内；以实际运行用户校验完整性、原字体名和嵌入权限。
+# 缺少授权字体包或摘要不符时，默认生产构建直接失败，不依赖宿主机字体。
+FROM runtime-base AS runtime
+RUN node scripts/official_fonts.js check

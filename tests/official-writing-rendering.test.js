@@ -5,11 +5,10 @@ const { PDFParse } = require('pdf-parse');
 const { validateDocumentIr } = require('../server/services/document-ir');
 const { renderDocx } = require('../server/services/document-rendering/docx-renderer');
 const { renderPdf } = require('../server/services/document-rendering/pdf-renderer');
-const { fixture } = require('./helpers/official-writing-rendering');
+const { fixture, officialFontsOrSkip } = require('./helpers/official-writing-rendering');
 
-
-
-test('真实 DOCX 保留全部发文要素，普通版式无红头，重复渲染字节一致', async () => {
+test('真实 DOCX 保留全部发文要素，普通版式无红头，重复渲染字节一致', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     const ir = fixture();
     const first = await renderDocx(ir);
     assert.deepEqual(await renderDocx(ir), first);
@@ -24,7 +23,8 @@ test('真实 DOCX 保留全部发文要素，普通版式无红头，重复渲�
     assert.ok(plain.includes('抄送：示例市政府办公室'));
 });
 
-test('真实 PDF 可提取中文，成文日期与印发日期独立，完整保留抄送与密级期限', async () => {
+test('真实 PDF 可提取中文，成文日期与印发日期独立，完整保留抄送与密级期限', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     const pdf = await renderPdf(fixture());
     assert.deepEqual(await renderPdf(fixture()), pdf);
     const parser = new PDFParse({ data: pdf });

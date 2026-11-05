@@ -1,5 +1,17 @@
 const assert = require('node:assert/strict');
 const { validateDocumentIr } = require('../../server/services/document-ir');
+const { loadOfficialFonts } = require('../../server/services/document-rendering/official-fonts');
+
+async function officialFontsOrSkip(t) {
+    try { return await loadOfficialFonts(); }
+    catch (error) {
+        // 授权字体不随仓库分发；只跳过明确的字体缺失，其他加载错误仍使测试失败。
+        if (error.code !== 'OFFICIAL_FONTS_UNAVAILABLE') throw error;
+        t.skip(error.message);
+        return null;
+    }
+}
+
 function fixture(layout = 'red_header') {
     const result = validateDocumentIr({ ir_version: '1', doc_type: 'official_document', meta: {
         title: '关于年度检查安排的通知', issuer: '示例市教育局', signoff: '示例市教育局', issued_at: '2026-11-04',
@@ -13,4 +25,4 @@ function fixture(layout = 'red_header') {
     assert.equal(result.valid, true, result.errors.join('；'));
     return result.ir;
 }
-module.exports = { fixture };
+module.exports = { fixture, officialFontsOrSkip };

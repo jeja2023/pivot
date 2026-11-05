@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "profile": "screenshot-20261104",
+  "fonts": [
+    {
+      "role": "title",
+      "name": "方正小标宋_GBK",
+      "filename": "方正小标宋_GBK.TTF",
+      "postscriptName": "FZXBSK--GBK1-0",
+      "sizeBytes": 13099364,
+      "sha256": "071768c8b8e2ade4e739814bc863418c090bfe3a6f61c85992d4234ecb468ec8"
+    },
+    {
+      "role": "body",
+      "name": "方正仿宋_GBK",
+      "filename": "方正仿宋_GBK.TTF",
+      "postscriptName": "FZFSK--GBK1-0",
+      "sizeBytes": 12434444,
+      "sha256": "7ed45a65864425a0e4e9b00bdf09e39578fb953686310f6bf67cc76a82b1f77e"
+    },
+    {
+      "role": "heading1",
+      "name": "方正黑体_GBK",
+      "filename": "方正黑体_GBK.TTF",
+      "postscriptName": "FZHTK--GBK1-0",
+      "sizeBytes": 10210812,
+      "sha256": "451062e0133cd05a33f817f63ea82e8c45bb3130a652318289bc62a25f7b5c43"
+    },
+    {
+      "role": "heading2",
+      "name": "方正楷体_GBK",
+      "filename": "方正楷体_GBK.TTF",
+      "postscriptName": "FZKTK--GBK1-0",
+      "sizeBytes": 14276240,
+      "sha256": "651e0e479ef15b6fa50125c6d79554ea59842c0cf29dff3e5dbdb78c87ff2a03"
+    },
+    {
+      "role": "footer",
+      "name": "宋体",
+      "filename": "simsun.ttc",
+      "postscriptName": "SimSun",
+      "sizeBytes": 18316748,
+      "sha256": "1526ac24375f51f6eb73bc2d3f8072dbe4a80a3a65217677c9d9a84f67dab2ab"
+    },
+    {
+      "role": "ascii",
+      "name": "Times New Roman",
+      "filename": "times.ttf",
+      "postscriptName": "TimesNewRomanPSMT",
+      "sizeBytes": 1195688,
+      "sha256": "2cff2a03d8034801979dd6d16f09b9a825c3d710fcf068f2ebfbf0e1425c87cf"
+    }
+  ]
+}

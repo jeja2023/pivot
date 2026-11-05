@@ -37,7 +37,7 @@ test('项目 Python 基线在主镜像、语音镜像和离线依赖准备中一
     assert.ok(mainImage?.endsWith(`python:${baseline}-bookworm`));
     assert.ok(speechImage?.endsWith(`python:${baseline}-bookworm`));
     assert.match(dockerfile, /FROM python-base AS speech-recognition/);
-    assert.match(dockerfile, /FROM python-base AS runtime/);
+    assert.match(dockerfile, /FROM python-base AS runtime-base/);
     assert.match(dockerfile, /PIVOT_AGENT_PYTHON=\/usr\/local\/bin\/python3\.12/);
     assert.match(prepare, /sys\.version_info\[:2\] != \(3, 12\)/);
     assert.doesNotMatch(dockerfile, /ln\s+.*\/usr\/bin\/python/);
@@ -136,4 +136,11 @@ test('生产主 Compose 内置 GPU 监控驱动能力，不依赖覆盖文件或
     assert.match(compose, /^\s*gpus:\s*all\s*$/m);
     assert.match(compose, /NVIDIA_VISIBLE_DEVICES:\s*all/);
     assert.match(compose, /NVIDIA_DRIVER_CAPABILITIES:\s*compute,utility/);
+});
+
+test('默认生产镜像以实际运行用户强制校验内置公文字体包', () => {
+    assert.match(dockerfile, /COPY --chown=node:node scripts\/official_fonts\.js \.\/scripts\/official_fonts\.js/);
+    assert.match(dockerfile, /COPY --chown=node:node assets \.\/assets/);
+    assert.match(dockerfile, /USER node[\s\S]*FROM runtime-base AS runtime\s+RUN node scripts\/official_fonts\.js check\s*$/);
+    assert.equal([...dockerfile.matchAll(/^FROM .+$/gm)].at(-1)[0], 'FROM runtime-base AS runtime');
 });

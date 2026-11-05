@@ -9,6 +9,7 @@ const { validateDocumentIr } = require('../server/services/document-ir');
 const { renderDocx } = require('../server/services/document-rendering/docx-renderer');
 const { renderPdf } = require('../server/services/document-rendering/pdf-renderer');
 const { readOfficialFonts } = require('../server/services/document-rendering/official-fonts');
+const { officialFontsOrSkip } = require('./helpers/official-writing-rendering');
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const attr = (node, name) => node.getAttributeNS(W, name);
 const elements = (node, name) => [...node.getElementsByTagNameNS(W, name)];
@@ -35,7 +36,8 @@ function fixture() {
     return result.ir;
 }
 
-test('截图标准 DOCX 精确页边距、22×28网格、28磅行距和两项网格开关', async () => {
+test('截图标准 DOCX 精确页边距、22×28网格、28磅行距和两项网格开关', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     const zip = await JSZip.loadAsync(await renderDocx(fixture()));
     const doc = new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'), 'text/xml');
     const margins = elements(doc, 'pgMar')[0];
@@ -58,7 +60,8 @@ test('截图标准 DOCX 精确页边距、22×28网格、28磅行距和两项网
     }
 });
 
-test('截图标准 DOCX 标题/四层级/附件/落款/页码的字体字号与位置独立校验', async () => {
+test('截图标准 DOCX 标题/四层级/附件/落款/页码的字体字号与位置独立校验', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     const zip = await JSZip.loadAsync(await renderDocx(fixture()));
     const xml = await zip.file('word/document.xml').async('string');
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
@@ -95,7 +98,8 @@ test('截图标准 DOCX 标题/四层级/附件/落款/页码的字体字号与�
     assert.match(elements(footer, 't').map(node => node.textContent).join(''), /—\s*—/);
 });
 
-test('DOCX 两行标题后空一行、附件前空一行、署名日期整体前空三行', async () => {
+test('DOCX 两行标题后空一行、附件前空一行、署名日期整体前空三行', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     for (const recipient of ['', '各单位：']) {
         const checked = validateDocumentIr({ ir_version: '1', doc_type: 'official_document', meta: {
             title: '首行标题\n第二行标题', recipient, signoff: '署名单位', issued_at: '2026-11-04', layout: 'plain', security_level: 'public'
@@ -129,10 +133,9 @@ test('DOCX 两行标题后空一行、附件前空一行、署名日期整体前
 });
 
 test('PDF 实际坐标验证标题末行后一行、附件前一行、署名日期前三行', async (t) => {
-    const status = await require('../server/services/document-rendering/official-fonts').officialFontStatus();
-    if (!status.available) { t.skip('缺少公文原字体，跳过 PDF 坐标验证'); return; }
+    const sources = await officialFontsOrSkip(t);
+    if (!sources) return;
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const sources = await require('../server/services/document-rendering/official-fonts').loadOfficialFonts();
     for (const recipient of ['', '各单位：']) {
         const checked = validateDocumentIr({ ir_version: '1', doc_type: 'official_document', meta: {
             title: '首行标题\n第二行标题', recipient, signoff: '署名单位', issued_at: '2026-11-04', layout: 'plain', security_level: 'public'
@@ -165,8 +168,7 @@ test('PDF 实际坐标验证标题末行后一行、附件前一行、署名日�
 });
 
 test('截图标准 PDF 嵌入全部原字体，纯正文22行28字与28磅基线，不带补零日期且附件续页码', async (t) => {
-    const status = await require('../server/services/document-rendering/official-fonts').officialFontStatus();
-    if (!status.available) { t.skip('缺少公文原字体，跳过 PDF 渲染验证'); return; }
+    if (!await officialFontsOrSkip(t)) return;
     const ir = fixture();
     ir.blocks.splice(0, 0, { type: 'page_break' }, { type: 'paragraph', runs: [{ text: '甲'.repeat(28 * 23) }], style: { indent_chars: 0 } });
     const bytes = await renderPdf(ir);

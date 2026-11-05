@@ -43,3 +43,8 @@ test-results/
 output/
 qa_a11y.json
 logs/
+
+# 授权公文字体由发布流程提供，源码库仅保存清单与校验值。
+/assets/fonts/official/*.[tT][tT][fF]
+/assets/fonts/official/*.[tT][tT][cC]
+/assets/fonts/official/*.[oO][tT][fF]

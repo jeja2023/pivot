@@ -156,8 +156,18 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Build production Docker image
-        run: docker build --pull -t pivot:ci .
+      # 授权字体不进入源码仓库；源码 CI 构建基础阶段，正式发布默认 runtime 阶段强制校验字体。
+      - name: Build Docker runtime base
+        run: docker build --pull --target runtime-base -t pivot:ci .
+
+      - name: Verify missing font bundle blocks production build
+        run: |
+          if docker build --pull=false -t pivot:ci-production . > font-check.log 2>&1; then
+            echo '源码 CI 不应包含未分发的授权字体'
+            exit 1
+          fi
+          cat font-check.log
+          grep -F '公文字体包校验失败：缺少' font-check.log
 
       - name: Inspect non-root image contract
         run: docker image inspect pivot:ci --format '{{.Config.User}}' | grep -x node
