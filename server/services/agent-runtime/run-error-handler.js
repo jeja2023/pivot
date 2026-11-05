@@ -5,7 +5,7 @@ function createAgentRunErrorHandler(deps = {}) {
         requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, instanceId, logger,
         updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
         getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
-        setRunMetadata, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
+        setRunMetadata = async () => {}, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
         loadRetryRow, TERMINAL_STATUSES, verifyAgentOutcome
     } = deps;
 

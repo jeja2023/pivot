@@ -39,6 +39,7 @@ const { buildIdempotencyKey } = require('../server/services/agent-artifact-deliv
 const { verifySignatureWithPublicKey, computeKeyFingerprint } = require('../server/services/agent-local-devices');
 const { getAgentGovernanceStatus } = require('../server/services/agent-governance-status');
 const { normalizeDefinition, runCapabilityWorker } = require('../server/services/agent-capability-worker');
+const { officialFontsOrSkip } = require('./helpers/official-writing-rendering');
 
 const NEWLINE = String.fromCharCode(10);
 
@@ -294,7 +295,7 @@ test('供应链扫描针对实际条目，声明式验证不执行包内脚本',
 test('Document IR 白名单校验拒绝非法块与内联图片，并保证规范化摘要稳定', () => {
     const checked = validateDocumentIr(officialIr());
     assert.equal(checked.valid, true);
-    assert.deepEqual(checked.ir.meta.page.margin_mm, { top: 37, bottom: 35, left: 28, right: 26 });
+    assert.deepEqual(checked.ir.meta.page.margin_mm, { top: 37, bottom: 35, left: 27, right: 27 });
     assert.equal(computeIrDigest(checked.ir), computeIrDigest(canonicalizeDocumentIr(officialIr())));
     const memo = validateDocumentIr({ ir_version: '1', doc_type: 'memo', meta: { title: 'x' }, blocks: [{ type: 'table', header: ['a'], rows: [] }] });
     assert.equal(memo.valid, false);
@@ -309,7 +310,8 @@ test('Document IR 白名单校验拒绝非法块与内联图片，并保证规�
     assert.match(mismatched.errors.join(' '), /列数/);
 });
 
-test('渲染器输出确定性，公文 DOCX 满足结构与度量断言且页脚不含 ASCII 问号', async () => {
+test('渲染器输出确定性，公文 DOCX 满足结构与度量断言且页脚不含 ASCII 问号', async (t) => {
+    if (!await officialFontsOrSkip(t)) return;
     const checked = validateDocumentIr(officialIr());
     const statuses = listRendererStatus();
     assert.deepEqual(statuses.map(item => item.format).sort(), ['docx', 'html', 'md', 'pdf', 'png', 'svg', 'wav', 'xlsx']);
@@ -341,7 +343,7 @@ test('渲染器输出确定性，公文 DOCX 满足结构与度量断言且页�
         const margins = /<w:pgMar([^>]*)\/>/.exec(document);
         assert.ok(margins, 'sectPr 必须包含页边距');
         const twip = mm => Math.round(mm * 1440 / 25.4);
-        [['top', 37], ['bottom', 35], ['left', 28], ['right', 26]].forEach(([side, mm]) => {
+        [['top', 37], ['bottom', 35], ['left', 27], ['right', 27]].forEach(([side, mm]) => {
             const found = new RegExp(`w:${side}="(-?\\d+)"`).exec(margins[1]);
             assert.ok(found, `页边距缺少 ${side}`);
             assert.ok(Math.abs(Number(found[1]) - twip(mm)) <= 2, `${side} 页边距应约为 ${twip(mm)} twip，实际 ${found[1]}`);

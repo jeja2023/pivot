@@ -165,10 +165,12 @@ test('发送后通过附件队列清理器移除预览，避免旧队列被同�
 
 test('聊天 Agent 详情会懒加载任务模块并展示安全的执行判断摘要', () => {
     const engine = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine.js'), 'utf8');
+    const loader = fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-run-detail-loader.js'), 'utf8');
     const sessions = fs.readFileSync(path.resolve(__dirname, '../client/chat/engine-sessions.js'), 'utf8');
     const styles = fs.readFileSync(path.resolve(__dirname, '../client/chat/styles/base/chat-shell.css'), 'utf8');
     assert.match(engine, /async function openChatAgentRunDetail\(runId\)/);
-    assert.match(engine, /await window\.Pivot\.legacy\.ensureWorkspaceScripts\('agent'\)/);
+    assert.match(engine, /await window\.Pivot\.loadScriptOnce\('\/chat\/agent-run-detail-loader\.js'\)/);
+    assert.match(loader, /window\.Pivot\.legacy\.ensureWorkspaceScripts\('agent'\)/);
     assert.match(engine, /addButton\('详情',[\s\S]*openChatAgentRunDetail\(runId\)/);
     assert.match(engine, /当前判断：\$\{thought\.slice\(0, 120\)\}/);
     assert.match(sessions, /window\.Pivot\.legacy\.chatAgentProgressText\?\.\(detail, status\)/);

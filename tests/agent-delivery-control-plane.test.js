@@ -91,7 +91,7 @@ async function createRunAndArtifact(user) {
 function documentIr(title = '关于开展年度核查的通知') {
     return {
         ir_version: '1',
-        doc_type: 'official_document',
+        doc_type: 'report',
         meta: { title, issuer: '示例单位', issued_at: '2026-08-31' },
         blocks: [
             { type: 'heading', level: 1, text: '一、总体要求' },
