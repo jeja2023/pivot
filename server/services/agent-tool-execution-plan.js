@@ -37,7 +37,7 @@ function retrySemantics(tool, policy = {}) {
 
 async function buildToolExecutionPlan({ run = {}, tool: rawTool = {}, input = {}, user = null, context = {}, policyEvaluator = evaluateToolPolicy } = {}) {
     const metadata = parseJsonObject(run.metadata) || {};
-    if (run.id && user?.id && metadata.capabilityConstraints?.present === true) {
+    if (run.id && user?.id && metadata.capabilityConstraints) {
         const fresh = await require('../repositories/chat-conversation-turns').currentExecutionScope(run.id, user.id);
         const current = parseJsonObject(fresh?.metadata) || {};
         // 调度器手中的旧快照不能覆盖用户刚撤回的权限或暂停要求。

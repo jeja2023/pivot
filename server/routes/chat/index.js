@@ -329,7 +329,7 @@ function createChatRouter({
             return res.end();
         }
         let automaticExecution = await decideAutomaticChatExecution({
-            routeOverrides: chatState.routeOverrides, mcpToolAllowlist,
+            routeOverrides: chatState.routeOverrides, mcpToolAllowlist, requestScope: chatState.requestScope,
             regenerate, ephemeralVoice, chatMode, agentExecutionAllowed,
             autoExecutionEnabled: readAutoExecutionEnabled(), modelContent,
             maxGoalLength: MAX_CHAT_AGENT_GOAL_LENGTH, sessionId, userId,

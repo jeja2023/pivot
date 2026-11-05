@@ -2,6 +2,7 @@
 
 const { isRegisteredCapability, capabilitiesCoverTool } = require('./agent-capability-registry');
 const { normalizeCapabilityDecision } = require('./chat-capability-decision');
+const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
 
 const ACTIONS = ['direct_answer', 'plan_only', 'agent_run', 'continue_run', 'clarify'];
 const NON_READ_CAPABILITY = /^(?:filesystem\.write|code\.|artifact\.deliver|document\.render|viz\.render|media\.|desktop\.|workflow\.)/;
@@ -14,13 +15,23 @@ function invalid(message) {
     return Object.assign(new Error(message), { code: 'CHAT_INTENT_INVALID_CONTRACT' });
 }
 
-function normalizeIntent(raw, { baseline = {}, tasks = [], history = [], userMessageId, availability = {} } = {}) {
+function normalizeIntent(raw, { baseline = {}, tasks = [], history = [], userMessageId, availability = {}, prompt = '', requestScope = null } = {}) {
     if (!raw || Array.isArray(raw) || !ACTIONS.includes(raw.action) || typeof raw.objective !== 'string' || !raw.objective.trim()) throw invalid('意图响应契约无效');
     if (raw.requiredCapabilities !== undefined && (!Array.isArray(raw.requiredCapabilities) || raw.requiredCapabilities.some(cap => typeof cap !== 'string' || !isRegisteredCapability(cap)))) throw invalid('意图响应包含未注册能力');
     if (raw.routing !== undefined && (!raw.routing || typeof raw.routing !== 'object' || Array.isArray(raw.routing))) throw invalid('依据与工具决策格式无效');
-    const route = raw.routing || {};
+    let route = raw.routing || {};
     for (const [field, allowed] of [['knowledge', ['required', 'none', 'auto']], ['tools', ['read_only', 'task', 'none']]]) {
         if (route[field] !== undefined && !allowed.includes(route[field])) throw invalid('依据与工具决策包含未知值');
+    }
+    const scope = requestScope || resolveChatRequestScope(prompt);
+    raw = constrainChatDecision(raw, scope);
+    route = raw.routing || {};
+    if (scope.excludeWeb || scope.excludeKnowledge || scope.sourceOnly) {
+        const allowedTools = (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, scope));
+        const disallowedNames = new Set((availability.tools || []).filter(tool => !toolAllowedByRequestScope(tool, scope)).map(tool => tool.name));
+        if (Array.isArray(route.toolNames)) route.toolNames = route.toolNames.filter(name => !disallowedNames.has(name));
+        availability = { ...availability, tools: allowedTools };
+        if (route.tools === 'read_only' && !raw.requiredCapabilities?.length) route.tools = 'none';
     }
     const target = raw.action === 'continue_run' ? tasks.find(task => task.id === raw.continuationOf) : null;
     if (raw.action === 'continue_run' && !target) throw invalid('续接目标不属于当前会话');
@@ -50,7 +61,7 @@ function normalizeIntent(raw, { baseline = {}, tasks = [], history = [], userMes
     const prior = action === 'continue_run' ? target : null;
     const constraints = [...new Set([...strings(prior?.constraints), ...(action === 'plan_only' ? strings(baseline.constraints) : []), ...strings(raw.constraints)])];
     const deliverables = strings(raw.deliverables);
-    return {
+    return constrainChatDecision({
         version: 4, action, sourceMessageId: userMessageId || null, intent: String(raw.intent || '').slice(0, 32), objective: raw.objective.trim().slice(0, 12000),
         constraints, deliverables: deliverables.length ? deliverables : strings(prior?.deliverables), requiredCapabilities: [...new Set(['agent.execute', 'system.observe', ...caps])],
         missingFacts, evidenceRefs: refs.length ? refs.map(ref => ref === 'current_message' && userMessageId ? `message:${userMessageId}` : ref) : userMessageId ? [`message:${userMessageId}`] : ['current_message'],
@@ -62,7 +73,7 @@ function normalizeIntent(raw, { baseline = {}, tasks = [], history = [], userMes
         reasonCode: 'semantic_intent', continuation: action === 'continue_run', delegated: ['agent_run', 'continue_run'].includes(action),
         allowMcp: baseline.allowMcp === true || caps.some(cap => /^(?:network\.|data\.)/.test(cap)), nextAction: action,
         routing
-    };
+    }, scope);
 }
 
 module.exports = { ACTIONS, normalizeIntent };

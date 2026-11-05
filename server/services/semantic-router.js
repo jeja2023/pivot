@@ -16,6 +16,7 @@ const { resolveBusinessDecision } = require('./decision-runtime');
 const { buildDecisionActionCandidate } = require('./decision-action-catalog');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { getCapabilityDecision } = require('./chat-capability-decision');
+const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
 
 const MAX_ROUTE_OVERRIDE_COLLECTIONS = 50;
 const MAX_ROUTE_OVERRIDE_TOOLS = 100;
@@ -415,6 +416,10 @@ function createSemanticRouter(deps = {}) {
 
     async function resolveRoutePlan({ prompt, taskState = null, user, modelCfg = null, state = {}, availableMcpTools = [], signal = null, env = process.env } = {}) {
         const startedAt = Date.now();
+        const requestScope = resolveChatRequestScope(state.modelContent || prompt, { ...state, ...(state.requestScope || {}) });
+        if (requestScope.excludeKnowledge) state = { ...state, ragEnabled: false, routeOverrides: { ...state.routeOverrides, excludeRag: true, forceRag: false } };
+        if (state.intentDecision) state = { ...state, intentDecision: constrainChatDecision(state.intentDecision, requestScope) };
+        availableMcpTools = availableMcpTools.filter(tool => toolAllowedByRequestScope(tool, requestScope));
         const config = getConfig(env);
         const structuredTaskState = taskState && typeof taskState === 'object'
             ? taskState

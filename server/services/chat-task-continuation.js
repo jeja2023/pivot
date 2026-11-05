@@ -1,4 +1,5 @@
 'use strict';
+const { resolveChatRequestScope, capabilityAllowedByRequestScope } = require('./chat-request-scope');
 
 const turns = require('../repositories/chat-conversation-turns');
 const { sendAgentControlMessage, claimAgentControlMessages, applyAgentControlMessages, acknowledgeAppliedAgentControlMessages } = require('./agent-control');
@@ -62,6 +63,9 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
     if (!run) return { continued: false, reason: 'task_not_active' };
     if (!ACTIVE.has(run.status)) return { continued: false, reason: 'task_completed', previousRun: run };
     const metadata = parseConversationRunMetadata(run.metadata);
+    const requestScope = resolveChatRequestScope(sourceContent || instruction, { routeOverrides, ...(decision.requestScope || {}),
+        excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true || decision.requestScope?.excludeKnowledge === true,
+        excludeWeb: metadata.capabilityConstraints?.excludeWeb === true || decision.requestScope?.excludeWeb === true });
     const revisedSelection = Array.isArray(routeOverrides.tools) && routeOverrides.tools.length > 0;
     const excluded = routeOverrides.excludeTools === true;
     const selectedNames = revisedSelection ? routeOverrides.tools : metadata.chatBridge?.selectedTools || [];
@@ -93,8 +97,10 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
             capabilities: [...new Set([...(excluded ? [] : decision.requiredCapabilities), ...(current.chatBridge ? ['conversation.read_source'] : []),
                 ...(!excluded && (revisedSelection || (current.capabilityConstraints?.capabilities?.length > 0 && current.routeCorrection?.routeOverrides?.excludeTools !== true
                     && JSON.stringify(current.chatBridge?.selectedTools || []) === JSON.stringify(selectedNames)))
-                    ? selection.tools.flatMap(tool => tool.capabilities || []) : [])])],
+                    ? selection.tools.flatMap(tool => tool.capabilities || []) : [])])].filter(capability => capabilityAllowedByRequestScope(capability, requestScope)),
+            ...(requestScope.excludeKnowledge ? { excludeKnowledge: true } : {}), ...(requestScope.excludeWeb ? { excludeWeb: true } : {}),
             authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
+        ...(requestScope.excludeKnowledge ? { chatBridge: { ...(reviseScope ? { ...current.chatBridge, selectedTools: selection.names, mcpToolAllowlist, mcpEnabled: !excluded } : current.chatBridge), ragEnabled: false, ragContext: '' } } : {}),
         conversationMessageIds: [...new Set([...(current.conversationMessageIds || []), userMessageId])].slice(-100)
     }); }, { userId: user.id, updateToolScope: reviseScope });
     await (deps.sendAgentControlMessage || sendAgentControlMessage)({ user, toRunId: run.id, type: 'steer', idempotencyKey, payload: { instruction, source: 'chat', sourceMessageId: userMessageId, taskContractPatch } });

@@ -4,6 +4,7 @@ const { recordLegacyUnrestrictedHit, recordPolicyDecision } = require('./agent-g
 const { getBeijingTimestamp } = require('../time');
 const { isDiscoveryMetaTool } = require('./agent-tool-progressive-discovery');
 const { toolMatchesAllowlist } = require('./agent-tool-identities');
+const { toolAllowedByRequestScope } = require('./chat-request-scope');
 
 class PolicyError extends Error {
     constructor(message, details = {}) {
@@ -218,9 +219,19 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     if (policy === 'builtin_only' && tool.source === 'mcp') deny('tool_policy_builtin_only', '当前任务仅允许内置工具。');
     // 任务级 allowlist 保持「未设置表示不额外收窄」语义，与 Skill 级默认拒绝语义相互独立。
     if (!discoveryControl && allowlist.length && !toolMatchesAllowlist(tool, allowlist, input, inspectOnly)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
-    const conversationScope = parseRunMetadata(run.metadata).capabilityConstraints;
+    const conversationMetadata = parseRunMetadata(run.metadata);
+    const conversationScope = conversationMetadata.capabilityConstraints;
     if (conversationScope?.excludeKnowledge === true && tool.capabilities.some(cap => /^knowledge\./.test(cap))) {
         deny('conversation_knowledge_excluded', '本轮已按用户要求排除知识库检索。');
+    }
+    if (conversationMetadata.chatBridge?.ragEnabled === false && tool.capabilities.some(cap => /^knowledge\./.test(cap))) {
+        deny('conversation_knowledge_excluded', '当前会话未允许知识库检索。');
+    }
+    if (conversationScope?.excludeWeb === true && !toolAllowedByRequestScope(tool, { excludeWeb: true })) {
+        deny('conversation_web_excluded', '本轮仅使用已有资料，不允许联网搜索或访问网页。');
+    }
+    if (conversationScope?.sourceOnly === true && tool.capabilities.some(cap => /^data\./.test(cap))) {
+        deny('conversation_source_only', '本轮仅分析用户提供的资料，不查询外部业务数据。');
     }
     if (!discoveryControl && conversationScope?.readOnly === true && (tool.side_effect || tool.approval_required || tool.risk_level >= 4 || !tool.idempotent)) {
         deny('conversation_readonly_scope', '本轮只读查询不允许写入、非幂等操作或需要审批的工具。');

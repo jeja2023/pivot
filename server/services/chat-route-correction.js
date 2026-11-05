@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { recordUserDecisionFeedback } = require('./decision-observability');
 const { redactRoutingText } = require('./decision-provider');
 const { currentRequestText, isPlanOnlyRequest } = require('./chat-request-constraints');
+const { resolveChatRequestScope, constrainChatDecision } = require('./chat-request-scope');
 
 // 只读取本轮用户自己表达的限制；引用、代码和附件不能撤销或授予任务权限。
 function detectChatRouteCorrection(prompt = '') {
@@ -16,18 +17,23 @@ function detectChatRouteCorrection(prompt = '') {
         || matches('(?:不是|并非)让你(?:执行|操作|启动任务)')
         || matches('(?:只需要|只要|直接)(?:回答|解释)(?:问题|一下)?(?:就好|即可|就行|吧)?');
     const planOnly = isPlanOnlyRequest(text);
+    const requestScope = resolveChatRequestScope(prompt);
     const excludeTools = answerOnly || planOnly || matches('(?:不要|不用|无需|先别)(?:再|继续)?(?:调用|使用|用)?(?:任何|外部)?工具(?:了|吧)?');
-    const excludeRag = answerOnly || planOnly || matches('(?:不要|不用|无需|先别)(?:再|继续)?(?:检索|搜索|查|使用|用)?(?:知识库|资料库)(?:检索|搜索)?(?:了|吧)?');
+    const excludeRag = answerOnly || planOnly || requestScope.excludeKnowledge;
+    const excludeWeb = requestScope.excludeWeb;
     const forceRag = !excludeRag && /不对|不是这个意思|应该|应当/.test(text)
         && matches('(?:应该|需要|应当|要|先)?(?:查|检索|搜索)(?:一下)?(?:知识库|资料库)(?:依据|资料)?(?:再回答|吧)?');
-    if (!excludeTools && !excludeRag && !forceRag) return null;
+    if (!excludeTools && !excludeRag && !excludeWeb && !forceRag) return null;
+    // 附件分析属于仍需完成的当前工作，不能被当作纯纠正吞掉原任务。
+    if (!answerOnly && !planOnly && !excludeTools && (requestScope.directSourceAnswer
+        || (/(?:分析|总结|翻译|审阅|提炼|解读)/u.test(text) && /(?:附件|上传|文档|材料)/u.test(text)))) return null;
     return {
-        kind: answerOnly ? 'answer_only' : planOnly ? 'plan_only' : forceRag ? 'require_evidence' : excludeTools ? 'exclude_tools' : 'exclude_rag',
+        kind: answerOnly ? 'answer_only' : planOnly ? 'plan_only' : forceRag ? 'require_evidence' : excludeTools ? 'exclude_tools' : excludeRag ? 'exclude_rag' : 'exclude_web',
         action: planOnly ? 'plan_only' : 'direct_answer',
-        routeOverrides: { ...(excludeTools ? { excludeTools: true } : {}), ...(excludeRag ? { excludeRag: true } : {}), ...(forceRag ? { forceRag: true } : {}) },
+        routeOverrides: { ...(excludeTools ? { excludeTools: true } : {}), ...(excludeRag ? { excludeRag: true } : {}), ...(excludeWeb ? { excludeWeb: true } : {}), ...(forceRag ? { forceRag: true } : {}) },
         pauseExecution: Boolean(answerOnly || planOnly || excludeTools),
         constraint: planOnly ? '本轮只提供方案，不执行操作。' : answerOnly ? '本轮只回答问题，不执行任务或调用工具。'
-            : forceRag ? '本轮在已有授权范围内检索知识库依据后回答。' : excludeTools ? '本轮不调用工具。' : '本轮不检索知识库。'
+            : forceRag ? '本轮在已有授权范围内检索知识库依据后回答。' : excludeTools ? '本轮不调用工具。' : [excludeRag ? '本轮不检索知识库。' : '', excludeWeb ? '本轮不联网搜索或浏览网页。' : ''].filter(Boolean).join('')
     };
 }
 
@@ -36,6 +42,9 @@ function parseMetadata(value) {
 }
 
 function applyAutomaticExecutionDecision(state, decision) {
+    const requestScope = resolveChatRequestScope(state.modelContent, { ...state, ...(state.requestScope || {}), ...(decision.requestScope || {}) });
+    decision = constrainChatDecision(decision, requestScope);
+    state.requestScope = requestScope;
     state.intentDecision = decision;
     const routing = decision.shadow !== true && decision.routing;
     if (routing?.source === 'semantic_intent') {
@@ -49,6 +58,10 @@ function applyAutomaticExecutionDecision(state, decision) {
         state.routeOverrides = { ...state.routeOverrides, ...decision.correction.routeOverrides };
         if (decision.correction.routeOverrides.excludeTools) state.mcpEnabled = false;
         if (decision.correction.routeOverrides.excludeRag) state.ragEnabled = false;
+    }
+    if (requestScope.excludeKnowledge) {
+        state.ragEnabled = false;
+        state.routeOverrides = { ...state.routeOverrides, forceRag: false, excludeRag: true };
     }
     return { mcpEnabled: state.mcpEnabled, ragEnabled: state.ragEnabled };
 }

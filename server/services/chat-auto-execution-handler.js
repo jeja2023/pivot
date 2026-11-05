@@ -11,16 +11,20 @@ const ledger = require('../repositories/chat-conversation-turns');
 const { detectChatRouteCorrection, recordChatRouteCorrection, applyAutomaticExecutionDecision, correctionRetrievalQuery } = require('./chat-route-correction');
 const { isDirectConversation } = require('./chat-capability-decision');
 const { getChatCapabilityAvailability } = require('./chat-capability-scope');
+const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
 
 async function decideAutomaticChatExecution({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
     autoExecutionEnabled = false, modelContent = '', maxGoalLength = 12000,
-    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null
+    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
 } = {}, deps = {}) {
     const intentPrompt = String(modelContent).split(/\n---\s*\n【参考文档/)[0];
     const providedSources = [...String(modelContent).matchAll(/【参考文档:\s*([^\n】]{1,240})】\s*\n/g)].slice(0, 20).map(match => ({ kind: 'inline_attachment', name: match[1], available: true, sourceMessageId: userMessageId }));
+    let requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, sourceLength: modelContent.length });
     const initial = classifyChatAutoExecution({ prompt: intentPrompt });
     if (regenerate || ephemeralVoice || chatMode !== 'normal') return { action: 'direct_answer', reasonCode: 'not_evaluated' };
+    if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, providedSources, requestScope,
+        sourceLength: modelContent.length, user, modelCfg, sessionId, userMessageId, signal });
     const correction = detectChatRouteCorrection(intentPrompt);
     if (correction) {
         let history = [];
@@ -35,8 +39,10 @@ async function decideAutomaticChatExecution({
             for (const task of active) {
                 await (deps.updateMetadata || require('./agent-run-metadata-patch').updateAgentRunMetadataWithRetry)(task.id, metadata => ({ ...metadata,
                     ...(correction.pauseExecution ? { capabilityConstraints: { ...(metadata.capabilityConstraints || {}), present: true, capabilities: [], authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
-                    ...(!correction.pauseExecution ? { capabilityConstraints: { ...(metadata.capabilityConstraints || {}), excludeKnowledge: correction.routeOverrides.excludeRag === true,
+                    ...(!correction.pauseExecution ? { capabilityConstraints: { ...(metadata.capabilityConstraints || {}),
+                        ...(correction.routeOverrides.excludeRag ? { excludeKnowledge: true } : {}), ...(correction.routeOverrides.excludeWeb ? { excludeWeb: true } : {}),
                         authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
+                    ...(correction.routeOverrides.excludeRag ? { chatBridge: { ...metadata.chatBridge, ragEnabled: false, ragContext: '' } } : {}),
                     taskContract: { ...(metadata.taskContract || {}), constraints: [...new Set([...(metadata.taskContract?.constraints || []), correction.constraint])].slice(-24) },
                     routeCorrection: { kind: correction.kind, sourceMessageId: userMessageId, routeOverrides: correction.routeOverrides }
                 }), { userId });
@@ -75,6 +81,9 @@ async function decideAutomaticChatExecution({
     writeSse?.(JSON.stringify({ type: 'route', status: 'understanding', message: '正在理解任务并安排处理' }));
     try {
         const history = (await sessionsRepository.listMessages(sessionId, userId)).filter(item => Number(item.id) !== Number(userMessageId));
+        requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, history });
+        if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, history, providedSources, requestScope,
+            user, modelCfg, sessionId, userMessageId, signal });
         const [tasks, memories, availability] = await Promise.all([
             (deps.getConversationTasks || getConversationTasks)(sessionId, userId),
             (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4 }).catch(() => []),
@@ -82,7 +91,8 @@ async function decideAutomaticChatExecution({
         ]);
         if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
         const resolved = await (deps.resolveChatIntent || resolveChatIntent)({
-            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, providedSources, availability,
+            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, providedSources,
+            availability: { ...availability, tools: (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, requestScope)) }, requestScope, sourceLength: modelContent.length,
             executionAllowed: agentExecutionAllowed && autoExecutionEnabled,
             preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
         });
@@ -94,7 +104,7 @@ async function decideAutomaticChatExecution({
                 });
             } catch (error) { log?.warn?.({ sessionId, userId, code: error.code }, '语义纠正证据记录暂不可用'); }
         }
-        return resolved;
+        return constrainChatDecision(resolved, requestScope);
     } catch (error) {
         if (signal?.aborted) throw error;
         log?.warn?.({ sessionId, userId, code: error.code }, '自动任务语义路由不可用');

@@ -177,6 +177,7 @@ async function executeChatMcpTool(tool, input, user, options = {}) {
             ...(options.executionScope ? { tool_allowlist: options.executionScope.toolNames || [] } : {}),
             approval_policy: 'safe_mcp_auto',
             ...(options.executionScope ? { metadata: { capabilityConstraints: { present: true, readOnly: true, capabilities: options.executionScope.capabilities || [],
+                excludeKnowledge: options.executionScope.excludeKnowledge === true, excludeWeb: options.executionScope.excludeWeb === true,
                 sourceMessageId: options.executionScope.sourceMessageId, authorizationRef: `user_message:${options.executionScope.sourceMessageId || ''}` } } } : {}),
             network_policy: options.networkPolicy || {}
         };

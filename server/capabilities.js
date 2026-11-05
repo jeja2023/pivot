@@ -1,3 +1,5 @@
+const { currentUserText, currentRequestText } = require('./services/chat-request-constraints');
+const { resolveChatRequestScope } = require('./services/chat-request-scope');
 const unsupportedCapabilities = [
     {
         code: 'image_generation',
@@ -55,17 +57,20 @@ function hasConfiguredTextToSpeech() {
 }
 
 function detectUnsupportedCapability(content) {
-    const text = String(content || '').trim();
-    if (!text) return null;
+    const text = currentRequestText(content);
+    const requestText = currentUserText(content);
+    if (!requestText) return null;
 
     const asksForSupportArtifact = supportIntentPatterns.some(pattern => pattern.test(text));
     if (asksForSupportArtifact) return null;
 
+    const scope = resolveChatRequestScope(content);
     return unsupportedCapabilities.find(capability => {
+        if (capability.code === 'realtime_web' && scope.excludeWeb) return false;
         const supported = (capability.code === 'realtime_web' && hasConfiguredRealtimeWebSearch())
             || (capability.code === 'image_generation' && hasConfiguredImageGeneration())
             || (capability.code === 'audio_generation' && hasConfiguredTextToSpeech());
-        return !supported && capability.patterns.some(pattern => pattern.test(text));
+        return !supported && capability.patterns.some(pattern => pattern.test(capability.code === 'realtime_web' ? text : requestText));
     }) || null;
 }
 

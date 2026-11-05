@@ -1,8 +1,13 @@
 'use strict';
 
 // 只把用户本轮的独立限制作为硬边界；引用中的指令仍交给语义层理解。
-function currentRequestText(prompt = '') {
+function currentUserText(prompt = '') {
     return String(prompt).split(/\n---\s*\n【参考文档/)[0]
+        .replace(/!?\[(?:附件|文件)[:：][^\]]*\]\([^\n)]*\)/g, '').trim();
+}
+
+function currentRequestText(prompt = '') {
+    return currentUserText(prompt)
         .replace(/```[\s\S]*?```/g, '').replace(/^[ \t]*>.*$/gm, '')
         .replace(/[“「][^”」]*[”」]|"[^"\n]*"/g, '').trim();
 }
@@ -18,4 +23,4 @@ function isPlanOnlyRequest(prompt = '') {
     return clauses.some(clause => plan.test(clause)) || (clauses.length > 0 && clauses.every(clause => restriction.test(clause)));
 }
 
-module.exports = { currentRequestText, isPlanOnlyRequest };
+module.exports = { currentUserText, currentRequestText, isPlanOnlyRequest };

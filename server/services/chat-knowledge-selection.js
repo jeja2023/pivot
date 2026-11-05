@@ -4,7 +4,7 @@ const { normalizeRetrievalScope } = require('./rag-index/retrieval-scope-builder
 
 async function resolveChatKnowledgeSelection(state, user, messageId, deps = {}) {
     const overrides = state.routeOverrides || {};
-    if (overrides.excludeRag === true) return { scope: { collectionIds: [], tagNames: [], cleared: true }, explicit: true };
+    if (overrides.excludeRag === true || state.ragEnabled === false || state.requestScope?.excludeKnowledge === true) return { scope: { collectionIds: [], tagNames: [], cleared: true }, explicit: true };
     const selected = overrides.collections?.length || overrides.tagNames?.length || state.ragScope?.collectionIds?.length || state.ragScope?.collectionId || state.ragScope?.tagNames?.length;
     let scope = selected ? normalizeRetrievalScope({ ...state.ragScope,
         ...(overrides.collections?.length ? { collectionIds: overrides.collections } : {}), ...(overrides.tagNames?.length ? { tagNames: overrides.tagNames } : {}) }) : null;

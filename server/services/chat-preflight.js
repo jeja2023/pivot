@@ -7,6 +7,7 @@ const {
 const { normalizeRegenerateFlag } = require('./chat-route-helpers');
 const { normalizeRouteOverrides } = require('./semantic-router');
 const sessionsRepository = require('../repositories/sessions');
+const { resolveChatRequestScope } = require('./chat-request-scope');
 
 function normalizeCapabilityPreference(value) {
     const normalized = String(value || '').trim().toLowerCase();
@@ -31,6 +32,7 @@ function buildChatRequestState(req) {
             .filter(value => value && value.length <= 240))]
             .slice(0, 300)
         : null;
+    const requestScope = resolveChatRequestScope(modelContent, { ...body, ragPreference, routeOverrides: normalizeRouteOverrides(body.routeOverrides) });
     return {
         timing: { startedAt: Date.now(), firstContentMs: null },
         content,
@@ -48,13 +50,14 @@ function buildChatRequestState(req) {
         voiceHistory: body.ephemeralVoice === true ? require('./chat-voice-context').normalizeVoiceHistory(body.voiceHistory) : [],
         autoRouteEnabled,
         routeOverrides: normalizeRouteOverrides(body.routeOverrides),
+        requestScope,
         ragPreference,
         mcpEnabled: Boolean(body.mcpEnabled) && Boolean(body.mcpConfirmed),
         mcpToolAllowlist,
         // `auto` 默认允许自适应路由决定是否检索，以兼容未发送该字段的旧
         // 客户端；只有明确传入 false 才关闭许可。关闭自动路由/影子模式时
         // 是否实际检索由语义路由器按显式请求另行判断，不能等同于全量检索。
-        ragEnabled: ragPreference === 'disabled'
+        ragEnabled: requestScope.excludeKnowledge || ragPreference === 'disabled'
             ? false
             : ragPreference === 'enabled'
                 ? true

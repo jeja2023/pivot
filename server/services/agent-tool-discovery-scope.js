@@ -36,7 +36,7 @@ function filterRunToolCatalog(tools = [], run = {}, user = null) {
 }
 
 async function refreshDiscoveryScope(run = {}, user = null, deps = {}) {
-    if (!run.id || !user?.id || runMetadata(run).capabilityConstraints?.present !== true) return run;
+    if (!run.id || !user?.id || !runMetadata(run).capabilityConstraints) return run;
     const current = await (deps.currentExecutionScope || require('../repositories/chat-conversation-turns').currentExecutionScope)(run.id, user.id);
     if (!current || current.source_active === false || ['needs_input', 'cancelled', 'deleted', 'completed', 'partial', 'error', 'failed'].includes(current.status)) {
         const error = new Error('当前任务已暂停、结束或原始授权来源已撤回，不能继续读取工具目录。');

@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
+const { currentUserText } = require('./chat-request-constraints');
+const { resolveChatRequestScope } = require('./chat-request-scope');
 
 const TASK_STATE_SCHEMA_VERSION = 1;
 const MAX_QUERY_LENGTH = 4000;
@@ -34,7 +36,8 @@ function inferToolIntent(query) {
 function inferEvidenceNeeds(query) {
     const value = text(query, MAX_QUERY_LENGTH);
     const needs = [];
-    if (/(?:依据|来源|引用|制度|规定|政策|手册|知识库|资料|文档)/iu.test(value)) needs.push('knowledge_base');
+    if (/(?:知识库|资料库|文档库)|(?:依据|查阅|检索|查询|引用).{0,20}(?:制度|规定|政策|手册)|(?:公司|单位|内部|组织).{0,12}(?:制度|规定|政策|手册|福利|报销)/iu.test(value)
+        && !resolveChatRequestScope(query).excludeKnowledge) needs.push('knowledge_base');
     if (/(?:最新|实时|今天|当前|现在|库存|余额)/iu.test(value)) needs.push('realtime');
     if (/(?:本机|本地|电脑|目录|文件|文档|报表)/iu.test(value)) needs.push('local_document');
     return unique(needs, 8);
@@ -90,7 +93,7 @@ function normalizeTaskState(value = {}, fallback = {}) {
 }
 
 function buildStructuredTaskState({ prompt = '', previousState = null, scope = {}, routeOverrides = {} } = {}) {
-    const currentQuestion = text(prompt, MAX_QUERY_LENGTH);
+    const currentQuestion = text(currentUserText(prompt), MAX_QUERY_LENGTH);
     const previous = normalizeTaskState(previousState || {});
     const toolIntent = inferToolIntent(currentQuestion);
     const state = normalizeTaskState({

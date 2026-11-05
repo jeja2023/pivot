@@ -10,6 +10,7 @@ const { resolveBusinessDecision } = require('./decision-runtime');
 const { isDirectConversation } = require('./chat-capability-decision');
 const { ACTIONS, normalizeIntent } = require('./chat-intent-contract');
 const { buildChatIntentMessages } = require('./chat-intent-prompt');
+const { resolveChatRequestScope, constrainChatDecision } = require('./chat-request-scope');
 
 const INTENT_POLICY_VERSION = 'chat-intent-v3';
 
@@ -39,6 +40,10 @@ async function callWithIntentDeadline(invoke, signal, timeoutMs) {
 async function resolveChatIntent(input, deps = {}) {
     const { prompt, history = [], tasks = [], modelCfg, user, sessionId, userMessageId, preferences = [], providedSources = [], signal, availability = {}, executionAllowed = true } = input;
     const baseline = classifyChatAutoExecution({ prompt, history });
+    const requestScope = resolveChatRequestScope(prompt, { ...input, ...(input.requestScope || {}) });
+    if (requestScope.directSourceAnswer) return constrainChatDecision({ ...baseline, action: 'direct_answer', nextAction: 'direct_answer',
+        delegated: false, continuation: false, continuationOf: null, requiredCapabilities: [], modelCalls: 0, reasonCode: 'provided_source_analysis',
+        routing: { source: 'semantic_intent', knowledge: 'none', tools: 'none', retrievalQuery: prompt, requestedCapabilities: [], toolNames: [], allowAutomaticRead: false } }, requestScope);
     const config = deps.config || {
         mode: readTypedEnv('PIVOT_CHAT_INTENT_MODE'), timeoutMs: readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS'),
         rolloutPercent: readTypedEnv('PIVOT_CHAT_INTENT_ROLLOUT_PERCENT')
@@ -56,13 +61,14 @@ async function resolveChatIntent(input, deps = {}) {
             if (!deps.callModelJson) await recordAgentModelUsage(user, modelCfg, messages, content, 'chat_intent', '', { usageRef });
             if (usageRef.truncated) throw Object.assign(new Error('意图响应不完整'), { code: 'CHAT_INTENT_INVALID_CONTRACT' });
             const raw = typeof content === 'object' ? content : JSON.parse(String(content).trim().replace(/^```(?:json)?\s*|\s*```$/g, ''));
-            resolved = normalizeIntent(raw, { baseline, tasks, history, userMessageId, availability });
+            resolved = normalizeIntent(raw, { baseline, tasks, history, userMessageId, availability, prompt, requestScope });
         } catch (error) {
             if (signal?.aborted) throw error;
             failure = error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : error.code === 'CHAT_INTENT_INVALID_CONTRACT' || error instanceof SyntaxError ? 'intent_invalid_contract' : 'intent_provider_unavailable';
             resolved = { ...baseline, action: baseline.action === 'direct_answer' ? 'direct_answer' : baseline.action === 'plan_only' ? 'plan_only' : 'clarify', question: '暂时无法可靠判断本次任务的处理范围，请稍后重试；你的请求已保留。', reasonCode: 'intent_unavailable', failureCode: failure, capabilityDecisionUnavailable: true };
         }
     }
+    resolved = constrainChatDecision(resolved, requestScope);
     const bucket = crypto.createHash('sha256').update(`${user.id}:${sessionId}`).digest()[0] % 100;
     const applied = config.mode === 'active' && bucket < config.rolloutPercent;
     let selected = applied ? resolved : { ...baseline, action: baseline.action === 'plan_only' ? 'plan_only' : 'direct_answer', reasonCode: 'intent_shadow' };
@@ -92,7 +98,7 @@ async function resolveChatIntent(input, deps = {}) {
         providerOutputs: [{ providerId: 'chat-intent', providerVersion: String(modelCfg?.id || ''), selectedActionId: resolved.action, durationMs: Date.now() - started, error: failure, scores: { [resolved.action]: resolved.confidence || 0 } }],
         policy: { mode: applied ? 'active' : 'shadow', policyVersion: INTENT_POLICY_VERSION, selectedActionId: selected.action, suggestedActionId: resolved.action, applied, reasonCode: resolved.reasonCode }
     });
-    return { ...selected, decisionId, learningDecisionId, modelCalls: config.mode === 'disabled' ? 0 : 1, durationMs: Date.now() - started, modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };
+    return { ...constrainChatDecision(selected, requestScope), decisionId, learningDecisionId, modelCalls: config.mode === 'disabled' ? 0 : 1, durationMs: Date.now() - started, modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };
 }
 
 module.exports = { resolveChatIntent, normalizeIntent };

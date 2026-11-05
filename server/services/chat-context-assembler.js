@@ -30,6 +30,8 @@ const { buildKnowledgeCatalogAnswer, buildKnowledgeOverviewContext, isKnowledgeC
 const { recordDecisionOutcome } = require('./decision-observability');
 const { buildAgentAuditFields, buildWorldStatePrompt } = require('./agent-step-context');
 const { createPersistedChatStepContext } = require('./chat-context-state-store');
+const { currentUserText } = require('./chat-request-constraints');
+const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope, requestScopeInstructions } = require('./chat-request-scope');
 const {
     buildLongTermMemoryContextMessage,
     compareMemoryRetrievalShadow,
@@ -129,16 +131,23 @@ async function assembleChatContext({
     signal = null
 }) {
     let { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
+    const requestPrompt = currentUserText(modelContent);
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
+    const requestScope = resolveChatRequestScope(modelContent, { ...state, ...(state.requestScope || {}), history });
+    if (requestScope.excludeKnowledge) {
+        ragEnabled = false;
+        state = { ...state, ragEnabled, routeOverrides: { ...state.routeOverrides, excludeRag: true, forceRag: false } };
+    }
+    if (state.intentDecision) state = { ...state, intentDecision: constrainChatDecision(state.intentDecision, requestScope) };
     // 临时语音的本轮文本未落库，必须显式加入请求；也不能进入持久任务上下文和路由审计正文。
     if (state.ephemeralVoice) return require('./chat-voice-context').buildEphemeralVoiceContext(state, history, modelCfg);
-    const catalogQuestion = isKnowledgeCatalogQuestion(modelContent);
-    const overviewQuestion = isKnowledgeOverviewQuestion(modelContent);
-    const hasKnowledgeReference = /知识库|专题库|专题|资料库/u.test(modelContent) || /^\s*@/u.test(modelContent)
+    const catalogQuestion = isKnowledgeCatalogQuestion(requestPrompt);
+    const overviewQuestion = isKnowledgeOverviewQuestion(requestPrompt);
+    const hasKnowledgeReference = /知识库|专题库|专题|资料库/u.test(requestPrompt) || /^\s*@/u.test(requestPrompt)
         || hasRagScopeFilter(ragScope) || Boolean(state.routeOverrides?.collections?.length);
     if (ragEnabled && state.routeOverrides?.excludeRag !== true && (hasKnowledgeReference || catalogQuestion || overviewQuestion)) {
         try {
-            const resolved = await resolveConversationKnowledgeScope({ question: modelContent, history, state, user: req.user });
+            const resolved = await resolveConversationKnowledgeScope({ question: requestPrompt, history, state, user: req.user });
             if (resolved.scope.collectionIds.length && !hasRagScopeFilter(ragScope) && !state.routeOverrides?.collections?.length) {
                 ragScope = resolved.scope;
                 state = { ...state, ragScope, routeOverrides: { ...state.routeOverrides, collections: ragScope.collectionIds, forceRag: true } };
@@ -173,12 +182,14 @@ async function assembleChatContext({
         history = [{ role: 'system', content: `${state.intentDecision.correction.constraint} 这是本轮用户的明确限制，优先于历史委托与偏好。已有操作无法自动撤销；缺少依据时说明限制，不能虚构执行或检索结果。` }, ...history];
     }
     if (state.intentDecision?.capabilityDecisionUnavailable) history = [{ role: 'system', content: '本轮依据与能力判断暂不可用。不得把组织内部事实或当前业务数据当作常识补答；需要这些依据时说明暂不可核实，并保留用户问题。' }, ...history];
+    const scopeInstructions = requestScopeInstructions(requestScope);
+    if (scopeInstructions.length) history = [{ role: 'system', content: scopeInstructions.join('\n') + '\n未提供或未经核实的外部事实须说明不确定，不得虚构检索或分析结果。' }, ...history];
     const capabilityDecision = getCapabilityDecision(state);
     let pendingMemoryUsage = null;
     const disableChatThinking = shouldDisableChatThinking(modelCfg);
     // 检索只使用本轮结构化任务状态中的 currentQuestion/retrievalQuery，
     // 不把完整聊天记录直接作为知识库或工具路由查询。完整 history 仅用于最终回答上下文。
-    const effectiveUserPrompt = resolveRagQueryContent(state.intentDecision?.correction?.retrievalQuery || capabilityDecision?.retrievalQuery || modelContent, history);
+    const effectiveUserPrompt = resolveRagQueryContent(state.intentDecision?.correction?.retrievalQuery || capabilityDecision?.retrievalQuery || requestPrompt, history);
     const taskState = buildStructuredTaskState({
         prompt: effectiveUserPrompt || modelContent,
         previousState: state.taskState || null,
@@ -188,9 +199,11 @@ async function assembleChatContext({
     const baseRetrievalQuery = taskState.retrievalQuery || effectiveUserPrompt || modelContent;
     if (capabilityDecision) {
         taskState.toolIntent = { ...taskState.toolIntent, requiresTool: capabilityDecision.tools !== 'none', requestedCapabilities: capabilityDecision.requestedCapabilities,
-            ...(Array.isArray(state.automaticReadCapabilities) ? { automaticReadScope: { capabilities: state.automaticReadCapabilities, sourceMessageId: state.intentDecision?.sourceMessageId || null } } : {}) };
+            ...(Array.isArray(state.automaticReadCapabilities) ? { automaticReadScope: { capabilities: capabilityDecision.requestedCapabilities,
+                excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, sourceMessageId: state.intentDecision?.sourceMessageId || null } } : {}) };
         if (capabilityDecision.knowledge === 'required') taskState.evidenceNeeds = [...new Set([...taskState.evidenceNeeds, 'knowledge_base'])];
     }
+    if (requestScope.excludeKnowledge || capabilityDecision?.knowledge === 'none') taskState.evidenceNeeds = taskState.evidenceNeeds.filter(need => need !== 'knowledge_base');
     const retrievalPlan = buildKnowledgeRetrievalPlan({ question: baseRetrievalQuery, history });
     const retrievalQuery = retrievalPlan.rewrittenQuery || baseRetrievalQuery;
     const memoryQuery = retrievalQuery;
@@ -213,7 +226,7 @@ async function assembleChatContext({
     if (toolRoutingRequested) {
         try {
             const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
-            accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist);
+            accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist).filter(tool => toolAllowedByRequestScope(tool, requestScope));
             if (capabilityDecision?.toolNames?.length) accessibleMcpTools = accessibleMcpTools.filter(tool => capabilityDecision.toolNames.includes(tool.fullName || tool.name));
             if (Array.isArray(state.automaticReadCapabilities)) {
                 accessibleMcpTools = accessibleMcpTools.filter(raw => {
@@ -298,7 +311,7 @@ async function assembleChatContext({
         ? routePlan.execution.rag.queryVector
         : null;
 
-    const shouldRetrieveRag = Boolean(routePlan.execution?.rag?.shouldRetrieve)
+    const shouldRetrieveRag = ragEnabled && !requestScope.excludeKnowledge && Boolean(routePlan.execution?.rag?.shouldRetrieve)
         && typeof retrieveContext === 'function'
         && typeof isRagEnabled === 'function'
         && isRagEnabled()
@@ -342,7 +355,7 @@ async function assembleChatContext({
         }
     } catch (_) {}
 
-    if (!shouldClarify && !shouldRetrieveRag && taskState.evidenceNeeds.includes('knowledge_base')) {
+    if (!shouldClarify && !shouldRetrieveRag && !requestScope.excludeKnowledge && ragRoutingRequested && taskState.evidenceNeeds.includes('knowledge_base')) {
         history = injectRagContextBeforeLatestUser(history, buildRagInsufficientContextMessage(ragEnabled ? 'rag_not_selected' : 'rag_disabled'));
         writeSse(JSON.stringify({
             type: 'rag',

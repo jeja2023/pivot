@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { resolveChatRequestScope, constrainChatDecision, capabilityAllowedByRequestScope, requestScopeInstructions } = require('./chat-request-scope');
 const { resolveChatProject } = require('./chat-preference-context');
 const { resolveChatAgentBudget } = require('./agent-token-policy');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('./agent-runtime/runtime-env');
@@ -39,12 +40,14 @@ async function createChatAgentHandoff({
     requestKey = ''
 } = {}) {
     if (typeof agentRunFactory !== 'function') throw new Error('Agent 运行时尚未初始化。');
+    const requestScope = resolveChatRequestScope(modelContent, { routeOverrides, ragEnabled, ragScope, ...(automaticExecution?.requestScope || {}) });
+    if (automaticExecution) automaticExecution = constrainChatDecision(automaticExecution, requestScope);
     const knowledgeSelected = Boolean(routeOverrides.collections?.length || routeOverrides.tagNames?.length);
-    if (knowledgeSelected && routeOverrides.excludeRag !== true) {
+    if (knowledgeSelected && !requestScope.excludeKnowledge) {
         ragScope = require('./knowledge-tool-results').intersectScopes(ragScope, { collectionIds: routeOverrides.collections, tagNames: routeOverrides.tagNames });
         ragScope = await require('./knowledge-tool-results').resolveKnowledgeToolScope(user, {}, { run: { metadata: { chatBridge: { ragScope } } } });
     }
-    ragEnabled = ragEnabled && routeOverrides.excludeRag !== true;
+    ragEnabled = ragEnabled && !requestScope.excludeKnowledge;
     const chatHistory = normalizeChatHistory((Array.isArray(sessionMessages) ? sessionMessages : []).filter(message => (
         !userMessageId || Number(message?.id || 0) !== Number(userMessageId)
     )));
@@ -69,7 +72,7 @@ async function createChatAgentHandoff({
     const selection = await require('./chat-selected-tools').resolveChatSelectedTools(user, { ...routeOverrides, tools: requestedTools }, mcpToolAllowlist);
     const selectedTools = selection.tools;
     const effectiveMcpEnabled = routeOverrides.excludeTools !== true && Boolean(mcpEnabled || (automatic && automaticExecution.allowMcp === true) || selectedTools.length);
-    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source', ...(ragEnabled && knowledgeSelected ? ['knowledge.search'] : []), ...selectedTools.flatMap(tool => tool.capabilities || [])])] : [];
+    const capabilities = automatic ? [...new Set([...(automaticExecution.requiredCapabilities || ['agent.execute']), 'conversation.read_source', ...(ragEnabled && knowledgeSelected ? ['knowledge.search'] : []), ...selectedTools.flatMap(tool => tool.capabilities || [])])].filter(capability => capabilityAllowedByRequestScope(capability, requestScope)) : [];
     const automaticEndpoints = automatic && effectiveMcpEnabled && !selection.names.length
         ? await require('./chat-selected-tools').resolveAutomaticMcpEndpoints(user, capabilities, mcpToolAllowlist) : {};
     const taskBudget = resolveChatAgentBudget({ modelCfg, decision: automaticExecution || {}, ragEnabled, mcpEnabled: effectiveMcpEnabled,
@@ -78,19 +81,21 @@ async function createChatAgentHandoff({
     const authorizationRef = `user_message:${userMessageId}`;
     const budgetRef = `sha256:${crypto.createHash('sha256').update(JSON.stringify(budget)).digest('hex')}`;
     const conversationTaskId = automaticExecution?.conversationTaskId || turn?.id || `chat:${sessionId}:${userMessageId}`;
-    const modeNote = automatic
+    const modeNote = (automatic
         ? '系统已根据当前委托、会话上下文和有效授权启动受控任务。工具、网络与副作用仍由运行时策略和审批逐项决定。'
         : effectiveMcpEnabled
             ? '这是用户显式选择的聊天 Agent 执行模式。遵守当前会话的 MCP 授权和工具白名单。'
-            : '这是用户显式选择的聊天 Agent 执行模式。当前会话未授权外部 MCP，只能使用内置安全能力。';
+            : '这是用户显式选择的聊天 Agent 执行模式。当前会话未授权外部 MCP，只能使用内置安全能力。') + '\n' + requestScopeInstructions(requestScope).join('\n');
     const metadata = {
         executionPolicy: taskBudget.policy,
         conversationTaskId,
         projectId: project.projectId,
         conversationMessageIds: [userMessageId].filter(Boolean),
         requiredSourceMessages: automatic && modelContent.length > 12000 ? [userMessageId] : [],
+        capabilityConstraints: { excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, sourceOnly: requestScope.sourceOnly },
         ...(automatic ? {
-            capabilityConstraints: { present: true, capabilities, authorizationRef, budgetRef, sourceMessageId: userMessageId },
+            capabilityConstraints: { present: true, capabilities, excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb,
+                sourceOnly: requestScope.sourceOnly, authorizationRef, budgetRef, sourceMessageId: userMessageId },
             taskContract: {
                 goal: automaticExecution.objective || modelContent,
                 constraints: automaticExecution.constraints || [],
