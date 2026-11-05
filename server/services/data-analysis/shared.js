@@ -97,6 +97,7 @@ function fromProjectRelative(relativePath) {
 }
 
 function jsonParse(value, fallback) {
+    if (value && typeof value === 'object') return value;
     try {
         return value ? JSON.parse(value) : fallback;
     } catch (_err) {
@@ -318,7 +319,7 @@ async function withDuckTimeout(connection, operation, timeoutMs = DATA_ANALYSIS_
 async function duckReadAll(sql) {
     const { instance, connection } = await createDuckConnection();
     try {
-        const reader = await connection.runAndReadAll(sql);
+        const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(sql));
         return reader.getRowObjectsJson();
     } finally {
         connection.closeSync();

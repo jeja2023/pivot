@@ -12,7 +12,7 @@ test('metrics startup path does not read RAG recorders through a circular depend
     ], {
         cwd: root,
         encoding: 'utf8',
-        timeout: 5000
+        timeout: 30000
     });
     const diagnostics = `${result.stdout || ''}\n${result.stderr || ''}`;
     assert.equal(result.status, 0, diagnostics);

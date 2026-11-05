@@ -39,6 +39,7 @@ async function withQpdfLease(operation) {
     let lockLost = false;
     let created = false;
     const controller = new AbortController();
+    const leaseError = () => Object.assign(new Error('qpdf 临时目录租约已失效，请重试任务。'), { code: 'QPDF_LEASE_LOST', status: 503 });
     const loseLock = () => { lockLost = true; controller.abort(); };
     client.on('error', loseLock);
     client.on('end', loseLock);
@@ -46,13 +47,21 @@ async function withQpdfLease(operation) {
         await client.query("SELECT pg_advisory_lock(hashtext('pivot:qpdf-temp'), hashtext(current_schema() || ':' || $1))", [id]);
         await fs.mkdir(directory, { mode: 0o700 });
         created = true;
-        if (lockLost) throw new Error('qpdf 临时目录租约已失效');
+        if (lockLost) throw leaseError();
         const result = await operation(directory, controller.signal);
-        if (lockLost) throw new Error('qpdf 临时目录租约已失效');
+        if (!lockLost) {
+            try { await client.query('SELECT 1'); } catch (_) { loseLock(); }
+        }
+        if (lockLost) throw leaseError();
         return result;
     } finally {
         // 锁连接意外断开后不能证明仍拥有执行权，保留目录由后续巡检回收。
-        if (created && !lockLost) await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
+        if (created && !lockLost && await safeRoot()) {
+            const current = await fs.lstat(directory).catch(() => null);
+            if (path.dirname(directory) === path.resolve(tempRoot) && current?.isDirectory() && !current.isSymbolicLink()) {
+                await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
+            }
+        }
         if (created && lockLost) logger.warn({ id }, 'qpdf 临时目录租约连接已断开，保留目录等待巡检');
         await client.end().catch(() => {});
     }

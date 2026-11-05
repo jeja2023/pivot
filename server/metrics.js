@@ -110,9 +110,9 @@ function getHttpMetricsSnapshot() {
 function metricsMiddleware(req, res, next) {
     if ((req.originalUrl || req.url || '').startsWith('/api/metrics')) return next();
     const start = process.hrtime.bigint();
-    res.on('finish', () => {
+    require('./services/http-response-lifecycle').onResponseSettled(res, complete => {
         const durationSeconds = Number(process.hrtime.bigint() - start) / 1e9;
-        recordHttpRequest(req.method, normalizeRoute(req), String(res.statusCode), durationSeconds);
+        recordHttpRequest(req.method, normalizeRoute(req), String(complete ? res.statusCode : 499), durationSeconds);
     });
     next();
 }

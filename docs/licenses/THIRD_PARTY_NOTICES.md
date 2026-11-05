@@ -8,6 +8,7 @@
 | libvips（由 sharp 预编译二进制携带） | 图片编解码与变换 | LGPL-3.0-or-later |
 | KaTeX | 公式排版 | MIT |
 | ECharts | 图表渲染 | Apache-2.0 |
+| Mermaid 11.17.2（离线静态构建） | 回复中的图形预览 | MIT；所含依赖许可见资源清单 |
 | SimpleMindMap 0.14.0-fix.3（裁剪构建） | 思维导图编辑、布局与导出 | MIT |
 | Yjs 13.6.33 / lib0 | 思维导图字段级协作合并与本地撤销 | MIT |
 | @xmldom/xmldom | OPML/FreeMind 的受控 XML 解析 | MIT |
@@ -24,6 +25,8 @@
 libvips 以动态链接库形式与应用分发；用户可以替换该动态库。项目未修改 libvips 本身。有关源代码和许可信息，请访问组件各自的上游发布页或本发行包内的相关许可文件。
 
 思维导图编辑器基于 [SimpleMindMap](https://github.com/wanglin2/mind-map) 开源库构建，版权归 The MindMap Team 所有。项目只编译所需插件，未引入其闭源桌面产品。完整 MIT 许可见 `SIMPLE-MIND-MAP-MIT.txt`；实际构建依赖、精确版本和摘要见 `client/common/vendor/simple-mind-map/0.14.0-fix.3/provenance.json`，所含组件完整许可保存在同目录 `LICENSES.txt`。运行时不依赖 CDN。
+
+Mermaid 图形预览使用 [Mermaid](https://github.com/mermaid-js/mermaid) 11.17.2，按需加载本地构建；DOMPurify 双许可部分选择 Apache-2.0 分支。D3 的表格对象转换在构建时替换为静态闭包，避免动态函数构造。完整依赖版本、原始许可和构建摘要位于 `client/common/vendor/mermaid/11.17.2/`，主界面不加载该运行时，不依赖公网服务。
 
 Docker 发行镜像中的 veraPDF CLI 来自 veraPDF 官方固定版本安装包，构建时校验 SHA-256 后以 CLI-only 模式安装。veraPDF 仅用于验证，不执行 PDF/A 转换；其完整许可与源代码获取方式见 [veraPDF 官方项目](https://github.com/veraPDF/veraPDF-apps)。
 

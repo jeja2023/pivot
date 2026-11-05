@@ -5,41 +5,20 @@
     const pending = new Map();
     const api = () => window.Pivot.moduleApi('agent.workflowExperience');
     const userKey = () => String(window.Pivot.legacy.currentUser?.id || window.Pivot.moduleApi('agent.workflowBridge').userId?.() || '');
-    function getStoredDraft(key) {
-        const uid = userKey();
-        if (uid) {
-            try {
-                const item = localStorage.getItem(`pivot.workflow.draft.${uid}.${key}`);
-                if (item) return JSON.parse(item);
-            } catch (_) {}
-        }
+    function getStoredDraft(key, uid) {
+        if (!uid) return null;
         try {
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                if (k && k.startsWith('pivot.workflow.draft.') && k.endsWith(`.${key}`)) {
-                    const item = localStorage.getItem(k);
-                    if (item) return JSON.parse(item);
-                }
-            }
+            const item = localStorage.getItem(`pivot.workflow.draft.${uid}.${key}`);
+            if (item) return JSON.parse(item);
         } catch (_) {}
         return null;
     }
-    const localKey = key => {
-        const uid = userKey();
-        if (uid) return `pivot.workflow.draft.${uid}.${key}`;
-        try {
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                const m = k && k.match(/^pivot\.workflow\.draft\.([^.]+)\./);
-                if (m && m[1]) return `pivot.workflow.draft.${m[1]}.${key}`;
-            }
-        } catch (_) {}
-        return `pivot.workflow.draft..${key}`;
-    };
-    const same = value => active === value;
+    const owned = value => Boolean(value?.userId && value.userId === userKey());
+    const same = value => active === value && owned(value);
     const status = (text, tone = '', error = null) => api().saveStatus?.(text, tone, error);
     function localWrite(value, payload) {
-        const key = localKey(value.key);
+        if (!owned(value)) return false;
+        const key = `pivot.workflow.draft.${value.userId}.${value.key}`;
         if (/"(?:password|passwd|authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|secret|private[-_]?key)"\s*:\s*"(?!\{\{)[^"\s]+|[?&](?:token|secret|password|api[-_]?key)=[^&\s"}]+/i.test(payload.specText)) return false;
         try { localStorage.setItem(key, JSON.stringify({ ...payload, revision: value.revision, pending: value.dirty, savedAt: Date.now() })); return true; }
         catch (_) { return false; }
@@ -47,13 +26,16 @@
     async function load(key, bridge) {
         clearTimeout(timer);
         if (active?.dirty) void flush(active);
-        const value = { key, bridge, revision: 0, dirty: false, blocked: false, loading: true, lastPayload: null };
+        const value = { key, userId: userKey(), bridge, revision: 0, dirty: false, blocked: false, loading: true, lastPayload: null };
+        value.pendingKey = `${value.userId}:${key}`;
         let finishLoad; value.loaded = new Promise(resolve => { finishLoad = resolve; });
         active = value;
         let local = null;
-        try { local = getStoredDraft(key); } catch (_) { /* 浏览器存储不可用时继续使用服务器修订。 */ }
+        try { local = getStoredDraft(key, value.userId); } catch (_) { /* 浏览器存储不可用时继续使用服务器修订。 */ }
         try {
-            if (pending.has(key)) await pending.get(key);
+            if (!owned(value)) return;
+            if (pending.has(value.pendingKey)) await pending.get(value.pendingKey);
+            if (!same(value)) return;
             const response = await bridge.request(`/agents/workflow-editor/drafts/${encodeURIComponent(key)}`);
             if (!response.ok) throw new Error('无法读取已保存草稿。');
             const data = await response.json();
@@ -82,7 +64,7 @@
         } catch (error) {
             if (!same(value)) return;
             status(local ? '仅保存在本机' : '无法读取服务器草稿', 'warning', error);
-            if (local && !value.dirty) api().offerRecovery?.(local, () => { bridge.restore(local); changed(); });
+            if (local && !value.dirty) api().offerRecovery?.(local, () => { if (same(value)) { bridge.restore(local); changed(); } });
         } finally {
             value.loading = false;
             finishLoad();
@@ -90,7 +72,7 @@
         }
     }
     function changed() {
-        if (!active || active.bridge.readOnly()) return;
+        if (!same(active) || active.bridge.readOnly()) return;
         active.dirty = true;
         active.lastPayload = active.bridge.capture();
         const stored = localWrite(active, active.lastPayload);
@@ -100,8 +82,8 @@
     }
     async function flush(value = active) {
         if (value?.loading) { await value.loaded; return flush(value); }
-        if (!value?.dirty || value.blocked) return;
-        if (pending.has(value.key)) { await pending.get(value.key); if (value.dirty && !value.blocked) return flush(value); return; }
+        if (!owned(value) || !value?.dirty || value.blocked) return;
+        if (pending.has(value.pendingKey)) { await pending.get(value.pendingKey); if (value.dirty && !value.blocked) return flush(value); return; }
         const payload = value.lastPayload || value.bridge.capture();
         value.failed = false;
         value.dirty = false;
@@ -113,7 +95,9 @@
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw Object.assign(new Error(data.error || '草稿保存失败，可重试或导出副本。'), { conflict: response.status === 409 });
-                value.revision = data.draft.revision;
+                if (!owned(value)) return;
+                if (!Number.isSafeInteger(Number(data.draft?.revision)) || Number(data.draft.revision) < 1) throw new Error('服务器没有返回有效的草稿保存确认，请重试。');
+                value.revision = Number(data.draft.revision);
                 localWrite(value, { ...(value.dirty ? value.lastPayload : payload), savedAt: Date.now() });
                 if (same(value)) status(value.dirty ? '仍有修改等待同步' : '草稿已保存');
             } catch (error) {
@@ -123,19 +107,20 @@
                 if (same(value)) status(error.conflict ? '存在冲突' : '保存失败，修改仍保留', 'error', error);
             }
         })();
-        pending.set(value.key, task);
+        pending.set(value.pendingKey, task);
         await task;
-        pending.delete(value.key);
+        if (pending.get(value.pendingKey) === task) pending.delete(value.pendingKey);
         if (value.dirty && !value.blocked && same(value) && !value.failed) timer = setTimeout(() => void flush(value), 1000);
     }
     async function latest() {
-        if (!active) return;
+        if (!same(active)) return;
         const value = active;
         let response; let data;
         try { response = await value.bridge.request(`/agents/workflow-editor/drafts/${encodeURIComponent(value.key)}`); data = await response.json(); }
         catch (error) { if (same(value)) status('读取服务器草稿失败，可重试', 'error', error); return; }
         if (!response.ok || !same(value)) return;
         api().compareDraft?.(value.bridge.capture(), data.draft, () => {
+            if (!same(value)) return;
             value.revision = Number(data.draft?.revision || 0); value.blocked = false; value.dirty = false;
             if (data.draft) value.bridge.restore({ specText: data.draft.spec_text, name: data.draft.name, description: data.draft.description, baseVersion: data.draft.base_version });
             value.lastPayload = value.bridge.capture(); localWrite(value, value.lastPayload);
@@ -146,14 +131,16 @@
     function listLocal() {
         const result = [];
         const uid = userKey();
-        const prefix = uid ? `pivot.workflow.draft.${uid}.` : 'pivot.workflow.draft.';
+        if (!uid) return result;
+        const prefix = `pivot.workflow.draft.${uid}.`;
         try {
             for (let index = 0; index < localStorage.length; index++) {
                 const storageKey = localStorage.key(index);
                 if (!storageKey?.startsWith(prefix)) continue;
-                const value = JSON.parse(localStorage.getItem(storageKey));
+                let value;
+                try { value = JSON.parse(localStorage.getItem(storageKey)); } catch (_) { continue; }
                 if (value?.specText) {
-                    const keyPart = uid ? storageKey.slice(prefix.length) : storageKey.replace(/^pivot\.workflow\.draft\.[^.]+\./, '');
+                    const keyPart = storageKey.slice(prefix.length);
                     result.push({ ...value, key: keyPart });
                 }
             }
@@ -163,9 +150,9 @@
     globalThis.addEventListener?.('pagehide', () => { if (active?.dirty) void flush(active); });
     globalThis.addEventListener?.('online', () => { if (active?.dirty && !active?.blocked) void flush(active); });
     globalThis.addEventListener?.('beforeunload', event => {
-        if (active?.dirty || active?.blocked) { event.preventDefault(); event.returnValue = ''; }
+        if (same(active) && (active.dirty || active.blocked || pending.has(active.pendingKey))) { event.preventDefault(); event.returnValue = ''; }
     });
     window.Pivot.registerModule('agent.workflowDrafts', { load, changed, flush, latest, detach, listLocal,
-        isSaved: () => Boolean(active && !active.dirty && !active.blocked && !active.loading && !active.failed && !pending.has(active.key) && active.revision > 0),
-        current: () => active ? { key: active.key, revision: active.revision, dirty: active.dirty, blocked: active.blocked } : null });
+        isSaved: () => Boolean(same(active) && !active.dirty && !active.blocked && !active.loading && !active.failed && !pending.has(active.pendingKey) && active.revision > 0),
+        current: () => same(active) ? { key: active.key, revision: active.revision, dirty: active.dirty, blocked: active.blocked } : null });
 })();

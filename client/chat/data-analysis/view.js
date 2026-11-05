@@ -2,14 +2,11 @@
 (function () {
     const app = window.Pivot.legacy.PivotDataAnalysis;
     if (!app) throw new Error('数据分析上下文模块未加载');
-    const { API, state, esc, fmtNumber, activeDataset } = app;
+    const { API, state, esc, fmtNumber } = app;
     const fetchJson = (...args) => app.fetchJson(...args);
     const setBusy = (...args) => app.setBusy(...args);
     const toast = (...args) => app.toast(...args);
     const bindEvents = (...args) => app.bindEvents(...args);
-    const renderVisualQueryControls = (...args) => app.renderVisualQueryControls(...args);
-    const syncChartAggregationControls = (...args) => app.syncChartAggregationControls(...args);
-    const syncChartTypeControls = (...args) => app.syncChartTypeControls(...args);
 
     function ensureView() {
         let view = document.getElementById('data-analysis-view');
@@ -759,7 +756,8 @@
         const header = headers[tab] || headers.overview;
         titleEl.textContent = header.title;
         metaEl.textContent = header.desc;
-        if (actionsEl) {
+        if (actionsEl && actionsEl.dataset.toolbarTab !== tab) {
+            actionsEl.dataset.toolbarTab = tab;
             PivotSafeHtml.setHtml(actionsEl, tab === 'overview' ? `
                 <label class="btn-secondary data-analysis-upload-action">
                     <input id="data-analysis-file" type="file" accept=".csv,.xlsx,.xls,.sqlite,.sqlite3,.db">
@@ -831,6 +829,7 @@
         PivotSafeHtml.setHtml(pager, '');
     }
     async function previewDataset(id, page = 1, { silent = false } = {}) {
+        const current = app.captureRequest('preview', () => 'preview');
         const isModalOpen = !document.getElementById('data-analysis-preview-modal')?.classList.contains('hidden');
         if (!silent && !isModalOpen) {
             setBusy(true, '正在加载预览数据...');
@@ -838,6 +837,7 @@
         try {
             const pageSize = state.previewPageSize || 25;
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}?page=${page}&pageSize=${pageSize}`);
+            if (!current()) return;
             const dataset = data?.dataset;
             if (!dataset) throw new Error('未能加载数据集详情');
 
@@ -850,6 +850,7 @@
 
             renderPreviewModal(dataset, page, pageSize);
         } catch (e) {
+            if (!current()) return;
             toast(e && e.message ? e.message : '预览数据加载失败', 'error');
         } finally {
             if (!silent && !isModalOpen) {
@@ -914,78 +915,11 @@
         modal.classList.remove('hidden');
     }
 
-    function buildOptions(columns = [], { includeEmpty = false, emptyLabel = '无' } = {}) {
-        const options = includeEmpty ? [`<option value="">${esc(emptyLabel)}</option>`] : [];
-        columns.forEach(column => {
-            options.push(`<option value="${esc(column.key)}">${esc(column.name)}</option>`);
-        });
-        return options.join('');
-    }
-
-    function setSelectOptions(id, htmlText, value) {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const previous = value !== undefined ? value : el.value;
-        PivotSafeHtml.setHtml(el, htmlText);
-        if (Array.from(el.options).some(option => option.value === previous)) {
-            el.value = previous;
-        } else {
-            el.value = '';
-        }
-    }
-
-    function renderControls() {
-        const dataset = activeDataset();
-        const columns = dataset?.columns || [];
-        setSelectOptions('data-analysis-chart-x', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分类字段' }));
-        setSelectOptions('data-analysis-chart-y', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择数值字段' }));
-        setSelectOptions('data-analysis-chart-y2', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择辅助数值字段' }));
-        setSelectOptions('data-analysis-chart-group', buildOptions(columns, { includeEmpty: true, emptyLabel: '请选择分组字段' }));
-        syncChartAggregationControls('auto');
-        syncChartTypeControls('auto');
-        
-        const datasetOptions = `<option value="">请选择数据集</option>` + state.datasets.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
-        setSelectOptions('data-analysis-compare-left', datasetOptions, state.compareLeftId);
-        setSelectOptions('data-analysis-compare-right', datasetOptions, state.compareRightId);
-        renderCompareKeyOptions();
-
-        // 渲染各个具体分析页面的数据集选择框
-        setSelectOptions('data-analysis-chart-dataset', datasetOptions, state.activeId);
-        setSelectOptions('data-analysis-cleaning-dataset', datasetOptions, state.cleaningDatasetId || state.activeId);
-        setSelectOptions('data-analysis-query-dataset', datasetOptions, state.activeId);
-        setSelectOptions('data-analysis-pivot-dataset', datasetOptions, state.activeId);
-        setSelectOptions('data-analysis-ai-dataset', datasetOptions, state.activeId);
-        setSelectOptions('data-analysis-semantic-dataset', datasetOptions, state.semanticDatasetId || state.activeId || '');
-        setSelectOptions('data-analysis-history-dataset', datasetOptions, state.activeId);
-        
-        // 渲染可视化查询编辑器
-        renderVisualQueryControls();
-
-        // 渲染智能分析数据集画像与引导看板
-        app.renderAiDatasetProfile?.();
-        app.renderSemanticControls?.();
-        app.renderCleaning?.();
-    }
-
-    function renderCompareKeyOptions() {
-        const leftId = document.getElementById('data-analysis-compare-left')?.value;
-        const rightId = document.getElementById('data-analysis-compare-right')?.value;
-        const left = state.datasets.find(item => item.id === leftId) || null;
-        const right = state.datasets.find(item => item.id === rightId) || null;
-        setSelectOptions('data-analysis-compare-left-key', buildOptions(left?.columns || [], { includeEmpty: true, emptyLabel: '请选择左侧主键' }));
-        setSelectOptions('data-analysis-compare-right-key', buildOptions(right?.columns || [], { includeEmpty: true, emptyLabel: '请选择右侧主键' }));
-        setSelectOptions('data-analysis-compare-field', buildOptions(left?.columns || [], { includeEmpty: true, emptyLabel: '请选择对比字段（留空仅比对主键）' }));
-    }
-
     Object.assign(app, {
         ensureView,
         updateToolbarHeader,
         renderHeader,
         renderOverview,
         previewDataset,
-        buildOptions,
-        setSelectOptions,
-        renderControls,
-        renderCompareKeyOptions
     });
 })();

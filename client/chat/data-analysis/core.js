@@ -19,14 +19,17 @@
     async function fetchJson(url, options = {}) {
         try {
             const res = await apiFetch(url, options);
-            const data = await res.json().catch(() => ({}));
+            let data;
+            try { data = res.status === 204 ? {} : await res.json(); }
+            catch (_) { throw Object.assign(new Error('服务未返回有效数据，请刷新后重试。'), { status: res.status }); }
             if (!res.ok) {
-                throw new Error(data?.error?.message || data?.error || `请求失败：${res.status}`);
+                throw Object.assign(new Error(data?.error?.message || data?.error || `请求失败：${res.status}，请稍后重试。`), { status: res.status, code: data?.code || data?.error?.code || '' });
             }
             return data;
         } catch (error) {
             const message = String(error?.message || '');
-            if (error?.name === 'AbortError' || /network|failed to fetch|load failed|networkerror/i.test(message)) {
+            if (error?.name === 'AbortError') throw error;
+            if (/network|failed to fetch|load failed|networkerror/i.test(message)) {
                 throw new Error('网络连接中断，请检查网络后重试。');
             }
             throw error;
@@ -34,10 +37,15 @@
     }
 
     async function loadDatasets({ keepActive = true, loadActiveDetail = true } = {}) {
+        const current = app.captureRequest('datasets', () => 'datasets');
         const data = await fetchJson(`${API}/datasets`);
+        if (!current()) return;
         state.datasets = Array.isArray(data.datasets) ? data.datasets : [];
         if (!keepActive || !state.datasets.some(item => item.id === state.activeId)) {
             state.activeId = '';
+            state.datasetEpoch += 1;
+            state.summary = null; state.query = null; state.chart = null; state.pivot = null; state.artifacts = [];
+            app.stopAsyncQueryPolling?.();
         }
         if (!state.compareLeftId) state.compareLeftId = '';
         if (!state.compareRightId) state.compareRightId = '';
@@ -47,6 +55,13 @@
 
     async function loadDatasetDetail(id) {
         if (String(id || '') !== String(state.activeId || '')) resetAiWorkspace();
+        state.datasetEpoch += 1;
+        state.activeId = id || '';
+        state.summary = null; state.chart = null; state.query = null; state.queryPage = 1; state.pivot = null; state.artifacts = [];
+        app.stopAsyncQueryPolling?.();
+        state.asyncQueryJobs = [];
+        const current = app.captureRequest('detail');
+        render();
         if (!id) {
             state.activeId = '';
             state.summary = null;
@@ -73,9 +88,13 @@
                 limit: 100
             };
             render();
-            return;
+            return true;
         }
-        const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}`);
+        let data;
+        try { data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}`); }
+        catch (error) { if (!current()) return false; throw error; }
+        if (!current()) return false;
+        if (data.dataset?.id !== id) throw new Error('数据集详情不可用，请刷新列表后重试。');
         const index = state.datasets.findIndex(item => item.id === id);
         if (index >= 0) state.datasets[index] = data.dataset;
         state.activeId = id;
@@ -103,13 +122,17 @@
         };
         render();
         await loadSummary(id);
+        if (!current()) return false;
         if (typeof app.loadSemanticJobs === 'function' && state.semanticDatasetId) {
             await app.loadSemanticJobs(state.semanticDatasetId);
         }
+        return true;
     }
 
     async function loadSummary(id) {
+        const current = app.captureRequest('summary');
         const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}/summary`, { method: 'POST' });
+        if (!current() || id !== state.activeId) return;
         state.summary = data;
         render();
     }
@@ -121,7 +144,7 @@
         form.append('name', file.name.replace(/\.[^.]+$/, ''));
         setBusy(true, '正在导入数据集...');
         try {
-            const data = await fetchJson(`${API}/datasets`, { method: 'POST', body: form });
+            const data = await fetchJson(`${API}/datasets`, { method: 'POST', body: form, timeoutMs: 300000 });
             resetAiWorkspace();
             state.activeId = data.dataset?.id || '';
             toast('数据集已导入');
@@ -158,7 +181,7 @@
             }
         }
         try {
-            await fn();
+            return await fn();
         } catch (e) {
             toast(e && e.message ? e.message : '操作失败', 'error');
         } finally {
@@ -179,7 +202,9 @@
         renderChart();
         renderCompare();
         renderQueryFields();
+        app.renderQuery?.();
         renderPivotControls();
+        app.renderPivot?.();
         renderSemanticControls();
         app.renderAsyncQueryJobs?.();
         app.renderGovernance?.();

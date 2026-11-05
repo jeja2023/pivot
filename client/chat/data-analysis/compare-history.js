@@ -51,6 +51,7 @@
             return;
         }
         await guardButton('data-analysis-run-compare', '比对中…', async () => {
+            const current = app.captureRequest('compare', () => ['data-analysis-compare-left', 'data-analysis-compare-right', 'data-analysis-compare-left-key', 'data-analysis-compare-right-key', 'data-analysis-compare-field'].map(id => document.getElementById(id)?.value || '').join('\0'));
             const payload = {
                 leftDatasetId: leftId,
                 rightDatasetId: rightId,
@@ -63,6 +64,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            if (!current()) return;
             state.compare = data;
             renderCompare();
         });
@@ -176,6 +178,7 @@
     }
 
     async function loadArtifacts() {
+        const current = app.captureRequest('history');
         const dataset = activeDataset();
         const box = document.getElementById('data-analysis-history-result');
         const pager = document.getElementById('data-analysis-history-pagination');
@@ -192,10 +195,12 @@
         }
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/artifacts?limit=100`);
+            if (!current()) return;
             state.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
             state.historyPage = 1;
             renderHistory();
         } catch (e) {
+            if (!current()) return;
             state.artifacts = [];
             state.historyPage = 1;
             if (box) PivotSafeHtml.setHtml(box, `<div class="data-analysis-empty">历史加载失败：${esc(e && e.message ? e.message : '请稍后重试')}</div>`);

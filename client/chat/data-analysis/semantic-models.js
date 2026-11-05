@@ -6,6 +6,9 @@
     const fetchJson = (...args) => app.fetchJson(...args);
     const toast = (...args) => app.toast(...args);
     const guardButton = (...args) => app.guardButton(...args);
+    let listSequence = 0;
+    let modelSequence = 0;
+    const cardinalityLabels = { one_to_one: '一对一', one_to_many: '一对多', many_to_one: '多对一', many_to_many: '多对多' };
 
     function governanceDataset() {
         const id = state.governanceDatasetId || '';
@@ -50,6 +53,9 @@
         if (!panel || !list) return;
         panel.classList.toggle('hidden', !model);
         if (!model) return;
+        for (const id of ['data-analysis-open-relation', 'data-analysis-model-edit', 'data-analysis-model-delete']) {
+            byId(id)?.classList.toggle('hidden', !model.isOwner);
+        }
         if (title) title.textContent = `模型关联：${model.name}`;
         const leftDataset = byId('data-analysis-relation-left-dataset');
         const rightDataset = byId('data-analysis-relation-right-dataset');
@@ -73,12 +79,16 @@
             <div class="data-analysis-asset-row">
                 <div class="data-analysis-asset-info">
                     <strong>${esc((state.datasets || []).find(item => item.id === relation.leftDatasetId)?.name || relation.leftDatasetId)}.${esc((state.datasets || []).find(item => item.id === relation.leftDatasetId)?.columns?.find(field => field.key === relation.leftFieldKey)?.name || relation.leftFieldKey)} → ${esc((state.datasets || []).find(item => item.id === relation.rightDatasetId)?.name || relation.rightDatasetId)}.${esc((state.datasets || []).find(item => item.id === relation.rightDatasetId)?.columns?.find(field => field.key === relation.rightFieldKey)?.name || relation.rightFieldKey)}</strong>
-                    <span>${esc(relation.joinType === 'inner' ? '内关联' : '左关联')} · ${esc(relation.cardinality)} · 左侧 ${fmtNumber(relation.quality?.leftRows || 0)} 行 / 右侧 ${fmtNumber(relation.quality?.rightRows || 0)} 行</span>
+                    <span>${esc(relation.joinType === 'inner' ? '内关联' : '左关联')} · ${esc(cardinalityLabels[relation.cardinality] || relation.cardinality)} · 左侧 ${fmtNumber(relation.quality?.leftRows || 0)} 行 / 右侧 ${fmtNumber(relation.quality?.rightRows || 0)} 行</span>
+                    ${(relation.quality?.warnings || []).map(warning => `<span>${esc(warning)}</span>`).join('')}
                 </div>
+                <div class="data-analysis-inline-actions">
                 <button class="btn-secondary btn-sm" type="button" data-analysis-model-run-relation="${esc(relation.id)}" title="预览关联数据样本">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                     <span>预览</span>
                 </button>
+                ${model.isOwner ? `<button class="btn-secondary btn-sm" type="button" data-analysis-model-edit-relation="${esc(relation.id)}">编辑</button><button class="btn-danger btn-sm" type="button" data-analysis-model-delete-relation="${esc(relation.id)}">删除</button>` : ''}
+                </div>
             </div>`;
         PivotSafeHtml.setHtml(list, relations.length ? relations.map(renderRelation).join('') : '<div class="data-analysis-empty">暂未配置关联。点击“添加关联”配置。</div>');
     }
@@ -97,17 +107,23 @@
         const rightDataset = (state.datasets || []).find(item => item.id === byId('data-analysis-relation-right-dataset')?.value);
         const leftField = byId('data-analysis-relation-left-field');
         const rightField = byId('data-analysis-relation-right-field');
-        if (leftField) PivotSafeHtml.setHtml(leftField, fieldOptions(leftDataset, false));
-        if (rightField) PivotSafeHtml.setHtml(rightField, fieldOptions(rightDataset, false));
+        for (const [field, dataset] of [[leftField, leftDataset], [rightField, rightDataset]]) {
+            if (!field) continue;
+            const previous = field.value;
+            PivotSafeHtml.setHtml(field, fieldOptions(dataset, false));
+            if ((dataset?.columns || []).some(column => column.key === previous)) field.value = previous;
+        }
     }
 
     async function loadSemanticModels({ silent = false } = {}) {
+        const sequence = ++listSequence;
         const dataset = governanceDataset();
         try {
             const [metrics, models] = await Promise.all([
                 fetchJson(`${API}/metrics${dataset ? `?datasetId=${encodeURIComponent(dataset.id)}` : ''}`),
                 fetchJson(`${API}/models`)
             ]);
+            if (sequence !== listSequence) return;
             state.metrics = metrics.metrics || [];
             state.dataModels = models.models || [];
             const target = state.dataModels.some(item => item.id === state.activeDataModelId) ? state.activeDataModelId : state.dataModels[0]?.id || '';
@@ -115,20 +131,97 @@
             else { state.activeDataModelId = ''; state.activeDataModel = null; renderMetrics(); renderModels(); }
             renderMetrics();
         } catch (error) {
-            if (!silent) toast(error?.message || '加载指标与数据模型失败', 'error');
+            if (sequence === listSequence && !silent) toast(error?.message || '加载指标与数据模型失败', 'error');
         }
     }
 
     async function loadDataModel(modelId, { silent = false } = {}) {
+        const sequence = ++modelSequence;
+        app.invalidateRequest('model-result');
+        state.activeDataModelId = modelId;
+        state.activeDataModel = null;
+        renderModels();
         try {
             const data = await fetchJson(`${API}/models/${encodeURIComponent(modelId)}`);
+            if (sequence !== modelSequence || state.activeDataModelId !== modelId) return;
             state.activeDataModelId = modelId;
             state.activeDataModel = data.model || null;
             if (byId('data-analysis-model-query-result')) byId('data-analysis-model-query-result').textContent = '';
             renderModels();
         } catch (error) {
-            if (!silent) toast(error?.message || '加载数据模型失败', 'error');
+            if (sequence === modelSequence && !silent) toast(error?.message || '加载数据模型失败', 'error');
         }
+    }
+
+    function resetModelForm(model = null) {
+        state.editingModelId = model?.id || '';
+        state.editingModelVersion = model?.version;
+        byId('data-analysis-model-name').value = model?.name || '';
+        byId('data-analysis-model-description').value = model?.description || '';
+        byId('data-analysis-model-create').textContent = model ? '保存模型修改' : '创建模型';
+        byId('data-analysis-model-form-title').textContent = model ? `修改模型：${model.name}` : '新建跨数据集模型';
+    }
+
+    function openRelationEditor(relationId = '') {
+        app.invalidateRequest('relation-quality');
+        const model = state.activeDataModel;
+        if (!model?.isOwner) return;
+        const relation = (model.relations || []).find(item => item.id === relationId);
+        state.editingRelationId = relation?.id || '';
+        state.relationModelId = model.id;
+        state.relationModelVersion = model.version;
+        for (const [side, datasetId] of [['left', relation?.leftDatasetId || ''], ['right', relation?.rightDatasetId || '']]) {
+            const select = byId(`data-analysis-relation-${side}-dataset`);
+            PivotSafeHtml.setHtml(select, dataSetOptions(datasetId)); select.value = datasetId;
+        }
+        renderRelationFieldOptions();
+        if (relation) {
+            byId('data-analysis-relation-left-field').value = relation.leftFieldKey;
+            byId('data-analysis-relation-right-field').value = relation.rightFieldKey;
+        }
+        byId('data-analysis-relation-join-type').value = relation?.joinType || 'left';
+        byId('data-analysis-relation-cardinality').value = relation?.cardinality || 'many_to_one';
+        byId('data-analysis-relation-quality').textContent = '';
+        app.openModal('data-analysis-relation-modal');
+    }
+
+    function relationPayload() {
+        return {
+            leftDatasetId: byId('data-analysis-relation-left-dataset')?.value || '', leftFieldKey: byId('data-analysis-relation-left-field')?.value || '',
+            rightDatasetId: byId('data-analysis-relation-right-dataset')?.value || '', rightFieldKey: byId('data-analysis-relation-right-field')?.value || '',
+            joinType: byId('data-analysis-relation-join-type')?.value || 'left', cardinality: byId('data-analysis-relation-cardinality')?.value || 'many_to_one',
+            expectedVersion: state.relationModelVersion
+        };
+    }
+
+    function qualityText(quality) {
+        const match = quality.leftMatchRate == null ? '无左侧记录' : `左侧匹配率 ${(quality.leftMatchRate * 100).toFixed(1)}%`;
+        return `${match}；关联后 ${fmtNumber(quality.joinedRows)} 行；左侧重复键 ${fmtNumber(quality.leftDuplicateKeys)} 个，右侧重复键 ${fmtNumber(quality.rightDuplicateKeys)} 个。${(quality.warnings || []).join('')}`;
+    }
+
+    async function previewRelation() {
+        const modelId = state.relationModelId;
+        const payload = relationPayload();
+        const current = app.captureRequest('relation-quality', () => `${state.relationModelId}:${JSON.stringify(relationPayload())}`);
+        const data = await fetchJson(`${API}/models/${encodeURIComponent(modelId)}/relations/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (current()) byId('data-analysis-relation-quality').textContent = qualityText(data.quality);
+    }
+
+    async function deleteModelRelation(relationId) {
+        const model = state.activeDataModel;
+        if (!model?.isOwner || !await window.Pivot.legacy.showConfirm?.('删除关联', '删除后会改变模型的关联范围。有关联依赖时，请先调整或删除依赖关系。')) return;
+        await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/relations/${encodeURIComponent(relationId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: model.version }) });
+        if (state.activeDataModelId === model.id) await loadDataModel(model.id);
+        toast('关联已删除。', 'success');
+    }
+
+    async function deleteModel() {
+        const model = state.activeDataModel;
+        if (!model?.isOwner || !await window.Pivot.legacy.showConfirm?.('删除数据模型', `确认删除“${model.name}”及其关联配置？源数据集将保留。`)) return;
+        await fetchJson(`${API}/models/${encodeURIComponent(model.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: model.version }) });
+        if (state.activeDataModelId === model.id) { state.activeDataModelId = ''; state.activeDataModel = null; }
+        if (state.editingModelId === model.id) resetModelForm();
+        await loadSemanticModels(); toast('数据模型已删除。', 'success');
     }
 
     async function saveMetric() {
@@ -154,27 +247,26 @@
     async function createDataModel() {
         const name = String(byId('data-analysis-model-name')?.value || '').trim();
         if (!name) throw new Error('请填写数据模型名称。');
-        const data = await fetchJson(`${API}/models`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: String(byId('data-analysis-model-description')?.value || '').trim() }) });
+        const editing = state.editingModelId;
+        const data = await fetchJson(`${API}/models${editing ? `/${encodeURIComponent(editing)}` : ''}`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: String(byId('data-analysis-model-description')?.value || '').trim(), expectedVersion: state.editingModelVersion }) });
         state.activeDataModelId = data.model?.id || '';
-        ['data-analysis-model-name', 'data-analysis-model-description'].forEach(id => { if (byId(id)) byId(id).value = ''; });
+        resetModelForm();
         app.closeModal?.('data-analysis-model-modal');
         await loadSemanticModels({ silent: true });
-        toast('数据模型已创建。', 'success');
+        toast(editing ? '数据模型信息已保存。' : '数据模型已创建。', 'success');
     }
 
     async function saveModelRelation() {
         const model = state.activeDataModel;
         if (!model) throw new Error('请先创建或选择数据模型。');
-        const data = await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/relations`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                leftDatasetId: String(byId('data-analysis-relation-left-dataset')?.value || ''), leftFieldKey: String(byId('data-analysis-relation-left-field')?.value || ''),
-                rightDatasetId: String(byId('data-analysis-relation-right-dataset')?.value || ''), rightFieldKey: String(byId('data-analysis-relation-right-field')?.value || ''),
-                joinType: String(byId('data-analysis-relation-join-type')?.value || 'left'), cardinality: String(byId('data-analysis-relation-cardinality')?.value || 'many_to_one')
-            })
+        const modelId = state.relationModelId || model.id;
+        const relationId = state.editingRelationId;
+        const data = await fetchJson(`${API}/models/${encodeURIComponent(modelId)}/relations${relationId ? `/${encodeURIComponent(relationId)}` : ''}`, {
+            method: relationId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(relationPayload())
         });
         app.closeModal?.('data-analysis-relation-modal');
-        await loadDataModel(model.id, { silent: true });
+        if (state.activeDataModelId === modelId) await loadDataModel(modelId, { silent: true });
+        app.openModal?.('data-analysis-model-modal');
         toast(`关联已保存，左侧 ${fmtNumber(data.relation?.quality?.leftRows || 0)} 行。`, 'success');
     }
 
@@ -183,13 +275,17 @@
         if (!box) return;
         const rows = result.rows || [];
         const columns = result.columns || [];
-        PivotSafeHtml.setHtml(box, rows.length ? `${result.truncated ? '<p>结果超过显示上限，仅显示前 100 行。</p>' : ''}<div class="table-container"><table class="data-table compact-table"><thead><tr>${columns.map(column => `<th>${esc(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${esc(row[column] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="data-analysis-empty">关联没有返回记录。</div>');
+        const notes = (result.warnings || []).map(warning => `<p class="data-analysis-muted-cell">${esc(warning)}</p>`).join('');
+        const quality = result.relation?.quality ? `<p>${esc(qualityText(result.relation.quality))}</p>` : '';
+        PivotSafeHtml.setHtml(box, notes + quality + (rows.length ? `${result.truncated ? '<p>结果超过显示上限，仅显示前 100 行。</p>' : ''}<div class="table-container"><table class="data-table compact-table"><thead><tr>${columns.map(column => `<th>${esc(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${esc(row[column] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<div class="data-analysis-empty">关联没有返回记录。</div>'));
     }
 
     async function runModelRelation(relationId) {
         const model = state.activeDataModel;
         if (!model) return;
+        const current = app.captureRequest('model-result', () => state.activeDataModelId);
         const result = await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relationId, limit: 100 }) });
+        if (!current()) return;
         renderModelQueryResult(result);
     }
 
@@ -200,11 +296,12 @@
         const measureValue = byId('data-analysis-model-measure')?.value;
         const aggregation = byId('data-analysis-model-aggregation')?.value || 'count';
         if (!dimensionValue || (aggregation !== 'count' && !measureValue)) throw new Error('请选择分组字段和所需的数值字段。');
+        const current = app.captureRequest('model-result', () => state.activeDataModelId);
         const result = await fetchJson(`${API}/models/${encodeURIComponent(model.id)}/analysis`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dimension: JSON.parse(dimensionValue), measure: measureValue ? JSON.parse(measureValue) : null, aggregation, limit: 100 })
         });
-        renderModelQueryResult(result);
+        if (current()) renderModelQueryResult(result);
     }
 
     function bindSemanticModelEvents(root) {
@@ -212,6 +309,10 @@
         root.dataset.semanticModelEventsBound = 'true';
         root.addEventListener('change', event => {
             if (['data-analysis-relation-left-dataset', 'data-analysis-relation-right-dataset'].includes(event.target?.id)) renderRelationFieldOptions();
+            if (event.target?.id?.startsWith('data-analysis-relation-')) {
+                app.invalidateRequest('relation-quality');
+                if (byId('data-analysis-relation-quality')) byId('data-analysis-relation-quality').textContent = '';
+            }
         });
         root.addEventListener('click', async event => {
             try {
@@ -222,6 +323,16 @@
                 if (event.target.closest('#data-analysis-model-create')) { await guardButton('data-analysis-model-create', '创建中…', createDataModel); return; }
                 const select = event.target.closest('[data-analysis-model-select]');
                 if (select) { await loadDataModel(select.dataset.analysisModelSelect); return; }
+                if (event.target.closest('#data-analysis-model-form-reset')) { resetModelForm(); return; }
+                if (event.target.closest('#data-analysis-model-edit')) { resetModelForm(state.activeDataModel); return; }
+                if (event.target.closest('#data-analysis-model-delete')) { await guardButton('data-analysis-model-delete', '删除中…', deleteModel); return; }
+                if (event.target.closest('#data-analysis-open-relation')) { openRelationEditor(); return; }
+                const edit = event.target.closest('[data-analysis-model-edit-relation]');
+                if (edit) { openRelationEditor(edit.dataset.analysisModelEditRelation); return; }
+                const remove = event.target.closest('[data-analysis-model-delete-relation]');
+                if (remove) { await deleteModelRelation(remove.dataset.analysisModelDeleteRelation); return; }
+                if (event.target.closest('#data-analysis-model-relation-run')) { await guardButton('data-analysis-model-relation-run', '检查中…', previewRelation); return; }
+                if (event.target.closest('[data-analysis-modal-close="data-analysis-relation-modal"]')) { app.openModal?.('data-analysis-model-modal'); return; }
                 if (event.target.closest('#data-analysis-model-relation-save')) { await guardButton('data-analysis-model-relation-save', '保存中…', saveModelRelation); return; }
                 if (event.target.closest('#data-analysis-model-analyze')) { await guardButton('data-analysis-model-analyze', '汇总中…', runModelAnalysis); return; }
                 const preview = event.target.closest('[data-analysis-model-run-relation]');

@@ -2,6 +2,9 @@
     const scripts = [
         '/chat/data-analysis/context.js',
         '/chat/data-analysis/view.js',
+        '/chat/data-analysis/controls.js',
+        '/chat/data-analysis/dataset-editor.js',
+        '/chat/data-analysis/model-panels.js',
         '/chat/data-analysis/extra-panels.js',
         '/chat/data-analysis/core.js',
         '/chat/data-analysis/query.js',

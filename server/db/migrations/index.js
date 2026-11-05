@@ -77,6 +77,7 @@ const migrationModules = [
     require('./knowledge-ai-answer-audit'),
     require('./analysis-bi-product'),
     require('./analysis-semantic-models'),
+    require('./analysis-query-reliability'),
     require('./analysis-scalability'),
     require('./presentation-workbench'),
     require('./presentation-collaboration'),

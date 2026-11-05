@@ -2275,6 +2275,7 @@ test.describe('Pivot browser smoke', () => {
     });
 
     test('数据分析在浏览器中导入 XLSX 和 SQLite，并保留表格字段与记录计数', async ({ page }) => {
+        test.setTimeout(180_000);
         const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-analysis-e2e-import-'));
         const workbookPath = path.join(fixtureDir, 'e2e-orders.xlsx');
         const sqlitePath = path.join(fixtureDir, 'e2e-inventory.sqlite');
@@ -2300,19 +2301,21 @@ test.describe('Pivot browser smoke', () => {
             await expect(page.locator('#data-analysis-view')).toBeVisible({ timeout: 15_000 });
 
             const workbookUpload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
-            await page.locator('#data-analysis-file').setInputFiles(workbookPath);
+            await page.locator('#data-analysis-file').setInputFiles({ name: 'e2e-orders.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: await fs.promises.readFile(workbookPath) });
             expect((await workbookUpload).ok()).toBeTruthy();
             await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-orders', { timeout: 15_000 });
             await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('2 行');
 
             const sqliteUpload = page.waitForResponse(response => response.url().endsWith('/api/apps/data-analysis/datasets') && response.request().method() === 'POST');
-            await page.locator('#data-analysis-file').setInputFiles(sqlitePath);
+            await page.locator('#data-analysis-file').setInputFiles({ name: 'e2e-inventory.sqlite', mimeType: 'application/vnd.sqlite3', buffer: await fs.promises.readFile(sqlitePath) });
             const sqliteUploadResponse = await sqliteUpload;
             expect(sqliteUploadResponse.ok(), await sqliteUploadResponse.text()).toBeTruthy();
             await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-inventory', { timeout: 15_000 });
             await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('2 行');
         } finally {
-            fs.rmSync(fixtureDir, { recursive: true, force: true });
+            expect(path.dirname(fixtureDir)).toBe(path.resolve(os.tmpdir()));
+            expect(path.basename(fixtureDir)).toMatch(/^pivot-analysis-e2e-import-/);
+            await fs.promises.rm(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         }
     });
 

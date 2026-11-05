@@ -49,6 +49,20 @@ function stopLeaseHeartbeat(live) {
     if (live) live.leaseHeartbeat = null;
 }
 
+function markLiveLeaseLost(id, live) {
+    if (!live) return;
+    live.leaseLost = true;
+    stopLeaseHeartbeat(live);
+    // 保留失效标记至显式恢复或清理，防止关闭事件与下一次调用竞争后被误判为普通占用。
+    liveSessions.set(String(id), live);
+    if (live.context && !live.closePromise) {
+        const context = live.context;
+        live.closePromise = Promise.resolve(closeAgentBrowserContext(context)).catch(() => {}).finally(() => {
+            if (live.context === context) { live.context = null; live.page = null; live.tabs?.clear(); }
+        });
+    }
+}
+
 function startLeaseHeartbeat(id, user, live) {
     let renewing = false;
     live.leaseHeartbeat = setInterval(async () => {
@@ -57,10 +71,7 @@ function startLeaseHeartbeat(id, user, live) {
         try {
             if (!await browserLeases.renewBrowserSessionLease({ ...leaseInput(id, user, live.leaseToken), recovery: live.recovering === true || live.closing === true })) throw new Error('浏览器会话租约已失效。');
         } catch (_) {
-            live.leaseLost = true;
-            stopLeaseHeartbeat(live);
-            if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
-            if (live.context) live.closePromise = Promise.resolve(closeAgentBrowserContext(live.context)).catch(() => {});
+            markLiveLeaseLost(id, live);
         } finally {
             renewing = false;
         }
@@ -74,17 +85,14 @@ async function assertLiveLease(id, user, live) {
         renewed = Boolean(live?.leaseToken && !live.leaseLost && await browserLeases.renewBrowserSessionLease({ ...leaseInput(id, user, live.leaseToken), recovery: live.recovering === true }));
     } catch (_) {}
     if (!renewed) {
-        if (live) live.leaseLost = true;
-        stopLeaseHeartbeat(live);
-        if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
-        if (live?.context) live.closePromise = Promise.resolve(closeAgentBrowserContext(live.context)).catch(() => {});
+        markLiveLeaseLost(id, live);
         throw browserError('浏览器会话执行权已失效，请重新检查会话。', 'AGENT_BROWSER_LEASE_LOST', 409);
     }
 }
 
 function attachLeaseCloseHandler(id, user, live) {
     live.context?.once?.('close', () => {
-        if (live.closing === true) return;
+        if (live.closing === true || live.leaseLost) return;
         stopLeaseHeartbeat(live);
         if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
         browserLeases.finishBrowserSessionOwner(leaseInput(id, user, live.leaseToken)).catch(() => {});
@@ -370,6 +378,7 @@ async function persistBrowserSession(id, user, patch = {}) {
 async function createLiveSession(row, user, options = {}) {
     const id = String(row.id);
     const existing = liveSessions.get(id);
+    if (existing?.leaseLost) throw leaseAcquisitionError({ reason: 'lease_lost' });
     if (existing?.context && existing?.page && !existing.page.isClosed?.()) {
         await assertLiveLease(id, user, existing);
         return attachLiveTabs(existing);
@@ -400,7 +409,7 @@ async function createLiveSession(row, user, options = {}) {
         return live;
     } catch (error) {
         stopLeaseHeartbeat(live);
-        if (liveSessions.get(id) === live) liveSessions.delete(id);
+        if (!live.leaseLost && liveSessions.get(id) === live) liveSessions.delete(id);
         try { await closeAgentBrowserContext(live.context); } catch (_) {}
         await browserLeases.releaseBrowserSessionLease(leaseInput(id, user, live.leaseToken)).catch(() => {});
         throw error;
@@ -517,7 +526,8 @@ async function recoverAgentBrowserSession(id, user, { confirmed = false, options
         if (existing) {
             stopLeaseHeartbeat(existing);
             liveSessions.delete(String(session.id));
-            if (existing.page && !existing.page.isClosed?.()) {
+            if (existing.closePromise) await existing.closePromise;
+            else if (existing.context) {
                 try { await closeAgentBrowserContext(existing.context); } catch (_) {}
             }
             await browserLeases.releaseBrowserSessionLease(leaseInput(id, user, existing.leaseToken)).catch(() => {});

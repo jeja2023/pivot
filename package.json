@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.93",
+  "version": "0.7.95",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -57,7 +57,7 @@
     "hooks:install": "node scripts/install_git_hooks.js",
     "version:sync": "node scripts/sync_version.js",
     "evaluate:ocr-quality": "node scripts/evaluate_ocr_quality.js",
-    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:mindmap-vendor && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
+    "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:mindmap-vendor && npm run check:mermaid-vendor && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=75 --test-coverage-functions=75 --test-coverage-branches=60",
     "test:agent:quality": "node scripts/run_node_tests.js tests/provider-usage-calibration.test.js tests/agent-model-quality.test.js tests/agent-auto-continuation.test.js tests/agent-planning-lifecycle.test.js tests/agent-lifecycle-hook-packages.test.js tests/agent-lifecycle-dispatcher.test.js tests/agent-runtime-lifecycle.test.js tests/agent-monitoring-slo.test.js tests/agent-domain-acceptance-evidence.test.js tests/agent-acceptance-evidence-ui.test.js tests/agent-capability-worker-grant.test.js tests/capability-worker-preflight.test.js tests/capability-worker-isolation-drill.test.js tests/workspace-recovery-snapshot.test.js tests/agent-code-runtime.test.js tests/agent-terminal-runtime.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js tests/agent-task-resource-multiprocess.test.js tests/agent-checkpoint-boundaries.test.js tests/agent-task-transactions-persistence.test.js tests/agent-control.test.js tests/agent-collaboration-restart.test.js tests/agent-collaboration-resource-conflicts.test.js tests/agent-delegation-role-policies.test.js tests/agent-delegation-role-policies-http.test.js tests/agent-progressive-tool-discovery.test.js tests/agent-browser.test.js tests/agent-browser-network-proxy.test.js tests/agent-browser-action-evidence.test.js tests/desktop-local-browser-automation.test.js tests/local-browser-connector-tools.test.js tests/agent-browser-sessions.test.js tests/agent-browser-session-leases.test.js tests/workflow-foreach-worker.test.js",
@@ -113,7 +113,9 @@
     "build:mindmap-vendor": "node scripts/build_mindmap_vendor.js",
     "check:mindmap-vendor": "node scripts/check_mindmap_vendor.js",
     "test:offline-tools:integration": "node scripts/run_offline_tools_integration.js",
-    "test:tool-knowledge-chain": "node scripts/verify_tool_knowledge_chain.js"
+    "test:tool-knowledge-chain": "node scripts/verify_tool_knowledge_chain.js",
+    "build:mermaid-vendor": "node scripts/build_mermaid_vendor.js",
+    "check:mermaid-vendor": "node scripts/check_mermaid_vendor.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",
@@ -179,6 +181,7 @@
     "esbuild": "0.28.2",
     "eslint": "^10.10.0",
     "katex": "0.18.2",
+    "mermaid": "11.17.2",
     "nodemon": "^3.1.0",
     "simple-mind-map": "0.14.0-fix.3"
   },

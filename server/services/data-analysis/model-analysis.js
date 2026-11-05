@@ -1,6 +1,7 @@
 'use strict';
 
 const { getDataModel } = require('./semantic-models');
+const { numericValueSql } = require('./numeric-values');
 const { getAccessibleDatasetColumns, assertDatasetFieldsAccessible } = require('./governance');
 const { getDatasetForUser, getDatasetPaths, sqlIdent, sqlLiteral, withAnalysisSlot, createDuckConnection, withDuckTimeout } = require('./shared');
 
@@ -48,7 +49,7 @@ async function runDataModelAnalysis({ user, modelId, dimension, measure, aggrega
     const dimensionSql = field(dimension, '分组');
     const kind = String(aggregation).toLowerCase();
     if (!['count', 'sum', 'avg', 'min', 'max'].includes(kind)) throw invalid('不支持的汇总方式。');
-    const valueSql = kind === 'count' ? 'COUNT(*)' : `${kind.toUpperCase()}(TRY_CAST(${field(measure, '数值')} AS DOUBLE))`;
+    const valueSql = kind === 'count' ? 'COUNT(*)' : `${kind.toUpperCase()}(${numericValueSql(field(measure, '数值'))})`;
     const base = datasets.get(plan.datasetIds[0]);
     const from = [`read_parquet(${sqlLiteral(getDatasetPaths(base.dataset).parquetPath)}) ${base.alias}`];
     for (const relation of plan.relations) {
@@ -68,7 +69,9 @@ async function runDataModelAnalysis({ user, modelId, dimension, measure, aggrega
             instance.closeSync();
         }
     });
-    return { columns: ['分组', '汇总值'], rows: rows.slice(0, safeLimit), truncated: rows.length > safeLimit, datasetCount: datasets.size };
+    const warnings = ['汇总基于关联后的记录；一对多或多对多关系可能重复统计，请先预览关联质量并核对口径。'];
+    if ([...datasets.values()].some(entry => entry.dataset.truncated || entry.dataset.is_truncated)) warnings.push('模型包含截断导入的数据集，结果仅覆盖已导入的数据范围。');
+    return { columns: ['分组', '汇总值'], rows: rows.slice(0, safeLimit), truncated: rows.length > safeLimit, limit: safeLimit, datasetCount: datasets.size, warnings };
 }
 
 module.exports = { planRelations, runDataModelAnalysis };

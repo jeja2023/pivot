@@ -85,7 +85,7 @@
     },
     {
       "file": "server/services/document-processing/qpdf-workdir-lease.js",
-      "count": 4,
+      "count": 5,
       "rationale": "使用独立 PostgreSQL 会话持有按 schema 和随机目录标识限定的咨询锁，清理前非阻塞获取同一锁并确认目录仍未变化。",
       "verification": "tests/qpdf-workdir-lease.test.js 使用独立进程验证活动租约保留、强制退出后回收及未知目录保护。"
     },
@@ -436,7 +436,7 @@
     },
     {
       "file": "server/services/data-analysis/governance.js",
-      "count": 52,
+      "count": 50,
       "rationale": "对已通过可见性检查的数据集分批绑定参数查询字段敏感性，保持共享字段过滤规则。",
       "verification": "tests/data-analysis-list-visibility.test.js 与 tests/data-analysis.test.js 覆盖权限、统计和共享字段过滤。"
     },
@@ -475,6 +475,24 @@
       "count": 11,
       "rationale": "公文摘要按当前用户及固定排序白名单服务端分页；导出以文档行锁和产物行锁在同一事务内维护独立绑定及版本，全部值使用参数绑定。",
       "verification": "tests/e2e/official-writing-library.spec.js 验证真实 PostgreSQL 分页、筛选、跨账号详情隔离、两篇文档独立绑定及版本冲突；official-writing-save.spec.js 验证保存与删除竞态。"
+    },
+    {
+      "file": "server/repositories/analysis-models.js",
+      "rationale": "模型和关联变更在所有者行锁下串行执行，版本条件防止旧窗口覆盖；关联图校验在事务内完成，删除只针对已鉴权模型。",
+      "verification": "data-analysis-reliability 验证并发冲突、环路拒绝、质量预览、跨账号及模型/关联编辑删除。",
+      "count": 11
+    },
+    {
+      "file": "server/repositories/analysis-query-jobs.js",
+      "rationale": "后台查询仓储按用户与任务绑定参数；锁行领取、执行代次与心跳保护恢复及取消，结果确认和产物登记同一事务。",
+      "verification": "data-analysis-reliability 验证精确限行、空结果字段、取消不复活、过期恢复、旧执行器回写拒绝及来源失效。",
+      "count": 11
+    },
+    {
+      "file": "server/repositories/analysis-assets.js",
+      "count": 1,
+      "rationale": "四类分析资产在 SQL 内按所有者、单位及个人共享范围预过滤后分页，并再次通过统一可见性判定，避免无权资产挤占页面。表名仅来自固定白名单，所有用户输入绑定参数。",
+      "verification": "data-analysis-reliability 验证大量他人私有资产下本人模型与仪表盘仍可见，显式个人共享保持可用。"
     }
   ]
 }

@@ -7,6 +7,18 @@
     const toast = (...args) => app.toast(...args);
     const guardButton = (...args) => app.guardButton(...args);
     let pollTimer = null;
+    let loadSequence = 0;
+
+    function visible() {
+        const view = byId('data-analysis-view');
+        const panel = byId('data-analysis-query-panel');
+        return !document.hidden && view && !view.closest('.hidden, [hidden], [aria-hidden="true"]') && panel && !panel.classList.contains('hidden');
+    }
+
+    function stopAsyncQueryPolling() {
+        loadSequence += 1;
+        clearTimeout(pollTimer); pollTimer = null;
+    }
 
     function renderAsyncQueryJobs() {
         const box = byId('data-analysis-async-query-jobs');
@@ -16,17 +28,24 @@
     }
 
     async function loadAsyncQueryJobs({ silent = true } = {}) {
+        stopAsyncQueryPolling();
+        const sequence = loadSequence;
         const dataset = activeDataset();
         if (!dataset) { state.asyncQueryJobs = []; renderAsyncQueryJobs(); return; }
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/async-queries`);
+            if (sequence !== loadSequence || activeDataset()?.id !== dataset.id) return;
             state.asyncQueryJobs = data.jobs || [];
             renderAsyncQueryJobs();
             const active = state.asyncQueryJobs.some(job => ['queued', 'running', 'retry_wait'].includes(job.status));
-            if (active && !pollTimer) pollTimer = setInterval(() => loadAsyncQueryJobs({ silent: true }), 2500);
-            else if (!active && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+            if (active && visible()) pollTimer = setTimeout(() => {
+                pollTimer = null;
+                if (visible()) void loadAsyncQueryJobs({ silent: true });
+            }, 2500);
         } catch (error) {
+            if (sequence !== loadSequence || activeDataset()?.id !== dataset.id) return;
             if (!silent) toast(error?.message || '加载后台查询任务失败', 'error');
+            if (visible()) pollTimer = setTimeout(() => { if (visible()) void loadAsyncQueryJobs({ silent: true }); }, 5000);
         }
     }
 
@@ -37,6 +56,7 @@
         const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/async-queries`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, limit: 200000 })
         });
+        if (activeDataset()?.id !== dataset.id) { toast(`数据集“${dataset.name}”的后台查询已创建，可切回查看进度。`, 'success'); return; }
         state.asyncQueryJobs = [data.job, ...(state.asyncQueryJobs || [])].filter(Boolean);
         renderAsyncQueryJobs();
         await loadAsyncQueryJobs({ silent: true });
@@ -44,10 +64,14 @@
     }
 
     async function openAsyncQuery(jobId) {
+        const current = app.captureRequest('query');
         const data = await fetchJson(`${API}/async-queries/${encodeURIComponent(jobId)}`);
+        if (!current()) return;
         const job = data.job;
         if (job.status !== 'succeeded') throw new Error('查询尚未完成。');
-        state.query = { columns: job.columns || [], rows: job.previewRows || [], rowCount: (job.previewRows || []).length, truncated: Boolean(job.hasFile) };
+        if (job.resultUnavailable) throw new Error(job.resultUnavailableReason || '来源数据或权限已变化，请重新运行查询。');
+        if (job.datasetId !== state.activeId) return;
+        state.query = { columns: job.columns || [], rows: job.previewRows || [], rowCount: (job.previewRows || []).length, totalRowCount: job.rowCount, truncated: Boolean(job.truncated) || Number(job.rowCount) > (job.previewRows || []).length };
         state.queryPage = 1;
         app.renderQuery?.();
         toast('已载入后台查询结果预览；完整结果作为受控产物保留。', 'success');
@@ -75,5 +99,7 @@
         });
     }
 
-    Object.assign(app, { loadAsyncQueryJobs, renderAsyncQueryJobs, bindAsyncQueryEvents });
+    document.addEventListener('visibilitychange', () => { if (visible()) void loadAsyncQueryJobs({ silent: true }); else stopAsyncQueryPolling(); });
+    window.addEventListener('pagehide', stopAsyncQueryPolling);
+    Object.assign(app, { loadAsyncQueryJobs, renderAsyncQueryJobs, bindAsyncQueryEvents, stopAsyncQueryPolling });
 })();

@@ -113,6 +113,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
     const row = await getDatasetForUser(actor, datasetId);
     // 共享数据集导出只能包含调用者获授权的字段，机密/受限字段不会被导出到临时文件。
     const columns = await require('./governance').getAccessibleDatasetColumns(actor, row);
+    if (!columns.length) throw Object.assign(new Error('当前共享权限没有可导出字段，请联系数据集所有者。'), { status: 403, code: 'ANALYSIS_FIELD_ACCESS_DENIED' });
     const { parquetPath } = getDatasetPaths(row);
     const exportDir = resolveInside(exportRoot, String(actor.id));
     await fs.promises.mkdir(exportDir, { recursive: true });

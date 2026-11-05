@@ -25,7 +25,7 @@
     "client/chat/apps-workbench-presentations.js": 109198,
     "client/chat/dag-inspector.js": 76517,
     "client/chat/dag-wizard-fields.js": 66615,
-    "client/chat/data-analysis/view.js": 85140,
+    "client/chat/data-analysis/view.js": 81144,
     "client/chat/knowledge-product.js": 64683,
     "client/chat/mcp-workbench-main.js": 70700,
     "client/chat/rag-documents.js": 76830

@@ -328,13 +328,19 @@ window.Pivot.legacy.scrollMessagesToBottom = function(options = {}) {
     }, 80);
 };
 const customRenderer = new marked.Renderer();
+let markdownIsStreaming = false;
 customRenderer.code = (code, infostring, _escaped) => {
+    const raw = typeof code === 'object' && code !== null ? code.raw || '' : '';
     if (typeof code === 'object' && code !== null) {
         infostring = code.lang || code.info || '';
         code = code.text || code.raw || '';
     }
     const language = String(infostring || '').trim().split(/\s+/)[0];
     const normalizedLanguage = language.toLowerCase();
+    if (['mermaid', 'mmd'].includes(normalizedLanguage)) {
+        const diagram = window.Pivot?.moduleApi?.('chat.mermaid');
+        if (diagram?.markup) return diagram.markup(code, { pending: markdownIsStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(raw.trimEnd()) });
+    }
     const chartLanguages = new Set(['pivot-echart', 'pivot-chart', 'chart', 'charts']);
     const isRenderableChart = normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code));
     if (isRenderableChart) {
@@ -605,11 +611,16 @@ function renderMarkdown(content, options = {}) {
         .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
         .replace(/\n{3,}/g, '\n\n');
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(safeContent));
-    let rawHtml = marked.parse(normalizedContent, {
-        renderer: customRenderer, breaks: true, gfm: true,
-        pivotStreamingTail: options.streaming ? normalizedContent.trimEnd() : null,
-        pivotRecoverEmphasis: Boolean(options.recoverEmphasis)
-    });
+    const previousStreaming = markdownIsStreaming;
+    markdownIsStreaming = Boolean(options.streaming);
+    let rawHtml;
+    try {
+        rawHtml = marked.parse(normalizedContent, {
+            renderer: customRenderer, breaks: true, gfm: true,
+            pivotStreamingTail: options.streaming ? normalizedContent.trimEnd() : null,
+            pivotRecoverEmphasis: Boolean(options.recoverEmphasis)
+        });
+    } finally { markdownIsStreaming = previousStreaming; }
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');

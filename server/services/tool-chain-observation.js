@@ -20,8 +20,7 @@ function trackArtifactResponse(response, rendition, user, kind) {
             eventType: `${kind}_${succeeded ? 'responded' : 'failed'}`, contentDigest: rendition.content_digest,
             decisionReason: succeeded ? 'HTTP_RESPONSE_FINISHED' : 'HTTP_RESPONSE_FAILED' }).catch(() => {});
     };
-    response.once('finish', () => record(true));
-    response.once('close', () => record(response.writableFinished));
+    require('./http-response-lifecycle').onResponseSettled(response, record);
 }
 
 module.exports = { toolResultReasonCodes, trackArtifactResponse };

@@ -7,7 +7,7 @@ const {
     listDashboards, getDashboard, saveDashboard, saveDashboardItem, deleteDashboardItem, refreshDashboard,
     listRefreshSchedules, saveRefreshSchedule, saveAlertRule, getAlertRule, listAlertRules, getDatasetSourceState,
     listMetricDefinitions, saveMetricDefinition, evaluateMetricDefinition,
-    getDataModel, listDataModels, saveDataModel, addDataModelRelation, runDataModelJoin, runDataModelAnalysis,
+    getDataModel, listDataModels, saveDataModel, addDataModelRelation, previewDataModelRelation, deleteDataModel, deleteDataModelRelation, runDataModelJoin, runDataModelAnalysis,
     createAsyncQueryJob, getAsyncQueryJob, listAsyncQueryJobs, cancelAsyncQueryJob,
     getScalabilityState, createDatasetPartitions, listMaterializations, saveMaterialization
 } = require('../../services/data-analysis');
@@ -141,15 +141,28 @@ function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }
         logAction(req, '数据分析-更新数据模型', `模型: ${model.id}`);
         res.json({ success: true, model });
     }));
+    router.delete('/apps/data-analysis/models/:modelId', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await deleteDataModel({ user: req.user, modelId: req.params.modelId, expectedVersion: req.body?.expectedVersion });
+        logAction(req, '数据分析-删除数据模型', `模型: ${req.params.modelId}`);
+        res.json({ success: true, ...result });
+    }));
     router.post('/apps/data-analysis/models/:modelId/relations', authMiddleware, asyncHandler(async (req, res) => {
         const relation = await addDataModelRelation({ user: req.user, modelId: req.params.modelId, body: req.body || {} });
         logAction(req, '数据分析-创建数据模型关联', `模型: ${req.params.modelId}，关联: ${relation.id}`);
         res.status(201).json({ success: true, relation });
     }));
+    router.post('/apps/data-analysis/models/:modelId/relations/preview', authMiddleware, asyncHandler(async (req, res) => {
+        res.json(await previewDataModelRelation({ user: req.user, modelId: req.params.modelId, body: req.body || {} }));
+    }));
     router.put('/apps/data-analysis/models/:modelId/relations/:relationId', authMiddleware, asyncHandler(async (req, res) => {
         const relation = await addDataModelRelation({ user: req.user, modelId: req.params.modelId, relationId: req.params.relationId, body: req.body || {} });
         logAction(req, '数据分析-更新数据模型关联', `模型: ${req.params.modelId}，关联: ${relation.id}`);
         res.json({ success: true, relation });
+    }));
+    router.delete('/apps/data-analysis/models/:modelId/relations/:relationId', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await deleteDataModelRelation({ user: req.user, modelId: req.params.modelId, relationId: req.params.relationId, expectedVersion: req.body?.expectedVersion });
+        logAction(req, '数据分析-删除模型关联', `模型: ${req.params.modelId}，关联: ${req.params.relationId}`);
+        res.json({ success: true, ...result });
     }));
     router.post('/apps/data-analysis/models/:modelId/query', authMiddleware, asyncHandler(async (req, res) => {
         const result = await runDataModelJoin({ user: req.user, modelId: req.params.modelId, relationId: req.body?.relationId, limit: req.body?.limit });

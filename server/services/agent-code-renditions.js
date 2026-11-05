@@ -31,7 +31,7 @@ const CODE_FORMAT_ALIASES = Object.freeze({
     shell: 'sh', bash: 'sh', sh: 'sh',
     sql: 'sql', json: 'json', yaml: 'yaml', yml: 'yml',
     xml: 'xml', css: 'css', scss: 'scss',
-    markdown: 'md', md: 'md', text: 'txt', txt: 'txt'
+    markdown: 'md', md: 'md', text: 'txt', txt: 'txt', mermaid: 'txt', mmd: 'txt'
 });
 
 const CODE_MIME_TYPES = Object.freeze({

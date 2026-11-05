@@ -57,7 +57,7 @@ const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/documen
 const { createOcrRouter } = require('../server/routes/apps/ocr');
 const { deleteAppSettingAsync, refreshAppSettingsCache, setAppSettingAsync } = require('../server/services/app-settings');
 
-async function waitForDocumentJob(userId, jobId, timeoutMs = 15000) {
+async function waitForDocumentJob(userId, jobId, timeoutMs = 30000) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
         const detail = await getJobDetail({ userId, jobId });

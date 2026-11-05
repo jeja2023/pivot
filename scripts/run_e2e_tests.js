@@ -113,6 +113,15 @@ async function main() {
             path.join('tests', 'e2e', 'playwright.config.js'),
             ...playwrightArgs
         ], env);
+        if (status !== 0) {
+            const results = path.join(testRoot, 'results');
+            const retained = path.join(root, 'output', 'e2e-failures', testSchema);
+            if (fs.existsSync(results)) {
+                fs.mkdirSync(path.dirname(retained), { recursive: true });
+                fs.cpSync(results, retained, { recursive: true });
+                console.error(`浏览器失败截图与跟踪已保留：${retained}`);
+            }
+        }
     } catch (error) {
         console.error(error.stack || error.message);
         status = error.exitCode || 1;

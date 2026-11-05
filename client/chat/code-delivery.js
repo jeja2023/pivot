@@ -8,7 +8,7 @@ const CODE_LANGUAGE_TO_EXTENSION = Object.freeze({
     go: 'go', rust: 'rs', rs: 'rs', php: 'php', ruby: 'rb', rb: 'rb', swift: 'swift',
     kotlin: 'kt', kt: 'kt', kts: 'kts', shell: 'sh', bash: 'sh', sh: 'sh',
     sql: 'sql', json: 'json', yaml: 'yaml', yml: 'yml', xml: 'xml', css: 'css',
-    scss: 'scss', markdown: 'md', md: 'md', text: 'txt', txt: 'txt'
+    scss: 'scss', markdown: 'md', md: 'md', text: 'txt', txt: 'txt', mermaid: 'txt', mmd: 'txt'
 });
 
 function codeDeliveryError(message) {
@@ -89,7 +89,7 @@ async function saveCodeBlockToDesktop(button) {
     const extension = CODE_LANGUAGE_TO_EXTENSION[language];
     if (!code.trim()) return codeDeliveryError('代码内容为空，无法保存。');
     if (!extension) return codeDeliveryError('当前代码语言暂不支持受控文件保存，请先复制代码或选择受支持的源码格式。');
-    const filename = window.prompt('请输入保存文件名（只允许保存为受支持的文本/源码文件）：', `代码.${extension}`);
+    const filename = window.prompt('请输入保存文件名（只允许保存为受支持的文本/源码文件）：', ['mermaid', 'mmd'].includes(language) ? '流程图源码.txt' : `代码.${extension}`);
     if (!filename) return null;
     button.disabled = true;
     try {

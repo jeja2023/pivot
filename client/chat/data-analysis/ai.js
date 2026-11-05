@@ -139,6 +139,7 @@
         setAiRunning(false);
         const result = document.getElementById('data-analysis-ai-result');
         if (result && result.querySelector('.data-analysis-ai-thinking')) {
+            window.Pivot.legacy.teardownPivotCharts?.(result);
             PivotSafeHtml.setHtml(result, '<div class="data-analysis-empty">已停止生成建议。</div>');
         }
         toast('已停止生成建议', 'info');
@@ -242,7 +243,7 @@
         state.aiWorkspaceEpoch = Number(state.aiWorkspaceEpoch || 0) + 1;
         setAiRunning(false);
         const result = document.getElementById('data-analysis-ai-result');
-        if (result) PivotSafeHtml.setHtml(result, '');
+        if (result) { window.Pivot.legacy.teardownPivotCharts?.(result); PivotSafeHtml.setHtml(result, ''); }
         document.getElementById('data-analysis-ai-result-wrap')?.classList.add('hidden');
         document.getElementById('data-analysis-ai-landing')?.classList.remove('hidden');
         const prompt = document.getElementById('data-analysis-ai-prompt');
@@ -664,6 +665,7 @@
     async function replayAgentResult(box, data, shouldContinue = () => true) {
         if (!box) return;
         const answer = String(data && data.answer ? data.answer : 'AI 未返回有效内容');
+        window.Pivot.legacy.teardownPivotCharts?.(box);
         PivotSafeHtml.setHtml(box, '<div class="data-analysis-ai-answer"></div>');
         const answerEl = box.querySelector('.data-analysis-ai-answer');
         await typewriterReplay(answerEl, answer, text => renderMarkdown(text), shouldContinue);
@@ -765,6 +767,7 @@
                 </div>
             </div>
         ` : '';
+        window.Pivot.legacy.teardownPivotCharts?.(box);
         PivotSafeHtml.setHtml(box, `
             ${promptHtml}
             ${scopeNotice}

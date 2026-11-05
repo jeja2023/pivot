@@ -17,6 +17,7 @@ const {
     isIdentifierLikeColumn,
     isMetricNumericColumn
 } = require('./shared');
+const { numericValueSql } = require('./numeric-values');
 
 function normalizeChartPalette(value) {
     const palette = String(value || '').toLowerCase();
@@ -140,9 +141,9 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
     const metadata = { chartType, xField: xCol.key, yField: yCol?.key || '', y2Field: y2Col?.key || '', groupField: groupCol?.key || '', aggregation, limit, sortBy, sortOrder, colorPalette };
     if (chartType === 'scatter') {
         const rows = await withAnalysisSlot(() => duckReadAll(`
-            SELECT TRY_CAST(${sqlIdent(xCol.key)} AS DOUBLE) AS x, TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) AS y
+            SELECT ${numericValueSql(sqlIdent(xCol.key))} AS x, ${numericValueSql(sqlIdent(yCol.key))} AS y
             FROM read_parquet(${sqlLiteral(parquetPath)})
-            WHERE TRY_CAST(${sqlIdent(xCol.key)} AS DOUBLE) IS NOT NULL AND TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) IS NOT NULL
+            WHERE ${numericValueSql(sqlIdent(xCol.key))} IS NOT NULL AND ${numericValueSql(sqlIdent(yCol.key))} IS NOT NULL
             LIMIT ${Math.min(limit * 100, 5000)}
         `));
         const series = [{ name: yCol.name, data: rows.map(item => [Number(item.x), Number(item.y)]) }];
@@ -154,9 +155,9 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
     if (chartType === 'boxplot') {
         const raw = await withAnalysisSlot(() => duckReadAll(`
             SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label,
-                   TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) AS value
+                   ${numericValueSql(sqlIdent(yCol.key))} AS value
             FROM read_parquet(${sqlLiteral(parquetPath)})
-            WHERE TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE) IS NOT NULL
+            WHERE ${numericValueSql(sqlIdent(yCol.key))} IS NOT NULL
             LIMIT 20000
         `));
         const groups = new Map();
@@ -169,11 +170,11 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         await recordAdvancedChart({ actor, datasetId, chart, metadata });
         return { chart, rows: entries };
     }
-    const valueExpr = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE))`;
+    const valueExpr = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(yCol.key))})`;
     const groupExpression = groupCol ? `, COALESCE(NULLIF(CAST(${sqlIdent(groupCol.key)} AS VARCHAR), ''), '(empty)') AS group_label` : '';
     const groupBy = groupCol ? 'GROUP BY label, group_label' : 'GROUP BY label';
     if (chartType === 'dual_axis') {
-        const secondExpr = `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(y2Col.key)} AS DOUBLE))`;
+        const secondExpr = `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(y2Col.key))})`;
         const rows = await withAnalysisSlot(() => duckReadAll(`
             SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label, ${valueExpr} AS primary_value, ${secondExpr} AS secondary_value
             FROM read_parquet(${sqlLiteral(parquetPath)}) GROUP BY label ORDER BY ${sortBy === 'label' ? 'label' : 'primary_value'} ${sortOrder.toUpperCase()} LIMIT ${limit}
@@ -255,7 +256,7 @@ async function buildChart(userId, datasetId, input = {}) {
     }
     const valueExpr = aggregation === 'count'
         ? 'COUNT(*)'
-        : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(yCol.key)} AS DOUBLE))`;
+        : `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(yCol.key))})`;
     const groupSelect = groupCol ? `, COALESCE(NULLIF(${sqlIdent(groupCol.key)}, ''), '(empty)') AS group_label` : '';
     const groupBy = groupCol ? 'GROUP BY label, group_label' : 'GROUP BY label';
     const orderBy = `ORDER BY ${sortBy === 'label' ? 'label' : 'value'} ${sortOrder.toUpperCase()}`;
@@ -313,7 +314,12 @@ async function buildChart(userId, datasetId, input = {}) {
 
 async function runSummary(userId, datasetId) {
     const row = await getDatasetForUser(userId, datasetId);
-    const profile = jsonParse(row.profile_json, []);
+    const allowedColumns = await require('./governance').getAccessibleDatasetColumns(userId, row);
+    const allowedKeys = new Set(allowedColumns.map(column => column.key));
+    const profile = jsonParse(row.profile_json, []).filter(column => allowedKeys.has(column.key));
+    const dataset = serializeDataset(row);
+    dataset.columns = allowedColumns; dataset.profile = profile;
+    dataset.previewRows = dataset.previewRows.map(item => Object.fromEntries(Object.entries(item).filter(([key]) => allowedKeys.has(key))));
     const numericColumns = profile.filter(isMetricNumericColumn);
     const completeness = profile.length
         ? profile.reduce((sum, column) => sum + Number(column.fillRate || 0), 0) / profile.length
@@ -355,7 +361,7 @@ async function runSummary(userId, datasetId) {
         });
     }
     return {
-        dataset: serializeDataset(row),
+        dataset,
         highlights,
         topColumns,
         numericColumns: numericColumns.slice(0, 8),

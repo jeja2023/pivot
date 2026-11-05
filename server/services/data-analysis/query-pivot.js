@@ -20,6 +20,7 @@ const {
     withDuckTimeout,
     isMetricNumericColumn
 } = require('./shared');
+const { numericValueSql } = require('./numeric-values');
 
 const CELL_KEY_SEPARATOR = '\u001F';
 
@@ -89,7 +90,7 @@ function pivotTopItems(labels, totals, grandTotal, { limit = 5, additive = true 
 }
 
 async function readPivotRows(connection, sql) {
-    const reader = await connection.runAndReadAll(sql);
+    const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(sql));
     return reader.getRowObjectsJson();
   }
 
@@ -117,7 +118,7 @@ async function runPivot(userId, datasetId, input = {}) {
     const { parquetPath } = getDatasetPaths(row);
     const valueExpr = aggregation === 'count'
         ? 'COUNT(*)'
-        : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(valueCol.key)} AS DOUBLE))`;
+        : `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(valueCol.key))})`;
     const fromExpr = `FROM read_parquet(${sqlLiteral(parquetPath)})`;
     const rowLabelExpr = buildPivotLabelExpr(rowCol, emptyLabel);
     const colLabelExpr = colCol ? buildPivotLabelExpr(colCol, emptyLabel) : sqlLiteral('合计');
@@ -287,18 +288,18 @@ function validateUserSql(sql) {
 }
 
 function buildQuerySelectList(row, columns) {
+    if (!columns.length) throw Object.assign(new Error('当前共享权限没有可查询字段，请联系数据集所有者。'), { status: 403, code: 'ANALYSIS_FIELD_ACCESS_DENIED' });
     const profile = jsonParse(row.profile_json, []);
     const numericKeys = new Set(
         profile
             .filter(isMetricNumericColumn)
             .map(item => item.key)
     );
-    if (!columns.length) return '*';
     return columns.map(column => {
         const source = sqlIdent(column.key);
         const target = sqlIdent(column.name);
         if (numericKeys.has(column.key)) {
-            return `CASE WHEN regexp_matches(trim(CAST(${source} AS VARCHAR)), '%$') THEN TRY_CAST(NULLIF(regexp_replace(CAST(${source} AS VARCHAR), '[,￥¥$%[:space:]]', '', 'g'), '') AS DOUBLE) / 100 ELSE TRY_CAST(NULLIF(regexp_replace(CAST(${source} AS VARCHAR), '[,￥¥$%[:space:]]', '', 'g'), '') AS DOUBLE) END AS ${target}`;
+            return `${numericValueSql(source)} AS ${target}`;
         }
         return `${source} AS ${target}`;
     }).join(', ');
@@ -332,7 +333,7 @@ async function runUserQuery(userId, datasetId, input = {}) {
             // 物化完成后切断外部文件访问，使用户 SQL 无法读取数据集以外的任何文件。
             await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
             const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
-            return reader.getRowObjectsJson();
+            return { rows: reader.getRowObjectsJson(), columns: reader.columnNames() };
         } catch (err) {
             if (err?.code === 'ANALYSIS_QUERY_TIMEOUT') throw err;
             const wrapped = new Error(`查询执行失败：${formatQueryExecutionError(err)}`);
@@ -343,11 +344,9 @@ async function runUserQuery(userId, datasetId, input = {}) {
             instance.closeSync();
         }
     });
-    const truncated = result.length > limit;
-    const rows = truncated ? result.slice(0, limit) : result;
-    const resultColumns = rows.length
-        ? Object.keys(rows[0])
-        : (columns.length ? columns.map(column => column.name) : []);
+    const truncated = result.rows.length > limit;
+    const rows = truncated ? result.rows.slice(0, limit) : result.rows;
+    const resultColumns = result.columns;
     await recordArtifact({
         userId: actor.id,
         datasetId,

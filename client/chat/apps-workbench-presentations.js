@@ -33,13 +33,18 @@
     function canEditActivePresentation() { return state.active?.isOwner !== false || state.active?.collaboratorRole === 'editor' || (typeof isAdminUser === 'function' && isAdminUser()); }
     async function ensureThemeFonts() {
         const content = activeContent(); if (!content?.theme?.fontAssets || typeof FontFace === 'undefined') return;
+        const id = state.active.id; const epoch = state.activeEpoch || 0;
+        const current = () => state.active?.id === id && (state.activeEpoch || 0) === epoch;
         for (const [kind, ref] of Object.entries(content.theme.fontAssets)) {
             if (!ref || state.fontFaceUrls.has(ref)) continue;
             try {
                 const response = await apiFetch(API + '/assets/content/by-ref?ref=' + encodeURIComponent(ref) + '&presentationId=' + encodeURIComponent(state.active?.id || ''));
                 if (!response.ok) continue;
+                if (!current()) return;
                 const url = URL.createObjectURL(await response.blob()); const family = kind === 'heading' ? content.theme.fonts.heading : content.theme.fonts.body;
-                const font = new FontFace(family, 'url(' + JSON.stringify(url) + ')'); await font.load(); document.fonts.add(font); state.fontFaceUrls.set(ref, url); renderStage();
+                const font = new FontFace(family, 'url(' + JSON.stringify(url) + ')'); await font.load();
+                if (!current()) { URL.revokeObjectURL(url); return; }
+                document.fonts.add(font); state.fontFaceUrls.set(ref, url); renderStage();
             } catch (_) {}
         }
     }
@@ -62,47 +67,20 @@
     function updateUndoRedo() { byId('presentation-undo-btn')?.toggleAttribute('disabled', state.historyIndex <= 0); byId('presentation-redo-btn')?.toggleAttribute('disabled', state.historyIndex >= state.history.length - 1); }
     function recordHistory() { if (!state.active?.content) return; const snapshot = deepClone(state.active.content); const current = state.history[state.historyIndex]; if (current && JSON.stringify(current) === JSON.stringify(snapshot)) return; state.history.splice(state.historyIndex + 1); state.history.push(snapshot); if (state.history.length > 80) state.history.shift(); state.historyIndex = state.history.length - 1; updateUndoRedo(); scheduleSave(); }
     function restoreHistory(index) { if (!state.active || !state.history[index]) return; state.historyIndex = index; state.active.content = deepClone(state.history[index]); state.active.title = state.active.content.title; renderEditor(); scheduleSave(); }
-    function scheduleSave() { if (!state.active?.id || !canEditActivePresentation()) return; clearTimeout(state.saveTimer); state.editRevision += 1; state.dirty = true; setSaveState('待保存', 'dirty'); state.saveTimer = window.setTimeout(() => saveActive().catch(error => { setSaveState('保存失败', 'error'); toast(error.message || '保存失败，内容仍保留在当前页面。', 'error'); }), 1200); }
-    async function saveActive({ force = false, templateApplyMode = '', note = '' } = {}) {
-        if (!state.active?.id || !canEditActivePresentation()) return false;
-        if (state.saving) { await state.savePromise; return state.dirty ? saveActive({ force, templateApplyMode, note }) : true; }
-        if (!state.dirty && !force) return true;
-        clearTimeout(state.saveTimer); state.saveTimer = null;
-        const content = activeContent(); if (!content) return;
-        const presentationId = state.active.id; const contentSnapshot = deepClone(content); const saveRevision = state.editRevision;
-        state.saving = true; setSaveState('保存中…', 'saving');
-        const save = (async () => {
-            const data = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/content`, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-                    baseVersion: state.active.version, title: contentSnapshot.title, templateId: contentSnapshot.template?.id,
-                    templateVersion: contentSnapshot.template?.version, templateApplyMode: templateApplyMode || state.pendingTemplateApplyMode || '',
-                    content: contentSnapshot, autoSave: !force, isMilestone: force, note: force ? (note || '用户主动保存') : '自动保存'
-                })
-            });
-            if (state.active?.id !== presentationId) return true;
-            const changedWhileSaving = state.editRevision !== saveRevision; const currentContent = activeContent();
-            state.active = data.presentation;
-            state.active.content = changedWhileSaving ? currentContent : (data.presentation.content || contentSnapshot);
-            state.active.validation = data.presentation.validation || state.active.validation;
-            state.pendingTemplateApplyMode = '';
-            state.documents = state.documents.map(item => item.id === state.active.id ? { ...item, ...state.active } : item);
-            state.dirty = changedWhileSaving; state.remoteVersionAvailable = false;
-            setSaveState(changedWhileSaving ? '待保存' : (force ? '版本已保存' : '已保存'), changedWhileSaving ? 'dirty' : 'saved');
-            renderIssues();
-            return true;
-        })();
-        state.savePromise = save;
-        try { return await save; }
-        finally { state.saving = false; if (state.savePromise === save) state.savePromise = null; }
-    }
+    const persistence = window.Pivot.moduleApi('apps.presentations.persistence').create(state, {
+        requestJson, canEdit: canEditActivePresentation, setSaveState, renderIssues, toast
+    });
+    const scheduleSave = () => persistence.scheduleSave();
+    const saveActive = options => persistence.saveActive(options);
     async function refreshRemotePresentation({ force = false } = {}) {
         if (!state.active?.id || state.saving || (!force && !window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.())) return false;
+        const revision = state.editRevision;
         const data = await window.Pivot.moduleApi('apps.presentations.realtime').fetchCurrent({ active: state.active, getActive: () => state.active,
             request: id => requestJson(API + '/' + encodeURIComponent(id), { cache: 'no-store' }), onRevoked: revokePresentationAccess });
         if (!data) return false;
         const remote = data.presentation;
         if (!remote || (!force && Number(remote.version || 0) <= Number(state.active.version || 0))) return false;
-        if (state.dirty && !force) {
+        if (state.dirty && (!force || revision !== state.editRevision)) {
             if (!state.remoteVersionAvailable) { state.remoteVersionAvailable = true; setSaveState('远端有更新', 'dirty'); toast('协作者已保存新版本。请先保存、恢复版本或点击“同步”后再继续编辑。', 'warning'); }
             return true;
         }
@@ -110,6 +88,7 @@
     }
     function revokePresentationAccess() {
         if (!state.active?.id) return;
+        persistence.invalidate();
         closePresenterMode(); stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat();
         state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1; state.dirty = false;
         byId('presentation-editor')?.classList.add('hidden'); byId('presentation-library')?.classList.remove('hidden');
@@ -312,10 +291,16 @@
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
     const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
     async function openPresentation(id) {
-        if (state.dirty) await saveActive();
+        const sequence = state.openSequence = (state.openSequence || 0) + 1;
+        if (!await persistence.flush() || sequence !== state.openSequence) return;
         setStatus('正在打开演示文稿…');
         const data = await requestJson(`${API}/${encodeURIComponent(id)}`);
+        if (sequence !== state.openSequence) return;
+        if (!await persistence.flush() || sequence !== state.openSequence) return;
+        if (state.active?.id === id && Number(state.active.version) > Number(data.presentation?.version)) data.presentation = state.active;
+        persistence.invalidate();
         state.active = data.presentation;
+        state.dirty = false; state.editRevision = 0; state.pendingTemplateApplyMode = '';
         state.selectedSlideId = state.active.content?.slides?.[0]?.id || '';
         state.selectedElementId = '';
         resetHistory();
@@ -328,14 +313,17 @@
         startPresentationRealtime();
         collab()?.loadComments(id);
     }
-    function closeEditor() {
+    async function closeEditor() {
+        const sequence = state.openSequence = (state.openSequence || 0) + 1;
+        if (!await persistence.flush() || sequence !== state.openSequence) return false;
+        persistence.invalidate();
         closePresenterMode();
         if (state.remoteSession?.id) stopRemotePresentation().catch(() => {});
         stopPresentationRealtime();
         stopPresentationSync();
         collab()?.stopPresenceHeartbeat();
-        if (state.dirty) saveActive().catch(() => {});
         state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1;
+        state.dirty = false;
         state.imageUrls.forEach(url => URL.revokeObjectURL(url)); state.imageUrls.clear(); state.fontFaceUrls.forEach(url => URL.revokeObjectURL(url)); state.fontFaceUrls.clear(); if (state.coverUrls instanceof Map) { state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear(); }
         byId('presentation-editor')?.classList.add('hidden');
         byId('presentation-library')?.classList.remove('hidden');
@@ -895,7 +883,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-create-from-artifact-btn')) { openArtifactCreateModal().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-artifact-cancel-btn')) { byId('presentation-artifact-modal')?.classList.add('hidden'); return; }
             if (event.target.closest('#presentation-refresh-btn')) { loadDocuments().catch(error => toast(error.message, 'error')); return; }
-            if (event.target.closest('#presentation-back-to-library-btn')) { closeEditor(); return; }
+            if (event.target.closest('#presentation-back-to-library-btn')) { void closeEditor().catch(() => {}); return; }
             if (event.target.closest('#presentation-undo-btn')) { restoreHistory(state.historyIndex - 1); return; }
             if (event.target.closest('#presentation-redo-btn')) { restoreHistory(state.historyIndex + 1); return; }
             if (event.target.closest('#presentation-add-slide-btn')) { const content = activeContent(); const slide = emptySlide(content.slides.length); content.slides.push(slide); state.selectedSlideId = slide.id; state.selectedElementId = ''; recordHistory(); renderEditor(); return; }
@@ -956,6 +944,7 @@ function setSelectedImageAsCover() {
             if (event.target.closest('#presentation-outline-confirm-all-btn')) { requiredOutlineAssumptions().forEach((_, index) => state.pendingOutlineConfirmations.add(index)); byId('presentation-outline-warnings')?.querySelectorAll('[data-presentation-outline-assumption]').forEach(item => { item.checked = true; }); updateOutlineConfirmationUi(); return; }
             if (event.target.closest('#presentation-outline-confirm-btn')) { generateSlides().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-library-reset-btn')) { resetLibraryFilters(); return; }
+            if (event.target.closest('#presentation-save-state') && state.dirty && !state.remoteVersionAvailable) { void persistence.flush().catch(() => {}); return; }
             if (event.target.closest('#presentation-sync-btn') || event.target.closest('#presentation-save-state')) { syncRemotePresentation().catch(error => toast(error.message, 'error')); return; }
         });
         view.addEventListener('submit', event => {
@@ -973,8 +962,11 @@ function setSelectedImageAsCover() {
             if (!modal || modal.classList.contains('hidden')) return;
             if (event.key === 'Escape') { event.preventDefault(); closePresenterMode(); } else if (event.key === 'ArrowLeft') { event.preventDefault(); movePresenterSlide(-1); } else if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); movePresenterSlide(1); }
         });
-        window.addEventListener('beforeunload', () => { stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat?.(); closePresenterMode(); });
+        window.addEventListener('beforeunload', persistence.beforeUnload);
+        window.addEventListener('online', () => { if (state.dirty && !state.remoteVersionAvailable) void persistence.flush().catch(() => {}); });
+        window.addEventListener('pagehide', () => { stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat?.(); closePresenterMode(); });
         document.addEventListener('visibilitychange', () => {
+            if (document.hidden) { if (state.dirty) void persistence.flush().catch(() => {}); return; }
             if (!state.active?.id || !window.Pivot.moduleApi('apps.presentations.realtime').isVisible?.()) return;
             refreshRemotePresentation().catch(() => {}); collab()?.loadComments(state.active.id); collab()?.sendPresenceHeartbeat?.();
         });

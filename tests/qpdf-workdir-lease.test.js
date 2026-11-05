@@ -65,11 +65,12 @@ test('数据库租约连接断开时中止在途操作并保留目录', { skip: 
         notify();
         if (!signal.aborted) await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
     });
+    const rejected = assert.rejects(task, /租约已失效/);
     try {
         await ready;
         assert.ok(pid);
         await admin.query('SELECT pg_terminate_backend($1)', [pid]);
-        await assert.rejects(task, /租约已失效/);
+        await rejected;
         assert.ok((await fs.stat(directory)).isDirectory());
         const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
         await fs.utimes(directory, old, old);

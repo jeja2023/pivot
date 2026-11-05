@@ -176,11 +176,13 @@
             percentMode: getPivotInputValue('data-analysis-pivot-percent-mode', 'none')
         };
         await guardButton('data-analysis-run-pivot', '生成中…', async () => {
+            const current = app.captureRequest('pivot');
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/pivot`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            if (!current()) return;
             state.pivot = data;
             renderPivot();
         });

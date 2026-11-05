@@ -44,6 +44,7 @@
     const state = {
         datasets: [],
         activeId: '',
+        datasetEpoch: 0,
         compareLeftId: '',
         compareRightId: '',
         chart: null,
@@ -129,6 +130,16 @@
         return state.datasets.find(item => item.id === state.activeId) || null;
     }
 
+    const requests = new Map();
+    function invalidateRequest(scope) { requests.set(scope, (requests.get(scope) || 0) + 1); }
+    function captureRequest(scope, context = () => state.activeId) {
+        invalidateRequest(scope);
+        const sequence = requests.get(scope);
+        const value = context();
+        const epoch = state.datasetEpoch;
+        return () => requests.get(scope) === sequence && state.datasetEpoch === epoch && context() === value;
+    }
+
     window.Pivot.legacy.PivotDataAnalysis = {
         ...(window.Pivot.legacy.PivotDataAnalysis || {}),
         API,
@@ -137,6 +148,8 @@
         esc,
         fmtNumber,
         activeDataset,
+        captureRequest,
+        invalidateRequest,
         SHARED_SCOPE,
         normalizeTab,
         getStoredActiveTab,

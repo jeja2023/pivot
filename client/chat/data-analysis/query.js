@@ -167,11 +167,13 @@
             return;
         }
         await guardButton('data-analysis-run-query', '查询中…', async () => {
+            const current = app.captureRequest('query');
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql })
             });
+            if (!current()) return;
             state.query = data;
             state.queryPage = 1;
             renderQuery();
@@ -199,7 +201,7 @@
             <div class="data-analysis-query-result-card">
                 <div class="data-analysis-query-meta-bar">
                     <div class="data-analysis-query-meta-info">
-                        <span class="data-analysis-query-meta-count">共 <strong>${fmtNumber(total)}</strong> 条结果${result.truncated ? `（已截断至前 ${fmtNumber(result.rowCount)} 行）` : ''}</span>
+                        <span class="data-analysis-query-meta-count">${result.totalRowCount === undefined ? '共' : '当前预览'} <strong>${fmtNumber(total)}</strong> 条${result.totalRowCount === undefined ? '结果' : `，后台结果共 ${fmtNumber(result.totalRowCount)} 条`}${result.truncated ? '（已按结果或预览上限截断）' : ''}</span>
                         <span class="data-analysis-query-meta-page">第 ${state.queryPage} / ${pageCount} 页（每页 ${pageSize} 条）</span>
                     </div>
                     <button id="data-analysis-query-export-btn" class="btn-secondary data-analysis-query-export-btn" type="button">导出查询结果 (CSV)</button>
@@ -340,11 +342,13 @@
         }
         
         await guardButton('data-analysis-run-query-visual', '查询中…', async () => {
+            const current = app.captureRequest('query');
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql })
             });
+            if (!current()) return;
             state.query = data;
             state.queryPage = 1;
             renderQuery();

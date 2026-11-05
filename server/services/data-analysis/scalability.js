@@ -25,6 +25,7 @@ const {
 const { ingestUpload } = require('./datasets');
 const { profileViaSql } = require('./profile');
 const { assertDatasetFieldsAccessible } = require('./governance');
+const { numericValueSql } = require('./numeric-values');
 
 const AGGREGATIONS = new Set(['count', 'sum', 'avg', 'min', 'max']);
 const MAX_GROUP_FIELDS = 4;
@@ -259,7 +260,7 @@ function materializationSql(config) {
     const groups = config.groupBy.map(key => sqlIdent(key));
     const metrics = config.metrics.map(metric => {
         if (metric.aggregation === 'count') return `COUNT(*) AS ${sqlIdent(metric.key)}`;
-        return `${metric.aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(metric.fieldKey)} AS DOUBLE)) AS ${sqlIdent(metric.key)}`;
+        return `${metric.aggregation.toUpperCase()}(${numericValueSql(sqlIdent(metric.fieldKey))}) AS ${sqlIdent(metric.key)}`;
     });
     const select = [...groups, ...metrics].join(', ');
     return { select, groupBy: groups.length ? ` GROUP BY ${groups.join(', ')}` : '' };
@@ -329,12 +330,23 @@ async function listMaterializations(user, datasetId) {
         WHERE dataset_id = ? AND deleted_at IS NULL
         ORDER BY updated_at DESC
     `, [dataset.id]);
-    return rows.filter(row => Number(row.user_id) === Number(dataset.user_id)).map(serializeMaterialization);
+    const accessible = await require('./governance').getAccessibleDatasetColumns(actor, dataset);
+    const allowed = new Set(accessible.map(column => column.key));
+    return rows.filter(row => {
+        const config = parseJson(row.config_json, {});
+        const fields = [...(config.groupBy || []), ...(config.metrics || []).map(metric => metric.fieldKey).filter(Boolean)];
+        return Number(row.user_id) === Number(dataset.user_id) && fields.every(key => allowed.has(key));
+    }).map(row => {
+        const item = serializeMaterialization(row);
+        if (Number(item.sourceVersion) !== Number(dataset.source_version || 1)) return { ...item, status: 'stale', previewRows: [], lastError: '来源数据或字段规则已变化，请刷新物化结果。' };
+        return item;
+    });
 }
 
 async function getScalabilityState(user, datasetId) {
     const actor = await resolveAnalysisUser(user);
     const dataset = await getDatasetForUser(actor, datasetId);
+    const allowedFields = new Set((await require('./governance').getAccessibleDatasetColumns(actor, dataset)).map(column => column.key));
     const [versions, partitions, materializations] = await Promise.all([
         query('SELECT * FROM analysis_dataset_versions WHERE dataset_id = ? ORDER BY version DESC', [dataset.id]),
         query('SELECT field_key, field_value, row_count, dataset_version FROM analysis_dataset_partitions WHERE dataset_id = ? ORDER BY field_key, field_value', [dataset.id]),
@@ -345,7 +357,7 @@ async function getScalabilityState(user, datasetId) {
         sourceVersion: Number(dataset.source_version || 1),
         partitionFieldKey: dataset.partition_field_key || '',
         versions: versions.map(serializeVersion),
-        partitions: partitions.map(row => ({ fieldKey: row.field_key, value: row.field_value, rowCount: Number(row.row_count || 0), sourceVersion: Number(row.dataset_version || 1) })),
+        partitions: partitions.filter(row => allowedFields.has(row.field_key)).map(row => ({ fieldKey: row.field_key, value: row.field_value, rowCount: Number(row.row_count || 0), sourceVersion: Number(row.dataset_version || 1) })),
         materializations
     };
 }

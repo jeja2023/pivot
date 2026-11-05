@@ -1,35 +1,28 @@
 'use strict';
 
-const fs = require('fs');
-const { query, queryOne, execute, transaction } = require('../../db/client');
+const { query, queryOne, execute } = require('../../db/client');
 const { canAccessSharedResource, normalizeShareScope, normalizeShareSettings } = require('../unit-visibility');
 const { filterExistingShareUserIds } = require('../share-targets');
-const { readTypedEnv } = require('../../config/env-registry');
+const modelRepository = require('../../repositories/analysis-models');
+const { listVisible } = require('../../repositories/analysis-assets');
+const { relationQuality } = require('./relation-quality');
 const {
     analysisId,
-    exportRoot,
-    resolveInside,
-    toProjectRelative,
     jsonParse,
     sqlIdent,
     sqlLiteral,
     getDatasetForUser,
     getDatasetPaths,
     getColumn,
-    resolveAnalysisUser,
     createDuckConnection,
     withDuckTimeout,
     withAnalysisSlot,
-    parquetToRows,
-    recordArtifact,
     getBeijingTimestamp
 } = require('./shared');
 
 const METRIC_AGGREGATIONS = new Set(['count', 'sum', 'avg', 'min', 'max']);
 const JOIN_TYPES = new Set(['inner', 'left']);
 const CARDINALITIES = new Set(['one_to_one', 'one_to_many', 'many_to_one', 'many_to_many']);
-const MAX_ASYNC_QUERY_ROWS = readTypedEnv('DATA_ANALYSIS_ASYNC_QUERY_MAX_ROWS');
-const ASYNC_QUERY_TIMEOUT_MS = readTypedEnv('DATA_ANALYSIS_ASYNC_QUERY_TIMEOUT_MS');
 
 function failure(message, status = 400, code = 'ANALYSIS_SEMANTIC_MODEL_INVALID') {
     const error = new Error(message);
@@ -83,11 +76,8 @@ function normalizeMetricConfig(value = {}) {
 }
 
 async function listMetricDefinitions(user, { datasetId = '', limit = 100 } = {}) {
-    const rows = await query(`
-        SELECT * FROM analysis_metric_definitions
-        WHERE deleted_at IS NULL ${datasetId ? 'AND dataset_id = ?' : ''}
-        ORDER BY updated_at DESC LIMIT ?
-    `, datasetId ? [datasetId, Math.min(Math.max(Number(limit) || 100, 1), 200)] : [Math.min(Math.max(Number(limit) || 100, 1), 200)]);
+    if (datasetId) await getDatasetForUser(user, datasetId);
+    const rows = await listVisible('analysis_metric_definitions', user, { datasetId, limit });
     return rows.filter(row => canAccessSharedResource(row, user, false)).map(row => ({ ...metricRecord(row), isOwner: Number(row.user_id) === Number(user.id) }));
 }
 
@@ -136,14 +126,14 @@ async function getDataModel(user, modelId, { write = false, includeRelations = t
     if (!row || !canAccessSharedResource(row, user, write)) throw failure('数据模型不存在或无权访问。', 404);
     const model = { ...modelRecord(row), isOwner: Number(row.user_id) === Number(user.id) };
     if (includeRelations) {
-        const relations = await query('SELECT * FROM analysis_data_model_relations WHERE model_id = ? ORDER BY created_at ASC', [row.id]);
+        const relations = await query('SELECT * FROM analysis_data_model_relations WHERE model_id = ? ORDER BY created_at ASC, id ASC', [row.id]);
         model.relations = relations.map(relationRecord);
     }
     return { row, model };
 }
 
 async function listDataModels(user, { limit = 100 } = {}) {
-    const rows = await query('SELECT * FROM analysis_data_models WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?', [Math.min(Math.max(Number(limit) || 100, 1), 200)]);
+    const rows = await listVisible('analysis_data_models', user, { limit });
     return rows.filter(row => canAccessSharedResource(row, user, false)).map(row => ({ ...modelRecord(row), isOwner: Number(row.user_id) === Number(user.id) }));
 }
 
@@ -156,7 +146,7 @@ async function saveDataModel({ user, body = {}, modelId = '' }) {
     const allowedUserIds = await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
     const now = getBeijingTimestamp();
     if (modelId) {
-        await execute(`UPDATE analysis_data_models SET name = ?, description = ?, scope = ?, allowed_units = ?, allowed_user_ids = ?, version = version + 1, updated_at = ? WHERE id = ? AND user_id = ?`, [name, text(body.description, 1000), share.scope, share.allowedUnits, allowedUserIds, now, modelId, user.id]);
+        await modelRepository.updateModel({ userId: user.id, modelId, expectedVersion: body.expectedVersion, name, description: text(body.description, 1000), share: { ...share, allowedUserIds } });
         return (await getDataModel(user, modelId)).model;
     }
     const id = analysisId('model');
@@ -164,62 +154,59 @@ async function saveDataModel({ user, body = {}, modelId = '' }) {
     return (await getDataModel(user, id)).model;
 }
 
-async function relationQuality(left, right, input) {
-    const { parquetPath: leftPath } = getDatasetPaths(left);
-    const { parquetPath: rightPath } = getDatasetPaths(right);
-    return await withAnalysisSlot(async () => {
-        const { instance, connection } = await createDuckConnection();
-        try {
-            const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(`
-                SELECT
-                    (SELECT COUNT(*) FROM read_parquet(${sqlLiteral(leftPath)})) AS left_rows,
-                    (SELECT COUNT(*) FROM read_parquet(${sqlLiteral(rightPath)})) AS right_rows,
-                    (SELECT COUNT(DISTINCT ${sqlIdent(input.leftFieldKey)}) FROM read_parquet(${sqlLiteral(leftPath)})) AS left_distinct,
-                    (SELECT COUNT(DISTINCT ${sqlIdent(input.rightFieldKey)}) FROM read_parquet(${sqlLiteral(rightPath)})) AS right_distinct
-            `));
-            const row = reader.getRowObjectsJson()[0] || {};
-            return {
-                leftRows: Number(row.left_rows) || 0,
-                rightRows: Number(row.right_rows) || 0,
-                leftDistinct: Number(row.left_distinct) || 0,
-                rightDistinct: Number(row.right_distinct) || 0
-            };
-        } finally {
-            connection.closeSync();
-            instance.closeSync();
-        }
-    });
+async function prepareRelation(user, body) {
+    const leftDatasetId = text(body.leftDatasetId ?? body.left_dataset_id, 120);
+    const rightDatasetId = text(body.rightDatasetId ?? body.right_dataset_id, 120);
+    let leftFieldKey = text(body.leftFieldKey ?? body.left_field_key, 80);
+    let rightFieldKey = text(body.rightFieldKey ?? body.right_field_key, 80);
+    if (!leftDatasetId || !rightDatasetId || leftDatasetId === rightDatasetId || !leftFieldKey || !rightFieldKey) throw failure('请分别选择两个不同的数据集及其关联字段。');
+    const [left, right] = await Promise.all([getDatasetForUser(user, leftDatasetId), getDatasetForUser(user, rightDatasetId)]);
+    leftFieldKey = getColumn(left, leftFieldKey).key;
+    rightFieldKey = getColumn(right, rightFieldKey).key;
+    await Promise.all([require('./governance').assertDatasetFieldsAccessible(user, left, [leftFieldKey]), require('./governance').assertDatasetFieldsAccessible(user, right, [rightFieldKey])]);
+    const requestedJoinType = String((body.joinType ?? body.join_type) || '').toLowerCase();
+    if (requestedJoinType && !JOIN_TYPES.has(requestedJoinType)) throw failure('当前仅支持左关联或内关联，请重新选择。');
+    const joinType = JOIN_TYPES.has(requestedJoinType) ? requestedJoinType : 'left';
+    const requestedCardinality = String(body.cardinality || '').toLowerCase();
+    if (requestedCardinality && !CARDINALITIES.has(requestedCardinality)) throw failure('关联对应基数无效，请重新选择。');
+    const cardinality = requestedCardinality || 'many_to_one';
+    const quality = await relationQuality(left, right, { leftFieldKey, rightFieldKey, joinType, cardinality });
+    const current = await Promise.all([getDatasetForUser(user, leftDatasetId), getDatasetForUser(user, rightDatasetId)]);
+    if (current.some((dataset, index) => Number(dataset.source_version || 1) !== Number([left, right][index].source_version || 1))) throw failure('检查期间数据或字段规则已变化，请重新检查关联质量。', 409);
+    await Promise.all(current.map((dataset, index) => require('./governance').assertDatasetFieldsAccessible(user, dataset, [index ? rightFieldKey : leftFieldKey])));
+    return { leftDatasetId, leftFieldKey, rightDatasetId, rightFieldKey, joinType, cardinality, quality };
+}
+
+async function previewDataModelRelation({ user, modelId, body = {} }) {
+    await getDataModel(user, modelId, { write: true, includeRelations: false });
+    const relation = await prepareRelation(user, body);
+    return { quality: relation.quality, warnings: relation.quality.warnings };
 }
 
 async function addDataModelRelation({ user, modelId, body = {}, relationId = '' }) {
     const { row: model } = await getDataModel(user, modelId, { write: true, includeRelations: false });
-    const leftDatasetId = text(body.leftDatasetId ?? body.left_dataset_id, 120);
-    const rightDatasetId = text(body.rightDatasetId ?? body.right_dataset_id, 120);
-    const leftFieldKey = text(body.leftFieldKey ?? body.left_field_key, 80);
-    const rightFieldKey = text(body.rightFieldKey ?? body.right_field_key, 80);
-    if (!leftDatasetId || !rightDatasetId || leftDatasetId === rightDatasetId || !leftFieldKey || !rightFieldKey) throw failure('请分别选择两个不同的数据集及其关联字段。');
-    const [left, right] = await Promise.all([getDatasetForUser(user, leftDatasetId), getDatasetForUser(user, rightDatasetId)]);
-    getColumn(left, leftFieldKey);
-    getColumn(right, rightFieldKey);
-    await Promise.all([require('./governance').assertDatasetFieldsAccessible(user, left, [leftFieldKey]), require('./governance').assertDatasetFieldsAccessible(user, right, [rightFieldKey])]);
-    const requestedJoinType = String((body.joinType ?? body.join_type) || '').toLowerCase();
-    const joinType = JOIN_TYPES.has(requestedJoinType) ? requestedJoinType : 'left';
-    const cardinality = CARDINALITIES.has(String(body.cardinality || '').toLowerCase()) ? String(body.cardinality).toLowerCase() : 'many_to_one';
-    const quality = await relationQuality(left, right, { leftFieldKey, rightFieldKey });
-    const now = getBeijingTimestamp();
-    if (relationId) {
-        const existing = await queryOne('SELECT * FROM analysis_data_model_relations WHERE id = ? AND model_id = ? AND user_id = ?', [relationId, model.id, user.id]);
-        if (!existing) throw failure('数据模型关联不存在或无权编辑。', 404);
-        await execute(`UPDATE analysis_data_model_relations SET left_dataset_id = ?, left_field_key = ?, right_dataset_id = ?, right_field_key = ?, join_type = ?, cardinality = ?, quality_json = ?::jsonb, updated_at = ? WHERE id = ? AND model_id = ?`, [left.id, leftFieldKey, right.id, rightFieldKey, joinType, cardinality, JSON.stringify(quality), now, relationId, model.id]);
-        await execute('UPDATE analysis_data_models SET version = version + 1, updated_at = ? WHERE id = ?', [now, model.id]);
-        return relationRecord(await queryOne('SELECT * FROM analysis_data_model_relations WHERE id = ?', [relationId]));
-    }
-    const id = analysisId('relation');
-    await transaction(async trx => {
-        await trx.execute(`INSERT INTO analysis_data_model_relations (id, model_id, user_id, left_dataset_id, left_field_key, right_dataset_id, right_field_key, join_type, cardinality, status, quality_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?::jsonb, ?, ?)`, [id, model.id, user.id, left.id, leftFieldKey, right.id, rightFieldKey, joinType, cardinality, JSON.stringify(quality), now, now]);
-        await trx.execute('UPDATE analysis_data_models SET version = version + 1, updated_at = ? WHERE id = ?', [now, model.id]);
+    const prepared = await prepareRelation(user, body);
+    const id = relationId || analysisId('relation');
+    const values = { ...prepared, editing: Boolean(relationId) };
+    const saved = await modelRepository.saveRelation({ userId: user.id, modelId: model.id, expectedVersion: body.expectedVersion, relationId: id, values,
+        validate: (rows, existing) => {
+            const candidate = { id, status: 'active', ...values };
+            const relations = rows.map(row => row.id === existing?.id ? candidate : relationRecord(row));
+            if (!existing) relations.push(candidate);
+            require('./model-analysis').planRelations(relations);
+        }
     });
-    return relationRecord(await queryOne('SELECT * FROM analysis_data_model_relations WHERE id = ?', [id]));
+    return relationRecord(saved);
+}
+
+async function deleteDataModel({ user, modelId, expectedVersion }) {
+    return modelRepository.removeModel({ userId: user.id, modelId, expectedVersion });
+}
+
+async function deleteDataModelRelation({ user, modelId, relationId, expectedVersion }) {
+    return modelRepository.removeRelation({ userId: user.id, modelId, relationId, expectedVersion,
+        validate: rows => { if (rows.length) require('./model-analysis').planRelations(rows.map(relationRecord)); }
+    });
 }
 
 async function runDataModelJoin({ user, modelId, relationId = '', limit = 100 } = {}) {
@@ -229,7 +216,8 @@ async function runDataModelJoin({ user, modelId, relationId = '', limit = 100 } 
     const [left, right] = await Promise.all([getDatasetForUser(user, relation.leftDatasetId), getDatasetForUser(user, relation.rightDatasetId)]);
     const [leftColumns, rightColumns] = await Promise.all([require('./governance').getAccessibleDatasetColumns(user, left), require('./governance').getAccessibleDatasetColumns(user, right)]);
     await Promise.all([require('./governance').assertDatasetFieldsAccessible(user, left, [relation.leftFieldKey]), require('./governance').assertDatasetFieldsAccessible(user, right, [relation.rightFieldKey])]);
-    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 5000);
+    const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 5000);
+    const quality = await relationQuality(left, right, relation);
     const select = [
         ...leftColumns.slice(0, 40).map(column => `l.${sqlIdent(column.key)} AS ${sqlIdent(`左_${column.name}`)}`),
         ...rightColumns.slice(0, 40).map(column => `r.${sqlIdent(column.key)} AS ${sqlIdent(`右_${column.name}`)}`)
@@ -252,139 +240,7 @@ async function runDataModelJoin({ user, modelId, relationId = '', limit = 100 } 
     });
     const truncated = rows.length > safeLimit;
     const result = truncated ? rows.slice(0, safeLimit) : rows;
-    return { model, relation, columns: result.length ? Object.keys(result[0]) : [], rows: result, rowCount: result.length, truncated };
-}
-
-function queryJobRecord(row) {
-    return {
-        id: row.id, datasetId: row.dataset_id, status: row.status, progress: Number(row.progress || 0), attempts: Number(row.attempts || 0), maxAttempts: Number(row.max_attempts || 0),
-        requestedLimit: Number(row.requested_limit || 0), columns: parseJson(row.result_columns_json, []), previewRows: parseJson(row.result_preview_json, []), hasFile: Boolean(row.result_file_path),
-        lastError: row.last_error || '', createdAt: row.created_at, startedAt: row.started_at || null, completedAt: row.completed_at || null
-    };
-}
-
-async function createAsyncQueryJob({ user, datasetId, sql, limit = 50_000 }) {
-    const dataset = await getDatasetForUser(user, datasetId);
-    const { validateUserSql } = require('./query-pivot');
-    const safeSql = validateUserSql(sql);
-    const safeLimit = Math.min(Math.max(Number(limit) || 50_000, 1), MAX_ASYNC_QUERY_ROWS);
-    const id = analysisId('query_job');
-    const now = getBeijingTimestamp();
-    await execute(`INSERT INTO analysis_query_jobs (id, user_id, dataset_id, sql_text, requested_limit, status, progress, attempts, max_attempts, next_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'queued', 0, 0, 3, ?, ?, ?)`, [id, user.id, dataset.id, safeSql, safeLimit, now, now, now]);
-    return queryJobRecord(await queryOne('SELECT * FROM analysis_query_jobs WHERE id = ?', [id]));
-}
-
-async function getAsyncQueryJob(user, jobId) {
-    const row = await queryOne('SELECT * FROM analysis_query_jobs WHERE id = ? AND user_id = ?', [jobId, user.id]);
-    if (!row) throw failure('异步查询任务不存在或无权访问。', 404);
-    return queryJobRecord(row);
-}
-
-async function listAsyncQueryJobs(user, { datasetId = '', limit = 30 } = {}) {
-    const rows = await query(`SELECT * FROM analysis_query_jobs WHERE user_id = ? ${datasetId ? 'AND dataset_id = ?' : ''} ORDER BY created_at DESC LIMIT ?`, datasetId ? [user.id, datasetId, Math.min(Math.max(Number(limit) || 30, 1), 100)] : [user.id, Math.min(Math.max(Number(limit) || 30, 1), 100)]);
-    return rows.map(queryJobRecord);
-}
-
-async function cancelAsyncQueryJob(user, jobId) {
-    const row = await queryOne('SELECT * FROM analysis_query_jobs WHERE id = ? AND user_id = ?', [jobId, user.id]);
-    if (!row) throw failure('异步查询任务不存在或无权操作。', 404);
-    if (['succeeded', 'failed', 'cancelled'].includes(row.status)) return queryJobRecord(row);
-    const now = getBeijingTimestamp();
-    await execute(`UPDATE analysis_query_jobs SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?`, [now, now, jobId, user.id]);
-    return await getAsyncQueryJob(user, jobId);
-}
-
-async function claimAsyncQueryJob() {
-    return await transaction(async trx => {
-        const row = await trx.queryOne(`SELECT * FROM analysis_query_jobs WHERE status IN ('queued', 'retry_wait') AND next_run_at <= ? ORDER BY next_run_at ASC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`, [getBeijingTimestamp()]);
-        if (!row) return null;
-        const now = getBeijingTimestamp();
-        await trx.execute(`UPDATE analysis_query_jobs SET status = 'running', progress = 5, attempts = attempts + 1, locked_at = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE id = ?`, [now, now, now, row.id]);
-        return { ...row, attempts: Number(row.attempts || 0) + 1 };
-    });
-}
-
-async function executeAsyncQueryJob(job) {
-    const owner = await resolveAnalysisUser(job.user_id);
-    if (!owner) throw new Error('异步查询任务所属账号已失效。');
-    const dataset = await getDatasetForUser(owner, job.dataset_id);
-    const allowedColumns = await require('./governance').getAccessibleDatasetColumns(owner, dataset);
-    const { buildQuerySelectList } = require('./query-pivot');
-    const outputDir = resolveInside(exportRoot, String(owner.id));
-    await fs.promises.mkdir(outputDir, { recursive: true });
-    const outputPath = resolveInside(outputDir, `${job.id}.parquet`);
-    await withAnalysisSlot(async () => {
-        const { instance, connection } = await createDuckConnection();
-        try {
-            await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${buildQuerySelectList(dataset, allowedColumns)} FROM read_parquet(${sqlLiteral(getDatasetPaths(dataset).parquetPath)})`), ASYNC_QUERY_TIMEOUT_MS);
-            await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { allowedPaths: [outputPath] });
-            await withDuckTimeout(connection, () => connection.run(`CREATE TABLE result AS SELECT * FROM (${job.sql_text}) AS _q LIMIT ${Number(job.requested_limit) + 1}`), ASYNC_QUERY_TIMEOUT_MS);
-            await withDuckTimeout(connection, () => connection.run(`COPY result TO ${sqlLiteral(outputPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`), ASYNC_QUERY_TIMEOUT_MS);
-        } finally {
-            connection.closeSync();
-            instance.closeSync();
-        }
-    });
-    const previewRows = await withAnalysisSlot(() => parquetToRows(outputPath, { limit: 100 }));
-    const columns = previewRows.length ? Object.keys(previewRows[0]) : [];
-    const now = getBeijingTimestamp();
-    await execute(`UPDATE analysis_query_jobs SET status = 'succeeded', progress = 100, result_columns_json = ?::jsonb, result_preview_json = ?::jsonb, result_file_path = ?, completed_at = ?, locked_at = NULL, last_error = '', updated_at = ? WHERE id = ? AND status = 'running'`, [JSON.stringify(columns), JSON.stringify(previewRows), toProjectRelative(outputPath), now, now, job.id]);
-    await recordArtifact({ userId: owner.id, datasetId: dataset.id, type: 'async_query', title: job.sql_text.slice(0, 120), filePath: outputPath, metadata: { jobId: job.id, requestedLimit: Number(job.requested_limit), previewRows: previewRows.length } });
-    return { columns, previewRows, filePath: outputPath };
-}
-
-let asyncQueryRunning = false;
-let asyncQueryRunner = null;
-
-async function processAsyncQueryJobs({ limit = 2 } = {}) {
-    if (asyncQueryRunning) return { skipped: true, processed: 0 };
-    asyncQueryRunning = true;
-    let processed = 0;
-    try {
-        for (let index = 0; index < Math.min(Math.max(Number(limit) || 2, 1), 8); index += 1) {
-            const job = await claimAsyncQueryJob();
-            if (!job) break;
-            try {
-                await executeAsyncQueryJob(job);
-            } catch (error) {
-                const now = getBeijingTimestamp();
-                const retry = Number(job.attempts || 0) < Number(job.max_attempts || 3);
-                const backoffMs = Math.min(60_000, 5_000 * (2 ** Math.max(0, Number(job.attempts || 1) - 1)));
-                const retryAt = getBeijingTimestamp(new Date(Date.now() + backoffMs));
-                await execute(`UPDATE analysis_query_jobs SET status = ?, progress = 0, last_error = ?, next_run_at = ?, locked_at = NULL, completed_at = CASE WHEN ? THEN NULL ELSE ?::timestamptz END, updated_at = ? WHERE id = ?`, [retry ? 'retry_wait' : 'failed', String(error?.message || '异步查询失败').slice(0, 1000), retry ? retryAt : now, retry, now, now, job.id]);
-            }
-            processed += 1;
-        }
-        return { skipped: false, processed };
-    } finally {
-        asyncQueryRunning = false;
-    }
-}
-
-function startAsyncQueryRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_ASYNC_QUERY_POLL_INTERVAL_MS'), setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout, processJobs = processAsyncQueryJobs } = {}) {
-    if (asyncQueryRunner) return asyncQueryRunner;
-    const safeInterval = Math.max(1_000, Math.min(Number(intervalMs) || 3_000, 60_000));
-    let timer = null;
-    let stopped = false;
-    let inFlight = null;
-    const tick = () => {
-        if (stopped || inFlight) return inFlight;
-        inFlight = Promise.resolve().then(processJobs).catch(() => {}).finally(() => {
-            inFlight = null;
-            if (!stopped) { timer = setTimeoutFn(tick, safeInterval); timer?.unref?.(); }
-        });
-        return inFlight;
-    };
-    timer = setTimeoutFn(tick, Math.min(safeInterval, 2_000));
-    timer?.unref?.();
-    const runner = { async stop() {
-        stopped = true;
-        if (timer) clearTimeoutFn(timer);
-        if (inFlight) await inFlight;
-        if (asyncQueryRunner === runner) asyncQueryRunner = null;
-    } };
-    asyncQueryRunner = runner;
-    return asyncQueryRunner;
+    return { model, relation: { ...relation, quality }, warnings: quality.warnings, columns: result.length ? Object.keys(result[0]) : [...leftColumns.slice(0, 40).map(column => `左_${column.name}`), ...rightColumns.slice(0, 40).map(column => `右_${column.name}`)], rows: result, rowCount: result.length, truncated };
 }
 
 module.exports = {
@@ -395,11 +251,9 @@ module.exports = {
     listDataModels,
     saveDataModel,
     addDataModelRelation,
+    previewDataModelRelation,
+    deleteDataModel,
+    deleteDataModelRelation,
     runDataModelJoin,
-    createAsyncQueryJob,
-    getAsyncQueryJob,
-    listAsyncQueryJobs,
-    cancelAsyncQueryJob,
-    processAsyncQueryJobs,
-    startAsyncQueryRunner
+    ...require('./async-query-jobs')
 };

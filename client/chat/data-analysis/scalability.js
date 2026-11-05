@@ -174,14 +174,16 @@
         const id = String(datasetId || '').trim();
         state.scalabilityDatasetId = id;
         renderScalability();
+        const current = app.captureRequest('scalability', () => state.scalabilityDatasetId);
         if (!id) { state.scalability = null; return null; }
         try {
             const data = await fetchJson(`${API}/datasets/${encodeURIComponent(id)}/scalability`);
-            if (String(state.scalabilityDatasetId) !== id) return null;
+            if (!current() || String(state.scalabilityDatasetId) !== id) return null;
             state.scalability = data;
             renderScalability();
             return data;
         } catch (error) {
+            if (!current()) return null;
             if (!options.silent) toast(error.message || '加载规模化数据管道失败', 'error');
             throw error;
         }
@@ -193,7 +195,7 @@
         if (!dataset || !file) return toast('请选择数据集和增量文件', 'warning');
         const form = new FormData();
         form.append('file', file);
-        const result = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/increments`, { method: 'POST', body: form });
+        const result = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/increments`, { method: 'POST', body: form, timeoutMs: 300000 });
         toast(`已追加 ${fmtNumber(result.appendedRows)} 行，生成版本 v${fmtNumber(result.sourceVersion)}`);
         const fileInput = document.getElementById('data-analysis-scale-increment-file');
         if (fileInput) fileInput.value = '';

@@ -44,6 +44,7 @@ function createSseResponseWriter(res, options = {}) {
     let pendingBytes = 0;
     const pendingChunks = [];
     let draining = false;
+    const drainWaiters = new Set();
 
     const isWritable = () => !closed && !res.writableEnded && !res.destroyed;
     const cleanup = () => {
@@ -53,6 +54,10 @@ function createSseResponseWriter(res, options = {}) {
         timer = null;
         pendingChunks.length = 0;
         pendingBytes = 0;
+        res.removeListener?.('drain', flushPending);
+        res.removeListener?.('finish', cleanup);
+        res.removeListener?.('close', cleanup);
+        for (const cancel of [...drainWaiters]) cancel();
     };
     const enqueue = chunk => {
         const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
@@ -93,7 +98,7 @@ function createSseResponseWriter(res, options = {}) {
                 flushPending();
                 return accepted;
             }
-            if (!res.write(value)) res.once?.('drain', flushPending);
+            res.write(value);
             lastActivityAt = Date.now();
             if (options.flush !== false) res.flush?.();
             return true;
@@ -121,12 +126,14 @@ function createSseResponseWriter(res, options = {}) {
                 res.removeListener?.('close', closedWait);
                 res.removeListener?.('finish', closedWait);
                 res.removeListener?.('error', closedWait);
+                drainWaiters.delete(closedWait);
             };
             const closedWait = () => { cleanupWait(); resolve(false); };
             const check = () => {
                 if (!isWritable()) return closedWait();
                 if (!pendingChunks.length && !res.writableNeedDrain) { cleanupWait(); resolve(true); }
             };
+            drainWaiters.add(closedWait);
             res.on?.('drain', check);
             res.once?.('close', closedWait);
             res.once?.('finish', closedWait);

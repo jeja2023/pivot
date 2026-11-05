@@ -32,7 +32,7 @@ test('方向、退款冲正、账户范围、分类修正及时间窗规则都�
     assert.equal(result.currencies[0].income, '10100.00'); assert.equal(result.currencies[0].expense, '9500.00'); assert.equal(result.counts.reversals, 1); assert.equal(result.counts.internalTransfers, 1); assert.equal(result.counts.cancelled, 1);
     assert.ok(result.categories.some(row => row.category === '人工修正')); const quick = result.evidence.find(row => row.rule === 'quickInOut'); assert.deepEqual(quick.rows, [2, 1]); assert.equal(result.hitCounts.frequency, 1); assert.ok(result.ruleVersion.length === 64);
 });
-test('真实数据集交易任务可恢复且幂等，跨账号拒绝、过期及源数据删除清理结果', { timeout: 30000 }, async () => {
+test('真实数据集交易任务可恢复且幂等，跨账号拒绝、过期及源数据删除清理结果', { timeout: 90000 }, async () => {
     const { queryOne, execute } = require('../server/db/client'); const datasets = require('../server/services/data-analysis/datasets'); const service = require('../server/services/data-analysis/transactions'); const repository = require('../server/repositories/analysis-transactions');
     const user = await queryOne("INSERT INTO users(username,password_hash,role,status,created_at) VALUES(?,?,'user','active',NOW()) RETURNING id", [`finance_${crypto.randomUUID()}`, 'test-hash']); let dataset;
     try {

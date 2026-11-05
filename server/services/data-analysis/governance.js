@@ -9,6 +9,8 @@ const { computeNextCronDate } = require('../cron-expression');
 const { readTypedEnv } = require('../../config/env-registry');
 const { canAccessSharedResource, normalizeShareScope, normalizeShareSettings } = require('../unit-visibility');
 const { filterExistingShareUserIds } = require('../share-targets');
+const { numericValueSql } = require('./numeric-values');
+const { listVisible } = require('../../repositories/analysis-assets');
 const {
     analysisId,
     datasetRoot,
@@ -257,18 +259,20 @@ function normalizeFormula(input = {}, columns = []) {
     if (/[;"'`\\]|--|\/\*/.test(expression)) throw invalid('计算表达式只能使用字段占位符、数字、括号、四则运算和允许的函数。');
     const allowedKeys = new Set(columns.map(column => String(column.key)));
     const dependencies = [];
-    const sqlExpression = expression.replace(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (_match, fieldKey) => {
+    const checkedExpression = expression.replace(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (_match, fieldKey) => {
         if (!allowedKeys.has(fieldKey)) throw invalid(`计算表达式引用了不存在的字段：${fieldKey}`);
         if (!dependencies.includes(fieldKey)) dependencies.push(fieldKey);
-        return `TRY_CAST(${sqlIdent(fieldKey)} AS DOUBLE)`;
+        return '0';
     });
     if (!dependencies.length) throw invalid('计算表达式至少需要引用一个字段，占位符格式为 {{c_1}}。');
-    if (/\{\{|\}\}/.test(sqlExpression)) throw invalid('计算字段占位符格式无效。');
-    if (!/^[\s0-9A-Za-z_+\-*/().,"]+$/.test(sqlExpression)) throw invalid('计算表达式包含不允许的字符。');
-    const words = sqlExpression.replace(/"c_[0-9]+"/g, '').match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+    if (/\{\{|\}\}/.test(checkedExpression)) throw invalid('计算字段占位符格式无效。');
+    if (!/^[\s0-9A-Za-z_+\-*/().,]+$/.test(checkedExpression)) throw invalid('计算表达式包含不允许的字符。');
+    const words = checkedExpression.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
     const allowedWords = new Set(['TRY_CAST', 'AS', 'DOUBLE', 'ABS', 'ROUND', 'COALESCE', 'NULLIF']);
     const unknown = words.find(word => !allowedWords.has(word.toUpperCase()));
     if (unknown) throw invalid(`计算表达式包含不允许的标识符：${unknown}`);
+    // 用户表达式完成白名单校验后，才展开由服务端生成的数值解析片段。
+    const sqlExpression = expression.replace(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (_match, fieldKey) => numericValueSql(sqlIdent(fieldKey)));
     return {
         name,
         expression,
@@ -401,11 +405,8 @@ function savedViewRecord(row) {
 async function listSavedViews(user, { datasetId = '', limit = 100 } = {}) {
     const userRecord = await resolveAnalysisUser(user);
     if (!userRecord) return [];
-    const rows = await query(`
-        SELECT * FROM analysis_saved_views
-        WHERE deleted_at IS NULL ${datasetId ? 'AND dataset_id = ?' : ''}
-        ORDER BY updated_at DESC LIMIT ?
-    `, datasetId ? [datasetId, Math.min(Math.max(Number(limit) || 100, 1), 200)] : [Math.min(Math.max(Number(limit) || 100, 1), 200)]);
+    if (datasetId) await getDatasetForUser(userRecord, datasetId);
+    const rows = await listVisible('analysis_saved_views', userRecord, { datasetId, limit });
     return rows.filter(row => canAccessSharedResource(row, userRecord, false)).map(row => ({ ...savedViewRecord(row), isOwner: Number(row.user_id) === Number(userRecord.id) }));
 }
 
@@ -483,8 +484,8 @@ function dashboardItemRecord(row) {
 }
 
 async function listDashboards(user, { limit = 100 } = {}) {
-    const rows = await query('SELECT * FROM analysis_dashboards WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?', [Math.min(Math.max(Number(limit) || 100, 1), 200)]);
-    return rows.filter(row => canAccessSharedResource(row, user, false)).map(row => ({ ...dashboardRecord(row), isOwner: Number(row.user_id) === Number(user.id) }));
+    const rows = await listVisible('analysis_dashboards', user, { limit });
+    return rows.filter(row => canAccessSharedResource(row, user, false)).map(row => ({ ...dashboardRecord(row), lastSnapshot: {}, isOwner: Number(row.user_id) === Number(user.id) }));
 }
 
 async function getDashboard(user, dashboardId, { write = false, includeItems = true } = {}) {
@@ -494,9 +495,14 @@ async function getDashboard(user, dashboardId, { write = false, includeItems = t
     if (includeItems) {
         const items = await query('SELECT * FROM analysis_dashboard_items WHERE dashboard_id = ? ORDER BY (position_json->>\'y\')::int ASC, created_at ASC', [row.id]);
         const visibleItems = [];
+        const versions = new Map();
         for (const item of items) {
             try {
-                await getDatasetForUser(user, item.dataset_id);
+                const dataset = await getDatasetForUser(user, item.dataset_id);
+                const allowed = await getAccessibleDatasetColumns(user, dataset);
+                // 快照可能来自任意查询或派生表达式，字段收紧后无法可靠地在旧结果上删列。
+                if (allowed.length !== parseJson(dataset.columns_json, []).length) throw invalid('快照来源字段受限。', 403);
+                versions.set(item.id, Number(dataset.source_version || 1));
                 visibleItems.push(dashboardItemRecord(item));
             } catch (_error) {
                 // 旧数据中的仪表盘若尚未同步共享数据集，不能通过快照绕过数据集权限。
@@ -504,9 +510,13 @@ async function getDashboard(user, dashboardId, { write = false, includeItems = t
             }
         }
         dashboard.items = visibleItems;
-        if (!dashboard.isOwner && Array.isArray(dashboard.lastSnapshot?.items)) {
+        if (Array.isArray(dashboard.lastSnapshot?.items)) {
             const hidden = new Set(visibleItems.filter(item => item.accessDenied).map(item => item.id));
-            dashboard.lastSnapshot = { ...dashboard.lastSnapshot, items: dashboard.lastSnapshot.items.map(item => hidden.has(item.itemId) ? { itemId: item.itemId, status: 'access_denied', error: '当前共享权限不允许查看该项目数据。' } : item) };
+            dashboard.lastSnapshot = { ...dashboard.lastSnapshot, items: dashboard.lastSnapshot.items.map(item => {
+                if (hidden.has(item.itemId) || !versions.has(item.itemId)) return { itemId: item.itemId, status: 'access_denied', error: '当前共享权限不允许查看该项目数据。' };
+                if (!item.sourceVersion || Number(item.sourceVersion) !== versions.get(item.itemId)) return { itemId: item.itemId, status: 'stale', error: '来源数据或字段规则已变化，请由仪表盘所有者刷新后查看。' };
+                return item;
+            }) };
         }
     }
     return { row, dashboard };
@@ -608,17 +618,23 @@ async function refreshDashboard({ user, dashboardId, scheduleId = null }) {
         const results = [];
         for (const item of dashboard.items || []) {
             try {
-                results.push({ itemId: item.id, title: item.title, status: 'succeeded', result: await executeDashboardItem(owner, item) });
+                const source = await getDatasetForUser(owner, item.datasetId);
+                const result = await executeDashboardItem(owner, item);
+                const latest = await getDatasetForUser(owner, item.datasetId);
+                if (Number(source.source_version || 1) !== Number(latest.source_version || 1)) throw invalid('刷新期间来源数据发生变化，请再次刷新。', 409);
+                results.push({ itemId: item.id, title: item.title, status: 'succeeded', sourceVersion: Number(source.source_version || 1), result });
             } catch (error) {
                 results.push({ itemId: item.id, title: item.title, status: 'failed', error: String(error?.message || '项目刷新失败').slice(0, 500) });
             }
         }
-        const snapshot = { refreshedAt: now, version: dashboard.version, items: results };
+        const failed = results.filter(item => item.status !== 'succeeded').length;
+        const status = failed ? (failed === results.length ? 'failed' : 'partial_success') : 'succeeded';
+        const snapshot = { refreshedAt: now, version: dashboard.version, status, items: results };
         await transaction(async trx => {
             await trx.execute('UPDATE analysis_dashboards SET last_snapshot_json = ?::jsonb, last_refreshed_at = ?, updated_at = ? WHERE id = ?', [JSON.stringify(snapshot), now, now, row.id]);
-            await trx.execute(`UPDATE analysis_refresh_runs SET status = 'succeeded', result_json = ?::jsonb, completed_at = ?, updated_at = ? WHERE id = ?`, [JSON.stringify(snapshot), now, now, runId]);
+            await trx.execute(`UPDATE analysis_refresh_runs SET status = ?, result_json = ?::jsonb, completed_at = ?, updated_at = ? WHERE id = ?`, [status, JSON.stringify(snapshot), now, now, runId]);
         });
-        return { runId, dashboardId: row.id, snapshot };
+        return { runId, dashboardId: row.id, status, snapshot };
     } catch (error) {
         await execute(`UPDATE analysis_refresh_runs SET status = 'failed', error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`, [String(error?.message || '仪表盘刷新失败').slice(0, 1000), sharedTimestamp(), sharedTimestamp(), runId]);
         throw error;
@@ -695,7 +711,8 @@ async function evaluateMetric(user, datasetId, config = {}) {
         ? String(config.aggregation).toLowerCase()
         : 'count';
     if (aggregation !== 'count' && !columns.some(column => column.key === fieldKey)) throw invalid('指标字段不存在。');
-    const expression = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(TRY_CAST(${sqlIdent(fieldKey)} AS DOUBLE))`;
+    const expression = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(fieldKey))})`;
+    if (fieldKey) await assertDatasetFieldsAccessible(user, dataset, [fieldKey]);
     const { parquetPath } = getDatasetPaths(dataset);
     const rows = await withAnalysisSlot(async () => {
         const { instance, connection } = await createDuckConnection();
@@ -798,12 +815,14 @@ async function refreshSchedule(schedule) {
         const result = schedule.dashboard_id
             ? await refreshDashboard({ user: owner, dashboardId: schedule.dashboard_id, scheduleId: schedule.id })
             : { datasetId: schedule.dataset_id, alerts: await evaluateAlertRulesForDataset(owner, schedule.dataset_id) };
+        const status = result.status || 'succeeded';
+        const incomplete = status !== 'succeeded';
         await execute(`
             UPDATE analysis_refresh_schedules
-            SET next_run_at = ?, last_run_at = ?, last_status = 'succeeded', last_error = '', failure_count = 0, updated_at = ?
+            SET next_run_at = ?, last_run_at = ?, last_status = ?, last_error = ?, failure_count = CASE WHEN ? THEN failure_count + 1 ELSE 0 END, updated_at = ?
             WHERE id = ?
-        `, [next, sharedTimestamp(), sharedTimestamp(), schedule.id]);
-        return { id: schedule.id, status: 'succeeded', result };
+        `, [next, sharedTimestamp(), status, incomplete ? '部分或全部项目刷新失败，请查看仪表盘结果。' : '', incomplete, sharedTimestamp(), schedule.id]);
+        return { id: schedule.id, status, result };
     } catch (error) {
         await execute(`
             UPDATE analysis_refresh_schedules

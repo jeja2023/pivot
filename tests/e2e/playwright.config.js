@@ -17,6 +17,6 @@ module.exports = {
         env: { PIVOT_TEST_PG_SYNC: 'false' },
         url: baseURL,
         reuseExistingServer: process.env.PIVOT_E2E_ISOLATED !== 'true',
-        timeout: 60_000
+        timeout: Math.min(300_000, Math.max(60_000, Number(process.env.PIVOT_E2E_WEBSERVER_TIMEOUT_MS) || 60_000))
     }
 };

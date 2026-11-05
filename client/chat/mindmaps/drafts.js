@@ -5,11 +5,26 @@
     function open() {
         if (connection) return connection;
         connection = new Promise((resolve, reject) => {
-            const request = window.indexedDB.open('pivot-mindmap-drafts', 1);
+            let settled = false;
+            const fail = () => {
+                if (settled) return;
+                settled = true; clearTimeout(timer);
+                reject(new Error('本地草稿暂时不可用，请关闭其他旧页面后重试，或手动保存并导出备份。'));
+            };
+            const timer = setTimeout(fail, 10000);
+            let request;
+            try { request = window.indexedDB.open('pivot-mindmap-drafts', 1); }
+            catch (_) { fail(); return; }
             request.onupgradeneeded = () => request.result.createObjectStore('drafts', { keyPath: 'key' });
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => { connection = null; reject(new Error('本地草稿不可用，请手动保存并导出备份。')); };
-        });
+            request.onsuccess = () => {
+                if (settled) { request.result.close(); return; }
+                settled = true; clearTimeout(timer);
+                request.result.onversionchange = () => { request.result.close(); connection = null; };
+                resolve(request.result);
+            };
+            request.onerror = fail;
+            request.onblocked = fail;
+        }).catch(error => { connection = null; throw error; });
         return connection;
     }
     function key(userId, id) { return `${location.origin}:${userId}:${id}`; }
@@ -18,7 +33,9 @@
         return new Promise((resolve, reject) => {
             const transaction = db.transaction('drafts', mode); const result = run(transaction.objectStore('drafts'));
             transaction.oncomplete = () => resolve(result?.result);
-            transaction.onerror = () => reject(new Error('本地草稿写入失败，请手动保存或导出备份。'));
+            const failure = () => reject(new Error('本地草稿操作中断，当前页面内容仍保留，请手动保存或导出备份。'));
+            transaction.onerror = failure;
+            transaction.onabort = failure;
         });
     }
     async function writeRecord(userId, id, document, versionId) {

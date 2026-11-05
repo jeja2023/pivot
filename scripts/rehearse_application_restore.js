@@ -65,7 +65,8 @@ async function main() {
     }
     async function start() {
         child = spawn(process.execPath, [path.join(__dirname, '../server/index.js')], { env, cwd: path.resolve(__dirname, '..'), stdio: 'ignore', windowsHide: true });
-        const deadline = Date.now() + 60000;
+        const startupTimeoutMs = Math.min(300000, Math.max(60000, Number(process.env.PIVOT_RESTORE_STARTUP_TIMEOUT_MS) || 60000));
+        const deadline = Date.now() + startupTimeoutMs;
         while (Date.now() < deadline) {
             if (child.exitCode !== null) throw new Error('测试服务启动失败。');
             try { if ((await fetch(`${base}/api/health`)).ok) return; } catch (_) {}

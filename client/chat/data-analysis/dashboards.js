@@ -6,9 +6,11 @@
     const fetchJson = (...args) => app.fetchJson(...args);
     const toast = (...args) => app.toast(...args);
     const guardButton = (...args) => app.guardButton(...args);
+    let dashboardSequence = 0;
+    let listSequence = 0;
     const viewTypeLabel = value => ({ chart: '图表', pivot: '透视', query: '查询' }[String(value || '')] || '未知类型');
     const scheduleFrequencyLabel = value => ({ interval: '按间隔', cron: '按计划表达式', manual: '手动' }[String(value || '')] || '未知频率');
-    const scheduleStatusLabel = value => ({ succeeded: '成功', failed: '失败', never: '尚未运行' }[String(value || '')] || '等待执行');
+    const scheduleStatusLabel = value => ({ succeeded: '成功', partial_success: '部分完成', failed: '失败', never: '尚未运行' }[String(value || '')] || '等待执行');
     const aggregationLabel = value => ({ sum: '求和', count: '计数', avg: '平均', min: '最小', max: '最大' }[String(value || '')] || '计数');
 
     function activeDashboard() {
@@ -126,6 +128,8 @@
 
     async function loadDashboard(dashboardId, { silent = false } = {}) {
         const id = String(dashboardId || '').trim();
+        const sequence = ++dashboardSequence;
+        state.activeDashboardId = id; state.activeDashboard = null; renderDashboards();
         if (!id) { state.activeDashboardId = ''; state.activeDashboard = null; renderDashboards(); return; }
         try {
             const [dashboardData, schedules, alerts] = await Promise.all([
@@ -133,22 +137,25 @@
                 fetchJson(`${API}/refresh-schedules?dashboardId=${encodeURIComponent(id)}`),
                 fetchJson(`${API}/alerts`)
             ]);
+            if (sequence !== dashboardSequence || state.activeDashboardId !== id) return;
             state.activeDashboardId = id;
             state.activeDashboard = dashboardData.dashboard || null;
             state.refreshSchedules = schedules.schedules || [];
             state.alerts = alerts.alerts || [];
             renderDashboards();
         } catch (error) {
-            if (!silent) toast(error?.message || '加载仪表盘失败', 'error');
+            if (sequence === dashboardSequence && !silent) toast(error?.message || '加载仪表盘失败', 'error');
         }
     }
 
     async function loadDashboards({ keepActive = true, silent = false } = {}) {
+        const sequence = ++listSequence;
         try {
             const [dashboardsData, viewsData] = await Promise.all([
                 fetchJson(`${API}/dashboards`),
                 fetchJson(`${API}/views?limit=200`)
             ]);
+            if (sequence !== listSequence) return;
             state.dashboards = dashboardsData.dashboards || [];
             state.savedViews = viewsData.views || state.savedViews || [];
             const targetId = keepActive && state.dashboards.some(item => item.id === state.activeDashboardId)
@@ -157,7 +164,7 @@
             if (targetId) await loadDashboard(targetId, { silent: true });
             else { state.activeDashboardId = ''; state.activeDashboard = null; renderDashboards(); }
         } catch (error) {
-            if (!silent) toast(error?.message || '加载仪表盘列表失败', 'error');
+            if (sequence === listSequence && !silent) toast(error?.message || '加载仪表盘列表失败', 'error');
         }
     }
 

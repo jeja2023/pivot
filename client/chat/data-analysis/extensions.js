@@ -3,6 +3,7 @@
     if (!app) throw new Error('数据分析上下文模块未加载');
 
     function onDataAnalysisTabActivated(tab) {
+        if (tab !== 'query') app.stopAsyncQueryPolling?.();
         if (tab === 'governance') {
             if (app.state.governanceDatasetId) {
                 app.loadGovernance?.(app.state.governanceDatasetId, { silent: true });

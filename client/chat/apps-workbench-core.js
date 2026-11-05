@@ -514,6 +514,7 @@ function showAppsHome() {
     document.getElementById('mindmaps-view')?.classList.add('hidden');
     setStoredAppsActiveApp('');
     window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
+    window.Pivot.legacy.PivotDataAnalysis?.stopAsyncQueryPolling?.();
     document.getElementById('apps-home-view')?.classList.remove('hidden');
     document.getElementById('official-writing-view')?.classList.add('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -536,6 +537,7 @@ async function showOfficialWritingApp() {
         document.getElementById(id)?.setAttribute('contenteditable', 'plaintext-only');
     }
     window.Pivot.legacy.PivotDataAnalysis?.resetAiWorkspace?.();
+    window.Pivot.legacy.PivotDataAnalysis?.stopAsyncQueryPolling?.();
     document.getElementById('apps-home-view')?.classList.add('hidden');
     document.getElementById('official-writing-view')?.classList.remove('hidden');
     document.getElementById('data-analysis-view')?.classList.add('hidden');
@@ -616,6 +618,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-collab.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-templates.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-presenter.js');
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-persistence.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations.js');
     const loaded = window.Pivot?.moduleApi?.('apps.presentations');
     if (typeof loaded?.showPresentationsApp !== 'function') throw new Error('PPT 制作模块未能完成加载，请刷新页面后重试。');

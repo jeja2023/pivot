@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { query, queryOne, execute } = require('../../db/client');
 const { profileViaSql } = require('./profile');
+const { numericValueSql } = require('./numeric-values');
 const {
     MAX_PREVIEW_ROWS,
     analysisId,
@@ -74,9 +75,7 @@ function cleanMissingExpr(expression) {
 }
 
 function numericExpr(expression) {
-    const text = `trim(CAST(${expression} AS VARCHAR))`;
-    const cleaned = `regexp_replace(${text}, '[,￥¥$%[:space:]]', '', 'g')`;
-    return `CASE WHEN regexp_matches(${text}, '%$') THEN TRY_CAST(${cleaned} AS DOUBLE) / 100 ELSE TRY_CAST(${cleaned} AS DOUBLE) END`;
+    return numericValueSql(expression);
 }
 
 function dateExpr(expression) {

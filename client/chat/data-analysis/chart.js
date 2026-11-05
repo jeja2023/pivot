@@ -70,6 +70,7 @@
             return;
         }
         await guardButton('data-analysis-build-chart', '生成中…', async () => {
+            const current = app.captureRequest('chart');
             syncChartAggregationControls('build', true);
             syncChartTypeControls('build');
             const sortValue = document.getElementById('data-analysis-chart-sort')?.value || 'value_desc';
@@ -91,6 +92,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            if (!current()) return;
             state.chart = data.chart;
             renderChart();
         });
@@ -99,6 +101,7 @@
     function renderChart() {
         const box = document.getElementById('data-analysis-chart-result');
         if (!box) return;
+        window.Pivot.legacy.teardownPivotCharts?.(box);
         if (!state.chart) {
             const suggestions = state.summary?.suggestions || [];
             PivotSafeHtml.setHtml(box, suggestions.length ? `

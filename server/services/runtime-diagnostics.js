@@ -57,8 +57,7 @@ function inFlightRequestMiddleware(req, res, next) {
         if (remaining > 0) inFlightByRoute.set(key, remaining);
         else inFlightByRoute.delete(key);
     };
-    res.once('finish', done);
-    res.once('close', done);
+    require('./http-response-lifecycle').onResponseSettled(res, done);
     next();
 }
 
@@ -259,8 +258,7 @@ function apiRequestWatchdog(req, res, next) {
     }, watchdogMs);
     timer.unref?.();
     const clear = () => clearTimeout(timer);
-    res.once('finish', clear);
-    res.once('close', clear);
+    require('./http-response-lifecycle').onResponseSettled(res, clear);
     next();
 }
 

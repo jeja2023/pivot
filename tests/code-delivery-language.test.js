@@ -23,6 +23,10 @@ test('代码文件必须经过安全格式白名单并保留源代码空白', ()
     assert.equal(result.filename, '五子棋.py');
     assert.equal(result.content, '\nprint("黑白棋")\n');
     assert.equal(normalizeCodeFormat('JavaScript', ''), 'js');
+    const mermaid = normalizeCodeFile({ filename: '流程图源码.txt', language: 'mermaid', content: 'flowchart TD\nA-->B\n' });
+    assert.equal(mermaid.format, 'txt');
+    assert.equal(mermaid.content, 'flowchart TD\nA-->B\n');
+    assert.throws(() => normalizeCodeFile({ filename: '流程图.svg', language: 'mermaid', content: 'flowchart TD\nA-->B' }), /扩展名/);
     assert.throws(() => normalizeCodeFile({ filename: '危险.exe', language: 'python', content: 'x' }), /格式|扩展名/);
 });
 
