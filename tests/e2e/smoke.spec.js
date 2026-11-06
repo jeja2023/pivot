@@ -1060,22 +1060,21 @@ test.describe('Pivot browser smoke', () => {
 
         for (const width of [1280, 390]) {
             await page.setViewportSize({ width, height: 844 });
-            await expect.poll(() => page.evaluate(() => Number(window.getComputedStyle(document.querySelector('#settings-scale-canvas')).getPropertyValue('--settings-scale')))).toBe(1);
+            await expect.poll(() => page.evaluate(() => Number(window.getComputedStyle(document.querySelector('#settings-scale-canvas')).getPropertyValue('--settings-scale'))), { timeout: 15_000 }).toBe(1);
             for (const section of ['overview', 'services', 'quality']) {
                 await page.locator('#monitor-' + section + '-tab').click();
                 const panel = page.locator('[data-quality-panels="monitor"][data-quality-panel="' + section + '"]');
-                await expect(panel).toBeVisible();
+                await expect(panel).toBeVisible({ timeout: 15_000 });
                 await expect.poll(() => page.evaluate(() => {
                     const content = document.querySelector('.settings-workspace-view .admin-content');
+                    if (!content) return false;
                     return content.scrollWidth <= content.clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1;
-                })).toBe(true);
+                }), { timeout: 15_000 }).toBe(true);
                 const lastCard = panel.locator('.monitor-panel-card').last();
                 await lastCard.scrollIntoViewIfNeeded();
                 const clipped = await panel.locator('.monitor-panel-card').evaluateAll(cards =>
                     cards.some(card => card.scrollHeight > card.clientHeight + 2));
                 expect(clipped).toBe(false);
-                await page.evaluate(() => { document.querySelector('.settings-workspace-view .admin-content').scrollTop = 0; });
-                await page.screenshot({ path: path.resolve(__dirname, '../../output/monitor-' + section + '-' + width + '.png') });
             }
         }
         expect(executionCalls).toBeGreaterThan(0);

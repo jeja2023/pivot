@@ -1,3 +1,14 @@
+## [v0.7.106] - 2026-11-06
+
+### 系统监控响应式宽度约束与 E2E 轮询容差优化
+
+- 为设置工作区内 `.table-container`、`.route-feedback-table-wrap` 及 `.monitor-routes-table-wrap` 补齐 `min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box;` 约束与横向滚动隔离，解决超宽表格在 flex 布局下因默认 `min-width: auto` 撑大页面内容可用宽度的问题。
+- 修复 `.route-feedback-filter-bar` 缺少 `box-sizing: border-box; min-width: 0; max-width: 100%;` 的问题，消除移动端（390px 视口）下内边距与边框造成的轻微容器溢出。
+- 对系统监控各子面板（`#tab-content-monitor [role="tabpanel"]`、`.monitor-panels`、`.monitor-panel-card`）强化宽度约束与容器裁剪保护，并重新编译打包设置工作区 CSS 样式产物。
+- 优化 `smoke.spec.js` 中系统监控缩放比例与全端无横向溢出断言的 `expect.poll` 超时等待至 `15_000ms`，提升高负载持续集成环境下的测试稳定性。
+
+详情见 [v0.7.106 发布记录](docs/releases/v0.7.106-系统监控响应式宽度约束与E2E轮询容差优化.md)。
+
 ## [v0.7.105] - 2026-11-06
 
 ### 系统监控移动端弹窗规范与 E2E 并发槽修复

@@ -6,6 +6,7 @@
     gap: 10px;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     height: auto;
     max-height: none;
     box-sizing: border-box;
@@ -17,11 +18,15 @@
     display: none !important;
 }
 
-#tab-content-monitor [role="tabpanel"] {
+#tab-content-monitor [role="tabpanel"],
+.settings-workspace-view #tab-content-monitor [role="tabpanel"] {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     height: auto;
 }
 
@@ -245,11 +250,15 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
     gap: 10px;
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .settings-workspace-view #tab-content-monitor .monitor-panel-card {
     min-width: 0;
+    max-width: 100%;
     height: auto;
     max-height: none;
     padding: 12px 14px;
@@ -260,6 +269,9 @@
     text-align: left;
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
     box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .settings-workspace-view #tab-content-monitor .monitor-panel-card:hover {
@@ -783,9 +795,19 @@
     }
 }
 
+#tab-content-monitor .table-container,
+.settings-workspace-view #tab-content-monitor .table-container {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-x: auto !important;
+}
+
 #tab-content-monitor .monitor-routes-table-wrap {
     margin-top: 6px;
     width: 100%;
+    min-width: 0;
     max-width: 100%;
     overflow-x: auto;
     border: 1px solid var(--border);
