@@ -39,9 +39,9 @@ test('工程边界集和保留验证集分别冻结，包含反向断言且不�
     const manifest = require('./fixtures/chat-intent-evaluation-manifest.v2.json');
     const ids = new Set();
     for (const entry of manifest.suites) {
-        const bytes = fs.readFileSync(path.join(__dirname, 'fixtures', entry.file));
-        assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), entry.sha256, entry.file);
-        const fixture = JSON.parse(bytes);
+        const text = fs.readFileSync(path.join(__dirname, 'fixtures', entry.file), 'utf8').replace(/\r\n/g, '\n');
+        assert.equal(crypto.createHash('sha256').update(text).digest('hex'), entry.sha256, entry.file);
+        const fixture = JSON.parse(text);
         assert.equal(fixture.cases.length, entry.caseCount);
         for (const item of fixture.cases) {
             assert.equal(ids.has(item.id), false, item.id);

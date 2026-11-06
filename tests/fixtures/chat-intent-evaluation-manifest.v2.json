@@ -65,13 +65,13 @@
       "file": "chat-intent-cases.v8.json",
       "role": "boundary",
       "caseCount": 56,
-      "sha256": "f3181dd6dcc1ee925eda69fd789c926f1a5afb55c29634d64c70c76e96de1f91"
+      "sha256": "ac8832ad0872aa9b10dc4430a64669347f326dbece4b61b73ee1f471c0c1ab9e"
     },
     {
       "file": "chat-intent-holdout-cases.v2.json",
       "role": "holdout",
       "caseCount": 12,
-      "sha256": "79474958e0fd9431806f79d320acdce7481c6f6edbbd5b9097ec04c3eec58b7a"
+      "sha256": "3402ad81357874f01df948c2a85fe2a518077d32343ae997a5bcfeaeee9bbe13"
     }
   ]
 }

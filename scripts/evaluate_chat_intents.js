@@ -22,8 +22,8 @@ async function main() {
     const modelId = Number(value('--model-id'));
     if (!args.includes('--user-id') || !args.includes('--model-id') || !userId || !modelId) throw new Error('请指定 --user-id 和 --model-id。仅对给定账号可用模型运行公开合成问题，不执行业务工具。');
     for (const entry of manifest.suites) {
-        const bytes = await fs.readFile(path.resolve(__dirname, '../tests/fixtures', entry.file));
-        if (crypto.createHash('sha256').update(bytes).digest('hex') !== entry.sha256) throw new Error('评测集摘要与冻结清单不一致，请先复核并创建新版本。');
+        const text = (await fs.readFile(path.resolve(__dirname, '../tests/fixtures', entry.file), 'utf8')).replace(/\r\n/g, '\n');
+        if (crypto.createHash('sha256').update(text).digest('hex') !== entry.sha256) throw new Error('评测集摘要与冻结清单不一致，请先复核并创建新版本。');
     }
     const user = await queryOne("SELECT id,role,unit FROM users WHERE id = ? AND status = 'active'", [userId]);
     const model = user && await getRunnableModelForUserAsync(modelId, user);
