@@ -1023,6 +1023,8 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#monitor-failure-details').scrollIntoViewIfNeeded();
         await expect(page.locator('#monitor-failure-details').getByRole('button', { name: '下一页' })).toBeVisible();
         await page.locator('#monitor-failure-details').screenshot({ path: 'output/intent-diagnostics/monitor-mobile.png' });
+        await page.locator('#monitor-failure-modal [data-monitor-failure-close]').first().click();
+        await expect(page.locator('#monitor-failure-modal')).toHaveClass(/hidden/);
         await page.setViewportSize({ width: 1280, height: 800 });
         state = 'empty';
         await page.locator('#monitor-refresh-btn').click();

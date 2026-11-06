@@ -28,7 +28,7 @@ async function reviewPresentationSlide(content, user, options = {}, deps = {}) {
     if (!deps.callModel) await recordAgentModelUsage(user, model, messages, output, 'presentation_visual_review', options.runId || '', { usageRef, budget: options.budget });
     options.signal?.throwIfAborted();
     const parsed = typeof output === 'string' ? JSON.parse(output.replace(/^```(?:json)?\s*|\s*```$/g, '')) : output;
-    if (!parsed || !Array.isArray(parsed.issues) || parsed.issues.length > 40) throw new Error('视觉检查响应无效，不能标记为已通过，请重试。');
+    if (usageRef.truncated || !parsed || !Array.isArray(parsed.issues) || parsed.issues.length > 40) throw new Error('视觉检查响应无效，不能标记为已通过，请重试。');
     const ids = new Set(slide.elements.map(element => element.id));
     const issues = parsed.issues.map((issue, i) => {
         if (!['blocking', 'warning', 'info'].includes(issue.level) || typeof issue.message !== 'string' || !issue.message.trim() || issue.message.length > 1000 || String(issue.suggestion || '').length > 1600

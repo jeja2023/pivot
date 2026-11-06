@@ -312,6 +312,7 @@
         startPresentationSync();
         startPresentationRealtime();
         collab()?.loadComments(id);
+        void window.Pivot?.moduleApi?.('apps.presentations.design')?.restoreDeckTask(state, { requestJson, activeContent, renderIssues, switchPanel, toast, recordHistory, renderEditor });
     }
     async function closeEditor() {
         const sequence = state.openSequence = (state.openSequence || 0) + 1;
@@ -513,11 +514,7 @@
     function closePresenterMode() { return presenter()?.closePresenterMode?.(state); }
     function movePresenterSlide(delta) { return presenter()?.movePresenterSlide?.(delta, state, { syncRemoteSlide }); }
     function renderIssues() {
-        const list = byId('presentation-issues-list'); if (!list) return;
-        list.replaceChildren(); const validation = state.active?.validation || { issues: [] }; const issues = validation.issues || [];
-        const reviewNote = document.createElement('div'); reviewNote.className = 'presentation-empty-note'; reviewNote.textContent = window.Pivot?.moduleApi?.('apps.presentations.design')?.reviewMessage(state) || '尚未进行视觉模型复核。'; list.appendChild(reviewNote);
-        if (!issues.length) { const empty = document.createElement('div'); empty.className = 'presentation-empty-note'; empty.textContent = '暂无问题。导出前仍可再次执行质量检查。'; list.appendChild(empty); return; }
-        issues.forEach(issue => { const item = document.createElement('button'); item.type = 'button'; item.className = `presentation-issue is-${issue.level || 'info'}`; item.dataset.presentationIssueSlide = issue.slideId || ''; item.dataset.presentationIssueElement = issue.elementId || ''; const title = document.createElement('strong'); title.textContent = issue.message; const tip = document.createElement('span'); tip.textContent = issue.suggestion || ''; item.append(title, tip); list.appendChild(item); });
+        window.Pivot?.moduleApi?.('apps.presentations.design')?.renderDesignIssues(state);
     }
     async function loadVersions() { return presenter()?.loadVersions?.(state, { formatTime }); }
     async function restoreVersion(version) { return presenter()?.restoreVersion?.(version, state, { saveActive, resetHistory, renderEditor, formatTime, toast }); }
@@ -693,7 +690,7 @@ function setSelectedImageAsCover() {
             const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, templateVersion: request.templateVersion, content: data.proposal.presentation, planApproval: { outline } }));
             byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id);
             const warnings = Array.isArray(data.proposal?.warnings) ? data.proposal.warnings.filter(Boolean) : [];
-            toast(warnings.length ? 'AI 初稿已生成；' + warnings.length + ' 项数据或元素提示已安全处理，可在画布中补充。' : 'AI 初稿已生成，可继续在画布中编辑。', warnings.length ? 'warning' : 'success');
+            toast(window.Pivot.moduleApi('apps.presentations.design').generationMessage(data.proposal), warnings.length ? 'warning' : 'success');
         } catch (error) {
             if (isAiAbort(error, controller)) { toast('AI 页面生成已取消。', 'warning'); return; }
             throw error;
@@ -935,6 +932,7 @@ function setSelectedImageAsCover() {
         if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-ai-layout-variants-btn')) { presenter()?.generateLayoutVariants?.(state, { renderEditor, toast }); return; }
         if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
         if (event.target.closest('#presentation-visual-review-btn')) { runVisualReview().catch(error => toast(error.message, 'error')); return; }
+        if (event.target.closest('#presentation-deck-review-btn') || event.target.closest('#presentation-deck-layout-btn')) { void window.Pivot?.moduleApi?.('apps.presentations.design')?.startDeckTask(state, { requestJson, activeContent, renderIssues, switchPanel, toast, recordHistory, renderEditor, saveActive, requirePresentationAiModel }, event.target.closest('#presentation-deck-layout-btn') ? 'layout' : 'visual'); return; }
         if (event.target.closest('#presentation-ai-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }
             if (event.target.closest('#presentation-create-cancel-btn') || event.target.id === 'presentation-create-modal') { closeCreateModal(); return; }
         if (event.target.closest('#presentation-create-stop-btn') || event.target.closest('#presentation-outline-stop-btn')) { if (abortAiRequest()) toast('正在停止 AI 任务…', 'warning'); return; }

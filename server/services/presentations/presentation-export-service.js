@@ -124,6 +124,8 @@ function createExportService(deps) {
         const irObject = await putBuffer({ buffer: contentBuffer, mimeType: 'application/json; charset=utf-8', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_ir' });
         const assets = await resolvePresentationAssets(user, exportContent, { presentationId: current.id });
         const rendered = await renderPresentation(exportContent, normalizedFormat, { ...normalizedOptions, assetResolver: async ref => assets.get(ref) || null });
+        const exportChecks = normalizedFormat === 'pptx' ? await require('./presentation-export-verification').verifyPptxExport(rendered.buffer, exportContent) : null;
+        if (exportChecks?.status === 'blocked') throw publicError('PPTX 导出内容未通过完整性核验，请查看源稿后重试。', 422, 'PRESENTATION_EXPORT_CONTENT_INVALID');
         taskContext.signal?.throwIfAborted();
         const output = await putBuffer({ buffer: rendered.buffer, mimeType: rendered.mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: `presentation_${normalizedFormat}` });
         const runId = taskContext.runId || `standalone-artifact:${artifact.id}`;
@@ -155,7 +157,7 @@ function createExportService(deps) {
             eventType: 'presentation_render', pathHint: `${current.title}.${normalizedFormat}`, contentDigest: output.contentDigest,
             decisionReason: validationDecision
         });
-        return { rendition, reused: false, validation: exportValidation, durationMs: rendered.durationMs };
+        return { rendition, reused: false, validation: exportValidation, exportChecks, durationMs: rendered.durationMs };
     }
 
     async function listPresentationExports(user, clientId) {

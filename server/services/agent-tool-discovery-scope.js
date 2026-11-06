@@ -3,7 +3,7 @@
 const { evaluateToolPolicy, normalizeAllowlist, resolveSkillPolicyContext } = require('./agent-policy');
 const { isDiscoveryMetaTool } = require('./agent-tool-progressive-discovery');
 const { narrowDatabaseConnections } = require('./agent-tool-identities');
-const INTERNAL_RENDER_TOOLS = new Set(['presentation.create', 'presentation.export', 'presentation.relayout', 'diagram.render_svg']);
+const INTERNAL_RENDER_TOOLS = new Set(['presentation.create', 'presentation.export', 'presentation.relayout', 'presentation.review_deck', 'diagram.render_svg']);
 
 function runMetadata(run = {}) {
     if (run.metadata && typeof run.metadata === 'object') return run.metadata;

@@ -10,7 +10,7 @@ const fontkit = require('@pdf-lib/fontkit');
 const sharp = require('sharp');
 const { normalizePresentation } = require('./presentation-schema');
 
-const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.102';
+const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.104';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_MIME = 'application/pdf';
 const PNG_MIME = 'image/png';

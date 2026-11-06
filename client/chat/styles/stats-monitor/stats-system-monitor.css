@@ -295,6 +295,23 @@
     border: 1px solid var(--border);
 }
 
+#tab-content-monitor .monitor-panel-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#tab-content-monitor .monitor-failure-open-btn,
+#btn-monitor-open-failure-modal {
+    height: 26px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: 1;
+    border-radius: var(--radius-sm, 6px);
+}
+
 #tab-content-monitor .monitor-panel-card h5 {
     margin: 8px 0 4px;
     font-size: 0.78rem;
@@ -309,8 +326,13 @@
     line-height: 1.35;
 }
 
-#tab-content-monitor .monitor-decision-failures-table .col-index { width: 56px; }
-#tab-content-monitor .monitor-decision-failures-table .col-count { width: 90px; }
+#tab-content-monitor .monitor-decision-failures-table .col-index {
+    width: 56px;
+}
+
+#tab-content-monitor .monitor-decision-failures-table .col-count {
+    width: 90px;
+}
 
 /* 键值行排版 */
 #tab-content-monitor .monitor-list {
@@ -360,7 +382,7 @@
 }
 
 #tab-content-monitor .monitor-row.is-warning strong,
-#tab-content-monitor .monitor-split-row > .is-warning strong {
+#tab-content-monitor .monitor-split-row>.is-warning strong {
     color: var(--warning);
 }
 
@@ -378,7 +400,7 @@
     grid-template-columns: 1fr;
 }
 
-#tab-content-monitor .monitor-split-row > div {
+#tab-content-monitor .monitor-split-row>div {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -386,7 +408,7 @@
     gap: 6px;
 }
 
-#tab-content-monitor .monitor-split-row > div > span {
+#tab-content-monitor .monitor-split-row>div>span {
     flex: 0 1 auto;
 }
 
@@ -749,6 +771,7 @@
         box-shadow: 0 0 0 3px var(--primary);
         border-color: var(--primary);
     }
+
     100% {
         box-shadow: var(--shadow-sm);
         border-color: var(--border);
@@ -927,60 +950,304 @@
         grid-template-columns: minmax(0, 1fr);
         gap: 8px;
     }
+
     #tab-content-monitor .monitor-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
     }
+
     #tab-content-monitor .monitor-card {
         padding: 6px 8px;
         min-height: 54px;
     }
+
     .settings-workspace-view #tab-content-monitor .monitor-panel-card {
         padding: 10px 12px;
     }
+
     #tab-content-monitor .settings-page-head {
         align-items: flex-start;
         flex-direction: column;
         gap: 8px;
     }
+
     #tab-content-monitor .settings-page-actions.monitor-head-actions {
         width: 100%;
         justify-content: flex-start;
         gap: 8px;
     }
+
     #tab-content-monitor .monitor-head-meta {
         width: 100%;
         justify-content: space-between;
         gap: 6px;
     }
+
     #tab-content-monitor .monitor-split-row,
     #tab-content-monitor .monitor-split-row.is-three {
         grid-template-columns: 1fr;
         gap: 6px;
     }
+
     #tab-content-monitor .monitor-gpu-cards-wrap {
         grid-template-columns: 1fr;
         gap: 6px;
     }
+
     #tab-content-monitor .monitor-row {
         gap: 6px;
         padding: 4px;
     }
+
     #tab-content-monitor .monitor-observability-row {
         flex-direction: column;
         gap: 4px;
     }
+
     #tab-content-monitor .monitor-observability-item-right {
         flex-direction: row;
         justify-content: space-between;
         text-align: left;
     }
 }
+
 .monitor-decision-details-table {
-    min-width: 760px;
+    min-width: 820px;
     table-layout: fixed;
 }
+
+.monitor-decision-details-table th.col-index,
+.monitor-decision-details-table td.col-index {
+    width: 56px;
+    text-align: center;
+}
+
 .monitor-decision-details-table td {
     white-space: normal;
     overflow-wrap: anywhere;
+}
+
+/* 对话质量：任务核验与决策失败明细弹窗全局统一样式 */
+#monitor-failure-modal.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 5200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+#monitor-failure-modal.hidden {
+    display: none !important;
+}
+
+.monitor-failure-modal {
+    width: min(1040px, calc(100vw - 32px));
+    max-height: min(840px, calc(100dvh - 36px));
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    overflow: hidden;
+    text-align: left;
+    border-radius: var(--radius-lg, 12px);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-lg, 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1));
+    background: var(--surface, #ffffff);
+}
+
+.monitor-failure-details-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.monitor-failure-modal-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 22px 12px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+}
+
+.monitor-failure-modal-title-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.monitor-failure-modal-title-wrap h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.25;
+}
+
+.monitor-failure-modal-title-wrap .model-modal-desc {
+    margin: 3px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.monitor-failure-close-btn {
+    flex: 0 0 auto;
+    min-width: 64px;
+    height: 32px;
+    padding: 0 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--danger, #ef4444) !important;
+    border: 1px solid var(--danger, #ef4444) !important;
+    background: transparent;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.monitor-failure-close-btn:hover {
+    background: var(--danger-subtle-hover, rgba(239, 68, 68, 0.08)) !important;
+    color: var(--danger, #ef4444) !important;
+    border-color: var(--danger, #ef4444) !important;
+}
+
+body.dark-mode .monitor-failure-close-btn:hover,
+.dark-mode .monitor-failure-close-btn:hover {
+    background: var(--danger-subtle-hover-dark, rgba(239, 68, 68, 0.16)) !important;
+}
+
+.monitor-failure-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 16px 22px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--surface, #ffffff);
+}
+
+.monitor-failure-table-wrap {
+    flex: 1 1 auto;
+    min-height: 180px;
+    max-height: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: auto;
+    background: #ffffff;
+}
+
+.monitor-failure-modal-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 10px 22px 12px;
+    background: var(--surface, #ffffff);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.03);
+}
+
+.monitor-failure-modal-footer .workspace-pagination,
+.monitor-failure-modal-footer .pagination {
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.monitor-failure-modal-footer .workspace-pagination button,
+.monitor-failure-modal-footer .pagination button {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 6px);
+}
+
+.monitor-failure-modal-footer .workspace-pagination span,
+.monitor-failure-modal-footer .pagination span {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0 6px;
+}
+
+#tab-content-monitor .monitor-failure-action-cell {
+    padding: 10px 12px !important;
+    text-align: center !important;
+    background: #f8fafc;
+}
+
+#tab-content-monitor .monitor-failure-action-cell button {
+    height: 32px;
+    padding: 0 16px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+body.dark-mode .monitor-failure-modal,
+.dark-mode .monitor-failure-modal {
+    background: var(--surface-dark, #1e293b);
+    border-color: var(--border-dark, #334155);
+}
+
+body.dark-mode .monitor-failure-modal-header,
+.dark-mode .monitor-failure-modal-header {
+    background: #0f172a;
+    border-bottom-color: var(--border-dark, #334155);
+}
+
+body.dark-mode .monitor-failure-modal-body,
+.dark-mode .monitor-failure-modal-body {
+    background: var(--surface-dark, #1e293b);
+}
+
+body.dark-mode .monitor-failure-table-wrap,
+.dark-mode .monitor-failure-table-wrap {
+    background: var(--surface-dark, #1e293b);
+    border-color: var(--border-dark, #334155);
+}
+
+body.dark-mode .monitor-failure-modal-footer,
+.dark-mode .monitor-failure-modal-footer {
+    background: var(--surface-dark, #1e293b);
+    border-top-color: var(--border-dark, #334155);
+}
+
+body.dark-mode #tab-content-monitor .monitor-failure-action-cell,
+.dark-mode #tab-content-monitor .monitor-failure-action-cell {
+    background: #0f172a;
+}
+
+@media (max-width: 760px) {
+    .monitor-failure-modal {
+        width: calc(100vw - 16px);
+        max-height: calc(100dvh - 20px);
+    }
+
+    .monitor-failure-modal-header {
+        padding: 12px 14px 10px;
+    }
+
+    .monitor-failure-modal-body {
+        padding: 12px 14px;
+    }
+
+    .monitor-failure-modal-footer {
+        padding: 8px 14px 10px;
+        flex-wrap: wrap;
+    }
 }

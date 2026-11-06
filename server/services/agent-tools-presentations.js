@@ -8,6 +8,10 @@ const points = { type: 'array', maxItems: 8, items: { type: 'string', maxLength:
 
 function presentationToolDefinitions() {
     return [
+        { name: 'presentation.review_deck', title: '整稿检查与排版优化任务', capabilities: ['document.render', 'model.invoke'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
+            description: '启动整稿逐页视觉复核或保留内容的排版优化；后台返回taskId后，用operation=status查询进度，operation=cancel停止。mode=layout不调用视觉模型，只提出排版建议，需用户在工作台确认应用；visual_repair复核建议稿。原稿变化或所属Agent任务停止时检查终止。未配置视觉模型不能算通过。',
+            input_schema: schema({ presentationId: { type: 'string' }, operation: { type: 'string', enum: ['start', 'status', 'cancel'], default: 'start' },
+                mode: { type: 'string', enum: ['visual', 'layout', 'visual_repair'], default: 'visual' }, taskId: { type: 'string' }, modelId: { type: 'string' } }, ['presentationId']) },
         { name: 'presentation.design_info', title: '读取 PPT 设计技能与模板', capabilities: ['document.render'], idempotent: true,
             description: '读取内置中文演示设计技能，以及当前账号可用模板和语义布局。制作完整PPT前先阅读；模板清单不代表任意布局能容纳任意正文。', input_schema: schema({}) },
         { name: 'presentation.review', title: '视觉复核 PPT 指定页', capabilities: ['document.render', 'model.invoke'], idempotent: false, cancellable: true,
@@ -35,6 +39,15 @@ function presentationToolDefinitions() {
 }
 
 async function executePresentationTool(name, input, user, context = {}) {
+    if (name === 'presentation.review_deck') {
+        const tasks = require('./presentations/presentation-quality-tasks');
+        const operation = input.operation || 'start';
+        if (operation === 'cancel' && !input.taskId) throw new Error('停止整稿检查时请提供明确的taskId。');
+        const task = operation === 'start' ? await tasks.createQualityTask(user, { ...input, modelId: input.modelId || context.run?.chosen_model_id || context.run?.model_id || '' }, context)
+            : operation === 'cancel' ? await tasks.cancelQualityTask(user, input.presentationId, input.taskId) : await tasks.getQualityTask(user, input.presentationId, input.taskId);
+        if (!task) throw new Error('整稿检查任务不存在或无权访问。');
+        return { ...task, taskId: task.id, text: task.result?.message || '检查任务已登记，请查询进度，不能把登记成功当作检查通过。' };
+    }
     if (name === 'presentation.design_info') return require('./presentations/presentation-design-actions').designInfo(user);
     if (name === 'presentation.review') return require('./presentations/presentation-design-actions').review(user, input, context);
     if (name === 'presentation.relayout') return require('./presentations/presentation-design-actions').relayout(user, input, context);
@@ -42,6 +55,7 @@ async function executePresentationTool(name, input, user, context = {}) {
     const runId = context.run?.id || context.runId;
     context.signal?.throwIfAborted();
     let presentation;
+    let designWarnings = [];
     if (name === 'presentation.create') {
         const identity = `${user.id}:${runId || context.stepId || context.toolCallId || ''}:${JSON.stringify(input)}`;
         const id = 'taskppt_' + crypto.createHash('sha256').update(identity).digest('hex').slice(0, 40);
@@ -56,7 +70,10 @@ async function executePresentationTool(name, input, user, context = {}) {
         if (!presentation) {
             const template = await service.resolveTemplateForUser(user, input.templateId || 'executive-clean');
             if (!template) throw new Error('所选 PPT 模板不存在或无权使用。');
-            const content = buildTaskPresentation(input, template, sources);
+            const design = template.definition?.layouts?.some(layout => String(layout.id).startsWith('design-'))
+                ? await require('./presentations/presentation-design-compiler').compileDesignPlan(input, template, sources, { signal: context.signal }) : null;
+            const content = design ? design.presentation : buildTaskPresentation(input, template, sources);
+            designWarnings = design?.warnings || [];
             presentation = await service.createPresentation(user, { id, title: input.title, templateId: template.id, templateVersion: template.version,
                 content, tags: ['聊天生成'] });
         }
@@ -72,7 +89,7 @@ async function executePresentationTool(name, input, user, context = {}) {
     const rendition = result.rendition;
     return { status: 'completed', presentationId: presentation.id, artifactId: rendition.artifact_id, renditionId: rendition.id,
         format, slideCount: presentation.content.slides.length, ...(format === 'svg' || format === 'png' ? { slideIndex: input.slideIndex || 0 } : {}),
-        byteSize: Number(rendition.byte_size), contentDigest: rendition.content_digest, validation,
+        byteSize: Number(rendition.byte_size), contentDigest: rendition.content_digest, validation, designWarnings, exportChecks: result.exportChecks || null,
         text: `已生成 ${format.toUpperCase()} 文件${format === 'pptx' || format === 'pdf' ? `（共 ${presentation.content.slides.length} 页）` : `（第 ${(input.slideIndex || 0) + 1} 页）`}，已挂载为任务结果，可下载或保存到本机；源稿可在 PPT 制作应用继续编辑。` };
 }
 

@@ -71,7 +71,7 @@ function resolveToolCallId(context = {}) {
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
-    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
+    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
     if (name === 'diagram.render_svg') return require('./tool-result-artifacts').materializeToolArtifact({ structuredContent: { pivotArtifact: {
         kind: 'diagram', title: input.title, svg: input.svg, format: input.format || 'svg' } } }, user, context);
     if (name === 'presentation.create_from_artifact') {
@@ -140,7 +140,7 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
     };
 }
 
-const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.create', 'presentation.export', 'presentation.create_from_artifact', 'diagram.render_svg', 'artifact.render', 'artifact.list_renditions']);
+const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.create', 'presentation.export', 'presentation.create_from_artifact', 'diagram.render_svg', 'artifact.render', 'artifact.list_renditions']);
 
 module.exports = {
     ARTIFACT_TOOL_NAMES,

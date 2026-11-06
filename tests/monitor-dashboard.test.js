@@ -8,16 +8,36 @@ const source = fs.readFileSync(path.join(__dirname, '../client/chat/monitor-dash
 function fixture(fetch) {
     const elements = new Map();
     const modules = {};
-    vm.runInNewContext(source, {
+    const context = {
         AbortController,
         API_BASE: '/api', apiFetch: fetch,
         escapeHtml: value => String(value).replace(/</g, '&lt;'),
         formatMetricNumber: value => String(value), formatTokenCount: value => String(value || 0), formatDuration: value => `${value}秒`,
-        document: { getElementById(id) { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); } },
+        document: {
+            getElementById(id) {
+                if (!elements.has(id)) {
+                    const classes = new Set(['hidden']);
+                    const attrs = {};
+                    elements.set(id, {
+                        classList: {
+                            add: c => classes.add(c),
+                            remove: c => classes.delete(c),
+                            contains: c => classes.has(c)
+                        },
+                        setAttribute: (k, v) => { attrs[k] = String(v); },
+                        getAttribute: k => attrs[k],
+                        classes,
+                        attrs
+                    });
+                }
+                return elements.get(id);
+            }
+        },
         PivotSafeHtml: { setHtml: (element, html) => { element.html = html; } },
         window: { Pivot: { legacy: {}, exposeModule: (name, api) => { modules[name] = api; } } }
-    });
-    return { api: modules['settings.monitorDashboard'], elements };
+    };
+    vm.runInNewContext(source, context);
+    return { api: modules['settings.monitorDashboard'], elements, document: context.document };
 }
 
 test('空 HTTP 样本和不可用运行探针不会显示成正常的零延迟或零等待', () => {
@@ -65,7 +85,7 @@ test('刷新重叠时取消旧统计请求，旧响应不能覆盖最新结果',
 
 
 test('决策失败原因只汇总对话执行失败并安全展示原因代码', async () => {
-    const { api, elements } = fixture(async () => ({ ok: true, json: async () => ({ unavailable: false, errorBreakdown: [
+    const { api, elements, document } = fixture(async () => ({ ok: true, json: async () => ({ unavailable: false, detailsAvailable: true, errorBreakdown: [
         { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 3 },
         { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 2 },
         { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: '<script>', count: 1 },
@@ -78,6 +98,9 @@ test('决策失败原因只汇总对话执行失败并安全展示原因代码',
     assert.match(html, /<tr><td class="text-center">1<\/td><td title="delivery_not_verified">任务交付未通过核验<\/td><td class="text-center">5 条<\/td><\/tr>/);
     assert.match(html, /title="&lt;script>">其他未识别原因/);
     assert.doesNotMatch(html, /feedback|partial|>rag</);
+    assert.doesNotMatch(html, /查看任务核验失败明细/);
+    const openBtn = document.getElementById('btn-monitor-open-failure-modal');
+    assert.equal(openBtn.classList.contains('hidden'), false);
 });
 
 test('决策失败原因空数据与接口不可用分别提示', async () => {
@@ -123,4 +146,36 @@ test('明细请求取消后迟到结果不能覆盖当前选择', async () => {
     const latest = elements.get('monitor-failure-details').html;
     pending[0].resolve({ ok: true, json: async () => ({ items: [], total: 99 }) }); await first;
     assert.equal(elements.get('monitor-failure-details').html, latest);
+});
+
+test('失败明细使用全局统一样式的弹窗结构展示，并支持通过接口关闭', async () => {
+    const { api, elements, document } = fixture(async () => ({ ok: true, json: async () => ({
+        items: [{ runId: 'run-delivery-1', decisionId: 'dec-1', label: '缺失产物', missing: ['未生成最终报表'] }],
+        total: 1,
+        hasMore: false
+    }) }));
+    const modal = document.getElementById('monitor-failure-modal');
+    assert.equal(modal.classList.contains('hidden'), true);
+
+    await api.loadFailureDetails('delivery');
+    assert.equal(modal.classList.contains('hidden'), false);
+    assert.equal(modal.getAttribute('aria-hidden'), 'false');
+
+    const html = elements.get('monitor-failure-details').html;
+    assert.match(html, /class="[^"]*monitor-failure-modal-header[^"]*"/);
+    assert.match(html, /class="monitor-failure-modal-body"/);
+    assert.match(html, /class="monitor-failure-modal-footer"/);
+    assert.match(html, /class="[^"]*btn-danger-outline[^"]*monitor-failure-close-btn[^"]*"/);
+    assert.match(html, /<th scope="col" class="text-center col-index">序号<\/th>/);
+    assert.match(html, /<td class="text-center col-index">1<\/td>/);
+    assert.match(html, /id="monitor-failure-pagination"/);
+    assert.match(html, /class="pagination workspace-pagination"/);
+    assert.match(html, /data-monitor-failure-close/);
+    assert.match(html, /run-delivery-1/);
+    const closeButtons = (html.match(/data-monitor-failure-close/g) || []).length;
+    assert.equal(closeButtons, 1);
+
+    api.closeFailureDetailsModal();
+    assert.equal(modal.classList.contains('hidden'), true);
+    assert.equal(modal.getAttribute('aria-hidden'), 'true');
 });

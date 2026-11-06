@@ -58,7 +58,15 @@ async function fitDesignPresentation(content, options = {}) {
     for (const slide of next.slides.filter(slide => String(slide.layoutId).startsWith('design-'))) {
         for (const element of slide.elements.filter(element => element.type === 'text' && !element.locked)) {
             const minimum = element.id === 'title' ? 36 : 24;
-            while (element.style.fontSize > minimum && metrics.lines(element).length * element.style.fontSize * element.style.lineHeight + element.style.padding * 2 > element.height) element.style.fontSize--;
+            const crowded = () => {
+                const lines = metrics.lines(element);
+                const orphan = String(element.content?.text || '').split('\n').some(paragraph => {
+                    const wrapped = metrics.lines({ ...element, content: { text: paragraph } });
+                    return wrapped.length > 1 && Array.from(wrapped[wrapped.length - 1].trim()).length < 3;
+                });
+                return orphan || lines.length * element.style.fontSize * element.style.lineHeight + element.style.padding * 2 > element.height;
+            };
+            while (element.style.fontSize > minimum && crowded()) element.style.fontSize--;
         }
     }
     return next;

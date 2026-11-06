@@ -13,6 +13,7 @@ const BUSINESS_ALIASES = Object.freeze({
     'presentation.create': '生成 PPT PPTX PowerPoint 幻灯片 演示文稿 汇报 根据文档 制作PPT',
     'presentation.design_info': 'PPT 设计 技能 模板 布局 风格 目录',
     'presentation.review': 'PPT 视觉 复核 版式 检查 截断 遮挡',
+    'presentation.review_deck': 'PPT 整稿 全部页面 视觉 复核 优化排版 检查 进度 停止',
     'presentation.relayout': 'PPT 重排 单页 布局 调整 修正',
     'presentation.export': '导出 PPT PPTX PowerPoint PDF 幻灯片 SVG PNG 页面',
     'diagram.render_svg': '生成 SVG PNG 图形 矢量图 页面 图片 源码',

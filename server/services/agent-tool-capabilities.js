@@ -71,6 +71,7 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'presentation.create': ['document.render'],
     'presentation.design_info': ['document.render'],
     'presentation.review': ['document.render', 'model.invoke'],
+    'presentation.review_deck': ['document.render', 'model.invoke'],
     'presentation.relayout': ['document.render'],
     'presentation.export': ['document.render'],
     'diagram.render_svg': ['viz.render'],

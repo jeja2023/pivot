@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/presentation-quality-tasks.js",
+      "count": 5,
+      "rationale": "PPT整稿检查复用tool_tasks。所有记录按当前user_id与固定tool_name过滤，查询最新任务还绑定presentationId；父任务状态按所属用户读取；进度只更新本人且仍为working的记录。参数全部绑定，不拼接输入；文稿可见性、编辑权限和内容摘要由服务层再次检查。",
+      "verification": "presentation-quality-tasks-postgres.test.js验证真实PostgreSQL进度持久化、最近任务、跨账号拒绝和原稿变化；presentation-design-workflow.test.js验证取消、父任务停止、旧内容失效及优化仅生成建议；真实浏览器验证确认应用、停止与刷新后恢复查询。"
+    },
+    {
       "file": "server/repositories/agent-run-overview.js",
       "count": 2,
       "rationale": "任务详情首屏只读仓储按运行 ID 参数查询最近步骤和节点，限制行数与单字段体积；调用前检查运行归属和当前知识来源，完整诊断沿用独立受控读取。",

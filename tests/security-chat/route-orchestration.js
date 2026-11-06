@@ -665,6 +665,35 @@ test('知识检索不占主模型并发槽，上游请求开始后才占用', as
         req.on('data', chunk => chunks.push(chunk));
         req.on('end', () => {
             const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if (body.stream !== true) {
+                const isIntent = body.messages?.some(m => String(m.content || '').includes('你是对话下一步决策器'));
+                const content = isIntent
+                    ? JSON.stringify({
+                        action: 'direct_answer',
+                        intent: 'understand',
+                        objective: '公司团建预算',
+                        routing: { knowledge: 'auto', tools: 'none' },
+                        confidence: 0.95
+                    })
+                    : '公司团建预算';
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({
+                    id: 'fake-cmpl-1',
+                    object: 'chat.completion',
+                    created: Math.floor(Date.now() / 1000),
+                    model: body.model || 'fake-model',
+                    choices: [{
+                        index: 0,
+                        message: {
+                            role: 'assistant',
+                            content
+                        },
+                        finish_reason: 'stop'
+                    }],
+                    usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 }
+                }));
+                return;
+            }
             if (body.stream === true) duringModel = aiSemaphore.getStatus().active;
             res.writeHead(200, { 'Content-Type': 'text/event-stream' });
             res.end('data: {"choices":[{"delta":{"content":"回答"}}]}\n\ndata: [DONE]\n\n');

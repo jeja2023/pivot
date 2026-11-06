@@ -100,6 +100,7 @@ function buildSlidesMessages(body = {}) {
     const layouts = templateLayoutSummary(template);
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
     const compact = body.compact === true;
+    const semantic = template.layouts.some(layout => String(layout.id).startsWith('design-'));
     const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${clamp(materialText(item), 5000)}`).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
@@ -118,9 +119,11 @@ function buildSlidesMessages(body = {}) {
                 materials ? `材料：\n${materials}` : '材料：未提供。',
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
-                `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
-                '使用 text、shape、table、chart 元素，每页最多 16 个元素（含标题）；每个 text 不超过 240 字，speakerNotes 不超过 1600 字。优先使用允许布局中的槽位 role 作为元素 id，由模板确定几何。坐标基于 1280x720。正文通常不低于24px（导出18pt），文字过密时拆页或将细节移入备注。禁止任意外部URL。表格必须有 columns，rows 列数一致；图表必须至少有两个 data.columns 字段及真实数值行。',
-                compact ? '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
+                semantic ? '{"title":"...","slides":[{"title":"页面核心信息","layout":"cover|content|agenda|section|executive-summary|two-column|comparison|three-card|key-metrics|chart|table|timeline|process|roadmap|risk-actions|quote|summary","points":["完整要点"],"left":[],"right":[],"metrics":[{"value":"真实数值与单位","label":"指标含义"}],"chart":{"type":"bar|line|area|pie","columns":[],"rows":[]},"table":{"columns":[],"rows":[]},"speakerNotes":"详细说明"}],"warnings":[],"assumptions":[]}'
+                    : `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
+                semantic ? '使用语义页面，不输出 elements、坐标或字号。layout从可用布局中选择并去除design-前缀；每页最多8条要点，每条不超过280字。双栏使用left/right，指标用metrics，图表或表格只填真实数据；无关字段省略。版式引擎负责字号、几何与溢出拆页，禁止静默省略关键事实。详细内容保留speakerNotes，不超过4000字。'
+                    : '使用 text、shape、table、chart 元素，每页最多 16 个元素（含标题）；每个 text 不超过 240 字，speakerNotes 不超过 1600 字。优先使用允许布局中的槽位 role 作为元素 id，由模板确定几何。坐标基于 1280x720。正文通常不低于24px（导出18pt），文字过密时拆页或将细节移入备注。禁止任意外部URL。表格必须有 columns，rows 列数一致；图表必须至少有两个 data.columns 字段及真实数值行。',
+                compact ? semantic ? '紧凑输出模式：只输出必要语义字段，完整保留所有页面、关键事实及数据，不输出坐标和空字段；先完成全部slides数组再闭合JSON。' : '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
             ].join('\n')
         }
     ];
@@ -560,4 +563,14 @@ function parsePresentationProposal(content, { templateId = 'business-blue', temp
     return { ...proposal, presentation: contentObject };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };
+async function compilePresentationProposal(content, options = {}) {
+    const raw = parseAiJsonObject(content, 'AI 返回的演示文稿 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID');
+    const template = templateForAi({ templateId: options.templateId, template: options.template });
+    if (!Array.isArray(raw.slides) || raw.slides.some(slide => Array.isArray(slide?.elements))) return parsePresentationProposal(content, options);
+    if (!template.layouts.some(layout => String(layout.id).startsWith('design-'))) return parsePresentationProposal(content, options);
+    const sources = (options.sources || []).map(source => require('./presentation-evidence').materialToPresentationSource(source));
+    const compiled = await require('./presentation-design-compiler').compileDesignPlan({ title: raw.title || options.title, slides: raw.slides }, template, sources, options);
+    return { ...raw, ...compiled, warnings: [...(Array.isArray(raw.warnings) ? raw.warnings.map(String) : []), ...compiled.warnings] };
+}
+
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, compilePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };

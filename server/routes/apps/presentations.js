@@ -471,7 +471,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             malformedJsonRecoveryAuditSuffix: ' 紧凑格式重试',
             malformedJsonFailureMessage: 'AI 返回的页面数据格式不完整，系统已按紧凑格式自动重试一次仍无法完成。请减少页数或补充材料后重新生成。',
             parse: async result => {
-                const proposal = parsePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials });
+                const proposal = await require('../../services/presentations/presentation-ai').compilePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials });
                 if (proposal.presentation) {
                     const sourceIds = new Set(requestBody.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                     proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
