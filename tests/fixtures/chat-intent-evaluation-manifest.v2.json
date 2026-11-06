@@ -1,0 +1,77 @@
+{
+  "version": "chat-intent-evaluation-manifest-v2",
+  "kind": "engineering_synthetic_frozen_suites",
+  "humanReviewed": false,
+  "reviewKind": "implementation_and_product_contract_review",
+  "reviewedAt": "2026-11-06",
+  "historicalManifest": "chat-intent-evaluation-manifest.json",
+  "changes": [
+    {
+      "id": "first-attachment",
+      "previousExpected": [
+        "agent_run"
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "rationale": "短附件已有可用来源，未要求下载、保存或外部操作；按DESIGN中的纯文本附件分析规则直接回答，不创建任务。"
+    },
+    {
+      "id": "polite-delegation",
+      "previousExpected": [
+        "agent_run"
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "rationale": "短附件已有可用来源，未要求下载、保存或外部操作；按DESIGN中的纯文本附件分析规则直接回答，不创建任务。"
+    },
+    {
+      "id": "negation-english-use-web",
+      "previousExpected": [
+        "agent_run",
+        "direct_answer"
+      ],
+      "expected": [
+        "clarify"
+      ],
+      "rationale": "输入未指定需要核实的事实或政策对象，缺口确实阻断检索；澄清只问业务对象。否定范围由独立回归验证，不通过猜测主题启动工具。"
+    },
+    {
+      "id": "negation-english-use-knowledge",
+      "previousExpected": [
+        "direct_answer"
+      ],
+      "expected": [
+        "clarify"
+      ],
+      "rationale": "输入未指定需要核实的事实或政策对象，缺口确实阻断检索；澄清只问业务对象。否定范围由独立回归验证，不通过猜测主题启动工具。"
+    },
+    {
+      "id": "continuation-replace-month",
+      "previousExpectedCapabilities": [
+        "data.sql.query",
+        "artifact.deliver"
+      ],
+      "expectedCapabilities": [
+        "data.sql.query",
+        "document.render"
+      ],
+      "rationale": "内置artifact.render与presentation.export只需要document.render即可登记可下载文件；artifact.deliver表示本机交付写入且为critical，不能因下载报告而扩大权限。"
+    }
+  ],
+  "suites": [
+    {
+      "file": "chat-intent-cases.v8.json",
+      "role": "boundary",
+      "caseCount": 56,
+      "sha256": "f3181dd6dcc1ee925eda69fd789c926f1a5afb55c29634d64c70c76e96de1f91"
+    },
+    {
+      "file": "chat-intent-holdout-cases.v2.json",
+      "role": "holdout",
+      "caseCount": 12,
+      "sha256": "79474958e0fd9431806f79d320acdce7481c6f6edbbd5b9097ec04c3eec58b7a"
+    }
+  ]
+}

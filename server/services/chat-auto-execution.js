@@ -1,7 +1,7 @@
 'use strict';
 
 const { isRegisteredCapability } = require('./agent-capability-registry');
-const { isPlanOnlyRequest } = require('./chat-request-constraints');
+const { isPlanOnlyRequest, isPureMemoryRequest } = require('./chat-request-constraints');
 const ACTION_PATTERN = /(查询|检索|读取|收集|汇总|整理|分析|核对|比对|生成|导出|更新|同步|跟进|监控|修复|部署|发布|发送|通知|执行|查找|统计|审查|对账|归档|修改|测试|query|search|read|collect|summari[sz]e|analy[sz]e|verify|compare|generate|export|update|sync|monitor|fix|deploy|publish|send|notify|archive)/gi;
 const TASK_SIGNAL = /附件|表格|数据|订单|代码|项目|系统|文件|目录|网页|浏览器|报告|工具|CRM|ERP|API|SQL|执行|完成|处理|继续|刚才|上次|按.*方案|修复|修改|部署|发布|发送|监控|生成|分析|核对|清理|制作|整理|收集|研究|调查|查找|准备|解决|优化|升级|改造|办好|export|implement|fix|deploy|execute|continue|analy[sz]e/i;
 const CONTINUE = /^(?:继续|接着|按(?:刚才|上面|此前|这个|该)|就按|开始吧|做吧|处理吧|再按上次|continue\b)/i;
@@ -40,7 +40,7 @@ function classifyChatAutoExecution({ prompt = '', history = [], enabled = true }
     if (!enabled || !text) return decision('direct_answer', text, { reasonCode: 'auto_execution_disabled' });
     if (STOP.test(text)) return decision('control', text, { control: /暂停|pause/i.test(text) ? 'pause' : 'stop', reasonCode: 'explicit_stop' });
     const containsCurrentTask = /[，,。；;]\s*(?:同时|然后|另外|并且)?\s*(?:请|帮我|替我|现在|再|把|将).*(?:附件|文件|数据|代码|订单|网页|数据库)/.test(text);
-    if (MEMORY.test(text) && !containsCurrentTask && (!/^(?:请|帮我)?(?:更正|改正|忘记|忘掉)/.test(text) || /偏好|记忆|习惯/.test(text))) return decision('memory', text, { reasonCode: 'explicit_memory_intent' });
+    if (MEMORY.test(text) && isPureMemoryRequest(prompt) && (!/^(?:请|帮我)?(?:更正|改正|忘记|忘掉)/.test(text) || /偏好|记忆|习惯/.test(text))) return decision('memory', text, { reasonCode: 'explicit_memory_intent' });
     const taskText = containsCurrentTask ? text.slice(text.search(/[，,。；;]/) + 1) : text;
     if (isPlanOnlyRequest(taskText)) return decision('plan_only', text, { constraints: ['仅提供分析与计划，不执行工具或外部动作。'], reasonCode: 'explicit_plan_only' });
     const continuation = CONTINUE.test(text) || CONTEXTUAL.test(text);

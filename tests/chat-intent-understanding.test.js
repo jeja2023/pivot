@@ -117,7 +117,7 @@ test('长上下文保留尾部限制并只发送白名单元数据，不传入�
     assert.ok(context.prompt.endsWith('本轮只读，不要发送。'));
     assert.ok(context.history[0].content.endsWith('仅统计实习生'));
     assert.doesNotMatch(messages[1].content, /隐藏凭据|隐藏密钥|内部系统历史/);
-    assert.ok(messages[0].content.includes('routing:{knowledge:'));
+    assert.ok(messages[0].content.includes('routing.knowledge/tools'));
 });
 
 test('长请求不绕过语义入口，资料正文仍通过来源读取而非决策提示传递', async () => {

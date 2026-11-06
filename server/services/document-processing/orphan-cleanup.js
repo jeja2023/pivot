@@ -68,8 +68,7 @@ async function collectCandidates({ cutoffMs, limit, scanLimit }) {
         }
         if (more) break;
     }
-    scanCursor = more ? last : null;
-    return { candidates, scanned, more };
+    return { candidates, scanned, more, nextCursor: more ? last : null };
 }
 
 async function removeIfUnreferenced(candidate, cutoff) {
@@ -98,9 +97,10 @@ async function runCleanup(options = {}) {
     const cutoff = getBeijingTimestamp(new Date(cutoffMs));
     const limit = Math.min(MAX_CANDIDATES, Math.max(1, Number.parseInt(options.limit, 10) || MAX_CANDIDATES));
     const scanLimit = Math.min(MAX_SCAN_FILES, Math.max(1, Number.parseInt(options.scanLimit, 10) || MAX_SCAN_FILES));
-    const { candidates, scanned, more } = await collectCandidates({ cutoffMs, limit, scanLimit });
+    const { candidates, scanned, more, nextCursor } = await collectCandidates({ cutoffMs, limit, scanLimit });
     let deleted = 0;
     for (const candidate of candidates) if (await removeIfUnreferenced(candidate, cutoff) === 'deleted') deleted += 1;
+    scanCursor = nextCursor;
     return { scanned, candidates: candidates.length, deleted, retentionDays, more };
 }
 

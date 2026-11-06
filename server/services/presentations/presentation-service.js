@@ -404,6 +404,7 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     let content = normalizePresentation({ ...reviewSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
     content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow' });
     content = applyTemplateBrandControls(content, activeTemplate);
+    if (body.templateApplyMode === 'reflow') content = await require('./presentation-text-metrics').fitDesignPresentation(content);
     const trustedAssetRefs = collectPresentationAssetRefs(parseJson(current.content_json, {}));
     await assertPresentationAssetOwnership(user, content, { trustedRefs: trustedAssetRefs });
     const validation = runPresentationValidation(content);

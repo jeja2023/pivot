@@ -12,7 +12,7 @@ const { createToolOrchestrator } = require('../server/services/agent-tool-orches
 
 const config = { mode: 'active', timeoutMs: 1000, rolloutPercent: 100 };
 const input = { prompt: '请分析附件并生成风险报告', user: { id: 9 }, userMessageId: 11, sessionId: 'test-session', modelCfg: { id: 8 }, history: [] };
-const modelDecision = { action: 'agent_run', intent: 'delegate', objective: '分析附件并生成风险报告', constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.2 };
+const modelDecision = { action: 'agent_run', intent: 'delegate', objective: '分析附件并生成风险报告', constraints: [], deliverables: ['风险报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.2, routing: { knowledge: 'none', tools: 'task' } };
 const deps = output => ({ config, callModelJson: async () => JSON.stringify(output), recordDecision() {} });
 
 test('同一句话中的长期偏好不能吞掉当前委托任务', () => {
@@ -35,7 +35,7 @@ test('候选任务以结构化语义结果选择运行，模型自报置信不�
     assert.equal(result.action, 'agent_run');
     assert.deepEqual(result.evidenceRefs, ['message:11']);
     assert.ok(result.decisionId);
-    const direct = await resolveChatIntent(input, deps({ ...modelDecision, action: 'direct_answer' }));
+    const direct = await resolveChatIntent(input, deps({ ...modelDecision, action: 'direct_answer', requiredCapabilities: [], routing: { knowledge: 'none', tools: 'none' } }));
     assert.equal(direct.action, 'direct_answer', '候选规则不得推翻主模型的处理方式');
 });
 

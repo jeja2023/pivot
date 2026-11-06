@@ -29,3 +29,20 @@ test('整稿检查持久化进度、可恢复查询、隔离账号并识别原�
     assert.match(notOwner.message, /不存在|无权/);
     await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]);
 });
+
+test('历史设计模板版本继续读取，主动升级同名新版后保持正文并重新适配标题', { skip: !process.env.DATABASE_URL, timeout: 60000 }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const plan = { title: '版本化样稿', slides: [{ title: '本次汇报围绕三项内容展开', layout: 'agenda', points: ['经营结果与统计口径', '主要风险与对应措施', '下一阶段责任与时限'] }] };
+    const original = (await compileDesignPlan(plan, getBuiltInTemplate('learning-studio', 1))).presentation;
+    const document = await service.createPresentation(user, { title: plan.title, templateId: 'learning-studio', templateVersion: 1, content: original });
+    assert.equal(document.template.version, 1);
+    assert.equal((await service.getPresentation(user, document.id)).content.slides[0].elements.find(element => element.id === 'title').width, 440);
+    const content = globalThis.structuredClone(document.content);
+    content.template = { id: 'learning-studio', version: 2 };
+    const changed = await service.savePresentationContent(user, document.id, { title: document.title, baseVersion: document.version, templateId: 'learning-studio', templateVersion: 2, content, templateApplyMode: 'reflow' });
+    assert.equal(changed.template.version, 2);
+    assert.ok(changed.content.slides[0].elements.find(element => element.id === 'title').width >= 1000);
+    for (const point of plan.slides[0].points) assert.ok(JSON.stringify(changed.content).includes(point));
+    const history = await service.getPresentationVersion(user, document.id, document.version);
+    assert.equal(history.content.template.version, 1);
+});

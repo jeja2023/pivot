@@ -111,11 +111,11 @@ test('真实任务从材料生成全部可编辑 PPTX 页面、复用导出、�
     assert.ok(feed.artifacts.some(artifact => artifact.rendition?.format === 'pptx' && artifact.rendition.ready));
     assert.ok(feed.artifacts.some(artifact => artifact.rendition?.format === 'svg' && artifact.rendition.ready));
     assert.doesNotMatch(feed.run.title, /uploads|private/);
-    const originalTexts = presentation.content.slides[2].elements.filter(element => element.type === 'text').map(element => element.content.text).sort();
+    const originalTexts = presentation.content.slides[2].elements.filter(element => element.type === 'text' && !element.locked).map(element => element.content.text).sort();
     const changed = await executeBuiltInTool('presentation.relayout', { presentationId: created.presentationId, slideIndex: 2, layoutId: 'design-comparison' }, user, context);
     const reloaded = await getPresentation(user, created.presentationId);
     assert.ok(changed.version > presentation.version);
-    assert.deepEqual(reloaded.content.slides[2].elements.filter(element => element.type === 'text').map(element => element.content.text).sort(), originalTexts);
+    assert.deepEqual(reloaded.content.slides[2].elements.filter(element => element.type === 'text' && !element.locked).map(element => element.content.text).sort(), originalTexts);
     const review = await executeBuiltInTool('presentation.review', { presentationId: created.presentationId, slideIndex: 2, modelId: 'not-accessible' }, user, context);
     assert.equal(review.status, 'unavailable');
     await require('../server/services/presentations/presentation-service').reviewPresentationSlide(user, created.presentationId, reloaded.content.slides[2].id, true);

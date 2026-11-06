@@ -15,7 +15,8 @@ async function getConversationTasks(sessionId, userId) {
     return (await turns.listSessionTasks(sessionId, userId)).map(run => {
         const metadata = parseConversationRunMetadata(run.metadata);
         return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE.has(run.status),
-            constraints: metadata.taskContract?.constraints || [], deliverables: metadata.taskContract?.deliverables || [], acceptance: metadata.taskContract?.acceptance || {},
+            requestScope: { excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true, excludeWeb: metadata.capabilityConstraints?.excludeWeb === true, excludeData: metadata.capabilityConstraints?.excludeData === true, sourceOnly: metadata.capabilityConstraints?.sourceOnly === true },
+            constraints: metadata.taskContract?.constraints || [], businessScope: metadata.taskContract?.businessScope || {}, deliverables: metadata.taskContract?.deliverables || [], acceptance: metadata.taskContract?.acceptance || {},
             requiredCapabilities: metadata.capabilityConstraints?.capabilities || [], decisionId: metadata.automaticExecution?.decisionId || null };
     });
 }
@@ -65,7 +66,8 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
     const metadata = parseConversationRunMetadata(run.metadata);
     const requestScope = resolveChatRequestScope(sourceContent || instruction, { routeOverrides, ...(decision.requestScope || {}),
         excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true || decision.requestScope?.excludeKnowledge === true,
-        excludeWeb: metadata.capabilityConstraints?.excludeWeb === true || decision.requestScope?.excludeWeb === true });
+        excludeWeb: metadata.capabilityConstraints?.excludeWeb === true || decision.requestScope?.excludeWeb === true,
+        excludeData: metadata.capabilityConstraints?.excludeData === true || decision.requestScope?.excludeData === true });
     const revisedSelection = Array.isArray(routeOverrides.tools) && routeOverrides.tools.length > 0;
     const excluded = routeOverrides.excludeTools === true;
     const selectedNames = revisedSelection ? routeOverrides.tools : metadata.chatBridge?.selectedTools || [];
@@ -77,7 +79,7 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
         : { names: [], tools: [], origins: [], ports: [] };
     const reviseScope = revisedSelection || excluded;
     const idempotencyKey = `chat:${sessionId}:${userMessageId}`;
-    const taskContractPatch = { goal: decision.objective || run.goal, constraints: decision.constraints || [], deliverables: decision.deliverables || [],
+    const taskContractPatch = { goal: decision.objective || run.goal, constraints: decision.constraints || [], businessScope: decision.businessScope || metadata.taskContract?.businessScope || {}, deliverables: decision.deliverables || [],
         acceptance: { ...decision.acceptance, requireSemanticVerification: true,
             requireCompleteSource: metadata.taskContract?.acceptance?.requireCompleteSource === true || sourceContent.length > 12000 }, authorizationRef: `user_message:${userMessageId}` };
     await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => {
@@ -94,11 +96,13 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
         } : {}),
         requiredSourceMessages: [...new Set([...(current.requiredSourceMessages || []), ...(sourceContent.length > 12000 ? [userMessageId] : [])])],
         ...(current.capabilityConstraints?.present === true && Array.isArray(decision.requiredCapabilities) ? { capabilityConstraints: { ...current.capabilityConstraints,
+            requireSourceBeforeTools: current.capabilityConstraints.requireSourceBeforeTools === true || decision.inputContext?.complete === false,
             capabilities: [...new Set([...(excluded ? [] : decision.requiredCapabilities), ...(current.chatBridge ? ['conversation.read_source'] : []),
                 ...(!excluded && (revisedSelection || (current.capabilityConstraints?.capabilities?.length > 0 && current.routeCorrection?.routeOverrides?.excludeTools !== true
                     && JSON.stringify(current.chatBridge?.selectedTools || []) === JSON.stringify(selectedNames)))
                     ? selection.tools.flatMap(tool => tool.capabilities || []) : [])])].filter(capability => capabilityAllowedByRequestScope(capability, requestScope)),
             ...(requestScope.excludeKnowledge ? { excludeKnowledge: true } : {}), ...(requestScope.excludeWeb ? { excludeWeb: true } : {}),
+            ...(requestScope.excludeData ? { excludeData: true } : {}),
             authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
         ...(requestScope.excludeKnowledge ? { chatBridge: { ...(reviseScope ? { ...current.chatBridge, selectedTools: selection.names, mcpToolAllowlist, mcpEnabled: !excluded } : current.chatBridge), ragEnabled: false, ragContext: '' } } : {}),
         conversationMessageIds: [...new Set([...(current.conversationMessageIds || []), userMessageId])].slice(-100)

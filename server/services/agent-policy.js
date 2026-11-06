@@ -221,6 +221,10 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     if (!discoveryControl && allowlist.length && !toolMatchesAllowlist(tool, allowlist, input, inspectOnly)) deny('task_tool_allowlist', '工具不在任务允许列表中。');
     const conversationMetadata = parseRunMetadata(run.metadata);
     const conversationScope = conversationMetadata.capabilityConstraints;
+    if (!discoveryControl && conversationScope?.requireSourceBeforeTools === true && tool.name !== 'chat.read_source'
+        && !require('./chat-source-progress').hasReadRequiredSources(conversationMetadata)) {
+        deny('conversation_source_incomplete', '当前请求的路由上下文经过裁剪，请先用 chat.read_source 分页读取完整原始消息，再使用其他工具。');
+    }
     if (conversationScope?.excludeKnowledge === true && tool.capabilities.some(cap => /^knowledge\./.test(cap))) {
         deny('conversation_knowledge_excluded', '本轮已按用户要求排除知识库检索。');
     }
@@ -232,6 +236,9 @@ function evaluateToolPolicy({ run = {}, tool: rawTool = {}, input = {}, user = n
     }
     if (conversationScope?.sourceOnly === true && tool.capabilities.some(cap => /^data\./.test(cap))) {
         deny('conversation_source_only', '本轮仅分析用户提供的资料，不查询外部业务数据。');
+    }
+    if (conversationScope?.excludeData === true && tool.capabilities.some(cap => /^data\./.test(cap))) {
+        deny('conversation_data_excluded', '本轮已按用户要求排除数据库、数据源和业务系统查询。');
     }
     if (!discoveryControl && conversationScope?.readOnly === true && (tool.side_effect || tool.approval_required || tool.risk_level >= 4 || !tool.idempotent)) {
         deny('conversation_readonly_scope', '本轮只读查询不允许写入、非幂等操作或需要审批的工具。');

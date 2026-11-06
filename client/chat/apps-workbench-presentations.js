@@ -777,7 +777,7 @@ function setSelectedImageAsCover() {
         if (!state.active?.id || !templateId) return;
         const template = templateById(templateId); if (!template) return;
         const currentTemplateId = state.active.content?.template?.id || state.active.template?.id;
-        const reapplying = String(templateId) === String(currentTemplateId || '');
+        const reapplying = String(templateId) === String(currentTemplateId || '') && Number(template.version) === Number(state.active.content?.template?.version);
         let reflow = false;
         if (reapplying) {
             const accepted = await window.Pivot.legacy.showConfirm?.('重新排版当前封面', '按当前主题模板重新排列封面说明，修复可能重叠的文字；文字内容会保留。');

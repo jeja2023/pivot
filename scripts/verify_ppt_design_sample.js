@@ -14,7 +14,7 @@ const { renderPresentation } = require('../server/services/presentations/present
 const { verifyPptxExport } = require('../server/services/presentations/presentation-export-verification');
 
 async function main() {
-    const root = path.resolve('output/ppt-upgrade-acceptance');
+    const root = path.resolve(process.env.PIVOT_DESIGN_SAMPLE_DIR || 'output/ppt-upgrade-acceptance');
     await fs.mkdir(root, { recursive: true });
     await fs.writeFile(path.join(root, '同材料原文.txt'), sample.source, 'utf8');
     const source = { id: 'sample_source', title: '同材料设计验收示例', type: 'material', locator: '验收材料', digest: 'design-acceptance-v1', excerpt: sample.source };

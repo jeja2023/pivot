@@ -179,6 +179,9 @@ async function assembleChatContext({
     if (state.intentDecision?.action === 'plan_only') {
         history = [{ role: 'system', content: '本轮用户只要求计划。请交付目标、步骤、依赖、验收方法和阻断信息，不调用工具、不宣称已经执行；不要要求用户选择普通或智能体模式。' }, ...history];
     }
+    if (state.intentDecision?.reasonCode === 'standalone_text_draft') {
+        history = [{ role: 'system', content: '本轮是无来源要求的独立文本草稿。直接交付可修改的正文，未提供的产品名称、日期、人员及业务数值使用清晰占位符，不编造事实；一般版式可自行确定，不因这些占位项再次要求用户补充资料。' }, ...history];
+    }
     if (state.intentDecision?.correction) {
         history = [{ role: 'system', content: `${state.intentDecision.correction.constraint} 这是本轮用户的明确限制，优先于历史委托与偏好。已有操作无法自动撤销；缺少依据时说明限制，不能虚构执行或检索结果。` }, ...history];
     }
@@ -201,7 +204,7 @@ async function assembleChatContext({
     if (capabilityDecision) {
         taskState.toolIntent = { ...taskState.toolIntent, requiresTool: capabilityDecision.tools !== 'none', requestedCapabilities: capabilityDecision.requestedCapabilities,
             ...(Array.isArray(state.automaticReadCapabilities) ? { automaticReadScope: { capabilities: capabilityDecision.requestedCapabilities,
-                excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, sourceMessageId: state.intentDecision?.sourceMessageId || null } } : {}) };
+                excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, excludeData: requestScope.excludeData === true, sourceMessageId: state.intentDecision?.sourceMessageId || null } } : {}) };
         if (capabilityDecision.knowledge === 'required') taskState.evidenceNeeds = [...new Set([...taskState.evidenceNeeds, 'knowledge_base'])];
     }
     if (requestScope.excludeKnowledge || capabilityDecision?.knowledge === 'none') taskState.evidenceNeeds = taskState.evidenceNeeds.filter(need => need !== 'knowledge_base');

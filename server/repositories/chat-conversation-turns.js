@@ -27,7 +27,7 @@ async function latestKnowledgeScope(sessionId, userId, beforeMessageId) {
 }
 
 function decisionAudit(value = {}) {
-    const keys = ['version','action','intent','nextAction','reasonCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','learningDecisionId','durationMs','modelId','modelCalls','policyVersion','shadow','projectId'];
+    const keys = ['version','action','intent','nextAction','reasonCode','failureCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','learningDecisionId','durationMs','modelId','modelCalls','policyVersion','structuredOutput','providerAction','contractAdjustments','providerRetries','inputContext','timing','usage','shadow','projectId'];
     if (value.knowledgeScope) keys.push('knowledgeScope');
     return Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 }

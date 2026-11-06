@@ -4,6 +4,7 @@ const { normalizeJsonSchema, schemaHasRules, validateValueAgainstSchema } = requ
 const { queryOne } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { buildChatAttachmentEvidenceObservation, buildChatRagEvidenceObservation } = require('./chat-rag-context');
+const { normalizeBusinessScope } = require('./chat-task-contract-update');
 
 const MAX_CONTRACT_ITEMS = 32;
 
@@ -42,6 +43,7 @@ function normalizeTaskContract(value = {}, goal = '') {
         revision,
         goal: text(source.goal || goal, 12000),
         constraints: list(source.constraints, 32),
+        ...(Object.keys(normalizeBusinessScope(source.businessScope)).length ? { businessScope: normalizeBusinessScope(source.businessScope) } : {}),
         deliverables: Array.isArray(source.deliverables) ? source.deliverables.slice(0, 16) : [],
         acceptance,
         repairAttempts: Math.max(0, Math.min(Number.parseInt(source.repairAttempts || source.repair_attempts, 10) || 0, 3)),

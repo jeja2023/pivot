@@ -93,13 +93,14 @@ async function createChatAgentHandoff({
         projectId: project.projectId,
         conversationMessageIds: [userMessageId].filter(Boolean),
         requiredSourceMessages: automatic && modelContent.length > 12000 ? [userMessageId] : [],
-        capabilityConstraints: { excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, sourceOnly: requestScope.sourceOnly },
+        capabilityConstraints: { excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, excludeData: requestScope.excludeData === true, sourceOnly: requestScope.sourceOnly },
         ...(automatic ? {
             capabilityConstraints: { present: true, capabilities, excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb,
-                sourceOnly: requestScope.sourceOnly, authorizationRef, budgetRef, sourceMessageId: userMessageId },
+                excludeData: requestScope.excludeData === true, sourceOnly: requestScope.sourceOnly, requireSourceBeforeTools: automaticExecution.inputContext?.complete === false, authorizationRef, budgetRef, sourceMessageId: userMessageId },
             taskContract: {
                 goal: automaticExecution.objective || modelContent,
                 constraints: automaticExecution.constraints || [],
+                businessScope: automaticExecution.businessScope || {},
                 deliverables: automaticExecution.deliverables?.length ? automaticExecution.deliverables : [automaticExecution.objective || visibleContent],
                 acceptance: {
                     requireCompleteSource: modelContent.length > 12000 || requestedPresentationFormats(visibleContent).length > 0,

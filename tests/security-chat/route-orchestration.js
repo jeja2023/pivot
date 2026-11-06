@@ -585,7 +585,8 @@ test('聊天路由在模型不可用时返回模型缺失错误', async () => {
 });
 
 test('聊天路由在知识库命中时下发引用来源摘要', async () => {
-    const upstream = await startFakeUpstream({ replyChunks: ['已依据知识库回答：出差住宿标准按城市分级执行。[引用 1]'] });
+    const upstream = await startFakeUpstream({ replyChunks: ['已依据知识库回答：出差住宿标准按城市分级执行。[引用 1]'],
+        intentDecision: { action: 'direct_answer', requiredCapabilities: ['knowledge.search'], routing: { knowledge: 'required', tools: 'none' } } });
     const fixture = createChatFixture({ prefix: 'chat_rag_hit', upstreamUrl: upstream.url });
     const ragContext = [
         '[引用 1 | 来源: 差旅报销制度.pdf] 出差住宿标准按城市分级执行。',
@@ -624,8 +625,9 @@ test('聊天路由在知识库命中时下发引用来源摘要', async () => {
     }
 });
 
-test('聊天路由在知识库未命中时提示按普通对话继续', async () => {
-    const upstream = await startFakeUpstream({ replyChunks: ['按普通对话回答'] });
+test('聊天路由在必要知识依据未命中时明确说明限制，不能把组织事实转为无依据回答', async () => {
+    const upstream = await startFakeUpstream({ replyChunks: ['按普通对话回答'],
+        intentDecision: { action: 'direct_answer', requiredCapabilities: ['knowledge.search'], routing: { knowledge: 'required', tools: 'none' } } });
     const fixture = createChatFixture({ prefix: 'chat_rag_empty', upstreamUrl: upstream.url });
     const routeServer = await startChatRouteServer({
         fixture,
@@ -642,12 +644,13 @@ test('聊天路由在知识库未命中时提示按普通对话继续', async ()
 
         const ragEvent = result.findByType('rag');
         assert.ok(ragEvent);
-        assert.equal(ragEvent.status, 'empty');
-        assert.match(ragEvent.message, /未检索到足够相关内容/);
+        assert.equal(ragEvent.status, 'rejected');
+        assert.match(ragEvent.message, /依据|检索|引用/);
 
         const assistant = readSessionMessages(fixture).find(row => row.role === 'assistant');
-        assert.ok(assistant, '未命中知识库时应按普通对话完成生成');
-        assert.match(assistant.content, /按普通对话回答/);
+        assert.ok(assistant, '缺少依据的说明也应保存为助手消息');
+        assert.match(assistant.content, /依据|检索|引用|核实/);
+        assert.doesNotMatch(assistant.content, /按普通对话回答/);
     } finally {
         await routeServer.close();
         await upstream.close();

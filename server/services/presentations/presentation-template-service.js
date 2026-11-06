@@ -101,7 +101,7 @@ async function resolveTemplateForUser(user, templateId, { includeDefinition = tr
 async function resolveTemplateVersionForUser(user, templateId, version, { includeDefinition = true, historical = false } = {}) {
     const id = String(templateId || 'business-blue').trim() || 'business-blue';
     const builtIn = getBuiltInTemplate(id);
-    if (builtIn) return Number(version || 1) === Number(builtIn.version) ? systemTemplateToPublic(builtIn) : null;
+    if (builtIn) { const historicalTemplate = getBuiltInTemplate(id, version || builtIn.version); return historicalTemplate ? systemTemplateToPublic(historicalTemplate) : null; }
     const requestedVersion = Number.parseInt(version, 10);
     if (!Number.isSafeInteger(requestedVersion) || requestedVersion < 1) return null;
     const tenant = await assertTenantContext(user);

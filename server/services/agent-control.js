@@ -54,6 +54,7 @@ function applyMessagesToTaskContract(value, messages = {}, goal = '') {
         if (!message.from_run_id && payload.source === 'chat' && payload.taskContractPatch) {
             const patch = payload.taskContractPatch;
             contract = normalizeTaskContract({ ...contract, goal: patch.goal || contract.goal, constraints: Array.isArray(patch.constraints) ? patch.constraints : contract.constraints,
+                businessScope: patch.businessScope || contract.businessScope,
                 deliverables: Array.isArray(patch.deliverables) && patch.deliverables.length ? patch.deliverables : contract.deliverables,
                 acceptance: { ...contract.acceptance, ...patch.acceptance, requireSemanticVerification: true }, authorizationRef: patch.authorizationRef || contract.authorizationRef }, goal);
             existing.clear();

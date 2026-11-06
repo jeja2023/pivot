@@ -2,6 +2,7 @@
 
 function resolveDesignLayout(layout, slide) {
     if (!layout || !String(layout.id).startsWith('design-')) return layout;
+    if (layout.editorial) return require('./presentation-editorial-layout').resolveEditorialLayout(layout, slide);
     const kind = layout.id.slice(7);
     if (!['key-metrics', 'timeline', 'three-card', 'roadmap'].includes(kind)) return layout;
     const expression = kind === 'key-metrics' ? /^value\d+$/ : kind === 'timeline' ? /^step\d+$/ : /^card\d+$/;
@@ -17,6 +18,11 @@ function resolveDesignLayout(layout, slide) {
 }
 
 function reflowDesignElements(elements, layout, presentation = {}) {
+    if (layout.editorial) elements = elements.flatMap(element => {
+        if (element.locked || element.type !== 'text' || !['body', 'evidence', 'left', 'right'].includes(element.id)) return [element];
+        const paragraphs = String(element.content?.text || '').split('\n\n');
+        return paragraphs.map((text, index) => ({ ...element, id: index ? `${element.id}_${index + 1}` : element.id, content: { ...element.content, text } }));
+    });
     const movable = elements.filter(element => !element.locked && element.visible !== false);
     const scale = Number(presentation.width || (presentation.aspectRatio === '4:3' ? 960 : 1280)) / 1280;
     const slots = (layout.placeholders || []).map(slot => ({ ...slot, x: slot.x * scale, width: slot.width * scale }));

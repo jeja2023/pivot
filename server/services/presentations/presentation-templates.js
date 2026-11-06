@@ -957,7 +957,7 @@ function makeTemplate(seed) {
     });
 }
 
-const BUILT_IN_TEMPLATES = Object.freeze([...require('./presentation-design-templates').listDesignTemplates(), ...THEME_SEEDS.map(makeTemplate)]);
+const BUILT_IN_TEMPLATES = Object.freeze([...require('./presentation-editorial-templates').listEditorialTemplates(), ...THEME_SEEDS.map(makeTemplate)]);
 
 function cloneTemplate(template) {
     return JSON.parse(JSON.stringify(template));
@@ -967,9 +967,13 @@ function listBuiltInTemplates() {
     return BUILT_IN_TEMPLATES.map(cloneTemplate);
 }
 
-function getBuiltInTemplate(templateId) {
+function getBuiltInTemplate(templateId, version) {
+    if (Number(version) === 1) {
+        const previous = require('./presentation-design-templates').listDesignTemplates().find(item => item.id === String(templateId || '').trim());
+        if (previous) return cloneTemplate(previous);
+    }
     const template = BUILT_IN_TEMPLATES.find(item => item.id === String(templateId || '').trim());
-    return template ? cloneTemplate(template) : null;
+    return template && (version === undefined || Number(version) === template.version) ? cloneTemplate(template) : null;
 }
 
 module.exports = {

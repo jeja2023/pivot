@@ -46,7 +46,7 @@ async function createTextMetrics(presentation = {}, { assetResolver } = {}) {
     }
     function lines(element) {
         const size = Number(element.style?.fontSize || 24);
-        return wrapByWidth(element.content?.text || '', Math.max(1, element.width - Number(element.style?.padding || 0) * 2), text => measure(text, size, element.style?.fontFamily));
+        return wrapByWidth(element.content?.text || '', Math.max(1, (element.width - Number(element.style?.padding || 0) * 2) * 0.97), text => measure(text, size, element.style?.fontFamily));
     }
     return { measured: Boolean(fallback), measure, lines };
 }

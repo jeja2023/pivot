@@ -10,7 +10,7 @@ const fontkit = require('@pdf-lib/fontkit');
 const sharp = require('sharp');
 const { normalizePresentation } = require('./presentation-schema');
 
-const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.104';
+const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.107';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_MIME = 'application/pdf';
 const PNG_MIME = 'image/png';
@@ -486,6 +486,7 @@ function pointOptions(element, presentation) {
 }
 
 async function renderPptx(presentation, options = {}) {
+    const metrics = await require('./presentation-text-metrics').createTextMetrics(presentation, options);
     const pptx = new PptxGenJS();
     pptx.layout = presentation.aspectRatio === '4:3' ? 'LAYOUT_4x3' : 'LAYOUT_WIDE';
     pptx.author = 'Pivot';
@@ -508,11 +509,13 @@ async function renderPptx(presentation, options = {}) {
         for (const element of slideData.elements.filter(item => item.visible)) {
             const pos = pointOptions(element, presentation);
             if (element.type === 'text') {
-                slide.addText(element.content.text, {
+                const controlledText = presentation.template.version >= 2 && slideData.layoutId.startsWith('design-');
+                slide.addText(controlledText ? metrics.lines(element).join('\n') : element.content.text, {
                     ...pos, margin: element.style.padding / 72, fontFace: element.style.fontFamily, fontSize: element.style.fontSize * 0.75,
                     bold: element.style.fontWeight >= 600, italic: element.style.italic, underline: element.style.underline,
                     color: pptColor(element.style.color), align: element.style.align, valign: element.style.verticalAlign,
-                    breakLine: false, fit: 'shrink', rotate: element.rotation, paraSpaceAfterPt: 0,
+                    breakLine: false, fit: controlledText ? 'none' : 'shrink', wrap: !controlledText,
+                    ...(controlledText ? { lineSpacingMultiple: element.style.lineHeight } : {}), rotate: element.rotation, paraSpaceAfterPt: 0,
                     bullet: element.style.bullet ? { type: 'ul' } : undefined, objectName: exportedAnimationName(element)
                 });
                 continue;
@@ -567,7 +570,10 @@ async function renderPptx(presentation, options = {}) {
                 const series = element.data.columns.slice(1).map((name, seriesIndex) => ({ name, labels: categories, values: element.data.rows.map(row => Number(row[seriesIndex + 1]) || 0) }));
                 const chartType = pptx.ChartType[element.chartType] || pptx.ChartType.bar;
                 try {
-                    slide.addChart(chartType, series, { ...pos, catAxisLabelFontFace: presentation.theme.fonts.body, valAxisLabelFontFace: presentation.theme.fonts.body, showLegend: element.options.showLegend, showValue: element.options.showLabels, showTitle: Boolean(element.title), title: element.title || undefined, chartColors: element.options.colors.map(pptColor), showCatName: false });
+                    const labelSize = (element.options.labelFontSize || 14) * 0.75;
+                    slide.addChart(chartType, series, { ...pos, catAxisLabelFontFace: presentation.theme.fonts.body, valAxisLabelFontFace: presentation.theme.fonts.body,
+                        catAxisLabelFontSize: labelSize, valAxisLabelFontSize: labelSize, dataLabelFontSize: labelSize, dataLabelColor: pptColor(presentation.theme.colors.text),
+                        valGridLine: { color: 'D3DCD4', width: 0.5 }, showLegend: element.options.showLegend, showValue: element.options.showLabels, showTitle: Boolean(element.title), title: element.title || undefined, chartColors: element.options.colors.map(pptColor), showCatName: false });
                 } catch (_) {
                     const chartData = await sharp(Buffer.from(createChartSvg(element, Math.round(element.width), Math.round(element.height)))).png().toBuffer();
                     slide.addImage({ data: `data:image/png;base64,${chartData.toString('base64')}`, ...pos });

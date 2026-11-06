@@ -8,16 +8,36 @@ const { handleChatMemoryRequest } = require('./chat-memory-actions');
 const { retrieveLongTermMemories } = require('./long-term-memory');
 const { recordDecisionOutcome } = require('./decision-observability');
 const ledger = require('../repositories/chat-conversation-turns');
-const { detectChatRouteCorrection, recordChatRouteCorrection, applyAutomaticExecutionDecision, correctionRetrievalQuery } = require('./chat-route-correction');
+const { detectChatRouteCorrection, recordChatRouteCorrection, applyAutomaticExecutionDecision } = require('./chat-route-correction');
 const { isDirectConversation } = require('./chat-capability-decision');
 const { getChatCapabilityAvailability } = require('./chat-capability-scope');
 const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
+const { applyChatRouteCorrection } = require('./chat-route-correction-handler');
 const { buildIntentFallback } = require('./chat-intent-fallback');
+const { readTypedEnv } = require('../config/env-registry');
+const { createChatIntentBudget } = require('./chat-intent-budget');
 
-async function decideAutomaticChatExecution({
+async function decideAutomaticChatExecution(options = {}, deps = {}) {
+    const startedAt = Date.now();
+    const budget = createChatIntentBudget({ signal: options.signal, deadlineAt: options.deadlineAt,
+        timeoutMs: deps.config?.timeoutMs ?? readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS') });
+    try {
+        const decision = await budget.run('total', () => decideWithinIntentBudget({ ...options, signal: budget.signal, deadlineAt: budget.deadlineAt }, { ...deps, budget }));
+        return { ...decision, timing: { ...decision.timing, contextMs: Math.max(budget.timings.history || 0, 0) + Math.max(budget.timings.tasks || 0, budget.timings.memories || 0, budget.timings.availability || 0),
+            semanticMs: budget.timings.semantic || 0, totalMs: Date.now() - startedAt, stages: { ...budget.timings } } };
+    } catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : error;
+        const baseline = classifyChatAutoExecution({ prompt: options.modelContent });
+        return constrainChatDecision({ ...buildIntentFallback(baseline, error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : 'intent_context_unavailable'),
+            durationMs: Date.now() - startedAt, timing: { totalMs: Date.now() - startedAt, stages: { ...budget.timings } } },
+        resolveChatRequestScope(options.modelContent, { ...(options.requestScope || {}), routeOverrides: options.routeOverrides }));
+    } finally { budget.dispose(); }
+}
+
+async function decideWithinIntentBudget({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
     autoExecutionEnabled = false, modelContent = '', maxGoalLength = 12000,
-    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
+    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, deadlineAt, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
 } = {}, deps = {}) {
     const intentPrompt = String(modelContent).split(/\n---\s*\n【参考文档/)[0];
     const providedSources = [...String(modelContent).matchAll(/【参考文档:\s*([^\n】]{1,240})】\s*\n/g)].slice(0, 20).map(match => ({ kind: 'inline_attachment', name: match[1], available: true, sourceMessageId: userMessageId }));
@@ -26,77 +46,35 @@ async function decideAutomaticChatExecution({
     if (regenerate || ephemeralVoice || chatMode !== 'normal') return { action: 'direct_answer', reasonCode: 'not_evaluated' };
     if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, providedSources, requestScope,
         sourceLength: modelContent.length, user, modelCfg, sessionId, userMessageId, signal });
-    const correction = detectChatRouteCorrection(intentPrompt);
+    const correction = detectChatRouteCorrection(intentPrompt, { includeMixed: true });
     if (correction) {
-        let history = [];
-        let tasks = [];
-        const applied = { pausedRunIds: [], restrictedRunIds: [], status: 'applied' };
-        try {
-            // 纠正属于当前用户的控制权，不受自动执行开关和新建任务权限影响。
-            tasks = await (deps.getConversationTasks || getConversationTasks)(sessionId, userId);
-            const active = tasks.filter(task => task.active);
-            if (active.length > 1) return { action: 'clarify', reasonCode: 'multiple_correction_targets',
-                question: '当前有多项任务，请指出需要调整的任务名称。', correction, constraints: [correction.constraint] };
-            for (const task of active) {
-                await (deps.updateMetadata || require('./agent-run-metadata-patch').updateAgentRunMetadataWithRetry)(task.id, metadata => ({ ...metadata,
-                    ...(correction.pauseExecution ? { capabilityConstraints: { ...(metadata.capabilityConstraints || {}), present: true, capabilities: [], authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
-                    ...(!correction.pauseExecution ? { capabilityConstraints: { ...(metadata.capabilityConstraints || {}),
-                        ...(correction.routeOverrides.excludeRag ? { excludeKnowledge: true } : {}), ...(correction.routeOverrides.excludeWeb ? { excludeWeb: true } : {}),
-                        authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
-                    ...(correction.routeOverrides.excludeRag ? { chatBridge: { ...metadata.chatBridge, ragEnabled: false, ragContext: '' } } : {}),
-                    taskContract: { ...(metadata.taskContract || {}), constraints: [...new Set([...(metadata.taskContract?.constraints || []), correction.constraint])].slice(-24) },
-                    routeCorrection: { kind: correction.kind, sourceMessageId: userMessageId, routeOverrides: correction.routeOverrides }
-                }), { userId });
-                if (!correction.pauseExecution) {
-                    await (deps.sendAgentControlMessage || require('./agent-control').sendAgentControlMessage)({ user, toRunId: task.id, type: 'steer',
-                        idempotencyKey: `chat-correction:${sessionId}:${userMessageId}`, payload: { instruction: correction.constraint, source: 'chat', sourceMessageId: userMessageId } });
-                    continue;
-                }
-                applied.restrictedRunIds.push(task.id);
-                const paused = await (deps.pauseAgentRun || require('./agent-runtime').runs.pauseAgentRun)(task.id, user);
-                if (!paused) throw new Error('纠正对象已经不可用');
-                if (paused.status === 'needs_input') applied.pausedRunIds.push(task.id);
-                else if (/^(?:queued|planning|running|executing|observing|diagnosing|replanning|resuming)$/.test(paused.status)) throw new Error('暂停尚未确认');
-            }
-        } catch (error) {
-            if (signal?.aborted) throw error;
-            log?.warn?.({ sessionId, userId, code: error.code }, '当前任务纠正未能完整应用');
-            return { action: 'clarify', reasonCode: 'correction_apply_failed', correction,
-                question: '本轮已限制处理方式，但当前任务的暂停尚未确认，请在任务详情查看状态后重试。', constraints: [correction.constraint] };
-        }
-        let evidence = [];
-        try {
-            history = (await sessionsRepository.listMessages(sessionId, userId)).filter(item => Number(item.id) !== Number(userMessageId));
-            if (correction.routeOverrides.forceRag) correction.retrievalQuery = correctionRetrievalQuery(intentPrompt, history);
-            evidence = await (deps.recordChatRouteCorrection || recordChatRouteCorrection)({ correction, history, tasks, prompt: intentPrompt, userId, sessionId, userMessageId, applied });
-        } catch (error) {
-            log?.warn?.({ sessionId, userId, code: error.code }, '当前任务纠正已生效，后台证据记录暂不可用');
-        }
-        writeSse?.(JSON.stringify({ type: 'route', status: 'corrected', message: applied.pausedRunIds.length ? '已暂停当前任务，并按本次要求调整处理方式' : '已按本次要求调整处理方式' }));
-        return { version: 2, action: correction.action, reasonCode: 'natural_route_correction', objective: intentPrompt,
-            requiredCapabilities: [], constraints: [correction.constraint], correction: { ...correction, ...applied, evidence } };
+        const corrected = await applyChatRouteCorrection({ correction, intentPrompt, sessionId, userId, user, userMessageId, signal, sessionsRepository, log, writeSse }, deps);
+        if (!correction.continueUnderstanding || corrected.action === 'clarify') return corrected;
+        routeOverrides = { ...routeOverrides, ...correction.routeOverrides };
     }
     // 停止与遗忘属于用户控制权，关闭自动执行开关也不能使其失效。
     if (['control', 'memory'].includes(initial.action)) return initial;
     if (isDirectConversation(intentPrompt)) return { ...initial, action: 'direct_answer' };
     writeSse?.(JSON.stringify({ type: 'route', status: 'understanding', message: '正在理解任务并安排处理' }));
     try {
-        const history = (await sessionsRepository.listMessages(sessionId, userId)).filter(item => Number(item.id) !== Number(userMessageId));
+        const history = (await deps.budget.run('history', () => sessionsRepository.listMessages(sessionId, userId))).filter(item => Number(item.id) !== Number(userMessageId));
         requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, history });
         if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, history, providedSources, requestScope,
             user, modelCfg, sessionId, userMessageId, signal });
         const [tasks, memories, availability] = await Promise.all([
-            (deps.getConversationTasks || getConversationTasks)(sessionId, userId),
-            (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4 }).catch(() => []),
-            (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user, {}, { prompt: intentPrompt, selectedTools: routeOverrides.tools, manualAllowlist: mcpToolAllowlist })
+            deps.budget.run('tasks', () => (deps.getConversationTasks || getConversationTasks)(sessionId, userId)),
+            deps.budget.run('memories', stageSignal => (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4, signal: stageSignal }),
+                { optional: true, fallback: [], timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) }),
+            deps.budget.run('availability', stageSignal => (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user, {}, { prompt: intentPrompt, selectedTools: routeOverrides.tools, manualAllowlist: mcpToolAllowlist, signal: stageSignal }),
+                { optional: true, fallback: { status: 'unavailable', tools: [] }, timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) })
         ]);
         if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
-        const resolved = await (deps.resolveChatIntent || resolveChatIntent)({
-            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, providedSources,
+        const resolved = await deps.budget.run('semantic', () => (deps.resolveChatIntent || resolveChatIntent)({
+            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, deadlineAt, providedSources,
             availability: { ...availability, tools: (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, requestScope)) }, requestScope, sourceLength: modelContent.length,
             executionAllowed: agentExecutionAllowed && autoExecutionEnabled,
             preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
-        });
+        }));
         if (resolved.failureCode) log?.warn?.({ sessionId, userId, modelId: modelCfg?.id, code: resolved.failureCode,
             durationMs: resolved.durationMs, policyVersion: resolved.policyVersion }, '任务意图判断未完成，本轮仅提供受限文本回复');
         if (/^(?:不对|不是让你|不是这个意思)|(?:不要|不用).{0,8}(?:新建|另开|新开)任务/.test(intentPrompt)) {

@@ -6,7 +6,7 @@ const { verificationDetails } = require('./task-verification-details');
 
 function parse(value) { if (value && typeof value === 'object') return value; try { return JSON.parse(value || '{}'); } catch (_) { return {}; } }
 const PROVIDER_REASONS = Object.freeze({ intent_timeout: '任务意图判断超时', intent_invalid_contract: '意图判断响应格式或范围无效',
-    intent_provider_unavailable: '意图判断模型调用失败', intent_context_unavailable: '任务理解上下文不可用', provider_timeout: '决策组件调用超时',
+    intent_provider_unavailable: '意图判断模型调用失败', intent_context_unavailable: '任务理解上下文不可用', intent_context_incomplete: '长请求需要补全原始上下文后再查询', provider_timeout: '决策组件调用超时',
     artifact_not_active: '决策模型制品未启用', provider_version_not_configured: '决策模型版本未配置' });
 function safe(value, limit = 240) { return redactRoutingText(String(value || '')).slice(0, limit); }
 

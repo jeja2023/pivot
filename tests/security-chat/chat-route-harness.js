@@ -27,7 +27,7 @@ function writeSseChunks(res, { chunks = [], usage = null } = {}) {
  * 启动可编程假上游模型服务。
  * handler 为空时按流式 SSE 返回 replyChunks；传入 handler 可自定义状态码、非流式 JSON 或中途断流。
  */
-async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usage = null } = {}) {
+async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usage = null, intentDecision = null } = {}) {
     const server = http.createServer((req, res) => {
         if (typeof handler === 'function') {
             req.resume();
@@ -45,7 +45,8 @@ async function startFakeUpstream({ handler, replyChunks = ['测试回答'], usag
                     let content = replyChunks.join('');
                     if (parsed.messages?.some(message => String(message.content || '').includes('你是对话下一步决策器'))) {
                         const request = JSON.parse(parsed.messages.find(message => message.role === 'user').content);
-                        content = JSON.stringify({ action: 'agent_run', intent: 'delegate', objective: request.prompt, constraints: [], deliverables: ['管理报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.95 });
+                        content = JSON.stringify({ action: 'agent_run', intent: 'delegate', objective: request.prompt, constraints: [], deliverables: ['管理报告'], requiredCapabilities: ['data.query','document.render'], missingFacts: [], evidenceRefs: ['current_message'], confidence: 0.95, routing: { knowledge: 'none', tools: 'task' } });
+                        if (intentDecision) content = JSON.stringify({ objective: request.prompt, ...intentDecision });
                     }
                     const isSemanticVerifier = parsed.messages?.some(m => String(m.content || '').includes('知识库证据蕴含核验器'));
                     if (isSemanticVerifier) {

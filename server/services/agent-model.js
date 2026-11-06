@@ -147,12 +147,14 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
     let globalAcquired = false;
     let endpointRelease = null;
     const startedAt = Date.now();
+    let providerStartedAt = null;
     try {
         // 决策器等短时调用会用 signal 取消排队；必须把信号继续传给全局和
         // 端点两层信号量，否则超时请求仍可能在队列中占住后续模型吞吐。
         await aiSemaphore.acquire({ signal: options.signal || null });
         globalAcquired = true;
         endpointRelease = await acquireModelSlot(modelCfg, { signal: options.signal || null });
+        providerStartedAt = Date.now();
         const result = await operation();
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return result;
@@ -160,6 +162,10 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         if (endpointRelease) recordModelFailure(modelCfg, err, { signal: options.signal });
         throw err;
     } finally {
+        if (options.usageRef && typeof options.usageRef === 'object') {
+            options.usageRef.queueMs = (Number(options.usageRef.queueMs) || 0) + (providerStartedAt || Date.now()) - startedAt;
+            options.usageRef.providerMs = (Number(options.usageRef.providerMs) || 0) + (providerStartedAt ? Date.now() - providerStartedAt : 0);
+        }
         if (endpointRelease) endpointRelease();
         if (globalAcquired) aiSemaphore.release();
     }

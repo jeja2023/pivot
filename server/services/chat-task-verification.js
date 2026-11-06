@@ -2,6 +2,7 @@
 
 const { callModelJson, recordAgentModelUsage } = require('./agent-model');
 const { getRunnableModelForUserAsync } = require('./models');
+const { hasReadRequiredSources } = require('./chat-source-progress');
 
 async function verifyAutomaticTask({ run, user, contract, answer, observations = [], signal, budget }, deps = {}) {
     signal?.throwIfAborted();
@@ -13,14 +14,8 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
         const required = metadata.requiredSourceMessages?.length ? metadata.requiredSourceMessages : [metadata.chatBridge?.userMessageId];
         for (const messageId of required) {
             if (!deps.currentExecutionScope && !await require('../repositories/chat-conversation-turns').readTaskSource(run.id, user.id, messageId)) return { passed: false, reason: 'source_revoked' };
-            const progress = metadata.sourceReadProgress?.[String(messageId)] || {};
-            let coveredTo = 0;
-            for (const [start, end] of (progress.ranges || []).slice().sort((left, right) => left[0] - right[0])) {
-                if (start > coveredTo) break;
-                coveredTo = Math.max(coveredTo, end);
-            }
-            if (!progress.totalChars || coveredTo < progress.totalChars) return { passed: false, reason: 'source_not_fully_read' };
         }
+        if (!hasReadRequiredSources(metadata)) return { passed: false, reason: 'source_not_fully_read' };
     }
     const artifacts = contract.acceptance?.artifactRequired
         ? await (deps.readyRunArtifacts || require('../repositories/chat-conversation-turns').readyRunArtifacts)(run.id, user.id) : [];

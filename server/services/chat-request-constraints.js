@@ -12,6 +12,19 @@ function currentRequestText(prompt = '') {
         .replace(/[“「][^”」]*[”」]|"[^"\n]*"/g, '').trim();
 }
 
+function requestClauses(prompt = '') {
+    return currentRequestText(prompt).split(/[，,。！？!?；;\n]|\b(?:but|however|then)\b/iu).map(item => item.trim()).filter(Boolean);
+}
+
+function isPureMemoryRequest(prompt = '') {
+    const text = currentUserText(prompt);
+    if (/[?？]|什么意思|怎么说|如何|是什么|\b(?:what|how|why|explain|translate)\b/iu.test(text)) return false;
+    const clauses = requestClauses(text);
+    // 混合意图交给语义入口，避免用有限的任务对象词表抢占当前工作。
+    if (clauses.length > 1 && clauses.slice(1).some(clause => !/^(?:只|仅)(?:用于|限于|在)(?:当前|这个|本)(?:项目|会话)$/.test(clause))) return false;
+    return !/(?:并且|然后|同时|另外|顺便|并(?!列))|(?:再)(?:请|帮我|替我|为我)|\b(?:and|also)\b/iu.test(text);
+}
+
 function isPlanOnlyRequest(prompt = '') {
     const text = currentRequestText(prompt);
     const clauses = text.split(/[，,。！!；;\n]/).map(item => item.trim()).filter(Boolean);
@@ -23,4 +36,4 @@ function isPlanOnlyRequest(prompt = '') {
     return clauses.some(clause => plan.test(clause)) || (clauses.length > 0 && clauses.every(clause => restriction.test(clause)));
 }
 
-module.exports = { currentUserText, currentRequestText, isPlanOnlyRequest };
+module.exports = { currentUserText, currentRequestText, isPureMemoryRequest, isPlanOnlyRequest };

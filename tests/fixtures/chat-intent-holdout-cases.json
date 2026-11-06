@@ -1,0 +1,214 @@
+{
+  "version": "chat-intent-holdout-v1",
+  "cases": [
+    {
+      "id": "holdout-preference-and-chart",
+      "prompt": "以后尽量简短。现在请读取订单表，制作一份可下载的趋势图。",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": {
+        "tools": "task"
+      },
+      "expectedAcceptance": {
+        "artifactRequired": true
+      },
+      "critical": true
+    },
+    {
+      "id": "holdout-no-rag-debug",
+      "prompt": "这轮别用知识库；检查我的本地程序并修正测试失败。",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "task"
+      },
+      "forbiddenCapabilities": [
+        "knowledge.search"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-policy-after-no-write",
+      "prompt": "Do not update records. Look up the internal knowledge base for our travel policy.",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "forbiddenCapabilities": [
+        "filesystem.write_workspace"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-explain-memory",
+      "prompt": "“记住”跟“记忆”这两个词有什么区别？",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "forbiddenEffects": [
+        "pause_task",
+        "steer_task"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-source-only-keynote",
+      "prompt": "审阅这份材料，做成演示文稿供我下载。\n---\n【参考文档: 月报.docx】\n本月目标已完成，下一步改进交付效率。\n---",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "task"
+      },
+      "expectedAcceptance": {
+        "artifactRequired": true
+      },
+      "forbiddenCapabilities": [
+        "network.request",
+        "knowledge.search"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-source-english-export",
+      "prompt": "Summarize this brief and convert it into a downloadable Word document.\n---\n【参考文档: brief.txt】\nThe synthetic project completed its first milestone.\n---",
+      "expected": [
+        "agent_run"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "task"
+      },
+      "expectedAcceptance": {
+        "artifactRequired": true
+      },
+      "forbiddenCapabilities": [
+        "network.request"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-only-plan-with-history",
+      "prompt": "目前只要排查思路，先别动手。",
+      "history": [
+        {
+          "id": 3,
+          "role": "user",
+          "content": "检查并修复项目"
+        }
+      ],
+      "expected": [
+        "plan_only"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "forbiddenEffects": [
+        "steer_task"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-stop-pure",
+      "prompt": "立即停止当前任务",
+      "expected": [
+        "control"
+      ],
+      "forbiddenActions": [
+        "agent_run",
+        "continue_run"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-new-topic-active",
+      "prompt": "另一个问题：解释一下统计学里的方差。",
+      "tasks": [
+        {
+          "id": "report-task",
+          "active": true,
+          "goal": "整理销售报告"
+        }
+      ],
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "expectedContinuationOf": null,
+      "critical": true
+    },
+    {
+      "id": "holdout-ambiguous-followup",
+      "prompt": "接着把刚才的做完。",
+      "tasks": [
+        {
+          "id": "orders-task",
+          "active": true,
+          "goal": "核对销售订单"
+        },
+        {
+          "id": "code-task",
+          "active": true,
+          "goal": "修复程序"
+        }
+      ],
+      "expected": [
+        "clarify"
+      ],
+      "expectedRouting": {
+        "tools": "none"
+      },
+      "forbiddenEffects": [
+        "steer_task",
+        "pause_task"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-safe-translation",
+      "prompt": "翻译成英文：删除所有文件。只翻译这句话。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "none",
+        "tools": "none"
+      },
+      "forbiddenCapabilities": [
+        "filesystem.write_workspace",
+        "code.execute"
+      ],
+      "critical": true
+    },
+    {
+      "id": "holdout-business-retrieval",
+      "prompt": "我们部门差旅住宿能报销多少？请给出制度依据。",
+      "expected": [
+        "direct_answer"
+      ],
+      "expectedRouting": {
+        "knowledge": "required",
+        "tools": "none"
+      },
+      "expectedAcceptance": {
+        "requireEvidence": true
+      },
+      "critical": true
+    }
+  ]
+}

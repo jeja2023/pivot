@@ -33,7 +33,7 @@ async function getChatCapabilityAvailability(user, deps = {}, options = {}) {
         const ordered = [...summaries.filter(tool => selected.has(tool.name)), ...ranked, ...summaries];
         const unique = [...new Map(ordered.map(tool => [tool.name, tool])).values()];
         const limit = Math.max(24, Math.min(selected.size, 100));
-        return { status: unique.length > limit ? 'partial' : 'available', totalTools: unique.length, tools: unique.slice(0, limit) };
+        return { status: unique.length > limit ? 'partial' : 'available', totalTools: unique.length, selectedToolNames: [...selected].filter(name => unique.some(tool => tool.name === name)), tools: unique.slice(0, limit) };
     } catch (_) { return { status: 'unavailable', tools: [] }; }
 }
 

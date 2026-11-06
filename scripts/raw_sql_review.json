@@ -472,9 +472,9 @@
     },
     {
       "file": "server/repositories/document-orphan-references.js",
-      "count": 4,
-      "rationale": "仅在任务锁和任务行锁保护下，以绑定参数检查任务、未完成导出和全部文档文件引用；数据库异常时清理失败关闭。",
-      "verification": "tests/document-orphan-cleanup.test.js 使用隔离 PostgreSQL 验证引用、活跃任务、持锁与故障情况下的文件保护。"
+      "count": 5,
+      "rationale": "孤儿清理在同一事务内从current_schema取得数据库转义的Schema标识符，所有任务、导出和引用查询显式限定该Schema；缺表不得通过search_path回退public。业务值均参数绑定，表名是仓储内部常量。任务锁和行锁持续到安全删除结束。",
+      "verification": "document-orphan-cleanup.test.js真实PostgreSQL验证缺表时报错且保留全部文件、恢复后重试同一游标、活跃任务和并发引用保护、保留期和符号链接边界；test:all复验。"
     },
     {
       "file": "server/repositories/official-writing-library.js",

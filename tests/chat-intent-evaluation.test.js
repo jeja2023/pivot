@@ -31,3 +31,34 @@ test('动作相同仍检查检索问题、来源、能力、续接对象和验�
     assert.equal(report.unavailable, 1);
     assert.equal(report.p95Ms, 30);
 });
+
+test('工程边界集和保留验证集分别冻结，包含反向断言且不修改历史版本', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const crypto = require('node:crypto');
+    const manifest = require('./fixtures/chat-intent-evaluation-manifest.v2.json');
+    const ids = new Set();
+    for (const entry of manifest.suites) {
+        const bytes = fs.readFileSync(path.join(__dirname, 'fixtures', entry.file));
+        assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), entry.sha256, entry.file);
+        const fixture = JSON.parse(bytes);
+        assert.equal(fixture.cases.length, entry.caseCount);
+        for (const item of fixture.cases) {
+            assert.equal(ids.has(item.id), false, item.id);
+            ids.add(item.id);
+            assert.ok(item.expected.length);
+        }
+    }
+    assert.ok(manifest.suites.some(entry => entry.role === 'holdout'));
+});
+
+test('实现摘要覆盖聊天入口、范围约束、模型协议、任务契约和运行时策略', async () => {
+    const { chatIntentImplementation } = require('../scripts/lib/chat_intent_implementation');
+    const path = require('node:path');
+    const value = await chatIntentImplementation(path.resolve(__dirname, '..'), { mode: 'active' });
+    for (const file of ['server/routes/chat/index.js', 'client/chat/chat-auto-route.js', 'server/services/chat-route-correction-handler.js',
+        'server/services/chat-request-scope.js', 'server/services/chat-intent-schema.js', 'server/services/chat-task-contract-update.js', 'server/services/agent-policy.js']) {
+        assert.ok(value.implementationFiles.includes(file), file);
+    }
+    assert.match(value.implementationDigest, /^[a-f0-9]{64}$/);
+});

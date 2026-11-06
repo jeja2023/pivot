@@ -1,0 +1,19 @@
+{
+  "version": "chat-intent-evaluation-manifest-v1",
+  "kind": "engineering_synthetic_frozen_suites",
+  "humanReviewed": false,
+  "suites": [
+    {
+      "file": "chat-intent-cases.v7.json",
+      "role": "boundary",
+      "caseCount": 56,
+      "sha256": "f868617dafbb7d491e54632e526510aa27731a26768819c776f08cb68e07a63d"
+    },
+    {
+      "file": "chat-intent-holdout-cases.json",
+      "role": "holdout",
+      "caseCount": 12,
+      "sha256": "8274be42ca01c302287c19440eff5ea6edbc359246b5c3a656df964665f058de"
+    }
+  ]
+}

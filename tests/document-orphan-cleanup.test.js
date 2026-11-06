@@ -219,7 +219,9 @@ test('数据库异常时保留文件，恢复后分批推进，不清理短保�
         await fs.writeFile(unknown, 'unknown'); await fs.utimes(unknown, old, old);
         await execute('ALTER TABLE document_exports RENAME TO document_exports_gc_test');
         renamed = true;
-        await assert.rejects(cleanupDocumentOrphans({ limit: 1, retentionDays: 1 }));
+        const unavailable = await cleanupDocumentOrphans({ limit: 1, retentionDays: 1 }).then(value => ({ value }), error => ({ error }));
+        assert.ok(unavailable.error, `引用查询不可用时必须保留文件并报告失败：${JSON.stringify(unavailable.value)}`);
+        assert.equal(unavailable.error.code, '42P01', '当前 Schema 缺表时必须失败，不能回退到其它 Schema。');
         for (const name of names) await fs.access(path.join(dir, name));
         await execute('ALTER TABLE document_exports_gc_test RENAME TO document_exports');
         renamed = false;
@@ -228,6 +230,7 @@ test('数据库异常时保留文件，恢复后分批推进，不清理短保�
             const result = await cleanupDocumentOrphans({ limit: 1, retentionDays: 1 });
             assert.equal(result.retentionDays, 30);
             deleted += result.deleted;
+            if (index === 0) await assert.rejects(fs.access(path.join(dir, names.slice().sort()[0])), { code: 'ENOENT' });
         }
         assert.equal(deleted, names.length);
         for (const name of names) await assert.rejects(fs.access(path.join(dir, name)), { code: 'ENOENT' });

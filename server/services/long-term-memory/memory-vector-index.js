@@ -47,16 +47,22 @@ async function createMemoryIndexSafely(dimensions, pool = getPgPool()) {
         const state = await client.query(`
             SELECT n.nspname AS schema_name, i.indisvalid AS valid,
                    pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS can_inspect_builders,
+                   pg_has_role(current_user, c.relowner, 'USAGE') AS owns_index,
+                   t.relname AS table_name,
+                   EXISTS (SELECT 1 FROM pg_locks l WHERE l.relation = c.oid AND l.pid IS DISTINCT FROM pg_backend_pid()) AS index_in_use,
                    EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = c.oid) AS building
             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             JOIN pg_index i ON i.indexrelid = c.oid
+            JOIN pg_class t ON t.oid = i.indrelid
             WHERE n.nspname = current_schema() AND c.relname = $1
         `, [indexName]);
         const existing = state.rows[0];
+        if (existing && existing.table_name !== 'memories') return { created: false, reason: 'index_definition_conflict' };
         if (existing?.valid) return { created: false, reason: 'already_exists' };
-        if (existing?.building) return { created: false, reason: 'build_in_progress' };
-        // 无法观察其他角色的建索引进程时，不能确定无效索引是否仍在构建。
-        if (existing && !existing.can_inspect_builders) return { created: false, reason: 'invalid_index_requires_admin' };
+        if (existing?.building || existing?.index_in_use) return { created: false, reason: 'build_in_progress' };
+        // 所有者可修复自己的无效索引，无需提升为统计管理员；pg_locks 对所有
+        // 会话可见，仍会保留被其它会话占用或正在构建的索引。
+        if (existing && !existing.can_inspect_builders && !existing.owns_index) return { created: false, reason: 'invalid_index_requires_admin' };
         if (existing) {
             const quote = value => `"${String(value).replace(/"/g, '""')}"`;
             await client.query(`DROP INDEX CONCURRENTLY IF EXISTS ${quote(existing.schema_name)}.${quote(indexName)}`);

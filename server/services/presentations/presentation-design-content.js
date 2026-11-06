@@ -25,8 +25,9 @@ function buildDesignPresentation(input, template, sources = []) {
         const add = (role, content) => {
             const slot = layout.placeholders.find(slot => slot.role === role && slot.kind === 'text');
             if (!slot || !content) return;
-            elements.push({ id: role, type: 'text', x: slot.x, y: slot.y, width: slot.width, height: slot.height, sourceRefs: refs,
-                content: { text: text(content, 2400) }, style: { ...slot.style, fontFamily: theme.fonts.body } });
+            const paragraphs = layout.editorial && ['body', 'evidence', 'left', 'right'].includes(role) && layout.editorial.kind !== 'section' ? String(content).split('\n\n') : [content];
+            paragraphs.forEach((paragraph, part) => elements.push({ id: part ? `${role}_${part + 1}` : role, type: 'text', x: slot.x, y: slot.y, width: slot.width, height: slot.height, sourceRefs: refs,
+                content: { text: text(paragraph, 2400) }, style: { ...slot.style, fontFamily: theme.fonts.body } }));
         };
         const points = slide.points || [];
         if (!Array.isArray(points) || points.length > 8) throw presentationError('每页要点最多八条，请拆页。');

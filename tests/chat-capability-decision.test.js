@@ -40,7 +40,7 @@ test('关闭自动任务仍理解业务问题，但不能因模型建议自动�
     let called = false;
     const result = await decideAutomaticChatExecution({ ...input, userId: 9, modelContent: input.prompt, sessionsRepository: { listMessages: async () => [] } }, {
         getConversationTasks: async () => [], retrieveLongTermMemories: async () => [], getChatCapabilityAvailability: async () => ({ tools: [] }),
-        resolveChatIntent: async value => { called = true; assert.equal(value.executionAllowed, false); return resolveChatIntent(value, modelDeps({ ...decision, action: 'agent_run' })); }
+        resolveChatIntent: async value => { called = true; assert.equal(value.executionAllowed, false); return resolveChatIntent(value, modelDeps({ ...decision, action: 'agent_run', routing: { ...decision.routing, tools: 'task' } })); }
     });
     assert.equal(called, true);
     assert.equal(result.action, 'direct_answer');
