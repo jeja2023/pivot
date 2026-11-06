@@ -3,6 +3,7 @@
 const { evaluateToolPolicy, normalizeAllowlist, resolveSkillPolicyContext } = require('./agent-policy');
 const { isDiscoveryMetaTool } = require('./agent-tool-progressive-discovery');
 const { narrowDatabaseConnections } = require('./agent-tool-identities');
+const INTERNAL_RENDER_TOOLS = new Set(['presentation.create', 'presentation.export', 'presentation.relayout', 'diagram.render_svg']);
 
 function runMetadata(run = {}) {
     if (run.metadata && typeof run.metadata === 'object') return run.metadata;
@@ -27,7 +28,9 @@ function filterRunToolCatalog(tools = [], run = {}, user = null) {
             }
         }
         if (bridge && bridge.ragEnabled !== true && ['rag.search', 'knowledge.list', 'knowledge.graph.query'].includes(tool.name)) return null;
-        if (bridge && bridge.mcpEnabled !== true && !metadata.automaticExecution
+        // 内置渲染只登记受控结果，不访问外部连接或写入本机，仍接受下方能力与任务策略检查。
+        const internalRender = tool.source === 'builtin' && INTERNAL_RENDER_TOOLS.has(tool.name) && !tool.network;
+        if (bridge && bridge.mcpEnabled !== true && !metadata.automaticExecution && !internalRender
             && (tool.network || tool.side_effect || tool.approval_required || tool.requiresApproval || tool.alwaysRequiresApproval)) return null;
         // 浏览目录时尚未填写业务参数；仅跳过参数校验，仍检查任务/能力/Skill
         // 范围。实际调用保持完整输入、审批、实时授权和网络检查。

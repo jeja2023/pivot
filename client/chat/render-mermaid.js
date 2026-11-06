@@ -8,7 +8,8 @@
     const user = () => String(window.Pivot?.legacy?.currentUser?.id || 'current-page');
     const escape = value => window.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
 
-    function markup(source, { pending = false } = {}) {
+    function markup(source, { pending = false, resultFiles = false } = {}) {
+        if (resultFiles) return `<details class="mermaid-card code-block mermaid-supplement" data-mermaid-card data-mermaid-source-only="true" data-code-language="mermaid" aria-label="补充图形源码"><summary>补充图形源码</summary><div class="mermaid-toolbar"><span class="mermaid-label">图形预览、下载和保存请使用上方“结果文件”。</span><div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source">复制源码</button></div></div><div class="mermaid-source"><pre><code class="language-mermaid">${escape(source)}</code></pre></div></details>`;
         return `<section class="mermaid-card code-block" data-mermaid-card data-code-language="mermaid" data-mermaid-pending="${pending ? 'true' : 'false'}" aria-label="Mermaid 图形">
             <div class="mermaid-toolbar"><strong class="mermaid-label">流程图 · Mermaid</strong>
                 <div class="mermaid-tabs" role="tablist" aria-label="图形显示方式"><button type="button" class="btn-secondary btn-sm" role="tab" aria-selected="true" data-mermaid-action="preview">预览</button><button type="button" class="btn-secondary btn-sm" role="tab" aria-selected="false" data-mermaid-action="source">源码</button></div>
@@ -42,6 +43,10 @@
             dispose(card); card.textContent = '账号已切换，请重新打开当前回复。'; return;
         }
         card.dataset.mermaidUser = user();
+        if (card.dataset.mermaidSourceOnly === 'true') {
+            if (!states.has(card)) states.set(card, { source: card.querySelector('code')?.textContent || '', userId: user(), url: '' });
+            return;
+        }
         if (card.dataset.mermaidPending === 'true') return;
         const source = card.querySelector('code')?.textContent || '';
         const colors = palette(card);

@@ -1,0 +1,48 @@
+'use strict';
+
+const { query } = require('../db/client');
+const { redactRoutingText } = require('./decision-provider');
+const { verificationDetails } = require('./task-verification-details');
+
+function parse(value) { if (value && typeof value === 'object') return value; try { return JSON.parse(value || '{}'); } catch (_) { return {}; } }
+const PROVIDER_REASONS = Object.freeze({ intent_timeout: '任务意图判断超时', intent_invalid_contract: '意图判断响应格式或范围无效',
+    intent_provider_unavailable: '意图判断模型调用失败', intent_context_unavailable: '任务理解上下文不可用', provider_timeout: '决策组件调用超时',
+    artifact_not_active: '决策模型制品未启用', provider_version_not_configured: '决策模型版本未配置' });
+function safe(value, limit = 240) { return redactRoutingText(String(value || '')).slice(0, limit); }
+
+async function getDecisionFailureDetails(options = {}, deps = {}) {
+    const kind = options.kind === 'provider' ? 'provider' : 'delivery';
+    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 20, 100));
+    const offset = Math.max(0, Math.min(Number.parseInt(options.offset, 10) || 0, 100000));
+    const queryFn = deps.query || query;
+    const interval = kind === 'provider' ? 1440 : 30;
+    const from = kind === 'provider'
+        ? "FROM decision_records d CROSS JOIN LATERAL jsonb_array_elements(d.provider_outputs) p(value) WHERE d.created_at >= CURRENT_TIMESTAMP - (?::integer * INTERVAL '1 minute') AND COALESCE(p.value->>'error', '') <> ''"
+        : "FROM decision_outcomes o JOIN decision_records d ON d.decision_id=o.decision_id WHERE o.occurred_at >= CURRENT_TIMESTAMP - (?::integer * INTERVAL '1 day') AND d.scenario='chat.execution' AND o.event_type='execution' AND o.status='failure'";
+    try {
+        const countPromise = queryFn('SELECT COUNT(*) AS count ' + from, [interval]);
+        const sql = kind === 'provider'
+            ? "SELECT d.decision_id, d.scenario, d.created_at AS occurred_at, p.value AS provider " + from + ' ORDER BY d.created_at DESC, d.decision_id DESC LIMIT ? OFFSET ?'
+            : "SELECT f.*, r.metadata AS run_metadata, r.status AS run_status, v.report AS verification_report FROM (SELECT o.id, d.decision_id, o.result_reference AS run_id, o.metadata AS outcome_metadata, o.reason_code, o.occurred_at " + from + ' ORDER BY o.occurred_at DESC, o.id DESC LIMIT ? OFFSET ?) f LEFT JOIN agent_runs r ON r.id=f.run_id LEFT JOIN agent_verifications v ON v.run_id=r.id ORDER BY f.occurred_at DESC, f.id DESC';
+        const [countRows, records] = await Promise.all([countPromise, queryFn(sql, [interval, limit, offset])]);
+        const items = records.map(row => {
+            if (kind === 'provider') {
+                const provider = parse(row.provider), code = safe(provider.error);
+                return { decisionId: safe(row.decision_id, 128), scenario: safe(row.scenario, 80), occurredAt: row.occurred_at,
+                    providerId: safe(provider.providerId, 80), providerVersion: safe(provider.providerVersion, 128),
+                    reasonCode: code, label: PROVIDER_REASONS[code] || '决策组件调用异常', detail: code, durationMs: Math.max(0, Number(provider.durationMs) || 0) };
+            }
+            const snapshot = parse(row.outcome_metadata).verification;
+            const historical = !snapshot;
+            const report = parse(row.verification_report || parse(row.run_metadata).taskVerification);
+            const detail = snapshot ? { reasonCode: safe(snapshot.reasonCode, 100), label: safe(snapshot.label), missing: Array.isArray(snapshot.missing) ? snapshot.missing.slice(0, 12).map(value => safe(value, 500)) : [],
+                ruleFailures: Array.isArray(snapshot.ruleFailures) ? snapshot.ruleFailures.slice(0, 12).map(rule => ({ key: safe(rule.key, 100), label: safe(rule.label), detail: safe(rule.detail, 300) })) : [], executionReason: safe(snapshot.executionReason, 500) } : verificationDetails(Object.keys(report).length ? report : null, { historical });
+            return { outcomeId: safe(row.id, 128), decisionId: safe(row.decision_id, 128), runId: safe(row.run_id, 160), occurredAt: row.occurred_at,
+                status: safe(row.run_status, 40), ...detail, detailSource: snapshot ? 'event_snapshot' : Object.keys(report).length ? 'current_report' : 'unavailable' };
+        });
+        const total = Number(countRows[0]?.count || 0);
+        return { kind, items, total, limit, offset, hasMore: offset + items.length < total, unavailable: false, window: kind === 'provider' ? '24h' : '30d' };
+    } catch (error) { return { kind, items: [], total: null, limit, offset, hasMore: false, unavailable: true, errorCode: safe(error.code || 'failure_details_unavailable', 80) }; }
+}
+
+module.exports = { getDecisionFailureDetails };

@@ -88,7 +88,8 @@ test('语义服务失败或影子模式不能凭失败结果启动工具和任�
     const failed = await resolveChatIntent(input, { ...modelDeps(null), callModelJson: async () => { throw Error('暂不可用'); } });
     assert.equal(failed.action, 'direct_answer');
     assert.equal(failed.capabilityDecisionUnavailable, true);
-    assert.equal(failed.routing, undefined);
+    assert.equal(failed.routing.tools, 'none');
+    assert.equal(failed.routing.knowledge, 'none');
     const shadow = await resolveChatIntent(input, { ...modelDeps(decision), config: { mode: 'shadow', timeoutMs: 1000, rolloutPercent: 100 } });
     const state = { mcpEnabled: false, ragEnabled: true };
     applyAutomaticExecutionDecision(state, shadow);

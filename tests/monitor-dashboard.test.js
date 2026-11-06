@@ -99,3 +99,28 @@ test('切换页面时取消失败原因请求，迟到响应不能覆盖页面',
     await request;
     assert.match(elements.get('monitor-decision-failures').html, /正在加载失败原因/);
 });
+
+test('决策计数保留调用错误口径，明细显示组件、原因、耗时及任务缺项', async () => {
+    const { api, elements } = fixture(async url => ({ ok: true, json: async () => url.includes('kind=provider')
+        ? { items: [{ providerId: 'chat-intent', providerVersion: '8', decisionId: 'decision-one', reasonCode: 'intent_timeout', label: '任务意图判断超时', durationMs: 30000 }], total: 39, hasMore: true }
+        : { items: [{ runId: 'run-one', decisionId: 'decision-one', label: '缺少文件格式', missing: ['尚未生成PPTX<script>'], ruleFailures: [], detailSource: 'current_report' }], total: 69, hasMore: true } }));
+    api.render({ decisionRouting: { providers: [{ calls: 121, errors: 39, p95_duration_ms: 30000 }] } });
+    assert.match(elements.get('monitor-routing-quality').html, /121 \/ 39/);
+    assert.match(elements.get('monitor-routing-quality').html, /查看24小时决策错误明细/);
+    await api.loadFailureDetails('provider');
+    assert.match(elements.get('monitor-failure-details').html, /任务意图判断超时/); assert.match(elements.get('monitor-failure-details').html, /39 条|39<\/|39 /);
+    await api.loadFailureDetails('delivery');
+    const html = elements.get('monitor-failure-details').html;
+    assert.match(html, /run-one/); assert.match(html, /当前核验报告/); assert.match(html, /&lt;script>/); assert.doesNotMatch(html, /<script>/);
+});
+
+test('明细请求取消后迟到结果不能覆盖当前选择', async () => {
+    const pending = [];
+    const { api, elements } = fixture((_url, options) => new Promise(resolve => pending.push({ resolve, signal: options.signal })));
+    const first = api.loadFailureDetails('delivery'), second = api.loadFailureDetails('provider');
+    assert.equal(pending[0].signal.aborted, true);
+    pending[1].resolve({ ok: true, json: async () => ({ items: [], total: 0, hasMore: false }) }); await second;
+    const latest = elements.get('monitor-failure-details').html;
+    pending[0].resolve({ ok: true, json: async () => ({ items: [], total: 99 }) }); await first;
+    assert.equal(elements.get('monitor-failure-details').html, latest);
+});

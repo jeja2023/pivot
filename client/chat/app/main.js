@@ -248,6 +248,7 @@ const deleteSession = (id) => {
     window.Pivot.legacy.showConfirm('删除会话', '确定要删除整个会话吗？', async () => {
         const res = await apiFetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' });
         if (res.ok) {
+            window.Pivot.moduleApi('chat.generations').discardSession?.(id);
             if (currentSessionId === id) {
                 currentSessionId = null;
                 window.Pivot.legacy.persistActiveChatSession?.('');

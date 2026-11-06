@@ -230,6 +230,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     const presentationUpload = createSafeUpload({ extensions: new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ttf', '.otf', '.woff', '.woff2', '.mp3', '.wav', '.ogg', '.aac', '.m4a', '.mp4', '.webm', '.mov', '.pdf', '.pptx', '.pptm', '.ppsm', '.bas', '.vba', '.docx', '.xlsx', '.txt', '.md', '.json']), fileSize: 100 * 1024 * 1024, maxFields: 12, errorMessage: 'PPT 素材仅支持图片、字体、音视频、PDF、DOCX、XLSX、TXT、Markdown 或模板 JSON' });
     const presentationFile = field => [presentationUpload.single(field), uploadSecurityMiddleware];
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
+    require('./presentation-design').registerPresentationDesignRoutes(router, { authMiddleware, asyncHandler, writeLog });
 
     router.get('/apps/presentations/metrics', authMiddleware, asyncHandler(async (req, res) => {
         if (!isAdmin(req.user)) return res.status(403).json({ error: '只有管理员可以查看 PPT 运营指标。', code: 'PRESENTATION_METRICS_ADMIN_REQUIRED' });

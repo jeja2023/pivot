@@ -36,8 +36,8 @@ async function materializeToolArtifact(output, user, context = {}) {
         const { putBuffer, buildCasRef } = require('./agent-artifact-cas');
         const object = await putBuffer({ buffer: Buffer.from(svg), mimeType: 'image/svg+xml', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'tool_diagram' });
         assetId = object.objectId;
-        ir = { ir_version: '1', doc_type: 'report', meta: { title: '结构图' }, blocks: [{ type: 'image', asset_ref: buildCasRef(object.objectId), alt: '离线结构图' }] };
-        format = 'svg';
+        ir = { ir_version: '1', doc_type: 'report', meta: { title: String(envelope.title || '结构图').slice(0, 160) }, blocks: [{ type: 'image', asset_ref: buildCasRef(object.objectId), alt: '离线结构图' }] };
+        format = envelope.format === 'png' ? 'png' : 'svg';
     } else throw new Error('工具产物类型未登记。');
     const delivery = await executeArtifactTool('artifact.render', { ir, format, ...(context.targetArtifactId ? { artifactId: context.targetArtifactId } : {}) }, user, context);
     if (assetId && !delivery.reused) await require('./agent-artifact-cas').incrementRefCount(assetId, 1);

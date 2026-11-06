@@ -141,10 +141,12 @@
         const answer = state.connection === 'forbidden' ? '' : showAnswer
             ? (run.status === 'cancelled' || (model().isWaiting(run.status) && run.status !== 'needs_input') ? run.final_answer || ''
                 : window.Pivot.legacy.chatAgentResultText?.(run) || run.final_answer || '') : '';
-        if (body && entry.renderedAnswer !== answer) {
+        const diagramResultFiles = state.artifacts.some(artifact => artifact.rendition?.ready && String(artifact.rendition.format).toLowerCase() === 'svg');
+        if (body && (entry.renderedAnswer !== answer || entry.renderedDiagramFiles !== diagramResultFiles)) {
             window.Pivot.legacy.teardownPivotCharts?.(body);
-            PivotSafeHtml.setHtml(body, answer ? renderAiMessage(answer, false) : '');
+            PivotSafeHtml.setHtml(body, answer ? renderAiMessage(answer, false, [], { diagramResultFiles }) : '');
             entry.renderedAnswer = answer;
+            entry.renderedDiagramFiles = diagramResultFiles;
             if (answer) window.Pivot.legacy.renderPivotCharts?.(body);
         }
         if (run.messageId) window.Pivot.legacy.setMessageActionId?.(element, run.messageId);

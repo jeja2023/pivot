@@ -176,6 +176,7 @@ function normalizeCircuitErrorDetail(value) {
     let detail = String(value || '')
         .replace(/模型端点暂时熔断[，,]?\s*约?\s*\d+\s*秒后可重试[。.]?/g, ' ')
         .replace(/AI_ENDPOINT_CIRCUIT_OPEN/gi, ' ')
+        .replace(/(?:上次错误\s*[:：]\s*)+/g, '')
         .replace(/\s+/g, ' ')
         .trim();
     if (detail.length > 800) detail = detail.slice(0, 800) + '…';
@@ -219,13 +220,22 @@ function recordModelSuccess(modelCfg, latencyMs) {
     runtime.lastSuccessAt = getBeijingTimestamp();
 }
 
-function recordModelFailure(modelCfg, err) {
+function recordModelFailure(modelCfg, err, { signal = null } = {}) {
+    // 用户取消、调用方短时限和本地准入失败都没有证明上游模型不可用。
+    // 熔断拒绝也不能反过来计为故障，否则会不断重开熔断并嵌套错误文案。
+    if (signal?.aborted) return;
+    const code = String(err?.code || '');
+    if (['ERR_CANCELED', 'ABORT_ERR', 'REQUEST_ABORTED', 'AI_ENDPOINT_CIRCUIT_OPEN', 'AI_QUEUE_FULL', 'AI_QUEUE_TIMEOUT',
+        'AI_OVERLOADED', 'CHAT_INTENT_TIMEOUT', 'CONTEXT_LENGTH_EXCEEDED', 'AGENT_BUDGET_EXCEEDED',
+        'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED'].includes(code)) return;
+    if (['AbortError', 'CanceledError', 'CancellationError', 'ConcurrencyLimitError'].includes(err?.name) || err?.__CANCEL__ === true) return;
+    if (!code && !err?.response && /^(?:cancell?ed|aborted|the operation was aborted\.?|this operation was aborted\.?)$/i.test(String(err?.message || '').trim())) return;
     const runtime = ensureRuntime(modelCfg);
     runtime.consecutiveFailures += 1;
     runtime.errorCount += 1;
-    runtime.lastError = err?.response?.data?.error?.message || err?.message || String(err || 'unknown error');
+    runtime.lastError = normalizeCircuitErrorDetail(err?.response?.data?.error?.message || err?.message || String(err || '模型请求失败'));
     runtime.lastFailureAt = getBeijingTimestamp();
-    if (runtime.consecutiveFailures >= FAILURE_THRESHOLD) {
+    if (runtime.consecutiveFailures >= FAILURE_THRESHOLD && runtime.circuitOpenUntil <= Date.now()) {
         runtime.circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
         runtime.semaphore.rejectQueuedRequests(
             `模型端点连续失败，已熔断 ${Math.round(CIRCUIT_OPEN_MS / 1000)} 秒`,

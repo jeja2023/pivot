@@ -25,6 +25,10 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
     const artifacts = contract.acceptance?.artifactRequired
         ? await (deps.readyRunArtifacts || require('../repositories/chat-conversation-turns').readyRunArtifacts)(run.id, user.id) : [];
     if (contract.acceptance?.artifactRequired && !artifacts.length) return { passed: false, reason: 'artifact_not_materialized' };
+    const requiredFormats = contract.acceptance?.requiredFormats?.length ? contract.acceptance.requiredFormats
+        : contract.acceptance?.artifactRequired ? require('./task-display-title').requestedPresentationFormats(contract.goal || run.goal) : [];
+    if (requiredFormats.some(format => !artifacts.some(artifact => String(artifact.format).toLowerCase() === format))) return { passed: false,
+        reason: 'artifact_format_missing', missing: requiredFormats.filter(format => !artifacts.some(artifact => artifact.format === format)).map(format => `尚未生成用户要求的 ${format.toUpperCase()} 文件`) };
     if (contract.acceptance?.artifactRequired && !deps.readyRunArtifacts) {
         try {
             for (const artifact of artifacts) {
@@ -52,14 +56,16 @@ async function verifyAutomaticTask({ run, user, contract, answer, observations =
         signal?.throwIfAborted();
         if (usage?.budgetExceeded) return { passed: false, reason: 'budget_exceeded' };
         const result = typeof output === 'object' ? output : JSON.parse(String(output).replace(/^```(?:json)?\s*|\s*```$/g, ''));
+        if (!result || typeof result.passed !== 'boolean' || !Array.isArray(result.coveredDeliverables) || result.coveredDeliverables.some(item => typeof item !== 'string') || !Array.isArray(result.missing) || result.missing.some(item => typeof item !== 'string') || usageRef.truncated) return { passed: false, reason: 'verifier_invalid_response', verifiedArtifacts, verifier: 'chat-deliverables-v1' };
         const covered = Array.isArray(result.coveredDeliverables) ? result.coveredDeliverables : [];
         const reportedMissing = Array.isArray(result.missing) ? result.missing.map(String) : ['核验响应缺少缺口清单'];
         const expected = contract.deliverables || [];
         const uncovered = expected.map(String).filter(item => !covered.includes(item));
         const missing = [...new Set([...reportedMissing, ...uncovered])].slice(0, 16);
         if (!await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user)) return { passed: false, reason: 'source_revoked', verifiedArtifacts };
-        return { passed: result.passed === true && missing.length === 0 && expected.every(item => covered.includes(String(item))), missing: missing.slice(0, 16).map(String), coveredDeliverables: covered.slice(0, 16).map(String), artifactIds: artifacts.map(item => item.id), verifiedArtifacts, verifier: 'chat-deliverables-v1' };
-    } catch (_) { signal?.throwIfAborted(); return { passed: false, reason: 'verifier_unavailable', verifiedArtifacts, verifier: 'chat-deliverables-v1' }; }
+        const passed = result.passed === true && missing.length === 0 && expected.every(item => covered.includes(String(item)));
+        return { passed, ...(!passed ? { reason: missing.length ? 'deliverables_missing' : 'verification_rejected' } : {}), missing: missing.slice(0, 16).map(String), coveredDeliverables: covered.slice(0, 16).map(String), artifactIds: artifacts.map(item => item.id), verifiedArtifacts, verifier: 'chat-deliverables-v1' };
+    } catch (error) { signal?.throwIfAborted(); return { passed: false, reason: controller.signal.aborted || /TIMEOUT|ECONNABORTED/.test(error.code || '') ? 'verifier_timeout' : error instanceof SyntaxError ? 'verifier_invalid_response' : 'verifier_unavailable', verifiedArtifacts, verifier: 'chat-deliverables-v1' }; }
     finally { clearTimeout(timer); }
 }
 

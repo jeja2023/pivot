@@ -29,7 +29,10 @@ function bindOfficialWritingProductEvents(panel) {
     click('official-writing-undo-btn', () => applyOfficialWritingHistory('undo'));
     click('official-writing-redo-btn', () => applyOfficialWritingHistory('redo'));
     click('official-writing-stop-ai-btn', cancelOfficialWritingAiTask);
-    click('official-writing-import-backup-btn', () => document.getElementById('official-writing-backup-input')?.click());
+    click('official-writing-import-backup-btn', () => {
+        document.getElementById('official-writing-library-more-menu')?.removeAttribute('open');
+        document.getElementById('official-writing-backup-input')?.click();
+    });
     document.getElementById('official-writing-backup-input')?.addEventListener('change', event => { void importOfficialWritingBackup(event.target.files?.[0]); event.target.value = ''; });
     click('official-writing-reference-check-btn', () => { void checkOfficialWritingReferenceSources(); });
     click('official-writing-clear-history-btn', () => { void clearOfficialWritingHistory(); });

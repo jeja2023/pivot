@@ -266,8 +266,7 @@
                         <div style="display: flex; gap: 8px;">
                             <input type="text" id="m-model" class="form-input" placeholder="例如: deepseek-chat"
                                 style="flex: 1;">
-                            <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从接口获取模型列表"
-                                style="padding: 0 12px; height: 38px;">
+                            <button type="button" data-static-action="fetch-remote-models" class="btn-secondary" title="从接口获取模型列表">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                     stroke-width="2">
                                     <path
@@ -294,7 +293,7 @@
                             <input type="text" id="m-units" class="form-input" placeholder="多个部门用逗号分隔">
                         </div>
                     </div>
-                    <div class="model-form-row">
+                    <div class="model-form-row model-limits-row">
                         <div class="form-item">
                             <label>每日额度（Token，用量单位）</label>
                             <input type="text" id="m-daily-limit" class="form-input"
@@ -304,6 +303,34 @@
                             <label>温度（Temperature）</label>
                             <input type="number" id="m-temp" class="form-input" min="0" max="2" step="0.1"
                                 placeholder="留空使用默认">
+                        </div>
+                        <div class="form-item">
+                            <label>端点并发上限</label>
+                            <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
+                                placeholder="0 使用系统默认">
+                        </div>
+                    </div>
+                    <div class="model-form-row model-cost-row">
+                        <div class="form-item">
+                            <label>输入单价（每百万 Token）</label>
+                            <input type="number" id="m-input-price" class="form-input" min="0" step="0.000001"
+                                placeholder="0 表示不统计成本">
+                        </div>
+                        <div class="form-item">
+                            <label>输出单价（每百万 Token）</label>
+                            <input type="number" id="m-output-price" class="form-input" min="0" step="0.000001"
+                                placeholder="0 表示不统计成本">
+                        </div>
+                        <div class="form-item">
+                            <label>计价币种</label>
+                            <select id="m-price-currency" class="form-input">
+                                <option value="人民币">人民币</option>
+                                <option value="美元">美元</option>
+                                <option value="欧元">欧元</option>
+                                <option value="港币">港币</option>
+                                <option value="日元">日元</option>
+                                <option value="英镑">英镑</option>
+                            </select>
                         </div>
                     </div>
                     <div class="model-form-row model-context-row">
@@ -330,13 +357,6 @@
                             <input type="text" id="m-monitor-url" class="form-input"
                                 placeholder="例如: http://10.0.0.8:8000/health">
                         </div>
-                        <div class="form-item">
-                            <label>端点并发上限</label>
-                            <input type="number" id="m-max-concurrent" class="form-input" min="0" step="1"
-                                placeholder="0 使用系统默认">
-                        </div>
-                    </div>
-                    <div class="model-form-row">
                         <div class="form-item">
                             <label>Agent 原生工具调用</label>
                             <select id="m-tool-call-mode" class="form-input">
@@ -368,6 +388,8 @@
                                 <span class="switch-slider"></span>
                             </label>
                         </div>
+                    </div>
+                    <div class="model-form-row">
                         <div class="form-item model-capability-row">
                             <div>
                                 <label>视觉输入（图片/扫描件）</label>
@@ -378,8 +400,6 @@
                                 <span class="switch-slider"></span>
                             </label>
                         </div>
-                    </div>
-                    <div class="model-form-row">
                         <div class="form-item model-capability-row">
                             <div>
                                 <label>启用该模型</label>

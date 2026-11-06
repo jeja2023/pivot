@@ -10,7 +10,7 @@ const fontkit = require('@pdf-lib/fontkit');
 const sharp = require('sharp');
 const { normalizePresentation } = require('./presentation-schema');
 
-const PRESENTATION_RENDERER_VERSION = 'presentation-1.165.0';
+const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.102';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_MIME = 'application/pdf';
 const PNG_MIME = 'image/png';
@@ -63,7 +63,8 @@ function createChartSvg(element, width, height) {
     const values = rows.map(row => Number(row[1]) || 0);
     const maximum = Math.max(1, ...values.map(value => Math.abs(value)));
     const colors = element.options?.colors?.length ? element.options.colors : ['#1769AA', '#5B8FF9', '#61DDAA', '#F59E0B'];
-    const pad = { top: element.title ? 34 : 12, right: 14, bottom: 38, left: 38 };
+    const labelSize = element.options?.labelFontSize || 14;
+    const pad = { top: element.title || element.options?.showLabels ? labelSize + 18 : 12, right: 14, bottom: labelSize + 24, left: 38 };
     const graphWidth = Math.max(1, width - pad.left - pad.right);
     const graphHeight = Math.max(1, height - pad.top - pad.bottom);
     let pieces = `<rect width="${width}" height="${height}" fill="#FFFFFF"/><line x1="${pad.left}" y1="${pad.top + graphHeight}" x2="${pad.left + graphWidth}" y2="${pad.top + graphHeight}" stroke="#CBD5E1"/><line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + graphHeight}" stroke="#CBD5E1"/>`;
@@ -107,11 +108,14 @@ function createChartSvg(element, width, height) {
             const x = pad.left + gap + index * (barWidth + gap);
             const y = pad.top + graphHeight - barHeight;
             pieces += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" fill="${colors[index % colors.length]}"/>`;
+            if (element.options?.showLabels) pieces += `<text x="${x + barWidth / 2}" y="${y - 8}" text-anchor="middle" font-size="${labelSize}" fill="#344054">${escapeXml(value)}</text>`;
         });
     }
     rows.forEach((row, index) => {
-        const x = pad.left + (rows.length <= 1 ? graphWidth / 2 : graphWidth * index / (rows.length - 1));
-        pieces += `<text x="${x}" y="${height - 12}" text-anchor="middle" font-size="11" fill="#64748B">${escapeXml(String(row[0]))}</text>`;
+        const barGap = Math.max(4, graphWidth / Math.max(1, rows.length) * 0.2);
+        const barWidth = (graphWidth - barGap * (rows.length + 1)) / Math.max(1, rows.length);
+        const x = element.chartType === 'bar' ? pad.left + barGap + index * (barWidth + barGap) + barWidth / 2 : pad.left + (rows.length <= 1 ? graphWidth / 2 : graphWidth * index / (rows.length - 1));
+        pieces += `<text x="${x}" y="${height - 12}" text-anchor="middle" font-size="${labelSize}" fill="#64748B">${escapeXml(String(row[0]))}</text>`;
     });
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${pieces}</svg>`;
 }
@@ -224,6 +228,7 @@ async function resolveDataUri(ref, assetResolver) {
 }
 
 async function slideSvg(slide, presentation, options = {}) {
+    const metrics = await require('./presentation-text-metrics').createTextMetrics(presentation, options);
     const pieces = [`<rect x="0" y="0" width="${presentation.width}" height="${presentation.height}" fill="${slide.background.fill}"/>`];
     const backgroundData = await resolveDataUri(slide.background.imageAssetRef, options.assetResolver);
     if (backgroundData) pieces.push(`<image href="${backgroundData}" x="0" y="0" width="${presentation.width}" height="${presentation.height}" opacity="${slide.background.opacity}" preserveAspectRatio="xMidYMid slice"/>`);
@@ -305,14 +310,14 @@ const SVG_VECTOR_ICONS = {
             }));
             continue;
         }
-        const lines = wrapText(element.content.text, Math.max(3, Math.floor((element.width - element.style.padding * 2) / Math.max(1, element.style.fontSize * 0.58))));
+        const lines = metrics.lines(element);
         const align = element.style.align === 'center' ? 'middle' : element.style.align === 'right' ? 'end' : 'start';
         const textX = element.style.align === 'center' ? element.x + element.width / 2 : element.style.align === 'right' ? element.x + element.width - element.style.padding : element.x + element.style.padding;
         const startY = element.y + element.style.padding + element.style.fontSize;
         const weight = element.style.fontWeight >= 600 ? '700' : '400';
         const hasIcons = lines.some(l => Object.keys(SVG_VECTOR_ICONS).some(k => l.includes(k)));
         if (!hasIcons) {
-            pieces.push(`<text x="${textX}" y="${startY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? element.style.fontSize * element.style.lineHeight : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`);
+            pieces.push(`<text x="${textX}" y="${startY}" text-anchor="${align}" font-family="${escapeXml(element.style.fontFamily)}, Microsoft YaHei, Noto Sans SC, sans-serif" font-size="${element.style.fontSize}" font-weight="${weight}" fill="${element.style.color}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})">${lines.map((line, index) => `<tspan x="${textX}" dy="${index ? element.style.fontSize * element.style.lineHeight : 0}">${escapeXml(line || ' ')}</tspan>`).join('')}</text>`);
         } else {
             lines.forEach((line, index) => {
                 const lineY = startY + index * element.style.fontSize * element.style.lineHeight;
@@ -368,8 +373,7 @@ function pdfFontForElement(fonts, presentation, element) {
 function drawPdfText(page, font, text, element, pdfHeight) {
     const size = Math.max(6, elementFontSizePx(element) * 0.75);
     const maxWidth = Math.max(1, element.width * 0.75 - element.style.padding * 1.5);
-    const chars = Math.max(3, Math.floor(maxWidth / Math.max(1, size * 0.72)));
-    const lines = wrapText(text, chars);
+    const lines = require('./presentation-text-metrics').wrapByWidth(text, maxWidth, value => font.widthOfTextAtSize(value, size));
     const color = hexToRgb(element.style.color);
     lines.forEach((line, index) => {
         const y = pdfHeight - (element.y * 0.75 + element.style.padding + size + index * size * element.style.lineHeight);
@@ -588,11 +592,16 @@ async function renderPresentation(input, format, options = {}) {
     } else if (normalizedFormat === 'pdf') {
         buffer = await renderPdf(presentation, options);
         mimeType = PDF_MIME;
+    } else if (normalizedFormat === 'svg') {
+        const slideIndex = Number(options.slideIndex || 0);
+        if (!Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= presentation.slides.length) throw new Error('要导出的 PPT 页码不存在。');
+        buffer = Buffer.from(await slideSvg(presentation.slides[slideIndex], presentation, options));
+        mimeType = 'image/svg+xml';
     } else if (normalizedFormat === 'png') {
         buffer = await renderPng(presentation, options);
         mimeType = PNG_MIME;
     } else {
-        const error = new Error('仅支持导出 PPTX、PDF 或 PNG。');
+        const error = new Error('仅支持导出 PPTX、PDF、PNG 或单页 SVG。');
         error.status = 400;
         error.code = 'PRESENTATION_EXPORT_FORMAT_INVALID';
         throw error;

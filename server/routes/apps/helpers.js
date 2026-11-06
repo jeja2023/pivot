@@ -198,7 +198,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                     const idleError = new Error(`上游流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
                     idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
                     logger.error({ model: modelCfg.name, source, idleMs }, '应用中心 AI 流式上游长时间无数据，已主动中止');
-                    recordModelFailure(modelCfg, idleError);
+                    recordModelFailure(modelCfg, idleError, { signal: abortController.signal });
                     try { response.data?.destroy?.(); } catch (_) {}
                     try { abortController.abort(); } catch (_) {}
                     if (!res.writableEnded) {
@@ -261,7 +261,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                     return;
                 }
                 logger.error({ err: err.message, model: modelCfg.name, source }, '应用中心 AI 流式转发中断');
-                recordModelFailure(modelCfg, err);
+                recordModelFailure(modelCfg, err, { signal: abortController.signal });
                 if (!res.writableEnded) res.end();
                 releaseSlots();
             });
@@ -313,7 +313,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             errorMsg = `上游 AI 模型服务暂时不可用（HTTP ${status}）。建议切换其他模型后重试。`;
         }
         logger.error({ err: errorMsg, model: modelCfg.name, source }, '应用中心 AI 调用失败');
-        recordModelFailure(modelCfg, e);
+        recordModelFailure(modelCfg, e, { signal: abortController.signal });
         if (!res.headersSent) {
             return res.status(status).json({ error: { message: errorMsg, type: 'api_error' } });
         }

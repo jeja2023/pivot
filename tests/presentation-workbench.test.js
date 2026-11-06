@@ -36,7 +36,7 @@ function testPresentation() {
 }
 
 test('内置 PPT 模板覆盖标准主题与十个标准布局', () => {
-    assert.equal(listBuiltInTemplates().length, 2);
+    assert.equal(listBuiltInTemplates().length, 5);
     assert.equal(STANDARD_LAYOUTS.length, 10);
     assert.ok(getBuiltInTemplate('business-blue').snapshotDigest);
     assert.equal(getBuiltInTemplate('does-not-exist'), null);

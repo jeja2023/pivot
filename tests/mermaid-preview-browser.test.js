@@ -6,6 +6,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const http = require('node:http');
 const express = require('express');
+const helmet = require('helmet');
 const { chromium } = require('playwright');
 
 const source = 'flowchart TD\n    A([开始]) --> B[用户登录]\n    B --> C{验证账号}\n    C -->|成功| D([登录成功])';
@@ -13,9 +14,11 @@ const source = 'flowchart TD\n    A([开始]) --> B[用户登录]\n    B --> C{�
 async function fixture(run) {
     const app = express(); const calls = [];
     app.use(express.json());
-    app.use((_req, res, next) => {
-        res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self'"); next();
-    });
+    app.use(helmet({ crossOriginEmbedderPolicy: false, crossOriginOpenerPolicy: false, originAgentCluster: false, hsts: false,
+        contentSecurityPolicy: { directives: { ...helmet.contentSecurityPolicy.getDefaultDirectives(), 'script-src': ["'self'", 'blob:'],
+            'script-src-elem': ["'self'", 'blob:'], 'img-src': ["'self'", 'data:', 'blob:'], 'frame-src': ["'self'", 'blob:'],
+            'style-src': ["'self'", "'unsafe-inline'"], 'connect-src': ["'self'"], 'upgrade-insecure-requests': null } } }));
+    require('../server/routes/mermaid-preview-assets').registerMermaidPreviewAssets(app);
     app.use('/chat', express.static(path.resolve('client/chat')));
     app.use('/common', express.static(path.resolve('client/common')));
     app.get('/fixture.js', (_req, res) => res.type('js').send(`
@@ -24,6 +27,7 @@ async function fixture(run) {
         window.addEventListener('message', event => { if (event.data?.type === 'pivot:mermaid-result') window.lastMermaidResult = event.data; });
         window.showToast = () => {};
         window.API_BASE = '/api';
+        window.currentSessionId = 'mermaid-session';
         window.apiFetch = (url, options) => fetch(url, options);
         const device = { available: true, registered: true, deviceId: 'test-device', grants: [{ grantId: 'text-grant', allowedFormats: ['txt'] }] };
         window.pivotDesktop = { getDeliveryStatus: async () => device, prepareDelivery: async () => device, startDelivery: async () => {} };
@@ -35,6 +39,7 @@ async function fixture(run) {
         <script defer src="/common/vendor/marked.min.js"></script><script defer src="/common/vendor/purify.min.js"></script><script defer src="/fixture.js"></script><script defer src="/chat/safe-html.js"></script>
         <script defer src="/chat/mermaid-svg.js"></script><script defer src="/chat/mermaid-runtime.js"></script><script defer src="/chat/render-mermaid.js"></script><script defer src="/chat/render-markdown-emphasis.js"></script>
         <script defer src="/chat/render.js"></script><script defer src="/chat/render-charts.js"></script><script defer src="/chat/render-messages.js"></script><script defer src="/chat/code-delivery.js"></script>
+        <script defer src="/chat/chat-task-state.js"></script><script defer src="/chat/chat-task-render.js"></script><script defer src="/chat/chat-task-controller.js"></script>
         </head><body><main class="text-body" id="answer"></main></body></html>`));
     const service = http.createServer(app);
     await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
@@ -60,12 +65,12 @@ async function fixture(run) {
     } finally { await browser?.close(); service.closeAllConnections(); await new Promise(resolve => service.close(resolve)); }
 }
 
-async function show(page, text = source, streaming = false) {
-    await page.evaluate(({ text, streaming }) => {
+async function show(page, text = source, streaming = false, diagramResultFiles = false) {
+    await page.evaluate(({ text, streaming, diagramResultFiles }) => {
         const box = document.getElementById('answer');
-        window.Pivot.html.setHtml(box, window.Pivot.legacy.renderMarkdown(text, { streaming }));
+        window.Pivot.html.setHtml(box, window.Pivot.legacy.renderMarkdown(text, { streaming, diagramResultFiles }));
         window.Pivot.legacy.renderPivotCharts(box);
-    }, { text, streaming });
+    }, { text, streaming, diagramResultFiles });
 }
 
 test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码保存分别工作', { timeout: 90000 }, async () => fixture(async ({ page, calls }) => {
@@ -75,6 +80,13 @@ test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码
     assert.equal(await page.locator('.mermaid-image').isVisible(), true);
     assert.equal(await page.locator('.mermaid-source').isVisible(), false);
     assert.equal(await page.locator('iframe.mermaid-render-host').getAttribute('sandbox'), 'allow-scripts');
+    assert.equal(await page.locator('iframe.mermaid-render-host').evaluate(frame => frame.contentDocument), null);
+    const resource = await page.request.get(new URL('/common/mermaid-assets/runtime.js', page.url()).href);
+    assert.equal(resource.headers()['access-control-allow-origin'], '*');
+    assert.equal(resource.headers()['cross-origin-resource-policy'], 'cross-origin');
+    const ordinary = await page.request.get(new URL('/chat/render.js', page.url()).href);
+    assert.equal(ordinary.headers()['cross-origin-resource-policy'], 'same-origin');
+    assert.equal(ordinary.headers()['access-control-allow-origin'], undefined);
     await page.locator('[data-mermaid-action="source"]').click();
     assert.equal(await page.locator('.mermaid-source').isVisible(), true);
     assert.equal(await page.locator('.mermaid-source code').textContent(), source);
@@ -124,6 +136,70 @@ test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码
     await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor({ timeout: 20000 });
     await page.screenshot({ path: path.resolve('output/mermaid-preview/dark-mobile.png'), fullPage: true, animations: 'disabled' });
     assert.deepEqual(errors, []);
+}));
+
+test('绘图资源失败立即显示错误，重试重新加载并完成预览', { timeout: 90000 }, async () => fixture(async ({ page }) => {
+    await page.route('**/common/mermaid-assets/runtime.js', route => route.abort());
+    await show(page, '```mermaid\n' + source + '\n```');
+    await page.locator('.mermaid-retry:not(.hidden)').waitFor({ timeout: 10000 });
+    assert.match(await page.locator('.mermaid-status').textContent(), /加载失败/);
+    assert.equal(await page.locator('[data-mermaid-action="download-svg"]').isDisabled(), true);
+    await page.unroute('**/common/mermaid-assets/runtime.js');
+    await page.locator('[data-mermaid-action="retry"]').click();
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor({ timeout: 30000 });
+    assert.equal(await page.locator('.mermaid-image').isVisible(), true);
+}));
+
+test('已有 SVG 结果时正文只保留折叠源码和复制，展开也不恢复重复按钮', { timeout: 90000 }, async () => fixture(async ({ page }) => {
+    let requests = 0;
+    page.on('request', request => { if (request.url().includes('/common/mermaid-assets/')) requests++; });
+    await show(page, '流程图结构\n\n```mermaid\n' + source + '\n```', false, true);
+    assert.equal(await page.locator('.mermaid-supplement').getAttribute('open'), null);
+    assert.equal(await page.locator('iframe.mermaid-render-host').count(), 0);
+    assert.equal(requests, 0);
+    assert.equal(await page.locator('[data-mermaid-action="download-svg"]').count(), 0);
+    await page.locator('.mermaid-supplement summary').click();
+    assert.equal(await page.locator('code').textContent(), source);
+    await page.locator('[data-mermaid-action="copy-source"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-mermaid-action="copy-source"]').textContent.includes('已复制'));
+    assert.deepEqual(await page.locator('[data-mermaid-action]').evaluateAll(buttons => buttons.map(button => button.dataset.mermaidAction)), ['copy-source']);
+    assert.equal(await page.locator('iframe.mermaid-render-host').count(), 0);
+    assert.equal(requests, 0);
+    await fs.mkdir(path.resolve('output/mermaid-preview'), { recursive: true });
+    await page.screenshot({ path: path.resolve('output/mermaid-preview/result-file-source.png'), fullPage: true, animations: 'disabled' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await page.locator('.mermaid-supplement').evaluate(element => ({ width: element.clientWidth, content: element.scrollWidth }));
+    assert.ok(bounds.content <= bounds.width + 2);
+    await page.screenshot({ path: path.resolve('output/mermaid-preview/result-file-source-mobile.png'), fullPage: true, animations: 'disabled' });
+    await show(page, '```mermaid\n' + source + '\n```');
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor();
+    assert.equal(await page.locator('.mermaid-supplement').count(), 0);
+}));
+
+test('真实任务呈现保留结果文件入口，文件就绪或失效时同步切换正文源码与预览', { timeout: 90000 }, async () => fixture(async ({ page }) => {
+    await page.evaluate(definition => {
+        const host = document.getElementById('answer');
+        window.Pivot.html.setHtml(host, '<div class="chat-task-execution"></div><div class="text-body"></div>');
+        const state = window.Pivot.moduleApi('chat.taskState').create('run', 'mermaid-session');
+        state.run = { ...state.run, status: 'completed', final_answer: '```mermaid\n' + definition + '\n```' };
+        state.connection = 'connected'; state.highWater = 1;
+        state.artifacts = [{ id: 'svg-artifact', title: '结构图', version: 1, rendition: { id: 'svg-file', format: 'svg', ready: true } }];
+        window.diagramTaskEntry = { state, element: host, panel: host.querySelector('.chat-task-execution'), epoch: 0, perform() {} };
+        window.Pivot.moduleApi('chat.tasks').renderEntry(window.diagramTaskEntry);
+    }, source);
+    assert.equal(await page.locator('.chat-task-artifacts [data-task-action="preview"]').count(), 1);
+    assert.equal(await page.locator('.chat-task-artifacts [data-task-action="download"]').count(), 1);
+    assert.equal(await page.locator('.mermaid-supplement').count(), 1);
+    assert.equal(await page.locator('[data-mermaid-action="download-svg"]').count(), 0);
+    assert.deepEqual(await page.locator('.text-body [data-mermaid-action]').evaluateAll(buttons => buttons.map(button => button.dataset.mermaidAction)), ['copy-source']);
+    assert.equal(await page.locator('.chat-task-artifacts [data-task-action="save-local"]').count(), 1);
+    await page.screenshot({ path: path.resolve('output/mermaid-preview/task-with-result-file.png'), fullPage: true, animations: 'disabled' });
+    await page.evaluate(() => {
+        window.diagramTaskEntry.state.artifacts = [];
+        window.Pivot.moduleApi('chat.tasks').renderEntry(window.diagramTaskEntry);
+    });
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor({ timeout: 30000 });
+    assert.equal(await page.locator('.mermaid-supplement').count(), 0);
 }));
 
 test('流式未闭合代码等待完成，语法失败可以重试，切换账号和移除节点释放预览', { timeout: 90000 }, async () => fixture(async ({ page }) => {

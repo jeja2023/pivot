@@ -46,6 +46,7 @@ function applyAutomaticExecutionDecision(state, decision) {
     decision = constrainChatDecision(decision, requestScope);
     state.requestScope = requestScope;
     state.intentDecision = decision;
+    require('./chat-intent-fallback').restrictIntentFallbackState(state);
     const routing = decision.shadow !== true && decision.routing;
     if (routing?.source === 'semantic_intent') {
         if (routing.knowledge === 'required') state.routeOverrides = { ...state.routeOverrides, forceRag: true };

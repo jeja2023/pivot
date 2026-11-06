@@ -3,13 +3,13 @@
 
 
 
-function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = []) {
+function renderAiMessage(content, _isStreaming = false, thoughtOpenStates = [], options = {}) {
     if (!content) return '';
     // 使用全局变量传递状态给 marked 渲染器
     window.Pivot.legacy._tempThoughtCounter = 0;
     window.Pivot.legacy._tempThoughtStates = thoughtOpenStates;
     return renderMarkdown(content, {
-        deferPivotCharts: Boolean(_isStreaming), streaming: Boolean(_isStreaming), recoverEmphasis: true
+        deferPivotCharts: Boolean(_isStreaming), streaming: Boolean(_isStreaming), recoverEmphasis: true, diagramResultFiles: Boolean(options.diagramResultFiles)
     });
 }
 

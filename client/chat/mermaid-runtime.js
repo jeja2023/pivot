@@ -98,7 +98,10 @@
     window.addEventListener('message', event => {
         if (!frame || event.source !== frame.contentWindow) return;
         const data = event.data;
-        if (data?.type === 'pivot:mermaid-ready') {
+        if (data?.type === 'pivot:mermaid-unavailable') {
+            const reject = readyReject;
+            dropFrame(); reject?.(new Error('本地绘图组件加载失败，请重试或刷新页面。'));
+        } else if (data?.type === 'pivot:mermaid-ready') {
             clearTimeout(loadTimer); readyResolve?.(); readyResolve = null; readyReject = null;
         } else if (data?.type === 'pivot:mermaid-result' && active && active.id === data.id) {
             const job = active; active = null; clearTimeout(job.timer);

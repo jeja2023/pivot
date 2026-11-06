@@ -130,6 +130,7 @@ async function assembleChatContext({
     persistOnError = false,
     signal = null
 }) {
+    require('./chat-intent-fallback').restrictIntentFallbackState(state);
     let { sessionId, userId, modelId, modelContent, ragEnabled, ragScope, mcpEnabled, mcpToolAllowlist } = state;
     const requestPrompt = currentUserText(modelContent);
     let history = await getContext(sessionId, userId, modelCfg, { user: req.user, signal });
@@ -181,7 +182,7 @@ async function assembleChatContext({
     if (state.intentDecision?.correction) {
         history = [{ role: 'system', content: `${state.intentDecision.correction.constraint} 这是本轮用户的明确限制，优先于历史委托与偏好。已有操作无法自动撤销；缺少依据时说明限制，不能虚构执行或检索结果。` }, ...history];
     }
-    if (state.intentDecision?.capabilityDecisionUnavailable) history = [{ role: 'system', content: '本轮依据与能力判断暂不可用。不得把组织内部事实或当前业务数据当作常识补答；需要这些依据时说明暂不可核实，并保留用户问题。' }, ...history];
+    if (state.intentDecision?.capabilityDecisionUnavailable) history = [{ role: 'system', content: require('./chat-intent-fallback').TEXT_ONLY_FALLBACK_INSTRUCTIONS }, ...history];
     const scopeInstructions = requestScopeInstructions(requestScope);
     if (scopeInstructions.length) history = [{ role: 'system', content: scopeInstructions.join('\n') + '\n未提供或未经核实的外部事实须说明不确定，不得虚构检索或分析结果。' }, ...history];
     const capabilityDecision = getCapabilityDecision(state);

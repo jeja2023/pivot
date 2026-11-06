@@ -136,7 +136,8 @@ async function recordAgentRunOutcome(runId, status, options = {}) {
     if (metadata.automaticExecution) {
         const { recordRunOutcome } = require('../repositories/chat-conversation-turns');
         await recordRunOutcome(run.id, { status, verified: verificationPassed, learnedSkillAuto: metadata.learnedSkillAuto === true, totalTokens: Number(run.total_tokens || 0), durationMs: Math.max(0, Date.parse(run.completed_at || new Date()) - Date.parse(run.created_at)) });
-        if (metadata.automaticExecution.decisionId) require('./decision-observability').recordDecisionOutcome({ decisionId: metadata.automaticExecution.decisionId, source: 'runtime', eventType: 'execution', status: verificationPassed ? 'success' : 'failure', reasonCode: verificationPassed ? 'delivery_verified' : 'delivery_not_verified', resultReference: run.id });
+        if (metadata.automaticExecution.decisionId) require('./decision-observability').recordDecisionOutcome({ decisionId: metadata.automaticExecution.decisionId, source: 'runtime', eventType: 'execution', status: verificationPassed ? 'success' : 'failure', reasonCode: verificationPassed ? 'delivery_verified' : 'delivery_not_verified', resultReference: run.id,
+            metadata: verificationPassed ? {} : { verification: require('./task-verification-details').verificationDetails(metadata.taskVerification) } });
     }
     let failures = [];
     let successfulToolCalls = 0;

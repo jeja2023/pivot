@@ -9,6 +9,11 @@
     color: var(--text-main);
     overflow: hidden;
 }
+.mermaid-supplement > summary {
+    padding: 10px 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
 .mermaid-toolbar,
 .mermaid-actions,
 .mermaid-tabs,

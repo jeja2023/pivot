@@ -1,12 +1,8 @@
 // --- 数据引擎模块 Engine ---
 /* global syncChatLocalMcpBridgeBeforeSend, getChatLocalMcpBridgeDebugSnapshot, estimateStreamingTokenUnits, cancelChatAgentRun */
 let currentAbortController = null;
-// 正在执行的发送任务；新消息发出时先中断它，再串行接管，避免两次发送并发
-let activeSendTask = null;
 // 任务草案创建也必须串行化，避免快速双击在创建会话期间生成两个草案。
 let activeTaskDraftCreation = null;
-let latestSendEpoch = 0;
-let activeVoiceRequestId = '';
 const chatAgentStreamingTargets = new Map();
 
 function hasSendableChatPayload() {
@@ -208,12 +204,13 @@ function handleChatAgentStreamingEvent(payload = {}) {
 }
 
 async function cancelCurrentChatAgent() {
-    const controller = currentAbortController || (typeof globalThis !== 'undefined' ? globalThis.currentAbortController : null);
+    const controller = window.Pivot.moduleApi('chat.generations').controller?.() || currentAbortController;
     // 输入区按钮只停止文字流；持久任务使用消息旁的“停止任务”明确取消。
     if (controller?.pivotAgentRunId) {
         controller.pivotSupersededBySend = true;
         showToast('已停止当前文字生成；需要结束后台工作时，请点击对应任务的“停止任务”。', 'info');
     }
+    window.Pivot.moduleApi('chat.generations').stop?.();
     controller?.abort();
 }
 
@@ -239,7 +236,7 @@ window.Pivot.exposeModule('chat.agentBridge', {
     'handleChatAgentStreamingEvent'
 ]);
 
-// 发新消息时先中断上一次生成再串行接管，而不是拦下用户输入
+// 同一会话的新消息串行接管；其它会话正在生成的回复继续接收。
 window.Pivot.legacy.sendMessage = async function(options = false) {
     const sendOptions = options && typeof options === 'object'
         ? options
@@ -258,27 +255,8 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
     // 空输入不应打断正在进行的生成
     if (!shouldRegenerate && !hasSendableChatPayload()) return;
 
-    const sendEpoch = ++latestSendEpoch;
-    if (currentAbortController) {
-        currentAbortController.pivotSupersededBySend = true;
-        currentAbortController.abort();
-    }
-    const previousTask = activeSendTask;
-    if (previousTask) {
-        // 等上一次发送走完 catch/finally，确保 currentAbortController 已复位再接管
-        try { await previousTask; } catch (_e) { /* 上一次发送的异常已在其内部处理 */ }
-    }
-    // 等待期间又有更新的发送进来，交给它执行，避免重复发送同一条输入
-    if (sendEpoch !== latestSendEpoch) return;
-
-    const task = runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides, { ephemeralVoice, voiceSessionId,
-        voiceHistory: ephemeralVoice ? sendOptions.voiceHistory : [], continuationKind, chatMode });
-    activeSendTask = task;
-    try {
-        await task;
-    } finally {
-        if (activeSendTask === task) activeSendTask = null;
-    }
+    await window.Pivot.moduleApi('chat.generations').run(generation => runSendMessage(shouldRegenerate, regenerateMessageId, resumeRouteOverrides,
+        { ephemeralVoice, voiceSessionId, voiceHistory: ephemeralVoice ? sendOptions.voiceHistory : [], continuationKind, chatMode, generation }));
 };
 
 // “生成计划”入口与普通发送完全分离：它只创建可审阅的持久化草案，
@@ -286,7 +264,7 @@ window.Pivot.legacy.sendMessage = async function(options = false) {
 async function createChatTaskDraft(options = {}) {
     if (activeTaskDraftCreation) return await activeTaskDraftCreation;
     const task = (async () => {
-    if (currentAbortController || activeSendTask) {
+    if (window.Pivot.moduleApi('chat.generations').busy?.()) {
         showToast('请等待当前回复结束后再规划新任务。', 'warning');
         return false;
     }
@@ -342,6 +320,9 @@ async function createChatTaskDraft(options = {}) {
 }
 
 async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resumeRouteOverrides = null, options = {}) {
+    const generation = options.generation;
+    const generations = window.Pivot.moduleApi('chat.generations');
+    if (!generations.owned(generation) || generation.sessionId !== String(currentSessionId || '')) return;
     const ephemeralVoice = options.ephemeralVoice === true;
     const voiceSessionId = ephemeralVoice ? String(options.voiceSessionId || '').trim() : '';
     const continuationKind = String(options.continuationKind || '');
@@ -388,7 +369,9 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             : (window.Pivot.legacy.pendingAttachments.find(item => item?.file)?.name || '新对话'));
         const data = await createSession(draftTitle);
         if (data && data.id) {
+            if (String(currentSessionId || '') !== generation.sessionId || generation.superseded) return;
             currentSessionId = data.id;
+            generation.sessionId = String(data.id);
             if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
             document.getElementById('current-title').innerText = data.title;
         } else return;
@@ -438,12 +421,13 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         localMcpBridgeDebug = getChatLocalMcpBridgeDebugSnapshot();
     }
 
+    if (!generations.owned(generation) || generation.superseded || String(currentSessionId || '') !== generation.sessionId) return;
     document.getElementById('user-input').value = '';
     if (window.Pivot.legacy.resizeUserInput) window.Pivot.legacy.resizeUserInput();
     clearPendingAttachments();
 
     const requestSessionId = String(currentSessionId);
-    const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId;
+    const isViewingRequestSession = () => String(currentSessionId || '') === requestSessionId && generations.owned(generation);
     const isRequestMessageVisible = () => isViewingRequestSession() && document.body.contains(aiMsgEl);
     const assistantModelName = model?.name || model?.model_name || '';
 
@@ -494,12 +478,10 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         return safeCount > 0 && elapsed > 0 ? safeCount / elapsed : 0;
     };
 
-    document.getElementById('send-btn').classList.add('hidden');
-    window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(true);
-    document.getElementById('stop-btn').classList.remove('hidden');
     const myController = new AbortController();
-    currentAbortController = myController;
-    activeVoiceRequestId = ephemeralVoice ? voiceSessionId : '';
+    myController.pivotVoiceRequestId = ephemeralVoice ? voiceSessionId : '';
+    generations.bind(generation, { sessionId: requestSessionId, controller: myController, user: userMsgEl, assistant: aiMsgEl, ephemeralVoice, regenerate: shouldRegenerate,
+        restore() { if (fullAiContent && !agentRunId) { PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, !generation.finished)); window.Pivot.legacy.renderPivotCharts?.(textBody); } } });
 
     try {
         const response = await apiFetch(API_BASE + '/chat', {
@@ -529,7 +511,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 localMcpBridge,
                 localMcpBridgeDebug
             }),
-            signal: currentAbortController.signal
+            signal: myController.signal
         });
         chatInputMenu?.clearRouteOverrides?.();
 
@@ -542,7 +524,6 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, false));
             if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
             if (window.Pivot.legacy.loadSessions) window.Pivot.legacy.loadSessions();
-            window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
             showTaskPromotionForResponse();
             return;
         }
@@ -801,6 +782,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 }
                 if (data.type === 'message_saved') {
                     if (data.role === 'user') {
+                        generation.userMessageId = data.messageId;
                         window.Pivot.legacy.setMessageActionId?.(userMsgEl, data.messageId);
                         window.Pivot.legacy.refreshCurrentContextUsage?.(requestSessionId);
                     }
@@ -920,7 +902,6 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         } else if (!isViewingRequestSession()) {
             showToast('原会话的回答已生成完成，可切回查看。', 'info');
         }
-        window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
         showTaskPromotionForResponse();
         
         // 结束时立即同步侧边栏（如果已由 message_saved 刷新则只做兜底，不再空等 1.5 秒）
@@ -934,7 +915,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
         pendingStreamChunks = [];
         localReplayTimer = null;
         renderTimer = null;
-        if (e.name === 'AbortError') {
+        if (myController.signal.aborted || e.name === 'AbortError') {
             if (remainingStreamContent) {
                 fullAiContent += remainingStreamContent;
                 tokenUnits += estimateStreamingTokenUnits(remainingStreamContent);
@@ -942,7 +923,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             }
             // 被新消息打断时不追加提示文字，干净截断即可
             if (!myController.pivotSupersededBySend) {
-                fullAiContent += '\n\n[已由用户中断生成]';
+                fullAiContent += '\n\n[生成已中止，以上为未完成回复]';
             }
             if (textBody && isRequestMessageVisible()) PivotSafeHtml.setHtml(textBody, renderAiMessage(fullAiContent, true));
             if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
@@ -955,7 +936,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
                 updateAssistantStatus(e.message, 'error');
             }
             if (isViewingRequestSession()) window.Pivot.legacy.scrollMessagesToBottom?.();
-            showToast(e.message, 'error');
+            if (generations.owned(generation)) showToast(e.message, 'error');
         }
     } finally {
         if (reader) {
@@ -963,11 +944,7 @@ async function runSendMessage(shouldRegenerate, regenerateMessageId = null, resu
             try { reader.releaseLock(); } catch (_e) { /* lock already released */ }
             reader = null;
         }
-        document.getElementById('stop-btn').classList.add('hidden');
-        document.getElementById('send-btn').classList.remove('hidden');
-        window.Pivot.moduleApi('chat.taskSuggestion')?.setSendBusy?.(false);
-        currentAbortController = null;
-        activeVoiceRequestId = '';
+        generations.syncControls();
     }
 }
 
@@ -980,7 +957,8 @@ async function continueMcpRouteMessage(messageId, routeOverrides = null, continu
 }
 
 window.Pivot.exposeModule('chat.execution', {
-    stopVoiceRequest(id) { if (activeVoiceRequestId === id) currentAbortController?.abort(); },
+    stopVoiceRequest(id) { window.Pivot.moduleApi('chat.generations').stopVoiceRequest?.(id); },
+    syncController() { currentAbortController = window.Pivot.moduleApi('chat.generations').controller?.() || null; },
     continueMcpRouteMessage,
     createTaskDraft: createChatTaskDraft
 });

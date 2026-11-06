@@ -329,6 +329,7 @@ window.Pivot.legacy.scrollMessagesToBottom = function(options = {}) {
 };
 const customRenderer = new marked.Renderer();
 let markdownIsStreaming = false;
+let markdownHasDiagramFiles = false;
 customRenderer.code = (code, infostring, _escaped) => {
     const raw = typeof code === 'object' && code !== null ? code.raw || '' : '';
     if (typeof code === 'object' && code !== null) {
@@ -339,7 +340,7 @@ customRenderer.code = (code, infostring, _escaped) => {
     const normalizedLanguage = language.toLowerCase();
     if (['mermaid', 'mmd'].includes(normalizedLanguage)) {
         const diagram = window.Pivot?.moduleApi?.('chat.mermaid');
-        if (diagram?.markup) return diagram.markup(code, { pending: markdownIsStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(raw.trimEnd()) });
+        if (diagram?.markup) return diagram.markup(code, { resultFiles: markdownHasDiagramFiles, pending: markdownIsStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(raw.trimEnd()) });
     }
     const chartLanguages = new Set(['pivot-echart', 'pivot-chart', 'chart', 'charts']);
     const isRenderableChart = normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code));
@@ -612,7 +613,9 @@ function renderMarkdown(content, options = {}) {
         .replace(/\n{3,}/g, '\n\n');
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(safeContent));
     const previousStreaming = markdownIsStreaming;
+    const previousDiagramFiles = markdownHasDiagramFiles;
     markdownIsStreaming = Boolean(options.streaming);
+    markdownHasDiagramFiles = Boolean(options.diagramResultFiles);
     let rawHtml;
     try {
         rawHtml = marked.parse(normalizedContent, {
@@ -620,7 +623,7 @@ function renderMarkdown(content, options = {}) {
             pivotStreamingTail: options.streaming ? normalizedContent.trimEnd() : null,
             pivotRecoverEmphasis: Boolean(options.recoverEmphasis)
         });
-    } finally { markdownIsStreaming = previousStreaming; }
+    } finally { markdownIsStreaming = previousStreaming; markdownHasDiagramFiles = previousDiagramFiles; }
 
     // 为生成的表格统一包裹外部滚动容器，彻底规避 marked 渲染器 API 版本兼容性问题
     rawHtml = rawHtml.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');

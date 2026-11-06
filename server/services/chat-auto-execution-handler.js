@@ -12,6 +12,7 @@ const { detectChatRouteCorrection, recordChatRouteCorrection, applyAutomaticExec
 const { isDirectConversation } = require('./chat-capability-decision');
 const { getChatCapabilityAvailability } = require('./chat-capability-scope');
 const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
+const { buildIntentFallback } = require('./chat-intent-fallback');
 
 async function decideAutomaticChatExecution({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
@@ -96,6 +97,8 @@ async function decideAutomaticChatExecution({
             executionAllowed: agentExecutionAllowed && autoExecutionEnabled,
             preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
         });
+        if (resolved.failureCode) log?.warn?.({ sessionId, userId, modelId: modelCfg?.id, code: resolved.failureCode,
+            durationMs: resolved.durationMs, policyVersion: resolved.policyVersion }, '任务意图判断未完成，本轮仅提供受限文本回复');
         if (/^(?:不对|不是让你|不是这个意思)|(?:不要|不用).{0,8}(?:新建|另开|新开)任务/.test(intentPrompt)) {
             try {
                 resolved.correctionEvidence = await (deps.recordChatRouteCorrection || recordChatRouteCorrection)({
@@ -108,7 +111,7 @@ async function decideAutomaticChatExecution({
     } catch (error) {
         if (signal?.aborted) throw error;
         log?.warn?.({ sessionId, userId, code: error.code }, '自动任务语义路由不可用');
-        return { ...initial, action: 'clarify', reasonCode: 'decision_unavailable', question: '任务理解服务暂时不可用，请稍后重试；你的请求已保存。' };
+        return constrainChatDecision(buildIntentFallback(initial, 'intent_context_unavailable', 'decision_unavailable'), requestScope);
     }
 }
 

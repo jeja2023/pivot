@@ -129,6 +129,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
 
 工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。
 
+文档生成 PPT 必须完整读取来源、规划整份逐页内容，再搜索 presentation.create 生成可编辑 PPTX；presentation.export 导出已有 PPT 或单页 SVG/PNG。正文 IR 的 artifact.render 不能生成 PPTX 或把段落直接转图片，单独 SVG 源码使用 diagram.render_svg。不得把大纲、单页示例或 SVG 代替完整 PPTX 宣告完成，先检查返回页数、版式和文件登记结果。
+
 本轮若已提供知识库检索结果，先判断现有证据是否足够；足够时直接回答，仅在缺少依据时补充检索。资料未覆盖的部分明确说明缺少依据，不得反复规划或重复检索同一问题来填补缺口。
 
 【重要语言规则】你的思考、推理和所有输出必须使用中文。禁止使用英文提纲或英文推理过程。

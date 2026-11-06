@@ -8,11 +8,12 @@
 function layoutForSlide(template, slide) {
     const layouts = Array.isArray(template?.definition?.layouts) ? template.definition.layouts : (Array.isArray(template?.layouts) ? template.layouts : []);
     const requested = String(slide?.layoutId || '').trim();
-    return layouts.find(layout => layout.id === requested)
+    const selected = layouts.find(layout => layout.id === requested)
         || layouts.find(layout => layout.legacyLayoutId === requested)
         || layouts.find(layout => slide?.type === 'cover' && (layout.legacyLayoutId === 'cover' || /封面|cover/i.test(layout.name)))
         || layouts[0]
         || null;
+    return require('./presentation-design-layout').resolveDesignLayout(selected, slide);
 }
 
 function coverNavigationModel(presentation = {}) {
@@ -301,6 +302,7 @@ function reflowCoverDescriptions(elements, placed, layout, template, subtitleSlo
 }
 
 function reflowSlideElements(elements, layout, template, presentation) {
+    if (String(layout.id).startsWith('design-')) return require('./presentation-design-layout').reflowDesignElements(elements, layout, presentation);
     const theme = template.definition?.theme || template.theme || {};
     const colors = theme.colors || {};
     const placeholders = layout.placeholders || [];

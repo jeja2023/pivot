@@ -17,6 +17,10 @@ function jsonSchema(properties = {}, required = []) {
 
 function getArtifactToolDefinitions() {
     return [
+        ...require('./agent-tools-presentations').presentationToolDefinitions(),
+        { name: 'diagram.render_svg', title: '生成 SVG 图形或页面图片', capabilities: ['viz.render'], idempotent: true, side_effect: true, concurrency: 'write',
+            description: '将完整 SVG 源码安全保存为可下载 SVG/PNG 结果，内部完成受控图片登记，无需用户提供 CAS 图片。适合单张结构图、示意图；完整可编辑 PPT 应使用 presentation.create，已有 PPT 页面应使用 presentation.export。禁止脚本、外链、内联图片和动态内容。',
+            input_schema: jsonSchema({ svg: { type: 'string', maxLength: 1000000 }, title: { type: 'string', maxLength: 160 }, format: { type: 'string', enum: ['svg', 'png'], default: 'svg' } }, ['svg']) },
         {
             name: 'presentation.create_from_artifact',
             title: '从产物创建演示文稿',
@@ -32,7 +36,7 @@ function getArtifactToolDefinitions() {
         {
             name: 'artifact.render',
             title: '文档渲染 (Word / PDF / Excel)',
-            description: '把结构化文档中间表示（Document IR）渲染为正式文档文件，支持 Word 文档（.docx / Word / doc）、PDF、Excel（.xlsx）、HTML 与 Markdown。生成的文档将自动作为任务结果交付，用户可在界面中直接下载或保存到本地授权目录。当用户要求生成 Word 文档、doc、docx、表格或报告并保存到本地时，必须调用此工具完成渲染。',
+            description: '把 Document IR 渲染为 Word、PDF、Excel、HTML 或 Markdown。生成完整可编辑 PPTX 请用 presentation.create，导出现有 PPT 用 presentation.export；从 SVG 源码生成图形请用 diagram.render_svg。此工具的 svg/png 仅转换已有 image 块中的受控图片，不能把段落和标题直接变成图片。结果自动挂载，用户可下载或保存到本机。',
             capabilities: ['document.render'],
             input_schema: jsonSchema({
                 artifactId: { type: 'integer', minimum: 1, description: '可选。要挂载渲染结果的产物 ID；若未提供，将自动为当前任务创建文档产物。' },
@@ -67,6 +71,9 @@ function resolveToolCallId(context = {}) {
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
+    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
+    if (name === 'diagram.render_svg') return require('./tool-result-artifacts').materializeToolArtifact({ structuredContent: { pivotArtifact: {
+        kind: 'diagram', title: input.title, svg: input.svg, format: input.format || 'svg' } } }, user, context);
     if (name === 'presentation.create_from_artifact') {
         const { createPresentationFromArtifact } = require('./presentations/presentation-service');
         const presentation = await createPresentationFromArtifact(user, input.artifactId, { title: input.title, templateId: input.templateId, tags: input.tags });
@@ -133,7 +140,7 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
     };
 }
 
-const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.create_from_artifact', 'artifact.render', 'artifact.list_renditions']);
+const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.create', 'presentation.export', 'presentation.create_from_artifact', 'diagram.render_svg', 'artifact.render', 'artifact.list_renditions']);
 
 module.exports = {
     ARTIFACT_TOOL_NAMES,

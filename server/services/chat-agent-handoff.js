@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { requestedPresentationFormats } = require('./task-display-title');
 const { resolveChatRequestScope, constrainChatDecision, capabilityAllowedByRequestScope, requestScopeInstructions } = require('./chat-request-scope');
 const { resolveChatProject } = require('./chat-preference-context');
 const { resolveChatAgentBudget } = require('./agent-token-policy');
@@ -101,9 +102,10 @@ async function createChatAgentHandoff({
                 constraints: automaticExecution.constraints || [],
                 deliverables: automaticExecution.deliverables?.length ? automaticExecution.deliverables : [automaticExecution.objective || visibleContent],
                 acceptance: {
-                    requireCompleteSource: modelContent.length > 12000,
+                    requireCompleteSource: modelContent.length > 12000 || requestedPresentationFormats(visibleContent).length > 0,
                     requireEvidence: automaticExecution.acceptance?.requireEvidence === true,
-                    artifactRequired: automaticExecution.acceptance?.artifactRequired === true || /导出|下载|生成.{0,8}文件/.test(visibleContent),
+                    artifactRequired: automaticExecution.acceptance?.artifactRequired === true || requestedPresentationFormats(visibleContent).length > 0 || /导出|下载|生成.{0,8}文件/.test(visibleContent),
+                    requiredFormats: requestedPresentationFormats(visibleContent),
                     requireSemanticVerification: true
                 },
                 source: 'chat_semantic_intent', authorizationRef, budgetRef

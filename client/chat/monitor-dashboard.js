@@ -69,15 +69,19 @@
             ['路由错误', available ? number(routing.errors) : unknown, routing.errors > 0],
             ['路由平均耗时', available && routing.requests ? ms(routing.duration / routing.requests) : unknown],
             ['平均候选（知识 / 工具）', available && routing.requests ? `${formatMetricNumber(routing.knowledge / routing.requests, 1)} / ${formatMetricNumber(routing.tools / routing.requests, 1)}` : unknown],
-            ['决策服务调用 / 错误', data.decisionRouting?.unavailable ? unknown : `${number(decisions.calls)} / ${number(decisions.errors)}`],
+            ['决策服务调用 / 错误', data.decisionRouting?.unavailable ? unknown : `${number(decisions.calls)} / ${number(decisions.errors)}`, decisions.errors > 0],
             ['决策服务最高 P95', !data.decisionRouting?.unavailable && decisions.calls ? ms(decisions.p95) : unknown]
-        ]));
+        ]) + (decisions.errors > 0 ? '<button type="button" class="btn-secondary" data-monitor-failure-kind="provider">查看24小时决策错误明细</button>' : ''));
     }
     let executionController = null;
     let decisionController = null;
+    let detailsController = null;
+    let detailKind = 'delivery';
+    let detailOffset = 0;
     function cancelQualityLoad() {
         executionController?.abort(); executionController = null;
         decisionController?.abort(); decisionController = null;
+        detailsController?.abort(); detailsController = null;
     }
     function failureReasonLabel(code) {
         const labels = {
@@ -113,6 +117,7 @@
                 ? sorted.map(([code, count], index) => `<tr><td class="text-center">${index + 1}</td><td title="${escapeHtml(code)}">${escapeHtml(failureReasonLabel(code))}</td><td class="text-center">${escapeHtml(number(count))} 条</td></tr>`).join('')
                 : `<tr><td colspan="3" class="text-center">${escapeHtml(emptyMessage)}</td></tr>`;
             set('monitor-decision-failures', content);
+            if (body.detailsAvailable && sorted.length) set('monitor-decision-failures', content + '<tr><td colspan="3"><button type="button" class="btn-secondary" data-monitor-failure-kind="delivery">查看任务核验失败明细</button></td></tr>');
         } catch (error) {
             if (!controller.signal.aborted) set('monitor-decision-failures', '<tr><td colspan="3" class="text-center">失败原因暂时不可用，请点击“刷新指标”重试。</td></tr>');
         } finally {
@@ -120,6 +125,40 @@
             api.legacy.scheduleSettingsWorkspaceScale?.();
         }
     }
+    async function loadFailureDetails(kind = 'delivery', offset = 0) {
+        detailsController?.abort();
+        const controller = new AbortController(); detailsController = controller;
+        detailKind = kind === 'provider' ? 'provider' : 'delivery'; detailOffset = Math.max(0, Number(offset) || 0);
+        const target = document.getElementById('monitor-failure-details'); if (!target) return;
+        target.classList?.remove('hidden');
+        set('monitor-failure-details', '<p class="monitor-empty">正在读取失败明细…</p>');
+        try {
+            const response = await apiFetch(`${API_BASE}/stats/observability/decision-failures?kind=${detailKind}&limit=20&offset=${detailOffset}`, { signal: controller.signal, timeoutMs: 30000 });
+            if (!response.ok) throw new Error('明细读取失败');
+            const body = await response.json();
+            if (controller.signal.aborted) return;
+            if (body.unavailable || !Array.isArray(body.items)) throw new Error('明细不可用');
+            const provider = detailKind === 'provider';
+            const content = body.items.map(item => {
+                const date = new Date(item.occurredAt);
+                const occurredAt = Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未记录时间';
+                const refs = provider ? `${item.providerId || '未知组件'} / ${item.providerVersion || '未记录版本'} · ${item.decisionId || ''}` : `任务 ${item.runId || '未关联'} · 决策 ${item.decisionId || ''}`;
+                const details = provider ? `${item.reasonCode || ''} · ${ms(item.durationMs)}` : [...(item.missing || []), ...(item.ruleFailures || []).map(rule => rule.label + (rule.detail ? `：${rule.detail}` : '')), item.executionReason || ''].filter(Boolean).join('；') || '未记录缺失项';
+                const source = !provider && item.detailSource === 'current_report' ? '（历史事件无快照，以下来自当前核验报告）' : '';
+                const reasonCode = escapeHtml(item.reasonCode || '未记录代码');
+                return `<tr><td>${escapeHtml(occurredAt)}</td><td>${escapeHtml(refs)}</td><td title="${reasonCode}">${escapeHtml((item.label || '未记录具体原因') + source)}</td><td>${escapeHtml(details)}</td></tr>`;
+            }).join('');
+            set('monitor-failure-details', `<h4>${provider ? '决策组件错误明细 · 最近24小时' : '任务核验失败明细 · 最近30天'}</h4><p class="monitor-panel-description">${provider ? '调用与错误按组件调用记录计数，单次对话可能产生多个组件记录，不等于失败任务数。' : '按失败事件统计，重试可能产生多条记录；新事件保存失败时快照，历史事件尽量读取已有报告，未保存的细节不能还原。'} 共 ${escapeHtml(number(body.total))} 条。</p><div class="table-container"><table class="data-table compact-table monitor-decision-details-table"><thead><tr><th>发生时间</th><th>关联记录</th><th>具体原因</th><th>${provider ? '错误代码与耗时' : '缺失项与规则'}</th></tr></thead><tbody>${content || '<tr><td colspan="4" class="text-center">所选时间范围内没有对应记录。</td></tr>'}</tbody></table></div><div class="workspace-pagination"><button type="button" class="btn-secondary" data-monitor-failure-page="previous"${detailOffset ? '' : ' disabled'}>上一页</button><span>第 ${Math.floor(detailOffset / 20) + 1} 页</span><button type="button" class="btn-secondary" data-monitor-failure-page="next"${body.hasMore ? '' : ' disabled'}>下一页</button></div>`);
+            target.scrollIntoView?.({ block: 'nearest' });
+        } catch (_) { if (!controller.signal.aborted) set('monitor-failure-details', '<p class="monitor-empty">失败明细暂不可用，请重新点击查看重试。</p>'); }
+        finally { if (detailsController === controller) detailsController = null; api.legacy.scheduleSettingsWorkspaceScale?.(); }
+    }
+    document.addEventListener?.('click', event => {
+        const choice = event.target.closest?.('[data-monitor-failure-kind]');
+        const page = event.target.closest?.('[data-monitor-failure-page]');
+        if (choice) void loadFailureDetails(choice.dataset.monitorFailureKind);
+        else if (page && !page.disabled) void loadFailureDetails(detailKind, detailOffset + (page.dataset.monitorFailurePage === 'next' ? 20 : -20));
+    });
     async function loadQuality() {
         cancelQualityLoad();
         const controller = new AbortController();
@@ -148,5 +187,5 @@
             api.legacy.scheduleSettingsWorkspaceScale?.();
         }
     }
-    api.exposeModule('settings.monitorDashboard', { render, loadQuality, loadDecisionFailures, cancelQualityLoad });
+    api.exposeModule('settings.monitorDashboard', { render, loadQuality, loadDecisionFailures, loadFailureDetails, cancelQualityLoad });
 }());

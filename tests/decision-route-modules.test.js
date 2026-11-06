@@ -30,6 +30,9 @@ test('智能决策管理路由完整注册审核、观测、模型和回滚端�
     assert.equal(endpoints.has('post /observability/decision-evaluation-sets/import'), true);
     assert.equal(endpoints.has('post /observability/decision-evaluation-sets/:version/cases/:caseId/review'), true);
     assert.equal(endpoints.has('get /observability/decision-maintenance'), true);
+    assert.equal(endpoints.has('get /observability/decision-failures'), true);
+    const diagnosticRoute = router.routes.find(route => route.path === '/observability/decision-failures');
+    assert.equal(diagnosticRoute.handlers.length, 3);
     assert.equal(endpoints.has('get /observability/decision-feedback'), true);
     assert.equal(endpoints.has('post /observability/decision-feedback/:id/review'), true);
     assert.equal(endpoints.has('post /observability/decision-models/:id/activate'), true);

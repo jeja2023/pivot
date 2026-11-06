@@ -80,6 +80,7 @@ const migrationModules = [
     require('./analysis-query-reliability'),
     require('./analysis-scalability'),
     require('./presentation-workbench'),
+    require('./presentation-svg-export'),
     require('./presentation-collaboration'),
     require('./presentation-product-governance'),
     require('./presentation-organization-controls'),

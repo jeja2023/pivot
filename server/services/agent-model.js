@@ -157,7 +157,7 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return result;
     } catch (err) {
-        recordModelFailure(modelCfg, err);
+        if (endpointRelease) recordModelFailure(modelCfg, err, { signal: options.signal });
         throw err;
     } finally {
         if (endpointRelease) endpointRelease();

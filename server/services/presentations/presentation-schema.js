@@ -261,6 +261,7 @@ function normalizeElement(input, canvas, index) {
         options: {
             showLegend: normalizeBoolean(input.options?.showLegend, columns.length > 2),
             showLabels: normalizeBoolean(input.options?.showLabels, false),
+            labelFontSize: normalizeNumber(input.options?.labelFontSize, 14, 10, 32, '图表标注字号'),
             colors: normalizeStringArray(input.options?.colors, 12, 7, '图表颜色').map(color => normalizeColor(color))
         },
         binding: input.binding && isPlainObject(input.binding) ? {
@@ -408,6 +409,7 @@ function normalizePresentation(input, options = {}) {
         }) : [],
         metadata: {
             aiGenerated: normalizeBoolean(input.metadata?.aiGenerated),
+            designSkillVersion: normalizeBoundedText(input.metadata?.designSkillVersion, '', 32, '设计技能版本', { allowEmpty: true }),
             coverAssetRef: input.metadata?.coverAssetRef ? (() => { const ref = String(input.metadata.coverAssetRef).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('封面图片必须引用受控素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : '',
             language: normalizeBoundedText(input.metadata?.language, 'zh-CN', 24, '语言'),
             updatedAt: normalizeBoundedText(input.metadata?.updatedAt, '', 64, '更新时间', { allowEmpty: true }),

@@ -46,12 +46,14 @@ test('续接必须指向当前会话给定任务，不接受模型发明或跨�
     assert.equal(classifyChatAutoExecution({ prompt: '按刚才的方案修改，并跑测试', history: [{ role: 'user', content: '请分析项目代码' }] }).action, 'continue_run');
 });
 
-test('只规划硬限制不会被语义结果推翻；无效能力与响应失败给出明确阻断', async () => {
+test('只规划硬限制不会被语义结果推翻；无效能力与响应失败仅允许文本回复', async () => {
     const planned = await resolveChatIntent({ ...input, prompt: '先给出修复方案，不要改代码' }, deps(modelDecision));
     assert.equal(planned.action, 'plan_only');
     for (const output of [{ ...modelDecision, requiredCapabilities: ['admin.all'] }, {}, { ...modelDecision, action: 'execute_everything' }]) {
         const result = await resolveChatIntent(input, deps(output));
-        assert.equal(result.action, 'clarify');
+        assert.equal(result.action, 'direct_answer');
+        assert.equal(result.textOnlyFallback, true);
+        assert.deepEqual(result.requiredCapabilities, []);
         assert.equal(result.reasonCode, 'intent_unavailable');
     }
 });

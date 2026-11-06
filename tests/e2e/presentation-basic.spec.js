@@ -17,7 +17,12 @@ test('演示文稿可创建、编辑、刷新恢复并导出 PPTX', async ({ pag
     await page.locator('#presentation-create-blank-btn').click();
     const result = await created;
     expect(result.ok()).toBeTruthy();
-    const id = (await result.json()).presentation.id;
+    const presentation = (await result.json()).presentation;
+    const id = presentation.id;
+    expect(presentation.template.id).toBe('executive-clean');
+    const templates = (await (await page.request.get('/api/apps/presentations/templates')).json()).templates;
+    expect(templates.some(template => template.id === 'learning-studio' && template.definition.layouts.length === 18)).toBeTruthy();
+    await expect(page.locator('#presentation-visual-review-btn')).toBeAttached();
     await expect(page.locator('#presentation-title-input')).toBeVisible();
     await page.locator('#presentation-title-input').fill('隔离演示保存测试');
     await page.locator('#presentation-add-slide-btn').click();

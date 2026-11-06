@@ -4,6 +4,9 @@
     let sequence = 0;
     const send = message => window.parent.postMessage({ type: 'pivot:mermaid-result', ...message }, '*');
     const color = value => typeof value === 'string' && /^(?:#[0-9a-f]{3,8}|rgba?\([\d.,%\s]+\))$/i.test(value) ? value : undefined;
+    if (!window.Pivot?.vendor?.mermaid) {
+        window.parent.postMessage({ type: 'pivot:mermaid-unavailable' }, '*'); return;
+    }
 
     window.addEventListener('message', async event => {
         const input = event.data;

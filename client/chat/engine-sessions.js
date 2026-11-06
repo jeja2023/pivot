@@ -171,6 +171,7 @@ function clearActiveChatSession() {
     sessionSelectionSequence += 1;
     detachReattachedChatAgents();
     currentSessionId = null;
+    window.Pivot.moduleApi('chat.generations').syncControls?.();
     window.Pivot.legacy.persistActiveChatSession?.('');
     window.Pivot.legacy.markActiveSessionInList?.('');
     window.Pivot?.moduleApi?.('chat.attachments')?.clearPendingAttachments?.();
@@ -195,6 +196,7 @@ async function selectSession(id, title, options = {}) {
         clearPendingAttachments('已清空未发送附件，避免发送到错误会话');
     }
     currentSessionId = id;
+    window.Pivot.moduleApi('chat.generations').syncControls?.();
     window.Pivot.legacy.persistActiveChatSession?.(id);
     window.Pivot.legacy.markActiveSessionInList?.(id);
     if (title) document.getElementById('current-title').innerText = title;
@@ -207,6 +209,7 @@ async function selectSession(id, title, options = {}) {
         if (!res.ok) {
             if (options.restore || res.status === 404) {
                 currentSessionId = null;
+                window.Pivot.moduleApi('chat.generations').syncControls?.();
                 window.Pivot.legacy.persistActiveChatSession?.('');
                 const titleEl = document.getElementById('current-title');
                 if (titleEl) titleEl.innerText = '请选择或新建对话';
@@ -224,6 +227,7 @@ async function selectSession(id, title, options = {}) {
         if (!isCurrentSelection()) return;
         if (options.restore) {
             currentSessionId = null;
+            window.Pivot.moduleApi('chat.generations').syncControls?.();
             window.Pivot.legacy.persistActiveChatSession?.('');
             const titleEl = document.getElementById('current-title');
             if (titleEl) titleEl.innerText = '请选择或新建对话';
@@ -244,6 +248,7 @@ async function selectSession(id, title, options = {}) {
     const messageVirtualizer = window.Pivot?.modules?.['chat.messageVirtualizer'];
     if (messageVirtualizer) {
         messageVirtualizer.start({ sessionId: id, records: messages, page: data.page, targetMessageId: options.targetMessageId });
+        if (!options.targetMessageId) window.Pivot.moduleApi('chat.generations').restore?.(id, messages);
         if (options.refreshSidebar) window.Pivot.moduleApi('chat.sidebar').loadSessions?.();
         attachChatAgentRunsForSession(id);
         return;
@@ -270,6 +275,7 @@ async function selectSession(id, title, options = {}) {
             if (m.role === 'assistant' && contentEl) assistantContentNodes.push(contentEl);
         });
     container.appendChild(fragment);
+    if (!options.targetMessageId) window.Pivot.moduleApi('chat.generations').restore?.(id, messages);
     assistantContentNodes.forEach(node => window.Pivot.legacy.renderPivotCharts?.(node));
     if (options.targetMessageId) {
         const targetEl = container.querySelector(`.message[data-id="${options.targetMessageId}"]`);

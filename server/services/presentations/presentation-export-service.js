@@ -4,7 +4,7 @@
 const crypto = require('crypto');
 const { query, queryOne } = require('../../db/client');
 const { assertTenantContext } = require('../agent-tenant-context');
-const { getAgentArtifactForUser } = require('../agent-artifacts');
+const { getAgentArtifactForUser, createOrUpdateRunArtifact } = require('../agent-artifacts');
 const { buildCasRef, incrementRefCount, putBuffer } = require('../agent-artifact-cas');
 const { recordDeliveryEvent } = require('../agent-artifact-delivery');
 const { canonicalJson } = require('../canonical-json');
@@ -12,7 +12,7 @@ const { computePresentationDigest, normalizePresentation } = require('./presenta
 const { runPresentationValidation } = require('./presentation-validation');
 const { PRESENTATION_RENDERER_VERSION, renderPresentation } = require('./presentation-renderer');
 
-const EXPORT_FORMATS = new Set(['pptx', 'pdf', 'png']);
+const EXPORT_FORMATS = new Set(['pptx', 'pdf', 'png', 'svg']);
 const SENSITIVE_ISSUE_CODES = new Set(['SENSITIVE_CONTENT', 'SENSITIVE_NOTES']);
 
 function publicError(message, status = 400, code = 'PRESENTATION_INVALID') {
@@ -52,7 +52,7 @@ function assertSensitiveExportAllowed(validation, options = {}) {
 function exportRendererVersion(format, options = {}) {
     const renderOptions = format === 'pptx'
         ? { includeNotes: options.includeNotes !== false }
-        : format === 'png'
+        : format === 'png' || format === 'svg'
             ? { imageQuality: options.imageQuality || 'standard', slideIndex: Number(options.slideIndex || 0) }
             : {};
     const optionDigest = crypto.createHash('sha256').update(canonicalJson(renderOptions)).digest('hex').slice(0, 8);
@@ -94,21 +94,25 @@ function preparePresentationForExport(content, options = {}) {
 function createExportService(deps) {
     const { getPresentationRow, assertPresentationOwnerOrAdmin, toPublicPresentation, resolvePresentationAssets } = deps;
 
-    async function createPresentationExport(user, clientId, format, options = {}) {
+    async function createPresentationExport(user, clientId, format, options = {}, taskContext = {}) {
+        taskContext.signal?.throwIfAborted();
         const normalizedFormat = String(format || '').toLowerCase();
-        if (!EXPORT_FORMATS.has(normalizedFormat)) throw publicError('仅支持导出 PPTX、PDF 或 PNG。', 400, 'PRESENTATION_EXPORT_FORMAT_INVALID');
+        if (!EXPORT_FORMATS.has(normalizedFormat)) throw publicError('仅支持导出 PPTX、PDF、PNG 或单页 SVG。', 400, 'PRESENTATION_EXPORT_FORMAT_INVALID');
         const currentRow = await getPresentationRow(user, clientId, { includeContent: true });
         if (!currentRow) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
         assertPresentationOwnerOrAdmin(user, currentRow);
         const current = toPublicPresentation(currentRow, { includeContent: true });
         const tenant = await assertTenantContext(user);
-        const artifact = await getAgentArtifactForUser(current.artifactId, user);
+        let artifact = await getAgentArtifactForUser(current.artifactId, user);
         if (!artifact) throw publicError('演示文稿产物不存在或无权导出。', 404, 'PRESENTATION_ARTIFACT_NOT_FOUND');
         const normalizedOptions = normalizeExportOptions(options);
+        if (['png', 'svg'].includes(normalizedFormat) && (!Number.isInteger(Number(options.slideIndex || 0)) || normalizedOptions.slideIndex < 0 || normalizedOptions.slideIndex >= current.content.slides.length)) throw publicError('要导出的 PPT 页码不存在。', 400, 'PRESENTATION_SLIDE_NOT_FOUND');
         const exportContent = preparePresentationForExport(current.content, normalizedOptions);
         const exportValidation = runPresentationValidation(exportContent);
         const sensitiveIssues = assertSensitiveExportAllowed(exportValidation, normalizedOptions);
         const irDigest = computePresentationDigest(exportContent);
+        if (taskContext.runId) artifact = await createOrUpdateRunArtifact({ runId: taskContext.runId, user, type: `presentation_${crypto.createHash('sha256').update(current.id).digest('hex').slice(0, 16)}`,
+            title: current.title, content: serializeJson(exportContent), note: '演示文稿任务导出' });
         // PPTX 备注、PNG 页码与清晰度不会改变文稿 IR，需通过确定性渲染配置区分缓存。
         const rendererVersion = exportRendererVersion(normalizedFormat, normalizedOptions);
         const existing = await queryOne(`
@@ -120,9 +124,10 @@ function createExportService(deps) {
         const irObject = await putBuffer({ buffer: contentBuffer, mimeType: 'application/json; charset=utf-8', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_ir' });
         const assets = await resolvePresentationAssets(user, exportContent, { presentationId: current.id });
         const rendered = await renderPresentation(exportContent, normalizedFormat, { ...normalizedOptions, assetResolver: async ref => assets.get(ref) || null });
+        taskContext.signal?.throwIfAborted();
         const output = await putBuffer({ buffer: rendered.buffer, mimeType: rendered.mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: `presentation_${normalizedFormat}` });
-        const runId = `standalone-artifact:${artifact.id}`;
-        const toolCallId = `presentation:${artifact.id}:v${current.version}:${normalizedFormat}`;
+        const runId = taskContext.runId || `standalone-artifact:${artifact.id}`;
+        const toolCallId = taskContext.toolCallId || `presentation:${artifact.id}:v${current.version}:${normalizedFormat}`;
         const rendition = await queryOne(`
             INSERT INTO agent_artifact_renditions
                 (tenant_id, artifact_id, run_id, tool_call_id, created_by, ir_ref, ir_digest, format, renderer_version, content_digest, mime_type, byte_size, storage_ref, status, created_at)

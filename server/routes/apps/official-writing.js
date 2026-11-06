@@ -227,7 +227,7 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                         accumulator.pushPayload(p);
                         let data;
                         try { data = JSON.parse(p); } catch (_) { return; }
-                        if (data.error) { upstreamError = true; recordModelFailure(modelCfg, new Error(data.error.message || '公文模型流式响应失败')); sse.writeData({ error: data.error }); return; }
+                        if (data.error) { upstreamError = true; recordModelFailure(modelCfg, new Error(data.error.message || '公文模型流式响应失败'), { signal: abortController.signal }); sse.writeData({ error: data.error }); return; }
                         const choice = data.choices?.[0];
                         const content = data.content ?? choice?.delta?.content ?? choice?.message?.content ?? '';
                         if (typeof content === 'string') sendVisible(textFilter.push(content));
@@ -246,7 +246,7 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                         const idleError = new Error(`上游流式响应空闲超过 ${Math.round(idleMs / 1000)} 秒`);
                         idleError.code = 'MODEL_STREAM_IDLE_TIMEOUT';
                         logger.error({ model: modelCfg.name, idleMs }, '公文写作流式上游长时间无数据，已主动中止');
-                        recordModelFailure(modelCfg, idleError);
+                        recordModelFailure(modelCfg, idleError, { signal: abortController.signal });
                         try { response.data?.destroy?.(); } catch (_) {}
                         try { abortController.abort(); } catch (_) {}
                         if (!res.writableEnded) {
@@ -284,7 +284,7 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                         return;
                     }
                     logger.error({ err: err.message, model: modelCfg.name }, '公文写作流式转发中断');
-                    recordModelFailure(modelCfg, err);
+                    recordModelFailure(modelCfg, err, { signal: abortController.signal });
                     if (!res.writableEnded) { sse.writeData({ error: { message: '上游生成中断，请重试', code: 'MODEL_STREAM_INTERRUPTED' } }); res.end(); }
                     releaseSemaphore();
                 });
@@ -342,7 +342,7 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
             }
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, '公文写作 AI 转发失败');
-            recordModelFailure(modelCfg, e);
+            recordModelFailure(modelCfg, e, { signal: abortController.signal });
             if (!res.headersSent) {
                 res.status(e.response?.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });
             } else if (!res.writableEnded) {

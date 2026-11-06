@@ -17,6 +17,7 @@ async function persistAssistantTurn({
     tps = null,
     routeMetadata = null,
     skipMemoryExtraction = false,
+    skipTitleGeneration = false,
     conversationTurnId = null
 }) {
     const previous = await require('../repositories/sessions').listMessages(sessionId, userId);
@@ -43,7 +44,7 @@ async function persistAssistantTurn({
         user,
         modelCfg
     }).catch(error => logger.warn({ sessionId, userId, code: error.code }, '自动记忆调度暂不可用，回答已保留'));
-    const sessionTitle = await maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
+    const sessionTitle = skipTitleGeneration ? null : await maybeGenerateTitle(sessionId, userId, visibleContent, assistantContent, modelCfg, user);
     return { assistantMessageResult, assistantMessageId, sessionTitle: sessionTitle || null };
 }
 

@@ -346,6 +346,7 @@ async function createPresentation(user, body = {}) {
     let content = body.content ? normalizePresentation({ ...withoutPlanApproval(body.content), presentationId: clientId, title, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest }, theme: body.content.theme || template.definition.theme }) : defaultPresentation({ presentationId: clientId, title, template, aspectRatio: body.aspectRatio || template.aspectRatio });
     content = applyTemplateLayoutLayers(content, template, { reflow: true });
     content = applyTemplateBrandControls(content, template);
+    content = await require('./presentation-text-metrics').fitDesignPresentation(content);
     content = attachApprovedOutline(content, body.planApproval || body.plan_approval, user);
     await assertPresentationAssetOwnership(user, content);
     const validation = runPresentationValidation(content);

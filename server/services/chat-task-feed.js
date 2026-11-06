@@ -4,6 +4,7 @@ const repository = require('../repositories/chat-task-feed');
 const { sanitizeUserVisibleText } = require('../llm');
 const { resolveTenantContext } = require('./agent-tenant-context');
 const { logger } = require('../logger');
+const { taskDisplayTitle } = require('./task-display-title');
 const { EVENT_TYPES, STATUS_LABELS, parseObject, safeTaskText, approvalSummary, presentTaskEvent, presentLegacyStep } = require('./chat-task-presentation');
 
 const TERMINAL = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
@@ -81,7 +82,7 @@ async function getChatTaskFeed(runId, user, options = {}, dependencies = {}) {
         progress: require('./agent-round-progress').buildRunProgress(row),
         run: {
             id: String(row.id), run_mode: row.run_mode || 'standard', session_id: row.session_id || null, conversationTaskId: row.conversation_task_id || String(row.id),
-            title: safeTaskText(row.title || '对话任务', 160), status, statusText: STATUS_LABELS[status] || '正在确认任务状态',
+            title: safeTaskText(taskDisplayTitle(row.title), 160), status, statusText: STATUS_LABELS[status] || '正在确认任务状态',
             final_answer: sanitizeUserVisibleText(row.final_answer || ''), error_message: safeTaskText(row.error_message, 500),
             created_at: row.created_at, updated_at: row.updated_at, started_at: row.started_at, completed_at: row.completed_at,
             last_heartbeat_at: row.last_heartbeat_at, model_name: safeTaskText(row.model_name, 80),

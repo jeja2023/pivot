@@ -39,7 +39,7 @@ function sanitizeSvg(source, limits = {}) {
 
 async function renderImage(ir, format, options) {
     const images = ir.blocks.filter(block => block.type === 'image');
-    if (images.length !== 1 || !options.imageResolver) throw new Error('图片导出需要一个受控 CAS 图片。');
+    if (images.length !== 1 || !options.imageResolver) throw new Error('此入口只能转换已有图片。生成完整 PPTX 请使用 presentation.create，导出 PPT 页面请使用 presentation.export；从 SVG 源码生成图形请使用 diagram.render_svg。');
     const bytes = await options.imageResolver(images[0].asset_ref);
     if (!bytes || bytes.length > (options.maxInputBytes || 2 * 1024 * 1024)) throw new Error('图形内容为空或超过限制。');
     if (format === 'svg') return Buffer.from(sanitizeSvg(bytes.toString('utf8'), options.svgLimits));

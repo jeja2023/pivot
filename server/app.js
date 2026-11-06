@@ -449,6 +449,7 @@ const renderPwaResetHtml = (nonce = '') => `<!DOCTYPE html>
 
 // 第三方库 vendor 目录长期缓存（内容几乎不变）
 require('./routes/document-preview-assets').registerDocumentPreviewAssets(app);
+require('./routes/mermaid-preview-assets').registerMermaidPreviewAssets(app);
 app.use('/common/vendor', express.static(path.join(__dirname, '../client/common/vendor'), {
     maxAge: appConfig.vendorMaxAge,
     immutable: true

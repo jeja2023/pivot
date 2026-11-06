@@ -16,10 +16,7 @@ const STANDARD_LAYOUTS = Object.freeze([
     { id: 'summary', name: '总结行动页', category: '总结', slots: ['title', 'summary', 'nextSteps'] }
 ]);
 
-const THEME_SEEDS = Object.freeze([
-    ['business-blue', '商务蓝汇报', '适用于项目阶段汇报、方案评审与经营复盘', '#1F5EA8', '#17A8C7', '#2E8B57', '#344054', '#F5F8FC', '#FFFFFF', '#D8E2EE', false, ['项目', '阶段汇报', '复盘']],
-    ['forest-green', '森林绿简报', '适用于环保、健康与自然主题的内容分享与产品介绍', '#1E7A4C', '#3FA97C', '#D8A23A', '#2B3A31', '#F6FAF7', '#FFFFFF', '#D5E4DA', false, ['环保', '健康', '产品介绍']]
-]);
+const THEME_SEEDS = require('./presentation-design-templates').LEGACY_THEME_SEEDS;
 
 function buildThemeMasters(colors, _isDark, useReferenceStyle = false, useForestStyle = false) {
     const { cardBorder, background, secondary, primary } = colors;
@@ -960,7 +957,7 @@ function makeTemplate(seed) {
     });
 }
 
-const BUILT_IN_TEMPLATES = Object.freeze(THEME_SEEDS.map(makeTemplate));
+const BUILT_IN_TEMPLATES = Object.freeze([...require('./presentation-design-templates').listDesignTemplates(), ...THEME_SEEDS.map(makeTemplate)]);
 
 function cloneTemplate(template) {
     return JSON.parse(JSON.stringify(template));

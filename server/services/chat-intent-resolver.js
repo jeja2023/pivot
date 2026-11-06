@@ -11,8 +11,9 @@ const { isDirectConversation } = require('./chat-capability-decision');
 const { ACTIONS, normalizeIntent } = require('./chat-intent-contract');
 const { buildChatIntentMessages } = require('./chat-intent-prompt');
 const { resolveChatRequestScope, constrainChatDecision } = require('./chat-request-scope');
+const { buildIntentFallback } = require('./chat-intent-fallback');
 
-const INTENT_POLICY_VERSION = 'chat-intent-v3';
+const INTENT_POLICY_VERSION = 'chat-intent-v4';
 
 async function callWithIntentDeadline(invoke, signal, timeoutMs) {
     const controller = new AbortController();
@@ -65,13 +66,13 @@ async function resolveChatIntent(input, deps = {}) {
         } catch (error) {
             if (signal?.aborted) throw error;
             failure = error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : error.code === 'CHAT_INTENT_INVALID_CONTRACT' || error instanceof SyntaxError ? 'intent_invalid_contract' : 'intent_provider_unavailable';
-            resolved = { ...baseline, action: baseline.action === 'direct_answer' ? 'direct_answer' : baseline.action === 'plan_only' ? 'plan_only' : 'clarify', question: '暂时无法可靠判断本次任务的处理范围，请稍后重试；你的请求已保留。', reasonCode: 'intent_unavailable', failureCode: failure, capabilityDecisionUnavailable: true };
+            resolved = buildIntentFallback(baseline, failure);
         }
     }
     resolved = constrainChatDecision(resolved, requestScope);
     const bucket = crypto.createHash('sha256').update(`${user.id}:${sessionId}`).digest()[0] % 100;
     const applied = config.mode === 'active' && bucket < config.rolloutPercent;
-    let selected = applied ? resolved : { ...baseline, action: baseline.action === 'plan_only' ? 'plan_only' : 'direct_answer', reasonCode: 'intent_shadow' };
+    let selected = failure || applied ? resolved : { ...baseline, action: baseline.action === 'plan_only' ? 'plan_only' : 'direct_answer', reasonCode: 'intent_shadow' };
     if (!executionAllowed && ['agent_run', 'continue_run'].includes(selected.action)) selected = { ...selected, action: 'direct_answer', nextAction: 'direct_answer', delegated: false, continuation: false, continuationOf: null, conversationTaskId: null,
         constraints: [...(selected.constraints || []), '当前任务自动执行未开放，本轮只提供说明，不执行操作。'],
         routing: { ...selected.routing, tools: 'none', allowAutomaticRead: false }, reasonCode: 'execution_not_enabled' };

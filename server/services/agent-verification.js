@@ -136,7 +136,7 @@ function taskVerificationFailureMessage(report = {}) {
         artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试' };
     const semantic = report.semanticVerification;
     const details = [...new Set((report.hardFailures || []).map(key => labels[key] || '结果尚未通过验收'))];
-    if (semantic?.reason && semanticReasons[semantic.reason]) details.push(semanticReasons[semantic.reason]);
+    if (semantic?.reason) details.push(semanticReasons[semantic.reason] || require('./task-verification-details').verificationReasonLabel(semantic.reason));
     if (Array.isArray(semantic?.missing)) details.push(...semantic.missing.slice(0, 3).map(item => text(item, 200)));
     return `任务尚未完成：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
 }

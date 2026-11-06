@@ -542,8 +542,9 @@ function looksLikeCorruptTitle(value) {
 }
 
 function normalizeAgentTitle(title, goal) {
-    const fallback = String(goal || '').trim().slice(0, 40) || '智能体任务';
-    const cleanTitle = String(title || '').trim();
+    const clean = require('./task-display-title').taskDisplayTitle;
+    const fallback = clean(goal, '智能体任务').slice(0, 40);
+    const cleanTitle = clean(title, '');
     if (looksLikeCorruptTitle(cleanTitle)) return fallback;
     return cleanTitle.slice(0, 80);
 }

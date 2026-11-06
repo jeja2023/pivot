@@ -534,8 +534,8 @@
     background: #ffffff;
 }
 .model-config-modal {
-    width: min(900px, 100%);
-    max-height: min(860px, 100%);
+    width: min(980px, calc(100vw - 32px));
+    max-height: min(920px, calc(100dvh - 28px));
 }
 .model-modal-header { 
     flex: 0 0 auto;
@@ -556,7 +556,14 @@
     text-align: left;
 }
 .model-config-modal .model-modal-header {
-    padding: 16px 24px 12px;
+    padding: 14px 24px 10px;
+}
+.model-config-modal .model-modal-header h3 {
+    font-size: 1.05rem;
+}
+.model-config-modal .model-modal-desc {
+    margin: 2px 0 0;
+    font-size: 0.76rem;
 }
 .model-config-modal .model-form {
     padding: 0;
@@ -568,10 +575,9 @@
     min-height: 0;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px 12px;
-    padding: 16px 24px 16px;
+    gap: 8px 12px;
+    padding: 12px 24px 12px;
     overflow-y: auto;
-    scrollbar-gutter: stable;
 }
 .model-config-modal .model-form-scroll > input[type="hidden"] {
     display: none;
@@ -579,20 +585,21 @@
 .model-config-modal .model-form-row {
     display: contents;
 }
-.model-config-modal .model-cost-row {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 12px;
-}
+.model-config-modal .model-limits-row,
+.model-config-modal .model-cost-row,
 .model-config-modal .model-context-row {
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 12px;
+    gap: 8px 12px;
 }
 .model-config-modal .form-item {
     min-width: 0;
+    gap: 3px;
+}
+.model-config-modal .form-item label {
+    font-size: 0.76rem;
+    line-height: 1.2;
 }
 .model-config-modal .model-id-item,
 .model-config-modal .model-full-row,
@@ -602,7 +609,7 @@
 .model-config-modal .model-scope-units-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px 12px;
+    gap: 8px 12px;
     align-items: end;
 }
 .model-config-modal .model-scope-units-row.scope-hidden {
@@ -626,6 +633,25 @@
     color: var(--text-muted);
     font-size: 0.7rem;
     line-height: 1.3;
+}
+.model-config-modal .model-capability-row {
+    padding: 7px 12px;
+    border-radius: 7px;
+}
+.model-config-modal .model-capability-row label {
+    font-size: 0.76rem;
+}
+.model-config-modal .model-capability-row small {
+    margin-top: 2px;
+    font-size: 0.69rem;
+    line-height: 1.25;
+}
+.model-config-modal #m-tool-call-probe-status {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.69rem;
+    line-height: 1.25;
 }
 .model-capability-icons {
     display: inline-flex;
@@ -688,7 +714,11 @@
     background: #ffffff; border: 1.5px solid #e2e8f0;
 }
 .model-config-modal .form-input {
-    height: 38px;
+    height: 36px;
+    font-size: 0.85rem;
+}
+.model-config-modal .btn-secondary[data-static-action="fetch-remote-models"] {
+    height: 36px !important;
 }
 .model-form .form-input:focus { border-color: var(--primary); background: #f0fdf4; }
 
@@ -698,12 +728,13 @@
 }
 .model-config-modal .model-modal-actions {
     margin-top: 0;
-    padding: 12px 24px 14px;
+    padding: 10px 24px 12px;
     border-top: 1px solid var(--border);
     background: #fff;
     box-shadow: 0 -8px 18px rgba(15, 23, 42, 0.035);
 }
 .model-modal-actions button { flex: 1; height: 38px; font-weight: 600; font-size: 0.82rem; }
+.model-config-modal .model-modal-actions button { height: 36px; font-size: 0.82rem; }
 .retrieval-config-modal .model-modal-actions button { flex: 0 0 auto !important; width: auto !important; white-space: nowrap !important; }
 
 @media (max-width: 760px) {
@@ -715,6 +746,7 @@
     }
     .model-config-modal .model-form-scroll,
     .model-config-modal .model-scope-units-row,
+    .model-config-modal .model-limits-row,
     .model-config-modal .model-cost-row,
     .model-config-modal .model-context-row,
     .model-form-row {

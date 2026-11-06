@@ -996,7 +996,7 @@ test.describe('Pivot browser smoke', () => {
                 { scenario: 'chat.execution', eventType: 'execution', status: 'failure', reasonCode: 'delivery_not_verified', count: 35 },
                 { scenario: 'chat.execution', eventType: 'feedback', status: 'failure', reasonCode: 'feedback', count: 6 }
             ];
-            return route.fulfill({ status: 200, json: { unavailable: false, errorBreakdown } });
+            return route.fulfill({ status: 200, json: { unavailable: false, detailsAvailable: true, errorBreakdown } });
         });
         await ensureBrowserSession(page);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel?.({ restore: false }));
@@ -1011,6 +1011,19 @@ test.describe('Pivot browser smoke', () => {
         await expect(failures.locator('tr').first().locator('td').first()).toHaveText('1');
         await expect(failures).toContainText('35 条');
         await expect(failures).not.toContainText('feedback');
+        await page.route('**/api/stats/observability/decision-failures?*', route => route.fulfill({ status: 200, json: {
+            kind: 'delivery', total: 69, hasMore: true, items: [{ runId: 'test-run-details', decisionId: 'test-decision-details', reasonCode: 'artifact_format_missing', label: '缺少用户要求的文件格式', missing: ['尚未生成PPTX'], ruleFailures: [], detailSource: 'event_snapshot' }]
+        } }));
+        await page.getByRole('button', { name: '查看任务核验失败明细' }).click();
+        await expect(page.locator('#monitor-failure-details')).toContainText('尚未生成PPTX');
+        await expect(page.locator('#monitor-failure-details')).toContainText('test-run-details');
+        await expect(page.locator('#monitor-failure-details')).toContainText('69 条');
+        await page.screenshot({ path: 'output/intent-diagnostics/monitor-desktop.png', fullPage: true });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.locator('#monitor-failure-details').scrollIntoViewIfNeeded();
+        await expect(page.locator('#monitor-failure-details').getByRole('button', { name: '下一页' })).toBeVisible();
+        await page.locator('#monitor-failure-details').screenshot({ path: 'output/intent-diagnostics/monitor-mobile.png' });
+        await page.setViewportSize({ width: 1280, height: 800 });
         state = 'empty';
         await page.locator('#monitor-refresh-btn').click();
         await expect(failures).toContainText('没有记录对话任务执行失败');

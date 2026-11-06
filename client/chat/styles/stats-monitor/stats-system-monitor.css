@@ -976,3 +976,11 @@
         text-align: left;
     }
 }
+.monitor-decision-details-table {
+    min-width: 760px;
+    table-layout: fixed;
+}
+.monitor-decision-details-table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}

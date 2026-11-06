@@ -54,7 +54,7 @@ function renderOfficialWritingHomeSummary(_docs, pageDocs) {
     const total = Number(officialWritingUiState.libraryTotal || 0);
     const pageLength = Array.isArray(pageDocs) ? pageDocs.length : 0;
     if (total === 0) {
-        PivotSafeHtml.setHtml(summaryEl, '<span class="official-writing-stat-badge empty">暂无公文</span><span class="official-writing-stat-hint">可点击右上角“创建公文”或“导入备份”开始写作</span>');
+        PivotSafeHtml.setHtml(summaryEl, '<span class="official-writing-stat-badge empty">暂无公文</span><span class="official-writing-stat-hint">点击右上角“创建公文”开始写作</span>');
         return;
     }
     PivotSafeHtml.setHtml(summaryEl, `<span class="official-writing-stat-badge">共 <b>${total}</b> 篇公文</span><span class="official-writing-stat-detail">本页 <b>${pageLength}</b> 篇</span><span class="official-writing-stat-hint">· 按需加载正文</span>`);
@@ -386,13 +386,13 @@ async function importOfficialWritingBackup(file) {
     try {
         const data = JSON.parse(await file.text());
         if (owner !== getOfficialWritingOwner()) return;
-        if (![1, 2].includes(data.version) || !data.state || typeof data.state !== 'object' || Array.isArray(data.state)
-            || (data.version === 2 && data.format !== 'pivot-official-writing')) throw new Error('备份格式无效');
+        if (!data || ![1, 2].includes(data.version) || !data.state || typeof data.state !== 'object' || Array.isArray(data.state)
+            || (data.version === 2 && data.format !== 'pivot-official-writing')) throw new Error('请选择在本应用中通过“备份这篇公文”保存的文件');
         const state = sanitizeOfficialWritingState(data.state);
         state.artifactId = '';
         createOfficialWritingDoc({ title: String(data.title || '恢复的公文').slice(0, 100), state });
-        showToast('备份已导入为新公文');
-    } catch (error) { showToast(error.message || '备份无法读取', 'error'); }
+        showToast('已恢复为一篇新公文，原有公文保留');
+    } catch (error) { showToast(error instanceof SyntaxError ? '这不是可恢复的公文备份，请选择此前通过“备份这篇公文”保存的文件' : error.message || '备份无法读取', 'error'); }
 }
 
 async function saveOfficialWritingConflictCopy() {

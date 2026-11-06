@@ -136,7 +136,8 @@ test('超时即返回安全结果，忽略中断的迟到模型不能再改变�
     const result = await resolveChatIntent(input, { ...deps(null), config: { ...config, timeoutMs: 25 },
         callModelJson: async () => new Promise(resolve => { complete = resolve; }), recordDecision: () => recorded++ });
     assert.equal(result.failureCode, 'intent_timeout');
-    assert.equal(result.routing, undefined);
+    assert.equal(result.routing.tools, 'none');
+    assert.equal(result.textOnlyFallback, true);
     complete(raw);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(recorded, 1);

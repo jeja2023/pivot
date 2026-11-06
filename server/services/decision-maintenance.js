@@ -68,7 +68,7 @@ async function getDecisionMaintenanceReport(options = {}, deps = {}) {
             readyForTraining: Number(row.verified_samples || 0) >= minimumVerifiedSamples,
             lastOutcomeAt: row.last_outcome_at || null
         }));
-        return { unavailable: false, lookbackDays, minimumVerifiedSamples, readiness, errorBreakdown: (errorRows || []).map(row => ({ tenantId: row.tenant_id ? Number(row.tenant_id) : null, scenario: row.scenario, eventType: row.event_type, status: row.status, reasonCode: row.reason_code, count: Number(row.count || 0) })), operations };
+        return { unavailable: false, detailsAvailable: true, lookbackDays, minimumVerifiedSamples, readiness, errorBreakdown: (errorRows || []).map(row => ({ tenantId: row.tenant_id ? Number(row.tenant_id) : null, scenario: row.scenario, eventType: row.event_type, status: row.status, reasonCode: row.reason_code, count: Number(row.count || 0) })), operations };
     } catch (error) {
         return { unavailable: true, lookbackDays, minimumVerifiedSamples, readiness: [], operations: null, errorCode: String(error?.code || 'maintenance_unavailable').slice(0, 80) };
     }

@@ -15,6 +15,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
     const semaphores = [];
     let axiosCalls = 0;
     let resolvePending = null;
+    let currentTime = Date.now();
 
     const fakeDb = {
         prepare(sql) {
@@ -109,7 +110,9 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
                         acquire() { return Promise.resolve(); }
                         rejectQueuedRequests() { return 0; }
                     },
-                    ConcurrencyLimitError: class extends Error {}
+                    ConcurrencyLimitError: class extends Error {
+                        constructor(message, code) { super(message); this.name = 'ConcurrencyLimitError'; this.code = code; }
+                    }
                 };
             }
             if (request === './observability') return { recordSlowModelResponse() {} };
@@ -127,7 +130,8 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
             return localRequire(request);
         },
         console,
-        process,
+        process: { ...process, env: { ...process.env, MODEL_ENDPOINT_FAILURE_THRESHOLD: '3', MODEL_ENDPOINT_CIRCUIT_OPEN_MS: '60000' } },
+        Date: class extends Date { static now() { return currentTime; } },
         Buffer,
         URL,
         setTimeout(fn, delay) {
@@ -159,6 +163,7 @@ function loadModelRuntimeHarness({ pendingFirstRequest = false, defaultConcurren
         getAxiosCalls: () => axiosCalls,
         getPendingResolve: () => resolvePending,
         getSemaphores: () => semaphores,
+        advanceTime: milliseconds => { currentTime += milliseconds; },
         setTimeoutCalls,
         setIntervalCalls
     };
@@ -299,4 +304,70 @@ test('熔断提示不会重复拼接同一段模型端点错误', () => {
     assert.equal(runtime.buildCircuitOpenMessage(60, repeated), '模型端点暂时熔断，约 60 秒后可重试。');
     assert.equal(runtime.buildCircuitOpenMessage(59, 'Request failed with status code 502'), '模型端点暂时熔断，约 59 秒后可重试。 上次错误：Request failed with status code 502');
     assert.equal(runtime.normalizeCircuitErrorDetail('AI_ENDPOINT_CIRCUIT_OPEN'), '');
+    assert.equal(runtime.buildCircuitOpenMessage(60, '上次错误：上次错误：上次错误：canceled'), '模型端点暂时熔断，约 60 秒后可重试。 上次错误：canceled');
+    assert.equal(runtime.buildCircuitOpenMessage(59, '模型端点暂时熔断，约 60 秒后可重试。 上次错误：上次错误：连接失败'), '模型端点暂时熔断，约 59 秒后可重试。 上次错误：连接失败');
+});
+
+test('取消、短时限和本地排队拒绝不累计为端点失败', async () => {
+    const { runtime } = loadModelRuntimeHarness();
+    const model = { id: 1, url: 'https://cancel.example/v1', name: '取消测试' };
+    runtime.getModelEndpointRuntimeStatus([model]);
+    for (const error of [
+        Object.assign(new Error('canceled'), { code: 'ERR_CANCELED', name: 'CanceledError' }),
+        Object.assign(new Error('操作已中止'), { name: 'AbortError' }),
+        new Error('canceled'), new Error('cancelled'), new Error('aborted'),
+        ...['REQUEST_ABORTED', 'AI_ENDPOINT_CIRCUIT_OPEN', 'AI_QUEUE_FULL', 'AI_QUEUE_TIMEOUT', 'AI_OVERLOADED',
+            'CHAT_INTENT_TIMEOUT', 'CONTEXT_LENGTH_EXCEEDED', 'AGENT_BUDGET_EXCEEDED'].map(code => Object.assign(new Error('本地请求结束'), { code }))
+    ]) runtime.recordModelFailure(model, error);
+    const controller = new AbortController(); controller.abort(new Error('调用方限制已到期'));
+    runtime.recordModelFailure(model, new Error('没有取消错误码的流中断'), { signal: controller.signal });
+    const status = runtime.getModelEndpointRuntimeStatus([model])[0];
+    assert.equal(status.consecutiveFailures, 0);
+    assert.equal(status.errorCount, 0);
+    assert.equal(status.circuitOpenMs, 0);
+    assert.equal(status.lastError, '');
+    const release = await runtime.acquireModelSlot(model); release();
+});
+
+test('真实故障仍触发熔断，熔断拒绝不会续期或覆盖根因，成功后恢复', async () => {
+    const { runtime, advanceTime } = loadModelRuntimeHarness();
+    const model = { id: 1, name: '故障测试', url: 'https://failure.example/v1' };
+    runtime.recordModelFailure(model, Object.assign(new Error('连接超时'), { code: 'ETIMEDOUT' }));
+    runtime.recordModelFailure(model, Object.assign(new Error('请求超时'), { code: 'ECONNABORTED' }));
+    runtime.recordModelFailure(model, { response: { status: 502, data: { error: { message: '网关不可用' } } } });
+    const first = runtime.getModelEndpointRuntimeStatus([model])[0];
+    assert.equal(first.consecutiveFailures, 3);
+    assert.equal(first.circuitOpenMs, 60000);
+    advanceTime(10000);
+    for (let index = 0; index < 8; index++) {
+        await assert.rejects(() => runtime.acquireModelSlot(model), error => {
+            assert.equal(error.code, 'AI_ENDPOINT_CIRCUIT_OPEN');
+            assert.equal((error.message.match(/上次错误/g) || []).length, 1);
+            runtime.recordModelFailure(model, error);
+            return true;
+        });
+    }
+    const after = runtime.getModelEndpointRuntimeStatus([model])[0];
+    assert.equal(after.consecutiveFailures, 3);
+    assert.equal(after.errorCount, 3);
+    assert.equal(after.circuitOpenMs, 50000);
+    assert.equal(after.lastError, '网关不可用');
+    runtime.recordModelFailure(model, new Error('另一在途请求失败'));
+    assert.equal(runtime.getModelEndpointRuntimeStatus([model])[0].circuitOpenMs, 50000);
+    advanceTime(50001);
+    const release = await runtime.acquireModelSlot(model); release();
+    runtime.recordModelSuccess(model, 120);
+    const recovered = runtime.getModelEndpointRuntimeStatus([model])[0];
+    assert.equal(recovered.circuitOpenMs, 0);
+    assert.equal(recovered.consecutiveFailures, 0);
+    assert.equal(recovered.lastError, '');
+});
+
+test('上游真实断流即使消息为 aborted，仍计为模型故障', () => {
+    const { runtime } = loadModelRuntimeHarness();
+    const model = { id: 1, name: '上游断流', url: 'https://reset.example/v1' };
+    runtime.recordModelFailure(model, Object.assign(new Error('aborted'), { code: 'ECONNRESET' }));
+    const status = runtime.getModelEndpointRuntimeStatus([model])[0];
+    assert.equal(status.errorCount, 1);
+    assert.equal(status.lastError, 'aborted');
 });

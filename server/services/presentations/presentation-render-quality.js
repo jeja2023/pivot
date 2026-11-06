@@ -9,11 +9,17 @@ function makeIssue(level, code, slideId, message, suggestion = '') {
     return { level, code, slideId, elementId: null, message, suggestion };
 }
 
-async function runRenderedPresentationQuality(input, { assetResolver } = {}) {
+async function runRenderedPresentationQuality(input, { assetResolver, signal } = {}) {
     const presentation = normalizePresentation(input);
     const structural = runPresentationValidation(presentation);
     const renderIssues = [];
+    const metrics = await require('./presentation-text-metrics').createTextMetrics(presentation, { assetResolver });
     for (const slide of presentation.slides) {
+        signal?.throwIfAborted();
+        if (String(slide.layoutId).startsWith('design-')) for (const element of slide.elements.filter(element => element.type === 'text' && element.visible)) {
+            const height = metrics.lines(element).length * element.style.fontSize * element.style.lineHeight + element.style.padding * 2;
+            if (height > element.height + 2) renderIssues.push({ ...makeIssue('blocking', 'MEASURED_TEXT_OVERFLOW', slide.id, '实际字体测量发现文字放不下。', '请调整布局、拆页或将详细内容放入讲稿，不要继续缩小正文。'), elementId: element.id });
+        }
         try {
             const output = await renderPresentation(presentation, 'png', { slideIndex: slide.index, assetResolver });
             const image = await sharp(output.buffer).metadata();
@@ -33,7 +39,9 @@ async function runRenderedPresentationQuality(input, { assetResolver } = {}) {
     return {
         status: blocking ? 'blocked' : warnings ? 'warning' : 'passed',
         summary: { slides: presentation.slides.length, renderedSlides: presentation.slides.length - renderIssues.filter(issue => issue.code === 'RENDER_FAILED').length, blocking, warnings, info: issues.length - blocking - warnings },
-        issues
+        issues,
+        textMeasurement: metrics.measured ? 'controlled_font' : 'estimated',
+        visualReview: { status: 'not_requested', message: '已完成结构与渲染检查，尚未进行视觉模型复核。' }
     };
 }
 

@@ -620,6 +620,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-presenter.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations-persistence.js');
     await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentations.js');
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-design.js');
     const loaded = window.Pivot?.moduleApi?.('apps.presentations');
     if (typeof loaded?.showPresentationsApp !== 'function') throw new Error('PPT 制作模块未能完成加载，请刷新页面后重试。');
     return await loaded.showPresentationsApp(options);

@@ -19,7 +19,8 @@ function capabilitiesFor(text) {
     if (/附件|文件|目录|代码|项目|file|workspace/i.test(text)) caps.push('filesystem.read_workspace', 'artifact.read');
     if (/网页|网站|浏览器|browser|web/i.test(text)) caps.push('network.browser_visit', 'network.web_search');
     if (/知识库|资料库|公司制度|knowledge/i.test(text)) caps.push('knowledge.search');
-    if (/报告|表格|图表|文档|导出|report|document/i.test(text)) caps.push('document.render', 'viz.render');
+    if (/报告|表格|图表|文档|导出|report|document|pptx?|powerpoint|幻灯片|演示文稿/i.test(text)) caps.push('document.render', 'viz.render');
+    if (/pptx?|powerpoint|幻灯片|演示文稿/i.test(text)) caps.push('model.invoke');
     if (/修改|修复|测试|代码|implement|fix|test/i.test(text)) caps.push('filesystem.write_workspace', 'code.execute');
     if (/API|接口/i.test(text)) caps.push('network.http_request');
     if (/交付|保存到|写入文件/i.test(text)) caps.push('artifact.deliver');

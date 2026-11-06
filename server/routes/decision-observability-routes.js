@@ -59,6 +59,9 @@ function registerDecisionObservabilityRoutes(router, dependencies = {}) {
     router.get('/observability/decision-metrics', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         res.json(await getDecisionOperationalMetrics({ minutes: req.query?.minutes }));
     }));
+    router.get('/observability/decision-failures', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
+        res.json(await require('../services/decision-failure-details').getDecisionFailureDetails({ kind: req.query?.kind, limit: req.query?.limit, offset: req.query?.offset }));
+    }));
 
     router.get('/observability/decision-learning', authMiddleware, adminMiddleware, asyncHandler(async (req, res) => {
         const dataset = await buildVerifiedDecisionDatasetFromStore({ scenario: req.query?.scenario, tenantId: req.query?.tenantId, limit: req.query?.limit });

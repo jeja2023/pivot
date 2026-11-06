@@ -732,7 +732,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         const idleError = new Error(`Upstream stream idle for more than ${Math.round(idleMs / 1000)}s.`);
                         idleError.code = 'upstream_stream_idle_timeout';
                         logger.error({ model: modelCfg.name, idleMs }, 'OpenAI 流式上游长时间无数据，已主动中止');
-                        recordModelFailure(modelCfg, idleError);
+                        recordModelFailure(modelCfg, idleError, { signal: abortController.signal });
                         recordApiCallLog(req, modelCfg, upstreamMessages, {
                             status: 'error',
                             errorMessage: idleError.message,
@@ -759,7 +759,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                         streamFailed = true;
                         const error = new Error(payloadError.error?.message || 'Upstream completion stream failed.');
                         error.code = payloadError.error?.code || 'upstream_stream_error';
-                        recordModelFailure(modelCfg, error);
+                        recordModelFailure(modelCfg, error, { signal: abortController.signal });
                         recordApiCallLog(req, modelCfg, upstreamMessages, {
                             status: 'error',
                             errorMessage: error.message,
@@ -797,7 +797,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     if (streamFailed) return;
                     streamFailed = true;
                     logger.error({ err: err.message, model: modelCfg.name }, 'OpenAI 流式转发中断');
-                    recordModelFailure(modelCfg, err);
+                    recordModelFailure(modelCfg, err, { signal: abortController.signal });
                     recordApiCallLog(req, modelCfg, upstreamMessages, {
                         status: 'error',
                         errorMessage: err.message,
@@ -846,7 +846,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             }
             const errorMsg = e.response?.data?.error?.message || e.message;
             logger.error({ err: errorMsg, model: modelCfg.name }, 'OpenAI 转发失败');
-            recordModelFailure(modelCfg, e);
+            recordModelFailure(modelCfg, e, { signal: abortController.signal });
             recordApiCallLog(req, modelCfg, upstreamMessages, {
                 status: 'error',
                 errorMessage: errorMsg,

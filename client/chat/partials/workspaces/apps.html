@@ -29,10 +29,16 @@
                                     <input id="official-writing-library-query" class="form-input" type="search" placeholder="搜索公文名称" aria-label="搜索公文名称" maxlength="120">
                                     <select id="official-writing-library-type" class="form-input" aria-label="按文种筛选"><option value="">全部文种</option><option>通知</option><option>请示</option><option>报告</option><option>函</option><option>会议纪要</option><option>通报</option><option>意见</option><option>其他公文</option></select>
                                     <select id="official-writing-library-sort" class="form-input" aria-label="公文排序"><option value="updated">最近更新</option><option value="oldest">最早更新</option><option value="title">名称排序</option></select>
-                                    <button id="official-writing-import-backup-btn" class="btn-secondary" type="button">导入备份</button>
                                     <input id="official-writing-backup-input" type="file" class="hidden" accept=".json,application/json">
                                     <button id="official-writing-create-doc-btn" class="btn-primary" type="button">创建公文</button>
                                     <button id="official-writing-refresh-docs-btn" class="btn-secondary" type="button">刷新</button>
+                                    <details id="official-writing-library-more-menu" class="official-writing-command-menu">
+                                        <summary class="btn-secondary official-writing-command-more-trigger" aria-label="展开公文列表更多操作">更多</summary>
+                                        <div class="official-writing-command-menu-panel" aria-label="公文列表更多操作">
+                                            <button id="official-writing-import-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button" aria-describedby="official-writing-backup-help">用备份恢复公文</button>
+                                            <p id="official-writing-backup-help" class="official-writing-stat-hint">换电脑或找回公文时使用。<br>请选择此前在本应用中备份的文件。</p>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                             <div class="official-writing-stat-bar">
@@ -166,7 +172,7 @@
                                         <button id="official-writing-references-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="references">材料来源</button>
                                         <button id="official-writing-compliance-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="compliance">规范检查与说明</button>
                                         <button id="official-writing-comments-toggle-btn" class="btn-secondary official-writing-command-menu-item" type="button" data-official-writing-drawer-tab="comments">批注</button>
-                                        <button id="official-writing-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button">导出公文备份</button>
+                                        <button id="official-writing-backup-btn" class="btn-secondary official-writing-command-menu-item" type="button" title="保存正文、写作材料和历史版本，供以后恢复">备份这篇公文</button>
                                     </div>
                                 </details>
                                 <span id="official-writing-ai-indicator" class="official-writing-ai-indicator hidden" role="status" aria-live="polite"></span>
@@ -891,7 +897,7 @@
                                                 <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="检查当前页逻辑流、事实数据与错别字，提出修改建议。">检查逻辑与错别字</button>
                                             </div>
                                         </div>
-                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
+                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-visual-review-btn" class="btn-secondary" type="button">视觉复核当前页</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
                                         <div id="presentation-layout-variants" class="presentation-layout-variants hidden" aria-live="polite"></div>
                                         <p class="presentation-ai-note">AI 改写先生成建议，确认后才会替换当前页面；内容检查仅提出可核实的问题。</p>
                                     </div>

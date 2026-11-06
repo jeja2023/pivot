@@ -57,7 +57,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PIVOT_CHAT_AUTO_EXECUTION_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许服务端将明确委托、范围充分的多步骤对话自动进入受控 Agent Run。此开关不授予工具、网络或副作用权限；具体动作仍由运行时策略和审批决定。' },
     PIVOT_CHAT_INTENT_MODE: { group: '对话自适应路由', type: 'enum', values: ['active', 'shadow', 'disabled'], defaultValue: 'active', description: '任务语义裁决模式。shadow 只记录建议；disabled 关闭语义调用和自动任务。' },
     PIVOT_CHAT_BACKGROUND_REVIEW_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许独立审查组件核对已知只读适配器的任务范围。不能放行策略拒绝、强制人工、写入、发送或权限变更；失败时回到原审批边界。' },
-    PIVOT_CHAT_INTENT_TIMEOUT_MS: { group: '对话自适应路由', type: 'integer', min: 1000, max: 120000, defaultValue: 30000, description: '统一语义判断的总超时，包含排队；超时和无效契约保留请求并安全降级。明确问候保留快速路径，业务问答、上下文确认及复合请求使用同一次语义判断。' },
+    PIVOT_CHAT_INTENT_TIMEOUT_MS: { group: '对话自适应路由', type: 'integer', min: 1000, max: 120000, defaultValue: 30000, description: '统一语义判断的总超时，包含排队；失败后仅提供文本回答，不创建任务、不调用工具或检索，不伪称实际操作或文件已完成。明确问候保留快速路径，其他请求使用同一次语义判断。' },
     PIVOT_CHAT_INTENT_ROLLOUT_PERCENT: { group: '对话自适应路由', type: 'integer', min: 0, max: 100, defaultValue: 100, description: '按用户和会话稳定分桶的任务自动处理比例。设为 0 立即回退影子模式。' },
     PIVOT_CHAT_DIRECT_PATH_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否启用普通对话直答快路径。无资料、工具或显式范围信号时跳过决策器、偏好读取与逐条决策审计，仅保留异步聚合指标。' },
     PIVOT_CHAT_ROUTE_SHADOW_MODE: { group: '对话自适应路由', type: 'boolean', defaultValue: false, description: '是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。' },

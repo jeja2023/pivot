@@ -10,17 +10,20 @@ const { listPromptInvocationsForUser } = require('./agent-prompt-registry');
 const { listBrowserActionEvidenceForRun } = require('./agent-browser-action-evidence');
 const { listAgentBrowserSessionsForRun } = require('./agent-browser-sessions');
 const runRepository = require('../repositories/agent-runs');
+const { taskDisplayTitle } = require('./task-display-title');
 
 async function getRunForUser(runId, user, options = {}) {
-    return await runRepository.getRunForUser(runId, user?.id, {
+    const run = await runRepository.getRunForUser(runId, user?.id, {
         includeDeleted: Boolean(options.includeDeleted)
     });
+    return run ? { ...run, title: taskDisplayTitle(run.title) } : null;
 }
 
 async function listRuns(user, options = {}) {
     const result = await runRepository.listRuns(user?.id, options);
     const rows = Array.isArray(result) ? result : result.runs || result.items || result.data;
     if (Array.isArray(rows)) for (let index = 0; index < rows.length; index++) {
+        rows[index].title = taskDisplayTitle(rows[index].title);
         const access = await require('./knowledge-run-access').inspectRunKnowledgeAccess(rows[index].id, user);
         if (!access.current) rows[index] = require('./knowledge-run-access').blockedRunDetail(rows[index], access).run;
     }

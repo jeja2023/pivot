@@ -61,6 +61,7 @@ const { assembleChatContext } = require('../../services/chat-context-assembler')
 const { buildRouteMetadata } = require('../../services/semantic-router');
 const { persistFinalChatResponse } = require('../../services/chat-decision-outcomes');
 const { persistAssistantTurn } = require('../../services/chat-persistence');
+const { createRetainedChatResponse } = require('../../services/chat-response-retention');
 const { runs: { createAgentRun } } = require('../../services/agent-runtime');
 const { createChatAgentHandoff } = require('../../services/chat-agent-handoff');
 const { beginChatTurn } = require('../../services/chat-turn-ledger');
@@ -161,14 +162,15 @@ function createChatRouter({
             });
         };
         let conversationTurn = null;
-        const persistAssistantResponse = async options => {
+        const persistAssistantResponse = createRetainedChatResponse({ res, enabled: !ephemeralVoice, log: req.log,
+            options: () => ({ sessionId, userId, userMessageId, modelCfg, user: req.user, visibleContent }), persist: async options => {
             if (ephemeralVoice) return { assistantMessageResult: null, assistantMessageId: null };
             const intent = chatState.intentDecision;
             const routeMetadata = intent?.decisionId ? { ...(options.routeMetadata || {}), decisions: [...(options.routeMetadata?.decisions || []), { decisionId: intent.decisionId, scenario: 'chat.execution', selectedActionId: intent.action, allowedActionIds: ['direct_answer','plan_only','agent_run','continue_run','clarify'] }] } : options.routeMetadata;
             const result = await persistAssistantTurn({ ...options, projectId: chatState.projectId || '', routeMetadata, conversationTurnId: conversationTurn?.id || null });
-            await conversationTurns.updateTurn(conversationTurn, { assistant_message_id: result.assistantMessageId, status: 'completed', outcome: { durationMs: Date.now() - chatState.timing.startedAt, firstContentMs: chatState.timing.firstContentMs, routerModelCalls: intent?.modelCalls || 0, totalTokens: options.providerUsage?.total_tokens || null } });
+            await conversationTurns.updateTurn(conversationTurn, { assistant_message_id: result.assistantMessageId, status: 'completed', outcome: { ...(options.interrupted ? { status: 'interrupted', partial: true } : {}), durationMs: Date.now() - chatState.timing.startedAt, firstContentMs: chatState.timing.firstContentMs, routerModelCalls: intent?.modelCalls || 0, totalTokens: options.providerUsage?.total_tokens || null } });
             return result;
-        };
+        } });
         const abortController = new AbortController();
         const onClientDisconnect = () => {
             try { abortController.abort(); } catch (_) {}
@@ -184,15 +186,13 @@ function createChatRouter({
 
         req.log.info({ sessionId, userId, modelId, regenerate, continuationKind, contentLength: modelContent.length }, '处理对话请求');
 
-        // --- 立即建立 SSE 连接 ---
         const sse = createSseResponseWriter(res, { contentType: 'text/event-stream; charset=utf-8' });
 
-        const chartSseCapture = createChartSseCapture((payload) => {
-            sse.writeData(payload);
-        });
+        const chartSseCapture = createChartSseCapture(payload => sse.writeData(payload));
         const streamedChartSpecs = chartSseCapture.streamedChartSpecs;
         const writeSse = (payload) => {
             if (res.writableEnded) return;
+            persistAssistantResponse.capture(payload);
             if (chatState.timing.firstContentMs === null && typeof payload === 'string' && payload.startsWith('{"content":')) chatState.timing.firstContentMs = Date.now() - chatState.timing.startedAt;
             chartSseCapture.writeSse(payload);
         };
@@ -879,8 +879,8 @@ function createChatRouter({
 
             response.data.on('error', err => {
                 streamIdleWatchdog.stop();
-                // 空闲看门狗已经中止上游并回过错误帧，这里不再重复通知客户端
-                if (streamIdleAborted) {
+                // 超时已处理或客户端已取消时，不重复通知，也不累计底层流关闭错误。
+                if (streamIdleAborted || abortController.signal.aborted) {
                     releaseSemaphore();
                     return;
                 }
@@ -904,7 +904,7 @@ function createChatRouter({
                         log: req.log
                     }).then(() => res.end()).catch(() => res.end());
                 }
-                recordModelFailure(modelCfg, err);
+                recordModelFailure(modelCfg, err, { signal: abortController.signal });
                 finishChatTrace('error', { phase: 'stream', error: err.message });
                 releaseSemaphore(); // 传输错误释放
             });
