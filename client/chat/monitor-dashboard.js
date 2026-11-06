@@ -86,6 +86,7 @@
             modal.classList?.add?.('hidden');
             modal.setAttribute?.('aria-hidden', 'true');
         }
+        set('monitor-failure-details', '');
     }
     function cancelQualityLoad() {
         executionController?.abort(); executionController = null;

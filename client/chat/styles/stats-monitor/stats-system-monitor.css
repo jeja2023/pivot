@@ -312,6 +312,11 @@
     border-radius: var(--radius-sm, 6px);
 }
 
+#tab-content-monitor .monitor-failure-open-btn.hidden,
+#btn-monitor-open-failure-modal.hidden {
+    display: none !important;
+}
+
 #tab-content-monitor .monitor-panel-card h5 {
     margin: 8px 0 4px;
     font-size: 0.78rem;
@@ -965,6 +970,28 @@
         padding: 10px 12px;
     }
 
+    #tab-content-monitor .monitor-panel-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    #tab-content-monitor .monitor-panel-head-actions {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 6px;
+    }
+
+    #tab-content-monitor .monitor-failure-open-btn,
+    #btn-monitor-open-failure-modal {
+        max-width: 100%;
+        white-space: normal;
+        height: auto;
+        min-height: 26px;
+        padding: 4px 10px;
+        line-height: 1.2;
+    }
+
     #tab-content-monitor .settings-page-head {
         align-items: flex-start;
         flex-direction: column;
@@ -1038,6 +1065,9 @@
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    padding: 16px;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 #monitor-failure-modal.hidden {
@@ -1233,8 +1263,14 @@ body.dark-mode #tab-content-monitor .monitor-failure-action-cell,
 }
 
 @media (max-width: 760px) {
+    #monitor-failure-modal.modal-overlay {
+        padding: 12px 8px;
+    }
+
     .monitor-failure-modal {
-        width: calc(100vw - 16px);
+        width: min(1040px, calc(100vw - 24px));
+        max-width: min(1040px, calc(100vw - 24px));
+        box-sizing: border-box;
         max-height: calc(100dvh - 20px);
     }
 

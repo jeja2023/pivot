@@ -93,8 +93,9 @@ async function main() {
         JWT_SECRET: 'pivot-e2e-tests-jwt-secret-012345678901234567890123',
         DATA_ENCRYPTION_KEY: 'pivot-e2e-tests-data-secret-012345678901234567890123',
         PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex'),
-        PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex')
-        ,E2E_MODEL_URL: fakeModel.url
+        PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex'),
+        E2E_MODEL_URL: fakeModel.url,
+        MAX_CONCURRENT_AI_REQUESTS: String(Math.max(Number(process.env.MAX_CONCURRENT_AI_REQUESTS) || 0, 4))
     };
 
     let status = 1;
