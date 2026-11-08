@@ -69,8 +69,8 @@ async function boundedFiles(items, operation) {
             catch (error) { failure ||= error; }
         }
     }));
-    // Drain every in-progress file operation before returning an error. A
-    // caller may immediately remove its owned staging directory on failure.
+    // 在返回错误前排空所有进行中的文件操作；调用方失败时可能立即清理其专有暂存目录。
+
     if (failure) throw failure;
     return results;
 }
@@ -103,8 +103,8 @@ async function verifyObjects({ files, backupRoot, key, clusterId }) {
 async function restoreObjects({ files, roots, backupRoot, key, clusterId }) {
     await verifyObjects({ files, backupRoot, key, clusterId });
     for (const root of roots) {
-        // Restore only into explicitly empty, real logical mounts. Relocating
-        // stored paths in unrelated applications is not a physical restore.
+        // 仅恢复到显式为空的真实逻辑挂载点；在无关应用中重定位存储路径不属于物理恢复。
+
         await sealed.privateDirectory(root);
         if ((await fs.readdir(root)).length) throw new Error('共享文件恢复目标必须为空，禁止覆盖现有业务目录。');
     }
@@ -142,7 +142,7 @@ function verifyReferences(application, inventory, files) {
         const file = byPath.get(resolveReference(application, item));
         if (!file) throw new Error(`共同恢复点缺少数据库必须文件：${item.kind}:${item.id}`);
         if (item.sha256 && /^[a-f0-9]{64}$/i.test(item.sha256.trim()) && item.sha256.trim().toLowerCase() !== file.sha256) throw new Error(`共同恢复点文件不符合数据库摘要：${item.kind}:${item.id}`);
-        // Some legacy source metadata uses zero for unknown byte size.
+        // 部分旧版源元数据对未知字节大小使用零表示。
         if (item.bytes && Number(item.bytes) > 0 && item.bytes !== file.bytes) throw new Error(`共同恢复点文件不符合数据库长度：${item.kind}:${item.id}`);
     }
 }

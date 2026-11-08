@@ -9,8 +9,8 @@ const { verifyPoint } = require('./common-recovery');
 const { canonicalHash } = require('./data-analysis/bi/canonical');
 
 function quotedArgument(value) {
-    // This is intentionally a restricted path alphabet: pg restore_command is
-    // a shell command on the DB host, while all other invocations use execFile.
+    // 此处特意限制路径字符集：PG restore_command 为数据库宿主上的 shell 命令，其余调用均使用 execFile。
+
     if (!/^[A-Za-z0-9_:./\\ -]+$/.test(value)) throw new Error('PostgreSQL 恢复命令路径含不支持的命令字符。');
     return `"${value}"`;
 }
@@ -45,8 +45,8 @@ async function prepareRestore({ config, configFile, pointId, destination }) {
         if (!shared.safeRelative(directory)) throw new Error('物理备份目录清单无效。');
         await fs.mkdir(path.join(destination, ...directory.split('/')), { recursive: true, mode: 0o700 });
     }
-    // pg_verifybackup validates the restored base before recovery configuration
-    // changes it. This catches plaintext write/storage errors as well as seals.
+    // pg_verifybackup 在恢复配置变动前校验已恢复的基础备份，可捕获明文写入与存储错误以及密封问题。
+
     await physical.command(config, 'pg_verifybackup', ['--exit-on-error', destination]);
     await shared.restoreObjects({ files: point.files, roots: point.application.roots, backupRoot: config.backupRoot, key: config.key, clusterId: config.clusterId });
     for (const alias of Object.values(point.application.aliases)) if (!alias.absent) await fs.mkdir(alias.path, { recursive: true, mode: 0o700 });
@@ -65,9 +65,9 @@ async function prepareRestore({ config, configFile, pointId, destination }) {
         "recovery_target_action = 'promote'", `recovery_target_timeline = ${pgLiteral(String(base.facts.timeline))}`,
         "archive_mode = 'off'", "listen_addresses = '127.0.0.1'"
     ];
-    // Source includes/data_directory/preload/archive settings can refer to a
-    // live host. Retain them for review, but boot the isolated recovery with a
-    // fixed local-only configuration, without external effects or includes.
+    // 原始配置可能引用在线宿主；保留供审查，但以固定的纯本地隔离配置启动恢复进程，无外部副作用。
+
+
     await fs.rename(path.join(destination, 'postgresql.conf'), path.join(destination, 'postgresql.restored-original.conf'));
     const conf = await fs.open(path.join(destination, 'postgresql.conf'), 'wx', 0o600);
     try {

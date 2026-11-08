@@ -55,9 +55,9 @@ async function withPostgresCluster(callback, options = {}) {
     async function stop(directory = data) {
         directory = owned(directory);
         if (!started.has(directory)) return;
-        // Real shutdown checkpoints can spend over a minute syncing thousands
-        // of schema files on a busy test disk. Keep durability and wait for a
-        // bounded clean stop rather than timing out before pg_ctl itself.
+        // 在高负载磁盘上，真实的停机检查点可能需要超过一分钟来同步数千个元数据文件；
+        // 保留持久性并等待受限的平稳停止，而非提前超时。
+
         await run('pg_ctl', ['-D', directory, '-m', 'fast', '-t', '180', '-w', 'stop']); started.delete(directory);
     }
     try {

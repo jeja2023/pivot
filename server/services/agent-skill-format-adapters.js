@@ -20,7 +20,7 @@ function parseMapping(text, container) {
         if (container === 'json') JSON.parse(text);
         // 同时适用于 JSON：json:false 拒绝重复键，JSON_SCHEMA 避免日期或自定义类型隐式展开。
         const parsed = yaml.load(text, { json: false, schema: yaml.JSON_SCHEMA });
-        if (!plain(parsed)) throw new Error('mapping');
+        if (!plain(parsed)) throw new Error('技能内容必须为键值映射对象');
         assertJsonData(parsed, { maxBytes: MAX_FRONTMATTER_BYTES + MAX_INSTRUCTIONS_BYTES, label: '技能文件' });
         return parsed;
     } catch (error) {

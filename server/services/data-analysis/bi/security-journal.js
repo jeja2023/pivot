@@ -42,16 +42,16 @@ async function flushSecurityJournal({ force = false, allowRecovery = false, tran
             if (!allowRecovery) throw files.unavailable();
         }
         const config = await files.configuration();
-        // Revalidate the whole protected history in the pump, outside response
-        // delivery transactions. Readers check its anchor and refuse a stale
-        // integrity audit rather than synchronously scanning all historical files.
+        // 在管道中独立于响应交付事务重新校验全部受保护历史；读取方核对其锚点并拒绝过期的完整性审计，
+        // 而非同步扫描所有历史文件。
+
         const chain = await chainState(config, state.origin_id, force || Boolean(cached && Date.now() - cached.verifiedAt >= 60000));
         const checkpoint = Number(state.journal_position);
         if (checkpoint > chain.position || checkpoint > 0 && chain.entries[checkpoint - 1]?.hash !== state.journal_hash) {
             await repository.close(client, 'independent_journal_missing_or_changed'); throw files.unavailable();
         }
-        // Missing committed event IDs distinguish a restored older business DB
-        // from a crash between the independent append and its SQL ACK.
+        // 缺失的已提交事件 ID 用于区分已恢复的旧业务数据库与独立追加和 SQL 确认之间的崩溃。
+
         for (let offset = force ? 0 : checkpoint; offset < chain.entries.length; offset += 500) {
             const ids = chain.entries.slice(offset, offset + 500).map(entry => entry.record.event_id);
             const known = await repository.records(client, ids);
@@ -87,8 +87,8 @@ async function committed({ transactionId = '' } = {}) {
 }
 
 async function assertResources(trx, resources) {
-    // Full restoration closure is mandatory even when the heavy worker flag is
-    // disabled; an old exploration client cannot reopen historical grants.
+    // 即使繁重的工作进程开关被关闭，也必须执行完全恢复闭环；旧的探索客户端不能重新打开历史授权。
+
     const state = await repository.stateForRead(trx);
     if (state?.enforced) enforcedRuntime = true;
     if (String(state?.accepted_database_timeline) !== String(state?.current_database_timeline) || Number(state?.current_database_timeline) === 0 || state?.accepted_database_system_identifier !== state?.current_database_system_identifier) {

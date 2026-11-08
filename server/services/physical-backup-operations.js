@@ -12,8 +12,8 @@ const DAY = 86400000;
 const executeChild = promisify(execFile);
 
 async function confirmSecurity(config) {
-    // Use a separate process/pool and finish it before taking the global X
-    // gate. The journal pump's SQL writes must never wait on our own barrier.
+    // 使用独立进程与连接池，在获取全局排他屏障前完成；管道的 SQL 写入绝不能在当前会话的屏障上等待。
+
     const modulePath = path.resolve(__dirname, 'data-analysis/bi/security-journal.js'), poolPath = path.resolve(__dirname, '../db/pg-connection.js');
     const script = `require(${JSON.stringify(modulePath)}).flush({force:true,full:true}).then(value=>{if(value.mode!=='ready')throw new Error('安全清单与独立确认尚未完成');}).catch(error=>{process.stderr.write(error.message);process.exitCode=1;}).finally(()=>require(${JSON.stringify(poolPath)}).closePgPool());`;
     await executeChild(process.execPath, ['-e', script], { windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024,
@@ -66,8 +66,8 @@ async function applyRetention(config, { now = Date.now(), client } = {}) {
         await common.verifyPoint(config, point.id);
         point.files.forEach(item => objectDigests.add(item.sha256)); point.escrow.forEach(item => escrowDigests.add(item.sha256)); point.wal.forEach(name => retainedWal.add(name));
     }
-    // No deletion starts until every retained chain/object and security anchor
-    // has verified. Point/base seals are immutable; removal expires a point.
+    // 在验证所有保留链路/对象和安全锚点前不得开始删除；时间点与基础密封为不可变，移除即表示恢复点过期。
+
     for (const point of plan.expiredPoints) {
         await client.query("UPDATE analysis_recovery_points SET status='expired' WHERE id=$1 AND status='verified'", [point.id]);
         await removeOwnedFile(config.backupRoot, physical.manifestPath(config, point.id));
@@ -81,16 +81,16 @@ async function applyRetention(config, { now = Date.now(), client } = {}) {
         for (const name of names) {
             if (!/^[a-f0-9]{64}\.seal$/.test(name)) continue;
             const file = path.join(directory, name), stat = await sealed.regularFile(file);
-            // A full backup/point process is bounded below this orphan grace;
-            // another in-progress publication cannot lose its pre-copied data.
+            // 完整备份与检查点过程受限于孤儿宽限期；其他进行中的发布流程不会丢失预复制的数据。
+
             if (!retained.has(name.slice(0, -5)) && now - Number(stat.mtimeMs) > DAY) { await removeOwnedFile(root, file); deletedObjects++; }
         }
     }
     const walDirectory = path.join(config.backupRoot, 'wal', config.clusterId);
     let names; try { names = await fs.readdir(walDirectory); } catch (error) { if (error.code !== 'ENOENT') throw error; names = []; }
-    // Continuous archives newer than seven days stay even when the latest
-    // five-minute point has not yet indexed them. Older daily points pin every
-    // segment between their base and named target.
+    // 七天内的新归档即使尚未被最新的五分钟时间点索引也予保留；较旧的每日恢复点会固定基础与目标之间的每个段。
+
+
     for (const name of names) if (/^[0-9A-F]{24}\.seal$/.test(name)) {
         const file = path.join(walDirectory, name), stat = await sealed.regularFile(file);
         if (!retainedWal.has(name.slice(0, -5)) && now - Number(stat.mtimeMs) > 7 * DAY) { await removeOwnedFile(config.backupRoot, file); deletedWal++; }

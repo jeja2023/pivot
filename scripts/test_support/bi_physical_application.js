@@ -1,7 +1,6 @@
 'use strict';
 
-// Child process entry points use a real application DB pool and real analysis
-// execution. No service mocks or production fault switches are installed.
+// 子进程入口使用真实应用数据库连接池与真实分析执行逻辑；不注入服务模拟（Mock）或生产故障开关。
 const fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -42,8 +41,8 @@ async function main(mode, inputFile) {
         return { revoked: true };
     }
     if (mode === 'closed') {
-        // Even with the feature flag disabled a fresh process cannot read an
-        // old physical snapshot whose independent event head did not change.
+
+        // 即使功能特性开关已关闭，新启动的进程也绝不能读取独立事件头部未发生变化的旧物理快照。
         process.env.DATA_ANALYSIS_MODEL_ENABLED = 'false';
         await assert.rejects(require('../../server/services/data-analysis/shared').getDatasetForUser(input.user, input.factId), error => error.status === 503);
         const state = await queryOne("SELECT mode,recovery_reason FROM analysis_security_state WHERE id='main'");

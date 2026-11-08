@@ -38,7 +38,7 @@
         modal.id = 'presentation-native-dialog';
         modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', '原稿编辑与离线视频');
 
-        // Header
+        // 弹窗头部
         const head = node('div', 'presentation-create-dialog-head');
         const titleRow = node('div', 'presentation-create-dialog-title-row');
         const titleGroup = node('div', 'presentation-create-dialog-title-group');
@@ -60,12 +60,12 @@
 
         const body = node('div', 'workspace-modal-body presentation-native-body-wrap');
 
-        // Notice banner
+        // 提示横幅
         const banner = node('div', 'presentation-native-banner');
         banner.id = 'presentation-native-banner';
         body.appendChild(banner);
 
-        // Entry two-card grid
+        // 入口双卡片网格
         const entryGrid = node('div', 'presentation-native-entry-grid');
         entryGrid.id = 'presentation-native-entry-grid';
 
@@ -103,7 +103,7 @@
         const status = node('div', 'presentation-evidence-card'); status.id = 'presentation-native-status'; status.setAttribute('aria-live', 'polite');
         body.appendChild(status);
 
-        // Editor
+        // 原稿编辑器主体
         const editor = node('div', 'presentation-native-editor hidden'); editor.id = 'presentation-native-editor';
         const top = node('div', 'presentation-native-toolbar'), slides = field('页面', 'select'), versions = field('版本', 'select');
         slides.input.id = 'presentation-native-slide'; versions.input.id = 'presentation-native-version';

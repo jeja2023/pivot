@@ -28,10 +28,13 @@
         return svg;
     }
     function field(label, id, value, options) {
-        const wrapper = node('label', 'presentation-master-field'), input = node(options ? 'select' : id.endsWith('duration') ? 'input' : 'textarea', 'form-input');
+        const isSingleLine = id.endsWith('duration') || id.endsWith('bridge') || id.endsWith('scope');
+        const inputTag = options ? 'select' : isSingleLine ? 'input' : 'textarea';
+        const wrapper = node('label', 'presentation-master-field'), input = node(inputTag, 'form-input');
         input.id = id; input.setAttribute('aria-label', label);
         if (options) Object.entries(options).forEach(([val, lbl]) => input.appendChild(new Option(lbl, val)));
-        else if (input.tagName === 'INPUT') { input.type = 'number'; input.min = '0'; input.max = '1800'; }
+        else if (id.endsWith('duration')) { input.type = 'number'; input.min = '0'; input.max = '1800'; }
+        else if (isSingleLine) { input.type = 'text'; input.maxLength = 200; }
         else { input.rows = 2; input.maxLength = id.endsWith('purpose') ? 600 : 400; }
         input.value = value !== undefined && value !== null ? value : '';
         wrapper.append(node('span', '', label), input);
@@ -69,16 +72,21 @@
         panel.appendChild(head);
 
         // 2. 整稿目标折叠卡片
-        const profile = state.active.content.metadata?.productionProfile || {}, goals = node('details', 'presentation-native-section presentation-story-goals');
+        const profile = state.active.content.metadata?.productionProfile || {}, goals = node('details', 'presentation-story-goals');
         goals.open = expanded;
         const audienceLabel = profile.audience || '受众待设置';
         const modeLabel = profile.consumptionMode === 'reading' ? '阅读材料' : '现场演示';
         const summary = node('summary', 'presentation-story-goals-summary');
-        summary.append(
-            svgIcon('M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm0-14a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4zm0-6a2 2 0 1 0 2 2 2 2 0 0 0-2-2z', 13, 13),
-            node('span', 'presentation-story-goals-title', '整稿目标'),
+        const summaryWrap = node('div', 'presentation-story-goals-summary-wrap');
+        const leftWrap = node('div', 'presentation-story-goals-summary-left');
+        leftWrap.append(
+            node('span', 'presentation-story-goals-badge', '整稿'),
+            node('strong', 'presentation-story-goals-title', '目标定位：'),
             node('span', 'presentation-story-goals-tags', audienceLabel + ' · ' + modeLabel)
         );
+        const chevron = node('span', 'presentation-story-goals-chevron', '配置 ▾');
+        summaryWrap.append(leftWrap, chevron);
+        summary.appendChild(summaryWrap);
         goals.appendChild(summary);
         const goalFields = node('div', 'presentation-master-form presentation-story-goals-form');
         goals.appendChild(goalFields);
@@ -116,12 +124,12 @@
 
         const purposeField = field('本页职责', 'presentation-story-page-purpose', slide.intent?.purpose);
         purposeField.querySelector('.form-input').disabled = !currentHelpers.canEdit() || slide.review?.status === 'approved';
-        purposeField.querySelector('.form-input').placeholder = '明确本页在整套文稿中的论证使命（如提出痛点、展示架构）';
+        purposeField.querySelector('.form-input').placeholder = '明确本页使命（如提出痛点、展示方案等）';
         card1.appendChild(purposeField);
 
         const takeawayField = field('本页核心结论', 'presentation-story-takeaway', slide.intent?.takeaway);
         takeawayField.querySelector('.form-input').disabled = !currentHelpers.canEdit() || slide.review?.status === 'approved';
-        takeawayField.querySelector('.form-input').placeholder = '一句话传达给受众的核心信息';
+        takeawayField.querySelector('.form-input').placeholder = '传达给受众的核心信息';
         card1.appendChild(takeawayField);
 
         const row1 = node('div', 'presentation-story-grid-2');

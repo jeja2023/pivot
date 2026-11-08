@@ -57,7 +57,8 @@ async function httpFixture(build, run, onStart = null) {
         next();
     });
     app.get('/:name', delivery.handler(async (req, res) => res.json(await build(req.params.name))));
-    app.use((error, _req, res, _next) => res.status(error.status || 500).json({ code: error.code || 'FAILED' }));
+    const defaultErrorCode = 'FAILED';
+    app.use((error, _req, res, _next) => res.status(error.status || 500).json({ code: error.code || defaultErrorCode }));
     const server = http.createServer(app);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     try { await run(name => fetch(`http://127.0.0.1:${server.address().port}/${name}`)); }

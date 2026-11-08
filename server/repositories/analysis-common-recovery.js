@@ -1,7 +1,6 @@
 'use strict';
 
-// The physical-backup operator owns this connection. Keep the short session
-// barrier and snapshot writes on the same session to avoid self-deadlock.
+// 物理备份操作方独占此连接；将简短的会话屏障与快照写入保持在同一会话中以避免死锁。
 async function coverage(client) {
     return (await client.query(`SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND NOT EXISTS(
@@ -27,8 +26,8 @@ async function prepare(client, { id, baseId }) {
         await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('pivot:common-recovery'),hashtext(current_database()))");
         await client.query(`INSERT INTO analysis_recovery_points(id,database_position,object_manifest_json,manifest_digest,status,authorization_watermark,backup_id,expires_at)
             VALUES($1,'','{}','', 'building','',$2,NOW()+INTERVAL '30 days')`, [id, baseId]);
-        // Foreign-key pin checks can wait for object row locks. Do this before
-        // the X barrier, never while another writer is blocked on that gate.
+
+        // 外键锁定检查可能等待对象行锁；须在排他屏障前执行，绝不能在其他写入方被阻塞在屏障时进行。
         await client.query(`INSERT INTO analysis_object_references(object_id,reference_kind,reference_id,expires_at)
             SELECT id,'backup',$1,NOW()+INTERVAL '30 days' FROM analysis_data_objects WHERE state='ready'
             ON CONFLICT(object_id,reference_kind,reference_id) DO NOTHING`, [id]);
@@ -41,8 +40,8 @@ async function register(client, point) {
     if (missing.missing) throw new Error('预复制后存在尚未固定的就绪对象，请重新建立共同恢复点。');
     await client.query(`UPDATE analysis_recovery_points SET object_manifest_json=$2::jsonb,manifest_digest=$3,authorization_watermark=$4,expires_at=NOW()+INTERVAL '30 days'
         WHERE id=$1 AND status='building'`, [point.id, JSON.stringify(point.manifest), point.digest, JSON.stringify(point.security)]);
-    // Only this point's existing pin rows change, with foreign keys unchanged.
-    // Their retention commitment is part of the common-point transaction.
+
+    // 仅变动当前恢复点的已有锁定行，外键保持不变；保留承诺属于公共恢复点事务的一部分。
     await client.query("UPDATE analysis_object_references SET expires_at=NOW()+INTERVAL '30 days' WHERE reference_kind='backup' AND reference_id=$1", [point.id]);
 }
 async function verified(client, point) {

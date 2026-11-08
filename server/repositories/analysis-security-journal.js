@@ -5,8 +5,7 @@ const PROTECTIONS_SQL = `SELECT
     (SELECT COUNT(*) FROM pg_trigger WHERE tgname='analysis_security_event' AND tgrelid IN (to_regclass('users'),to_regclass('analysis_datasets'),to_regclass('analysis_data_models'),to_regclass('analysis_field_governance'),to_regclass('analysis_audit_events'),to_regclass('analysis_saved_views'),to_regclass('analysis_dashboards'),to_regclass('analysis_metric_definitions')) AND tgenabled='O')=8
     AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='analysis_security_outbox_immutable' AND tgrelid=to_regclass('analysis_security_outbox') AND tgenabled='O') AS ready`;
 
-// The pump deliberately uses one raw pool client: acknowledgements must not
-// recursively invoke the ordinary database after-commit hook.
+// 管道故意使用单个裸连接池客户端：确认操作绝不能递归调用普通的数据库提交后钩子。
 async function withPump(fn) {
     const client = await getPgPool().connect();
     let locked = false, broken;

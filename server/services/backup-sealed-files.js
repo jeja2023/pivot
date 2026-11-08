@@ -1,7 +1,6 @@
 'use strict';
 
-// Streaming, authenticated, immutable storage shared by physical DB, WAL and
-// application-file backups. Keys are read from a separate operator-owned file.
+// 流式、带鉴权且不可变存储，由物理数据库、WAL 和应用文件备份共享；密钥由单独的操作员私有文件读取。
 const fs = require('node:fs/promises');
 const streams = require('node:fs');
 const path = require('node:path');
@@ -79,9 +78,9 @@ async function decryptTo({ source, key, context, destination, expectedDigest, ex
         await pipeline(input, decipher, meter, sink);
         const sha256 = hash.digest('hex');
         if (expectedDigest && sha256 !== expectedDigest || expectedBytes !== undefined && bytes !== Number(expectedBytes)) throw new Error('备份明文摘要或长度不匹配。');
-        // Removing the publisher's temporary hard link changes inode ctime,
-        // but not the immutable sealed bytes. Concurrent duplicate readers
-        // bind the inode/length/mtime and authenticate every byte instead.
+
+        // 移除发布方的临时硬链接会改变 inode 的 ctime，但不会改变不可变的密封字节；
+        // 并发重复读取方绑定 inode/大小/修改时间并校验全部字节。
         if (sealedIdentity(stat) !== sealedIdentity(await handle.stat({ bigint: true })) || sealedIdentity(stat) !== sealedIdentity(await regularFile(source))) throw new Error('备份校验期间文件发生变化。');
         if (output) await output.sync();
         return { sha256, bytes };
@@ -94,7 +93,7 @@ async function decryptTo({ source, key, context, destination, expectedDigest, ex
 async function sealFile({ source, destination, key, context, expectedDigest }) {
     await privateDirectory(path.dirname(destination));
     const stat = await regularFile(source), before = signature(stat);
-    // An archived segment or content object can be retried, but never replaced.
+    // 已归档的段或内容对象可重试，但绝不可覆盖替换。
     try {
         await fs.lstat(destination);
         const sha256 = expectedDigest || await digestBackupFile(source);
@@ -140,7 +139,7 @@ async function restoreFile(options) {
         const stat = await fs.lstat(parent);
         if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(parent) !== parent || process.platform !== 'win32' && (stat.mode & 0o022)) throw new Error('配置恢复目录路径或写入权限无效。');
     }
-    // Never publish plaintext until authentication and the full digestBackupFile pass.
+    // 鉴权和完整摘要校验未通过前，绝不能发布明文内容。
     const temporary = path.join(parent, `.restore-${crypto.randomUUID()}`);
     try {
         const result = await decryptTo({ ...options, destination: temporary });

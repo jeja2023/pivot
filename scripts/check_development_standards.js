@@ -379,8 +379,14 @@ function checkFrontendAddedLine(file, item) {
     }
     // 导图主题色属于可导出的文档数据，不是工作台 UI 配色；只允许固定预设声明。
     const isMindmapPalette = file === 'client/common/mindmap-document.js' && text.trim().startsWith('const THEMES = Object.freeze(');
-    // 这两个纯模块输出可导出的文稿矢量数据；工作台表单/按钮仍须使用主题变量。
-    const isPresentationDocumentRenderer = ['client/chat/presentation-graphics.js', 'client/chat/presentation-geometry.js'].includes(file);
+    // 这五个纯模块输出可导出的文稿矢量数据与渲染计算；工作台表单/按钮仍须使用主题变量。
+    const isPresentationDocumentRenderer = [
+        'client/chat/presentation-graphics.js',
+        'client/chat/presentation-geometry.js',
+        'client/chat/presentation-colors.js',
+        'client/chat/apps-workbench-presentation-native-properties.js',
+        'client/chat/apps-workbench-presentation-canvas.js'
+    ].includes(file);
     if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(') && !isMindmapPalette && !isPresentationDocumentRenderer) {
         addFailure(`${location} 新增硬编码颜色。请使用全局 CSS 变量或既有样式类。`);
     }

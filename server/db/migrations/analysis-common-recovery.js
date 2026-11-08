@@ -4,18 +4,18 @@ module.exports = [{
     id: '202611070010_analysis_common_recovery',
     description: 'Fence every shared-schema reference commit for short physical/common recovery points.',
     async upPg(client) {
-        // A physical promotion changes the timeline even when the last
-        // independent security event predates the restored point. Persisting
-        // its accepted value closes reads until current-authority review.
+        // 即使最后一条独立安全事件早于恢复时间点，物理提升也会改变时间线；
+        // 持久化已接受值并关闭读取，直到当前授权复核完成。
+
         await client.query(`CREATE OR REPLACE FUNCTION pivot_current_database_timeline() RETURNS BIGINT LANGUAGE SQL SECURITY DEFINER SET search_path=pg_catalog AS $body$
             SELECT CASE WHEN pg_is_in_recovery() THEN 0::BIGINT ELSE ('x'||substring(pg_walfile_name(pg_current_wal_insert_lsn()),1,8))::bit(32)::BIGINT END $body$`);
         await client.query(`CREATE OR REPLACE FUNCTION pivot_current_database_system_identifier() RETURNS TEXT LANGUAGE SQL SECURITY DEFINER SET search_path=pg_catalog AS $body$
             SELECT system_identifier::text FROM pg_control_system() $body$`);
         await client.query('ALTER TABLE analysis_security_state ADD COLUMN IF NOT EXISTS accepted_database_timeline BIGINT');
         await client.query('ALTER TABLE analysis_security_state ADD COLUMN IF NOT EXISTS accepted_database_system_identifier TEXT');
-        // An already-enforced older DB has no trusted lineage marker. An
-        // upgrade cannot distinguish a live original from an old logical
-        // restore; require current-authority review once before accepting it.
+        // 已强制执行的旧数据库缺少受信任的血缘标记；升级时无法区分在线原始实例与旧逻辑恢复，
+        // 在接受前须经当前授权复核一次。
+
         await client.query(`UPDATE analysis_security_state SET accepted_database_timeline=pivot_current_database_timeline(),
             accepted_database_system_identifier=pivot_current_database_system_identifier(),
             mode=CASE WHEN enforced THEN 'recovery_required' ELSE mode END,
@@ -33,9 +33,9 @@ module.exports = [{
                 PERFORM pg_advisory_xact_lock_shared(hashtext('pivot:common-recovery'),hashtext(current_database()));
                 RETURN NULL;
             END $body$`);
-        // A statement trigger takes the shared gate before row/authorization
-        // locks. All applications sharing the schema participate, including
-        // direct SQL, bulk statements and truncation; not just BI writers.
+        // 语句触发器在行锁与授权锁之前获取共享屏障；所有共享该 Schema 的应用共同参与
+        // （含直接 SQL、批量操作和截断，不限于 BI 写入方）。
+
         const tables = await client.query("SELECT tablename FROM pg_tables WHERE schemaname=current_schema() ORDER BY tablename");
         for (const { tablename } of tables.rows) {
             const quoted = '"' + tablename.replace(/"/g, '""') + '"';

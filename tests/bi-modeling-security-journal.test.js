@@ -108,7 +108,7 @@ test('独立副本不可写时撤权仍已生效，明确返回已应用待确�
 
 test('数据库回滚不生成独立事件，直接 SQL 的真实提交也由触发器捕获', async () => fixture(async ({ user, fact }) => {
     const before = (await chain()).position;
-    await assert.rejects(transaction(async trx => { await trx.execute("UPDATE analysis_datasets SET allowed_units='rollback_marker' WHERE id=?", [fact.id]); throw new Error('intentional rollback'); }), /intentional rollback/);
+    await assert.rejects(transaction(async trx => { await trx.execute("UPDATE analysis_datasets SET allowed_units='rollback_marker' WHERE id=?", [fact.id]); throw new Error('故意触发事务回滚'); }), /故意触发事务回滚/);
     assert.equal((await chain()).position, before);
     await getPgPool().query("UPDATE analysis_datasets SET allowed_units='database_operator' WHERE id=$1", [fact.id]);
     const pending = await queryOne('SELECT * FROM analysis_security_outbox WHERE target_id=? AND acknowledged_at IS NULL', [fact.id]);

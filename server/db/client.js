@@ -341,8 +341,8 @@ async function transaction(fn) {
         if (securityChanged) securityChanged = await require('../services/data-analysis/bi/security-journal').pendingIn(client);
         await client.query('COMMIT');
         committed = true;
-        // Release the connection before confirming the independent copy. The
-        // committed primary change must never be rolled back on replica error.
+        // 在确认独立副本前释放连接；已提交的主库变更绝不能因为副本错误而回滚。
+
         client.release(releaseError || undefined);
         client.removeListener('error', connectionError);
         if (securityChanged) await require('../services/data-analysis/bi/security-journal').committed({ transactionId: securityChanged });

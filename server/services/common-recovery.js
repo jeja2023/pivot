@@ -80,8 +80,8 @@ async function createPoint(config, baseId) {
             await new Promise(resolve => setTimeout(resolve, 20));
         }
         const lockedAt = Date.now();
-        // A second independent operator session releases a stuck gate even if
-        // a filesystem operation is slow. The point remains incomplete.
+        // 即使文件系统操作缓慢，第二个独立操作员会话也会释放停滞的屏障；该时间点仍保留未完成状态。
+
         timer = setTimeout(() => { timedOut = true; void watchdog.query('SELECT pg_terminate_backend($1)', [pid]).catch(() => {}); }, Math.max(1, deadline - Date.now()));
         await guardian.arm(pid, deadline);
         const remaining = async () => {
@@ -105,8 +105,8 @@ async function createPoint(config, baseId) {
         await remaining(); await client.query('COMMIT'); inTransaction = false;
         await remaining();
         point.lsn = (await client.query('SELECT pg_create_restore_point($1) AS lsn', [id])).rows[0].lsn;
-        // Recheck mutable filesystem/config signatures before publishing the
-        // named point; any race makes this attempted point unusable.
+        // 在发布具名时间点前重新核对易变的文件系统与配置签名；任何竞态均导致该次尝试点不可用。
+
         if (!shared.sameSignatures(objects, await shared.scan(config.application.roots, deadline, config.application.exclusions))) throw new Error('恢复点定位期间共享文件已变化。');
         await confirmAliases(config);
         await checkEscrowSignatures(escrow); await remaining();

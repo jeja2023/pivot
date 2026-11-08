@@ -39,8 +39,8 @@ async function applyDataset(client, record) {
 
 async function applyModel(client, record) {
     const value = record.payload_json;
-    // A newer definition cannot be reconstructed from security metadata. Keep
-    // that model archived until its immutable definition is explicitly restored.
+    // 较新的定义无法从安全元数据重构；将该模型保持归档状态，直到其不可变定义被显式恢复。
+
     await client.query(`UPDATE analysis_data_models SET user_id=$1,scope=$2,allowed_units=$3,allowed_user_ids=$4,
         deleted_at=CASE WHEN $5 THEN COALESCE(deleted_at,NOW()) ELSE $6::timestamptz END,
         archived_at=CASE WHEN encode(sha256(convert_to(COALESCE(definition_json::text,''),'UTF8')),'hex')<>$7 THEN COALESCE(archived_at,NOW()) ELSE $8::timestamptz END WHERE id=$9`,
@@ -51,7 +51,7 @@ async function applyField(client, record) {
     const value = record.payload_json;
     if (!(await client.query('SELECT id FROM analysis_datasets WHERE id=$1', [value.dataset_id])).rowCount) return;
     if (record.tombstone) {
-        // Removing a policy row must not make a restored old column public.
+        // 删除策略行绝不能使已恢复的旧列公开。
         await client.query("UPDATE analysis_field_governance SET sensitivity='restricted',status='active',revision=revision+1 WHERE dataset_id=$1 AND field_key=$2", [value.dataset_id, value.field_key]);
         return;
     }

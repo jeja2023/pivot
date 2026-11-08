@@ -191,8 +191,9 @@
             const isKey = selected.grainKeys.includes(field.key);
             const hasDim = existingDimKeys.has(field.key);
             const hasMetric = existingMetricKeys.has(field.key);
+            const fieldTitle = esc(`${field.name}（${field.type || '文本'}）`);
             return `<li class="modeling-field-item">
-                <div class="modeling-field-main" title="${esc(`${field.name} (${field.type || '文本'})`)}">
+                <div class="modeling-field-main" title="${fieldTitle}">
                     ${isKey ? '<span class="modeling-mini-tag is-key">主键</span>' : ''}
                     <span class="modeling-field-name">${esc(field.name)}</span>
                 </div>
@@ -375,7 +376,8 @@
         else if (mode === 'trial') bodyContent = trial();
         else bodyContent = renderNodeDrawerContent();
 
-        return `<aside id="modeling-drawer" class="modeling-node-drawer${isWide ? ' is-wide' : ''}" aria-label="${esc(titles[mode] || '建模配置抽屉')}">
+        const drawerAriaLabel = esc(titles[mode] || '建模配置抽屉');
+        return `<aside id="modeling-drawer" class="modeling-node-drawer${isWide ? ' is-wide' : ''}" aria-label="${drawerAriaLabel}">
             <div class="modeling-drawer-header">
                 <div class="modeling-drawer-tabs" role="tablist">
                     ${[['node', '节点配置'], ['semantics', `维度指标 (${state.draft.dimensions.length}/${state.draft.metrics.length})`], ['quality', '检查血缘'], ['trial', '试算分析']].map(([key, label]) => {

@@ -371,7 +371,7 @@
         const slide = activeSlide();
         if (!stage || !slide || !state.active?.content) return;
         stage.replaceChildren();
-        stage.style.backgroundColor = slide.background?.fill || '#FFFFFF';
+        stage.style.backgroundColor = slide.background?.fill || 'var(--presentation-canvas-bg, #FFFFFF)';
         stage.style.backgroundImage = '';
         stage.dataset.presentationImageRef = '';
         const content = state.active.content;

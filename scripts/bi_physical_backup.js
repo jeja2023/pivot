@@ -1,7 +1,6 @@
 'use strict';
 
-// PostgreSQL archive/restore commands invoke this file with a fixed private
-// config path and %p/%f only. Credentials never appear in child command lines.
+// PostgreSQL 归档与恢复命令仅使用受控私有配置路径和 %p/%f 调用此文件；凭据绝不暴露在子进程命令行中。
 const path = require('node:path');
 const physical = require('../server/services/physical-backup');
 function option(name) { const index = process.argv.indexOf(name); return index < 0 ? '' : String(process.argv[index + 1] || ''); }
@@ -29,7 +28,7 @@ async function main() {
     finally { await client.end(); }
 }
 main().then(result => process.stdout.write(JSON.stringify(result) + '\n')).catch(error => {
-    // Do not print pg connection objects or command arguments containing local
-    // credentials. PostgreSQL treats any nonzero archive exit as retryable.
+
+    // 严禁打印包含本地凭据的 PG 连接对象或命令参数；PostgreSQL 将任何非零退出视为可重试错误。
     process.stderr.write(`物理备份操作失败：${error.message}\n`); process.exitCode = 1;
 });

@@ -2,9 +2,7 @@
 
 const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 
-// A distinct event loop enforces the deadline while the backup coordinator is
-// hashing/serializing a large inventory. An ordinary timer on that coordinator
-// cannot bound a write pause when its JavaScript thread is busy.
+// 在备份协调器计算或序列化大量清单时，由独立事件循环强制执行截止时间；协调器上的普通定时器在其 JS 线程忙碌时无法限制写入暂停。
 if (!isMainThread) {
     const { Client } = require('pg');
     const client = new Client({ connectionString: workerData.connection, application_name: 'pivot-physical-backup-watchdog', connectionTimeoutMillis: 10000 });

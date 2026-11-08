@@ -15,9 +15,9 @@ async function cleanupConfirmed(sql, params) {
     try { return await execute(sql, params); }
     catch (error) {
         if (error.code !== 'ANALYSIS_SECURITY_COMMITTED_PENDING' || !error.applied || !error.securityTransactionId) throw error;
-        // Bulk fixture teardown can legitimately exceed one synchronous ACK
-        // window. The rows are already deleted; finish the same durable event
-        // transaction instead of pretending it rolled back or repeating DML.
+        // 批量测试夹具清理允许合理超过单个同步确认（ACK）时间窗口；数据行已删除，
+        // 直接完成当前持久化事件事务，不伪造回滚或重试 DML。
+
         for (let attempt = 0; attempt < 4; attempt++) {
             try { await require('../../server/services/data-analysis/bi/security-journal').committed({ transactionId: error.securityTransactionId }); return; }
             catch (pending) { if (pending.code !== 'ANALYSIS_SECURITY_COMMITTED_PENDING' || attempt === 3) throw pending; }

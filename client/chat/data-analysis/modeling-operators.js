@@ -464,13 +464,14 @@
             <div class="modeling-flow-list">
                 ${conds.map((cond, idx) => {
                     const hideVal = ['is_null', 'is_not_null'].includes(cond.operator);
+                    const valPlaceholder = cond.operator === 'in' ? '多个值用逗号分隔' : '输入比较值';
                     return `<div class="modeling-flow-row-card">
                         <div class="modeling-flow-row-top">
                             <select class="form-input" data-flow-cond-field="${idx}" aria-label="筛选字段"${dis}>${renderColumnSelectOptions(firstCols, cond.field, '选择或输入字段')}</select>
                             <select class="form-input" data-flow-cond-op="${idx}" aria-label="筛选条件"${dis}>${FILTER_OPERATOR_OPTIONS.map(([k, lbl]) => `<option value="${k}"${k === cond.operator ? ' selected' : ''}>${esc(lbl)}</option>`).join('')}</select>
                             <button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-cond="${idx}"${dis}>删除</button>
                         </div>
-                        ${hideVal ? '' : `<input class="form-input" data-flow-cond-val="${idx}" value="${esc(cond.value ?? '')}" placeholder="${cond.operator === 'in' ? '多个值用逗号分隔' : '输入比较值'}" maxlength="1000"${dis}>`}
+                        ${hideVal ? '' : `<input class="form-input" data-flow-cond-val="${idx}" value="${esc(cond.value ?? '')}" placeholder="${valPlaceholder}" maxlength="1000"${dis}>`}
                     </div>`;
                 }).join('')}
             </div>
@@ -613,10 +614,10 @@
                 ? upstreamIds.map((upId, idx) => `<code>input_${idx + 1}</code> = ${esc(getAnyNodeName(upId))}`).join('；')
                 : '请先从左侧表或上游算子连线到此节点，SQL 中使用 <code>input_1</code>、<code>input_2</code> 引用上游输出表';
             const allUpCols = [...new Set(upstreamIds.flatMap(upId => inferNodeColumns(upId)))];
-            return `<div class="modeling-notice is-info">上游视图别名：${aliasTips}${upstreamIds.length === 1 ? '（也可直接写 <code>input</code>）' : ''}</div>
+            return `<div class="modeling-notice is-info">上游视图别名：${aliasTips}${upstreamIds.length === 1 ? '（也可直接写 <code>输入表 input</code>）' : ''}</div>
             <label class="modeling-drawer-field">
                 <span class="modeling-field-label">自定义只读 SQL（支持 SELECT / WITH、窗口函数、多表 JOIN 与全部内置函数）</span>
-                <textarea id="modeling-flow-sql-editor" class="form-input modeling-code-input modeling-sql-textarea" rows="6" data-flow-prop="sql" maxlength="6000" placeholder="SELECT * FROM input_1 WHERE ... LIMIT 100"${dis}>${esc(cfg.sql || '')}</textarea>
+                <textarea id="modeling-flow-sql-editor" class="form-input modeling-code-input modeling-sql-textarea" rows="6" data-flow-prop="sql" maxlength="6000" placeholder="示例：SELECT * FROM input_1 WHERE ... LIMIT 100"${dis}>${esc(cfg.sql || '')}</textarea>
             </label>
             ${renderFunctionAssistant(allUpCols, allUpCols[0] || '')}`;
         }

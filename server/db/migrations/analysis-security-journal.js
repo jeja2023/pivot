@@ -102,8 +102,8 @@ module.exports = [{
             DROP TRIGGER IF EXISTS analysis_security_outbox_immutable ON analysis_security_outbox;
             CREATE TRIGGER analysis_security_outbox_immutable BEFORE UPDATE OR DELETE ON analysis_security_outbox FOR EACH ROW EXECUTE FUNCTION analysis_protect_security_outbox()`);
         await client.query('DROP TRIGGER IF EXISTS analysis_security_event ON analysis_audit_events; CREATE TRIGGER analysis_security_event AFTER INSERT ON analysis_audit_events FOR EACH ROW EXECUTE FUNCTION analysis_capture_security_event()');
-        // Backfill is separate, bounded and resumable after this short DDL commit.
-        // The initializing gate cannot open until all cursors and ACKs finish.
+        // 回填是独立、受限且可断点续传的操作，在本次简短 DDL 提交后执行；
+        // 初始化屏障在所有游标与确认完成前不可打开。
         for (const table of ['users', 'analysis_datasets', 'analysis_data_models', 'analysis_field_governance', 'analysis_audit_events', 'analysis_saved_views', 'analysis_dashboards', 'analysis_metric_definitions']) await client.query('INSERT INTO analysis_security_inventory(table_name) VALUES ($1) ON CONFLICT(table_name) DO NOTHING', [table]);
     }
 }];

@@ -80,8 +80,8 @@ async function appendSecurityRecord(config, chain, record) {
     const handle = await fs.open(temporary, 'wx', 0o600);
     try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
     try {
-        // Publish only fully written bytes. A hard link is atomic and cannot
-        // replace an entry won by another writer, unlike rename on POSIX.
+        // 仅发布完全写入的字节；硬链接是原子的，不会像 POSIX 上的 rename 那样覆盖其他写入方的条目。
+
         await fs.link(temporary, file);
         await syncDirectory(chain.directory);
     } finally { await fs.unlink(temporary).catch(() => {}); await syncDirectory(config.root); }

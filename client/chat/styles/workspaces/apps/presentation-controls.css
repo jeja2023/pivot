@@ -1,7 +1,14 @@
 /* PPT 编辑器的页面与版本控制补充样式，独立于画布基础样式以避免压缩源文件难以维护。 */
-.presentation-rail-head > div { display: flex; gap: 4px; }
+.presentation-rail-head>div {
+    display: flex;
+    gap: 4px;
+}
+
 /* 原生形状的边线只由共享SVG绘制，外层容器不能再绘制默认边框。 */
-.presentation-canvas-shape { border: 0; background: transparent; }
+.presentation-canvas-shape {
+    border: 0;
+    background: transparent;
+}
 
 .presentation-create-dialog-title-row .workspace-modal-close {
     align-self: flex-start;
@@ -53,6 +60,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     overflow: hidden;
     box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
 }
+
 .presentation-catalog-body-wrap {
     padding: 16px 22px 22px;
     overflow-y: auto;
@@ -60,6 +68,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 12px;
 }
+
 .presentation-catalog-tip {
     display: flex;
     align-items: center;
@@ -72,16 +81,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-size: 0.78rem;
     line-height: 1.45;
 }
+
 .presentation-catalog-tip svg {
     flex-shrink: 0;
     color: var(--primary);
 }
+
 .presentation-catalog-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
 }
+
 .presentation-catalog-tab {
     height: 32px;
     padding: 0 14px;
@@ -94,16 +106,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 .presentation-catalog-tab:hover {
     border-color: var(--primary);
     color: var(--primary);
     background: rgba(16, 163, 127, 0.04);
 }
+
 .presentation-catalog-tab.is-active {
     border-color: var(--primary);
     background: var(--primary);
     color: var(--text-inverse, #ffffff);
 }
+
 .presentation-catalog-toolbar {
     display: flex;
     align-items: center;
@@ -112,9 +127,11 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-wrap: wrap;
     margin-top: 4px;
 }
+
 .presentation-catalog-filter-hidden {
     display: none !important;
 }
+
 .presentation-catalog-search-wrap {
     display: flex;
     align-items: center;
@@ -123,12 +140,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     min-width: 200px;
     max-width: 360px;
 }
+
 .presentation-catalog-search-wrap svg {
     position: absolute;
     left: 11px;
     color: var(--text-muted);
     pointer-events: none;
 }
+
 .presentation-catalog-search-input {
     width: 100%;
     height: 34px;
@@ -136,6 +155,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-radius: 8px;
     font-size: 0.8rem;
 }
+
 .presentation-catalog-import-btn {
     height: 34px;
     padding: 0 14px;
@@ -144,6 +164,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-weight: 750;
     white-space: nowrap;
 }
+
 .presentation-catalog-status {
     margin: 0;
     padding: 2px 0 6px;
@@ -153,25 +174,30 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     background: transparent;
     text-align: left;
 }
+
 .presentation-catalog-table-wrap {
     margin-top: 2px;
     border-radius: 8px;
     border: 1px solid var(--border);
     overflow: hidden;
 }
+
 .presentation-catalog-table {
     width: 100%;
     margin: 0;
 }
+
 .presentation-catalog-template-info {
     display: grid;
     gap: 3px;
 }
+
 .presentation-catalog-template-desc {
     color: var(--text-muted);
     font-size: 0.72rem;
     line-height: 1.35;
 }
+
 .presentation-source-badge {
     display: inline-flex;
     align-items: center;
@@ -181,35 +207,42 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-weight: 750;
     white-space: nowrap;
 }
+
 .presentation-source-badge.is-system {
     background: rgba(59, 130, 246, 0.12);
     color: #2563eb;
     border: 1px solid rgba(59, 130, 246, 0.25);
 }
+
 .presentation-source-badge.is-org {
     background: rgba(16, 163, 127, 0.12);
     color: #10a37f;
     border: 1px solid rgba(16, 163, 127, 0.25);
 }
+
 .presentation-source-badge.is-engine {
     background: rgba(139, 92, 246, 0.12);
     color: #7c3aed;
     border: 1px solid rgba(139, 92, 246, 0.25);
 }
+
 .presentation-catalog-version-cell {
     font-family: var(--font-mono, monospace);
     font-size: 0.76rem;
     color: var(--text-muted);
 }
+
 .presentation-catalog-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
 }
+
 .presentation-catalog-actions button {
     white-space: nowrap;
 }
+
 .presentation-catalog-empty {
     display: flex;
     flex-direction: column;
@@ -222,16 +255,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border: 1px dashed var(--border);
     background: rgba(248, 250, 252, 0.6);
 }
+
 .presentation-catalog-empty svg {
     color: var(--text-muted);
     margin-bottom: 4px;
 }
+
 .presentation-catalog-empty h4 {
     margin: 0;
     font-size: 0.95rem;
     font-weight: 700;
     color: var(--text-main);
 }
+
 .presentation-catalog-empty p {
     margin: 0;
     font-size: 0.78rem;
@@ -239,8 +275,22 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     max-width: 380px;
     line-height: 1.5;
 }
-.presentation-page-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 7px; border-bottom: 1px solid rgba(148, 163, 184, 0.14); }
-.presentation-page-actions .btn-secondary { height: 28px; padding: 0 3px; border-radius: 6px; font-size: 0.67rem; font-weight: 750; }
+
+.presentation-page-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 7px;
+    border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.14));
+}
+
+.presentation-page-actions .btn-secondary {
+    height: 28px;
+    padding: 0 3px;
+    border-radius: 6px;
+    font-size: 0.67rem;
+    font-weight: 750;
+}
 
 /* ==========================================================================
    演示文稿右侧检查器（属性、模板、素材、AI助手、备注、评论、检查、版本、运营）
@@ -275,6 +325,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     white-space: normal !important;
     flex-shrink: 0 !important;
 }
+
 .presentation-inspector-tabs button {
     flex: 1 1 44px;
     min-width: 42px;
@@ -297,12 +348,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     user-select: none;
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
 }
+
 .presentation-inspector-tabs button:hover {
     background: #f8fafc;
     color: #0f172a;
     border-color: rgba(16, 163, 127, 0.35);
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
 }
+
 .presentation-inspector-tabs button.is-active {
     background: #10a37f !important;
     color: #ffffff !important;
@@ -310,10 +363,12 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 2px 5px rgba(16, 163, 127, 0.28) !important;
     font-weight: 800;
 }
+
 .presentation-inspector-tabs button.is-active .presentation-comments-badge {
     background: #ffffff;
     color: #10a37f;
 }
+
 .presentation-comments-badge {
     display: inline-flex;
     align-items: center;
@@ -342,6 +397,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     background: #ffffff;
     gap: 11px;
 }
+
 .presentation-inspector-panel.hidden,
 .presentation-inspector-panel[hidden],
 #presentation-properties-panel.hidden,
@@ -355,9 +411,11 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 #presentation-versions-panel.hidden {
     display: none !important;
 }
+
 .presentation-inspector-panel::-webkit-scrollbar {
     width: 5px;
 }
+
 .presentation-inspector-panel::-webkit-scrollbar-thumb {
     background: rgba(148, 163, 184, 0.3);
     border-radius: 4px;
@@ -369,11 +427,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 1px;
 }
+
 .presentation-panel-title-group strong {
     font-size: 0.83rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-panel-subtitle,
 .presentation-issues-sub,
 .presentation-version-sub,
@@ -382,6 +442,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #64748b;
     line-height: 1.35;
 }
+
 .presentation-info-card {
     display: flex;
     align-items: flex-start;
@@ -394,6 +455,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-size: 0.68rem;
     line-height: 1.45;
 }
+
 .presentation-info-card-icon {
     display: inline-flex;
     align-items: center;
@@ -406,6 +468,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-shrink: 0;
     margin-top: 1px;
 }
+
 .presentation-info-card-icon svg {
     width: 12px;
     height: 12px;
@@ -413,6 +476,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     stroke-width: 2;
     fill: none;
 }
+
 .presentation-info-card-text strong {
     display: block;
     font-size: 0.71rem;
@@ -420,6 +484,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #1e293b;
     margin-bottom: 2px;
 }
+
 .presentation-info-card-text p {
     margin: 0;
     color: #64748b;
@@ -435,9 +500,11 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding: 13px 13px 0 13px;
     gap: 8px;
 }
+
 #presentation-template-panel.hidden {
     display: none !important;
 }
+
 .presentation-template-panel-head {
     display: flex;
     flex-direction: column;
@@ -447,21 +514,25 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     margin-bottom: 2px;
     flex-shrink: 0 !important;
 }
+
 .presentation-template-panel-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
+
 .presentation-template-panel-title-row strong {
     font-size: 0.83rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-template-actions-group {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
+
 .presentation-template-panel-head .btn-secondary {
     height: 27px;
     padding: 0 9px;
@@ -473,12 +544,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #334155;
     transition: all 0.15s ease;
 }
+
 .presentation-template-panel-head .btn-secondary:hover {
     background: #ffffff;
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.38);
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
 }
+
 .presentation-template-list {
     display: flex !important;
     flex-direction: column !important;
@@ -492,16 +565,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-right: 2px !important;
     padding-bottom: 14px !important;
 }
+
 .presentation-template-list::-webkit-scrollbar {
     width: 5px;
 }
+
 .presentation-template-list::-webkit-scrollbar-thumb {
     background: rgba(148, 163, 184, 0.3);
     border-radius: 999px;
 }
+
 .presentation-template-list::-webkit-scrollbar-thumb:hover {
     background: rgba(16, 163, 127, 0.5);
 }
+
 .presentation-template-list .presentation-template-card {
     min-height: auto;
     height: auto !important;
@@ -521,12 +598,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     text-align: left;
     transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
+
 .presentation-template-list .presentation-template-card:hover {
     border-color: rgba(16, 163, 127, 0.35);
     border-left-color: var(--presentation-template-color, #1769aa);
     transform: translateY(-1px);
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
 }
+
 .presentation-template-list .presentation-template-card.is-active {
     border-color: #10a37f;
     border-left-color: var(--presentation-template-color, #1769aa);
@@ -534,6 +613,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     background: linear-gradient(90deg, rgba(16, 163, 127, 0.035) 0%, #ffffff 100%);
     box-shadow: 0 0 0 1.5px rgba(16, 163, 127, 0.25), 0 2px 6px rgba(16, 163, 127, 0.06);
 }
+
 .presentation-template-list .presentation-template-card strong {
     font-size: 0.8rem;
     font-weight: 800;
@@ -544,6 +624,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     gap: 4px;
     line-height: 1.3;
 }
+
 .presentation-template-list .presentation-template-card.is-active strong::after {
     content: "当前使用";
     font-size: 0.6rem;
@@ -554,6 +635,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-radius: 4px;
     white-space: nowrap;
 }
+
 .presentation-template-list .presentation-template-card span {
     font-size: 0.69rem;
     line-height: 1.4;
@@ -564,6 +646,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
 .presentation-template-list .presentation-template-card-footer {
     display: flex;
     align-items: center;
@@ -571,6 +654,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     gap: 6px;
     margin-top: 1px;
 }
+
 .presentation-template-list .presentation-template-card small {
     font-size: 0.64rem;
     font-weight: 750;
@@ -583,12 +667,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
 .presentation-template-palette {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     flex-shrink: 0;
 }
+
 .presentation-template-color-dot {
     width: 8px;
     height: 8px;
@@ -611,11 +697,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
     margin-bottom: 4px;
 }
+
 #presentation-assets-panel .presentation-template-panel-head strong {
     font-size: 0.83rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 #presentation-assets-refresh-btn {
     height: 27px;
     padding: 0 10px;
@@ -626,17 +714,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border: 1px solid rgba(148, 163, 184, 0.24);
     color: #334155;
 }
+
 #presentation-assets-refresh-btn:hover {
     background: #ffffff;
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.4);
 }
+
 .presentation-assets-quick-toolbar {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 5px;
     margin-bottom: 6px;
 }
+
 .presentation-assets-quick-toolbar .btn-secondary {
     height: 28px;
     padding: 0 4px;
@@ -651,12 +742,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #334155;
     transition: all 0.15s ease;
 }
+
 .presentation-assets-quick-toolbar .btn-secondary:hover {
     background: #ffffff;
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.35);
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.1);
 }
+
 #presentation-assets-panel:not(.hidden) {
     display: flex;
     flex-direction: column;
@@ -664,13 +757,16 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding: 13px 13px 0 13px;
     gap: 8px;
 }
+
 #presentation-assets-panel.hidden {
     display: none !important;
 }
+
 #presentation-assets-panel .presentation-template-panel-head,
 #presentation-assets-panel .presentation-assets-quick-toolbar {
     flex-shrink: 0 !important;
 }
+
 .presentation-assets-list {
     display: flex !important;
     flex-direction: column !important;
@@ -684,22 +780,27 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-right: 2px !important;
     padding-bottom: 14px !important;
 }
+
 .presentation-assets-list::-webkit-scrollbar {
     width: 5px;
 }
+
 .presentation-assets-list::-webkit-scrollbar-thumb {
     background: rgba(148, 163, 184, 0.3);
     border-radius: 999px;
 }
+
 .presentation-assets-list::-webkit-scrollbar-thumb:hover {
     background: rgba(16, 163, 127, 0.5);
 }
+
 #presentation-assets-panel .presentation-ai-note {
     flex-shrink: 0 !important;
     margin: 0 !important;
     padding: 8px 10px !important;
     border-top: 1px solid rgba(148, 163, 184, 0.16) !important;
 }
+
 .presentation-asset-row {
     display: flex;
     align-items: center;
@@ -716,19 +817,23 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
     transition: all 0.15s ease;
 }
+
 .presentation-asset-row:hover {
     border-color: rgba(16, 163, 127, 0.35);
     box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
 }
+
 .presentation-asset-row strong {
     font-size: 0.74rem;
     font-weight: 750;
     color: #0f172a;
 }
+
 .presentation-asset-row small {
     font-size: 0.65rem;
     color: #64748b;
 }
+
 .presentation-asset-row .btn-secondary {
     height: 25px;
     padding: 0 8px;
@@ -739,6 +844,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-color: rgba(16, 163, 127, 0.3);
     background: #f0fdf4;
 }
+
 .presentation-asset-row .btn-secondary:hover {
     background: #10a37f;
     color: #ffffff;
@@ -753,6 +859,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 11px;
 }
+
 .presentation-inspector-section-head {
     display: flex;
     align-items: center;
@@ -760,11 +867,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-bottom: 6px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-inspector-section-head strong {
     font-size: 0.83rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-ai-badge,
 .presentation-notes-badge {
     font-size: 0.62rem;
@@ -775,16 +884,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding: 1px 7px;
     border-radius: 999px;
 }
+
 .presentation-ai-model-selector {
     display: grid;
     gap: 5px;
     margin: 0;
 }
+
 .presentation-ai-model-selector span {
     font-size: 0.72rem;
     font-weight: 750;
     color: #334155;
 }
+
 .presentation-ai-model-selector .form-input {
     height: 33px;
     border-radius: 7px;
@@ -796,21 +908,25 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding: 0 10px;
     transition: all 0.15s ease;
 }
+
 .presentation-ai-model-selector .form-input:focus {
     border-color: #10a37f;
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-ai-prompt-group {
     display: grid;
     gap: 6px;
 }
+
 .presentation-ai-prompt-group label {
     font-size: 0.72rem;
     font-weight: 750;
     color: #334155;
     margin: 0;
 }
+
 #presentation-ai-instruction {
     border-radius: 7px;
     border: 1px solid rgba(148, 163, 184, 0.25);
@@ -822,17 +938,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     min-height: 72px;
     transition: all 0.15s ease;
 }
+
 #presentation-ai-instruction:focus {
     border-color: #10a37f;
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-ai-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
     margin-top: 2px;
 }
+
 .presentation-ai-chip {
     padding: 3px 8px;
     border-radius: 999px;
@@ -845,17 +964,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     transition: all 0.15s ease;
     user-select: none;
 }
+
 .presentation-ai-chip:hover {
     background: #dcfce7;
     border-color: #10a37f;
     transform: translateY(-1px);
 }
+
 .presentation-ai-actions {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 7px !important;
     margin-top: 4px !important;
 }
+
 .presentation-ai-actions button {
     height: 33px;
     padding: 0 8px;
@@ -870,23 +992,27 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 #presentation-ai-rewrite-btn.btn-primary {
     background: linear-gradient(135deg, #10a37f 0%, #0d8a6b 100%) !important;
     border: 1px solid #10a37f !important;
     color: #ffffff !important;
     box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
 }
+
 #presentation-ai-rewrite-btn.btn-primary:hover {
     background: linear-gradient(135deg, #0d8a6b 0%, #0a7359 100%) !important;
     transform: translateY(-1px);
     box-shadow: 0 4px 10px rgba(16, 163, 127, 0.35);
 }
+
 #presentation-ai-continue-btn.btn-secondary,
 #presentation-ai-validate-btn.btn-secondary {
     background: #ffffff !important;
     border: 1px solid rgba(148, 163, 184, 0.28) !important;
     color: #1e293b !important;
 }
+
 #presentation-ai-continue-btn.btn-secondary:hover,
 #presentation-ai-validate-btn.btn-secondary:hover {
     background: #f8fafc !important;
@@ -894,15 +1020,18 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #10a37f !important;
     transform: translateY(-1px);
 }
+
 #presentation-ai-stop-btn.btn-secondary {
     background: #ffffff !important;
     border: 1px solid rgba(220, 38, 38, 0.25) !important;
     color: #dc2626 !important;
 }
+
 #presentation-ai-stop-btn.btn-secondary:hover {
     background: #fef2f2 !important;
     border-color: #dc2626 !important;
 }
+
 .presentation-ai-note {
     margin: 4px 0 0;
     padding: 8px 10px;
@@ -930,6 +1059,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     text-align: center;
     gap: 6px;
 }
+
 .presentation-empty-icon {
     display: grid;
     place-items: center;
@@ -941,11 +1071,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 2px 8px rgba(16, 163, 127, 0.12);
     margin-bottom: 2px;
 }
+
 .presentation-empty-note strong {
     font-size: 0.82rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-empty-note p {
     margin: 0;
     font-size: 0.71rem;
@@ -957,6 +1089,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     display: grid;
     gap: 9px;
 }
+
 .presentation-form-section {
     display: grid;
     gap: 6px;
@@ -965,6 +1098,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-radius: 8px;
     background: #f8fafc;
 }
+
 .presentation-form-section-title {
     font-size: 0.72rem;
     font-weight: 800;
@@ -974,11 +1108,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     justify-content: space-between;
     margin-bottom: 2px;
 }
+
 .presentation-property-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
 }
+
 .presentation-property-grid label {
     display: grid;
     gap: 3px;
@@ -986,6 +1122,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-size: 0.67rem;
     font-weight: 750;
 }
+
 .presentation-property-grid .form-input,
 .presentation-properties-form .form-input {
     height: 30px;
@@ -997,11 +1134,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #0f172a;
     transition: all 0.15s ease;
 }
+
 .presentation-properties-form .form-input:focus {
     border-color: #10a37f;
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-properties-form textarea.form-input {
     height: auto;
     padding: 6px 8px;
@@ -1016,6 +1155,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-top: 9px;
     border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-inspector-actions .btn-secondary,
 .presentation-inspector-actions .btn-danger {
     height: 28px;
@@ -1029,21 +1169,25 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     white-space: nowrap;
     transition: all 0.15s ease;
 }
+
 .presentation-inspector-actions .btn-secondary {
     background: #ffffff;
     border: 1px solid rgba(148, 163, 184, 0.25);
     color: #334155;
 }
+
 .presentation-inspector-actions .btn-secondary:hover {
     background: #f8fafc;
     border-color: rgba(16, 163, 127, 0.4);
     color: #10a37f;
 }
+
 .presentation-inspector-actions .btn-danger {
     background: #fff5f5;
     border: 1px solid rgba(220, 38, 38, 0.25);
     color: #dc2626;
 }
+
 .presentation-inspector-actions .btn-danger:hover {
     background: #dc2626;
     color: #ffffff;
@@ -1058,6 +1202,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
 }
+
 .presentation-element-actions .btn-secondary {
     height: 29px;
     padding: 0 5px;
@@ -1072,6 +1217,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #334155;
     transition: all 0.15s ease;
 }
+
 .presentation-element-actions .btn-secondary:hover {
     background: #f0fdf4;
     border-color: rgba(16, 163, 127, 0.4);
@@ -1087,12 +1233,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 10px;
 }
+
 .presentation-notes-container {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 180px;
 }
+
 .presentation-speaker-notes-input {
     width: 100%;
     min-height: 190px;
@@ -1107,16 +1255,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     transition: all 0.15s ease;
     box-sizing: border-box;
 }
+
 .presentation-speaker-notes-input:focus {
     border-color: #10a37f;
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-notes-actions {
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
+
 #presentation-notes-presenter-btn.btn-primary {
     height: 35px;
     border-radius: 7px;
@@ -1133,6 +1284,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 #presentation-notes-presenter-btn.btn-primary:hover {
     background: linear-gradient(135deg, #0d8a6b 0%, #0a7359 100%) !important;
     transform: translateY(-1px);
@@ -1147,6 +1299,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 10px;
 }
+
 .presentation-comments-head {
     display: flex;
     align-items: center;
@@ -1155,6 +1308,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-comments-scope-toggle {
     display: inline-flex;
     padding: 2px;
@@ -1162,6 +1316,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     background: #f1f5f9;
     gap: 2px;
 }
+
 .presentation-comments-scope-toggle .btn-secondary {
     height: 24px;
     padding: 0 8px;
@@ -1174,21 +1329,25 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 .presentation-comments-scope-toggle .btn-secondary:hover {
     color: #0f172a !important;
 }
+
 .presentation-comments-scope-toggle .btn-secondary.is-active {
     background: #ffffff !important;
     color: #10a37f !important;
     font-weight: 800;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
+
 .presentation-comment-form {
     display: grid;
     gap: 7px;
     padding-bottom: 10px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
+
 #presentation-comment-input {
     border-radius: 7px;
     border: 1px solid rgba(148, 163, 184, 0.25);
@@ -1199,15 +1358,18 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     resize: vertical;
     transition: all 0.15s ease;
 }
+
 #presentation-comment-input:focus {
     border-color: #10a37f;
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-comment-form-actions {
     display: flex;
     justify-content: flex-end;
 }
+
 .presentation-comment-form-actions .btn-primary {
     height: 28px;
     padding: 0 12px;
@@ -1220,14 +1382,17 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 .presentation-comment-form-actions .btn-primary:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 6px rgba(16, 163, 127, 0.25);
 }
+
 .presentation-comments-list {
     display: grid;
     gap: 8px;
 }
+
 .presentation-comment-card {
     display: grid;
     gap: 6px;
@@ -1238,30 +1403,36 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
     transition: all 0.15s ease;
 }
+
 .presentation-comment-card:hover {
     border-color: rgba(16, 163, 127, 0.35);
     box-shadow: 0 3px 8px rgba(15, 23, 42, 0.04);
 }
+
 .presentation-comment-card.is-resolved {
     background: #f8fafc;
     border-style: dashed;
     opacity: 0.78;
 }
+
 .presentation-comment-meta {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 6px;
 }
+
 .presentation-comment-author {
     font-size: 0.74rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-comment-time {
     font-size: 0.65rem;
     color: #94a3b8;
 }
+
 .presentation-comment-slide-tag {
     display: inline-block;
     padding: 1px 6px;
@@ -1272,6 +1443,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-size: 0.62rem;
     font-weight: 750;
 }
+
 .presentation-comment-body {
     font-size: 0.74rem;
     line-height: 1.5;
@@ -1279,6 +1451,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     white-space: pre-wrap;
     word-break: break-word;
 }
+
 .presentation-comment-actions {
     display: flex;
     align-items: center;
@@ -1286,6 +1459,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     gap: 6px;
     margin-top: 2px;
 }
+
 .presentation-comment-actions button {
     padding: 2px 7px;
     border-radius: 4px;
@@ -1297,16 +1471,19 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     cursor: pointer;
     transition: all 0.15s ease;
 }
+
 .presentation-comment-actions button:hover {
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.4);
     background: #ffffff;
 }
+
 .presentation-comment-actions button.btn-danger-text:hover {
     color: #dc2626;
     border-color: rgba(220, 38, 38, 0.3);
     background: #fff5f5;
 }
+
 .presentation-comment-replies {
     display: grid;
     gap: 6px;
@@ -1314,17 +1491,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-left: 10px;
     border-left: 2px solid rgba(16, 163, 127, 0.25);
 }
+
 .presentation-reply-box {
     display: grid;
     gap: 6px;
     margin-top: 6px;
 }
+
 .presentation-reply-box textarea {
     font-size: 0.73rem;
     padding: 6px 8px;
     border-radius: 6px;
     border: 1px solid rgba(148, 163, 184, 0.24);
 }
+
 .presentation-reply-box-actions button {
     height: 24px;
     padding: 0 8px;
@@ -1341,6 +1521,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 10px;
 }
+
 .presentation-issues-head {
     display: flex;
     flex-direction: column;
@@ -1348,12 +1529,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-issues-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
     margin: 8px 0 10px;
 }
+
 .presentation-issue-action-btn {
     display: inline-flex;
     align-items: center;
@@ -1369,27 +1552,32 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-sizing: border-box;
     transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 .presentation-issue-action-btn svg {
     flex-shrink: 0;
 }
+
 .presentation-issue-action-btn.is-check {
     background: var(--primary, #10a37f);
     color: #ffffff;
     border: 1px solid var(--primary, #10a37f);
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.25);
 }
+
 .presentation-issue-action-btn.is-check:hover {
     background: #0d8a6a;
     border-color: #0d8a6a;
     transform: translateY(-1px);
     box-shadow: 0 3px 8px rgba(16, 163, 127, 0.32);
 }
+
 .presentation-issue-action-btn.is-delivery {
     background: var(--surface, #ffffff);
     color: var(--text-main, #0f172a);
     border: 1px solid rgba(148, 163, 184, 0.28);
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
+
 .presentation-issue-action-btn.is-delivery:hover {
     background: #f8fafc;
     border-color: rgba(16, 163, 127, 0.4);
@@ -1397,10 +1585,12 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     transform: translateY(-1px);
     box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
 }
+
 #presentation-production-task-status:empty,
 .presentation-empty-note:empty {
     display: none !important;
 }
+
 .presentation-issues-list .presentation-empty-note {
     padding: 12px 14px;
     border-radius: 8px;
@@ -1411,10 +1601,12 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: var(--text-secondary, #475569);
     text-align: center;
 }
+
 .presentation-issues-list {
     display: grid;
     gap: 7px;
 }
+
 .presentation-issue {
     display: grid;
     gap: 4px;
@@ -1428,30 +1620,36 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
     transition: all 0.15s ease;
 }
+
 .presentation-issue:hover {
     border-color: #10a37f !important;
     transform: translateY(-1px);
     box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05);
 }
+
 .presentation-issue strong {
     font-size: 0.75rem;
     font-weight: 800;
     line-height: 1.35;
     color: #0f172a;
 }
+
 .presentation-issue span {
     color: #64748b;
     font-size: 0.68rem;
     line-height: 1.4;
 }
+
 .presentation-issue.is-blocking {
     border-left: 4px solid #ef4444 !important;
     background: linear-gradient(90deg, #fef2f2 0%, #ffffff 100%);
 }
+
 .presentation-issue.is-warning {
     border-left: 4px solid #f59e0b !important;
     background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%);
 }
+
 .presentation-issue.is-info {
     border-left: 4px solid #10a37f !important;
     background: linear-gradient(90deg, #f0fdf4 0%, #ffffff 100%);
@@ -1465,6 +1663,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 10px;
 }
+
 .presentation-version-head {
     display: flex;
     align-items: center;
@@ -1474,17 +1673,20 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-version-head strong {
     font-size: 0.83rem;
     font-weight: 800;
     color: #0f172a;
 }
+
 .presentation-version-actions {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
 }
+
 .presentation-version-head .btn-primary {
     height: 27px;
     padding: 0 10px;
@@ -1493,6 +1695,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-weight: 750;
     white-space: nowrap;
 }
+
 .presentation-version-head .btn-secondary {
     height: 27px;
     padding: 0 10px;
@@ -1504,15 +1707,18 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     color: #334155;
     transition: all 0.15s ease;
 }
+
 .presentation-version-head .btn-secondary:hover {
     background: #ffffff;
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.4);
 }
+
 .presentation-versions-list {
     display: grid;
     gap: 7px;
 }
+
 .presentation-version-row {
     display: flex;
     align-items: center;
@@ -1525,21 +1731,25 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 1px 2px var(--shadow-sm, rgba(15, 23, 42, 0.025));
     transition: all 0.15s ease;
 }
+
 .presentation-version-row:hover {
     border-color: var(--primary-border-hover, rgba(16, 163, 127, 0.35));
     box-shadow: 0 2px 6px var(--shadow-md, rgba(15, 23, 42, 0.05));
 }
-.presentation-version-row > div {
+
+.presentation-version-row>div {
     display: grid;
     flex: 1 1 auto;
     min-width: 0;
     gap: 3px;
 }
+
 .presentation-version-row strong {
     font-size: 0.75rem;
     font-weight: 800;
     color: var(--text-main, #0f172a);
 }
+
 .presentation-version-row span {
     overflow: hidden;
     color: var(--text-muted, #64748b);
@@ -1548,6 +1758,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
 .presentation-version-row .btn-secondary {
     flex-shrink: 0 !important;
     white-space: nowrap !important;
@@ -1568,6 +1779,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-sizing: border-box !important;
     line-height: 1 !important;
 }
+
 .presentation-version-row .btn-secondary:hover {
     background: var(--primary, #10a37f) !important;
     color: var(--text-inverse, #ffffff) !important;
@@ -1582,6 +1794,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     flex-direction: column;
     gap: 10px;
 }
+
 .presentation-metrics-head {
     display: flex;
     align-items: center;
@@ -1590,6 +1803,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-metrics-head .btn-secondary {
     height: 27px;
     padding: 0 10px;
@@ -1600,11 +1814,13 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border: 1px solid rgba(148, 163, 184, 0.24);
     color: #334155;
 }
+
 .presentation-metrics-head .btn-secondary:hover {
     background: #ffffff;
     color: #10a37f;
     border-color: rgba(16, 163, 127, 0.4);
 }
+
 .presentation-metrics-summary {
     background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
     border: 1px solid rgba(16, 163, 127, 0.25);
@@ -1615,6 +1831,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     padding: 9px 12px;
     box-shadow: 0 1px 3px rgba(16, 163, 127, 0.08);
 }
+
 #presentation-metrics-panel .presentation-issues-list .presentation-issue {
     border-left: 3px solid #10a37f !important;
 }
@@ -2598,7 +2815,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     border-top: 0;
 }
 
-.presentation-outline-section > .presentation-outline-field .form-input {
+.presentation-outline-section>.presentation-outline-field .form-input {
     min-height: 34px;
     font-size: 0.82rem;
     font-weight: 750;
@@ -2743,11 +2960,11 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 /* 顶部各类按钮与下拉控件统一垂直居中与基线对齐 */
-.presentation-editor-actions > .presentation-btn-group,
-.presentation-editor-actions > .presentation-dropdown,
-.presentation-editor-actions > button,
-.presentation-library-actions > .presentation-dropdown,
-.presentation-library-actions > button {
+.presentation-editor-actions>.presentation-btn-group,
+.presentation-editor-actions>.presentation-dropdown,
+.presentation-editor-actions>button,
+.presentation-library-actions>.presentation-dropdown,
+.presentation-library-actions>button {
     display: inline-flex !important;
     align-items: center !important;
     vertical-align: middle !important;
@@ -2861,7 +3078,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     transform: rotate(180deg);
 }
 
-.presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary {
+.presentation-dropdown[open]>.presentation-dropdown-summary.btn-secondary {
     border-color: var(--primary-focus, rgba(16, 163, 127, 0.45));
     background: var(--primary-subtle, #f0fdfa);
     color: var(--primary-dark, #047857);
@@ -2884,8 +3101,17 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 @keyframes presentationBadgePulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.8; transform: scale(0.96); }
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.8;
+        transform: scale(0.96);
+    }
 }
 
 /* 下拉菜单面板浮层 */
@@ -2917,6 +3143,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
         opacity: 0;
         transform: translateY(-4px) scale(0.98);
     }
+
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -2958,7 +3185,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 /* 图标固定尺寸容器与居中对齐，彻底消除不同图标宽度的不对齐现象 */
-.presentation-dropdown-item > svg,
+.presentation-dropdown-item>svg,
 .presentation-dropdown-icon {
     display: inline-flex !important;
     align-items: center !important;
@@ -2974,7 +3201,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     margin: 0 !important;
 }
 
-.presentation-dropdown-item:hover > svg {
+.presentation-dropdown-item:hover>svg {
     color: var(--primary, #10a37f) !important;
     transform: scale(1.08);
 }
@@ -3039,7 +3266,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 .presentation-dropdown-item-danger:hover strong,
-.presentation-dropdown-item-danger:hover > svg {
+.presentation-dropdown-item-danger:hover>svg {
     color: var(--danger, #dc2626) !important;
 }
 
@@ -3091,8 +3318,8 @@ body.dark-mode .presentation-tag-badge,
     border-color: var(--primary-badge-dark-border, rgba(16, 163, 127, 0.35));
 }
 
-body.dark-mode .presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary,
-.dark-mode .presentation-dropdown[open] > .presentation-dropdown-summary.btn-secondary {
+body.dark-mode .presentation-dropdown[open]>.presentation-dropdown-summary.btn-secondary,
+.dark-mode .presentation-dropdown[open]>.presentation-dropdown-summary.btn-secondary {
     background: var(--primary-dark-active-bg, #064e3b);
     color: var(--primary-dark-active-color, #6ee7b7);
     border-color: var(--primary-dark-active-border, #059669);
@@ -3103,24 +3330,29 @@ body.dark-mode .presentation-version-row,
     background: var(--bg-dark-card, #1e293b);
     border-color: var(--border-dark, rgba(148, 163, 184, 0.2));
 }
+
 body.dark-mode .presentation-version-row:hover,
 .dark-mode .presentation-version-row:hover {
     border-color: var(--primary-focus, rgba(16, 163, 127, 0.5));
 }
+
 body.dark-mode .presentation-version-row strong,
 .dark-mode .presentation-version-row strong {
     color: var(--text-dark-head, #f8fafc);
 }
+
 body.dark-mode .presentation-version-row span,
 .dark-mode .presentation-version-row span {
     color: var(--text-muted, #94a3b8);
 }
+
 body.dark-mode .presentation-version-row .btn-secondary,
 .dark-mode .presentation-version-row .btn-secondary {
     background: var(--primary-dark-subtle, rgba(16, 163, 127, 0.16)) !important;
     border-color: var(--primary-dark-border, rgba(16, 163, 127, 0.45)) !important;
     color: var(--primary-light, #34d399) !important;
 }
+
 body.dark-mode .presentation-version-row .btn-secondary:hover,
 .dark-mode .presentation-version-row .btn-secondary:hover {
     background: var(--primary, #10a37f) !important;
@@ -3129,6 +3361,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
 
 /* 覆盖旧版本在 <= 1120px 粗暴隐藏撤销重做的规则 */
 @media (max-width: 1120px) {
+
     .presentation-editor-actions .btn-secondary:nth-of-type(1),
     .presentation-editor-actions .btn-secondary:nth-of-type(2) {
         display: inline-flex !important;
@@ -3145,46 +3378,83 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
+
 .presentation-story-sub {
     font-size: 0.65rem;
     color: #64748b;
     line-height: 1.35;
 }
+
 .presentation-story-goals {
     margin: 0;
     padding: 0;
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 8px;
-    background: #f8fafc;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.28));
+    border-radius: 7px;
+    background: var(--bg-secondary, #f8fafc);
     overflow: hidden;
     transition: all 0.15s ease;
 }
+
 .presentation-story-goals[open] {
-    background: #ffffff;
-    border-color: rgba(16, 163, 127, 0.3);
-    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+    background: var(--bg-card, #ffffff);
+    border-color: var(--primary-border, rgba(16, 163, 127, 0.35));
+    box-shadow: 0 2px 8px var(--shadow-sm, rgba(15, 23, 42, 0.04));
 }
+
 .presentation-story-goals-summary {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    font-size: 0.73rem;
-    color: var(--text-main, #0f172a);
+    display: block;
+    padding: 5px 8px;
+    font-size: 0.72rem;
+    color: var(--text-main, #1e293b);
     cursor: pointer;
     user-select: none;
     list-style: none;
+    outline: none;
 }
+
 .presentation-story-goals-summary::-webkit-details-marker {
     display: none;
 }
+
+.presentation-story-goals-summary-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+}
+
+.presentation-story-goals-summary-left {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.presentation-story-goals-badge {
+    font-size: 0.60rem;
+    font-weight: 800;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--primary-light, rgba(16, 163, 127, 0.12));
+    color: var(--primary, #10a37f);
+    flex-shrink: 0;
+    line-height: 1.2;
+}
+
 .presentation-story-goals-summary svg {
     color: var(--primary, #10a37f);
     flex-shrink: 0;
 }
+
 .presentation-story-goals-title {
-    font-weight: 800;
+    font-weight: 700;
+    color: var(--text-main, #1e293b);
+    white-space: nowrap;
+    font-size: 0.70rem;
 }
+
 .presentation-story-goals-tags {
     color: var(--text-muted, #64748b);
     font-weight: 500;
@@ -3193,14 +3463,28 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.presentation-story-goals-chevron {
+    font-size: 0.65rem;
+    color: var(--text-muted, #64748b);
+    transition: transform 0.15s ease;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.presentation-story-goals[open] .presentation-story-goals-chevron {
+    transform: rotate(180deg);
+}
+
 .presentation-story-goals-form {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 8px;
-    padding: 10px 10px 12px;
+    gap: 6px;
+    padding: 8px 8px 10px;
     border-top: 1px solid rgba(148, 163, 184, 0.14);
     margin: 0;
 }
+
 .presentation-story-goals-form .presentation-master-field {
     margin: 0;
 }
@@ -3216,6 +3500,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     background: rgba(241, 245, 249, 0.85);
     border: 1px solid rgba(148, 163, 184, 0.2);
 }
+
 .presentation-story-flow-node {
     display: inline-flex;
     align-items: center;
@@ -3224,6 +3509,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     flex: 1 1 0;
     font-size: 0.68rem;
 }
+
 .presentation-story-flow-node .flow-tag {
     font-size: 0.62rem;
     font-weight: 800;
@@ -3232,23 +3518,28 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     white-space: nowrap;
     flex-shrink: 0;
 }
+
 .presentation-story-flow-node.is-prev .flow-tag {
     background: rgba(148, 163, 184, 0.25);
     color: #475569;
 }
+
 .presentation-story-flow-node.is-current {
     flex: 0 0 auto;
 }
+
 .presentation-story-flow-node.is-current .flow-tag {
     background: rgba(16, 163, 127, 0.15);
     color: #10a37f;
     font-weight: 800;
     padding: 2px 7px;
 }
+
 .presentation-story-flow-node.is-next .flow-tag {
     background: rgba(59, 130, 246, 0.14);
     color: #2563eb;
 }
+
 .presentation-story-flow-node .flow-text {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3256,6 +3547,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     color: var(--text-main, #334155);
     font-weight: 600;
 }
+
 .presentation-story-flow-arrow {
     color: rgba(148, 163, 184, 0.7);
     font-size: 0.65rem;
@@ -3267,102 +3559,140 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
 .presentation-story-card {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 11px 12px;
-    border-radius: 9px;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
     background: #ffffff;
     border: 1px solid rgba(148, 163, 184, 0.22);
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02);
 }
+
 .presentation-story-card.is-ai {
     background: linear-gradient(180deg, #fbfcfe 0%, #f4fbf8 100%);
     border-color: rgba(16, 163, 127, 0.28);
 }
+
 .presentation-story-card-head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.75rem;
+    gap: 5px;
+    font-size: 0.73rem;
     font-weight: 800;
     color: var(--text-main, #0f172a);
 }
+
 .presentation-story-card-head svg {
     color: var(--primary, #10a37f);
     flex-shrink: 0;
 }
+
 .presentation-story-card .presentation-master-field {
     margin: 0;
     display: grid;
-    gap: 4px;
-    font-size: 0.73rem;
+    gap: 3px;
+    font-size: 0.71rem;
 }
+
 .presentation-story-card .presentation-master-field span {
     font-weight: 700;
     color: var(--text-secondary, #475569);
-    font-size: 0.71rem;
+    font-size: 0.67rem;
+    margin-bottom: 1px;
 }
-.presentation-story-card .form-input {
+
+.presentation-story-card input.form-input,
+.presentation-story-card select.form-input,
+.presentation-story-goals-form input.form-input,
+.presentation-story-goals-form select.form-input {
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 0 6px !important;
+    font-size: 0.70rem !important;
+    line-height: 24px !important;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.28));
+    background: var(--bg-card, #ffffff);
+    color: var(--text-main, #0f172a);
+    box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    box-sizing: border-box;
-    font-size: 0.76rem;
-    padding: 5px 8px;
-    border-radius: 6px;
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    background: #ffffff;
-    color: var(--text-main, #0f172a);
     transition: all 0.15s ease;
 }
+
 .presentation-story-card textarea.form-input {
     resize: vertical;
-    min-height: 48px;
-    line-height: 1.4;
+    min-height: 32px;
+    height: 32px;
+    padding: 3px 6px;
+    line-height: 1.3;
+    font-size: 0.70rem;
+    border-radius: 5px;
+    border: 1px solid var(--border-color, rgba(148, 163, 184, 0.28));
+    background: var(--bg-card, #ffffff);
+    color: var(--text-main, #0f172a);
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    transition: all 0.15s ease;
 }
-.presentation-story-card .form-input:focus {
+
+.presentation-story-card .form-input::placeholder,
+.presentation-story-goals-form .form-input::placeholder {
+    font-size: 0.67rem;
+    color: var(--text-placeholder, #94a3b8);
+}
+
+.presentation-story-card .form-input:focus,
+.presentation-story-goals-form .form-input:focus {
     border-color: var(--primary, #10a37f);
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
     outline: none;
 }
+
 .presentation-story-grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 6px;
 }
+
 .presentation-story-grid-2 .presentation-master-field {
     min-width: 0;
 }
+
 .presentation-story-tip {
-    font-size: 0.68rem;
-    line-height: 1.45;
+    font-size: 0.67rem;
+    line-height: 1.4;
     color: var(--text-muted, #64748b);
-    padding: 6px 8px;
-    border-radius: 6px;
+    padding: 5px 7px;
+    border-radius: 5px;
     background: rgba(148, 163, 184, 0.1);
 }
+
 .presentation-story-action-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    height: 30px;
-    border-radius: 7px;
-    font-size: 0.74rem;
+    gap: 5px;
+    height: 26px;
+    border-radius: 6px;
+    font-size: 0.71rem;
     font-weight: 700;
     margin-top: 2px;
     cursor: pointer;
 }
+
 .presentation-story-propose-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    height: 32px;
-    border-radius: 7px;
-    font-size: 0.76rem;
+    gap: 5px;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 0.73rem;
     font-weight: 750;
     margin-top: 3px;
     cursor: pointer;
-    box-shadow: 0 2px 6px rgba(16, 163, 127, 0.2);
+    box-shadow: 0 2px 6px var(--primary-shadow, rgba(16, 163, 127, 0.2));
 }
 
 /* 全篇大纲列表 */
@@ -3372,12 +3702,14 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     gap: 7px;
     margin-top: 4px;
 }
+
 .presentation-story-section-title {
     font-size: 0.72rem;
     font-weight: 800;
     color: var(--text-secondary, #475569);
     padding-left: 2px;
 }
+
 .presentation-story-list {
     display: grid;
     gap: 6px;
@@ -3385,6 +3717,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     margin: 0;
     list-style: none;
 }
+
 .presentation-story-item-btn {
     display: flex;
     align-items: flex-start;
@@ -3400,16 +3733,19 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     transition: all 0.15s ease;
     white-space: normal;
 }
+
 .presentation-story-item-btn:hover {
     border-color: rgba(16, 163, 127, 0.45);
     background: #f8fafc;
     transform: translateY(-1px);
 }
+
 .presentation-story-item-btn.is-active {
     border-color: var(--primary, #10a37f);
     background: rgba(240, 253, 244, 0.7);
     box-shadow: 0 2px 6px rgba(16, 163, 127, 0.12);
 }
+
 .presentation-story-page-num {
     font-size: 0.65rem;
     font-weight: 800;
@@ -3420,12 +3756,14 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     flex-shrink: 0;
     margin-top: 1px;
 }
+
 .presentation-story-item-main {
     display: grid;
     gap: 2px;
     min-width: 0;
     flex: 1 1 auto;
 }
+
 .presentation-story-item-title {
     font-size: 0.76rem;
     font-weight: 750;
@@ -3434,6 +3772,7 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
 .presentation-story-item-meta {
     display: flex;
     align-items: center;
@@ -3442,29 +3781,49 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     font-size: 0.66rem;
     color: var(--text-muted, #64748b);
 }
+
 .presentation-story-stage-badge {
     font-size: 0.62rem;
     font-weight: 750;
     padding: 1px 5px;
     border-radius: 3px;
-    background: rgba(148, 163, 184, 0.18);
-    color: #334155;
+    background: var(--badge-default-bg, rgba(148, 163, 184, 0.18));
+    color: var(--badge-default-text, #334155);
     flex-shrink: 0;
 }
-.presentation-story-stage-badge.is-opening { background: rgba(59, 130, 246, 0.15); color: #1d4ed8; }
-.presentation-story-stage-badge.is-problem { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
-.presentation-story-stage-badge.is-proposal { background: rgba(16, 163, 127, 0.15); color: #047857; }
-.presentation-story-stage-badge.is-closing { background: rgba(139, 92, 246, 0.15); color: #6d28d9; }
+
+.presentation-story-stage-badge.is-opening {
+    background: var(--badge-blue-bg, rgba(59, 130, 246, 0.15));
+    color: var(--badge-blue-text, #1d4ed8);
+}
+
+.presentation-story-stage-badge.is-problem {
+    background: var(--badge-red-bg, rgba(239, 68, 68, 0.15));
+    color: var(--badge-red-text, #b91c1c);
+}
+
+.presentation-story-stage-badge.is-proposal {
+    background: var(--badge-green-bg, rgba(16, 163, 127, 0.15));
+    color: var(--badge-green-text, #047857);
+}
+
+.presentation-story-stage-badge.is-closing {
+    background: var(--badge-purple-bg, rgba(139, 92, 246, 0.15));
+    color: var(--badge-purple-text, #6d28d9);
+}
+
 .presentation-story-item-takeaway {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
 #presentation-story-status {
     display: grid;
     gap: 8px;
     margin-top: 6px;
 }
+
 .data-table td.presentation-story-preview-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -3481,92 +3840,191 @@ body.dark-mode .presentation-story-head,
 .dark-mode .presentation-story-head {
     border-color: rgba(148, 163, 184, 0.18);
 }
+
 body.dark-mode .presentation-issue-action-btn.is-delivery,
 .dark-mode .presentation-issue-action-btn.is-delivery {
     background: rgba(30, 41, 59, 0.7);
     border-color: rgba(148, 163, 184, 0.25);
     color: #e2e8f0;
 }
+
 body.dark-mode .presentation-issue-action-btn.is-delivery:hover,
 .dark-mode .presentation-issue-action-btn.is-delivery:hover {
     background: rgba(51, 65, 85, 0.8);
     color: var(--primary, #10a37f);
 }
+
 body.dark-mode .presentation-story-goals,
 .dark-mode .presentation-story-goals {
     background: rgba(30, 41, 59, 0.6);
     border-color: rgba(148, 163, 184, 0.2);
 }
+
 body.dark-mode .presentation-story-goals[open],
 .dark-mode .presentation-story-goals[open] {
     background: rgba(30, 41, 59, 0.9);
 }
+
+body.dark-mode .presentation-story-goals-title,
+.dark-mode .presentation-story-goals-title {
+    color: var(--text-main, #f1f5f9);
+}
+
+body.dark-mode .presentation-story-goals-tags,
+.dark-mode .presentation-story-goals-tags,
+body.dark-mode .presentation-story-goals-chevron,
+.dark-mode .presentation-story-goals-chevron {
+    color: var(--text-muted, #94a3b8);
+}
+
 body.dark-mode .presentation-story-flow-bar,
 .dark-mode .presentation-story-flow-bar {
     background: rgba(30, 41, 59, 0.7);
     border-color: rgba(148, 163, 184, 0.2);
 }
+
 body.dark-mode .presentation-story-flow-node.is-prev .flow-tag,
 .dark-mode .presentation-story-flow-node.is-prev .flow-tag {
     background: rgba(148, 163, 184, 0.2);
     color: #94a3b8;
 }
+
 body.dark-mode .presentation-story-flow-node .flow-text,
 .dark-mode .presentation-story-flow-node .flow-text {
     color: #e2e8f0;
 }
+
 body.dark-mode .presentation-story-card,
 .dark-mode .presentation-story-card {
     background: rgba(30, 41, 59, 0.7);
     border-color: rgba(148, 163, 184, 0.2);
 }
+
 body.dark-mode .presentation-story-card.is-ai,
 .dark-mode .presentation-story-card.is-ai {
     background: rgba(22, 34, 48, 0.75);
     border-color: rgba(16, 163, 127, 0.35);
 }
+
 body.dark-mode .presentation-story-card .form-input,
 .dark-mode .presentation-story-card .form-input {
     background: rgba(15, 23, 42, 0.6);
     border-color: rgba(148, 163, 184, 0.25);
     color: #f1f5f9;
 }
+
 body.dark-mode .presentation-story-tip,
 .dark-mode .presentation-story-tip {
     background: rgba(148, 163, 184, 0.12);
     color: #94a3b8;
 }
+
 body.dark-mode .presentation-story-item-btn,
 .dark-mode .presentation-story-item-btn {
     background: rgba(30, 41, 59, 0.7);
     border-color: rgba(148, 163, 184, 0.2);
 }
+
 body.dark-mode .presentation-story-item-btn:hover,
 .dark-mode .presentation-story-item-btn:hover {
     background: rgba(51, 65, 85, 0.8);
 }
+
 body.dark-mode .presentation-story-item-btn.is-active,
 .dark-mode .presentation-story-item-btn.is-active {
     background: rgba(16, 163, 127, 0.18);
     border-color: var(--primary, #10a37f);
 }
+
 body.dark-mode .presentation-story-item-title,
 .dark-mode .presentation-story-item-title {
     color: #f1f5f9;
 }
-.presentation-studio-edge { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border-color, #dbe2ea); }
-.presentation-studio-edge label { min-width: 0; display: grid; gap: 4px; }
-.presentation-studio-edge .form-input { width: 100%; min-width: 0; }
-.presentation-claim { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--border-color, #dbe2ea); }
-.presentation-claim blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--primary, #10a37f); white-space: pre-wrap; }
-.presentation-master-dialog { max-width: 880px; max-height: 92vh; margin: auto; }
-.presentation-master-dialog .workspace-modal-body { overflow: auto; padding: 18px; }
-.presentation-master-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
-.presentation-master-field { display: grid; gap: 6px; min-width: 0; font-size: .82rem; }
-.presentation-master-field:has(textarea), .presentation-master-field:has(input[type="file"]) { grid-column: 1 / -1; }
-#presentation-master-status { display: grid; gap: 8px; margin-top: 16px; }
-#presentation-master-status pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 600px) { .presentation-master-form { grid-template-columns: minmax(0, 1fr); } .presentation-master-dialog { max-height: 100vh; } }
+
+.presentation-studio-edge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color, #dbe2ea);
+}
+
+.presentation-studio-edge label {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.presentation-studio-edge .form-input {
+    width: 100%;
+    min-width: 0;
+}
+
+.presentation-claim {
+    display: grid;
+    gap: 6px;
+    padding: 12px 0;
+    border-top: 1px solid var(--border-color, #dbe2ea);
+}
+
+.presentation-claim blockquote {
+    margin: 0;
+    padding-left: 10px;
+    border-left: 3px solid var(--primary, #10a37f);
+    white-space: pre-wrap;
+}
+
+.presentation-master-dialog {
+    max-width: 880px;
+    max-height: 92vh;
+    margin: auto;
+}
+
+.presentation-master-dialog .workspace-modal-body {
+    overflow: auto;
+    padding: 18px;
+}
+
+.presentation-master-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 14px 0;
+}
+
+.presentation-master-field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    font-size: .82rem;
+}
+
+.presentation-master-field:has(textarea),
+.presentation-master-field:has(input[type="file"]) {
+    grid-column: 1 / -1;
+}
+
+#presentation-master-status {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+#presentation-master-status pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+    .presentation-master-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .presentation-master-dialog {
+        max-height: 100vh;
+    }
+}
+
 .presentation-native-dialog {
     width: min(860px, 94vw);
     max-width: 860px;
@@ -3581,12 +4039,14 @@ body.dark-mode .presentation-story-item-title,
     box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
     transition: width 0.25s ease, max-width 0.25s ease;
 }
+
 .presentation-native-dialog.has-document {
     width: min(1460px, 96vw);
     max-width: 96vw;
     height: min(92vh, 920px);
     max-height: 94vh;
 }
+
 .presentation-native-body-wrap {
     padding: 18px 24px 24px;
     overflow-y: auto;
@@ -3594,6 +4054,7 @@ body.dark-mode .presentation-story-item-title,
     flex-direction: column;
     gap: 14px;
 }
+
 .presentation-native-banner {
     display: flex;
     align-items: center;
@@ -3605,6 +4066,7 @@ body.dark-mode .presentation-story-item-title,
     font-size: 0.78rem;
     color: var(--text-main);
 }
+
 .presentation-native-mode-pill {
     display: inline-flex;
     align-items: center;
@@ -3616,22 +4078,26 @@ body.dark-mode .presentation-story-item-title,
     color: #2563eb;
     white-space: nowrap;
 }
+
 .presentation-native-mode-pill.is-active {
     background: rgba(16, 163, 127, 0.15);
     color: #10a37f;
 }
+
 .presentation-native-mode-text {
     flex: 1;
     font-size: 0.76rem;
     color: var(--text-muted);
     line-height: 1.4;
 }
+
 .presentation-native-entry-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
     margin-top: 4px;
 }
+
 .presentation-native-card {
     display: flex;
     flex-direction: column;
@@ -3642,27 +4108,32 @@ body.dark-mode .presentation-story-item-title,
     background: var(--surface);
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.02);
 }
+
 .presentation-native-card-head {
     display: flex;
     align-items: center;
     gap: 8px;
 }
+
 .presentation-native-card-head svg {
     color: var(--primary);
     flex-shrink: 0;
 }
+
 .presentation-native-card-head h4 {
     margin: 0;
     font-size: 0.94rem;
     font-weight: 750;
     color: var(--text-main);
 }
+
 .presentation-native-card-desc {
     margin: 0;
     font-size: 0.75rem;
     color: var(--text-muted);
     line-height: 1.45;
 }
+
 .presentation-native-submit-btn {
     width: 100%;
     height: 36px;
@@ -3671,11 +4142,13 @@ body.dark-mode .presentation-story-item-title,
     font-weight: 750;
     margin-top: auto;
 }
+
 .presentation-native-existing-actions {
     display: flex;
     gap: 8px;
     margin-top: auto;
 }
+
 .presentation-native-existing-actions button {
     flex: 1;
     height: 36px;
@@ -3685,33 +4158,137 @@ body.dark-mode .presentation-story-item-title,
     font-weight: 750;
     white-space: nowrap;
 }
+
 .presentation-empty-hint {
     margin: 0;
     font-size: 0.78rem;
     color: var(--text-muted);
 }
-.presentation-native-dialog .workspace-modal-body { overflow: auto; }
-.presentation-native-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-bottom: 12px; }
-.presentation-native-field { display: grid; gap: 6px; min-width: 0; }
-.presentation-native-field .form-input { width: 100%; min-width: 0; }
-.presentation-native-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 16px; align-items: start; }
-.presentation-native-stage { position: relative; width: 100%; min-width: 0; border: 1px solid var(--border); }
-.presentation-native-stage > img { display: block; width: 100%; }
-.presentation-native-selection { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
-.presentation-native-hit { fill: transparent; stroke: transparent; cursor: pointer; }
-.presentation-native-hit:hover { stroke: var(--primary); stroke-width: 2px; }
-.presentation-native-hit.is-selected { stroke: var(--primary); stroke-width: 3px; cursor: move; }
-.presentation-native-properties { min-width: 0; max-height: 65vh; overflow: auto; }
-.presentation-native-section { margin: 10px 0; padding: 10px 0; border-top: 1px solid var(--border); }
-.presentation-native-section > summary { cursor: pointer; margin-bottom: 10px; }
-.presentation-native-section .presentation-native-field { margin-bottom: 8px; }
-.presentation-native-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.presentation-native-video { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-#presentation-native-narration { display: grid; gap: 10px; margin: 10px 0; }
+
+.presentation-native-dialog .workspace-modal-body {
+    overflow: auto;
+}
+
+.presentation-native-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.presentation-native-field {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.presentation-native-field .form-input {
+    width: 100%;
+    min-width: 0;
+}
+
+.presentation-native-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+    gap: 16px;
+    align-items: start;
+}
+
+.presentation-native-stage {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border);
+}
+
+.presentation-native-stage>img {
+    display: block;
+    width: 100%;
+}
+
+.presentation-native-selection {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+}
+
+.presentation-native-hit {
+    fill: transparent;
+    stroke: transparent;
+    cursor: pointer;
+}
+
+.presentation-native-hit:hover {
+    stroke: var(--primary);
+    stroke-width: 2px;
+}
+
+.presentation-native-hit.is-selected {
+    stroke: var(--primary);
+    stroke-width: 3px;
+    cursor: move;
+}
+
+.presentation-native-properties {
+    min-width: 0;
+    max-height: 65vh;
+    overflow: auto;
+}
+
+.presentation-native-section {
+    margin: 10px 0;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.presentation-native-section>summary {
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+
+.presentation-native-section .presentation-native-field {
+    margin-bottom: 8px;
+}
+
+.presentation-native-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.presentation-native-video {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+#presentation-native-narration {
+    display: grid;
+    gap: 10px;
+    margin: 10px 0;
+}
+
 @media (max-width: 760px) {
-    .presentation-native-entry-grid { grid-template-columns: minmax(0, 1fr); }
-    .presentation-native-layout { grid-template-columns: minmax(0, 1fr); }
-    .presentation-native-properties { max-height: none; }
-    .presentation-native-toolbar > * { max-width: 100%; }
-    .presentation-native-dialog { width: 96vw; }
+    .presentation-native-entry-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .presentation-native-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .presentation-native-properties {
+        max-height: none;
+    }
+
+    .presentation-native-toolbar>* {
+        max-width: 100%;
+    }
+
+    .presentation-native-dialog {
+        width: 96vw;
+    }
 }

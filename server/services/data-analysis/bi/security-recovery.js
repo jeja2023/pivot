@@ -14,8 +14,8 @@ function invalid() { return biError('ANALYSIS_SECURITY_RECONCILIATION_REQUIRED',
 async function replay({ reason }) {
     if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) throw invalid();
     return journalRepository.withPump(async (client, state) => {
-        // Persist closure before touching recovered rows, including on later
-        // missing-key, corrupt-entry or transaction failure paths.
+        // 在改动已恢复行之前持久化闭包状态，包括后续缺失密钥、条目损坏或事务失败路径。
+
         await journalRepository.close(client, reason.trim());
         const config = await files.configuration(), chain = await files.readChain(config, state.origin_id);
         if (Number(state.journal_position) > chain.position || Number(state.journal_position) > 0 && chain.entries[Number(state.journal_position) - 1]?.hash !== state.journal_hash) throw files.unavailable();
@@ -65,8 +65,8 @@ async function reconcile(envelope) {
         if (state.mode !== 'recovery_required') throw invalid();
         const config = await files.configuration(), chain = await files.readChain(config, state.origin_id);
         const body = await validateAuthority(envelope, state, chain);
-        // The repository holds table write locks while checking completeness
-        // and credential fingerprints, so a concurrent row cannot be omitted.
+        // 仓储在检查完整性和凭据指纹时持有表写锁，防止并发新增行被遗漏。
+
         if (state.pending_reconciliation_hash !== canonicalHash(body)) try { await recovery.applyAuthority(client, body, chain, canonicalHash(body)); } catch (_) { throw invalid(); }
         return { authorityDigest: canonicalHash(body) };
     });

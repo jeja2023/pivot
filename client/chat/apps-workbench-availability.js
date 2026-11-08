@@ -52,11 +52,16 @@
         PivotSafeHtml.setHtml(grid, visible.map(app => {
             const enabled = isEnabled(app.id);
             const busy = saving.has(app.id);
-            return `<article class="app-card ${catalog.canManage ? 'has-management' : ''} ${enabled ? 'is-enabled' : 'is-disabled'}">
+            const switchAction = enabled ? '关闭' : '开启';
+            const switchAria = `${switchAction}${escapeAppsHtml(app.name)}`;
+            const switchTitle = enabled ? '点击关闭应用' : '点击开启应用';
+            const switchClass = enabled ? 'is-enabled' : 'is-disabled';
+            const switchState = busy ? '保存中…' : switchAction;
+            return `<article class="app-card ${catalog.canManage ? 'has-management' : ''} ${switchClass}">
                 ${catalog.canManage ? `<div class="app-card-management">
-                    <button class="app-card-switch ${enabled ? 'is-enabled' : 'is-disabled'} btn-pill" type="button" role="switch" aria-checked="${enabled}" data-app-toggle="${escapeAppsHtml(app.id)}" aria-label="${enabled ? '关闭' : '开启'}${escapeAppsHtml(app.name)}" ${busy ? 'disabled aria-busy="true"' : ''} title="${enabled ? '点击关闭应用' : '点击开启应用'}">
+                    <button class="btn-secondary app-card-switch ${switchClass}" type="button" role="switch" aria-checked="${enabled}" data-app-toggle="${escapeAppsHtml(app.id)}" aria-label="${switchAria}" ${busy ? 'disabled aria-busy="true"' : ''} title="${switchTitle}">
                         <span class="app-card-switch-track" aria-hidden="true"><span class="app-card-switch-thumb"></span></span>
-                        <span class="app-card-switch-label">${busy ? '保存中…' : enabled ? '关闭' : '开启'}</span>
+                        <span class="app-card-switch-label">${switchState}</span>
                     </button>
                 </div>` : ''}
                 <button class="btn-secondary app-card-open" type="button" data-app-id="${escapeAppsHtml(app.id)}" aria-label="打开${escapeAppsHtml(app.name)}" ${enabled ? '' : 'disabled'}>
@@ -146,7 +151,8 @@
                 method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !app.enabled })
             });
             const data = await response.json();
-            if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || '应用状态保存失败，请重试。');
+            const errorMessage = typeof data.error === 'string' ? data.error : data.error?.message || '应用状态保存失败，请重试。';
+            if (!response.ok) throw new Error(errorMessage);
             if (identity() !== requestOwner) return;
             // 写入确认后重新读取，避免覆盖其他 admin 会话刚保存的状态。
             if (pending) await pending;

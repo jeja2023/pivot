@@ -33,8 +33,8 @@ test('independent watchdog releases the real write barrier while its coordinator
         const pid = (await victim.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
         assert.equal(await reference.tryBarrier(victim), true);
         await guardian.arm(pid, Date.now() + 500);
-        // Intentional test-only coordinator suspension; the watchdog has its
-        // own event loop/DB connection and must still terminate this session.
+        // 测试专用的协调器暂停逻辑；看门狗拥有独立事件循环与数据库连接，仍必须终止该会话。
+
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
         assert.equal(await reference.tryBarrier(observer), true);
         await reference.releaseBarrier(observer); assert.equal(expired, true);
@@ -76,8 +76,8 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
         await run(['scripts/test_support/bi_physical_application.js', mode, input || '-', output], selectedEnv);
         return JSON.parse(await fs.readFile(output, 'utf8'));
     };
-    // Validate the real production startup contract before the long physical
-    // copy, and escrow the same settings that the restored process will use.
+    // 在执行耗时物理拷贝前验证真实生产启动契约，并托管已恢复进程将使用的相同配置。
+
     await run(['-e', "require('./server/config').validateConfig()"]);
     await run(['scripts/setup_pg_test_db.js']);
     const client = new Client({ connectionString: cluster.url }); await client.connect(); await client.query(`SET search_path TO "${schema}",public`);
@@ -105,7 +105,7 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
         await client.query('CREATE TABLE uncovered_reference(id INT)');
         assert.ok((await reference.coverage(client)).some(row => row.relname === 'uncovered_reference'));
         await assert.rejects(recovery.createPoint(config, base.id), /未覆盖/); await client.query('DROP TABLE uncovered_reference');
-        // All applications, rather than just analysis tables, join the gate.
+        // 所有应用（而不只是分析表）共同接入该屏障。
         const writer = new Client({ connectionString: cluster.url }); await writer.connect(); await writer.query(`SET search_path TO "${schema}",public`);
         try {
             assert.equal(await reference.tryBarrier(client), true);
@@ -165,8 +165,8 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
         assert.ok(Number((await client.query("SELECT COUNT(*) AS n FROM analysis_object_references WHERE reference_kind='backup' AND reference_id=$1", [point.id])).rows[0].n) > 0);
         const { point: manifest } = await recovery.verifyPoint(config, point.id);
         assert.ok(counter > 0); assert.ok(manifest.files.every(item => !path.resolve(item.root, item.path).startsWith(path.dirname(temporary) + path.sep)));
-        // Each required independent component must fail before any restore
-        // destination is created. Missing/tampered data is never success.
+        // 每个必需的独立组件必须在创建任何恢复目标前报错；缺失或被篡改的数据绝不标记成功。
+
         const walFile = physical.walPath(config, manifest.wal[0]);
         await fs.rename(walFile, walFile + '.missing');
         try { await assert.rejects(recovery.verifyPoint(config, point.id)); }
@@ -180,8 +180,8 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
         try { await assert.rejects(physical.configuration(configFile)); }
         finally { await fs.rename(backupKey + '.missing', backupKey); }
         await action('revoke', fixtureFile);
-        // Current authority is copied independently before loss, never derived
-        // from the restored historic DB as the expected authorization policy.
+        // 当前授权在丢失前独立复制，绝不直接将已恢复历史数据库派生为预期授权策略。
+
         const authoritative = await require('../server/repositories/analysis-security-recovery').authorityDraft(client);
         const authorityFile = path.join(independent, 'current-authority.json');
         await fs.writeFile(authorityFile, JSON.stringify({ resources: authoritative, privateKey: signing.privateKey.export({ type: 'pkcs8', format: 'pem' }) }), { mode: 0o600 });
@@ -225,8 +225,8 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
         assert.ok(rpoSeconds <= 900); assert.ok(rtoSeconds <= 3600);
     } finally { await client.end().catch(() => {}); await restoredClient?.end(); }
 }, { durable: true,
-    // Analysis stores project-relative paths when temp is inside the source
-    // tree. A distinct owned mount proves the supported @analysis contract
-    // without reading/overwriting the developer's real .env/config files.
+    // 当临时目录位于源码树内部时，分析模块存储项目相对路径；独立的专用挂载验证受支持的契约，
+    // 不覆盖开发者的真实配置文件。
+
     tempRoot: sealed.inside(path.resolve(__dirname, '..'), os.tmpdir()) ? path.join(path.parse(os.tmpdir()).root, 'pivot-isolated-recovery-tests') : os.tmpdir(),
     settings: ["archive_mode = 'on'", "wal_level = 'replica'", 'full_page_writes = on', 'fsync = on', 'synchronous_commit = on', 'archive_timeout = 60'] }));

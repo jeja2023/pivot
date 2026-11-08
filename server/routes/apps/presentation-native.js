@@ -6,7 +6,8 @@ const runtime = require('../../services/presentations/master/runtime');
 
 function registerPresentationNativeRoutes(router, { authMiddleware, asyncHandler, writeLog }) {
     const root = '/apps/presentations/native';
-    router.get(root + '/info', authMiddleware, asyncHandler(async (_req, res) => res.json({ engine: runtime.availability(), videoMode: 'page_video', network: 'disabled' })));
+    const networkStatus = 'disabled';
+    router.get(root + '/info', authMiddleware, asyncHandler(async (_req, res) => res.json({ engine: runtime.availability(), videoMode: 'page_video', network: networkStatus })));
     router.get(root + '/documents', authMiddleware, asyncHandler(async (req, res) => res.json({ documents: await documents.list(req.user) })));
     router.get(root + '/documents/:id', authMiddleware, asyncHandler(async (req, res) => res.json({ document: documents.publicDocument(await documents.get(req.user, req.params.id)) })));
     router.get(root + '/documents/:id/versions', authMiddleware, asyncHandler(async (req, res) => res.json({ versions: await documents.versions(req.user, req.params.id) })));
