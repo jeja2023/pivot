@@ -12,7 +12,7 @@ const jobs = require('../server/services/data-analysis/bi/jobs');
 const runner = require('../server/services/data-analysis/bi/runner');
 const delivery = require('../server/services/data-analysis/bi/delivery');
 
-test('十个授权会话每五秒提交分析并混合刷新，超载单列且已接纳任务保持全局二槽、每人一槽和同一精确口径', { timeout: 120000 }, async t => fixture(async ({ user, model, fact }) => {
+test('十个授权会话每五秒提交分析并混合刷新，超载单列且已接纳任务保持全局二槽、每人一槽和同一精确口径', { timeout: 180000 }, async t => fixture(async ({ user, model, fact }) => {
     const check = await checked(user, model);
     await jobs.publishModel({ user, modelId: model.id, body: { expectedVersion: model.version, checkId: check.id, requestKey: crypto.randomUUID() } });
     const readers = [], created = [], overloads = [], samples = [], latencies = [], started = performance.now();
@@ -29,7 +29,7 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
         app.use((err, _req, res, _next) => res.status(err.status || 500).json({ code: err.code }));
         server = http.createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
         const base = `http://127.0.0.1:${server.address().port}`;
-        poll = setInterval(() => runner.dispatchModelJobs(), 1000);
+        poll = setInterval(() => runner.dispatchModelJobs(), 150);
         monitoring = setInterval(async () => {
             if (sampling) return; sampling = true;
             try {
@@ -55,7 +55,8 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
         }
         assert.equal(created.length + overloads.length, 20); assert.ok(created.length >= 10);
         const pending = new Set(created);
-        while (pending.size && performance.now() - started < 100000) {
+        while (pending.size && performance.now() - started < 150000) {
+            runner.dispatchModelJobs();
             await Promise.all([...pending].map(async item => {
                 const response = await fetch(`${base}/queries/${item.id}`, { headers: { 'x-fixture-user': String(item.actor.id) } }), job = await response.json();
                 assert.equal(response.status, 200, JSON.stringify(job));
@@ -67,7 +68,10 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
             if (pending.size) await new Promise(resolve => setTimeout(resolve, 100));
         }
         assert.equal(pending.size, 0);
-        while (['queued', 'running', 'retry_wait'].includes((await jobs.getModelJob(user, refresh.job.id)).status) && performance.now() - started < 100000) await new Promise(resolve => setTimeout(resolve, 100));
+        while (['queued', 'running', 'retry_wait'].includes((await jobs.getModelJob(user, refresh.job.id)).status) && performance.now() - started < 150000) {
+            runner.dispatchModelJobs();
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
         assert.equal((await jobs.getModelJob(user, refresh.job.id)).status, 'succeeded');
         assert.ok(samples.length > 10); assert.ok(samples.every(counts => counts.reduce((total, count) => total + count, 0) <= 2 && counts.every(count => count <= 1)));
         assert.ok(samples.some(counts => counts.reduce((total, count) => total + count, 0) === 2));

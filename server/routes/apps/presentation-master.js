@@ -6,8 +6,8 @@ const runtime = require('../../services/presentations/master/runtime');
 function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler, writeLog }) {
     router.get('/apps/presentations/template-catalog', authMiddleware, asyncHandler(async (req, res) => res.json(await require('../../services/presentations/presentation-template-catalog').list(req.user))));
     router.get('/apps/presentations/master/info', authMiddleware, asyncHandler(async (_req, res) => {
-        const available = runtime.availability();
-        res.json({ engine: { ...available, revision: runtime.lock.revision, version: runtime.lock.skillVersion,
+        const available = await runtime.availability();
+        res.json({ engine: { ...available, revision: available.revision || runtime.lock.revision, version: available.version || runtime.lock.skillVersion,
             operations: ['generate', 'create_template', 'edit_native'], profiles: ['default', 'quick', 'beautify', 'image_to_pptx'],
             editing: '保留原生PPTX和完整项目源包；复杂对象不自动转换为Pivot画布。' } });
     }));

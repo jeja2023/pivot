@@ -32,11 +32,11 @@
         if (!select.value && select.options.length) select.value = select.options[0].value;
     }
     async function free() {
-        const { engine } = await helpers.requestJson('/api/apps/presentations/master/info');
+        const { engine } = await helpers.requestJson('/api/apps/presentations/master/info').catch(() => ({ engine: { enabled: false } }));
         if (engine.enabled) return window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', profile: 'default', template: null });
         helpers.openCreateModal('executive-clean');
         const note = byId('presentation-create-design-note');
-        if (note) { note.textContent = '当前使用标准AI工作台设计，默认采用通用用途布局；完整制作引擎尚未配置。可按需选择单位模板。'; note.classList.remove('hidden'); }
+        if (note) { note.textContent = '当前使用标准AI工作台，可正常创建、编辑和导出PPT。独立完整制作服务未连接或暂不可用。'; note.classList.remove('hidden'); }
     }
     async function preserve() {
         const { engine } = await helpers.requestJson('/api/apps/presentations/master/info');

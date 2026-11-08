@@ -420,8 +420,8 @@
             <div class="modeling-drawer-subhead">
                 <span>内置函数库（点击直接插入模板）</span>
                 <div class="modeling-fn-tabs">${FUNCTION_CATEGORIES.map(([cat, label]) => {
-                    return `<button class="btn-secondary modeling-mini-btn${state.fnCategory === cat ? ' is-selected' : ''}" type="button" data-flow-fn-cat="${cat}">${esc(label)}</button>`;
-                }).join('')}</div>
+            return `<button class="btn-secondary modeling-mini-btn${state.fnCategory === cat ? ' is-selected' : ''}" type="button" data-flow-fn-cat="${cat}">${esc(label)}</button>`;
+        }).join('')}</div>
             </div>
             <div class="modeling-fn-grid">${fnItems}</div>
         </div>`;
@@ -463,9 +463,9 @@
             </label>
             <div class="modeling-flow-list">
                 ${conds.map((cond, idx) => {
-                    const hideVal = ['is_null', 'is_not_null'].includes(cond.operator);
-                    const valPlaceholder = cond.operator === 'in' ? '多个值用逗号分隔' : '输入比较值';
-                    return `<div class="modeling-flow-row-card">
+                const hideVal = ['is_null', 'is_not_null'].includes(cond.operator);
+                const valPlaceholder = cond.operator === 'in' ? '多个值用逗号分隔' : '输入比较值';
+                return `<div class="modeling-flow-row-card">
                         <div class="modeling-flow-row-top">
                             <select class="form-input" data-flow-cond-field="${idx}" aria-label="筛选字段"${dis}>${renderColumnSelectOptions(firstCols, cond.field, '选择或输入字段')}</select>
                             <select class="form-input" data-flow-cond-op="${idx}" aria-label="筛选条件"${dis}>${FILTER_OPERATOR_OPTIONS.map(([k, lbl]) => `<option value="${k}"${k === cond.operator ? ' selected' : ''}>${esc(lbl)}</option>`).join('')}</select>
@@ -473,7 +473,7 @@
                         </div>
                         ${hideVal ? '' : `<input class="form-input" data-flow-cond-val="${idx}" value="${esc(cond.value ?? '')}" placeholder="${valPlaceholder}" maxlength="1000"${dis}>`}
                     </div>`;
-                }).join('')}
+            }).join('')}
             </div>
             <button class="btn-secondary" type="button" data-flow-add-cond${dis}>+ 添加筛选条件</button>`;
         }
@@ -486,15 +486,15 @@
             </label>
             <div class="modeling-flow-list">
                 ${fields.map((item, idx) => {
-                    const exprId = `modeling-flow-expr-${idx}`;
-                    return `<div class="modeling-flow-row-card">
+                const exprId = `modeling-flow-expr-${idx}`;
+                return `<div class="modeling-flow-row-card">
                         <div class="modeling-flow-row-top">
                             <input class="form-input" data-flow-formula-name="${idx}" value="${esc(item.name || '')}" placeholder="新字段名称（如：折后金额）" maxlength="80"${dis}>
                             <button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-formula="${idx}"${dis}>删除</button>
                         </div>
                         <textarea id="${exprId}" class="form-input modeling-code-input" rows="2" data-flow-formula-expr="${idx}" placeholder="输入函数表达式，例如：ROUND(TRY_CAST(&quot;金额&quot; AS DOUBLE) * 0.9, 2)" maxlength="2000"${dis}>${esc(item.expression || '')}</textarea>
                     </div>`;
-                }).join('')}
+            }).join('')}
             </div>
             <button class="btn-secondary" type="button" data-flow-add-formula${dis}>+ 添加计算字段</button>
             ${renderFunctionAssistant(firstCols, firstCols[0] || '')}`;
@@ -516,7 +516,7 @@
             </label>
             <div class="modeling-flow-list">
                 ${pairs.map((pair, idx) => {
-                    return `<div class="modeling-flow-row-card">
+                return `<div class="modeling-flow-row-card">
                         <div class="modeling-flow-row-top">
                             <select class="form-input" data-flow-join-left="${idx}" aria-label="左表关联字段"${dis}>${renderColumnSelectOptions(firstCols, pair.leftField, '左表字段')}</select>
                             <span class="text-muted">=</span>
@@ -524,7 +524,7 @@
                             <button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-join="${idx}"${dis}>删除</button>
                         </div>
                     </div>`;
-                }).join('')}
+            }).join('')}
             </div>
             <button class="btn-secondary" type="button" data-flow-add-join${dis}>+ 添加复合关联键</button>`;
         }
@@ -546,7 +546,7 @@
             <div class="modeling-drawer-subhead"><span>汇总统计指标</span></div>
             <div class="modeling-flow-list">
                 ${aggs.map((agg, idx) => {
-                    return `<div class="modeling-flow-row-card">
+                return `<div class="modeling-flow-row-card">
                         <div class="modeling-flow-row-top">
                             <select class="form-input" data-flow-agg-fn="${idx}" aria-label="聚合函数"${dis}>${AGG_FN_OPTIONS.map(([k, lbl]) => `<option value="${k}"${k === agg.fn ? ' selected' : ''}>${esc(lbl)}</option>`).join('')}</select>
                             ${agg.fn === 'count' ? '' : `<select class="form-input" data-flow-agg-field="${idx}" aria-label="聚合字段"${dis}>${renderColumnSelectOptions(firstCols, agg.field, '选择统计字段')}</select>`}
@@ -554,7 +554,7 @@
                         </div>
                         <input class="form-input" data-flow-agg-alias="${idx}" value="${esc(agg.alias || '')}" placeholder="输出列名（留空自动生成）" maxlength="80"${dis}>
                     </div>`;
-                }).join('')}
+            }).join('')}
             </div>
             <button class="btn-secondary" type="button" data-flow-add-agg${dis}>+ 添加汇总指标</button>`;
         }
@@ -587,11 +587,11 @@
             </div>
             <div class="modeling-flow-list modeling-select-col-list">
                 ${mergedList.length ? mergedList.map((col, idx) => {
-                    return `<div class="modeling-select-col-row">
+                return `<div class="modeling-select-col-row">
                         <label class="modeling-checkbox"><input type="checkbox" data-flow-sel-on="${idx}" data-flow-sel-field="${esc(col.field)}"${col.enabled !== false ? ' checked' : ''}${dis}><span>${esc(col.field)}</span></label>
                         <input class="form-input" data-flow-sel-alias="${idx}" data-flow-sel-field="${esc(col.field)}" value="${esc(col.alias || '')}" placeholder="重命名（可选）" maxlength="80"${dis}>
                     </div>`;
-                }).join('') : '<span class="text-muted">连接上游节点后自动列出可勾选字段</span>'}
+            }).join('') : '<span class="text-muted">连接上游节点后自动列出可勾选字段</span>'}
             </div>`;
         }
 
@@ -637,8 +637,8 @@
                     <span class="modeling-rail-count">${inEdges.length}${spec.maxInputs ? ` / ${spec.maxInputs}` : ''}</span>
                 </div>
                 ${inEdges.length ? `<div class="modeling-chip-wrap">${inEdges.map((edge, idx) => {
-                    return `<span class="modeling-edge-chip">输入${idx + 1}：<strong>${esc(getAnyNodeName(edge.fromNodeId))}</strong>${editable ? `<button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-edge="${esc(edge.id)}" title="断开此输入连线">×</button>` : ''}</span>`;
-                }).join('')}</div>` : '<p class="modeling-rail-tip">尚未连接上游节点：请从画布上游节点右侧圆点拖线至本节点左侧圆点。</p>'}
+                return `<span class="modeling-edge-chip">输入${idx + 1}：<strong>${esc(getAnyNodeName(edge.fromNodeId))}</strong>${editable ? `<button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-edge="${esc(edge.id)}" title="断开此输入连线">×</button>` : ''}</span>`;
+            }).join('')}</div>` : '<p class="modeling-rail-tip">尚未连接上游节点：请从画布上游节点右侧圆点拖线至本节点左侧圆点。</p>'}
             </div>`
             : '';
 

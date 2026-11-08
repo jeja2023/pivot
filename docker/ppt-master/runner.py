@@ -20,7 +20,8 @@ from tool_catalog import TOOLS, command, relative_path
 ENGINE = Path(os.environ.get("PIVOT_MASTER_ENGINE_ROOT", "/engine"))
 WORKSPACE = Path(os.environ.get("PIVOT_MASTER_WORKSPACE", "/workspace"))
 SKILL = ENGINE / "skill"
-REVISION = "769547394107870a0c7b5ad8d1c0c75035123aef"
+LOCK_PATH = Path("/runner/engine-lock.json") if Path("/runner/engine-lock.json").is_file() else Path(__file__).resolve().parents[2] / "config/ppt-master-engine.json"
+REVISION = json.loads(LOCK_PATH.read_text(encoding="utf-8"))["revision"]
 TEXT_EXTENSIONS = {".md", ".json", ".yaml", ".yml", ".txt", ".svg", ".csv", ".xml"}
 MAX_TEXT = 180_000
 MAX_WORKSPACE = 250 * 1024 * 1024

@@ -1,0 +1,38 @@
+'use strict';
+/* global window */
+const { test, expect } = require('@playwright/test');
+
+test('独立PPT服务停机时标准AI创建、编辑与PPTX导出继续工作', async ({ page }) => {
+    test.setTimeout(120000);
+    expect((await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } })).ok()).toBeTruthy();
+    const csrf = async () => ({ 'x-csrf-token': (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value });
+    const name = '标准PPT独立性-' + Date.now();
+    expect((await page.request.post('/api/models', { headers: await csrf(), data: { name, url: process.env.E2E_MODEL_URL, model_name: 'ppt-storyline-e2e-slow' } })).ok()).toBeTruthy();
+    const model = (await (await page.request.get('/api/models?limit=100')).json()).data.find(item => item.name === name);
+    await page.request.put('/api/settings/default-model', { headers: await csrf(), data: { default_model_id: model.id } });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    const info = await (await page.request.get('/api/apps/presentations/master/info')).json(); expect(info.engine.enabled).toBe(false); expect(info.engine.transport).toBe('service');
+    await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
+    await expect(page.locator('#presentation-create-modal')).toBeVisible(); await expect(page.locator('#presentation-create-design-note')).toContainText('标准AI工作台');
+    await page.locator('#presentation-create-topic').fill('无独立引擎时继续制作'); await page.locator('#presentation-create-pages').fill('3');
+    await page.locator('#presentation-create-model').selectOption(String(model.id)); await page.locator('#presentation-create-submit-btn').click();
+    await expect(page.locator('#presentation-outline-confirm-btn')).toBeVisible({ timeout: 20000 });
+    const creating = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations') && response.request().method() === 'POST');
+    await page.locator('#presentation-outline-confirm-btn').click(); const created = await creating; expect(created.ok(), await created.text()).toBeTruthy();
+    const document = (await created.json()).presentation; expect(document.content.slides.length).toBe(3);
+    await page.locator('[data-presentation-panel="story"]').click(); await page.locator('#presentation-story-takeaway').fill('服务离线后的标准编辑'); await page.locator('#presentation-story-save').click();
+    await expect.poll(async () => (await (await page.request.get('/api/apps/presentations/' + document.id)).json()).presentation.content.slides[0].intent.takeaway).toBe('服务离线后的标准编辑');
+    const response = await page.request.post('/api/apps/presentations/' + document.id + '/export', { headers: await csrf(), data: { format: 'pptx' } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const rendition = (await response.json()).rendition;
+    const token = await page.request.post('/api/agents/renditions/' + rendition.id + '/download-token', { headers: await csrf() }); expect(token.ok()).toBeTruthy();
+    const download = await page.request.get('/api/agents/renditions/' + rendition.id + '/download?token=' + encodeURIComponent((await token.json()).token)); expect(download.ok()).toBeTruthy();
+    expect((await download.body()).subarray(0, 2).toString()).toBe('PK');
+    const pdf = await page.request.post('/api/apps/presentations/' + document.id + '/export', { headers: await csrf(), data: { format: 'pdf' } }); expect(pdf.ok(), await pdf.text()).toBeTruthy();
+    const pdfRendition = (await pdf.json()).rendition;
+    const pdfToken = await page.request.post('/api/agents/renditions/' + pdfRendition.id + '/download-token', { headers: await csrf() }); expect(pdfToken.ok()).toBeTruthy();
+    const pdfDownload = await page.request.get('/api/agents/renditions/' + pdfRendition.id + '/download?token=' + encodeURIComponent((await pdfToken.json()).token)); expect(pdfDownload.ok()).toBeTruthy();
+    expect((await pdfDownload.body()).subarray(0, 4).toString()).toBe('%PDF'); expect(errors).toEqual([]);
+});

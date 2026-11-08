@@ -35,7 +35,7 @@ if __name__ == "__main__":
                     target = tarfile.TarInfo("artifacts/ppt-master-runtime/skill/" + member.name[len(prefix):])
                     target.size = member.size; target.mode = 0o644; target.mtime = 0
                     output.addfile(target, source.extractfile(member))
-            files = ["config/ppt-master-engine.json", "docker/ppt-master/Dockerfile", "docker/ppt-master/runner.py", "docker/ppt-master/tool_catalog.py", "docker/ppt-master/template_adapter.py", "docker/ppt-master/requirements.lock", "docker/ppt-master/preview-requirements.lock"]
+            files = ["config/ppt-master-engine.json", "docker/ppt-master/Dockerfile", "docker/ppt-master/runner.py", "docker/ppt-master/tool_catalog.py", "docker/ppt-master/template_adapter.py", "docker/ppt-master/requirements.lock", "docker/ppt-master/preview-requirements.lock", "docker/ppt-master/service.py", "docker/ppt-master/service_jobs.py", "docker/ppt-master/service_worker.py", "docker/ppt-master/service_sandbox.py"]
             files += [file.relative_to(ROOT).as_posix() for file in sorted((ROOT / "docker/ppt-master").glob("native_*.py"))]
             for name in files:
                 data = (ROOT / name).read_bytes()

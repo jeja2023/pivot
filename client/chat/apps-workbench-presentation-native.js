@@ -160,8 +160,8 @@
         const banner = byId('presentation-native-banner');
         if (banner) {
             banner.replaceChildren();
-            const pill = node('span', 'presentation-native-mode-pill' + (engine.enabled ? ' is-active' : ''), engine.enabled ? '高阶制作引擎就绪' : '离线原生模式');
-            const msg = node('span', 'presentation-native-mode-text', engine.enabled ? '支持云端完整重构制作与本地原生编辑双模式。' : '当前使用本地原生引擎解析 PPTX 对象、图层微调与离线视频导出（无需云端模型）。');
+            const pill = node('span', 'presentation-native-mode-pill' + (engine.enabled ? ' is-active' : ''), engine.enabled ? '原稿制作服务就绪' : '原稿服务未连接');
+            const msg = node('span', 'presentation-native-mode-text', engine.enabled ? '可编辑原生PPTX对象、保存版本并制作离线页面视频。' : '原稿编辑与视频需要完整制作服务；标准PPT创建、编辑和导出仍可使用。');
             banner.append(pill, msg);
         }
         if (!engine.enabled) { showError(new Error(engine.message)); return; }
@@ -285,8 +285,10 @@
             const body = new FormData(); body.append('file', input.files[0]); body.append('assetType', 'audio');
             const { asset } = await helpers.requestJson('/api/apps/presentations/assets', { method: 'POST', body }); narration.push({ slideIndex: Number(input.dataset.narrationSlide), assetId: String(asset.id) });
         }
-        await begin({ kind: 'video', documentId: documentValue.id, baseVersion: documentValue.version, title: documentValue.title, mode: 'page_video', acknowledgeStatic: true,
-            duration: Number(byId('presentation-native-video-duration').value), resolution: byId('presentation-native-video-resolution').value, fps: Number(byId('presentation-native-video-fps').value), transition: byId('presentation-native-video-transition').value, narration });
+        await begin({
+            kind: 'video', documentId: documentValue.id, baseVersion: documentValue.version, title: documentValue.title, mode: 'page_video', acknowledgeStatic: true,
+            duration: Number(byId('presentation-native-video-duration').value), resolution: byId('presentation-native-video-resolution').value, fps: Number(byId('presentation-native-video-fps').value), transition: byId('presentation-native-video-transition').value, narration
+        });
     }
     function bind(state, suppliedHelpers) {
         presentationState = state; helpers = suppliedHelpers; if (bound) return; bound = true;

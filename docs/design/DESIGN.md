@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-11-08
-- Release baseline: v0.7.134
+- Release baseline: v0.7.135
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。
@@ -33,6 +33,8 @@
 - Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
 
 ## PPT 原稿编辑与离线视频
+
+- v0.7.135完整PPT引擎优先作为独立内网HTTP服务，主应用仅配置地址和密钥；兼容协议的更新只替换服务镜像，PPT路径不授予主应用Docker权限或共享任务目录。服务不可用时保留标准创建、编辑、故事线与导出，完整引擎专属功能明确依赖状态；正在处理的原稿或制作任务不静默切换实现。
 
 - v0.7.133生产部署把发布签名与镜像登记收进构建工具；首次登记发布公钥后，生产用单命令导入、验签、切换和检查。PPT信任与其他Worker隔离，失败恢复原配置，活跃任务不被更新中断；默认部署不启用Docker socket，显式安装后才授予可信协调进程。
 

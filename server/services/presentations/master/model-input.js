@@ -1,7 +1,5 @@
 'use strict';
 
-const fs = require('node:fs/promises');
-const path = require('node:path');
 const sharp = require('sharp');
 const { modelSupportsVision } = require('../../models');
 const { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_INPUT_PIXELS, MAX_IMAGE_OUTPUT_BYTES, IMAGE_OUTPUT_SIZE, getMaxImagesPerMessage } = require('../../../image-safety');
@@ -9,11 +7,7 @@ const runtime = require('./runtime');
 
 async function sourceImage(user, id, relative) {
     if (!/^inputs\/[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:png|jpe?g|webp)$/.test(relative || '')) throw runtime.error('模型图片必须来自当前任务的输入快照。');
-    const root = await runtime.workspace(user, id), file = path.join(root, relative);
-    const stat = await fs.lstat(file), resolved = await fs.realpath(file);
-    const comparable = value => process.platform === 'win32' ? value.toLowerCase() : value;
-    if (!stat.isFile() || stat.isSymbolicLink() || comparable(resolved) !== comparable(file) || stat.size > MAX_IMAGE_UPLOAD_BYTES) throw runtime.error('模型图片无效、已重定向或超过输入大小上限。');
-    const buffer = await fs.readFile(file);
+    const buffer = await runtime.inputBuffer(user, id, relative.slice('inputs/'.length), MAX_IMAGE_UPLOAD_BYTES);
     const normalized = await sharp(buffer, { animated: false, failOn: 'warning', limitInputPixels: MAX_IMAGE_INPUT_PIXELS })
         .rotate().resize({ width: IMAGE_OUTPUT_SIZE, height: IMAGE_OUTPUT_SIZE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
     if (normalized.length > MAX_IMAGE_OUTPUT_BYTES) throw runtime.error('模型图片压缩后仍超过输入上限。');

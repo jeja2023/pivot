@@ -8,16 +8,74 @@ const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const execute = promisify(execFile);
 
-async function postgresBin(explicit) {
-    if (explicit) return path.resolve(explicit);
-    if (process.platform !== 'win32') return '';
-    const root = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PostgreSQL');
-    const directories = await fs.readdir(root);
-    for (const directory of directories.sort((a, b) => Number(b) - Number(a))) {
-        const bin = path.join(root, directory, 'bin');
-        try { await fs.access(path.join(bin, 'initdb.exe')); return bin; } catch (_) { /* 尝试已安装的下一个版本。 */ }
+async function resolvePostgresBin(explicit) {
+    if (explicit) {
+        const resolved = path.resolve(explicit);
+        const ext = process.platform === 'win32' ? '.exe' : '';
+        try { await fs.access(path.join(resolved, `initdb${ext}`)); return resolved; } catch (_) { return null; }
     }
-    throw new Error('未找到 PostgreSQL 测试运行时，请用 --pg-bin 指定安装目录。');
+    if (process.platform === 'win32') {
+        const root = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PostgreSQL');
+        try {
+            const directories = await fs.readdir(root);
+            for (const directory of directories.sort((a, b) => Number(b) - Number(a))) {
+                const bin = path.join(root, directory, 'bin');
+                try { await fs.access(path.join(bin, 'initdb.exe')); return bin; } catch (_) { /* 尝试已安装的下一个版本。 */ }
+            }
+        } catch (_) { /* 忽略读取错误。 */ }
+    } else {
+        try {
+            await execute('initdb', ['--version']);
+            return '';
+        } catch (_) { /* PATH 中无 initdb，继续检索常见安装路径。 */ }
+        for (const candidate of ['/usr/lib/postgresql', '/usr/local/opt/postgresql', '/opt/homebrew/opt/postgresql']) {
+            try {
+                const directories = await fs.readdir(candidate);
+                for (const directory of directories.sort((a, b) => Number(b) - Number(a))) {
+                    const bin = path.join(candidate, directory, 'bin');
+                    try { await fs.access(path.join(bin, 'initdb')); return bin; } catch (_) { /* 尝试下一个候选。 */ }
+                }
+            } catch (_) { /* 候选目录不存在。 */ }
+        }
+    }
+    return null;
+}
+
+async function postgresBin(explicit) {
+    const bin = await resolvePostgresBin(explicit);
+    if (bin === null) throw new Error('未找到 PostgreSQL 测试运行时，请用 --pg-bin 指定安装目录。');
+    return bin;
+}
+
+function hasPostgresClusterSync() {
+    if (process.platform === 'win32') {
+        const nodeFs = require('node:fs');
+        const root = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PostgreSQL');
+        try {
+            if (nodeFs.existsSync(root)) {
+                for (const directory of nodeFs.readdirSync(root)) {
+                    if (nodeFs.existsSync(path.join(root, directory, 'bin', 'initdb.exe'))) return true;
+                }
+            }
+        } catch (_) { /* 忽略文件系统错误。 */ }
+        return false;
+    }
+    const nodeChildProcess = require('node:child_process');
+    try {
+        const result = nodeChildProcess.spawnSync('initdb', ['--version'], { stdio: 'ignore' });
+        if (result.status === 0) return true;
+    } catch (_) { /* PATH 中无 initdb。 */ }
+    const nodeFs = require('node:fs');
+    for (const candidate of ['/usr/lib/postgresql', '/usr/local/opt/postgresql', '/opt/homebrew/opt/postgresql']) {
+        try {
+            if (nodeFs.existsSync(candidate)) {
+                for (const directory of nodeFs.readdirSync(candidate)) {
+                    if (nodeFs.existsSync(path.join(candidate, directory, 'bin', 'initdb'))) return true;
+                }
+            }
+        } catch (_) { /* 忽略候选目录。 */ }
+    }
+    return false;
 }
 
 async function withPostgresCluster(callback, options = {}) {
@@ -88,4 +146,4 @@ async function withIsolatedPostgres(command, args, options = {}) {
     }), options);
 }
 
-module.exports = { withIsolatedPostgres, withPostgresCluster };
+module.exports = { withIsolatedPostgres, withPostgresCluster, hasPostgresClusterSync };

@@ -63,7 +63,7 @@ test('数据库系统标识变化和旧库首次登记谱系都保持关闭，�
             await client.query('BEGIN');
             await client.query("UPDATE analysis_security_state SET accepted_database_timeline=NULL,accepted_database_system_identifier=NULL WHERE id='main'");
             await require('../server/db/migrations/analysis-common-recovery')[0].upPg(client); await client.query('COMMIT');
-        } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+        } catch (error) { await client.query('ROLLBACK').catch(() => { }); throw error; }
         finally { client.release(); }
         assert.equal((await state()).mode, 'recovery_required'); assert.equal((await state()).recovery_reason, 'database_lineage_review_required');
         await assert.rejects(datasets.getDatasetForUser(user, fact.id), error => error.status === 503);
@@ -259,8 +259,10 @@ test('主库和独立日志都不能证明最新撤权时，恢复流程保持�
 
 test('新进程中关闭执行开关并移除日志配置，也不能绕过已持久启用的独立确认要求', async () => fixture(async ({ user }) => {
     const code = `const db=require('./server/db/client'); db.execute("UPDATE users SET status='disabled' WHERE id=?",[process.argv[1]]).then(()=>{process.stdout.write(JSON.stringify({unexpected:true})+'\\n');process.exitCode=1;}).catch(e=>process.stdout.write(JSON.stringify({code:e.code,applied:e.applied})+'\\n')).finally(()=>require('./server/db/pg-connection').closePgPool());`;
-    const result = await execFile(process.execPath, ['-e', code, String(user.id)], { cwd: path.resolve(__dirname, '..'), windowsHide: true,
-        env: { ...process.env, DATA_ANALYSIS_MODEL_ENABLED: 'false', DATA_ANALYSIS_SECURITY_JOURNAL_DIR: '', DATA_ANALYSIS_SECURITY_KEY_FILE: '' }, timeout: 20000 });
+    const result = await execFile(process.execPath, ['-e', code, String(user.id)], {
+        cwd: path.resolve(__dirname, '..'), windowsHide: true,
+        env: { ...process.env, DATA_ANALYSIS_MODEL_ENABLED: 'false', DATA_ANALYSIS_SECURITY_JOURNAL_DIR: '', DATA_ANALYSIS_SECURITY_KEY_FILE: '' }, timeout: 20000
+    });
     const response = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch (_) { return {}; } }).find(row => row.applied);
     assert.deepEqual(response, { code: 'ANALYSIS_SECURITY_COMMITTED_PENDING', applied: true });
     assert.equal((await queryOne('SELECT status FROM users WHERE id=?', [user.id])).status, 'disabled');

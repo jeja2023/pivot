@@ -47,7 +47,7 @@ async function drive(user, id, state, hooks, deps = {}) {
         await hooks.ensureCurrent();
         await hooks.checkpoint(state, { phase: 'preflight', message: '正在核对完整制作运行包的固定版本和内容摘要。' });
         const health = await execute(user, id, { action: 'health' }, hooks);
-        if (health.status !== 'ready' || health.contentDigest !== runtime.lock.contentDigest) throw runtime.error('完整制作引擎没有通过固定版本与内容摘要预检。');
+        if (health.status !== 'ready' || (health.serviceProtocol !== 1 && health.contentDigest !== runtime.lock.contentDigest)) throw runtime.error('完整制作引擎没有通过运行包及服务协议预检。');
         state.engine = health; state.messages = [{ role: 'system', content: HOST }, { role: 'user', content: JSON.stringify({
             operation: request.operation, profile: request.profile, title: request.title, instruction: request.instruction, pageCount: request.pageCount,
             productionProfile: request.productionProfile,

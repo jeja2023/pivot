@@ -964,7 +964,7 @@
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-storyline.js');
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-studio.js');
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-master.js');
-        window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson });
+        window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson, openCreateModal });
         await window.Pivot.loadScriptOnce('/chat/presentation-native-geometry.js');
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-native-properties.js');
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-native.js');

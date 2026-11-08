@@ -13,7 +13,7 @@ function classify(template) {
 }
 async function list(user) {
     const templates = await require('./presentation-service').listPresentationTemplates(user);
-    const available = runtime.availability();
+    const available = await runtime.availability();
     return { engine: available, canManageTemplates: isAdmin(user), defaultMode: 'free', templates: [
         ...templates.map(classify),
         ...runtimeTemplates.templates.map(item => ({ ...item, ownerType: 'engine', scope: 'system', status: 'published', catalogGroup: 'engine', sourceLabel: 'PPT Master', supportedEngines: ['master'], available: available.enabled, aspectRatio: '16:9' }))

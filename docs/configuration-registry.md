@@ -94,6 +94,8 @@
 | `PIVOT_PRESENTATION_ASSET_MAX_BYTES` | integer | `20971520` | 1048576–67108864 | 单个 PPT 图片素材允许上传的最大字节数；素材仍受安全上传 MIME、真实文件头与 CAS 归属校验。 |
 | `PIVOT_PPT_MASTER_ENABLED` | boolean | `false` | true / false | 启用固定版本的 PPT Master 完整制作引擎；需要已准备并登记的受限执行镜像，未配置不回退到宿主 Shell。 |
 | `PIVOT_PPT_MASTER_IMAGE` | string | `` | 逗号分隔的语言标记 | PPT Master不可变仓库摘要或完整sha256镜像ID；离线更新工具自动登记，保持签名和隔离检查。 |
+| `PIVOT_PPT_MASTER_SERVICE_URL` | string | `` | 逗号分隔的语言标记 | 可选独立PPT Master内网服务根地址，例如http://ppt-master:8502；配置后优先通过服务协议调用，不需要应用挂载Docker。 |
+| `PIVOT_PPT_MASTER_SERVICE_TOKEN` | string | `` | 逗号分隔的语言标记 | 独立PPT服务访问密钥，与服务的PPT_MASTER_TOKEN一致；至少32位，配置一次，不随镜像升级更换，不发送给模型。 |
 | `PIVOT_PPT_MASTER_WORKSPACE_DIR` | string | `` | 逗号分隔的语言标记 | 可选独立任务目录；Docker部署由更新工具配置为宿主机与容器内相同的绝对路径，留空沿用数据目录。 |
 | `PIVOT_PPT_MASTER_TRUSTED_MANIFEST` | string | `` | 逗号分隔的语言标记 | 可选PPT独立签名清单，由更新工具登记；与独立公钥文件同时配置，避免覆盖其他Worker信任。 |
 | `PIVOT_PPT_MASTER_SIGNING_PUBLIC_KEY_FILE` | string | `` | 逗号分隔的语言标记 | PPT独立发布公钥PEM文件；与独立签名清单同时配置，生产不保存签名私钥。 |

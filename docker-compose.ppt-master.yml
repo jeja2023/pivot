@@ -1,0 +1,34 @@
+# 独立PPT服务，可单独启动/更新；不依赖Pivot，不挂载Docker socket。
+services:
+  ppt-master:
+    image: ${PPT_MASTER_IMAGE:-ppt-master:6.8.0}
+    pull_policy: never
+    container_name: ppt-master
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 3g
+    cpus: 2
+    stop_grace_period: 15s
+    environment:
+      PPT_MASTER_TOKEN: ${PPT_MASTER_TOKEN:?请首次配置至少32位PPT服务访问密钥}
+      PPT_MASTER_DATA_DIR: /data/jobs
+    expose: ["8502"]
+    volumes:
+      - ppt-master-data:/data
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    networks: [ai-bridge]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+networks:
+  ai-bridge:
+    external: true
+volumes:
+  ppt-master-data:

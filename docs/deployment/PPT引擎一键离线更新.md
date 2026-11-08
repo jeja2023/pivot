@@ -1,5 +1,7 @@
 # PPT引擎一键离线更新
 
+本文保留v0.7.133直接Docker执行部署的维护方法。v0.7.135起优先使用[PPT Master独立服务](PPTMaster独立服务部署与更新.md)，首次配置地址和密钥后只更新服务镜像，主应用无需PPT用途Docker权限、共享目录或镜像签名设置。
+
 适用v0.7.133起的Linux/amd64单活Docker部署。构建机需要Node.js、Python 3.12、Git和Docker；生产宿主机需要Python 3.10或更新版本、OpenSSL及Docker Compose v2。生产更新不会下载依赖或访问镜像仓库。
 
 ## 构建机：一条命令发布

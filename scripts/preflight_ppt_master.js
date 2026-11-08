@@ -27,12 +27,14 @@ async function smoke() {
     const user = { id: 1 }, id = 'tooltask_' + crypto.randomBytes(24).toString('base64url'), marker = crypto.randomBytes(24).toString('hex');
     try {
         const health = await runtime.execute(user, id, { action: 'health' });
-        if (health.status !== 'ready' || health.contentDigest !== runtime.lock.contentDigest || health.offlineNativeProtocol !== 1) throw new Error('制作镜像与当前应用合同或原稿协议不一致。');
+        if (health.status !== 'ready' || health.serviceProtocol !== 1 && health.contentDigest !== runtime.lock.contentDigest || health.offlineNativeProtocol !== 1) throw new Error('制作镜像与当前应用合同或原稿协议不一致。');
         await runtime.inputFile(user, id, 'deployment-input.txt', Buffer.from(marker));
         const loaded = await runtime.execute(user, id, { action: 'read', path: 'inputs/deployment-input.txt' });
         if (loaded.text !== marker) throw new Error('PPT任务目录没有正确映射到执行节点。');
         await runtime.execute(user, id, { action: 'write', path: 'deployment-output.txt', text: marker });
-        if (await fs.readFile(path.join(await runtime.workspace(user, id), 'deployment-output.txt'), 'utf8') !== marker) throw new Error('PPT执行结果没有正确写回任务目录。');
+        if (health.serviceProtocol === 1) {
+            if ((await runtime.execute(user, id, { action: 'read', path: 'deployment-output.txt' })).text !== marker) throw new Error('PPT服务没有正确保存任务结果。');
+        } else if (await fs.readFile(path.join(await runtime.workspace(user, id), 'deployment-output.txt'), 'utf8') !== marker) throw new Error('PPT执行结果没有正确写回任务目录。');
         return { ready: true, revision: health.revision, contentDigest: health.contentDigest, offlineNativeProtocol: health.offlineNativeProtocol, workspaceRoundtrip: true, image: runtime.config().image };
     } finally { await runtime.cleanupWorkspace(user, id); }
 }

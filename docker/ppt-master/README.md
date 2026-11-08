@@ -1,10 +1,10 @@
 # PPT Master 完整引擎
 
-独立执行镜像统一命名为 `ppt-master:6.8.0`，名称不绑定宿主项目，其他项目可按同一 JSON 协议接入。镜像保留固定上游完整技能发行包，以非特权用户、无网络、只读根文件系统运行。Pivot 宿主继续使用 Capability Worker 的镜像摘要、签名、时限和取消策略，不开放普通技能包执行脚本。
+镜像统一命名为`ppt-master:6.8.0`，默认启动独立HTTP服务，其他项目可按服务协议1接入。服务以非特权用户和只读根运行，动作进程通过seccomp拒绝Internet socket，继续使用固定上游完整技能包和工具白名单。Pivot只配置服务地址和密钥，不需要Docker socket或共享工作区；原stdin执行入口仍可显式调用，供兼容旧部署。
 
 ## 构建
 
-日常发布优先使用`npm run release:ppt-master -- --checkout <固定上游仓库> --output <新发布目录>`。工具自动准备/构建、实际核对、导出`ppt-master.tar`并签名；生产首次登记公钥后单命令更新，见[一键离线更新](../../docs/deployment/PPT引擎一键离线更新.md)。下面保留单独构建入口，供排查与开发使用。
+日常构建优先使用`npm run build:ppt-master-service -- --checkout <固定上游仓库> --output <新发布目录>`。工具准备/构建、检查实际服务启动并导出`ppt-master.tar`和独立Compose；生产以后只导入并重建该服务，见[独立服务部署](../../docs/deployment/PPTMaster独立服务部署与更新.md)。下面保留单独构建入口，供排查与开发使用。
 
 ```powershell
 python scripts/prepare_ppt_master.py --checkout <已固定提交的本地仓库>
@@ -19,6 +19,8 @@ docker image inspect ppt-master:6.8.0 --format '{{json .RepoDigests}}'
 PyMuPDF 的 PDF 源转换依赖未安装，PDF/Word 等文本提取由宿主完成后传入已授权文本快照；Pivot 复用现有文档处理底座。其他库及字体许可随镜像元数据保留；源包中的归属门禁必须通过。
 
 ## 配置
+
+优先独立执行`docker compose -f docker-compose.ppt-master.yml up -d --no-build --pull never`，首次设置服务`PPT_MASTER_TOKEN`并在Pivot填写`PIVOT_PPT_MASTER_SERVICE_URL`及`PIVOT_PPT_MASTER_SERVICE_TOKEN`。后续兼容服务协议的更新无需修改Pivot。以下不可变镜像与Worker签名配置只用于原有直接Docker执行兼容路径。
 
 准备不可变的 image@sha256 引用后登记到原有 Worker 签名信任清单；配置 `PIVOT_CAPABILITY_WORKER_ENABLED=true`、`PIVOT_PPT_MASTER_ENABLED=true` 和 `PIVOT_PPT_MASTER_IMAGE`。生产继续要求已签名清单；未准备运行时的平台显示不可用，不回退到宿主 Python 或 Shell。
 

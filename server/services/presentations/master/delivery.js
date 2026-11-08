@@ -14,7 +14,7 @@ async function deliver(user, taskId, request, receipt, context = {}) {
     const primary = await runtime.readOutput(user, taskId, receipt.templateOnly ? 'project.zip' : 'presentation.pptx');
     const actualDigest = crypto.createHash('sha256').update(primary).digest('hex');
     if (actualDigest !== receipt.sha256 || receipt.packageCheck?.status !== 'passed') throw runtime.error('最终文件摘要或内容核验无效。', 'PPT_MASTER_DELIVERY_INVALID', 422);
-    const metadata = { engine: 'ppt-master', revision: runtime.lock.revision, taskId, title: request.title, operation: request.operation,
+    const metadata = { engine: 'ppt-master', revision: context.engine?.revision || runtime.lock.revision, runtimeId: context.engine?.runtimeId || '', taskId, title: request.title, operation: request.operation,
         sourceDigest: request.sourceDigest, inputDigests: request.inputDigests, outputDigest: actualDigest, checks: receipt.packageCheck, productionProfile: request.productionProfile,
         editing: '原生PPTX与上游项目源包保留；复杂对象尚未转换为Pivot画布元素。' };
     const artifact = request.runId ? await createOrUpdateRunArtifact({ runId: request.runId, user, type: 'ppt_master', title: request.title, content: JSON.stringify(metadata), note: 'PPT Master 完整制作引擎产物' })
@@ -27,7 +27,7 @@ async function deliver(user, taskId, request, receipt, context = {}) {
         const buffer = format === 'pptx' || receipt.templateOnly ? primary : await runtime.readOutput(user, taskId, name);
         const stored = await putBuffer({ buffer, mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'ppt_master_' + format });
         const record = await repository.insert(user, tenant.tenantId, artifact.id, { runId: request.runId || `standalone-artifact:${artifact.id}`, toolCallId: 'ppt-master:' + taskId,
-            irRef: buildCasRef(meta.objectId), irDigest: meta.contentDigest, format, rendererVersion: 'ppt-master-6.8.0', contentDigest: stored.contentDigest, mimeType,
+            irRef: buildCasRef(meta.objectId), irDigest: meta.contentDigest, format, rendererVersion: 'ppt-master-' + (context.engine?.runtimeId || runtime.lock.skillVersion), contentDigest: stored.contentDigest, mimeType,
             byteSize: stored.byteSize, storageRef: buildCasRef(stored.objectId) });
         await incrementRefCount(stored.objectId, 1); await incrementRefCount(meta.objectId, 1);
         await recordDeliveryEvent({ tenantId: tenant.tenantId, renditionId: Number(record.id), runId: request.runId || `standalone-artifact:${artifact.id}`,

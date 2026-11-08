@@ -122,6 +122,7 @@ COPY --from=verapdf --chown=node:node /opt/verapdf /opt/verapdf
 COPY --from=speech-recognition --chown=node:node /opt/pivot-speech /opt/pivot-speech
 COPY --chown=node:node server ./server
 COPY --chown=node:node config/ppt-master-engine.json ./config/ppt-master-engine.json
+COPY --chown=node:node config/ppt-master-templates.json ./config/ppt-master-templates.json
 COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
 COPY --chown=node:node scripts/official_fonts.js ./scripts/official_fonts.js

@@ -112,8 +112,9 @@ async function run(id, user, deps = {}) {
     try {
         const row = await repo.read(user, id);
         state = row.result_json.state || { request: row.input_request, steps: 0, usedTokens: 0, bootstrapped: false };
-        deployment.assertCheckpoint(state, runtime.config().image);
-        state.runtimeImage ||= runtime.config().image;
+        const currentRuntime = await runtime.identity();
+        deployment.assertCheckpoint(state, currentRuntime);
+        state.runtimeImage ||= currentRuntime;
         await ensureCurrent();
         if (!state.prepared) { state.request = await prepareInputs(user, id, state.request, deps); state.prepared = true; await checkpoint(state, progress); }
         const result = await (deps.drive || drive)(user, id, state, { signal, ensureCurrent, checkpoint }, deps.driverDeps || {});
@@ -122,12 +123,12 @@ async function run(id, user, deps = {}) {
             await checkpoint(state, { phase: 'input_required', message: result.pending.question });
             await store.requestInput(id, user, result.pending, { expectedLease: lease }); return;
         }
-        const output = await (deps.deliver || deliver)(user, id, state.request, result.receipt, { signal });
+        const output = await (deps.deliver || deliver)(user, id, state.request, result.receipt, { signal, engine: state.engine });
         await ensureCurrent();
         const message = result.receipt.templateOnly ? '模板工作区通过上游校验，完整模板源包已登记。尚未自动发布到组织模板库。'
             : '制作完成；可下载原生PPTX和项目源包。复杂对象在PowerPoint或上游项目中继续编辑，尚未转换为Pivot画布元素。';
         await store.complete(id, user, { state, usedTokens: state.usedTokens, steps: state.steps, progress: { ...progress, phase: 'finished', message },
-            publicResult: { ...output, engineRevision: runtime.lock.revision, message } }, { expectedLease: lease });
+            publicResult: { ...output, engineRevision: state.engine?.revision || runtime.lock.revision, message } }, { expectedLease: lease });
     } catch (error) {
         const latestTask = await store.getForUser(id, user).catch(() => null);
         if (latestTask?.status === 'working') await store.complete(id, user, { state, progress: { ...progress, phase: 'interrupted' }, publicResult: { message: String(error.message).slice(0, 1200) } },
@@ -135,7 +136,7 @@ async function run(id, user, deps = {}) {
     } finally { clearInterval(heartbeat); await repo.release(user, id, lease).catch(() => {}); store.endExecution(id, controller); active.delete(id); }
 }
 async function start(user, input, context = {}) {
-    const available = runtime.availability();
+    const available = await runtime.availability();
     if (!available.enabled) throw runtime.error(available.message, 'PPT_MASTER_UNAVAILABLE', 503);
     const request = { ...contract.normalize(input), runId: String(context.run?.id || context.runId || '') };
     await ensureAccess(user, request);
@@ -149,7 +150,7 @@ async function respond(user, id, answer) {
     if (task.status !== 'input_required') throw runtime.error('当前任务没有待确认问题。', 'PPT_MASTER_NOT_WAITING', 409);
     if (typeof answer !== 'string' || !answer.trim() || answer.length > 12000) throw runtime.error('请提供不超过12000字的明确答复。');
     const state = row.result_json.state;
-    deployment.assertCheckpoint(state, runtime.config().image);
+    deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request); state.response = answer.trim();
     if (!await repository.acceptResponse(user, id, state)) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
     setImmediate(() => run(id, user).catch(() => {})); return get(user, id);
@@ -159,7 +160,7 @@ async function latest(user, presentationId) { const row = await repository.lates
 async function resume(user, id, input = {}) {
     const row = await repository.read(user, id), state = row?.result_json.state;
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
-    deployment.assertCheckpoint(state, runtime.config().image);
+    deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
     const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = Number(input.tokenBudget || state.request.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160 || !Number.isInteger(tokenBudget) || tokenBudget < state.request.tokenBudget || tokenBudget > 500000) throw runtime.error('继续预算只能在上限内增加，不能重置累计消耗。');

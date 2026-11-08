@@ -1,6 +1,7 @@
 const nodePath = require('node:path');
 const nodeFs = require('node:fs');
 const nodeOs = require('node:os');
+const crypto = require('node:crypto');
 
 const previousAnalysisDir = process.env.PIVOT_ANALYSIS_DIR;
 const previousMaxRows = process.env.DATA_ANALYSIS_MAX_ROWS;
@@ -71,11 +72,13 @@ function cleanupAnalysisRows(userId) {
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 }
 
-function createAnalysisUser(username, nickname) {
-    return db.prepare(`
+function createAnalysisUser(username, nickname, unit = null) {
+    const assignedUnit = unit || `QA_${crypto.randomBytes(4).toString('hex')}`;
+    const result = db.prepare(`
         INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))
-    `).run(username, 'hash', nickname, 'QA', 'user', 'active');
+    `).run(username, 'hash', nickname, assignedUnit, 'user', 'active');
+    return { ...result, unit: assignedUnit };
 }
 
 test('数据分析支持上传 SQLite 文件生成数据集', async () => {
@@ -158,7 +161,7 @@ test('数据分析支持受控增量导入、分区 Parquet、版本记录和物
     const suffix = Date.now().toString(36);
     const username = `analysis_scale_${suffix}`;
     const userInfo = createAnalysisUser(username, 'Data Analysis Scale Test');
-    const user = { id: userInfo.lastInsertRowid, username, unit: 'QA', role: 'user', status: 'active' };
+    const user = { id: userInfo.lastInsertRowid, username, unit: userInfo.unit, role: 'user', status: 'active' };
     const incrementDir = path.join(uploadRoot, 'data-analysis-increment-test', String(user.id));
     const incrementPath = path.join(incrementDir, 'increment.csv');
     let dataset = null;
@@ -284,10 +287,11 @@ test('数据分析数据总览支持编辑修改数据集名称与原始文件�
 
 test('数据分析产品层提供字段治理、计算字段、共享字段权限、保存视图、仪表盘、刷新和告警', async () => {
     const suffix = Date.now().toString(36);
-    const ownerInfo = createAnalysisUser(`analysis_governance_${suffix}`, '治理所有者');
-    const viewerInfo = createAnalysisUser(`analysis_viewer_${suffix}`, '治理查看者');
-    const owner = { id: ownerInfo.lastInsertRowid, username: `analysis_governance_${suffix}`, unit: 'QA', role: 'user', status: 'active' };
-    const viewer = { id: viewerInfo.lastInsertRowid, username: `analysis_viewer_${suffix}`, unit: 'QA', role: 'user', status: 'active' };
+    const govUnit = `QA_gov_${suffix}`;
+    const ownerInfo = createAnalysisUser(`analysis_governance_${suffix}`, '治理所有者', govUnit);
+    const viewerInfo = createAnalysisUser(`analysis_viewer_${suffix}`, '治理查看者', govUnit);
+    const owner = { id: ownerInfo.lastInsertRowid, username: `analysis_governance_${suffix}`, unit: govUnit, role: 'user', status: 'active' };
+    const viewer = { id: viewerInfo.lastInsertRowid, username: `analysis_viewer_${suffix}`, unit: govUnit, role: 'user', status: 'active' };
     let source;
     let output;
     try {
@@ -349,7 +353,7 @@ test('数据分析产品层提供字段治理、计算字段、共享字段权�
         const alerts = await evaluateAlertRulesForDataset(owner, source.id);
         assert.equal(alerts.length, 1);
 
-        await updateDataset(owner, source.id, { scope: 'shared', allowedUnits: ['QA'] });
+        await updateDataset(owner, source.id, { scope: 'shared', allowedUnits: [govUnit] });
         const sharedDetail = await getDatasetDetail(viewer, source.id);
         assert.equal(sharedDetail.columns.some(column => column.key === 'c_3'), false);
         assert.equal(sharedDetail.previewRows.every(row => !Object.prototype.hasOwnProperty.call(row, 'c_3')), true);
@@ -368,7 +372,7 @@ test('数据分析产品层提供字段治理、计算字段、共享字段权�
 test('数据分析高级图表覆盖散点、堆叠、漏斗、热力、箱线和双轴口径', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = createAnalysisUser(`analysis_charts_${suffix}`, '高级图表测试');
-    const user = { id: userInfo.lastInsertRowid, username: `analysis_charts_${suffix}`, unit: 'QA', role: 'user', status: 'active' };
+    const user = { id: userInfo.lastInsertRowid, username: `analysis_charts_${suffix}`, unit: userInfo.unit, role: 'user', status: 'active' };
     let dataset;
     try {
         dataset = await require('../server/services/data-analysis/datasets').createDatasetFromRows({
@@ -405,7 +409,7 @@ test('数据分析高级图表覆盖散点、堆叠、漏斗、热力、箱线�
 test('数据分析指标口径、跨数据集模型与可恢复异步查询保持受控边界', async () => {
     const suffix = Date.now().toString(36);
     const userInfo = createAnalysisUser(`analysis_semantic_${suffix}`, '语义模型测试');
-    const user = { id: userInfo.lastInsertRowid, username: `analysis_semantic_${suffix}`, unit: 'QA', role: 'user', status: 'active' };
+    const user = { id: userInfo.lastInsertRowid, username: `analysis_semantic_${suffix}`, unit: userInfo.unit, role: 'user', status: 'active' };
     let sales;
     let regions;
     let managers;

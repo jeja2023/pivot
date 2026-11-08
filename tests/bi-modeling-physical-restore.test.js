@@ -10,13 +10,14 @@ const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { Client } = require('pg');
-const { withPostgresCluster } = require('../scripts/test_support/isolated_postgres');
+const { withPostgresCluster, hasPostgresClusterSync } = require('../scripts/test_support/isolated_postgres');
 const physical = require('../server/services/physical-backup');
 const recovery = require('../server/services/common-recovery');
 const sealed = require('../server/services/backup-sealed-files');
 const reference = require('../server/repositories/analysis-common-recovery');
 const { prepareRestore, quotedArgument } = require('../server/services/physical-restore');
 const execute = promisify(execFile);
+const skipCluster = !hasPostgresClusterSync() && '未检测到 PostgreSQL 服务端运行工具 (initdb)，跳过物理恢复测试';
 
 async function reservePort() {
     const server = net.createServer();
@@ -24,7 +25,7 @@ async function reservePort() {
     const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
 }
 
-test('independent watchdog releases the real write barrier while its coordinator event loop is blocked', { timeout: 60000 }, async () => withPostgresCluster(async cluster => {
+test('independent watchdog releases the real write barrier while its coordinator event loop is blocked', { skip: skipCluster, timeout: 60000 }, async () => withPostgresCluster(async cluster => {
     const victim = new Client({ connectionString: cluster.url }), observer = new Client({ connectionString: cluster.url });
     await victim.connect(); await observer.connect(); victim.on('error', () => {});
     let expired = false;
@@ -41,7 +42,7 @@ test('independent watchdog releases the real write barrier while its coordinator
     } finally { await guardian.stop(); await victim.end().catch(() => {}); await observer.end(); }
 }));
 
-test('durable whole-cluster PITR restores a common shared-file point after complete source loss, then replays current security', { timeout: 1800000 }, async t => withPostgresCluster(async cluster => {
+test('durable whole-cluster PITR restores a common shared-file point after complete source loss, then replays current security', { skip: skipCluster, timeout: 1800000 }, async t => withPostgresCluster(async cluster => {
     const schema = `pivot_test_physical_${crypto.randomBytes(6).toString('hex')}`, root = cluster.root;
     const application = path.join(root, 'application'), projectRoot = path.join(application, 'project'), independent = path.join(root, 'independent');
     const data = path.join(application, 'data'), uploads = path.join(application, 'uploads');

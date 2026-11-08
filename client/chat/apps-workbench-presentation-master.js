@@ -65,7 +65,11 @@
         if (!byId('presentation-master-title').value) byId('presentation-master-title').value = state.active?.title || '演示文稿';
         const { engine } = await helpers.requestJson(API + '/info');
         byId('presentation-master-start').disabled = !engine.enabled;
-        if (!engine.enabled) byId('presentation-master-status').replaceChildren(node('p', '', '完整制作引擎尚未配置，请联系管理员准备运行环境。原有PPT编辑与导出继续可用。'));
+        if (!engine.enabled) {
+            const fallback = node('button', 'btn-secondary', '使用标准PPT制作'); fallback.type = 'button';
+            fallback.addEventListener('click', () => { const profile = window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master'); byId('presentation-master-modal').classList.add('hidden'); helpers.openCreateModal(); window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-create', profile); });
+            byId('presentation-master-status').replaceChildren(node('p', '', '完整制作服务未连接或暂不可用，标准PPT创建、编辑和导出继续可用。'), fallback);
+        }
         else if (task && task.request?.presentationId === (state.active?.id || '')) await poll(task.id, ++epoch);
         else {
             task = null;
