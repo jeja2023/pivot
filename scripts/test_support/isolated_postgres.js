@@ -78,6 +78,34 @@ function hasPostgresClusterSync() {
     return false;
 }
 
+function hasPostgresVectorSync() {
+    if (!hasPostgresClusterSync()) return false;
+    const nodeFs = require('node:fs');
+    if (process.platform === 'win32') {
+        const root = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PostgreSQL');
+        try {
+            if (nodeFs.existsSync(root)) {
+                for (const directory of nodeFs.readdirSync(root)) {
+                    if (nodeFs.existsSync(path.join(root, directory, 'share', 'extension', 'vector.control'))) return true;
+                }
+            }
+        } catch (_) { /* 忽略文件系统错误。 */ }
+        return false;
+    }
+    for (const candidate of ['/usr/share/postgresql', '/usr/local/share/postgresql', '/opt/homebrew/share/postgresql', '/usr/lib/postgresql']) {
+        try {
+            if (nodeFs.existsSync(candidate)) {
+                for (const directory of nodeFs.readdirSync(candidate)) {
+                    if (nodeFs.existsSync(path.join(candidate, directory, 'extension', 'vector.control')) ||
+                        nodeFs.existsSync(path.join(candidate, directory, 'share', 'extension', 'vector.control')) ||
+                        nodeFs.existsSync(path.join(candidate, 'extension', 'vector.control'))) return true;
+                }
+            }
+        } catch (_) { /* 忽略候选目录。 */ }
+    }
+    return false;
+}
+
 async function withPostgresCluster(callback, options = {}) {
     const bin = await postgresBin(options.bin), extension = process.platform === 'win32' ? '.exe' : '';
     const executable = name => bin ? path.join(bin, `${name}${extension}`) : name;
@@ -146,4 +174,4 @@ async function withIsolatedPostgres(command, args, options = {}) {
     }), options);
 }
 
-module.exports = { withIsolatedPostgres, withPostgresCluster, hasPostgresClusterSync };
+module.exports = { withIsolatedPostgres, withPostgresCluster, hasPostgresClusterSync, hasPostgresVectorSync };

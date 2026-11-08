@@ -45,13 +45,16 @@ def restrict_filesystem():
 
     try:
         readonly = (1 << 0) | (1 << 2) | (1 << 3)
-        for file in ["/usr", "/lib", "/lib64", "/bin", "/etc", "/engine", "/runner", "/var/cache/fontconfig", "/proc/meminfo", "/proc/cpuinfo", "/proc/self"]:
+        for file in ["/usr", "/lib", "/lib64", "/bin", "/etc", "/engine", "/runner", "/var/cache/fontconfig", "/proc/meminfo", "/proc/cpuinfo", "/proc/filesystems", "/proc/self"]:
             allow(file, readonly)
         for file in ["/dev/null", "/dev/zero", "/dev/urandom", "/dev/random"]:
             allow(file, (1 << 1) | (1 << 2))
         writable = handled & ~((1 << 6) | (1 << 10))
         allow(os.environ["PIVOT_MASTER_WORKSPACE"], writable)
         allow(os.environ["TMPDIR"], writable)
+        # LibreOffice固定在/tmp创建/清理本地IPC；任务和临时文档统一放在独立/data目录。
+        # 这里不授予普通文件创建、读取或写入，也不开放目录枚举。
+        allow('/tmp', (1 << 9) | (1 << 5))
         # no_new_privs是无特权Landlock的前提，规则随exec和所有子进程继承。
         if libc.prctl(38, 1, 0, 0, 0) or libc.syscall(446, descriptor, 0):
             raise RuntimeError("不能启用动作目录隔离。")

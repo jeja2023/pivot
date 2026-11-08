@@ -38,7 +38,7 @@ def restrict():
             comparison = Comparison(0, 1, 1, 0)
             if number < 0 or seccomp.seccomp_rule_add_array(context, 0x00050000 | errno.EPERM, number, 1, ctypes.byref(comparison)):
                 raise RuntimeError("不能登记制作动作网络隔离。")
-        for name in [b"ptrace", b"process_vm_readv", b"process_vm_writev", b"kcmp", b"perf_event_open", b"bpf"]:
+        for name in [b"ptrace", b"process_vm_readv", b"process_vm_writev", b"kcmp", b"perf_event_open", b"bpf", b"setsid", b"setpgid"]:
             number = seccomp.seccomp_syscall_resolve_name(name)
             if number >= 0 and seccomp.seccomp_rule_add_array(context, 0x00050000 | errno.EPERM, number, 0, None):
                 raise RuntimeError("不能登记动作进程访问隔离。")

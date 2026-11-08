@@ -14,14 +14,14 @@ async function main(args = process.argv.slice(2)) {
     }
     if (!settings.output || !settings.skipBuild && !settings.checkout) throw new Error('请指定新的--output目录，构建时同时指定--checkout固定上游仓库。');
     const output = path.resolve(settings.output), image = settings.image || 'ppt-master:' + require('../config/ppt-master-engine.json').skillVersion;
-    if (!/^[a-z0-9][a-z0-9./:_-]{1,240}(?:@sha256:[a-f0-9]{64})?$/.test(image)) throw new Error('请使用有效的本机镜像名称。');
+    if (!/^[a-z0-9][a-z0-9./:_-]{1,240}:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(image) || image.startsWith('sha256:')) throw new Error('独立服务交付请使用带标签的镜像名称，保证离线导入后名称保持一致。');
     const python = settings.python || (process.platform === 'win32' ? 'python' : 'python3');
     await fs.mkdir(path.dirname(output), { recursive: true });
     await fs.mkdir(output);
     if (!settings.skipBuild) {
         const manifest = await fs.readFile('artifacts/ppt-master-runtime/manifest.json', 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
         if (!manifest) await run(python, ['scripts/prepare_ppt_master.py', '--checkout', path.resolve(settings.checkout)]);
-        await run(python, ['scripts/build_ppt_master.py', '--checkout', path.resolve(settings.checkout), '--tag', image]);
+        await run(python, ['scripts/build_ppt_master.py', '--checkout', path.resolve(settings.checkout), '--tag', image], { timeout: 2 * 60 * 60 * 1000 });
     }
     const metadata = JSON.parse((await run('docker', ['image', 'inspect', image])).stdout)[0];
     if (metadata.Os !== 'linux' || metadata.Architecture !== 'amd64') throw new Error('当前离线交付基线为Linux/amd64，请使用匹配架构的镜像。');

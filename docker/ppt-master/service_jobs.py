@@ -86,8 +86,12 @@ class Jobs:
         with self.locked(key) as root:
             workspace = root / "workspace"
             directory = workspace / "inputs"
+            if workspace.is_symlink() or directory.is_symlink():
+                raise ServiceError("输入目录已被重定向，不能写入快照。", 409, "PPT_SERVICE_INPUT_CHANGED")
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             target = directory / name
+            if target.resolve() != target.absolute():
+                raise ServiceError("输入快照路径已变化。", 409, "PPT_SERVICE_INPUT_CHANGED")
             if target.exists():
                 if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
                     raise ServiceError("不能覆盖已经保存的输入快照。", 409, "PPT_SERVICE_INPUT_CHANGED")
@@ -114,7 +118,7 @@ class Jobs:
             raise ServiceError("输入文件名无效。")
         with self.locked(key) as root:
             file = root / "workspace" / "inputs" / name
-            if not file.is_file() or file.is_symlink() or file.stat().st_size > 50 * 1024**2:
+            if not file.is_file() or file.is_symlink() or file.resolve() != file.absolute() or file.stat().st_size > 50 * 1024**2:
                 raise ServiceError("输入快照不存在或过大。", 404)
             return file.read_bytes()
 
@@ -128,8 +132,12 @@ class Jobs:
         try:
             with self.locked(key) as root:
                 work = root / "workspace"
+                if work.is_symlink():
+                    raise ServiceError("任务目录已被重定向。", 409, "PPT_SERVICE_JOB_CHANGED")
                 work.mkdir(exist_ok=True, mode=0o700)
                 temporary = root / "tmp"
+                if temporary.is_symlink():
+                    raise ServiceError("任务临时目录已被重定向。", 409, "PPT_SERVICE_JOB_CHANGED")
                 temporary.mkdir(exist_ok=True, mode=0o700)
                 journal = root / ("operation-" + request_id + ".json")
                 encoded = json.dumps(operation, ensure_ascii=False, separators=(",", ":")).encode()

@@ -30,11 +30,11 @@ async function executeJob(job) {
     let retained = null, heartbeat = null, lastRenewal = Date.now(), mayRelease = true;
     const renew = async () => {
         try { if (!await jobs.renew(job)) controller.abort(); else lastRenewal = Date.now(); }
-        catch (_) { if (Date.now() - lastRenewal > 10000) controller.abort(); }
+        catch (_) { if (Date.now() - lastRenewal > 25000) controller.abort(); }
     };
-    const timer = setInterval(() => { if (Date.now() - lastRenewal > 10000) controller.abort(); if (!heartbeat) heartbeat = renew().finally(() => { heartbeat = null; }); }, 2000);
+    const timer = setInterval(() => { if (Date.now() - lastRenewal > 25000) controller.abort(); if (!heartbeat) heartbeat = renew().finally(() => { heartbeat = null; }); }, 2000);
     timer.unref?.();
-    const deadline = setTimeout(() => controller.abort(), ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300000 : 60000);
+    const deadline = setTimeout(() => controller.abort(), ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300000 : 180000);
     deadline.unref?.();
     try {
         const user = await resolveAnalysisUser(job.user_id);

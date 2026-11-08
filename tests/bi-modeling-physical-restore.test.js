@@ -10,7 +10,7 @@ const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { Client } = require('pg');
-const { withPostgresCluster, hasPostgresClusterSync } = require('../scripts/test_support/isolated_postgres');
+const { withPostgresCluster, hasPostgresClusterSync, hasPostgresVectorSync } = require('../scripts/test_support/isolated_postgres');
 const physical = require('../server/services/physical-backup');
 const recovery = require('../server/services/common-recovery');
 const sealed = require('../server/services/backup-sealed-files');
@@ -18,6 +18,7 @@ const reference = require('../server/repositories/analysis-common-recovery');
 const { prepareRestore, quotedArgument } = require('../server/services/physical-restore');
 const execute = promisify(execFile);
 const skipCluster = !hasPostgresClusterSync() && '未检测到 PostgreSQL 服务端运行工具 (initdb)，跳过物理恢复测试';
+const skipVectorCluster = skipCluster || (!hasPostgresVectorSync() && '未检测到 PostgreSQL pgvector 扩展组件 (vector.control)，跳过依赖完整数据库 Schema 的全集群 PITR 测试');
 
 async function reservePort() {
     const server = net.createServer();
@@ -42,7 +43,19 @@ test('independent watchdog releases the real write barrier while its coordinator
     } finally { await guardian.stop(); await victim.end().catch(() => {}); await observer.end(); }
 }));
 
-test('durable whole-cluster PITR restores a common shared-file point after complete source loss, then replays current security', { skip: skipCluster, timeout: 1800000 }, async t => withPostgresCluster(async cluster => {
+test('durable whole-cluster PITR restores a common shared-file point after complete source loss, then replays current security', { skip: skipVectorCluster, timeout: 1800000 }, async t => withPostgresCluster(async cluster => {
+    const probe = new Client({ connectionString: cluster.url });
+    await probe.connect();
+    let hasVector = false;
+    try {
+        const result = await probe.query("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'");
+        hasVector = result.rowCount > 0;
+    } catch (_) { /* 忽略探针错误。 */ }
+    finally { await probe.end().catch(() => {}); }
+    if (!hasVector) {
+        t.skip('当前 PostgreSQL 实例未安装 pgvector 扩展，跳过全集群 PITR 恢复测试');
+        return;
+    }
     const schema = `pivot_test_physical_${crypto.randomBytes(6).toString('hex')}`, root = cluster.root;
     const application = path.join(root, 'application'), projectRoot = path.join(application, 'project'), independent = path.join(root, 'independent');
     const data = path.join(application, 'data'), uploads = path.join(application, 'uploads');

@@ -100,6 +100,17 @@ class JobsTests(unittest.TestCase):
         with self.assertRaises(ServiceError):
             self.jobs.output(self.key, 'presentation.pptx')
 
+    @unittest.skipIf(os.name == 'nt', 'Linux链接边界在容器执行')
+    def test_input_parent_symlink_cannot_read_service_environment_or_write_another_job(self):
+        root = self.jobs.directory(self.key)
+        workspace = root / 'workspace'
+        workspace.mkdir()
+        (workspace / 'inputs').symlink_to('/proc/1', target_is_directory=True)
+        with self.assertRaises(ServiceError):
+            self.jobs.input(self.key, 'environ')
+        with self.assertRaises(ServiceError):
+            self.jobs.put_input(self.key, 'pollution', b'rejected')
+
 
 if __name__ == '__main__':
     unittest.main()

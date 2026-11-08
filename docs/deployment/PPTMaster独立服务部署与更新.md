@@ -29,6 +29,8 @@ docker compose -f docker-compose.ppt-master.yml up -d --no-build --pull never
 
 默认只在`ai-bridge`内网暴露8502端口，不映射公网端口；服务以非root、只读根、固定CPU/内存和进程数运行，持久任务放在独立命名卷，升级不清卷。动作子进程不继承访问密钥，通过Landlock只读运行库并仅写入自身任务与临时目录，拒绝其他任务和服务进程凭据访问；seccomp拒绝Internet网络socket和进程内存读取，LibreOffice本地Unix socket可用。接口需要Bearer访问密钥，不接收Shell或任意路径。
 
+LibreOffice固定使用公共`/tmp`放置IPC socket，隔离规则仅允许其创建和清理；不开放普通文件读写或目录枚举。文档和动作临时文件保存在各自的`/data`任务子目录，服务会拒绝把任务数据根目录配置到`/tmp`。
+
 在Pivot生产`.env`添加两项，密钥填写上面生成的同一值：
 
 ```dotenv

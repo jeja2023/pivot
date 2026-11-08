@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import signal
+import subprocess
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -19,6 +21,8 @@ def runtime_identity():
     for file in sorted(Path("/runner").glob("*.py")) + sorted(Path("/runner").glob("*requirements.lock")) + [Path("/runner/engine-lock.json"), Path("/engine/manifest.json")]:
         digest.update(file.name.encode())
         digest.update(file.read_bytes())
+    digest.update(sys.version.encode())
+    digest.update(subprocess.check_output(['dpkg-query', '-W'], timeout=15))
     return "sha256:" + digest.hexdigest()
 
 
@@ -162,7 +166,10 @@ def main():
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token):
         raise RuntimeError("请配置至少32位的PPT_MASTER_TOKEN服务密钥。")
     runtime = runtime_identity()
-    jobs = Jobs(os.environ.get("PPT_MASTER_DATA_DIR", "/data/jobs"), runtime)
+    data_root = Path(os.environ.get("PPT_MASTER_DATA_DIR", "/data/jobs")).resolve()
+    if data_root == Path('/tmp') or data_root.is_relative_to('/tmp'):
+        raise RuntimeError('服务任务数据不能放入LibreOffice公共IPC目录/tmp。')
+    jobs = Jobs(data_root, runtime)
     probe_key = "0" * 64
     jobs.open(probe_key)
     try:

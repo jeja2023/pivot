@@ -51,8 +51,10 @@ async function main() {
         const native = await execute({ action: 'native_inspect', source: 'inputs/source.pptx' }); assert.equal(native.status, 'passed'); assert.equal(native.offlineProtocol, 1);
         const preview = await client.file(user, task, 'outputs', 'preview-1.png', 8 * 1024 * 1024, env); assert.deepEqual([...preview.subarray(0, 4)], [137, 80, 78, 71]);
         await fs.writeFile(path.join(output, 'native-preview.png'), preview);
+        await execute({ action: 'native_video_prepare', source: 'inputs/source.pptx' });
         const controller = new AbortController();
-        const interrupted = client.execute(user, task, { action: 'native_video_prepare', source: 'inputs/source.pptx' }, { env, signal: controller.signal }).then(() => ({ finished: true }), error => ({ error }));
+        const interrupted = client.execute(user, task, { action: 'native_video_clip', source: 'inputs/source.pptx', slideIndex: 0,
+            options: { duration: 60, fps: 30, resolution: '1080p', transition: 'fade' } }, { env, signal: controller.signal }).then(() => ({ finished: true }), error => ({ error }));
         await new Promise(resolve => setTimeout(resolve, 100)); controller.abort(new Error('验收停止制作'));
         const stopped = await interrupted; assert.match(stopped.error?.message || '', /验收停止制作/);
         let unlocked = false;
@@ -62,7 +64,7 @@ async function main() {
         }
         assert.equal(unlocked, true, '停止后不能留下占用任务的执行进程');
         const isolated = await run('docker', ['exec', name, 'python', '-c', "import sys,socket,tempfile,os;from pathlib import Path;sys.path.insert(0,'/runner');from service_worker import restrict;own=tempfile.mkdtemp();other=tempfile.mkdtemp();Path(other,'secret').write_text('不可访问');os.environ['PIVOT_MASTER_WORKSPACE']=own;os.environ['TMPDIR']=own;restrict();\ntry:\n socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n raise Exception('网络未隔离')\nexcept PermissionError: print('动作进程已拒绝网络')\nfor target in ['/proc/1/environ',other+'/secret']:\n try:\n  Path(target).read_bytes()\n  raise Exception('任务目录未隔离')\n except PermissionError: print('动作进程已拒绝跨任务或服务凭据访问')"]); assert.match(isolated.stdout, /拒绝网络/); assert.match(isolated.stdout, /拒绝跨任务/);
-        const tests = await run('docker', ['exec', name, 'python', '-B', '-m', 'unittest', 'discover', '-s', '/source/tests/ppt_service', '-v']); await fs.writeFile(path.join(output, 'python-tests.log'), tests.stdout + tests.stderr);
+        const tests = await run('docker', ['exec', '--env', 'PPT_SANDBOX_TEST_ROOT=/data/jobs', name, 'python', '-B', '-m', 'unittest', 'discover', '-s', '/source/tests/ppt_service', '-v']); await fs.writeFile(path.join(output, 'python-tests.log'), tests.stdout + tests.stderr);
         await run('docker', ['restart', name]);
         let restarted;
         for (let attempt = 0; attempt < 180; attempt++) {

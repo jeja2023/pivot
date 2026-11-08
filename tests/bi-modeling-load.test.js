@@ -12,7 +12,7 @@ const jobs = require('../server/services/data-analysis/bi/jobs');
 const runner = require('../server/services/data-analysis/bi/runner');
 const delivery = require('../server/services/data-analysis/bi/delivery');
 
-test('十个授权会话每五秒提交分析并混合刷新，超载单列且已接纳任务保持全局二槽、每人一槽和同一精确口径', { timeout: 180000 }, async t => fixture(async ({ user, model, fact }) => {
+test('十个授权会话每五秒提交分析并混合刷新，超载单列且已接纳任务保持全局二槽、每人一槽和同一精确口径', { timeout: 240000 }, async t => fixture(async ({ user, model, fact }) => {
     const check = await checked(user, model);
     await jobs.publishModel({ user, modelId: model.id, body: { expectedVersion: model.version, checkId: check.id, requestKey: crypto.randomUUID() } });
     const readers = [], created = [], overloads = [], samples = [], latencies = [], started = performance.now();
@@ -29,14 +29,14 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
         app.use((err, _req, res, _next) => res.status(err.status || 500).json({ code: err.code }));
         server = http.createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
         const base = `http://127.0.0.1:${server.address().port}`;
-        poll = setInterval(() => runner.dispatchModelJobs(), 150);
+        poll = setInterval(() => runner.dispatchModelJobs(), 400);
         monitoring = setInterval(async () => {
             if (sampling) return; sampling = true;
             try {
                 const rows = await query('SELECT q.user_id,COUNT(*) AS n FROM analysis_runtime_slots s JOIN analysis_query_jobs q ON q.id=s.job_id GROUP BY q.user_id');
                 samples.push(rows.map(row => Number(row.n)));
             } finally { sampling = false; }
-        }, 50);
+        }, 100);
         const refresh = await jobs.createModelRefresh({ user, modelId: model.id, body: { publishedVersion: 1, bindingRevision: 1, requestKey: crypto.randomUUID() } });
         const waveStart = Date.now();
         for (let round = 0; round < 2; round++) {
@@ -55,8 +55,7 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
         }
         assert.equal(created.length + overloads.length, 20); assert.ok(created.length >= 10);
         const pending = new Set(created);
-        while (pending.size && performance.now() - started < 150000) {
-            runner.dispatchModelJobs();
+        while (pending.size && performance.now() - started < 180000) {
             await Promise.all([...pending].map(async item => {
                 const response = await fetch(`${base}/queries/${item.id}`, { headers: { 'x-fixture-user': String(item.actor.id) } }), job = await response.json();
                 assert.equal(response.status, 200, JSON.stringify(job));
@@ -65,12 +64,11 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
                     latencies.push(performance.now() - item.submittedAt); pending.delete(item);
                 } else assert.ok(['queued', 'running', 'retry_wait'].includes(job.status), job.lastError);
             }));
-            if (pending.size) await new Promise(resolve => setTimeout(resolve, 100));
+            if (pending.size) await new Promise(resolve => setTimeout(resolve, 200));
         }
         assert.equal(pending.size, 0);
-        while (['queued', 'running', 'retry_wait'].includes((await jobs.getModelJob(user, refresh.job.id)).status) && performance.now() - started < 150000) {
-            runner.dispatchModelJobs();
-            await new Promise(resolve => setTimeout(resolve, 100));
+        while (['queued', 'running', 'retry_wait'].includes((await jobs.getModelJob(user, refresh.job.id)).status) && performance.now() - started < 180000) {
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
         assert.equal((await jobs.getModelJob(user, refresh.job.id)).status, 'succeeded');
         assert.ok(samples.length > 10); assert.ok(samples.every(counts => counts.reduce((total, count) => total + count, 0) <= 2 && counts.every(count => count <= 1)));

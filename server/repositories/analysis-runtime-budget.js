@@ -47,7 +47,7 @@ async function claim(trx, { owner, kinds, jobId = null, slots = readTypedEnv('DA
     // 各执行器只领取兼容类型；全局队首由对应执行器领取，避免跨类型绕过公平性。
     if (!job || !kinds.includes(job.execution_kind) || (jobId && job.id !== jobId)) return null;
     const epoch = Number(job.execution_epoch) + 1;
-    const seconds = ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300 : 60;
+    const seconds = ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300 : 180;
     const containerId = (job.execution_kind.startsWith('model_') || job.execution_kind === 'dataset_ingest') ? `pivot-bi-${job.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 48)}-${epoch}` : null;
     const claimed = await trx.queryOne(`UPDATE analysis_query_jobs SET status='running',runtime_protocol=2,execution_epoch=?,lease_owner=?,lease_expires_at=NOW()+(? * INTERVAL '1 second'),container_id=?,slot_id=?,attempts=attempts+1,
         started_at=COALESCE(started_at,NOW()),locked_at=NOW(),execution_deadline_at=LEAST(deadline_at,NOW()+(? * INTERVAL '1 second')),progress=5,updated_at=NOW() WHERE id=? RETURNING *`, [epoch, owner, leaseSeconds, containerId, slot.id, seconds, job.id]);

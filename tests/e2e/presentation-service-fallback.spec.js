@@ -14,6 +14,12 @@ test('独立PPT服务停机时标准AI创建、编辑与PPTX导出继续工作',
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     const info = await (await page.request.get('/api/apps/presentations/master/info')).json(); expect(info.engine.enabled).toBe(false); expect(info.engine.transport).toBe('service');
+    await page.waitForFunction(() => typeof window.Pivot?.moduleApi('apps.presentations.master')?.open === 'function');
+    await page.evaluate(() => window.Pivot.moduleApi('apps.presentations.master').open());
+    await page.locator('#presentation-master-audience').fill('标准制作的受众');
+    await page.getByRole('button', { name: '使用标准PPT制作', exact: true }).click();
+    await expect(page.locator('#presentation-create-audience')).toHaveValue('标准制作的受众');
+    await page.locator('#presentation-create-modal').getByRole('button', { name: '取消', exact: true }).click();
     await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
     await expect(page.locator('#presentation-create-modal')).toBeVisible(); await expect(page.locator('#presentation-create-design-note')).toContainText('标准AI工作台');
     await page.locator('#presentation-create-topic').fill('无独立引擎时继续制作'); await page.locator('#presentation-create-pages').fill('3');
