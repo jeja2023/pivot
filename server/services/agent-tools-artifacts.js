@@ -10,6 +10,7 @@
  */
 const { DOC_TYPES } = require('./document-ir');
 const { SUPPORTED_FORMATS } = require('./document-rendering');
+const { normalizeAgentStepId } = require('./agent-tool-call-identity');
 
 function jsonSchema(properties = {}, required = []) {
     return { type: 'object', properties, required, additionalProperties: false };
@@ -62,11 +63,11 @@ function getArtifactToolDefinitions() {
 /** 从运行时上下文推导确定性的工具调用标识，与 agent_tool_calls.step_id 一致。 */
 function resolveToolCallId(context = {}) {
     const stepId = String(context.stepId || context.toolCallId || context.callId || '').trim();
-    if (stepId) return stepId;
+    if (stepId) return normalizeAgentStepId(stepId);
     const runId = String(context.run?.id || context.runId || '').trim();
     const stepIndex = Number.parseInt(context.stepIndex, 10);
-    if (runId && Number.isSafeInteger(stepIndex)) return `${runId}:${stepIndex}`;
-    if (runId) return `${runId}:artifact:${Date.now()}`;
+    if (runId && Number.isSafeInteger(stepIndex)) return normalizeAgentStepId(`${runId}:${stepIndex}`);
+    if (runId) return normalizeAgentStepId(`${runId}:artifact:${Date.now()}`);
     return `artifact:${Date.now()}`;
 }
 

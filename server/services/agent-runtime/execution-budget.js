@@ -6,10 +6,12 @@ const { parseJsonObject } = require('../agent-validators');
 
 async function prepareExecutionBudget(run, { updateRun, listSteps, assertRunNotCancelled = async () => {}, maxTotalRuntimeMs = 7200000, defaultTimeoutMs = 600000 }) {
     const policy = runRoundPolicy(run), config = parseJsonObject(run.budget_config) || {};
+    const previous = parseJsonObject(run.usage_stats) || {};
+    // 旧任务可能只在用量快照中保存风险限额，升级默认容量不能扩大其已持久化边界。
+    if (config.risk_budget == null && config.riskBudget == null && previous.limits?.risk_budget != null) config.risk_budget = previous.limits.risk_budget;
     const limits = normalizeTaskBudget({ ...config, max_steps: policy.totalSteps });
     if (Number(run.max_token_budget) > 0) limits.max_tokens_total = Math.min(limits.max_tokens_total, Number(run.max_token_budget));
     policy.reserveTokens = Math.min(8192, Math.floor(limits.max_tokens_total * .1));
-    const previous = parseJsonObject(run.usage_stats) || {};
     const counts = { ...(previous.counts || {}) };
     if (previous.accountingVersion !== 2) {
         const steps = await listSteps(run.id);

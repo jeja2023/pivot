@@ -16,10 +16,13 @@ function config() {
         command: ['python', '/runner/runner.py'], limits: { memoryMb: 1024, cpu: 1, timeoutMs: 120000, maxOutputBytes: 1024 * 1024 } };
 }
 async function availability() {
-    if (remote.configured()) {
-        try { const health = await remote.info({ force: true }); return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId, message: '独立PPT制作服务可用。' }; }
-        catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }
-    }
+    try {
+        if (await remote.configured()) {
+            const health = await remote.info({ force: true });
+            if (!health) return { enabled: false, transport: 'service', message: '完整制作服务已停用，标准PPT功能继续可用。' };
+            return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId, message: '独立PPT制作服务可用。' };
+        }
+    } catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }
     if (!deployment.accepting()) return { enabled: false, message: 'PPT制作引擎正在更新，请稍后重新提交。' };
     const definition = config();
     if (!definition.enabled || !definition.image) return { enabled: false, message: '完整制作引擎尚未配置。' };
@@ -43,7 +46,7 @@ async function workspace(user, id) {
     return directory;
 }
 async function execute(user, id, input, { signal, env = process.env, runWorker = worker.runCapabilityWorker } = {}) {
-    if (remote.configured(env)) {
+    if (await remote.configured(env)) {
         const output = await remote.execute(user, id, input, { signal, env });
         if (!output.ok) throw error(String(output.error || '制作服务执行失败。').slice(0, 1600), 'PPT_MASTER_OPERATION_FAILED', 422);
         return { ...output.result, ...(input.action === 'health' ? { runtimeId: output.runtimeId, serviceProtocol: output.serviceProtocol } : {}) };
@@ -60,7 +63,7 @@ async function execute(user, id, input, { signal, env = process.env, runWorker =
 }
 async function inputFile(user, id, name, buffer) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name) || !Buffer.isBuffer(buffer) || buffer.length > 50 * 1024 * 1024) throw error('制作输入文件无效或超过上限。');
-    if (remote.configured()) return remote.inputFile(user, id, name, buffer);
+    if (await remote.configured()) return remote.inputFile(user, id, name, buffer);
     const root = await workspace(user, id), directory = path.join(root, 'inputs');
     await fs.mkdir(directory, { recursive: true });
     const file = path.join(directory, name);
@@ -74,7 +77,7 @@ async function inputFile(user, id, name, buffer) {
 }
 async function readOutput(user, id, name, maxBytes = 60 * 1024 * 1024) {
     if (!['presentation.pptx', 'project.zip', 'manifest.json', 'video.mp4', 'video-first.png'].includes(name) && !/^preview-(?:[1-9]|[1-3]\d|40)\.png$/.test(name)) throw error('交付文件类型无效。');
-    if (remote.configured()) return remote.file(user, id, 'outputs', name, maxBytes);
+    if (await remote.configured()) return remote.file(user, id, 'outputs', name, maxBytes);
     const root = await workspace(user, id), file = name.startsWith('preview-') ? path.join(root, 'native-preview', name.replace('preview-', 'slide-')) : path.join(root, 'delivery', name);
     const stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes || !comparable(await fs.realpath(file)).startsWith(comparable(root) + path.sep)) throw error('交付文件不存在或越过当前任务范围。', 'PPT_MASTER_OUTPUT_INVALID', 422);
@@ -82,7 +85,7 @@ async function readOutput(user, id, name, maxBytes = 60 * 1024 * 1024) {
 }
 
 async function cleanupWorkspace(user, id) {
-    if (remote.configured()) return remote.cleanup(user, id);
+    if (await remote.configured()) return remote.cleanup(user, id);
     const directory = taskDirectory(user, id);
     const actual = await fs.realpath(directory).catch(() => null);
     if (!actual) return;
@@ -90,10 +93,10 @@ async function cleanupWorkspace(user, id) {
     await fs.rm(actual, { recursive: true, force: true });
 }
 
-async function identity() { return remote.configured() ? (await remote.info()).runtimeId : config().image; }
+async function identity() { return await remote.configured() ? remote.identity() : config().image; }
 async function inputBuffer(user, id, name, maximum) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name)) throw error('输入快照文件名无效。');
-    if (remote.configured()) return remote.file(user, id, 'inputs', name, maximum);
+    if (await remote.configured()) return remote.file(user, id, 'inputs', name, maximum);
     const root = await workspace(user, id), file = path.join(root, 'inputs', name), stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || comparable(await fs.realpath(file)) !== comparable(file) || stat.size > maximum) throw error('输入快照不存在、已变化或超过大小限制。');
     return fs.readFile(file);

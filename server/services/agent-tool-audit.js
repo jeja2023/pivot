@@ -5,6 +5,7 @@ const { logger } = require('../logger');
 const { redactTraceValue } = require('./agent-traces');
 const { putAgentBlob } = require('./agent-blob-store');
 const { buildAgentAuditFields } = require('./agent-step-context');
+const { normalizeAgentStepId, normalizeAgentOperationKey } = require('./agent-tool-call-identity');
 
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value ?? {})).digest('hex'); }
 
@@ -17,6 +18,9 @@ async function recordAgentToolCall(data = {}) {
         entrypoint: data.entrypoint || data.stepContext?.entrypoint || 'agent',
         purpose: 'tool_call'
     });
+    const originalStepId = String(data.stepId || id);
+    if (originalStepId.length > 64) auditContext.originalStepId = redactTraceValue(originalStepId);
+    if (String(data.operationKey || '').length > 255) auditContext.originalOperationKey = redactTraceValue(data.operationKey);
     const outputBlob = await putAgentBlob(output, { runId: data.runId });
     const now = data.createdAt || getBeijingTimestamp();
     const sql = `
@@ -31,7 +35,7 @@ async function recordAgentToolCall(data = {}) {
     const params = [
         id,
         data.runId,
-        String(data.stepId || id),
+        normalizeAgentStepId(originalStepId),
         String(data.toolName).slice(0, 128),
         String(data.capability || 'agent.execute').slice(0, 128),
         Number(data.riskLevel) || 0,
@@ -49,7 +53,7 @@ async function recordAgentToolCall(data = {}) {
         Math.max(Number(data.durationMs) || 0, 0),
         now,
         Math.max(Number(data.attempt) || 1, 1),
-        data.operationKey || null,
+        data.operationKey ? normalizeAgentOperationKey(data.operationKey) : null,
         String(data.contextHash || '').slice(0, 64)
         ,data.tenantId || data.tenant_id || null
         ,String(data.toolVersion || data.tool_version || '').slice(0, 64)
@@ -100,9 +104,9 @@ async function listAgentToolCalls(runId, options = {}) {
     `, [runId, limit]);
     return rows.map(row => {
         let input = {};
-        try { input = JSON.parse(row.input_payload || '{}'); } catch (_) {}
+        try { input = typeof row.input_payload === 'string' ? JSON.parse(row.input_payload || '{}') : (row.input_payload || {}); } catch (_) {}
         let contextSnapshot = {};
-        try { contextSnapshot = JSON.parse(row.context_snapshot || '{}'); } catch (_) {}
+        try { contextSnapshot = typeof row.context_snapshot === 'string' ? JSON.parse(row.context_snapshot || '{}') : (row.context_snapshot || {}); } catch (_) {}
         return { ...row, input_payload: input, context_snapshot: contextSnapshot };
     });
 }

@@ -98,6 +98,13 @@ test('task contract retains a bounded revision for runtime constraint changes', 
     assert.deepEqual(contract.constraints, ['仅使用已授权资料']);
 });
 
+test('直接任务和旧的空验收契约默认独立核验，明确的结构化验收仍保留', () => {
+    for (const value of [undefined, {}, { acceptance: {} }, normalizeTaskContract({}, '交付报告')]) {
+        assert.equal(normalizeTaskContract(value, '交付报告', { verifyByDefault: true }).acceptance.requireSemanticVerification, true);
+    }
+    assert.notEqual(normalizeTaskContract({ acceptance: { requireJson: true } }, '输出JSON', { verifyByDefault: true }).acceptance.requireSemanticVerification, true);
+});
+
 test('task verification blocks forbidden content and missing required artifacts', () => {
     const report = verifyTaskOutcome({
         taskContract: {

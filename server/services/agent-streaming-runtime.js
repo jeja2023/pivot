@@ -3,6 +3,7 @@ const { callModelStreamingWithTools, recordAgentModelUsage, resolveAgentPlanning
 const { buildAgentToolSchemas } = require('./agent-tool-catalog');
 const { normalizeMaxSteps, normalizePositiveInt } = require('./agent-validators');
 const { buildAssistantToolMessage, buildToolResultMessage } = require('./streaming-tools');
+const { agentToolStepId } = require('./agent-tool-call-identity');
 const { compactToolOutputForModel, executeToolByName, findAgentToolByName } = require('./agent-tool-runtime');
 const { normalizeToolInput } = require('./agent-policy');
 const { recordAgentToolCall } = require('./agent-tool-audit');
@@ -648,7 +649,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                             run,
                             modelCfg,
                             autonomous: true,
-                            stepId: `${runId}:${step}:${call.id || call.name}`,
+                            stepId: agentToolStepId(runId, step, call.id || call.name),
                             stepIndex: step,
                             stepContext,
                             contextHash: stepContext?.contextHash || '',
@@ -699,7 +700,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     });
                     await recordToolCall({
                         runId,
-                        stepId: `${runId}:${step}:${call.id || call.name}`,
+                        stepId: agentToolStepId(runId, step, call.id || call.name),
                         operationKey: `${runId}:${step}:${call.id || call.name}`,
                         toolName: call.name,
                         input: args,
@@ -727,7 +728,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         contextHash: stepContext?.contextHash || ''
                     });
                     await recordToolCall({
-                        runId, stepId: `${runId}:${step}:${call.id || call.name}`,
+                        runId, stepId: agentToolStepId(runId, step, call.id || call.name),
                         operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
                         input: args, output: compactOutput, policyDecision: 'allow', status: 'success',
                         durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
@@ -752,7 +753,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     status: 'error', durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                 });
                 await recordToolCall({
-                    runId, stepId: `${runId}:${step}:${call.id || call.name}`,
+                    runId, stepId: agentToolStepId(runId, step, call.id || call.name),
                     operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
                     input: args, output: failureOutput,
                     policyDecision: ['AGENT_POLICY_DENIED', 'TOOL_POLICY_DENIED'].includes(toolErr.code) ? 'denied' : 'allow',

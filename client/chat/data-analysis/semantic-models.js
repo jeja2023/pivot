@@ -316,6 +316,7 @@
         });
         root.addEventListener('click', async event => {
             try {
+                if (event.target.closest('#data-analysis-open-model-modal')) { await loadSemanticModels({ silent: true }); return; }
                 if (event.target.closest('#data-analysis-open-metric-modal')) { renderMetrics(); return; }
                 if (event.target.closest('#data-analysis-metric-save')) { await guardButton('data-analysis-metric-save', '保存中…', saveMetric); return; }
                 const metric = event.target.closest('[data-analysis-metric-evaluate]');

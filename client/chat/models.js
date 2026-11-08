@@ -157,6 +157,7 @@ function renderRetrievalModelServices(settings = {}) {
             </div>
         </article>
         ${window.Pivot.moduleApi('settings.speech', {}).renderCard?.(settings.speechConfig) || ''}
+        ${window.Pivot.moduleApi('settings.pptMaster', {}).renderCard?.(settings.pptMasterConfig) || ''}
     `);
     window.Pivot.moduleApi('settings.speech', {}).refreshStatus?.();
 }

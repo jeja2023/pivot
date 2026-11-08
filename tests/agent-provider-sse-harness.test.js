@@ -189,7 +189,7 @@ function startMockProvider(received) {
                                 index: 0,
                                 id: 'call_echo',
                                 type: 'function',
-                                function: { name: 'test.echo', arguments: '{"value":"' }
+                                function: { name: require('../server/services/model-tool-protocol').providerToolName('test.echo'), arguments: '{"value":"' }
                             }]
                         }
                     }]
@@ -430,7 +430,7 @@ test('mock SSE harness verifies provider isolation, tool execution, and next mod
         const secondTurnMessages = received[2].body.messages;
         const assistantToolCall = secondTurnMessages.find(message => message.role === 'assistant' && Array.isArray(message.tool_calls));
         const toolResult = secondTurnMessages.find(message => message.role === 'tool');
-        assert.equal(assistantToolCall.tool_calls[0].function.name, 'test.echo');
+        assert.equal(assistantToolCall.tool_calls[0].function.name, require('../server/services/model-tool-protocol').providerToolName('test.echo'));
         assert.deepEqual(JSON.parse(toolResult.content), { echo: 'from tool' });
         assert.equal(events.filter(event => event.type === 'model.requested').length, 2);
         assert.equal(events.filter(event => event.type === 'model.completed').length, 2);

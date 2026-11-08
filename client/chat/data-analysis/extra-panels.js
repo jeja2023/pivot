@@ -70,7 +70,7 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
         <span>业务指标口径</span>
             </button>
-            <button id="data-analysis-open-model-modal" class="btn-secondary btn-sm" type="button">
+            <button id="data-analysis-open-model-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-model-modal">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
         <span>打开数据建模</span>
             </button>

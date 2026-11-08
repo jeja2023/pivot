@@ -66,6 +66,20 @@ test('继续使用父任务扣除已用量及预留后的剩余预算，两层�
     } finally { await current.cleanup(); }
 });
 
+test('新默认风险容量不能扩大父任务上限，子任务显式更紧额度与父任务零额度保留', skipWithoutDatabase, async () => {
+    const current = await fixture();
+    const child = budgetConfig => current.create({ user: current.user, modelId: current.original.model_id, parentRunId: current.original.id,
+        goal: '在父任务预算内核对资料', maxTokenBudget: 5000, budgetConfig, metadata: { autoPersonalSkill: false } });
+    try {
+        assert.equal(parseJsonObject((await child({})).budget_config).risk_budget, 3);
+        assert.equal(parseJsonObject((await child({ risk_budget: 1 })).budget_config).risk_budget, 1);
+        await execute("UPDATE agent_runs SET budget_config = jsonb_set(budget_config, '{risk_budget}', '0') WHERE id = ?", [current.original.id]);
+        assert.equal(parseJsonObject((await child({})).budget_config).risk_budget, 0);
+        await execute("UPDATE agent_runs SET budget_config = budget_config - 'risk_budget', usage_stats = ?::jsonb WHERE id = ?", [JSON.stringify({ limits: { risk_budget: 2 } }), current.original.id]);
+        assert.equal(parseJsonObject((await child({})).budget_config).risk_budget, 2);
+    } finally { await current.cleanup(); }
+});
+
 test('聊天等待补充时并发点击继续复用原任务，不创建子运行或重复预留预算', skipWithoutDatabase, async () => {
     const current = await fixture({ metadata: { autoPersonalSkill: false, chatBridge: { version: 1 } } });
     try {

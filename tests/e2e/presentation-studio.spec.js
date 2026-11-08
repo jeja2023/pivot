@@ -34,6 +34,9 @@ test('原生形状、调整参数、图示连接和故事线可编辑并保存�
     await page.locator('#presentation-shape-type').selectOption('rightArrow');
     await page.locator('[data-presentation-shape-adjust="adj1"]').fill('25');
     await page.locator('[data-presentation-panel="story"]').click();
+    if (!await page.locator('#presentation-story-audience').isVisible()) {
+        await page.locator('#presentation-story-panel summary').click();
+    }
     await page.locator('#presentation-story-audience').fill('经营负责人');
     await page.locator('#presentation-story-page-purpose').fill('说明执行步骤');
     await page.locator('#presentation-story-takeaway').fill('保留原生编辑能力');

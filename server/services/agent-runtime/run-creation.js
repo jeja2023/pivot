@@ -180,6 +180,7 @@ function createAgentRunFactory(deps = {}) {
         }
         const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
         let resourceReservation = null;
+        let inheritedRiskBudget = null;
         let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
         let skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
         // Skill 约束是 PEP 的判定输入，而 metadata 是调用方可写字段。
@@ -226,7 +227,8 @@ function createAgentRunFactory(deps = {}) {
         const cleanGoal = normalizeAgentGoal(normalizedRunMode === 'dag'
             ? await inferDagRunGoal({ goal, title, workflowId, runMetadata, dagSpec, user })
             : goal, goalMaxLength ? { maxLength: goalMaxLength } : undefined);
-        runMetadata.taskContract = normalizeTaskContract(taskContract || runMetadata.taskContract || {}, cleanGoal);
+        // 直接创建的自然语言任务也必须独立核验交付，不能仅凭最终回复非空标记完成。
+        runMetadata.taskContract = normalizeTaskContract(taskContract || runMetadata.taskContract || {}, cleanGoal, { verifyByDefault: normalizedRunMode !== 'dag' });
         runMetadata.workingState = createTaskWorkingState(runMetadata.taskContract, cleanGoal);
         const runId = createRunId();
         const now = getBeijingTimestamp();
@@ -278,6 +280,7 @@ function createAgentRunFactory(deps = {}) {
                 forkHistory: normalizedForkHistory
             });
             effectiveChildTokenBudget = inherited.tokenBudget;
+            inheritedRiskBudget = inherited.riskBudget ?? null;
             resourceReservation = inherited.reservation;
             runMetadata.resourceInheritance = {
                 parentRunId: String(parentRunId),
@@ -294,6 +297,7 @@ function createAgentRunFactory(deps = {}) {
             }
         }
         const effectiveTaskBudget = normalizeModelTaskBudget(budgetConfig, modelCfg || {});
+        if (inheritedRiskBudget !== null) effectiveTaskBudget.risk_budget = Math.min(effectiveTaskBudget.risk_budget, inheritedRiskBudget);
         if (budgetConfig?.max_steps == null && budgetConfig?.maxSteps == null) {
             effectiveTaskBudget.max_steps = normalizedRunMode === 'dag' ? Math.max(effectiveMaxSteps, runMetadata.dagSpec?.nodes?.length || 0) : Math.min(120, effectiveMaxSteps * 2);
         }

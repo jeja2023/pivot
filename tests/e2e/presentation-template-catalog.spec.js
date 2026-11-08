@@ -18,7 +18,11 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     await expect(page.getByRole('button', { name: 'AI 自由设计', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '使用单位模板', exact: true }).click();
+    const unitTemplateBtn = page.getByRole('button', { name: '使用单位模板', exact: true });
+    if (!await unitTemplateBtn.isVisible()) {
+        await page.locator('#presentation-catalog-dropdown summary').click();
+    }
+    await unitTemplateBtn.click();
     await expect(page.locator('#presentation-catalog-filter')).toHaveValue('organization');
     await expect(page.getByRole('button', { name: '导入单位模板', exact: true })).toBeVisible();
     await page.locator('#presentation-catalog-filter').selectOption('all');
@@ -82,7 +86,14 @@ test('AI自由设计与上游模板从统一入口进入完整制作，所选模
     await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
     await expect(page.locator('#presentation-master-operation')).toHaveValue('generate'); await expect(page.locator('#presentation-master-template-note')).toContainText('未指定固定模板');
     await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
-    await page.getByRole('button', { name: '模板库', exact: true }).click(); await page.locator('#presentation-catalog-filter').selectOption('engine');
+    const catalogSummary = page.locator('#presentation-catalog-dropdown summary');
+    if (await catalogSummary.isVisible()) {
+        await catalogSummary.click();
+        await page.getByRole('button', { name: '浏览全部模板', exact: true }).click();
+    } else {
+        await page.getByRole('button', { name: '模板库', exact: true }).click();
+    }
+    await page.locator('#presentation-catalog-filter').selectOption('engine');
     const row = page.locator('#presentation-catalog-body tr').filter({ hasText: '咨询决策' });
     await row.getByRole('button', { name: '使用此制作模板', exact: true }).click();
     await expect(page.locator('#presentation-master-template-note')).toContainText('咨询决策');

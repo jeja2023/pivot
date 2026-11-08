@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const net = require('node:net');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { run } = require('./lib/ppt_master_release');
@@ -12,13 +13,17 @@ async function main() {
     const image = process.argv[2] || 'ppt-master:service-v135', name = 'ppt-service-acceptance-' + crypto.randomBytes(6).toString('hex'), token = crypto.randomBytes(32).toString('hex');
     const output = path.resolve('artifacts/ppt-service-acceptance', name); await fs.mkdir(output, { recursive: true });
     const mount = 'type=bind,src=' + path.resolve('.') + ',dst=/source,readonly';
+    const listener = net.createServer();
+    await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+    const fixedPort = listener.address().port;
+    await new Promise(resolve => listener.close(resolve));
     let created = false, volumeCreated = false;
     const volume = name + '-data';
     const upgradeImage = process.argv[3];
     try {
         await run('docker', ['volume', 'create', volume]); volumeCreated = true;
         await run('docker', ['run', '-d', '--pull', 'never', '--name', name, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '3g', '--cpus', '2',
-            '--user', '65532:65532', '--publish', '127.0.0.1::8502', '--tmpfs', '/tmp:size=512m,mode=1777', '--mount', 'type=volume,src=' + volume + ',dst=/data', '--env', 'PPT_MASTER_TOKEN=' + token, '--mount', mount, image]); created = true;
+            '--user', '65532:65532', '--publish', '127.0.0.1:' + fixedPort + ':8502', '--tmpfs', '/tmp:size=512m,mode=1777', '--mount', 'type=volume,src=' + volume + ',dst=/data', '--env', 'PPT_MASTER_TOKEN=' + token, '--mount', mount, image]); created = true;
         const port = (await run('docker', ['port', name, '8502/tcp'])).stdout.trim().split(':').at(-1), env = { PIVOT_PPT_MASTER_SERVICE_URL: 'http://127.0.0.1:' + port, PIVOT_PPT_MASTER_SERVICE_TOKEN: token };
         let health;
         for (let attempt = 0; attempt < 180; attempt++) {
@@ -63,6 +68,7 @@ async function main() {
             if (response?.ok) { unlocked = true; break; } await new Promise(resolve => setTimeout(resolve, 250));
         }
         assert.equal(unlocked, true, '停止后不能留下占用任务的执行进程');
+        await fs.writeFile(path.join(output, 'progress.json'), JSON.stringify({ actualPptx: true, nativePreview: true, cancelledAndUnlocked: true }));
         const isolated = await run('docker', ['exec', name, 'python', '-c', "import sys,socket,tempfile,os;from pathlib import Path;sys.path.insert(0,'/runner');from service_worker import restrict;own=tempfile.mkdtemp();other=tempfile.mkdtemp();Path(other,'secret').write_text('不可访问');os.environ['PIVOT_MASTER_WORKSPACE']=own;os.environ['TMPDIR']=own;restrict();\ntry:\n socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n raise Exception('网络未隔离')\nexcept PermissionError: print('动作进程已拒绝网络')\nfor target in ['/proc/1/environ',other+'/secret']:\n try:\n  Path(target).read_bytes()\n  raise Exception('任务目录未隔离')\n except PermissionError: print('动作进程已拒绝跨任务或服务凭据访问')"]); assert.match(isolated.stdout, /拒绝网络/); assert.match(isolated.stdout, /拒绝跨任务/);
         const tests = await run('docker', ['exec', '--env', 'PPT_SANDBOX_TEST_ROOT=/data/jobs', name, 'python', '-B', '-m', 'unittest', 'discover', '-s', '/source/tests/ppt_service', '-v']); await fs.writeFile(path.join(output, 'python-tests.log'), tests.stdout + tests.stderr);
         await run('docker', ['restart', name]);

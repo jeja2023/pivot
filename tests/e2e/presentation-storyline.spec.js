@@ -26,7 +26,9 @@ test('整稿目标从创建带入结构，逐页叙事调整先预览再确认�
     const document = (await created.json()).presentation, root = '/api/apps/presentations/' + document.id;
     expect(document.content.metadata.productionProfile).toMatchObject({ audience: '业务决策人员', purpose: '确定后续行动', consumptionMode: 'presentation', targetDurationSeconds: 720 });
     await page.locator('[data-presentation-panel="story"]').click(); await expect(page.locator('[data-presentation-panel="story"]')).toHaveText('结构');
-    await page.locator('#presentation-story-panel summary').click();
+    if (!await page.locator('#presentation-story-audience').isVisible()) {
+        await page.locator('#presentation-story-panel summary').click();
+    }
     await expect(page.locator('#presentation-story-audience')).toHaveValue('业务决策人员'); await expect(page.locator('#presentation-story-purpose')).toHaveValue('确定后续行动');
     await expect(page.locator('#presentation-story-consumption')).toHaveValue('presentation'); await expect(page.locator('#presentation-story-duration')).toHaveValue('12');
     await page.locator('#presentation-story-consumption').selectOption('reading');

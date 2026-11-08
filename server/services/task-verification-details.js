@@ -6,7 +6,7 @@ const REASONS = Object.freeze({
     artifact_not_materialized: '尚未生成要求的文件', artifact_format_missing: '缺少用户要求的文件格式',
     artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '交付核验模型或服务不可用',
     verifier_timeout: '交付核验调用超时', verifier_invalid_response: '核验模型返回格式无效',
-    budget_exceeded: '核验时任务预算已耗尽', deliverables_missing: '交付内容遗漏要求', verification_rejected: '交付核验未通过',
+    budget_exceeded: '核验时任务预算已耗尽', deliverables_missing: '交付内容遗漏要求', verification_rejected: '交付核验未通过', user_input_required: '需要用户补充业务信息',
     verification_not_recorded: '未记录交付核验报告', historical_details_unavailable: '历史失败细节未保存，当前报告已通过'
 });
 const RULES = Object.freeze({ final_answer_non_empty: '未生成有效答案', evidence: '缺少可核验来源', required_phrase: '缺少要求的内容',

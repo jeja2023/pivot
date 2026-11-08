@@ -83,6 +83,15 @@ test('语义验收遵从暂停信号并避免在预算用完后发起模型调�
     assert.equal(result.reason, 'budget_exceeded');
 });
 
+test('缺少用户业务输入时保留待补充状态，异常的输入标记不能通过验收', async () => {
+    const base = { run: { id: 'verify-input', model_id: 1 }, user: { id: 7 }, contract: { acceptance: {}, deliverables: [] }, answer: '请补充收款账号。' };
+    const missing = await verifyAutomaticTask(base, { getModel: async () => ({}), callModelJson: async () => ({ passed: true, needsInput: true, coveredDeliverables: [], missing: [] }) });
+    assert.equal(missing.passed, false);
+    assert.equal(missing.reason, 'user_input_required');
+    const invalid = await verifyAutomaticTask(base, { getModel: async () => ({}), callModelJson: async () => ({ passed: true, needsInput: 'false', coveredDeliverables: [], missing: [] }) });
+    assert.equal(invalid.reason, 'verifier_invalid_response');
+});
+
 test('委派结构化修复按两次真实模型输出分别计费，修复失败也保留原始用量', async () => {
     for (const repaired of ['{"ok":true}', '仍是无效结果']) {
         const records = [];

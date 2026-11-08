@@ -34,9 +34,13 @@ function normalizeAcceptance(value = {}) {
     };
 }
 
-function normalizeTaskContract(value = {}, goal = '') {
+function normalizeTaskContract(value = {}, goal = '', { verifyByDefault = false } = {}) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const acceptance = normalizeAcceptance(source.acceptance || source);
+    const hasAcceptance = acceptance.requiredPhrases.length || acceptance.forbiddenPhrases.length || acceptance.minLength > 0
+        || acceptance.requireJson || schemaHasRules(acceptance.outputSchema) || acceptance.requiredArtifacts.length
+        || acceptance.requireEvidence || acceptance.artifactRequired || acceptance.requireSemanticVerification;
+    if (verifyByDefault && !hasAcceptance) acceptance.requireSemanticVerification = true;
     const revision = Math.max(1, Math.min(Number.parseInt(source.revision, 10) || 1, 1000000));
     return {
         schemaVersion: 1,
@@ -135,7 +139,7 @@ function taskVerificationFailureMessage(report = {}) {
         ,knowledge_sources_current: '资料来源已变化或不可访问'
     };
     const semanticReasons = { source_revoked: '原始资料已不可用', source_not_fully_read: '尚未读取完整资料',
-        artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试' };
+        artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试', user_input_required: '需要用户补充业务信息' };
     const semantic = report.semanticVerification;
     const details = [...new Set((report.hardFailures || []).map(key => labels[key] || '结果尚未通过验收'))];
     if (semantic?.reason) details.push(semanticReasons[semantic.reason] || require('./task-verification-details').verificationReasonLabel(semantic.reason));
@@ -167,7 +171,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
             evidence = [];
         }
     }
-    const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '');
+    const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '', { verifyByDefault: run?.run_mode !== 'dag' });
     let semanticVerification = contract.acceptance.requireSemanticVerification && !partial
         ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null;
     if (!semanticVerification && observations.some(item => item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1)) {
@@ -176,7 +180,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     }
     signal?.throwIfAborted();
     const report = verifyTaskOutcome({
-        taskContract: taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract,
+        taskContract: contract,
         goal: run?.goal || '',
         answer,
         observations,

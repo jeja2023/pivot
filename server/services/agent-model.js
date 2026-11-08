@@ -14,6 +14,7 @@ const {
 } = require('./model-runtime');
 const { createProviderEventStateMachine, createSseEventParser } = require('../streaming');
 const { createToolCallAccumulator, buildOpenAiToolsPayload } = require('./streaming-tools');
+const { createModelToolProtocol } = require('./model-tool-protocol');
 const { forwardChatCompletion } = require('./model-forwarder');
 const { assertProviderSafe, toProviderInput } = require('./agent-provider-envelope');
 const { recordAgentRunResourceUsage } = require('./agent-run-resources');
@@ -180,7 +181,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
         const maxTokens = budgetedMaxTokens(modelCfg, messages, options);
         const data = {
             model: modelCfg.model_name || modelCfg.name,
-            messages: providerMessages,
+            messages: createModelToolProtocol([], providerMessages).messages,
             stream: false,
             temperature,
             max_tokens: maxTokens
@@ -271,11 +272,12 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
         try {
         const providerMessages = toProviderInput(messages);
         assertProviderSafe(providerMessages);
-        const accumulator = createToolCallAccumulator();
+        const toolProtocol = createModelToolProtocol(tools, providerMessages);
+        const accumulator = createToolCallAccumulator({ resolveToolName: toolProtocol.canonicalName });
         const providerState = createProviderEventStateMachine({ onEvent: options.onProviderEvent });
         const payload = {
             model: modelCfg.model_name || modelCfg.name,
-            messages: providerMessages,
+            messages: toolProtocol.messages,
             stream: true,
             temperature: typeof options.temperature === 'number' ? options.temperature : 0.2,
             max_tokens: budgetedMaxTokens(modelCfg, messages, options, tools)
@@ -283,7 +285,7 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
         const toolsPayload = buildOpenAiToolsPayload(tools);
         if (toolsPayload.length > 0) {
             payload.tools = toolsPayload;
-            if (options.toolChoice) payload.tool_choice = options.toolChoice;
+            if (options.toolChoice) payload.tool_choice = toolProtocol.toolChoice(options.toolChoice);
         }
         applyAgentThinkingControls(payload, modelCfg, options);
         const sseParser = createSseEventParser({

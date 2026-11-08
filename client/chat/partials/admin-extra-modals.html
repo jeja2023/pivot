@@ -1,3 +1,37 @@
+    <!-- 全站PPT Master独立服务连接 -->
+    <div id="ppt-master-service-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
+        <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="ppt-master-service-title">
+            <div class="model-modal-header">
+                <div class="retrieval-header-content">
+                    <h3 id="ppt-master-service-title">配置PPT Master制作服务</h3>
+                    <p class="model-modal-desc">全站共用；更换连接后立即生效，标准PPT制作不依赖此服务。</p>
+                </div>
+            </div>
+            <form id="ppt-master-service-form" class="model-form retrieval-model-config-form" autocomplete="off">
+                <label class="speech-setting-check"><input id="ppt-master-enabled" type="checkbox">启用独立PPT Master服务</label>
+                <div class="retrieval-field-item">
+                    <label class="retrieval-field-label" for="ppt-master-endpoint">服务根地址</label>
+                    <input id="ppt-master-endpoint" type="url" class="form-input" maxlength="2048" placeholder="http://ppt-master:8502" spellcheck="false">
+                    <small class="model-modal-desc">由Pivot服务器连接此地址；填写服务根地址，不附加接口路径。</small>
+                </div>
+                <div class="retrieval-field-item">
+                    <label class="retrieval-field-label" for="ppt-master-token">访问密钥</label>
+                    <input id="ppt-master-token" type="password" class="form-input" maxlength="256" autocomplete="new-password">
+                    <label class="speech-setting-check"><input id="ppt-master-clear-token" type="checkbox">清除原密钥</label>
+                    <small class="model-modal-desc">密钥加密保存且不回显。留空保留；更换地址时请重新填写新服务密钥。</small>
+                </div>
+                <p id="ppt-master-config-source" class="model-modal-desc"></p>
+                <p id="ppt-master-config-status" class="model-modal-desc retrieval-config-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="model-modal-actions">
+                <button type="button" class="btn-secondary" data-ppt-service-close>取消</button>
+                <div class="retrieval-actions-right">
+                    <button id="ppt-master-config-test" type="button" class="btn-secondary">测试连接</button>
+                    <button id="ppt-master-config-save" type="button" class="btn-primary">保存并应用</button>
+                </div>
+            </div>
+        </div>
+    </div>
     <!-- 全站统一语音识别服务 -->
     <div id="speech-service-modal" class="modal-overlay hidden retrieval-config-modal" data-knowledge-modal aria-hidden="true">
         <div class="modal model-modal" role="dialog" aria-modal="true" aria-labelledby="speech-service-title">

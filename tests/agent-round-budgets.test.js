@@ -67,6 +67,16 @@ test('预算写入失败时在模型或外部工具执行前停止', async () =>
     assert.equal(budget.counts.steps, 1);
 });
 
+test('升级默认容量后，旧任务用量快照中的风险限额和零额度仍保留', async () => {
+    for (const risk of [0, 20]) {
+        const run = { id: 'legacy-risk', max_steps: 30, budget_config: {}, usage_stats: { accountingVersion: 2, counts: {}, limits: { risk_budget: risk } } };
+        const deps = { listSteps: async () => [], updateRun: async () => {} };
+        assert.equal((await prepareExecutionBudget(run, deps)).taskBudget.limits.risk_budget, risk);
+        run.budget_config = { risk_budget: 5 };
+        assert.equal((await prepareExecutionBudget(run, deps)).taskBudget.limits.risk_budget, 5);
+    }
+});
+
 test('收尾预算只供总结、文件登记和核验使用，仍受累计 Token 和工具总数约束', async () => {
     const policy = profileRoundPolicy('standard', 10000);
     const budget = new TaskBudget({ max_tokens_total: 10000, max_tool_calls: 8, max_runtime_seconds: 600 }, { policy });

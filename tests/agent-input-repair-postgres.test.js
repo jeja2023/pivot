@@ -51,7 +51,7 @@ test('普通和流式运行器连续参数错误后可修复继续，无法修�
                 let run;
                 try {
                     run = await createAgentRunFactory({ enqueueAgentRun() {} })({ user, modelId: model.id, goal: '解释任务处理流程，给出通用文字建议', maxSteps: 9,
-                        toolAllowlist: ['models.list'], metadata: { autoPersonalSkill: false }, retryLimit: 0 });
+                        toolAllowlist: ['models.list'], taskContract: { acceptance: { requiredPhrases: ['梳理目标与步骤'] } }, metadata: { autoPersonalSkill: false }, retryLimit: 0 });
                     await runAgent(run.id, user);
                     const row = await queryOne('SELECT status,error_message,final_answer,usage_stats,metadata FROM agent_runs WHERE id = ?', [run.id]);
                     const steps = await query("SELECT output,status FROM agent_steps WHERE run_id = ? AND type = 'tool' ORDER BY step_index", [run.id]);

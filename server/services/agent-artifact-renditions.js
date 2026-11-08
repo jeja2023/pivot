@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { query, queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { assertTenantContext } = require('./agent-tenant-context');
+const { normalizeAgentStepId } = require('./agent-tool-call-identity');
 const { getAgentArtifactForUser } = require('./agent-artifacts');
 const { collectIrAssetRefs, computeIrDigest, validateDocumentIr } = require('./document-ir');
 const { renderDocumentIr } = require('./document-rendering');
@@ -60,7 +61,7 @@ async function createRendition(params = {}) {
     const tenant = await assertTenantContext(user);
     const artifactId = Number.parseInt(params.artifactId, 10);
     if (!Number.isSafeInteger(artifactId) || artifactId <= 0) throw renditionError('渲染必须指定有效的产物 ID。');
-    const toolCallId = String(params.toolCallId || '').trim();
+    const toolCallId = normalizeAgentStepId(String(params.toolCallId || '').trim());
     if (!toolCallId) throw renditionError('渲染必须携带工具调用标识，否则审计链不完整。', 'ARTIFACT_RENDITION_TOOL_CALL_REQUIRED');
     const artifact = await getAgentArtifactForUser(artifactId, user);
     if (!artifact) throw renditionError('产物不存在或无权访问。', 'ARTIFACT_NOT_FOUND', 404);

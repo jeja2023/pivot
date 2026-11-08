@@ -31,14 +31,16 @@ docker compose -f docker-compose.ppt-master.yml up -d --no-build --pull never
 
 LibreOffice固定使用公共`/tmp`放置IPC socket，隔离规则仅允许其创建和清理；不开放普通文件读写或目录枚举。文档和动作临时文件保存在各自的`/data`任务子目录，服务会拒绝把任务数据根目录配置到`/tmp`。
 
-在Pivot生产`.env`添加两项，密钥填写上面生成的同一值：
+v0.7.136起推荐由系统`admin`在前端配置连接：进入“设置 → 模型配置 → PPT Master制作服务”，启用服务、填写`http://ppt-master:8502`和上述同一访问密钥，点击“测试连接”，再“保存并应用”。保存即时生效，无需重启Pivot；更换地址须填写新密钥，旧密钥不会被自动发往新地址。运行或等待确认的PPT任务须先结束再切换。
+
+未保存页面设置时，也可继续通过Pivot生产`.env`提供初始默认值：
 
 ```dotenv
 PIVOT_PPT_MASTER_SERVICE_URL=http://ppt-master:8502
 PIVOT_PPT_MASTER_SERVICE_TOKEN=与PPT_MASTER_TOKEN相同的密钥
 ```
 
-然后仅首次重建Pivot以加载连接配置：
+仅使用环境配置时，首次重建Pivot以加载默认值：
 
 ```bash
 cd /data/pivot
@@ -46,6 +48,8 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 ```
 
 这条服务路径不需要开启`PIVOT_CAPABILITY_WORKER_ENABLED`或`PIVOT_PPT_MASTER_ENABLED`。如以前安装了v0.7.133直接Docker协调覆盖，请从Pivot的`COMPOSE_FILE`移除旧`docker-compose.ppt-master.yml`覆盖并重建Pivot，撤销PPT用途socket和共享目录挂载；保留其他业务仍需要的Docker配置。新的服务Compose独立放在`/data/ppt-master`，不要作为Pivot的覆盖文件叠加。
+
+页面配置使用现有`DATA_ENCRYPTION_KEY`整体加密，服务地址和密钥不写入普通审计详情。仅系统`admin`可以修改和测试，其他账号不获得服务地址和密钥。测试草稿不改变配置；页面停用后以停用状态为准，不自动回退环境中的旧服务。服务镜像更新仍按下面的独立更新步骤，不需要随前端配置功能重建服务镜像。
 
 ## 以后只更新服务镜像
 

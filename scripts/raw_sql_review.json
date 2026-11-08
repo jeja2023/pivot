@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/presentation-master-settings.js",
+      "count": 2,
+      "rationale": "PPT全站服务配置仅由系统admin路由写入，完整配置先按独立用途加密。仓储只接收固定设置键、预期旧密文、新密文及鉴权操作者；在与PPT任务接纳相同的事务锁下读取并比较旧值、核对活动任务，再参数化登记新值和审计操作者，避免多实例覆盖或中途切断任务。",
+      "verification": "presentation-master-settings-postgres验证并发保存仅一方成功、未提交任务与切换串行、活动任务拒绝、密文及操作者持久化、保存后实际连接立即切换和停用生效。"
+    },
+    {
       "file": "server/repositories/presentation-engine-deployment.js",
       "count": 2,
       "rationale": "PPT引擎更新复用PostgreSQL事务锁；更新接纳与完整制作/原稿任务接纳使用同一个固定advisory键。活动任务只按固定工具名、非终态及期限计数；查询不返回任何任务内容或用户资料。无外部SQL拼接。",

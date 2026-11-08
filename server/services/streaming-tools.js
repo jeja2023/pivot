@@ -23,9 +23,10 @@
  *   // result = { content: string, toolCalls: [{ id, name, arguments, argumentsRaw, parsed }], finishReason }
  */
 
+const { randomUUID } = require('node:crypto');
 const TOOL_CALL_LIMIT = 16; // 安全上限：超出认为是异常增量
 
-function createToolCallAccumulator() {
+function createToolCallAccumulator({ resolveToolName = name => name } = {}) {
     const textReconciler = require('../streaming-text').createStreamTextReconciler();
     const state = {
         content: '',
@@ -62,6 +63,7 @@ function createToolCallAccumulator() {
         if (!choice) return;
         if (choice.finish_reason) state.finishReason = String(choice.finish_reason);
         const delta = choice.delta || choice.message || {};
+        const completeMessage = !choice.delta && Boolean(choice.message);
         if (typeof delta.content === 'string' && delta.content.length > 0) {
             state.content += textReconciler.ingest(frame, { delta: delta.content, isThought: false }).delta;
         }
@@ -73,9 +75,9 @@ function createToolCallAccumulator() {
                 if (!call) return;
                 if (entry.id && !call.id) call.id = String(entry.id);
                 const fn = entry.function || {};
-                if (fn.name && !call.name) call.name = String(fn.name);
+                if (fn.name) call.name = completeMessage ? String(fn.name) : call.name + String(fn.name);
                 if (typeof fn.arguments === 'string') {
-                    call.argumentsRaw += fn.arguments;
+                    call.argumentsRaw = completeMessage ? fn.arguments : call.argumentsRaw + fn.arguments;
                 }
             });
         }
@@ -83,9 +85,9 @@ function createToolCallAccumulator() {
         if (delta.function_call && typeof delta.function_call === 'object') {
             const call = ensureCall(0);
             if (call) {
-                if (delta.function_call.name && !call.name) call.name = String(delta.function_call.name);
+                if (delta.function_call.name) call.name = completeMessage ? String(delta.function_call.name) : call.name + String(delta.function_call.name);
                 if (typeof delta.function_call.arguments === 'string') {
-                    call.argumentsRaw += delta.function_call.arguments;
+                    call.argumentsRaw = completeMessage ? delta.function_call.arguments : call.argumentsRaw + delta.function_call.arguments;
                 }
             }
         }
@@ -95,6 +97,8 @@ function createToolCallAccumulator() {
         const toolCalls = Array.from(state.toolCallsByIndex.values())
             .sort((a, b) => a.index - b.index)
             .map(call => {
+                // 部分兼容提供方和旧式 function_call 不返回ID，历史消息与工具结果必须共用同一补全值。
+                if (!call.id) call.id = `call_${randomUUID().replace(/-/g, '')}`;
                 let parsed = null;
                 let parseError = '';
                 if (call.argumentsRaw && call.argumentsRaw.trim()) {
@@ -106,7 +110,7 @@ function createToolCallAccumulator() {
                 }
                 return {
                     id: call.id || '',
-                    name: call.name || '',
+                    name: resolveToolName(call.name || ''),
                     argumentsRaw: call.argumentsRaw,
                     arguments: parsed,
                     parseError
@@ -127,7 +131,7 @@ function createToolCallAccumulator() {
             content: state.content,
             partialToolCalls: Array.from(state.toolCallsByIndex.values()).map(call => ({
                 id: call.id,
-                name: call.name,
+                name: resolveToolName(call.name),
                 argumentsRaw: call.argumentsRaw
             })),
             finishReason: state.finishReason
@@ -144,7 +148,7 @@ function buildOpenAiToolsPayload(tools = []) {
         .map(tool => ({
             type: 'function',
             function: {
-                name: String(tool.name).slice(0, 64),
+                name: require('./model-tool-protocol').providerToolName(tool.name),
                 description: String(tool.description || tool.title || '').slice(0, 1024),
                 parameters: tool.input_schema && typeof tool.input_schema === 'object'
                     ? tool.input_schema

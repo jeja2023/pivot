@@ -406,7 +406,7 @@
             state.drawerMode = 'node';
             state.drawerOpen = true;
             m.render();
-            if (state.previewOpen) void m.runNodePreview?.(id).catch(() => {});
+            if (state.previewOpen) void m.runNodePreview?.(id).catch(() => { });
             return;
         }
         if (actionName === 'toggle-preview') {
@@ -524,7 +524,6 @@
                     }
                     return;
                 }
-                if (event.target.closest('#data-analysis-open-model-modal')) { app.activateTab('modeling'); return; }
                 if (m.handleOperatorClick?.(event)) return;
                 const trigger = event.target.closest('[data-modeling-action]');
                 if (trigger && !trigger.disabled) {
@@ -551,7 +550,7 @@
                     state.drawerMode = 'node';
                     state.drawerOpen = true;
                     m.render();
-                    if (state.previewOpen) void m.runNodePreview?.(state.selectedNodeId).catch(() => {});
+                    if (state.previewOpen) void m.runNodePreview?.(state.selectedNodeId).catch(() => { });
                 }
             } catch (error) { app.toast(error.message || '模型操作失败，请重试。', 'error'); }
         });

@@ -73,7 +73,7 @@
 
         // 2. 整稿目标折叠卡片
         const profile = state.active.content.metadata?.productionProfile || {}, goals = node('details', 'presentation-story-goals');
-        goals.open = expanded;
+        goals.open = expanded || !profile.audience;
         const audienceLabel = profile.audience || '受众待设置';
         const modeLabel = profile.consumptionMode === 'reading' ? '阅读材料' : '现场演示';
         const summary = node('summary', 'presentation-story-goals-summary');

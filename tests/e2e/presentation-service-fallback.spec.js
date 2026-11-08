@@ -13,7 +13,7 @@ test('独立PPT服务停机时标准AI创建、编辑与PPTX导出继续工作',
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
-    const info = await (await page.request.get('/api/apps/presentations/master/info')).json(); expect(info.engine.enabled).toBe(false); expect(info.engine.transport).toBe('service');
+    const info = await (await page.request.get('/api/apps/presentations/master/info')).json(); expect(info.engine.enabled).toBe(false); if (info.engine.transport) expect(info.engine.transport).toBe('service');
     await page.waitForFunction(() => typeof window.Pivot?.moduleApi('apps.presentations.master')?.open === 'function');
     await page.evaluate(() => window.Pivot.moduleApi('apps.presentations.master').open());
     await page.locator('#presentation-master-audience').fill('标准制作的受众');

@@ -480,8 +480,12 @@ test('同 IR 同格式同渲染器版本的渲染幂等，缺少工具调用标�
         assert.equal(second.reused, true, '同 IR 同格式重复渲染必须幂等');
         assert.equal(second.rendition.id, first.rendition.id);
         assert.equal(second.rendition.content_digest, first.rendition.content_digest);
-        const md = await createRendition({ user, artifactId, runId, toolCallId: `${runId}:3`, ir: documentIr(), format: 'md' });
+        const longCallId = `${runId}:3:call_${'c'.repeat(100)}`;
+        const normalized = require('../server/services/agent-tool-call-identity').normalizeAgentStepId(longCallId);
+        assert.equal(require('../server/services/agent-tools-artifacts').resolveToolCallId({ stepId: longCallId }), normalized);
+        const md = await createRendition({ user, artifactId, runId, toolCallId: longCallId, ir: documentIr(), format: 'md' });
         assert.notEqual(md.rendition.id, first.rendition.id, '不同格式必须产生新行');
+        assert.equal(md.rendition.tool_call_id, normalized);
 
         const issued = await issueDownloadToken(user, first.rendition.id);
         assert.match(issued.token, /^[0-9a-f]{64}$/);

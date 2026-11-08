@@ -97,8 +97,10 @@ async function cancelLegacyForRelease(userId, id) {
         WHERE id=? AND user_id=? AND execution_kind='legacy_operation' AND status IN ('queued','retry_wait','running','cancelling')`, [id, userId]));
 }
 
-async function expiredNative() { return query(`SELECT q.* FROM analysis_query_jobs q JOIN analysis_runtime_slots s ON s.job_id=q.id
-    WHERE q.execution_kind IN ('dataset_sql','legacy_operation') AND (q.lease_expires_at<NOW() OR q.execution_deadline_at<NOW() OR q.status NOT IN ('running','cancelling') OR q.cancel_requested_at IS NOT NULL)`); }
+async function expiredNative() {
+    return query(`SELECT q.* FROM analysis_query_jobs q JOIN analysis_runtime_slots s ON s.job_id=q.id
+    WHERE q.execution_kind IN ('dataset_sql','legacy_operation') AND (q.lease_expires_at<NOW() OR q.execution_deadline_at<NOW() OR q.status NOT IN ('running','cancelling') OR q.cancel_requested_at IS NOT NULL)`);
+}
 
 // 只接受监督器已经确认停止的执行单元，不通过租约过期推断进程已终止。
 async function settleStopped(job) {

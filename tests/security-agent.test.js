@@ -1964,7 +1964,7 @@ test('buildOpenAiToolsPayload 把工具列表转成 OpenAI tools 数组', () => 
     ]);
     assert.equal(payload.length, 1);
     assert.equal(payload[0].type, 'function');
-    assert.equal(payload[0].function.name, 'rag.search');
+    assert.equal(payload[0].function.name, require('../server/services/model-tool-protocol').providerToolName('rag.search'));
     assert.deepEqual(payload[0].function.parameters, { type: 'object', properties: { q: { type: 'string' } } });
 });
 

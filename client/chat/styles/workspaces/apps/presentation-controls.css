@@ -3392,6 +3392,10 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     border-radius: 7px;
     background: var(--bg-secondary, #f8fafc);
     overflow: hidden;
+    position: relative;
+    z-index: 2;
+    min-height: 32px;
+    box-sizing: border-box;
     transition: all 0.15s ease;
 }
 
@@ -3402,7 +3406,9 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
 }
 
 .presentation-story-goals-summary {
-    display: block;
+    display: flex;
+    align-items: center;
+    min-height: 30px;
     padding: 5px 8px;
     font-size: 0.72rem;
     color: var(--text-main, #1e293b);
@@ -3410,6 +3416,9 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     user-select: none;
     list-style: none;
     outline: none;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 2;
 }
 
 .presentation-story-goals-summary::-webkit-details-marker {
@@ -3499,6 +3508,9 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     border-radius: 8px;
     background: rgba(241, 245, 249, 0.85);
     border: 1px solid rgba(148, 163, 184, 0.2);
+    position: relative;
+    z-index: 1;
+    margin-top: 6px;
 }
 
 .presentation-story-flow-node {
@@ -3619,7 +3631,8 @@ body.dark-mode .presentation-version-row .btn-secondary:hover,
     transition: all 0.15s ease;
 }
 
-.presentation-story-card textarea.form-input {
+.presentation-story-card textarea.form-input,
+.presentation-story-goals-form textarea.form-input {
     resize: vertical;
     min-height: 32px;
     height: 32px;

@@ -15,7 +15,7 @@ test('only bounded internal verification gaps can request another planning attem
     for (const reason of ['source_not_fully_read', 'artifact_not_materialized']) {
         assert.equal(canAttemptVerificationRepair({ ...base, semanticVerification: { reason } }, options), true);
     }
-    for (const reason of ['source_revoked', 'verifier_unavailable', 'budget_exceeded']) {
+    for (const reason of ['source_revoked', 'verifier_unavailable', 'budget_exceeded', 'user_input_required']) {
         assert.equal(canAttemptVerificationRepair({ ...base, semanticVerification: { reason } }, options), false);
     }
     const incompleteDeliverable = { ...base, hardFailures: ['deliverables_verified'], semanticVerification: { missing: ['总结缺少文档中的部署前检查项'] } };
@@ -24,6 +24,8 @@ test('only bounded internal verification gaps can request another planning attem
     assert.equal(canAttemptVerificationRepair(incompleteDeliverable, { ...options, remainingSteps: 1 }), false);
     assert.equal(canAttemptVerificationRepair(incompleteDeliverable, { ...options, budget: new TaskBudget({ max_tool_calls: 0 }) }), false);
     assert.match(buildVerificationRepairMessage(incompleteDeliverable), /总结缺少文档中的部署前检查项/);
+    assert.equal(canAttemptVerificationRepair({ ...incompleteDeliverable, semanticVerification: { reason: 'deliverables_missing', missing: ['尚未提交文件'] } }, options), true);
+    assert.equal(canAttemptVerificationRepair({ ...incompleteDeliverable, semanticVerification: { reason: 'deliverables_missing', missing: [] } }, options), false);
     assert.equal(canAttemptVerificationRepair({ ...base, taskContract: { repairAttempts: 2 } }, options), false);
     assert.equal(canAttemptVerificationRepair(base, { ...options, remainingSteps: 1 }), false);
     const budget = new TaskBudget({ max_tool_calls: 0 });

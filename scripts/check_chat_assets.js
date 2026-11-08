@@ -6,6 +6,7 @@ const parse5 = require('parse5');
 const acorn = require('acorn');
 const { loadChatHtmlTemplate, loadChatWorkspaceTemplate, resolveChatHtmlIncludes } = require('../server/chat-template');
 const { renderManualHtml, stripVersionUpdateSections } = require('../server/manual-page');
+const { describesRemovedTaskWorkspace } = require('./lib/manual-navigation-contract');
 
 const rootDir = path.resolve(__dirname, '..');
 const chatDir = path.join(rootDir, 'client', 'chat');
@@ -87,7 +88,7 @@ if (!manualMarkdown.includes('点击左侧“自动化”') || !manualMarkdown.i
 if (/点击左侧“任务”/.test(manualMarkdown)) {
     fail('使用帮助.md must not describe the removed task navigation item');
 }
-if (/任务运行/.test(manualMarkdown)) {
+if (describesRemovedTaskWorkspace(manualMarkdown)) {
     fail('使用帮助.md must not describe the removed task-run workspace');
 }
 const manualNavSection = /### 1\.2 认识左侧导航([\s\S]*?)(?=\n### 1\.3)/.exec(manualMarkdown)?.[1] || '';

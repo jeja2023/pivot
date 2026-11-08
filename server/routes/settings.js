@@ -49,6 +49,8 @@ const { getPermissionCapabilities, isAdmin, isSuperAdmin, requireCapability } = 
 const { safeJsonGet } = require('../services/safe-http-client');
 const { speechSettings } = require('../services/speech-recognition/settings');
 const { registerSpeechSettingsRoutes } = require('./speech-settings');
+const { registerPresentationMasterSettingsRoutes } = require('./presentation-master-settings');
+const { pptMasterSettings } = require('../services/presentations/master/settings');
 const { invalidateMonitorSummaryCache } = require('./admin-stats');
 const { getStealthConfig, setStealthConfigAsync } = require('../services/stealth-service');
 const {
@@ -191,6 +193,7 @@ async function saveUserEmbeddingSettings(req, updates) {
 function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
     registerSpeechSettingsRoutes(router, { authMiddleware, logAction });
+    registerPresentationMasterSettingsRoutes(router, { authMiddleware, logAction });
 
     router.get('/settings', authMiddleware, asyncHandler(async (req, res) => {
         const settings = getSettings();
@@ -205,6 +208,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             retrievalModelConfig: getPublicEmbeddingConfig(),
             rerankConfig: getPublicRerankConfig(),
             speechConfig: speechSettings.publicConfig({ administrator: isSuperAdmin(req.user) }),
+            pptMasterConfig: await pptMasterSettings.publicConfig({ administrator: isSuperAdmin(req.user) }),
             ocrConfig: {
                 engine: ocrSettings.engine || 'http',
                 serviceUrl: ocrSettings.serviceUrl || ''

@@ -21,7 +21,8 @@ const DEFAULT_BUDGET = Object.freeze({
     max_runtime_seconds: DEFAULT_RUNTIME_SECONDS,
     max_python_timeout_seconds: 30,
     max_tokens_total: Math.max(128000, Number.parseInt(process.env.AGENT_TASK_MAX_TOKENS_TOTAL || '500000', 10) || 500000),
-    risk_budget: 20,
+    // 默认容量覆盖多步发现、读取和交付；显式预算及旧运行持久化限额仍原样生效。
+    risk_budget: 80,
     // Approval remains the gate for risky calls; this bounded default prevents
     // every ordinary MCP read/write from being rejected before approval.
     max_external_side_effects: 10,

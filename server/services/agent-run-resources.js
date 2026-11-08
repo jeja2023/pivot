@@ -65,7 +65,7 @@ async function reserveChildRunResources({ parentRunId, userId, requestedTokenBud
     const mode = normalizeForkHistory(forkHistory);
     return await transaction(async trx => {
         const parent = await trx.queryOne(`
-            SELECT id, user_id, parent_run_id, max_token_budget, budget_config, metadata
+            SELECT id, user_id, parent_run_id, max_token_budget, budget_config, usage_stats, metadata
             FROM agent_runs
             WHERE id = ? AND user_id = ? AND deleted_at IS NULL
             FOR UPDATE
@@ -87,6 +87,7 @@ async function reserveChildRunResources({ parentRunId, userId, requestedTokenBud
         }
         const ledgerBudget = Number(parentLedger.token_budget || 0);
         const budgetConfig = parseJson(parent.budget_config, {});
+        const parentRisk = budgetConfig.risk_budget ?? budgetConfig.riskBudget ?? parseJson(parent.usage_stats, {}).limits?.risk_budget;
         const configuredValue = budgetConfig.max_tokens_total ?? budgetConfig.maxTokensTotal;
         const configuredBudget = Number(configuredValue);
         const hasConfiguredLimit = configuredValue != null && Number.isFinite(configuredBudget) && configuredBudget >= 0;
@@ -122,6 +123,7 @@ async function reserveChildRunResources({ parentRunId, userId, requestedTokenBud
         `, [effectiveBudget, now, parentRunId]);
         return {
             tokenBudget: effectiveBudget,
+            riskBudget: parentRisk == null ? null : Math.max(0, Math.floor(Number(parentRisk) || 0)),
             forkHistory: mode,
             reservation: {
                 parentRunId: String(parentRunId),

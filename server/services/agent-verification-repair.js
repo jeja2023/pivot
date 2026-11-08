@@ -1,12 +1,13 @@
 'use strict';
 
 const REPAIRABLE_RULES = new Set(['final_answer_non_empty', 'required_phrase', 'forbidden_phrase', 'min_length', 'valid_json', 'output_schema', 'artifact_required', 'required_artifact', 'deliverables_verified']);
-const REPAIRABLE_REASONS = new Set(['source_not_fully_read', 'artifact_not_materialized']);
+const REPAIRABLE_REASONS = new Set(['source_not_fully_read', 'artifact_not_materialized', 'deliverables_missing']);
 
 function canAttemptVerificationRepair(report, { allowed = false, remainingSteps = 0, budget = null } = {}) {
     if (!allowed || remainingSteps < 2 || report.outcomeStatus !== 'needs_input' || Number(report.taskContract?.repairAttempts || 0) >= 2) return false;
     const reason = report.semanticVerification?.reason;
     if (reason && !REPAIRABLE_REASONS.has(reason)) return false;
+    if (reason === 'deliverables_missing' && !report.semanticVerification?.missing?.some(item => String(item || '').trim())) return false;
     const failures = report.hardFailures || [];
     if (!reason && (!failures.length || !failures.every(rule => REPAIRABLE_RULES.has(rule)))) return false;
     if (!reason && failures.includes('deliverables_verified')

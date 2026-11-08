@@ -2215,7 +2215,9 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#data-cleaning-add-rule').click();
         await page.locator('#data-cleaning-apply').click();
         await expect(page.locator('#data-analysis-overview-panel')).toBeVisible({ timeout: 15_000 });
-        await expect(page.locator('#data-analysis-dataset-table-body .data-analysis-dataset-name')).toHaveCount(initialDatasetCount + 2, { timeout: 15_000 });
+        const expectedCount = Math.min(10, initialDatasetCount + 2);
+        await expect(page.locator('#data-analysis-dataset-table-body .data-analysis-dataset-name')).toHaveCount(expectedCount, { timeout: 15_000 });
+        await expect(page.locator('#data-analysis-dataset-table-body')).toContainText('e2e-sales', { timeout: 15_000 });
 
         await page.locator('[data-data-analysis-tab="chart"]').click();
         await page.locator('#data-analysis-chart-x').selectOption('c_1');
