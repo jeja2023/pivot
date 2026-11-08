@@ -161,6 +161,8 @@ class Jobs:
                     if (root / ("cancel-" + request_id)).exists():
                         self.kill(child)
                     output, error = child.communicate(encoded, timeout=self.timeout)
+                    if child.returncode and any(marker in error.decode('utf-8', errors='replace') for marker in ['Landlock', '目录隔离', '网络隔离', '隔离组件']):
+                        raise ServiceError("动作隔离未能启用，请检查Linux内核Landlock及镜像libseccomp组件。", 503, "PPT_SERVICE_SANDBOX_UNAVAILABLE")
                     if len(output) > 1024**2 or child.returncode or self.stop.is_set() or (root / ("cancel-" + request_id)).exists():
                         raise ServiceError("制作动作未完成或已取消，请核对任务后重试。", 409, "PPT_SERVICE_OPERATION_FAILED")
                     response = json.loads(output)
