@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "status": "plan_only",
+  "description": "从Pivot历史问题类型选择的四类对照任务。必须先冻结仓库或缺陷变体快照，再运行同模型的基线与候选；本文件不是模型评测结果。",
+  "repeats": 3,
+  "cases": [
+    {
+      "id": "zero-value-chart",
+      "source": "docs/releases/v0.7.126-PPT原生能力与技能格式兼容升级.md",
+      "scope": "图表多序列、零值、负数及导出数据一致性",
+      "acceptance": ["追踪预览、图表缓存和嵌入工作簿", "区分零值、空值与无效值", "按实际快照给出触发条件，不把历史修复当作当前缺陷"]
+    },
+    {
+      "id": "skill-permission-boundary",
+      "source": "docs/design/技能多格式兼容与统一运行时方案-2026-11-07.md",
+      "scope": "外部技能元数据、工具绑定、来源往返和运行时权限",
+      "acceptance": ["确认元数据不构成授权", "追踪预览、发布和实际运行的权限来源", "识别未适配宿主行为，不执行包内脚本"]
+    },
+    {
+      "id": "canvas-layout-isolation",
+      "source": "docs/releases/v0.7.124-BI画布键盘移动与独立布局修复.md",
+      "scope": "画布键盘与拖拽位置、布局持久化和发布语义隔离",
+      "acceptance": ["检查实际键盘和拖拽调用方", "区分布局变化与语义哈希变化", "核对只读权限和修订冲突"]
+    },
+    {
+      "id": "native-version-conflict",
+      "source": "docs/releases/v0.7.128-PPT原稿编辑与离线视频.md",
+      "scope": "原稿保存时的预期版本、租约、账号隔离和受控交付",
+      "acceptance": ["追踪旧窗口与失效租约的写入路径", "检查租户及账号边界", "确认失败不会登记为成功或覆盖新稿"]
+    }
+  ]
+}

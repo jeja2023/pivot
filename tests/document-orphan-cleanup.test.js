@@ -129,6 +129,21 @@ test('强制终止执行器后恢复任务，再清理超过保留期的未登�
         await fs.access(target);
         worker.kill();
         await exited;
+        const lockProbe = await getPgPool().connect();
+        try {
+            // 子进程退出与数据库后端释放连接并非同一时刻，先确认原任务锁已实际释放。
+            const deadline = Date.now() + 5000;
+            let released = false;
+            while (Date.now() < deadline) {
+                released = (await lockProbe.query("SELECT pg_try_advisory_lock(hashtext('pivot_document_job'), hashtext($1::text)) AS locked", [String(job.id)])).rows[0].locked;
+                if (released) {
+                    await lockProbe.query("SELECT pg_advisory_unlock(hashtext('pivot_document_job'), hashtext($1::text))", [String(job.id)]);
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            assert.equal(released, true, '终止执行器后数据库必须实际释放任务锁。');
+        } finally { lockProbe.release(); }
         await execute("UPDATE document_jobs SET lease_until = NOW() - INTERVAL '1 second' WHERE id = ?", [job.id]);
         assert.equal((await recoverDocumentProcessingJobs()).requeued, 1);
         const deadline = Date.now() + 10000;

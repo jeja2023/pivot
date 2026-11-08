@@ -120,23 +120,16 @@
             node.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[element.style?.verticalAlign] || 'flex-start';
             node.style.alignItems = ({ left: 'flex-start', center: 'center', right: 'flex-end' })[element.style?.align] || 'flex-start';
         } else if (element.type === 'shape') {
-            node.style.background = element.style?.fill || 'var(--bg-canvas, #FFFFFF)';
-            const strokeW = Number(element.style?.strokeWidth ?? 1);
-            if (element.shapeType === 'line') {
-                node.style.background = 'transparent';
-                node.style.borderTop = `${Math.max(1, strokeW)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}`;
-                node.style.borderLeft = 'none';
-                node.style.borderRight = 'none';
-                node.style.borderBottom = 'none';
-            } else {
-                node.style.border = strokeW > 0 ? `${Math.max(1, strokeW)}px solid ${element.style?.stroke || 'var(--border-color, #CBD5E1)'}` : 'none';
-                node.style.borderRadius = (element.shapeType === 'ellipse' ? '50%' : Math.max(0, Number(element.style?.radius || 0) * 0.55) + 'px');
-            }
-            node.style.opacity = String(element.style?.opacity ?? 1);
+            window.Pivot.presentationGraphics.mountSvg(node, window.Pivot.presentationGeometry.shapeSvg(element), window.Pivot.presentationGeometry.label(element.shapeType));
         } else if (element.type === 'image') {
             node.src = API + '/assets/content/by-ref?ref=' + encodeURIComponent(element.assetRef) + '&presentationId=' + encodeURIComponent(state.active?.id || '');
             node.alt = element.alt || '';
             node.style.objectFit = element.fit === 'contain' ? 'contain' : element.fit === 'stretch' ? 'fill' : 'cover';
+        } else if (['chart', 'diagram'].includes(element.type) && window.Pivot?.presentationGraphics) {
+            const graphics = window.Pivot.presentationGraphics;
+            graphics.mountSvg(node, element.type === 'chart' ? graphics.chartSvg(element) : graphics.diagramSvg(element), element.title || element.items?.join('，') || '数据图表');
+        } else if (element.type === 'table') {
+            renderTableElement(node, element, 0.55);
         } else {
             node.textContent = element.title || (element.type === 'chart' ? '图表' : '表格');
             node.style.fontSize = '14px';
@@ -645,6 +638,8 @@
             toast?.('当前没有可转换的 Agent 文本产物。', 'warning');
             return;
         }
+        const titleInput = byId('presentation-artifact-title-input');
+        if (titleInput) titleInput.value = '';
         byId('presentation-artifact-modal')?.classList.remove('hidden');
     }
 
@@ -680,19 +675,8 @@
     }
 
     function renderChartElement(node, element) {
-        const values = (element.data?.rows || []).map(row => Number(row[1]) || 0);
-        const max = Math.max(1, ...values.map(value => Math.abs(value)));
-        const palette = element.options?.colors?.length ? element.options.colors : ['#1769AA', '#5B8FF9', '#61DDAA', '#F59E0B'];
-        const title = document.createElement('strong'); title.className = 'presentation-chart-title'; title.textContent = element.title || ''; node.appendChild(title);
-        const chart = document.createElement('div'); chart.className = `presentation-chart presentation-chart-${element.chartType}`;
-        values.forEach((value, index) => {
-            const item = document.createElement('div'); item.className = 'presentation-chart-item';
-            const mark = document.createElement('i'); mark.style.background = palette[index % palette.length];
-            mark.style.setProperty('--chart-value', `${Math.max(4, Math.abs(value) / max * 100)}%`);
-            const label = document.createElement('span'); label.textContent = String(element.data.rows[index]?.[0] || '');
-            item.append(mark, label); chart.appendChild(item);
-        });
-        node.appendChild(chart);
+        const graphics = window.Pivot.presentationGraphics;
+        graphics.mountSvg(node, graphics.chartSvg(element), element.title || '数据图表');
     }
 
     // ==========================================
@@ -814,6 +798,7 @@
         const list = byId('presentation-evidence-list'); if (!list) return;
         list.replaceChildren();
         const content = state.active?.content; const sources = content?.sources || [];
+        window.Pivot?.moduleApi?.('apps.presentations.studio')?.renderEvidence(list, state);
         const approvedOutline = content?.metadata?.planApproval;
         if (approvedOutline?.status === 'approved') {
             const plan = document.createElement('article'); plan.className = 'presentation-evidence-card';

@@ -1,7 +1,7 @@
 const express = require('express');
 const { query, queryOne, execute, transaction } = require('../../db/client');
 const { nowOffsetExpr } = require('../../db/dialect');
-const { asyncHandler } = require('../../http');
+const { handler: asyncHandler } = require('../../services/data-analysis/bi/delivery');
 const { getBeijingTimestamp } = require('../../time');
 const {
     decryptSecret,

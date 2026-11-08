@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "revision": "769547394107870a0c7b5ad8d1c0c75035123aef",
+  "templates": [
+    {
+      "id": "master-style-academic-research",
+      "name": "学术研究",
+      "description": "问题、方法、结果与局限清晰呈现",
+      "kind": "style",
+      "path": "templates/styles/academic-research",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-consulting-decision",
+      "name": "咨询决策",
+      "description": "结论先行，以证据支持决策",
+      "kind": "style",
+      "path": "templates/styles/consulting-decision",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-creative-pitch",
+      "name": "创意提案",
+      "description": "围绕核心创意和应用场景组织内容",
+      "kind": "style",
+      "path": "templates/styles/creative-pitch",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-duty-manual",
+      "name": "技术手册",
+      "description": "机制、规则与操作说明",
+      "kind": "style",
+      "path": "templates/styles/duty-manual",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-incident-postmortem",
+      "name": "事件复盘",
+      "description": "时间线、成因与改进行动",
+      "kind": "style",
+      "path": "templates/styles/incident-postmortem",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-investor-pitch",
+      "name": "项目路演",
+      "description": "机会、方案、进展与团队",
+      "kind": "style",
+      "path": "templates/styles/investor-pitch",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-mbb-consulting",
+      "name": "咨询分析",
+      "description": "结构化分析与管理汇报",
+      "kind": "style",
+      "path": "templates/styles/mbb-consulting",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-narrative-keynote",
+      "name": "主题演讲",
+      "description": "围绕主题建立连贯叙事",
+      "kind": "style",
+      "path": "templates/styles/narrative-keynote",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-operating-review",
+      "name": "经营复盘",
+      "description": "指标、差距、原因与行动",
+      "kind": "style",
+      "path": "templates/styles/operating-review",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-product-launch",
+      "name": "产品发布",
+      "description": "产品价值、能力和应用案例",
+      "kind": "style",
+      "path": "templates/styles/product-launch",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-science-explainer",
+      "name": "科普讲解",
+      "description": "将原理转成清晰的讲解结构",
+      "kind": "style",
+      "path": "templates/styles/science-explainer",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-solution-proposal",
+      "name": "方案建议",
+      "description": "业务问题、解决方案与实施安排",
+      "kind": "style",
+      "path": "templates/styles/solution-proposal",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-technical-deepdive",
+      "name": "技术详解",
+      "description": "架构、原理与实现细节",
+      "kind": "style",
+      "path": "templates/styles/technical-deepdive",
+      "version": "6.8.0"
+    },
+    {
+      "id": "master-style-workshop-teaching",
+      "name": "培训研讨",
+      "description": "目标、讲解、练习与总结",
+      "kind": "style",
+      "path": "templates/styles/workshop-teaching",
+      "version": "6.8.0"
+    }
+  ]
+}

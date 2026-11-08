@@ -19,6 +19,10 @@ const { getPgPool } = require('./pg-connection');
 const { getScopedSession } = require('./scoped-session');
 const { LruCache } = require('../cache');
 
+function securityWrite(sql) {
+    return /\b(?:INSERT|UPDATE|DELETE|MERGE)\b/i.test(String(sql)) && /\b(?:users|analysis_datasets|analysis_data_models|analysis_field_governance|analysis_audit_events|analysis_saved_views|analysis_dashboards|analysis_metric_definitions)\b/i.test(String(sql));
+}
+
 const SLOW_SQL_THRESHOLD_MS = Math.max(Number.parseInt(process.env.PIVOT_SLOW_SQL_MS || '500', 10) || 500, 100);
 let cachedSlowSqlRecorder = null;
 
@@ -161,6 +165,7 @@ function toPostgresParams(sql) {
  * @returns {Promise<any[]>}
  */
 async function query(sql, params = []) {
+    if (!getScopedSession() && securityWrite(sql)) return transaction(trx => trx.query(sql, params));
     const startedAt = Date.now();
     const result = await (getScopedSession() || getPgPool()).query(getPostgresSql(sql), params);
     const duration = Date.now() - startedAt;
@@ -267,6 +272,7 @@ async function queryOne(sql, params = []) {
  * @returns {Promise<number>}
  */
 async function execute(sql, params = []) {
+    if (!getScopedSession() && securityWrite(sql)) return transaction(trx => trx.execute(sql, params));
     const startedAt = Date.now();
     const result = await (getScopedSession() || getPgPool()).query(getPostgresSql(sql), params);
     const duration = Date.now() - startedAt;
@@ -285,10 +291,23 @@ async function transaction(fn) {
     if (getScopedSession()) throw new Error('持锁任务不支持独立数据库事务。');
     const client = await getPgPool().connect();
     let releaseError = null;
+    let committed = false, securityChanged = false, securityActorSet = false;
+    const markSecurityWrite = async sql => {
+        if (!securityWrite(sql)) return;
+        securityChanged = true;
+        if (securityActorSet) return;
+        const context = require('../services/request-context').getRequestContext();
+        await client.query("SELECT set_config('pivot.actor_id',$1,true),set_config('pivot.request_id',$2,true)", [String(context.userId || ''), String(context.requestId || '').slice(0, 200)]);
+        securityActorSet = true;
+    };
+    // 事务期间连接仍由调用方持有，断连事件不能交给空闲池监听器处理，否则会成为未捕获异常。
+    const connectionError = error => { releaseError = error; };
+    client.on('error', connectionError);
     try {
         await client.query('BEGIN');
         const trx = {
             query: async (sql, params = []) => {
+                await markSecurityWrite(sql);
                 const startedAt = Date.now();
                 const result = await client.query(getPostgresSql(sql), params);
                 const duration = Date.now() - startedAt;
@@ -298,6 +317,7 @@ async function transaction(fn) {
                 return result.rows;
             },
             queryOne: async (sql, params = []) => {
+                await markSecurityWrite(sql);
                 const startedAt = Date.now();
                 const result = await client.query(getPostgresSql(sql), params);
                 const duration = Date.now() - startedAt;
@@ -307,6 +327,7 @@ async function transaction(fn) {
                 return result.rows[0] ?? null;
             },
             execute: async (sql, params = []) => {
+                await markSecurityWrite(sql);
                 const startedAt = Date.now();
                 const result = await client.query(getPostgresSql(sql), params);
                 const duration = Date.now() - startedAt;
@@ -317,7 +338,14 @@ async function transaction(fn) {
             },
         };
         const result = await fn(trx);
+        if (securityChanged) securityChanged = await require('../services/data-analysis/bi/security-journal').pendingIn(client);
         await client.query('COMMIT');
+        committed = true;
+        // Release the connection before confirming the independent copy. The
+        // committed primary change must never be rolled back on replica error.
+        client.release(releaseError || undefined);
+        client.removeListener('error', connectionError);
+        if (securityChanged) await require('../services/data-analysis/bi/security-journal').committed({ transactionId: securityChanged });
         return result;
     } catch (err) {
         // 回滚本身可能再次失败（连接已断、statement_timeout 触发、事务已中断）。
@@ -325,15 +353,21 @@ async function transaction(fn) {
         // 空闲池（pg-pool/index.js:392 仅在传入 err 时才 _remove），后续使用者都会拿到
         // "current transaction is aborted"，坏连接逐个累积直到池被占满——表现为全站
         // 接口不可用且只有重启进程才能恢复。所以回滚失败必须让连接池销毁该连接。
-        try {
-            await client.query('ROLLBACK');
-        } catch (rollbackError) {
-            releaseError = rollbackError;
+        if (!committed) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                releaseError = rollbackError;
+            }
+            if (err.securityFenceReason && !releaseError) await require('../services/data-analysis/bi/security-journal').recordFence(client, err.securityFenceReason);
         }
         throw err;
     } finally {
         // 传入错误 => pg-pool 销毁连接；无错误 => 正常归还。
-        client.release(releaseError || undefined);
+        if (!committed) {
+            client.release(releaseError || undefined);
+            client.removeListener('error', connectionError);
+        }
     }
 }
 

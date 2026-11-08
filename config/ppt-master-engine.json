@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/hugohe3/ppt-master.git",
+  "revision": "769547394107870a0c7b5ad8d1c0c75035123aef",
+  "skillPath": "skills/ppt-master",
+  "skillVersion": "6.8.0",
+  "protocolVersion": 1,
+  "requiredFiles": [
+    "SKILL.md",
+    "LICENSE",
+    "SPONSORS.md",
+    "SPONSORS_CN.md",
+    "requirements.txt",
+    "workflows/routing.md",
+    "workflows/generate-pptx.md",
+    "workflows/create-template.md",
+    "workflows/edit-native-pptx.md",
+    "workflows/profiles/quick-generate.md",
+    "scripts/attribution_guard.py",
+    "scripts/svg_quality_checker.py",
+    "scripts/svg_to_pptx.py",
+    "scripts/pptx_to_svg.py",
+    "scripts/pptx_template_import.py"
+  ],
+  "tree": "47705749ef2f9f01933904c854ea065386490cc1",
+  "contentDigest": "3c2d0346f658b45fe764e7fcfe045461f6e10de04d23227dda8f466624793041"
+}

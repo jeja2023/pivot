@@ -360,6 +360,7 @@ const chatShellCss = fs.readFileSync(path.join(stylesDir, 'base', 'chat-shell.cs
 const appsWorkbenchSlices = [
     'apps-model-selector.js',
     'apps-workbench-core.js',
+    'apps-workbench-availability.js',
     'apps-workbench-editor.js',
     'apps-workbench-library.js', 'apps-workbench-library-ui.js', 'apps-workbench-surface.js', 'apps-workbench-history.js', 'apps-workbench-suggestions.js',
     'apps-workbench-proofread.js',

@@ -353,14 +353,18 @@ function checkChineseHumanTextAddedLine(file, item) {
                 addFailure(`${location} 新增英文界面提示：${attrMatch[1].slice(0, 80)}。请改为中文。`);
             }
         }
-        const htmlTextPattern = />\s*([^<>{}]+?)\s*</g;
-        let htmlMatch;
-        while ((htmlMatch = htmlTextPattern.exec(text))) {
-            if (isEnglishOnlyHumanText(htmlMatch[1])) {
-                addFailure(`${location} 新增英文界面文案：${htmlMatch[1].slice(0, 80)}。请改为中文。`);
+        for (const value of extractHtmlText(text)) {
+            if (isEnglishOnlyHumanText(value)) {
+                addFailure(`${location} 新增英文界面文案：${value.slice(0, 80)}。请改为中文。`);
             }
         }
     }
+}
+
+function extractHtmlText(source) {
+    // 仅匹配真实标签之后的文字，避免把 JavaScript 的 >、< 比较表达式当成界面文案。
+    const pattern = /<[A-Za-z][\w:-]*(?:\s[^<>]*)?\s*\/?>\s*([^<>{}]+?)\s*(?=<\/?[A-Za-z])/g;
+    return [...String(source).matchAll(pattern)].map(match => match[1]);
 }
 
 function checkFrontendAddedLine(file, item) {
@@ -375,7 +379,9 @@ function checkFrontendAddedLine(file, item) {
     }
     // 导图主题色属于可导出的文档数据，不是工作台 UI 配色；只允许固定预设声明。
     const isMindmapPalette = file === 'client/common/mindmap-document.js' && text.trim().startsWith('const THEMES = Object.freeze(');
-    if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(') && !isMindmapPalette) {
+    // 这两个纯模块输出可导出的文稿矢量数据；工作台表单/按钮仍须使用主题变量。
+    const isPresentationDocumentRenderer = ['client/chat/presentation-graphics.js', 'client/chat/presentation-geometry.js'].includes(file);
+    if (/(^|[^\w-])#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(text) && !text.includes('var(') && !isMindmapPalette && !isPresentationDocumentRenderer) {
         addFailure(`${location} 新增硬编码颜色。请使用全局 CSS 变量或既有样式类。`);
     }
     if (/<button\b/i.test(text) && !/(btn-primary|btn-secondary|btn-danger|btn-danger-outline|workspace-modal-close|data-analysis-tab|admin-tab|settings-subtab|automation-primary-tab)/.test(text)) {
@@ -474,6 +480,7 @@ if (require.main === module) main();
 module.exports = {
     buildBaseRefCandidates,
     extractMessageStringLiterals,
+    extractHtmlText,
     isSkippableGeneratedFile,
     resolveChangedDiffArgs
 };

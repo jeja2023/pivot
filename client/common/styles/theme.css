@@ -96,6 +96,7 @@ input, textarea, select, button { font-family: inherit; }
     background: var(--surface); color: var(--text-main); cursor: pointer; transition: 0.2s;
 }
 .btn-secondary:hover { background: var(--bg-side); }
+.btn-pill { border-radius: 999px; }
 
 .btn-danger {
     display: inline-flex; align-items: center; justify-content: center;

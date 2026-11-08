@@ -1,4 +1,5 @@
 'use strict';
+const colors = require('../../../client/chat/presentation-colors');
 
 /**
  * 演示文稿模板母版、布局图层叠加与智能排版（Smart Reflow）
@@ -591,7 +592,7 @@ function reflowSlideElements(elements, layout, template, presentation) {
     return editable;
 }
 
-function applyTemplateLayoutLayers(content, template, { reflow = false, normalizePresentation } = {}) {
+function applyTemplateLayoutLayers(content, template, { reflow = false, recolor = false, normalizePresentation } = {}) {
     const definition = template?.definition || template || {};
     if (!Array.isArray(definition.masters) || !definition.masters.length) return content;
     const theme = definition.theme || content.theme || {};
@@ -612,6 +613,20 @@ function applyTemplateLayoutLayers(content, template, { reflow = false, normaliz
             imageAssetRef: master.background.imageAssetRef || '',
             opacity: master.background.opacity === undefined ? 1 : master.background.opacity
         } : slide.background;
+        if (!reflow && recolor && !background?.imageAssetRef) {
+            const used = new Set();
+            for (const element of elements.filter(item => item.type === 'text')) {
+                const slot = slotForTextElement(element, layout.placeholders || [], used);
+                if (slot) used.add(slot.id);
+                const surface = colors.textBackground({ ...slide, background, elements: [...templateLayerElements(template, layout, slideIndex, content), ...elements] }, element);
+                const previousPalette = [content.theme?.colors?.text, content.theme?.colors?.primary, content.theme?.colors?.secondary, content.theme?.colors?.accent].filter(Boolean).map(color => color.toUpperCase());
+                const current = String(element.style?.color || '').toUpperCase();
+                const inherited = previousPalette.includes(current) || (slot && ['title', 'subtitle'].includes(slot.role));
+                const preferred = inherited ? slot?.style?.color || theme.colors?.text : element.style?.color;
+                element.style = { ...element.style, fontFamily: theme.fonts?.[Number(element.style?.fontSize) >= 24 ? 'heading' : 'body'] || element.style?.fontFamily,
+                    color: colors.readable(surface, preferred || theme.colors?.text) };
+            }
+        }
         return { ...slide, layoutId: layout.id, background, transition: layout.defaultTransition?.type !== 'none' ? { ...layout.defaultTransition } : slide.transition, elements: [...templateLayerElements(template, layout, slideIndex, content), ...elements] };
     });
     const result = { ...content, theme: { ...content.theme, ...theme, colors: { ...(content.theme?.colors || {}), ...(theme.colors || {}) }, fonts: { ...(content.theme?.fonts || {}), ...(theme.fonts || {}) } }, slides };

@@ -4,6 +4,9 @@
     let bound = false;
     let proposal = null;
     let sourceText = '';
+    let sourceFileName = '';
+    let templateId = '';
+    let templateToolNames = null;
     let draftId = '';
     let stage = '';
     let preparedSnapshot = '';
@@ -77,7 +80,7 @@
         if (!busy) status('内容或工具已更改，请重新预览。');
     }
     function lockInputs(locked) {
-        ['agent-skill-import-source', 'agent-skill-import-title', 'agent-skill-import-description', 'agent-skill-import-tools', 'agent-skill-import-preview', 'agent-skill-tools-picker-open-btn'].forEach(id => { const target = element(id); if (target) target.disabled = locked; });
+        ['agent-skill-import-template', 'agent-skill-import-source', 'agent-skill-import-title', 'agent-skill-import-description', 'agent-skill-import-tools', 'agent-skill-import-preview', 'agent-skill-tools-picker-open-btn'].forEach(id => { const target = element(id); if (target) target.disabled = locked; });
     }
     async function request(url, options = {}) {
         const response = await apiFetch(url, options);
@@ -95,6 +98,53 @@
         const versions = await request(`${API_BASE}/agents/skills/versions?limit=200`, { cache: 'no-store' });
         return (versions.data || []).find(item => String(item.name) === proposal.name && String(item.version) === '1.0.0');
     }
+    function renderToolOptions(tools, previous = new Set()) {
+        const select = element('agent-skill-import-tools');
+        cachedTools = tools;
+        select.replaceChildren();
+        for (const tool of tools) {
+            const option = document.createElement('option');
+            option.value = tool.name;
+            option.textContent = `${tool.title || tool.name}（${tool.name}）${tool.approvalRequired ? ' · 需要审批' : ''}`;
+            option.selected = previous.has(tool.name);
+            select.append(option);
+        }
+        updateToolsPreview();
+    }
+    async function useTemplate() {
+        if (busy || draftId || creationAttempted) return;
+        invalidate();
+        const sequence = ++fileGeneration;
+        const selected = element('agent-skill-import-template').value;
+        ++toolsGeneration;
+        templateId = ''; templateToolNames = null; sourceText = ''; sourceFileName = '';
+        element('agent-skill-import-source').value = '';
+        element('agent-skill-import-title').value = '';
+        element('agent-skill-import-description').value = '';
+        updateFileDropzoneUI(null);
+        renderToolOptions([]);
+        if (toolsLoading) await toolsLoading;
+        if (sequence !== fileGeneration) return;
+        if (!selected) { await loadTools(); return; }
+        status('正在读取代码审查模板和当前可用的只读工具…');
+        try {
+            const data = await request(`${API_BASE}/agents/skills/import/templates/${encodeURIComponent(selected)}`, { cache: 'no-store' });
+            if (sequence !== fileGeneration) return;
+            templateId = data.template.id;
+            templateToolNames = new Set(data.tools.map(tool => tool.name));
+            sourceText = data.template.markdown; sourceFileName = `${templateId}.md`;
+            element('agent-skill-import-title').value = data.template.title;
+            element('agent-skill-import-description').value = data.template.description;
+            renderToolOptions(data.tools, templateToolNames);
+            const title = element('agent-skill-file-title');
+            if (title) title.textContent = `已选择：${data.template.title}`;
+            const desc = element('agent-skill-file-desc');
+            if (desc) desc.textContent = '可直接预览，或上传自己的技能文件';
+            status(data.tools.length ? '模板已就绪，已选当前账号可用的只读工具，请预览并核对后添加。' : '暂无可用的工作区只读工具，请先连接并授权本机工作区，再重新选择模板。');
+        } catch (error) {
+            if (sequence === fileGeneration) status(error.message || '模板读取失败，请重新选择。');
+        }
+    }
     async function loadTools() {
         const select = element('agent-skill-import-tools');
         if (!select || draftId || busy || creationAttempted) return;
@@ -107,16 +157,16 @@
             const nextFingerprint = JSON.stringify([...(data.tools || [])].sort((a, b) => String(a.name).localeCompare(String(b.name))));
             if (toolsFingerprint && toolsFingerprint !== nextFingerprint) invalidate();
             toolsFingerprint = nextFingerprint;
-            cachedTools = Array.isArray(data.tools) ? [...data.tools] : [];
-            select.replaceChildren();
-            for (const tool of Array.isArray(data.tools) ? data.tools : []) {
-                const option = document.createElement('option');
-                option.value = tool.name;
-                option.textContent = `${tool.title || tool.name}（${tool.name}）${tool.approvalRequired ? ' · 需要审批' : ''}`;
-                option.selected = previous.has(tool.name);
-                select.append(option);
+            renderToolOptions((data.tools || []).filter(tool => !templateToolNames || templateToolNames.has(tool.name)), previous);
+            const templates = element('agent-skill-import-template');
+            if (templates && !templates.options.length) {
+                const blank = document.createElement('option');
+                blank.value = ''; blank.textContent = '上传技能文件，或选择内置模板'; templates.append(blank);
+                for (const template of data.templates || []) {
+                    const option = document.createElement('option');
+                    option.value = template.id; option.textContent = template.title; templates.append(option);
+                }
             }
-            updateToolsPreview();
             if (!select.options.length) status('当前没有可用工具，请先在工具库配置或授权。');
         } catch (_) {
             if (sequence === toolsGeneration) status('工具列表暂不可用，刷新技能列表后可重试。');
@@ -135,36 +185,71 @@
         } else {
             dropzone.classList.remove('has-file');
             if (titleEl) PivotSafeHtml.setHtml(titleEl, '点击或拖拽上传 <strong>SKILL.md</strong>');
-            if (descEl) descEl.textContent = '标准 Markdown 指引，大小不超过 272 KB';
+            if (descEl) descEl.textContent = '支持 Markdown、JSON、YAML，大小不超过 272 KB';
         }
     }
     async function readFile() {
         invalidate();
         const sequence = ++fileGeneration;
+        const wasTemplate = Boolean(templateId || element('agent-skill-import-template')?.value);
+        templateId = ''; templateToolNames = null;
+        if (element('agent-skill-import-template')) element('agent-skill-import-template').value = '';
+        if (wasTemplate) {
+            element('agent-skill-import-title').value = '';
+            element('agent-skill-import-description').value = '';
+            await loadTools();
+            if (sequence !== fileGeneration) return;
+        }
         const file = element('agent-skill-import-source').files?.[0];
         sourceText = '';
+        sourceFileName = '';
         updateFileDropzoneUI(file);
         if (!file) return;
         if (file.size > 272 * 1024) { status('技能文件过大，请选择不超过 272 KB 的文件。'); return; }
         try {
             const text = await file.text();
             if (sequence !== fileGeneration) return;
-            sourceText = text; status('文件已读取，请填写名称并选择工具。');
+            sourceText = text; sourceFileName = file.name || 'SKILL.md';
+            status('文件已读取，正在识别技能格式…');
+            try {
+                const result = await post(`${API_BASE}/agents/skills/import/inspect`, { markdown: sourceText, fileName: sourceFileName });
+                if (sequence !== fileGeneration || proposal || draftId || busy) return;
+                const { identity, compatibility } = result.inspection;
+                if (!element('agent-skill-import-title').value.trim()) element('agent-skill-import-title').value = String(identity.title || '').slice(0, 120);
+                if (!element('agent-skill-import-description').value.trim()) element('agent-skill-import-description').value = String(identity.description || '').slice(0, 800);
+                status(`已识别：${compatibility.formatLabel}。${compatibility.status === 'adaptation_required' ? '资源或宿主行为需要适配，预览中将列出详情。' : '请选择当前账号可用的工具，再预览转换结果。'}`);
+            } catch (error) {
+                if (sequence !== fileGeneration || proposal || draftId || busy) return;
+                if (Number(error.status) >= 400 && Number(error.status) < 500) { sourceText = ''; status(error.message); }
+                else status('格式自动识别暂不可用，可填写名称并选择工具后重新预览。');
+            }
         } catch (_) { if (sequence === fileGeneration) status('无法读取技能文件，请重新选择。'); }
     }
     function snapshot() {
-        return JSON.stringify({ sourceText, title: element('agent-skill-import-title').value.trim(), description: element('agent-skill-import-description').value.trim(), tools: [...element('agent-skill-import-tools').selectedOptions].map(option => option.value) });
+        return JSON.stringify({ sourceText, sourceFileName, templateId, title: element('agent-skill-import-title').value.trim(), description: element('agent-skill-import-description').value.trim(), tools: [...element('agent-skill-import-tools').selectedOptions].map(option => option.value) });
+    }
+    function compatibilityLines(report) {
+        if (!report) return [];
+        const handling = { mapped: '已转换', preserved: '保留来源', permission_review: '重新核对授权', unsupported: '宿主行为未适配' };
+        const requirement = { resource: '配套文件未导入', environment: '环境尚未验证', host_feature: '宿主功能未适配', metadata: '描述字段需核对' };
+        return [`识别格式：${report.formatLabel} · 适配器 ${report.adapterVersion}`,
+            `文件类型：${({ markdown: 'Markdown', json: 'JSON', yaml: 'YAML' })[report.container] || '待识别'}`,
+            `兼容状态：${report.status === 'adaptation_required' ? '可转换指引，完整运行仍需适配' : '指引格式可兼容，工具授权单独校验'}`,
+            ...(report.fields || []).map(item => `字段 ${item.field}：${handling[item.handling] || '需核对'}；${item.message}`),
+            ...(report.requirements || []).map(item => `${requirement[item.kind] || '待适配'}：${item.name}`),
+            ...(report.declaredTools?.length ? ['原技能工具声明仅供核对，不会自动授予：' + report.declaredTools.join('、')] : []),
+            ...(report.declaredCapabilities?.length ? ['原技能能力/权限声明仅供核对，不会自动授予：' + report.declaredCapabilities.join('、')] : [])];
     }
     async function preview() {
         if (busy || draftId) return;
         invalidate();
         const title = element('agent-skill-import-title').value.trim();
         const tools = [...element('agent-skill-import-tools').selectedOptions].map(option => option.value);
-        if (!sourceText || !title || !tools.length) return status('请先选择文件、填写技能名称并选择至少一个工具。');
+        if (!sourceText || !title || !tools.length) return status('请先选择模板或文件、填写技能名称并选择至少一个可用工具。');
         const expectedSnapshot = snapshot();
         busy = true; lockInputs(true); status('正在检查技能文件和工具…');
         try {
-            const result = await post(`${API_BASE}/agents/skills/import/preview`, { markdown: sourceText, title, description: element('agent-skill-import-description').value.trim(), tools });
+            const result = await post(`${API_BASE}/agents/skills/import/preview`, { markdown: sourceText, fileName: sourceFileName, templateId, title, description: element('agent-skill-import-description').value.trim(), tools });
             if (snapshot() !== expectedSnapshot) throw new Error('文件或工具已变化，请重新预览');
             proposal = result.proposal;
             preparedSnapshot = expectedSnapshot;
@@ -172,6 +257,7 @@
             publishAttempted = false;
             const lines = [
                 `技能名称：${title}`,
+                ...compatibilityLines(proposal.compatibility),
                 ...proposal.tools.map(item => `工具：${item.title}（${item.name}） · 能力：${item.capabilities.join('、')} · 风险：${riskText(item.risk)}${item.approvalRequired ? ' · 需要审批' : ''}`),
                 ...proposal.warnings.map(item => `提示：${item}`),
                 ...(proposal.preview.errors || []).map(item => `校验问题：${item}`),
@@ -189,7 +275,7 @@
         busy = true; lockInputs(true); element('agent-skill-import-submit').disabled = true;
         try {
             stage = '核对工具';
-            const current = await request(`${API_BASE}/agents/skills/import/tools`, { cache: 'no-store' });
+            const current = await request(templateId ? `${API_BASE}/agents/skills/import/templates/${encodeURIComponent(templateId)}` : `${API_BASE}/agents/skills/import/tools`, { cache: 'no-store' });
             const currentByName = new Map((current.tools || []).map(tool => [tool.name, tool]));
             const comparable = tool => tool && ({ name: tool.name, title: tool.title, description: tool.description, risk: tool.risk, approvalRequired: tool.approvalRequired, capabilities: [...(tool.capabilities || [])].sort() });
             const changed = (proposal?.tools || []).some(tool => JSON.stringify(comparable(currentByName.get(tool.name))) !== JSON.stringify(comparable(tool)));
@@ -252,6 +338,8 @@
                 }
             }
             draftId = ''; proposal = null; sourceText = ''; preparedSnapshot = '';
+            templateId = ''; templateToolNames = null; sourceFileName = '';
+            if (element('agent-skill-import-template')) element('agent-skill-import-template').value = '';
             publishAttempted = false;
             creationAttempted = false;
             element('agent-skill-import-source').value = '';
@@ -280,6 +368,7 @@
         if (bound || !element('agent-skill-import-source')) return;
         bound = true;
         element('agent-skill-import-source').addEventListener('change', readFile);
+        element('agent-skill-import-template')?.addEventListener('change', useTemplate);
         ['agent-skill-import-title', 'agent-skill-import-description', 'agent-skill-import-tools'].forEach(id => element(id).addEventListener('input', invalidate));
         element('agent-skill-import-tools').addEventListener('change', invalidate);
         element('agent-skill-import-preview').addEventListener('click', preview);

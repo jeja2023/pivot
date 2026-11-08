@@ -302,7 +302,7 @@ async function previewCalculatedField({ user, datasetId, input = {} }) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
     return { formula: { name: formula.name, expression: formula.expression, dependencies: formula.dependencies }, rows };
 }
 
@@ -310,7 +310,11 @@ function calculatedFieldKey() {
     return `calc_${crypto.randomBytes(6).toString('hex')}`;
 }
 
-async function materializeCalculatedField({ user, datasetId, input = {} }) {
+async function materializeCalculatedField(options) {
+    return withAnalysisSlot(() => materializeCalculatedFieldInSlot(options), { userId: options.user.id });
+}
+
+async function materializeCalculatedFieldInSlot({ user, datasetId, input = {} }) {
     const source = await getDatasetForUser(user, datasetId, { write: true });
     const columns = parseJson(source.columns_json, []);
     const formula = normalizeFormula(input, columns);
@@ -338,7 +342,7 @@ async function materializeCalculatedField({ user, datasetId, input = {} }) {
                 connection.closeSync();
                 instance.closeSync();
             }
-        });
+        }, { userId: user.id });
         const profile = await profileViaSql(outputPath, outputColumns, Number(source.row_count) || 0);
         const now = sharedTimestamp();
         await transaction(async trx => {
@@ -407,7 +411,14 @@ async function listSavedViews(user, { datasetId = '', limit = 100 } = {}) {
     if (!userRecord) return [];
     if (datasetId) await getDatasetForUser(userRecord, datasetId);
     const rows = await listVisible('analysis_saved_views', userRecord, { datasetId, limit });
-    return rows.filter(row => canAccessSharedResource(row, userRecord, false)).map(row => ({ ...savedViewRecord(row), isOwner: Number(row.user_id) === Number(userRecord.id) }));
+    const visible = [];
+    for (const row of rows.filter(row => canAccessSharedResource(row, userRecord, false))) {
+        if (row.source_type === 'model') {
+            try { visible.push((await require('./bi/consumers').resolveView(userRecord, row)).view); }
+            catch (error) { if (!error.code?.startsWith('ANALYSIS_')) throw error; }
+        } else visible.push({ ...savedViewRecord(row), isOwner: Number(row.user_id) === Number(userRecord.id) });
+    }
+    return visible;
 }
 
 async function saveAnalysisView({ user, datasetId, body = {}, viewId = '' }) {
@@ -444,12 +455,14 @@ async function saveAnalysisView({ user, datasetId, body = {}, viewId = '' }) {
 
 async function getSavedView(user, viewId, { write = false } = {}) {
     const row = await queryOne('SELECT * FROM analysis_saved_views WHERE id = ? AND deleted_at IS NULL', [viewId]);
+    if (row?.source_type === 'model') return require('./bi/consumers').resolveView(user, row, { write });
     if (!row || !canAccessSharedResource(row, user, write)) throw invalid('分析视图不存在或无权访问。', 404);
     return { row, view: { ...savedViewRecord(row), isOwner: Number(row.user_id) === Number(user.id) } };
 }
 
 async function runSavedView(user, viewId) {
     const { row, view } = await getSavedView(user, viewId);
+    if (row.source_type === 'model') return require('./bi/consumers').runModelView(user, viewId);
     // 视图自身可共享不代表数据自动可共享；运行前再次验证调用者对源数据集的读取权。
     await getDatasetForUser(user, row.dataset_id);
     const owner = await resolveAnalysisUser(row.user_id);
@@ -462,6 +475,7 @@ async function runSavedView(user, viewId) {
 
 async function deleteSavedView(user, viewId) {
     const { row } = await getSavedView(user, viewId, { write: true });
+    if (row.source_type === 'model') return require('./bi/consumers').deleteModelView(user, viewId);
     await execute('UPDATE analysis_saved_views SET deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?', [sharedTimestamp(), sharedTimestamp(), row.id, user.id]);
     return { id: row.id };
 }
@@ -496,8 +510,15 @@ async function getDashboard(user, dashboardId, { write = false, includeItems = t
         const items = await query('SELECT * FROM analysis_dashboard_items WHERE dashboard_id = ? ORDER BY (position_json->>\'y\')::int ASC, created_at ASC', [row.id]);
         const visibleItems = [];
         const versions = new Map();
+        const modelSnapshots = new Map();
         for (const item of items) {
             try {
+                if (item.source_type === 'model') {
+                    const resolved = await require('./bi/consumers').resolveModelItem(user, item);
+                    visibleItems.push(resolved.item);
+                    modelSnapshots.set(item.id, await require('./bi/consumers').modelItemSnapshot(user, item));
+                    continue;
+                }
                 const dataset = await getDatasetForUser(user, item.dataset_id);
                 const allowed = await getAccessibleDatasetColumns(user, dataset);
                 // 快照可能来自任意查询或派生表达式，字段收紧后无法可靠地在旧结果上删列。
@@ -505,6 +526,7 @@ async function getDashboard(user, dashboardId, { write = false, includeItems = t
                 versions.set(item.id, Number(dataset.source_version || 1));
                 visibleItems.push(dashboardItemRecord(item));
             } catch (_error) {
+                if (item.source_type === 'model') { visibleItems.push({ id: item.id, dashboardId: row.id, title: '来源不可用', itemType: 'restricted', config: {}, accessDenied: true }); continue; }
                 // 旧数据中的仪表盘若尚未同步共享数据集，不能通过快照绕过数据集权限。
                 visibleItems.push({ ...dashboardItemRecord(item), itemType: 'restricted', config: {}, accessDenied: true });
             }
@@ -513,11 +535,14 @@ async function getDashboard(user, dashboardId, { write = false, includeItems = t
         if (Array.isArray(dashboard.lastSnapshot?.items)) {
             const hidden = new Set(visibleItems.filter(item => item.accessDenied).map(item => item.id));
             dashboard.lastSnapshot = { ...dashboard.lastSnapshot, items: dashboard.lastSnapshot.items.map(item => {
+                if (modelSnapshots.has(item.itemId)) return modelSnapshots.get(item.itemId);
                 if (hidden.has(item.itemId) || !versions.has(item.itemId)) return { itemId: item.itemId, status: 'access_denied', error: '当前共享权限不允许查看该项目数据。' };
                 if (!item.sourceVersion || Number(item.sourceVersion) !== versions.get(item.itemId)) return { itemId: item.itemId, status: 'stale', error: '来源数据或字段规则已变化，请由仪表盘所有者刷新后查看。' };
                 return item;
             }) };
         }
+        const existingIds = new Set((dashboard.lastSnapshot.items || []).map(item => item.itemId));
+        for (const [id, snapshot] of modelSnapshots) if (!existingIds.has(id)) { if (!Array.isArray(dashboard.lastSnapshot.items)) dashboard.lastSnapshot.items = []; dashboard.lastSnapshot.items.push(snapshot); }
     }
     return { row, dashboard };
 }
@@ -547,6 +572,7 @@ async function saveDashboard({ user, body = {}, dashboardId = '' }) {
 }
 
 async function saveDashboardItem({ user, dashboardId, body = {}, itemId = '' }) {
+    if (body.sourceType === 'model') return require('./bi/consumers').saveModelDashboardItem({ user, dashboardId, itemId: itemId || null, body });
     const { row: dashboard } = await getDashboard(user, dashboardId, { write: true, includeItems: false });
     const itemType = String((body.itemType ?? body.item_type) || 'chart').toLowerCase();
     if (!DASHBOARD_ITEM_TYPES.has(itemType)) throw invalid('仪表盘项目类型无效。');
@@ -607,7 +633,7 @@ async function executeDashboardItem(owner, item) {
 async function refreshDashboard({ user, dashboardId, scheduleId = null }) {
     const { row, dashboard } = await getDashboard(user, dashboardId, { write: true });
     const owner = await resolveAnalysisUser(row.user_id);
-    if (!owner) throw invalid('仪表盘所属账号已失效。', 409);
+    if (!owner || owner.status !== 'active' || owner.deleted_at) throw invalid('仪表盘所属账号已失效，刷新与计划运行已停止。', 409);
     const runId = analysisId('refresh');
     const now = sharedTimestamp();
     await execute(`
@@ -618,6 +644,11 @@ async function refreshDashboard({ user, dashboardId, scheduleId = null }) {
         const results = [];
         for (const item of dashboard.items || []) {
             try {
+                if (item.sourceType === 'model') {
+                    const run = await require('./bi/consumers').runModelDashboardItem({ user: owner, dashboardId: row.id, itemId: item.id });
+                    results.push({ itemId: item.id, title: item.title, sourceType: 'model', status: run.job.status, runId: run.job.id });
+                    continue;
+                }
                 const source = await getDatasetForUser(owner, item.datasetId);
                 const result = await executeDashboardItem(owner, item);
                 const latest = await getDatasetForUser(owner, item.datasetId);
@@ -627,12 +658,13 @@ async function refreshDashboard({ user, dashboardId, scheduleId = null }) {
                 results.push({ itemId: item.id, title: item.title, status: 'failed', error: String(error?.message || '项目刷新失败').slice(0, 500) });
             }
         }
-        const failed = results.filter(item => item.status !== 'succeeded').length;
-        const status = failed ? (failed === results.length ? 'failed' : 'partial_success') : 'succeeded';
-        const snapshot = { refreshedAt: now, version: dashboard.version, status, items: results };
+        const pending = results.some(item => ['queued', 'running', 'retry_wait', 'cancelling'].includes(item.status));
+        const failed = results.filter(item => ['failed', 'cancelled'].includes(item.status)).length;
+        const status = pending ? 'running' : failed ? (failed === results.length ? 'failed' : 'partial_success') : 'succeeded';
+        const snapshot = { runId, refreshedAt: now, version: dashboard.version, status, items: results };
         await transaction(async trx => {
             await trx.execute('UPDATE analysis_dashboards SET last_snapshot_json = ?::jsonb, last_refreshed_at = ?, updated_at = ? WHERE id = ?', [JSON.stringify(snapshot), now, now, row.id]);
-            await trx.execute(`UPDATE analysis_refresh_runs SET status = ?, result_json = ?::jsonb, completed_at = ?, updated_at = ? WHERE id = ?`, [status, JSON.stringify(snapshot), now, now, runId]);
+            await trx.execute(`UPDATE analysis_refresh_runs SET status = ?, result_json = ?::jsonb, completed_at = ?, updated_at = ? WHERE id = ?`, [status, JSON.stringify(snapshot), pending ? null : now, now, runId]);
         });
         return { runId, dashboardId: row.id, status, snapshot };
     } catch (error) {
@@ -723,7 +755,7 @@ async function evaluateMetric(user, datasetId, config = {}) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
     return { datasetId: dataset.id, fieldKey: aggregation === 'count' ? '' : fieldKey, aggregation, value: Number(rows[0]?.value || 0), sourceVersion: Number(dataset.source_version || 1) };
 }
 
@@ -808,7 +840,10 @@ async function evaluateAlertRulesForDataset(user, datasetId) {
 
 async function refreshSchedule(schedule) {
     const owner = await resolveAnalysisUser(schedule.user_id);
-    if (!owner) throw new Error('刷新计划所属账号已失效。');
+    if (!owner || owner.status !== 'active' || owner.deleted_at) {
+        await require('../../repositories/analysis-model-plans').pauseUnavailableRefresh(schedule.id);
+        return { id: schedule.id, status: 'paused', error: '执行主体已停用或删除。' };
+    }
     const now = new Date();
     const next = nextScheduleTime(schedule.frequency, schedule.cron_expression, schedule.interval_minutes, now);
     try {

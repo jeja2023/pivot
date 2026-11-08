@@ -31,5 +31,6 @@ module.exports = {
     ...governance,
     ...semanticModels,
     ...modelAnalysis,
-    ...scalability
+    ...scalability,
+    ...require('./data-analysis/bi/models')
 };

@@ -41,17 +41,150 @@
     background: #ffffff;
     color: var(--text-main);
     text-align: left;
-    cursor: pointer;
+    cursor: default;
     box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
     transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     position: relative;
     outline: none;
 }
 
-.app-card:disabled {
+.app-card-open:disabled {
     cursor: not-allowed;
     opacity: 0.62;
     transform: none;
+}
+
+.app-card-open {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.app-card-open:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 4px;
+}
+
+.app-card-open:hover {
+    background: transparent;
+}
+
+/* 应用卡片顶部管理滑块开关 */
+.app-card-management {
+    position: absolute;
+    top: 20px;
+    right: 22px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+.app-card-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 4px;
+    height: 26px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    background: #f8fafc;
+    color: #64748b;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.app-card-switch:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    color: #334155;
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.08);
+}
+
+.app-card-switch:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.app-card-switch.is-enabled {
+    background: rgba(16, 185, 129, 0.08);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: var(--primary, #059669);
+}
+
+.app-card-switch.is-enabled:hover {
+    background: rgba(16, 185, 129, 0.14);
+    border-color: var(--primary, #059669);
+    color: var(--primary, #059669);
+}
+
+.app-card-switch[disabled] {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.app-card-switch-track {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 32px;
+    height: 18px;
+    padding: 2px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transition: background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-card-switch.is-enabled .app-card-switch-track {
+    background: var(--primary, #059669);
+}
+
+.app-card-switch-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25), 0 0 1px rgba(15, 23, 42, 0.15);
+    transform: translateX(0);
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-card-switch.is-enabled .app-card-switch-thumb {
+    transform: translateX(14px);
+}
+
+.app-card-switch-label {
+    display: inline-block;
+    letter-spacing: 0.02em;
+}
+
+.has-management .app-card-head {
+    min-height: 52px;
+}
+
+.has-management .app-card-badges {
+    margin-top: 30px;
 }
 
 .app-card:hover,
@@ -102,6 +235,12 @@
     background: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(37, 99, 235, 0.04) 100%);
     border-color: rgba(37, 99, 235, 0.25);
     color: #2563eb;
+}
+
+.app-card-icon-data-modeling {
+    background: color-mix(in srgb, var(--primary) 15%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+    color: var(--primary);
 }
 
 .app-card-icon-regulations {
@@ -306,8 +445,54 @@ body.dark-mode .apps-empty,
     color: #94a3b8;
 }
 
+body.dark-mode .app-card-switch,
+.dark-mode .app-card-switch {
+    background: rgba(30, 41, 59, 0.85);
+    border-color: rgba(148, 163, 184, 0.25);
+    color: #94a3b8;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+body.dark-mode .app-card-switch:hover,
+.dark-mode .app-card-switch:hover {
+    background: rgba(51, 65, 85, 0.7);
+    border-color: rgba(148, 163, 184, 0.4);
+    color: #e2e8f0;
+}
+
+body.dark-mode .app-card-switch.is-enabled,
+.dark-mode .app-card-switch.is-enabled {
+    background: rgba(16, 185, 129, 0.16);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #34d399;
+}
+
+body.dark-mode .app-card-switch.is-enabled:hover,
+.dark-mode .app-card-switch.is-enabled:hover {
+    background: rgba(16, 185, 129, 0.24);
+    border-color: #10b981;
+    color: #34d399;
+}
+
+body.dark-mode .app-card-switch-track,
+.dark-mode .app-card-switch-track {
+    background: rgba(100, 116, 139, 0.5);
+}
+
+body.dark-mode .app-card-switch.is-enabled .app-card-switch-track,
+.dark-mode .app-card-switch.is-enabled .app-card-switch-track {
+    background: #10b981;
+}
+
+body.dark-mode .app-card-switch-thumb,
+.dark-mode .app-card-switch-thumb {
+    background: #f8fafc;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 /* 响应式断点适配 */
 @media (max-width: 1120px) {
+
     .apps-home-view .apps-grid,
     .apps-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -329,5 +514,10 @@ body.dark-mode .apps-empty,
     .app-card {
         padding: 20px;
         min-height: 180px;
+    }
+
+    .app-card-management {
+        top: 18px;
+        right: 18px;
     }
 }

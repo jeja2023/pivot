@@ -65,6 +65,9 @@ const {
 function cleanupAnalysisRows(userId) {
     db.prepare('DELETE FROM analysis_artifacts WHERE user_id = ?').run(userId);
     db.prepare('DELETE FROM analysis_datasets WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM analysis_object_references WHERE object_id IN (SELECT id FROM analysis_data_objects WHERE user_id=?)').run(userId);
+    db.prepare('DELETE FROM analysis_data_objects WHERE user_id=?').run(userId);
+    db.prepare('DELETE FROM analysis_audit_events WHERE user_id=?').run(userId);
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 }
 

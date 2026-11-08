@@ -42,6 +42,7 @@ async function createAsyncQueryJob({ user, datasetId, sql, limit = 50_000 }) {
 async function getAsyncQueryJob(user, jobId) {
     const row = await repository.get(user.id, jobId);
     if (!row) throw error('异步查询任务不存在或无权访问。', 404);
+    if (row.execution_kind && row.execution_kind !== 'dataset_sql') return require('./bi/jobs').getModelJob(user, jobId);
     return readable(user, row);
 }
 
@@ -55,11 +56,21 @@ async function listAsyncQueryJobs(user, { datasetId = '', limit = 30 } = {}) {
 }
 
 async function cancelAsyncQueryJob(user, jobId) {
+    const existing = await repository.get(user.id, jobId);
+    if (existing?.execution_kind && existing.execution_kind !== 'dataset_sql') {
+        const result = await require('./bi/jobs').cancelModelJob(user, jobId);
+        await require('./bi/runner').cancelActiveModelJob(jobId);
+        return result;
+    }
     if (!await repository.cancel(user.id, jobId)) throw error('异步查询任务不存在或无权操作。', 404);
     return getAsyncQueryJob(user, jobId);
 }
 
 async function executeJob(job) {
+    return withAnalysisSlot(() => executeClaimedJob(job), { userId: Number(job.user_id), job });
+}
+
+async function executeClaimedJob(job) {
     const owner = await resolveAnalysisUser(job.user_id);
     if (!owner) throw error('查询所属账号已失效，请重新登录后检查。', 401);
     const dataset = await getDatasetForUser(owner, job.dataset_id);
@@ -97,9 +108,9 @@ async function executeJob(job) {
                 clearInterval(timer); if (heartbeat) await heartbeat;
                 connection.closeSync(); instance.closeSync();
             }
-        });
+        }, { userId: job.user_id });
         if (!result) return;
-        const previewRows = await withAnalysisSlot(() => parquetToRows(outputPath, { limit: 100 }));
+        const previewRows = await withAnalysisSlot(() => parquetToRows(outputPath, { limit: 100 }), { userId: job.user_id });
         const current = await getDatasetForUser(owner, dataset.id);
         if (Number(current.source_version || 1) !== sourceVersion) throw error('来源数据或字段权限已变化，请重新创建查询。', 409, 'ANALYSIS_SOURCE_CHANGED');
         committed = await repository.finish(job, { ...result, previewRows, filePath: toProjectRelative(outputPath) }, {
@@ -114,6 +125,7 @@ async function processAsyncQueryJobs({ limit = 2 } = {}) {
     if (running) return { skipped: true, processed: 0 };
     running = true; let processed = 0;
     try {
+        await require('./runtime-budget').recoverStoppedAnalysis();
         for (let index = 0; index < Math.min(Math.max(Number(limit) || 2, 1), 8); index += 1) {
             const job = await repository.claim(LEASE_MS);
             if (!job) break;
@@ -131,7 +143,8 @@ async function processAsyncQueryJobs({ limit = 2 } = {}) {
             }
             processed += 1;
         }
-        return { skipped: false, processed };
+        const modelJobs = await require('./bi/runner').processModelJobs();
+        return { skipped: false, processed: processed + modelJobs.processed };
     } finally { running = false; }
 }
 
@@ -148,7 +161,7 @@ function startAsyncQueryRunner({ intervalMs = readTypedEnv('DATA_ANALYSIS_ASYNC_
         return inFlight;
     };
     timer = setTimeoutFn(tick, Math.min(interval, 2000)); timer?.unref?.();
-    const instance = { async stop() { stopped = true; clearTimeoutFn(timer); if (inFlight) await inFlight; if (runner === instance) runner = null; } };
+    const instance = { async stop() { stopped = true; clearTimeoutFn(timer); await require('./bi/runner').stopModelJobs(); if (inFlight) await inFlight; if (runner === instance) runner = null; } };
     runner = instance;
     return instance;
 }

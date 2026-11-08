@@ -1,6 +1,6 @@
 /**
  * Capability Package 的 Docker 隔离执行器。
- * 仅接受平台管理员登记的不可变 image@sha256 与固定入口命令；没有已批准镜像时 fail-closed。
+ * 仅接受平台管理员登记的不可变仓库摘要或完整镜像ID与固定入口；没有已批准镜像时拒绝执行。
  */
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -9,7 +9,7 @@ const path = require('path');
 const { verifyExecutionGrant } = require('./agent-execution-grant');
 const { canonicalJson } = require('./canonical-json');
 
-const IMAGE_PATTERN = /^[a-z0-9][a-z0-9./:_-]{1,240}@sha256:[a-f0-9]{64}$/;
+const IMAGE_PATTERN = /^(?:[a-z0-9][a-z0-9./:_-]{1,240}@)?sha256:[a-f0-9]{64}$/;
 const ARG_PATTERN = /^[A-Za-z0-9_./:=+@,-]{1,200}$/;
 const WORKER_MANIFEST_SIGNATURE_ALGORITHM = 'RSA-SHA256';
 const activeCapabilityWorkers = new Set();
@@ -97,7 +97,7 @@ function verifyWorkerSignature(definition, options = {}) {
 }
 function normalizeDefinition(value = {}) {
     const image = String(value.image || '').trim().toLowerCase();
-    if (!IMAGE_PATTERN.test(image)) throw workerError('Capability Worker 镜像必须是锁定摘要的 image@sha256:...，不接受 tag 或 latest。', 'CAPABILITY_WORKER_IMAGE_UNPINNED');
+    if (!IMAGE_PATTERN.test(image)) throw workerError('Capability Worker 镜像必须是不可变仓库摘要或完整sha256镜像ID，不接受标签或短ID。', 'CAPABILITY_WORKER_IMAGE_UNPINNED');
     const command = Array.isArray(value.command) ? value.command.map(item => String(item).trim()).filter(Boolean) : [];
     if (!command.length || command.some(item => !ARG_PATTERN.test(item))) throw workerError('Capability Worker 入口命令必须由平台登记的安全参数组成。', 'CAPABILITY_WORKER_COMMAND_INVALID');
     const limits = value.limits && typeof value.limits === 'object' ? value.limits : {};

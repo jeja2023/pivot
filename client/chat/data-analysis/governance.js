@@ -151,7 +151,7 @@
                         <span class="data-analysis-type-badge">${esc(typeLabels[view.viewType] || view.viewType)}</span>
                         <span class="data-analysis-scope-badge ${view.scope === 'shared' ? 'is-shared' : ''}">${view.scope === 'shared' ? '已共享' : '私有'}</span>
                     </div>
-                    <span>${esc(view.description || '无补充说明')} · 数据集版本 v${fmtNumber(view.sourceVersion)}</span>
+                    <span>${esc(view.description || '无补充说明')} · ${view.sourceType === 'model' ? `模型发布版本 v${esc(view.publishedVersion)}` : `数据集版本 v${fmtNumber(view.sourceVersion)}`}</span>
                 </div>
                 <div class="data-analysis-inline-actions">
                     <button class="btn-secondary btn-sm" type="button" data-analysis-view-run="${esc(view.id)}" title="载入并运行视图">
@@ -392,7 +392,10 @@
     }
 
     async function runSavedView(viewId) {
+        const userId = String(window.Pivot.legacy.currentUser?.id || '');
         const data = await fetchJson(`${API}/views/${encodeURIComponent(viewId)}/run`, { method: 'POST' });
+        if (String(window.Pivot.legacy.currentUser?.id || '') !== userId) return;
+        if (data.sourceType === 'model') { await app.modeling.openSavedModelRun(data); return; }
         const type = data.view?.viewType;
         if (type === 'chart') {
             state.chart = data.result?.chart || null;

@@ -17,7 +17,18 @@ const PG_SCHEMA_RECONCILE_ENV = 'PIVOT_PG_SCHEMA_RECONCILE';
 // 这类索引依赖“已部署旧库尚未拥有”的迁移字段。初始化快照会先于版本迁移运行，
 // 因而在旧库上应安静地延后到对应迁移创建；其他未知字段缺失仍须保留告警。
 const MIGRATION_OWNED_DEFERRED_INDEXES = new Set([
-    'idx_regulation_versions_index_retry'
+    'idx_analysis_job_completion',
+    'idx_analysis_job_result_cache',
+    'idx_analysis_dataset_append_batch',
+    'idx_regulation_versions_index_retry',
+    'idx_analysis_model_metric_member',
+    'idx_analysis_job_model_idempotency',
+    'idx_analysis_job_model_due',
+    'idx_analysis_job_model_lease',
+    'idx_analysis_model_active_refresh',
+    'idx_analysis_saved_views_model',
+    'idx_analysis_dashboard_items_model',
+    'idx_analysis_ingestion_job'
 ]);
 
 const PG_HELPER_FUNCTIONS = [

@@ -1,6 +1,7 @@
 (function () {
     const scripts = [
         '/chat/data-analysis/context.js',
+        '/chat/data-analysis/navigation-metadata.js',
         '/chat/data-analysis/view.js',
         '/chat/data-analysis/controls.js',
         '/chat/data-analysis/dataset-editor.js',
@@ -21,6 +22,20 @@
         '/chat/data-analysis/scalability.js',
         '/chat/data-analysis/extensions.js',
         '/chat/data-analysis/transactions.js',
+        '/chat/data-analysis/modeling-state.js',
+        '/chat/data-analysis/modeling-view.js',
+        '/chat/data-analysis/modeling-forms.js',
+        '/chat/data-analysis/modeling-operators.js',
+        '/chat/data-analysis/modeling-preview.js',
+        '/chat/data-analysis/modeling-canvas.js',
+        '/chat/data-analysis/modeling.js',
+        '/chat/data-analysis/modeling-lifecycle.js',
+        '/chat/data-analysis/modeling-consumers.js',
+        '/chat/data-analysis/modeling-ownership.js',
+        '/chat/data-analysis/modeling-migration.js',
+        '/chat/data-analysis/modeling-sources.js',
+        '/chat/data-analysis/source-metadata.js',
+        '/chat/data-analysis/controlled-ingestion.js',
         '/chat/data-analysis/events.js'
     ];
 
@@ -39,7 +54,7 @@
                 script.dataset.loaded = 'true';
                 resolve();
             };
-            script.onerror = () => reject(new Error('Failed to load script: ' + src));
+            script.onerror = () => reject(new Error('加载数据分析脚本失败：' + src));
             if (!existing) {
                 script.dataset.loaded = 'false';
                 script.src = src;
@@ -71,8 +86,17 @@
         return window.Pivot.legacy.PivotDataAnalysis.showDataAnalysisApp(options);
     }
 
+    async function showDataModelingApp(options = {}) {
+        await loadDataAnalysisModules();
+        if (typeof window.Pivot.legacy.PivotDataAnalysis?.showDataModelingApp !== 'function') {
+            throw new Error('数据建模应用加载失败');
+        }
+        return window.Pivot.legacy.PivotDataAnalysis.showDataModelingApp(options);
+    }
+
     window.Pivot.legacy.showDataAnalysisApp = showDataAnalysisApp;
     window.Pivot?.exposeModule?.('apps.dataAnalysis', {
-        showDataAnalysisApp
+        showDataAnalysisApp,
+        showDataModelingApp
     });
 })();

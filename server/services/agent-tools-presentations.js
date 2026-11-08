@@ -2,16 +2,26 @@
 
 const crypto = require('node:crypto');
 const { buildTaskPresentation } = require('./presentations/presentation-task-content');
+const semanticContract = require('./presentations/presentation-semantic-contract');
 
 function schema(properties, required = []) { return { type: 'object', properties, required, additionalProperties: false }; }
 const points = { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 280 } };
 
 function presentationToolDefinitions() {
     return [
+        { name: 'presentation.master', title: '完整PPT制作引擎', capabilities: ['document.render', 'model.invoke'], idempotent: false, side_effect: true, concurrency: 'write', cancellable: true,
+            description: '使用固定版本PPT Master完整工作流生成PPT、创建模板或保留原稿设计地编辑PPTX。action=start登记后台任务，status查询真实进度，respond提交用户对具体确认的实际答复，cancel停止。需要平台已准备运行镜像。返回任务登记不是制作完成；最终交付原生PPTX与项目源包，复杂对象不自动变成Pivot画布。材料必须来自已授权来源，不编造确认或事实。',
+            input_schema: schema({ action: { type: 'string', enum: ['start', 'status', 'respond', 'cancel', 'resume'], default: 'start' }, taskId: { type: 'string' },
+                operation: { type: 'string', enum: ['generate', 'create_template', 'edit_native'] }, profile: { type: 'string', enum: ['default', 'quick', 'beautify', 'image_to_pptx'] },
+                title: { type: 'string', maxLength: 120 }, instruction: { type: 'string', maxLength: 16000 }, modelId: { type: 'string' }, pageCount: { type: 'integer', minimum: 1, maximum: 40 },
+                presentationId: { type: 'string' }, sourceAssetId: { type: 'string' }, assetIds: { type: 'array', maxItems: 20, items: { type: 'string' } }, answer: { type: 'string', maxLength: 12000 },
+                template: schema({ type: { type: 'string', enum: ['runtime', 'organization'] }, id: { type: 'string', maxLength: 96 }, version: { type: 'integer', minimum: 1 } }, ['type', 'id']),
+                materials: { type: 'array', maxItems: 20, items: schema({ title: { type: 'string' }, text: { type: 'string', maxLength: 120000 } }, ['text']) },
+                maxSteps: { type: 'integer', minimum: 5, maximum: 160 }, tokenBudget: { type: 'integer', minimum: 10000, maximum: 500000 } }) },
         { name: 'presentation.review_deck', title: '整稿检查与排版优化任务', capabilities: ['document.render', 'model.invoke'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
-            description: '启动整稿逐页视觉复核或保留内容的排版优化；后台返回taskId后，用operation=status查询进度，operation=cancel停止。mode=layout不调用视觉模型，只提出排版建议，需用户在工作台确认应用；visual_repair复核建议稿。原稿变化或所属Agent任务停止时检查终止。未配置视觉模型不能算通过。',
+            description: '启动整稿视觉复核、保留内容的排版优化或mode=production交付检查。production核对事实证据/计算、真实字体、素材和最终PPTX原生对象/嵌入工作簿，不调用模型。后台返回taskId后用operation=status查询，operation=cancel停止。layout只提出排版建议，visual_repair复核建议稿。原稿变化或所属Agent停止时终止。结构/原生检查不等于视觉或Office通过。',
             input_schema: schema({ presentationId: { type: 'string' }, operation: { type: 'string', enum: ['start', 'status', 'cancel'], default: 'start' },
-                mode: { type: 'string', enum: ['visual', 'layout', 'visual_repair'], default: 'visual' }, taskId: { type: 'string' }, modelId: { type: 'string' } }, ['presentationId']) },
+                mode: { type: 'string', enum: ['visual', 'layout', 'visual_repair', 'production'], default: 'visual' }, taskId: { type: 'string' }, modelId: { type: 'string' } }, ['presentationId']) },
         { name: 'presentation.design_info', title: '读取 PPT 设计技能与模板', capabilities: ['document.render'], idempotent: true,
             description: '读取内置中文演示设计技能，以及当前账号可用模板和语义布局。制作完整PPT前先阅读；模板清单不代表任意布局能容纳任意正文。', input_schema: schema({}) },
         { name: 'presentation.review', title: '视觉复核 PPT 指定页', capabilities: ['document.render', 'model.invoke'], idempotent: false, cancellable: true,
@@ -23,8 +33,10 @@ function presentationToolDefinitions() {
         { name: 'presentation.create', title: '生成完整 PPTX 演示文稿', capabilities: ['document.render'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
             description: '读取用户文档并规划整稿后，一次提交完整 slides 内容，生成可编辑 PPT 源稿并导出包含全部页面的 PPTX 文件，自动挂载当前任务结果。先用 chat.read_source 完整读取附件；标题、要点、讲稿和数值必须依据材料。安排封面、必要目录/章节、内容页和总结；不要只传大纲或一页示例。支持正文、双栏、表格、图表，不需要代码执行或联网。返回 presentationId 后可通过 presentation.export 导出 PDF 或指定页面 SVG/PNG。版式阻断会返回具体问题，修正 slides 后重新生成，不能反复提交同一失败输入。',
             input_schema: schema({ title: { type: 'string', maxLength: 160 }, templateId: { type: 'string', default: 'executive-clean' },
+                productionProfile: semanticContract.productionProfile,
                 sourceMessageId: { type: 'integer', minimum: 1, description: '仅使用当前任务已授权的用户来源消息编号；省略时读取创建任务的原始消息。' },
                 slides: { type: 'array', minItems: 1, maxItems: 60, items: schema({ title: { type: 'string', maxLength: 90 },
+                    sourceRefs: semanticContract.sourceRefs, intent: semanticContract.intent, claims: semanticContract.claims, diagram: semanticContract.diagram,
                     layout: { type: 'string', enum: ['cover', 'content', 'two-column', 'section', 'summary', 'table', 'chart', 'agenda', 'executive-summary', 'comparison', 'three-card', 'key-metrics', 'timeline', 'process', 'roadmap', 'risk-actions', 'image-focus', 'quote'] }, points, left: points, right: points,
                     metrics: { type: 'array', minItems: 1, maxItems: 3, items: schema({ value: { type: 'string', maxLength: 24 }, label: { type: 'string', maxLength: 160 } }, ['value', 'label']) },
                     image: schema({ assetRef: { type: 'string', pattern: '^artifact-cas://' }, caption: { type: 'string', maxLength: 500 } }, ['assetRef']),
@@ -39,6 +51,14 @@ function presentationToolDefinitions() {
 }
 
 async function executePresentationTool(name, input, user, context = {}) {
+    if (name === 'presentation.master') {
+        const tasks = require('./presentations/master/tasks'), action = input.action || 'start';
+        if (action !== 'start' && !input.taskId) throw new Error('请提供完整制作任务的taskId。');
+        const task = action === 'start' ? await tasks.start(user, { ...input, modelId: input.modelId || String(context.run?.chosen_model_id || context.run?.model_id || '') }, context)
+            : action === 'respond' ? await tasks.respond(user, input.taskId, input.answer) : action === 'cancel' ? await tasks.cancel(user, input.taskId) : action === 'resume' ? await tasks.resume(user, input.taskId, input) : await tasks.get(user, input.taskId);
+        if (!task) throw new Error('制作任务不存在或无权访问。');
+        return { ...task, taskId: task.id, text: task.result?.message || task.progress?.message || '任务已登记，请查询实际制作结果。' };
+    }
     if (name === 'presentation.review_deck') {
         const tasks = require('./presentations/presentation-quality-tasks');
         const operation = input.operation || 'start';
@@ -64,7 +84,7 @@ async function executePresentationTool(name, input, user, context = {}) {
             const source = await require('../repositories/chat-conversation-turns').readTaskSource(runId, user.id, input.sourceMessageId);
             if (!source || source.requestedMessageFallback) throw new Error('PPT 来源不属于当前任务或已不可访问，请重新选择材料。');
             sources = [{ id: 'task_source', title: '用户上传材料及任务要求', type: 'user_message', locator: `message:${source.id}`,
-                digest: crypto.createHash('sha256').update(source.content).digest('hex'), excerpt: source.content.slice(0, 2400), excerptTruncated: source.content.length > 2400 }];
+                digest: crypto.createHash('sha256').update(source.content).digest('hex'), text: source.content, excerpt: source.content.slice(0, 2400), excerptTruncated: source.content.length > 2400 }];
         }
         presentation = await service.getPresentation(user, id);
         if (!presentation) {

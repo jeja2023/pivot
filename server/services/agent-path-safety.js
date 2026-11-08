@@ -27,6 +27,8 @@ const DELIVERY_EXTENSION_BY_FORMAT = Object.freeze({
     docx: '.docx',
     pdf: '.pdf',
     pptx: '.pptx',
+    mp4: '.mp4',
+    zip: '.zip',
     xlsx: '.xlsx',
     png: '.png',
     svg: '.svg',

@@ -557,15 +557,25 @@ function bindAppsWorkbenchEvents() {
     });
 }
 
-function openAppsWorkbench(options = {}) {
+let appsWorkbenchNavigationSequence = 0;
+async function openAppsWorkbench(options = {}) {
+    const navigationSequence = ++appsWorkbenchNavigationSequence;
     window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace?.('apps');
     window.Pivot.legacy.setAppsWorkbenchVisibility?.(true);
     bindAppsWorkbenchEvents();
+    const availability = window.Pivot.moduleApi('apps.availability');
+    const targetApp = options?.app || getStoredAppsActiveApp();
     if (options?.home) {
+        showAppsHome();
+        await availability.refresh();
+        return;
+    }
+    const loaded = await availability.refresh();
+    if (navigationSequence !== appsWorkbenchNavigationSequence) return;
+    if (!loaded || (targetApp && !availability.isEnabled(targetApp))) {
         showAppsHome();
         return;
     }
-    const targetApp = options?.app || getStoredAppsActiveApp();
     if (targetApp !== 'official-writing') void window.Pivot.moduleApi('apps.officialWriting')?.suspend?.();
     window.Pivot.moduleApi('apps.mindmaps')?.suspend?.();
     document.getElementById('mindmaps-view')?.classList.add('hidden');
@@ -585,6 +595,8 @@ function openAppsWorkbench(options = {}) {
         }).catch(() => showAppsHome());
     } else if (targetApp === 'data-analysis') {
         showDataAnalysisAppFromRegistry().catch(() => showAppsHome());
+    } else if (targetApp === 'data-modeling') {
+        window.Pivot.moduleApi('workspaces.apps').showDataModelingAppFromRegistry(options).catch(() => showAppsHome());
     } else if (targetApp === 'regulations') {
         if (typeof window.Pivot.legacy.showRegulationsAppFromRegistry === 'function') {
             window.Pivot.legacy.showRegulationsAppFromRegistry().catch(() => showAppsHome());

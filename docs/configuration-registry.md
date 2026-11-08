@@ -92,6 +92,11 @@
 | --- | --- | --- | --- | --- |
 | `PIVOT_PRESENTATION_MAX_BYTES` | integer | `8388608` | 262144–67108864 | 单份演示文稿结构化 IR 的最大字节数，限制页面、文本和内嵌表格数据，避免编辑与渲染耗尽内存。 |
 | `PIVOT_PRESENTATION_ASSET_MAX_BYTES` | integer | `20971520` | 1048576–67108864 | 单个 PPT 图片素材允许上传的最大字节数；素材仍受安全上传 MIME、真实文件头与 CAS 归属校验。 |
+| `PIVOT_PPT_MASTER_ENABLED` | boolean | `false` | true / false | 启用固定版本的 PPT Master 完整制作引擎；需要已准备并登记的受限执行镜像，未配置不回退到宿主 Shell。 |
+| `PIVOT_PPT_MASTER_IMAGE` | string | `` | 逗号分隔的语言标记 | PPT Master不可变仓库摘要或完整sha256镜像ID；离线更新工具自动登记，保持签名和隔离检查。 |
+| `PIVOT_PPT_MASTER_WORKSPACE_DIR` | string | `` | 逗号分隔的语言标记 | 可选独立任务目录；Docker部署由更新工具配置为宿主机与容器内相同的绝对路径，留空沿用数据目录。 |
+| `PIVOT_PPT_MASTER_TRUSTED_MANIFEST` | string | `` | 逗号分隔的语言标记 | 可选PPT独立签名清单，由更新工具登记；与独立公钥文件同时配置，避免覆盖其他Worker信任。 |
+| `PIVOT_PPT_MASTER_SIGNING_PUBLIC_KEY_FILE` | string | `` | 逗号分隔的语言标记 | PPT独立发布公钥PEM文件；与独立签名清单同时配置，生产不保存签名私钥。 |
 
 ## 桌面交付
 
@@ -167,6 +172,18 @@
 | `DATA_ANALYSIS_ASYNC_QUERY_POLL_INTERVAL_MS` | integer | `3000` | 1000–60000 | 可恢复异步查询 Worker 的任务领取间隔；查询仍受用户、数据集、字段和输出行数边界保护。 |
 | `DATA_ANALYSIS_ASYNC_QUERY_MAX_ROWS` | integer | `200000` | 5000–1000000 | 单个异步查询任务可物化的最大结果行数；超过该范围应采用分区、聚合或专用 OLAP 服务。 |
 | `DATA_ANALYSIS_ASYNC_QUERY_TIMEOUT_MS` | integer | `300000` | 10000–1800000 | 单个异步查询任务的 DuckDB 执行超时；超时后任务进入有上限退避重试。 |
+
+## 数据建模
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `DATA_ANALYSIS_MODEL_ENABLED` | boolean | `false` | true / false | 允许正式模型接纳重型任务；需隔离执行器、数据库迁移、容量与存储就绪检查通过。个人草稿管理不依赖此开关。 |
+| `DATA_ANALYSIS_SECURITY_JOURNAL_DIR` | string | `` | 逗号分隔的语言标记 | 独立安全日志绝对路径，必须位于主数据、上传和分析存储之外；生产部署需独立身份和故障域。启用建模时缺失或不可验证即关闭读取。 |
+| `DATA_ANALYSIS_SECURITY_KEY_FILE` | string | `` | 逗号分隔的语言标记 | 独立安全日志 AES-256 密钥文件绝对路径，内容为至少 64 位十六进制随机串，权限仅服务身份可读；不得放在日志或主数据目录内，必须另行保管。 |
+| `DATA_ANALYSIS_SECURITY_AUTHORITY_PUBLIC_KEY_FILE` | string | `` | 逗号分隔的语言标记 | 恢复时用于核验当前身份源与业务授权负责人签认的 Ed25519 公钥 PEM 文件；签名私钥由核对负责人独立保管，不交给应用或随备份存放。未提供有效当前签认时恢复读取保持关闭。 |
+| `DATA_ANALYSIS_MODEL_RUNTIME` | enum | `docker` | docker、development_process | 正式部署使用有硬资源限制的 Docker 执行器；development_process 仅限隔离测试或显式开发模式，不构成生产支持。 |
+| `DATA_ANALYSIS_MODEL_WORKER_IMAGE` | string | `` | 逗号分隔的语言标记 | 离线构建并审查的数据建模 Worker 镜像，需使用本机 sha256 镜像 ID 或带摘要的镜像引用，不在运行时拉取。 |
+| `DATA_ANALYSIS_MODEL_RUNNING_LIMIT` | integer | `2` | 1–2 | 持久分析运行槽位上限；与单用户一个运行任务、全局十六个及单用户三个排队任务配合，不扩大方案资源边界。 |
 
 ## 知识库 LLM Wiki
 

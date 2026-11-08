@@ -9,6 +9,7 @@ const { createPdfToolsRouter } = require('./pdf-tools');
 const { createPresentationsRouter } = require('./presentations');
 const { registerDataAnalysisProductRoutes } = require('./data-analysis-product-routes');
 const { asyncHandler, normalizeLimit } = require('../../http');
+const { handler: analysisDeliveryHandler } = require('../../services/data-analysis/bi/delivery');
 const { logger } = require('../../logger');
 const { createSafeUpload, uploadSecurityMiddleware } = require('../../upload');
 const { estimateTokens } = require('../../llm');
@@ -294,6 +295,11 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
 
 function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) {
     const router = express.Router();
+    require('./availability').registerAppAvailabilityRoutes(router, { authMiddleware, logAction });
+    router.use('/apps/data-analysis', asyncHandler(async (req, _res, next) => {
+        if (!/^\/operations(?:\/|$)/.test(req.path)) await require('../../services/data-analysis/bi/security-journal').assertAccess();
+        next();
+    }));
     require('./document-comparison').registerDocumentComparisonRoutes(router, { authMiddleware, logAction });
     require('./mindmaps').registerMindmapRoutes(router, { authMiddleware, logAction });
     // 数据分析可安全导入 SQLite 文件；不要放宽通用附件上传白名单。
@@ -477,9 +483,9 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             throw e;
         }
     }));
-    router.post('/apps/data-analysis/datasets/:id/increments', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
+    router.post('/apps/data-analysis/datasets/:id/increments', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, analysisDeliveryHandler(async (req, res) => {
         try {
-            const result = await appendIncrementalDataset({ user: req.user, datasetId: req.params.id, file: req.file });
+            const result = await appendIncrementalDataset({ user: req.user, datasetId: req.params.id, file: req.file, input: { inputBatchId: req.body?.inputBatchId, expectedSourceRevision: req.body?.expectedSourceRevision } });
             logAction(req, '数据分析-增量导入', `数据集: ${req.params.id}，新增行: ${result.appendedRows}，版本: ${result.sourceVersion}`);
             res.status(201).json({ success: true, ...result });
         } catch (error) {

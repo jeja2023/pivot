@@ -352,7 +352,7 @@ async function getCleaningQuality(userId, datasetId) {
             connection.closeSync();
             instance.closeSync();
         }
-    }) : {};
+    }, { userId: Number(userId?.id || userId) }) : {};
     const missingCells = profile.reduce((sum, field) => sum + (Number(field.empty) || 0), 0);
     const sourceRows = Number(dataset.row_count) || 0;
     const recommendations = [];
@@ -446,7 +446,7 @@ async function previewCleaning(userId, datasetId, rawRules) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: Number(userId?.id || userId) });
 }
 
 async function applyCleaning({ user, datasetId, rules: rawRules, name }) {
@@ -476,7 +476,7 @@ async function applyCleaning({ user, datasetId, rules: rawRules, name }) {
                 connection.closeSync();
                 instance.closeSync();
             }
-        });
+        }, { userId: user.id });
         const now = getBeijingTimestamp();
         const sourceTruncated = Number(dataset.truncated) || 0;
         const summary = {

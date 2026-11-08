@@ -1,6 +1,6 @@
 'use strict';
 
-const { asyncHandler } = require('../../http');
+const { handler: asyncHandler } = require('../../services/data-analysis/bi/delivery');
 const {
     listFieldGovernance, updateFieldGovernance, previewCalculatedField, materializeCalculatedField, listCalculatedFields,
     listSavedViews, saveAnalysisView, getSavedView, runSavedView, deleteSavedView,
@@ -14,6 +14,8 @@ const {
 const { listShareTargets } = require('../../services/share-targets');
 
 function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }) {
+    require('./data-analysis-model-routes').registerDataAnalysisModelRoutes(router, { authMiddleware });
+    require('./data-analysis-ingestion-routes').registerDataAnalysisIngestionRoutes(router, { authMiddleware });
     require('./analysis-transactions').registerTransactionRoutes(router, { authMiddleware, logAction });
     router.get('/apps/data-analysis/share-targets', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ success: true, ...await listShareTargets(req.user) });

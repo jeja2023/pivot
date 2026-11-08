@@ -64,9 +64,9 @@
                         <strong>${esc(item.title || '未命名项目')}</strong>
                         <span class="data-analysis-type-badge">${esc(typeLabels[item.itemType] || item.itemType)}</span>
                     </div>
-                    <span>关联数据集: ${esc(item.datasetId)}</span>
+                    <span>${item.sourceType === 'model' ? `模型发布版本：v${esc(item.publishedVersion)}` : `关联数据集：${esc(item.datasetId)}`}</span>
                 </div>
-                ${item.accessDenied ? '<span class="data-analysis-warning-text">当前无查看该项目数据的权限</span>' : `<button class="btn-secondary btn-sm is-danger" type="button" data-analysis-dashboard-item-delete="${esc(item.id)}" title="从看板移除该项">
+                ${item.accessDenied ? '<span class="data-analysis-warning-text">当前无查看该项目数据的权限</span>' : `${item.sourceType === 'model' ? `<button class="btn-secondary" type="button" data-analysis-model-item-run="${esc(item.id)}">按我的身份运行</button>` : ''}<button class="btn-secondary btn-sm is-danger" type="button" data-analysis-dashboard-item-delete="${esc(item.id)}" title="从看板移除该项">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                     <span>删除</span>
                 </button>`}
@@ -79,7 +79,7 @@
         if (!box) return;
         const snapshot = activeDashboard()?.lastSnapshot;
         if (!snapshot?.items?.length) { PivotSafeHtml.setHtml(box, ''); return; }
-        PivotSafeHtml.setHtml(box, `<div class="data-analysis-dashboard-snapshot-head">最近刷新：${esc(snapshot.refreshedAt || '—')}</div>${snapshot.items.map(item => `<div class="data-analysis-dashboard-snapshot-row"><strong>${esc(item.title || item.itemId)}</strong><span class="${item.status === 'succeeded' ? 'is-success' : 'is-error'}">${item.status === 'succeeded' ? '已刷新' : esc(item.error || '刷新失败')}</span></div>`).join('')}`);
+        PivotSafeHtml.setHtml(box, `<div class="data-analysis-dashboard-snapshot-head">最近刷新：${esc(snapshot.refreshedAt || '—')}</div>${snapshot.items.map(item => `<div class="data-analysis-dashboard-snapshot-row"><strong>${esc(item.title || item.itemId)}</strong><span class="${item.status === 'succeeded' ? 'is-success' : 'is-error'}">${item.status === 'succeeded' ? '本次运行成功' : esc(item.message || item.error || ({ queued: '排队中', running: '执行中', retry_wait: '等待重试', not_run: '尚未运行' })[item.status] || '刷新失败')}</span>${item.sourceType === 'model' && item.result ? `<button class="btn-secondary" type="button" data-analysis-model-item-result="${esc(item.itemId)}">查看精确结果</button>` : ''}${item.previousRunId ? `<button class="btn-secondary" type="button" data-analysis-model-item-history="${esc(item.previousRunId)}">查看上次结果（历史）</button>` : ''}</div>`).join('')}`);
     }
 
     function renderSchedulesAndAlerts() {
@@ -287,7 +287,7 @@
         if (!dashboard || !view) throw new Error('请先选择仪表盘和已保存的分析视图。');
         await fetchJson(`${API}/dashboards/${encodeURIComponent(dashboard.id)}/items`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: view.name, itemType: view.viewType, datasetId: view.datasetId, savedViewId: view.id, config: view.config, position: { y: (dashboard.items || []).length * 4 } })
+            body: JSON.stringify({ ...(view.sourceType === 'model' ? { sourceType: 'model' } : { datasetId: view.datasetId, itemType: view.viewType }), title: view.name, savedViewId: view.id, config: view.config, position: { y: (dashboard.items || []).length * 4 } })
         });
         app.closeModal?.('data-analysis-add-view-modal');
         await loadDashboard(dashboard.id, { silent: true });

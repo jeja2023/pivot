@@ -285,14 +285,17 @@ try {
     });
     run(process.execPath, [electronBuilderInstallDeps]);
     const electronExecutable = require('electron');
+    const sqliteManifest = path.join(desktopBuildStaging.stagingDir, 'sqlite-binding.json');
+    run(process.execPath, [path.join('scripts', 'desktop_sqlite_binding.js'), root, buildTarget.platform, buildTarget.arch, sqliteManifest]);
+    const nativeEnvironment = { ...process.env, PIVOT_DESKTOP_SQLITE_MANIFEST: sqliteManifest };
     run(electronExecutable, [path.join('scripts', 'verify_desktop_runtime.js'), buildTarget.platform, buildTarget.arch], {
         env: {
-            ...process.env,
+            ...nativeEnvironment,
             ELECTRON_RUN_AS_NODE: '1',
             PIVOT_VERIFY_DESKTOP_BROWSER_RUNTIME: String(desktopRuntimeProfile.includesBrowserRuntime)
         }
     });
-    run(process.execPath, ['--require', path.join(root, 'scripts', 'electron_builder_json_guard.js'), electronBuilderCli, '--config', desktopBuildStaging.builderConfigPath, ...normalizeBuilderArgs(rawBuilderArgs)]);
+    run(process.execPath, ['--require', path.join(root, 'scripts', 'electron_builder_json_guard.js'), electronBuilderCli, '--config', desktopBuildStaging.builderConfigPath, ...normalizeBuilderArgs(rawBuilderArgs)], { env: nativeEnvironment });
     if (windowsRelease) {
         const installerPath = path.join(electronOutputDir, `Pivot Setup ${projectVersion}.exe`);
         const appPath = path.join(electronOutputDir, 'win-unpacked', 'Pivot.exe');

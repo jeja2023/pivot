@@ -13,6 +13,7 @@ async function mutateModel({ userId, modelId, expectedVersion }, mutate) {
     return transaction(async trx => {
         const model = await trx.queryOne('SELECT * FROM analysis_data_models WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE', [modelId, userId]);
         if (!model) throw conflict('数据模型不存在或无权编辑。', 404);
+        if (model.model_kind === 'production') throw Object.assign(new Error('正式模型请使用数据建模草稿或归档接口。'), { status: 409, code: 'ANALYSIS_MODEL_UPGRADE_REQUIRED' });
         if (expectedVersion !== undefined && Number(expectedVersion) !== Number(model.version)) throw conflict('数据模型已在其他窗口修改，请重新加载后再保存；当前输入仍保留。');
         return mutate(trx, model);
     });

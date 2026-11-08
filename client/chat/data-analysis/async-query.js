@@ -24,7 +24,7 @@
         const box = byId('data-analysis-async-query-jobs');
         if (!box) return;
         const jobs = state.asyncQueryJobs || [];
-        PivotSafeHtml.setHtml(box, jobs.length ? jobs.map(job => `<div class="data-analysis-asset-row"><div><strong>后台查询 · ${esc({ queued: '等待执行', running: '执行中', retry_wait: '等待重试', succeeded: '已完成', failed: '失败', cancelled: '已取消' }[job.status] || job.status)}</strong><span>进度 ${fmtNumber(job.progress)}% · 上限 ${fmtNumber(job.requestedLimit)} 行${job.lastError ? ` · ${esc(job.lastError)}` : ''}</span></div><div class="data-analysis-inline-actions">${job.status === 'succeeded' ? `<button class="btn-secondary" type="button" data-analysis-async-query-open="${esc(job.id)}">查看结果</button>` : ''}${['queued', 'running', 'retry_wait'].includes(job.status) ? `<button class="btn-secondary is-danger" type="button" data-analysis-async-query-cancel="${esc(job.id)}">取消</button>` : ''}</div></div>`).join('') : '');
+        PivotSafeHtml.setHtml(box, jobs.length ? jobs.map(job => `<div class="data-analysis-asset-row"><div><strong>后台查询 · ${esc({ queued: '等待执行', running: '执行中', retry_wait: '等待重试', succeeded: '已完成', failed: '失败', cancelled: '已取消', cancelling: '正在取消' }[job.status] || job.status)}</strong><span>进度 ${fmtNumber(job.progress)}% · 上限 ${fmtNumber(job.requestedLimit)} 行${job.lastError ? ` · ${esc(job.lastError)}` : ''}</span></div><div class="data-analysis-inline-actions">${job.status === 'succeeded' ? `<button class="btn-secondary" type="button" data-analysis-async-query-open="${esc(job.id)}">查看结果</button>` : ''}${['queued', 'running', 'retry_wait'].includes(job.status) ? `<button class="btn-secondary is-danger" type="button" data-analysis-async-query-cancel="${esc(job.id)}">取消</button>` : ''}</div></div>`).join('') : '');
     }
 
     async function loadAsyncQueryJobs({ silent = true } = {}) {
@@ -37,7 +37,7 @@
             if (sequence !== loadSequence || activeDataset()?.id !== dataset.id) return;
             state.asyncQueryJobs = data.jobs || [];
             renderAsyncQueryJobs();
-            const active = state.asyncQueryJobs.some(job => ['queued', 'running', 'retry_wait'].includes(job.status));
+            const active = state.asyncQueryJobs.some(job => ['queued', 'running', 'retry_wait', 'cancelling'].includes(job.status));
             if (active && visible()) pollTimer = setTimeout(() => {
                 pollTimer = null;
                 if (visible()) void loadAsyncQueryJobs({ silent: true });

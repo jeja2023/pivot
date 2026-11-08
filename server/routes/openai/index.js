@@ -1,5 +1,5 @@
 const express = require('express');
-const { asyncHandler } = require('../../http');
+const { handler: asyncHandler } = require('../../services/data-analysis/bi/delivery');
 const {
     getAccessibleModelAsync,
     getModelDailyUsageAsync,
@@ -493,14 +493,14 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 totalTokens: promptTokens + completionTokens,
                 stream: false
             });
-            return res.json({
+            return res.json(require('../../services/data-analysis/bi/delivery').inherit({
                 id: `chatcmpl-tool-${Date.now()}`,
                 object: 'chat.completion',
                 created: Math.floor(Date.now() / 1000),
                 model: 'pivot-tools',
                 choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
                 usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens }
-            });
+            }, result));
         }
 
         // 1. 获取模型配置 (通过模型标识符或 ID)

@@ -1,0 +1,91 @@
+'use strict';
+/* global window */
+const { test, expect } = require('@playwright/test');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const Zip = require('jszip');
+const sharp = require('sharp');
+
+test('统一模板入口保留历史版本，深色封面在画布、缩略图与导出中清晰且主题切换恢复背景', async ({ page }, testInfo) => {
+    test.setTimeout(180000);
+    const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } }); expect(login.ok()).toBeTruthy();
+    const csrf = async () => ({ 'x-csrf-token': (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value });
+    const choices = (await (await page.request.get('/api/apps/presentations/templates')).json()).templates;
+    const { templates: catalog } = await (await page.request.get('/api/apps/presentations/template-catalog')).json();
+    expect(catalog.filter(item => item.recommended)).toHaveLength(3);
+    expect(catalog.filter(item => item.legacyTheme)).toHaveLength(2);
+    expect(catalog.filter(item => item.ownerType === 'engine').length).toBeGreaterThan(0);
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await expect(page.getByRole('button', { name: 'AI 自由设计', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '使用单位模板', exact: true }).click();
+    await expect(page.locator('#presentation-catalog-filter')).toHaveValue('organization');
+    await expect(page.getByRole('button', { name: '导入单位模板', exact: true })).toBeVisible();
+    await page.locator('#presentation-catalog-filter').selectOption('all');
+    await expect(page.locator('#presentation-catalog-body')).toContainText('咨询式简报');
+    await expect(page.locator('#presentation-catalog-body')).not.toContainText('森林绿简报');
+    await page.locator('#presentation-catalog-filter').selectOption('theme');
+    await expect(page.locator('#presentation-catalog-body')).toContainText('森林绿简报');
+    await page.getByRole('dialog', { name: '演示模板库' }).getByRole('button', { name: '关闭', exact: true }).click();
+    const evidence = process.env.E2E_PPT_TEMPLATE_EVIDENCE_DIR || testInfo.outputPath('evidence'); await fs.mkdir(evidence, { recursive: true });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    let darkDocument;
+    for (const template of choices.filter(item => item.ownerType === 'system')) {
+        const response = await page.request.post('/api/apps/presentations', { headers: await csrf(), data: { title: '清晰度验收-' + template.id, templateId: template.id, templateVersion: template.version } }); expect(response.ok(), await response.text()).toBeTruthy();
+        const document = (await response.json()).presentation;
+        await page.evaluate(id => window.Pivot.moduleApi('apps.presentations').openPresentation(id), document.id);
+        const background = document.content.slides[0].background.fill;
+        const headingId = document.content.slides[0].elements.find(item => item.visible !== false && item.type === 'text' && item.style.fontSize >= 24).id;
+        const colors = await page.locator('#presentation-stage').evaluate((stage, id) => {
+            const title = [...stage.querySelectorAll('.presentation-canvas-text')].find(item => item.dataset.presentationElementId === id);
+            return { background: window.getComputedStyle(stage).backgroundColor, color: window.getComputedStyle(title).color, border: [...stage.querySelectorAll('.presentation-canvas-shape')].map(shape => window.getComputedStyle(shape).borderTopWidth), hasImage: window.getComputedStyle(stage).backgroundImage };
+        }, headingId);
+        const rgb = value => '#' + value.match(/\d+/g).slice(0, 3).map(number => Number(number).toString(16).padStart(2, '0')).join('').toUpperCase();
+        expect(rgb(colors.background)).toBe(background.toUpperCase()); expect(colors.border.every(value => value === '0px')).toBeTruthy();
+        const readable = await page.evaluate(({ foreground, background }) => window.Pivot.moduleApi('apps.presentations.colors').contrast(foreground, background), { foreground: rgb(colors.color), background }); expect(readable).toBeGreaterThanOrEqual(3);
+        const thumbColor = await page.locator('.presentation-slide-thumb.is-active strong').evaluate(element => window.getComputedStyle(element).color); expect(rgb(thumbColor)).toBe(rgb(colors.color));
+        await page.locator('#presentation-stage').screenshot({ path: path.join(evidence, template.id + '-cover.png') });
+        if (template.id === 'executive-clean') darkDocument = document;
+    }
+    const oldResponse = await page.request.post('/api/apps/presentations', { headers: await csrf(), data: { title: '历史模板升级验收', templateId: 'learning-studio', templateVersion: 2 } }); expect(oldResponse.ok()).toBeTruthy();
+    const oldDocument = (await oldResponse.json()).presentation;
+    await page.evaluate(id => window.Pivot.moduleApi('apps.presentations').openPresentation(id), oldDocument.id);
+    await page.evaluate(() => window.Pivot.moduleApi('apps.presentations.catalog').open('starter'));
+    await page.locator('#presentation-catalog-body tr').filter({ hasText: '培训讲解' }).getByRole('button', { name: '应用到当前文稿', exact: true }).click();
+    await expect(page.locator('#confirm-title')).toHaveText('应用主题模板'); await page.locator('#confirm-ok-btn').click();
+    await expect(page.locator('#confirm-title')).toHaveText('重新套用布局');
+    const upgradeResponse = page.waitForResponse(response => response.url().endsWith('/' + oldDocument.id + '/content') && response.request().method() === 'PUT');
+    await page.locator('#modal-confirm-cancel').click(); const upgrade = await upgradeResponse; expect(upgrade.ok()).toBeTruthy();
+    expect((await upgrade.json()).presentation.content.template.version).toBe(choices.find(item => item.id === 'learning-studio').version);
+    await page.evaluate(id => window.Pivot.moduleApi('apps.presentations').openPresentation(id), darkDocument.id);
+    const exported = await page.request.post(`/api/apps/presentations/${darkDocument.id}/export`, { headers: await csrf(), data: { format: 'pptx' } });
+    expect(exported.ok()).toBeTruthy(); const exportResult = await exported.json();
+    const rendition = exportResult.rendition;
+    const tokenResponse = await page.request.post('/api/agents/renditions/' + rendition.id + '/download-token', { headers: await csrf() }); expect(tokenResponse.ok()).toBeTruthy();
+    const token = (await tokenResponse.json()).token, download = await page.request.get('/api/agents/renditions/' + rendition.id + '/download?token=' + encodeURIComponent(token)); expect(download.ok()).toBeTruthy();
+    const pptx = await download.body(); await fs.writeFile(path.join(evidence, 'readable-cover.pptx'), pptx);
+    const zip = await Zip.loadAsync(pptx), source = await zip.file('ppt/slides/slide1.xml').async('string'); expect(source).toContain(darkDocument.content.slides[0].background.fill.replace('#', ''));
+    await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(id => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations', presentationId: id }), darkDocument.id);
+    const restored = (await (await page.request.get('/api/apps/presentations/' + darkDocument.id)).json()).presentation;
+    expect(restored.content.template.version).toBe(darkDocument.content.template.version); expect(restored.content.slides[0].background.fill).toBe(darkDocument.content.slides[0].background.fill);
+    await page.locator('#presentation-stage').screenshot({ path: path.join(evidence, 'restored-cover.png') });
+    const image = await sharp(path.join(evidence, 'restored-cover.png')).stats(); expect(image.channels[0].mean).toBeLessThan(180);
+    expect(errors).toEqual([]);
+});
+
+test('AI自由设计与上游模板从统一入口进入完整制作，所选模板不会丢失', async ({ page }) => {
+    test.skip(process.env.PIVOT_PPT_MASTER_ENABLED !== 'true', '需要已登记完整制作镜像');
+    const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } }); expect(login.ok()).toBeTruthy();
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
+    await expect(page.locator('#presentation-master-operation')).toHaveValue('generate'); await expect(page.locator('#presentation-master-template-note')).toContainText('未指定固定模板');
+    await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
+    await page.getByRole('button', { name: '模板库', exact: true }).click(); await page.locator('#presentation-catalog-filter').selectOption('engine');
+    const row = page.locator('#presentation-catalog-body tr').filter({ hasText: '咨询决策' });
+    await row.getByRole('button', { name: '使用此制作模板', exact: true }).click();
+    await expect(page.locator('#presentation-master-template-note')).toContainText('咨询决策');
+    await expect(page.locator('#presentation-master-operation')).toBeDisabled(); await expect(page.locator('#presentation-master-profile')).toBeDisabled();
+    await expect(page.locator('#presentation-master-profile')).toHaveValue('default');
+});

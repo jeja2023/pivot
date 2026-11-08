@@ -7,11 +7,13 @@ const { fitDesignPresentation } = require('./presentation-text-metrics');
 
 async function designInfo(user) {
     const templates = await service.listPresentationTemplates(user);
+    const catalog = await require('./presentation-template-catalog').list(user);
     const skill = require('./presentation-design-skill').getPresentationDesignSkill();
     return { skill: { manifest: skill.manifest, instructions: skill.instructions, source: skill.source }, templates: templates.map(template => ({
         id: template.id, name: template.name, version: template.version, description: template.description,
         layouts: (template.definition?.layouts || template.layouts || []).map(layout => ({ id: layout.id, name: layout.name }))
-    })), text: '先根据用途选择模板，再使用支持的语义布局；视觉复核按页执行，不得把未检查的页面标记为通过。' };
+    })), catalog: { defaultMode: catalog.defaultMode, engine: catalog.engine, templates: catalog.templates.map(({ definition: _definition, masters: _masters, ...template }) => template) },
+    text: '默认按材料自由设计；需要单位品牌或固定版式时再选择当前账号可用模板。目录区分在线编辑和完整制作方式，来源、版本和权限需保持。视觉复核按页执行，不得把未检查页面标为通过。' };
 }
 
 async function review(user, input, context = {}) {

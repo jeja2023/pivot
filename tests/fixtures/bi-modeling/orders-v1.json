@@ -1,0 +1,19 @@
+{
+  "fixtureVersion": 1,
+  "description": "生产方案第16.1节业务黄金集，期望值独立于执行编译器。",
+  "fact": [
+    {"order_id":"O1","line_id":"1","customer_id":"C1","product_id":"P1","date":"2026-11-01","quantity":"1","amount":"100.00","status":"已确认"},
+    {"order_id":"O1","line_id":"2","customer_id":"C1","product_id":"P2","date":"2026-11-01","quantity":"2","amount":"100.00","status":"已确认"},
+    {"order_id":"O2","line_id":"1","customer_id":"C2","product_id":"P1","date":"2026-11-02","quantity":"1","amount":"50.00","status":"已确认"},
+    {"order_id":"O3","line_id":"1","customer_id":"C9","product_id":"P2","date":"2026-11-02","quantity":"1","amount":"80.00","status":"待确认"},
+    {"order_id":"O4","line_id":"1","customer_id":"C1","product_id":"P2","date":"2026-11-03","quantity":"1","amount":"20.00","status":"已确认"}
+  ],
+  "customers": [{"id":"C1","region":"北区"},{"id":"C2","region":"南区"}],
+  "products": [{"id":"P1","name":"产品一"},{"id":"P2","name":"产品二"}],
+  "expected": {
+    "total":{"sales":"350.00","rows":"5","orders":"4","quantity":"6","average_line":"70.00","average_order":"87.50","confirmation_rate":"0.8000"},
+    "regions":[{"region":"北区","sales":"220.00","rows":"3","orders":"2"},{"region":"南区","sales":"50.00","rows":"1","orders":"1"},{"region":null,"unmatched":true,"sales":"80.00","rows":"1","orders":"1"}],
+    "products":[{"id":"P1","sales":"150.00","orders":"2"},{"id":"P2","sales":"200.00","orders":"3"}],
+    "customer_inner":{"sales":"270.00","rows":"4","orders":"3"}
+  }
+}

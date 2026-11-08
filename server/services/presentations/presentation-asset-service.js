@@ -11,7 +11,7 @@ const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'imag
 const FONT_MIME_TYPES = new Set(['font/ttf', 'font/otf', 'font/woff', 'font/woff2', 'application/font-sfnt', 'application/vnd.ms-fontobject']);
 const AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp4', 'audio/aac']);
 const VIDEO_MIME_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
-const ATTACHMENT_MIME_TYPES = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', 'text/markdown', 'application/vnd.ms-powerpoint.presentation.macroenabled.12', 'application/vnd.ms-powerpoint.slideshow.macroenabled.12']);
+const ATTACHMENT_MIME_TYPES = new Set(['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/plain', 'text/markdown', 'application/vnd.ms-powerpoint.presentation.macroenabled.12', 'application/vnd.ms-powerpoint.slideshow.macroenabled.12']);
 
 function createPresentationAssetService(deps) {
     const {
@@ -33,7 +33,7 @@ function createPresentationAssetService(deps) {
         if (AUDIO_MIME_TYPES.has(mime) || (/\.(mp3|wav|ogg|aac|m4a)$/.test(name) && (hasAscii('RIFF') || hasAscii('ID3') || hasAscii('OggS') || hasFtyp))) return 'audio';
         if (VIDEO_MIME_TYPES.has(mime) || (/\.(mp4|webm|mov)$/.test(name) && (webm || hasFtyp))) return 'video';
         const safeMacroSource = /\.(bas|vba)$/.test(name) && buffer.length > 0 && !buffer.subarray(0, Math.min(buffer.length, 1024)).includes(0);
-        if (ATTACHMENT_MIME_TYPES.has(mime) || (/\.(pdf|docx|xlsx|txt|md|pptm|ppsm)$/.test(name) && (hasAscii('%PDF') || hasAscii('PK\x03\x04') || mime.startsWith('text/'))) || safeMacroSource) return 'attachment';
+        if (ATTACHMENT_MIME_TYPES.has(mime) || (/\.(pdf|docx|xlsx|txt|md|pptx|pptm|ppsm)$/.test(name) && (hasAscii('%PDF') || hasAscii('PK\x03\x04') || mime.startsWith('text/'))) || safeMacroSource) return 'attachment';
         return '';
     }
 
@@ -114,10 +114,12 @@ function createPresentationAssetService(deps) {
         return (await query('SELECT * FROM presentation_assets WHERE ' + conditions.join(' AND ') + ' ORDER BY created_at DESC, id DESC LIMIT ?', [...params, limit])).map(publicAsset);
     }
 
-    async function getPresentationAsset(user, assetId) {
+    async function getPresentationAsset(user, assetId, options = {}) {
         const tenant = await assertTenantContext(user); const access = assetAccessClause(user);
         const row = await queryOne(`SELECT * FROM presentation_assets WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL AND ${access.sql} LIMIT 1`, [Number.parseInt(assetId, 10), tenant.tenantId, ...access.params]);
-        if (!row) return null; const loaded = await readBuffer({ objectId: row.object_id, tenantId: tenant.tenantId, tenantScoped: true });
+        if (!row) return null;
+        if (options.metadataOnly === true) return { asset: publicAsset(row) };
+        const loaded = await readBuffer({ objectId: row.object_id, tenantId: tenant.tenantId, tenantScoped: true });
         return { asset: publicAsset(row), buffer: loaded.buffer };
     }
 

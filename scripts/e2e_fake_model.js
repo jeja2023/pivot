@@ -40,10 +40,12 @@ const server = http.createServer((req, res) => {
             res.end('data: [DONE]\n\n');
             return;
         }
-        const semanticDelayMs = JSON.stringify(payload).includes('E2E_SEMANTIC_DELAY') || payload.model === 'ppt-e2e-vision-slow' ? 1_500 : 0;
+        const semanticDelayMs = JSON.stringify(payload).includes('E2E_SEMANTIC_DELAY') || ['ppt-e2e-vision-slow', 'ppt-storyline-e2e-slow'].includes(payload.model) ? 1_500 : 0;
         const respond = () => {
         if (payload.stream === false) {
             let content = '真实 E2E 回答';
+            if (payload.model === 'ppt-master-e2e') content = JSON.stringify(require('./test_support/ppt_master_model').pptMasterModelTurn(payload.messages || []));
+            if (payload.model === 'ppt-storyline-e2e-slow') content = JSON.stringify(require('./test_support/ppt_storyline_model').turn(payload.messages || []));
             if (payload.model === 'ppt-e2e-vision-slow') content = JSON.stringify({ issues: [] });
             if (JSON.stringify(payload.messages || []).includes('E2E_KNOWLEDGE_刑事案件') && payload.messages?.some(message => String(message.content || '').includes('知识库证据蕴含核验器'))) {
                 content = JSON.stringify({ claims: [{ index: 1, supported: true, sourceIds: [1] }] });

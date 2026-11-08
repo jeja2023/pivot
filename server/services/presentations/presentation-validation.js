@@ -1,7 +1,9 @@
 'use strict';
 
 const { normalizePresentation } = require('./presentation-schema');
+const { analyzePresentationSemantics } = require('./presentation-semantics');
 const { hasSensitiveContent } = require('../long-term-memory/memory-utils');
+const { contrast: contrastRatio, textBackground } = require('../../../client/chat/presentation-colors');
 
 // 记忆治理规则覆盖常见凭据与证件格式；演示场景再补充中文字段标签，
 // 避免“密码：***”这类面向展示的文本因 Unicode 单词边界而漏报。
@@ -32,20 +34,6 @@ function overlapArea(a, b) {
     const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
     const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
     return width * height;
-}
-
-function hexLuminance(color) {
-    const hex = String(color || '#000000').replace('#', '');
-    if (!/^[0-9a-f]{6}$/i.test(hex)) return 0;
-    const channels = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255)
-        .map(value => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-}
-
-function contrastRatio(foreground, background) {
-    const fg = hexLuminance(foreground);
-    const bg = hexLuminance(background);
-    return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
 }
 
 function estimatedTextLines(element) {
@@ -94,7 +82,7 @@ function runPresentationValidation(input) {
                 if (/\b(?:xxx|todo|tbd)\b|请填写|待补充|\[.*?\]|【.*?】/i.test(String(element.content.text || ''))) {
                     issues.push(makeIssue('warning', 'PLACEHOLDER_REMAINS', slide.id, element.id, '页面仍包含待替换占位内容。', '请在导出前补全占位内容。'));
                 }
-                if (!slide.background.imageAssetRef && contrastRatio(element.style.color, slide.background.fill) < 3) {
+                if (!slide.background.imageAssetRef && contrastRatio(element.style.color, textBackground(slide, element)) < (element.style.fontSize >= 24 ? 3 : 4.5)) {
                     issues.push(makeIssue('warning', 'LOW_CONTRAST', slide.id, element.id, '文字与背景对比度不足。', '请调整文字颜色或背景色以增强可读性。'));
                 }
                 if (!hasKnownFont(element, presentation)) {
@@ -148,12 +136,15 @@ function runPresentationValidation(input) {
             issues.push(makeIssue('warning', 'CONTENT_DENSE', slide.id, null, '页面文字较多，可能不适合现场演示。', '建议提炼为要点或拆分为两页。'));
         }
     });
+    const semantics = analyzePresentationSemantics(presentation);
+    issues.push(...semantics.issues);
     const blocking = issues.filter(issue => issue.level === 'blocking').length;
     const warnings = issues.filter(issue => issue.level === 'warning').length;
     return {
         status: blocking ? 'blocked' : warnings ? 'warning' : 'passed',
         summary: { slides: presentation.slides.length, blocking, warnings, info: issues.length - blocking - warnings },
-        issues
+        issues,
+        semantics
     };
 }
 

@@ -232,17 +232,12 @@
             return;
         }
         const choice = event.target?.closest?.('[data-monitor-failure-kind]');
-        const page = event.target?.closest?.('[data-monitor-failure-page]');
-        const wsPage = event.target?.closest?.('[data-workspace-pagination-page]');
+        // 通用分页由组件回调处理；这里只代理弹窗内的备用分页，避免跨页误触和重复请求。
+        const page = event.target?.closest?.('#monitor-failure-modal [data-monitor-failure-page]');
         if (choice) {
             void loadFailureDetails(choice.dataset.monitorFailureKind);
         } else if (page && !page.disabled) {
             const targetPage = Number(page.dataset.monitorFailurePage);
-            if (Number.isFinite(targetPage)) {
-                void loadFailureDetails(detailKind, (targetPage - 1) * 20);
-            }
-        } else if (wsPage && !wsPage.disabled) {
-            const targetPage = Number(wsPage.dataset.workspacePaginationPage);
             if (Number.isFinite(targetPage)) {
                 void loadFailureDetails(detailKind, (targetPage - 1) * 20);
             }

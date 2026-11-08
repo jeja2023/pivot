@@ -145,7 +145,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
             FROM read_parquet(${sqlLiteral(parquetPath)})
             WHERE ${numericValueSql(sqlIdent(xCol.key))} IS NOT NULL AND ${numericValueSql(sqlIdent(yCol.key))} IS NOT NULL
             LIMIT ${Math.min(limit * 100, 5000)}
-        `));
+        `), { userId: actor.id });
         const series = [{ name: yCol.name, data: rows.map(item => [Number(item.x), Number(item.y)]) }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation: 'raw' }, labels: [], series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
         chart.echartsOption = buildChartOption({ chartType, title, labels: [], series, xName: xCol.name, yName: yCol.name, colors });
@@ -159,7 +159,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
             FROM read_parquet(${sqlLiteral(parquetPath)})
             WHERE ${numericValueSql(sqlIdent(yCol.key))} IS NOT NULL
             LIMIT 20000
-        `));
+        `), { userId: actor.id });
         const groups = new Map();
         raw.forEach(item => { const values = groups.get(String(item.label)) || []; values.push(Number(item.value)); groups.set(String(item.label), values); });
         const entries = [...groups.entries()].map(([label, values]) => ({ label, values: values.sort((a, b) => a - b) })).sort((a, b) => b.values.length - a.values.length).slice(0, limit);
@@ -178,7 +178,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         const rows = await withAnalysisSlot(() => duckReadAll(`
             SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label, ${valueExpr} AS primary_value, ${secondExpr} AS secondary_value
             FROM read_parquet(${sqlLiteral(parquetPath)}) GROUP BY label ORDER BY ${sortBy === 'label' ? 'label' : 'primary_value'} ${sortOrder.toUpperCase()} LIMIT ${limit}
-        `));
+        `), { userId: actor.id });
         const labels = rows.map(item => String(item.label));
         const series = [{ name: yCol.name, axis: 0, data: rows.map(item => Number(item.primary_value) || 0) }, { name: y2Col.name, axis: 1, data: rows.map(item => Number(item.secondary_value) || 0) }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation }, secondaryYAxis: { field: y2Col.key, label: y2Col.name, aggregation }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
@@ -190,7 +190,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         SELECT COALESCE(NULLIF(CAST(${sqlIdent(xCol.key)} AS VARCHAR), ''), '(empty)') AS label${groupExpression}, ${valueExpr} AS value
         FROM read_parquet(${sqlLiteral(parquetPath)}) ${groupBy}
         ORDER BY ${sortBy === 'label' ? 'label' : 'value'} ${sortOrder.toUpperCase()} LIMIT ${limit * (groupCol ? 20 : 1)}
-    `));
+    `), { userId: actor.id });
     const labels = Array.from(new Set(rows.map(item => String(item.label)))).slice(0, limit);
     if (chartType === 'heatmap') {
         const rowLabels = Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 30);
@@ -267,7 +267,7 @@ async function buildChart(userId, datasetId, input = {}) {
         ${orderBy}
         LIMIT ${limit * (groupCol ? 20 : 1)}
     `;
-    const rows = await withAnalysisSlot(() => duckReadAll(sql));
+    const rows = await withAnalysisSlot(() => duckReadAll(sql), { userId: Number(userId?.id || userId) });
     const labels = Array.from(new Set(rows.map(item => String(item.label)))).slice(0, limit);
     const groups = groupCol ? Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 12) : ['value'];
     const series = groups.map(group => ({

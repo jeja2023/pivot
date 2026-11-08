@@ -971,7 +971,7 @@ test('deleting a user releases the username without reviving the old identity', 
 
         const listRes = makeRes();
         await runExpressHandlers(listRoute.route.stack.map(layer => layer.handle), {
-            query: { includeDeleted: 'true', limit: '10000' }
+            query: { includeDeleted: 'true', search: username, limit: '100' }
         }, listRes);
         const matchingUsers = listRes.body.data.filter(user => user.username === username);
         assert.equal(matchingUsers.length, 2);

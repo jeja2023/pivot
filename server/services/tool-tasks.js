@@ -36,6 +36,12 @@ function createToolTaskStore(deps = {}) {
     const now = deps.getBeijingTimestamp || getBeijingTimestamp;
     const controllers = new Map();
 
+    async function readable(row, user) {
+        if (!row || row.tool_name !== 'presentation.storyline') return row;
+        const document = await require('./presentations/presentation-service').getPresentation(user, parseJson(row.input_request).presentationId);
+        return document ? row : null;
+    }
+
     async function expireIfNeeded(row) {
         if (!row || !['working', 'input_required'].includes(row.status) || !row.expires_at || Date.parse(row.expires_at) > Date.now()) return row;
         await write(`
@@ -64,13 +70,14 @@ function createToolTaskStore(deps = {}) {
     }
 
     async function getForUser(id, user) {
-        const row = await expireIfNeeded(await readOne('SELECT * FROM tool_tasks WHERE id = ? AND user_id = ?', [id, user?.id || 0]));
+        const row = await expireIfNeeded(await readable(await readOne('SELECT * FROM tool_tasks WHERE id = ? AND user_id = ?', [id, user?.id || 0]), user));
         return row ? publicTask(row) : null;
     }
 
     async function requestCancel(id, user) {
         const current = await readOne('SELECT * FROM tool_tasks WHERE id = ? AND user_id = ?', [id, user?.id || 0]);
         if (!current) return null;
+        if (current.tool_name === 'presentation.storyline') return require('./presentations/storyline/tasks').cancel(user, parseJson(current.input_request).presentationId, id);
         const task = await expireIfNeeded(current);
         if (!['working', 'input_required'].includes(task.status)) return publicTask(task);
         await write(`
@@ -110,16 +117,17 @@ function createToolTaskStore(deps = {}) {
             UPDATE tool_tasks
             SET status = ?, result_json = ?::jsonb, result_digest = ?, invocation_event_id = COALESCE(?, invocation_event_id), error_code = ?, error_message = ?, updated_at = ?
             WHERE id = ? AND user_id = ? AND status IN ('working', 'input_required')
-        `, [status, JSON.stringify(result ?? {}), digest(result ?? {}), options.invocationEventId || null, String(options.errorCode || '').slice(0, 128), String(options.errorMessage || '').slice(0, 2000), now(), id, user.id]);
+              AND (?::text IS NULL OR (result_json->>'_lease'=? AND COALESCE((result_json->>'_leaseUntil')::numeric,0)>extract(epoch from NOW())))
+        `, [status, JSON.stringify(result ?? {}), digest(result ?? {}), options.invocationEventId || null, String(options.errorCode || '').slice(0, 128), String(options.errorMessage || '').slice(0, 2000), now(), id, user.id, options.expectedLease || null, options.expectedLease || null]);
         return publicTask(await readOne('SELECT * FROM tool_tasks WHERE id = ?', [id]));
     }
 
-    async function requestInput(id, user, inputRequest = {}) {
+    async function requestInput(id, user, inputRequest = {}, options = {}) {
         const current = await readOne('SELECT * FROM tool_tasks WHERE id = ? AND user_id = ?', [id, user?.id || 0]);
         if (!current) return null;
         const task = await expireIfNeeded(current);
         if (task.status !== 'working') return publicTask(task);
-        await write("UPDATE tool_tasks SET status = 'input_required', input_request = ?::jsonb, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'working'", [JSON.stringify(inputRequest || {}), now(), id, user.id]);
+        await write("UPDATE tool_tasks SET status = 'input_required', input_request = ?::jsonb, updated_at = ? WHERE id = ? AND user_id = ? AND status = 'working' AND (?::text IS NULL OR (result_json->>'_lease'=? AND COALESCE((result_json->>'_leaseUntil')::numeric,0)>extract(epoch from NOW())))", [JSON.stringify(inputRequest || {}), now(), id, user.id, options.expectedLease || null, options.expectedLease || null]);
         return publicTask(await readOne('SELECT * FROM tool_tasks WHERE id = ?', [id]));
     }
 
@@ -137,4 +145,4 @@ function createToolTaskStore(deps = {}) {
 
 const defaultStore = createToolTaskStore();
 
-module.exports = { newTaskId, ...defaultStore };
+module.exports = { newTaskId, createToolTaskStore, ...defaultStore };

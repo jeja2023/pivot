@@ -6,6 +6,42 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/presentation-engine-deployment.js",
+      "count": 2,
+      "rationale": "PPT引擎更新复用PostgreSQL事务锁；更新接纳与完整制作/原稿任务接纳使用同一个固定advisory键。活动任务只按固定工具名、非终态及期限计数；查询不返回任何任务内容或用户资料。无外部SQL拼接。",
+      "verification": "presentation-engine-deployment-postgres验证未提交任务与维护检查串行、活动任务拒绝、维护期间双任务入口拒绝及更新标识隔离；实际隔离容器更新/回退验证服务保留。"
+    },
+    {
+      "file": "server/services/app-availability.js",
+      "count": 1,
+      "rationale": "应用可见性按固定八个应用的设置键做参数化只读查询，仅返回键和值；复用 app_settings 保存和审计操作者，不缓存授权结果，不拼接用户输入，旧安装没有记录时维持原入口。",
+      "verification": "app-availability 隔离 PostgreSQL 与 HTTP 回归已验证 admin 专属权限、普通管理员拒绝、参数校验、全员目录过滤、持久保存及共享数据集底座；浏览器回归验证刷新、失败重试、空列表与桌面及窄屏按钮。"
+    },
+    {
+      "file": "server/services/agent-artifacts.js",
+      "count": 26,
+      "rationale": "嵌入事务的版本更新只允许当前所有者、未删除且不关联运行的独立产物，行锁后读取版本序号并在同一executor写回；知识运行产物与思维导图不能借此路径扩权。所有ID参数绑定。",
+      "verification": "presentation-storyline-postgres验证冲突回滚，presentation-workbench-integration与artifact-access-boundaries验证产物归属及共享边界。"
+    },
+    {
+      "file": "server/repositories/presentation-storyline.js",
+      "count": 12,
+      "rationale": "故事线任务复用tool_tasks；按user_id、固定tool_name和文稿过滤。接纳使用事务锁，模型结果与确认应用使用状态、期限及租约条件更新；只存服务端已校验方案，取消不能抢占有效应用。参数全部绑定。；创建时间由数据库微秒时钟记录，最近任务排序稳定，避免同秒取消与重建读回旧任务。",
+      "verification": "presentation-storyline-postgres验证并发接纳、租约恢复、隔离、取消、显式确认、旧草稿拒绝及重复应用。"
+    },
+    {
+      "file": "server/repositories/presentation-master-renditions.js",
+      "count": 1,
+      "rationale": "最终文件先在受限引擎通过上游导出和摘要核验，再由已鉴权Artifact服务创建用户产物；仓储仅接收服务端租户、产物、CAS摘要和受控格式登记不可变rendition，不接受外部存储路径。",
+      "verification": "真实完整PPT引擎端到端验证原生PPTX与源包登记、一次性令牌下载和刷新恢复；交付仍按原有Artifact/CAS授权读取。"
+    },
+    {
+      "file": "server/repositories/presentation-master-tasks.js",
+      "count": 11,
+      "rationale": "完整PPT引擎复用tool_tasks；所有读取/更新绑定user_id与固定tool_name，租约、期限、状态在条件更新中核对。确认答复与恢复采用原子状态条件，取消后的旧执行不能登记进度；内部检查点仅服务端投影，不原样返回模型提示词。所有业务参数绑定。；启动/恢复使用统一事务锁核对单用户与全局并发上限，避免多个实例超额接纳。",
+      "verification": "presentation-master-postgres验证真实并发领取、输家写入拒绝、跨账号、确认重复提交、最近任务、有效租约不能接管和取消后拒绝；presentation-master验证权限、取消、预算与有限动作。"
+    },
+    {
       "file": "server/repositories/presentation-quality-tasks.js",
       "count": 5,
       "rationale": "PPT整稿检查复用tool_tasks。所有记录按当前user_id与固定tool_name过滤，查询最新任务还绑定presentationId；父任务状态按所属用户读取；进度只更新本人且仍为working的记录。参数全部绑定，不拼接输入；文稿可见性、编辑权限和内容摘要由服务层再次检查。",
@@ -394,9 +430,9 @@
     },
     {
       "file": "server/services/presentations/presentation-service.js",
-      "count": 14,
-      "rationale": "演示文稿草稿自动保存与里程碑版本分离机制：在事务内按文稿 ID 与 current_version 执行乐观锁条件更新，仅更新当前文稿草稿内容、验证状态及关联产物，不冗余插入历史版本快照；全部查询均已参数化并按租户和所有者权限隔离。",
-      "verification": "tests/presentation-workbench.test.js、tests/presentation-workbench-contract.test.js、tests/presentation-workbench-integration.test.js 覆盖自动保存、乐观锁冲突、草稿与里程碑版本隔离。"
+      "count": 15,
+      "rationale": "演示文稿草稿自动保存与里程碑版本分离机制：在事务内按文稿 ID 与 current_version 执行乐观锁条件更新，仅更新当前文稿草稿内容、验证状态及关联产物，不冗余插入历史版本快照；全部查询均已参数化并按租户和所有者权限隔离。；里程碑保存先条件更新文稿并核对原始JSON，再在同一显式事务中登记所有者产物及文稿版本；任一步失败整体回滚。新增语句仅绑定受控产物ID和已鉴权文稿主键。",
+      "verification": "presentation-storyline-postgres并发草稿冲突验证文稿与产物均无残留写入；presentation-workbench-integration验证历史、恢复和协作保存。"
     },
     {
       "file": "server/repositories/mindmaps.js",
@@ -490,15 +526,231 @@
     },
     {
       "file": "server/repositories/analysis-query-jobs.js",
-      "rationale": "后台查询仓储按用户与任务绑定参数；锁行领取、执行代次与心跳保护恢复及取消，结果确认和产物登记同一事务。",
-      "verification": "data-analysis-reliability 验证精确限行、空结果字段、取消不复活、过期恢复、旧执行器回写拒绝及来源失效。",
-      "count": 11
+      "rationale": "旧单数据集 SQL 保留原行为和授权版本，纳入统一持久预算与服务端发布控制；取消区分用户/系统原因，不提前把运行资源标为结束。SQL 文本作为任务值绑定，动态目录片段仍来自布尔分支。",
+      "verification": "data-analysis-reliability、bi-modeling-budget 与 release-controls 验证 SQL 接纳暂停、领取协议、系统取消和相同队列预算。",
+      "count": 7
     },
     {
       "file": "server/repositories/analysis-assets.js",
       "count": 1,
-      "rationale": "四类分析资产在 SQL 内按所有者、单位及个人共享范围预过滤后分页，并再次通过统一可见性判定，避免无权资产挤占页面。表名仅来自固定白名单，所有用户输入绑定参数。",
-      "verification": "data-analysis-reliability 验证大量他人私有资产下本人模型与仪表盘仍可见，显式个人共享保持可用。"
+      "rationale": "资产目录 SQL 预筛选和统一可见性继续生效，返回前按当前主体及资产批量核对独立确认，恢复旧客户端也不能读取历史共享配置。",
+      "verification": "security-journal 恢复默认关闭，pipeline 和 data-analysis 资产消费与共享；authorization 当前撤权和响应复核。"
+    },
+    {
+      "file": "server/repositories/analysis-production-models.js",
+      "count": 19,
+      "rationale": "草稿保存统一锁定模型并验证修订号，节点/关系/维度/指标与审计同事务持久化；参数全部绑定。；画布布局仅在现有节点 config_json 的 canvasLayout 中保存，查询按模型绑定，事务内先锁模型修订并重新授权；布局不进入语义定义及旧快照哈希。未提供布局的兼容客户端保留既有展示位置。",
+      "verification": "tests/bi-modeling-drafts.test.js 与 bi-modeling-schema.test.js 验证冲突、所有者、快照不可变和旧写入隔离。；bi-modeling-canvas-layout 验证重开、哈希及固定发布不变、非法节点/坐标、越权和并发修订拒绝。"
+    },
+    {
+      "file": "server/repositories/analysis-objects.js",
+      "count": 17,
+      "rationale": "对象和固定消费者共用行锁及不可变引用；完整性扫描有持久游标、诊断记录和调度互斥，保留策略不删除当前绑定、活动任务、固定报告或备份；所有参数绑定，目录只由受控 CAS 构造。",
+      "verification": "bi-modeling-integrity 与 bi-modeling-objects 在真实隔离 PostgreSQL 验证读取/GC 竞态、损坏隔离、固定结果保留、游标和活动临时目录保护；pipeline 回归消费者接线。"
+    },
+    {
+      "file": "server/repositories/analysis-manifests.js",
+      "count": 12,
+      "rationale": "在最终授权与模型/来源锁内复核来源修订、路径、字段、治理语义、不可变版本ID和业务元数据哈希后登记清单。业务批次/期间来自实际数据版本；增量与部分不能冒充全量。首次恢复登记保留原始数据时间；对象引用与清单成员原子提交。",
+      "verification": "bi-modeling-source-metadata 覆盖共同批次/期间成功、缺失与不一致失败、覆盖声明、来源变化竞争和历史清单不变；pipeline、objects 验证真实字节和引用。"
+    },
+    {
+      "file": "server/repositories/analysis-authorization.js",
+      "count": 11,
+      "rationale": "在当前账号与模型/数据集授权栅栏内读取字段治理及最新物理路径对应的不可变数据版本，供来源业务水位固定；授权不从版本快照继承，仍核对当前账号、共享范围、字段限制与独立安全日志。用户输入全部绑定；数据版本按已授权数据集和路径精确查询。",
+      "verification": "bi-modeling-source-metadata、authorization、faults、pipeline 验证当前权限、所有者写入、版本匹配和水位准备后并发拒绝。"
+    },
+    {
+      "file": "server/repositories/analysis-model-jobs.js",
+      "count": 27,
+      "rationale": "模型持久任务沿用统一预算、代次、租约和当前授权事务。新增缓存身份在最终完成事务按实际当前授权向量计算，包含发布快照、清单与规范查询；命中仍是独立任务和审计，引用只在有效对象上原子登记。",
+      "verification": "bi-modeling-result-cache、pipeline、authorization、faults及budget验证缓存与正常任务的同一终态/授权/引用边界。"
+    },
+    {
+      "file": "server/repositories/analysis-model-publications.js",
+      "count": 19,
+      "rationale": "发布锁定草稿并复核定义、规则、完整检查、警告与业务复核证据；刷新以绑定修订比较交换并拒绝业务水位倒退和口径变化，查询在授权事务中固定成功清单。所有输入绑定参数。",
+      "verification": "tests/bi-modeling-pipeline.test.js 验证幂等发布、旧检查拒绝、固定历史清单、候选刷新失败保留与治理破坏检测。"
+    },
+    {
+      "file": "server/repositories/analysis-model-sharing.js",
+      "count": 9,
+      "rationale": "复用现有单位和个人共享范围；业务复核绑定所有者、另一位有实际来源权限的复核者、语义及规则与范围摘要，不赋予模型修改权。复核和共享变更连同审计在事务落库。",
+      "verification": "tests/bi-modeling-pipeline.test.js 验证缺来源权限不能复核、不能自审、确认项完整、证据不可改写及解除共享立即拒绝。"
+    },
+    {
+      "file": "server/repositories/analysis-model-consumers.js",
+      "count": 24,
+      "rationale": "对象和固定消费者共用行锁及不可变引用；完整性扫描有持久游标、诊断记录和调度互斥，保留策略不删除当前绑定、活动任务、固定报告或备份；所有参数绑定，目录只由受控 CAS 构造。",
+      "verification": "bi-modeling-integrity 与 bi-modeling-objects 在真实隔离 PostgreSQL 验证读取/GC 竞态、损坏隔离、固定结果保留、游标和活动临时目录保护；pipeline 回归消费者接线。"
+    },
+    {
+      "file": "server/repositories/analysis-model-results.js",
+      "count": 2,
+      "rationale": "每次结果分页、下载意图和分块读取都在授权栅栏内校验本人成功任务及就绪对象，读取租约阻止 GC；下载授权审计与保留事务一致。",
+      "verification": "tests/bi-modeling-pipeline.test.js 验证分页排序、会话及权限绑定、完整导出和停用后拒绝。"
+    },
+    {
+      "file": "server/repositories/analysis-model-readiness.js",
+      "count": 1,
+      "rationale": "要求十三号来源业务信息迁移、非空会话元数据列及有效版本不可变保护，同时保留缓存索引、发布维护、安全日志、不可变清单、执行代次和唯一刷新保护；仅查询固定系统目录和迁移ID。",
+      "verification": "bi-modeling-source-metadata、result-cache、readiness 与 release-controls 验证重复迁移、保护/索引丢失时拒绝就绪和恢复后继续运行。"
+    },
+    {
+      "file": "server/repositories/analysis-runtime-budget.js",
+      "count": 21,
+      "rationale": "模型、SQL及旧操作沿用相同调度锁、持久槽位、当前账号、配额、代次和租约。写入型追加允许在业务版本同一事务结算自己的legacy_operation；后续重复结算只接受同任务代次/持有者已经成功终态，不能覆盖取消/失败或其它执行种类，避免成功提交后因续租结束误报失败。",
+      "verification": "bi-modeling-budget 覆盖真实取消小于五秒、代次/槽位错配、异常释放、混合配额与排队；bi-modeling-increments 覆盖提交前取消不产生版本与提交后幂等结果。"
+    },
+    {
+      "file": "server/repositories/analysis-ingestions.js",
+      "count": 25,
+      "rationale": "导入会话存储不可变来源业务标注；分块、请求摘要、真实字节与行数验证后，在相同有效任务代次/租约和当前账号授权事务中登记数据集、版本、标注与审计。完成读取只声明文件完整，业务覆盖以用户合同为准。全部输入绑定，不允许变更已确认的上传合同。",
+      "verification": "bi-modeling-ingestion 覆盖真实合同不可修改、批次/期间/截止时间随版本保存、幂等与不同合同冲突、百万行/跨块UTF8、取消、错误摘要和HTTP撤权；source-metadata 覆盖后续固定与覆盖策略。"
+    },
+    {
+      "file": "server/repositories/analysis-integrity.js",
+      "count": 37,
+      "rationale": "对象和固定消费者共用行锁及不可变引用；完整性扫描有持久游标、诊断记录和调度互斥，保留策略不删除当前绑定、活动任务、固定报告或备份；所有参数绑定，目录只由受控 CAS 构造。",
+      "verification": "bi-modeling-integrity 与 bi-modeling-objects 在真实隔离 PostgreSQL 验证读取/GC 竞态、损坏隔离、固定结果保留、游标和活动临时目录保护；pipeline 回归消费者接线。"
+    },
+    {
+      "file": "server/repositories/analysis-model-ownership.js",
+      "count": 14,
+      "rationale": "所有权交接先锁定参与主体再锁定模型，排他模式在模型行锁前取得授权写锁；原所有者在锁内重新核对，受让人必须具备全部历史及当前来源权限；幂等请求、到期、活动任务和计划影响摘要均在事务内校验。",
+      "verification": "bi-modeling-ownership 八项覆盖双方确认、停用账号受控交接、全部版本来源授权、并发草稿行锁、计划暂停、到期与重复响应；bi-modeling-authorization 验证固定授权顺序。"
+    },
+    {
+      "file": "server/repositories/analysis-model-plans.js",
+      "count": 6,
+      "rationale": "交接使用现有身份、来源和字段授权栅栏；接收人实际具备所有保留口径来源权限，影响摘要、修订及活动槽位同事务核验，暂停旧主体计划并重置为个人范围。所有动态值绑定，不迁移凭据或源数据所有权。",
+      "verification": "bi-modeling-ownership 在隔离 PostgreSQL 与真实 HTTP 验证双向确认、停用主体救援、历史字段权限、重复与并发、终态不可改写、计划变化和精确暂停；浏览器验证真实交接表单。"
+    },
+    {
+      "file": "server/repositories/analysis-model-origins.js",
+      "count": 10,
+      "rationale": "旧探索盘点在模型及当前身份来源授权栅栏内读取，幂等键串行化后同事务创建新草稿和不可变来源证据；只使用绑定参数，不改写原探索或历史资产。",
+      "verification": "bi-modeling-migration 验证真实隔离 PostgreSQL 的并发幂等、来源冻结、原探索不变、固定清单对照、权限撤回及明确视图切换。"
+    },
+    {
+      "file": "server/repositories/analysis-authorized-delivery.js",
+      "count": 5,
+      "rationale": "模型结果、视图和仪表盘发送前保持当前授权及行锁，新增共享资产独立确认检查；判断放在当前行锁之后，避免未确认扩权在检查后提交而被交付。",
+      "verification": "bi-modeling-authorization 实际 HTTP 和慢下载；security-journal 的独立确认与恢复；pipeline 固定视图、仪表盘与导出。"
+    },
+    {
+      "file": "server/repositories/analysis-model-catalog.js",
+      "count": 3,
+      "rationale": "模型目录只批量读取可见摘要、最小图结构和字段键；当前身份从数据库重新解析，发送前以稳定顺序锁住全部模型并批量核对可见性、修订与发布指针，不向接收者返回来源或完整定义。所有数组和身份均绑定参数。",
+      "verification": "bi-modeling-catalog 覆盖千模型、多主体、单位及个人共享、真实 HTTP p95、字段撤权、已准备摘要撤权、旧探索与草稿冲突；bi-modeling-authorization 验证交付栅栏。"
+    },
+    {
+      "file": "server/repositories/analysis-operations.js",
+      "count": 21,
+      "rationale": "SLI 按分钟、固定类型与结果类别持久聚合；用户配额、授权及输入失败单列，内部误拒绝计入平台失败，质量失败另计。探针配置和执行用事务锁串行化；专用账号不发登录凭据；所有权、模型、版本与来源限定专用合同。事件修订、事故关闭与恢复均保留审计。固定 SQL 与绑定参数，不接受监控标签或 SQL 字符串输入。",
+      "verification": "bi-modeling-operations 验证实际 HTTP 分类、终态幂等、质量失败、正反向真实查询、错误结果与意外授权的持久关闭、系统管理员恢复和真实本机 Webhook；容量用例记录真实 RSS/CPU/溢写。"
+    },
+    {
+      "file": "server/db/client.js",
+      "count": 13,
+      "rationale": "普通安全写入统一事务设置可信请求上下文；提交前只检测本事务是否产生安全事件，释放主库连接后独立确认。已提交后失败返回已应用待确认，不对已提交数据执行回滚。持久强制标记防止重启及关闭开关绕过。",
+      "verification": "bi-modeling-security-journal 验证真实提交/回滚、密钥中断、已追加未 ACK、新进程关闭开关、当前授权签认重试；authorization 和 pipeline 验证交付与取消原合同。"
+    },
+    {
+      "file": "server/services/data-analysis/shared.js",
+      "count": 4,
+      "rationale": "原数据集访问沿用受控路径与共享判定，增加主体/来源锁、当前身份重新查询和独立安全确认；恢复关闭也覆盖旧探索调用。仅固定 SQL 和绑定标识，不接收查询 SQL。",
+      "verification": "bi-modeling-security-journal 验证恢复旧权限、独立日志缺失和当前身份签认；data-analysis 与 BI 现有回归检查字段、精度、来源和导出。"
+    },
+    {
+      "file": "server/repositories/analysis-security-journal.js",
+      "count": 26,
+      "rationale": "延续独立原生会话的有序 outbox 确认与当前授权栅栏，新增集群时间线核对；物理提升后即使独立事件没有增量也默认关闭。",
+      "verification": "security-journal/readiness/authorization 十七项组合通过；physical-restore 验证新集群时间线及关闭功能开关的新进程不能读取旧快照。"
+    },
+    {
+      "file": "server/repositories/analysis-security-inventory.js",
+      "count": 14,
+      "rationale": "历史回填目标限定八张固定表，按原生主键游标分批；每资源取得稳定排他锁后重新读取最小政策快照，存在当前事件时跳过旧基线。资源排序避免逆序，短事务和剩余时间限制失败后保留原游标。全部值绑定，动态表名仅来自常量 Map。",
+      "verification": "bi-modeling-security-journal 验证两次小批中断续跑、计数与游标、并行授权变更不被旧基线覆盖、全量完成后才开放。"
+    },
+    {
+      "file": "server/repositories/analysis-security-recovery.js",
+      "count": 42,
+      "rationale": "独立当前授权签认完成并确认全部安全记录后，才接受新集群时间线；其余固定白名单/凭据指纹/墓碑/租约合同保持。",
+      "verification": "security-journal 当前授权签认、中断续确认、撤权和墓碑；physical-restore 真实 PITR 后独立当前授权证明才重新开放。"
+    },
+    {
+      "file": "server/repositories/analysis-common-recovery.js",
+      "count": 17,
+      "rationale": "整库共享表的语句级锁覆盖核对、最小安全高水位、共同恢复点登记/固定对象引用与固定表/字段清单；运维原生会话固定 SQL 和绑定参数，绝不从浏览器接收 SQL 或表名。",
+      "verification": "bi-modeling-physical-restore 实际共享写锁、超时、文件变化、缺少引用、全源删除和 WAL 还原；backup-files 校验加密与链边界。"
+    },
+    {
+      "file": "server/services/physical-backup.js",
+      "count": 16,
+      "rationale": "独立运维物理复制/恢复适配器按固定 PG 元数据和白名单 SHOW 项核对专属集群、持久设置、受限应用身份和外部表空间；凭据经 PG 环境传给工具，不进入命令行。",
+      "verification": "bi-modeling-physical-restore 使用独立随机集群、物理 base/verifybackup、实际 WAL 链和跨模块共享还原；其他数据库与缺 WAL/密钥均拒绝。"
+    },
+    {
+      "file": "server/services/common-recovery.js",
+      "count": 9,
+      "rationale": "只有独立运维入口调用；短屏障在同一原生会话登记引用和创建有名恢复点，独立看护有时限；SQL 仅固定 BEGIN/COMMIT/恢复函数和绑定 UUID，不接受普通请求 SQL。",
+      "verification": "bi-modeling-physical-restore 实际数据库屏障/计时、看护线程在主线程阻塞时释放锁、完整引用与安全高水位、源丢失后实际启动和授权重放。"
+    },
+    {
+      "file": "server/services/physical-backup-operations.js",
+      "count": 4,
+      "rationale": "独立调度器串行化完整日备份、五分钟点及有依赖的七天/三十天保留；固定 SQL 更新目录/释放已失效点的保留引用，清理前核验所有保留恢复链。",
+      "verification": "backup-files 验证保留依赖及最后一个旧点；physical-restore 验证实际 point、保留引用和恢复后确认路径。"
+    },
+    {
+      "file": "server/services/physical-backup-watchdog.js",
+      "count": 2,
+      "rationale": "独立线程和数据库会话只设定有限超时、按绑定 PID 终止本次备份协调会话；调用方只传自己刚查询的 pg_backend_pid，不提供 HTTP 入口。",
+      "verification": "bi-modeling-physical-restore 人为阻塞协调线程，实际数据库锁在独立看护截止时间后释放。"
+    },
+    {
+      "file": "server/repositories/analysis-release-controls.js",
+      "count": 14,
+      "rationale": "在既有运营状态行保存发布控制，统一恢复/发布栅栏顺序，按预期修订进行比较更新；事务内重新锁定并核对当前系统管理员。关闭提交后才排空/取消，恢复必须在任务与执行单元停止及当前预检完成后；权限收紧可先提交而扩权需独立确认。仅固定 SQL、绑定参数及有限五秒锁等待。",
+      "verification": "bi-modeling-release-controls 覆盖真实旧客户端 HTTP、直接 SQL、修订冲突、统一准入/领取、续租/完成、有限排空、系统取消、保护丢失及副本失联后确认；实际升级回退专项另记录冻结制品。"
+    },
+    {
+      "file": "server/repositories/analysis-model-cache.js",
+      "count": 2,
+      "rationale": "缓存仅匹配当前用户、模型发布版、不可变清单、规范查询哈希和当前授权向量；事务内确认当前任务代次/租约、保留结果对象，再由服务层验证真实摘要。最终完成事务再次复核来源任务/对象/元数据和当前授权，不跨用户共享，不绕过取消或GC。全部输入绑定，候选查询使用持久部分索引与单条上限。",
+      "verification": "bi-modeling-result-cache通过独立请求真实命中、用户隔离、语义/清单/过滤/授权变化、过期和损坏、慢验证撤权/取消竞争及结果引用保护；pipeline、authorization、faults组合回归。"
+    },
+    {
+      "file": "server/repositories/analysis-source-metadata.js",
+      "count": 5,
+      "rationale": "来源业务信息沿用当前账号、资源读写栅栏和独立安全日志；仅所有者在排他来源锁内按预期来源修订保存。分配不可变新版本并保留原始数据截止时间，审计与来源修订在同一事务提交，不改写历史版本、清单或文件。所有用户值绑定，版本记录查询限定单一已授权数据集。",
+      "verification": "bi-modeling-source-metadata 覆盖所有者/共享只读/撤权/停用、并发冲突、准备后变化、旧水位不变、不可变触发器和迁移可重复；受控导入与浏览器场景验证实际录入。"
+    },
+    {
+      "file": "server/repositories/analysis-dataset-increments.js",
+      "count": 8,
+      "rationale": "旧追加入口在统一持久任务预算内固定原始字节与合并CAS。最终事务先锁当前任务代次/租约/槽位及取消状态，再锁当前主体和所有者来源，复核来源修订/路径、同一批次摘要与字节数；唯一部分索引阻止同批次重复。不可变新版本、输入/输出对象引用、数据指针、审计和任务完成在同一事务提交。全部用户值绑定，不使用请求路径或原始SQL。",
+      "verification": "bi-modeling-increments 覆盖同批次重试、摘要冲突、未填批次的文件身份、真实行数/金额、旧字节不变、当前所有权、修订竞争、准备后停用/取消、部分覆盖和CAS引用；既有data-analysis、budget及浏览器真实追加重试回归。"
+    },
+    {
+      "file": "server/services/data-analysis/scalability.js",
+      "count": 10,
+      "rationale": "保留现有分区和物化受控路径及参数化元数据；追加准备/幂等/事务写入拆到独立业务服务和仓储，不继续扩大旧文件。分区/物化仍由当前数据集权限、字段治理和统一资源预算约束。",
+      "verification": "data-analysis.test.js 验证真实增量后分区、版本、物化及旧消费兼容；bi-modeling-increments验证新追加合同与故障边界。"
+    },
+    {
+      "file": "server/repositories/analysis-flow-datasets.js",
+      "count": 2,
+      "rationale": "数据建模算子流节点输出物化为受控个人数据集时，在事务内按参数化绑定写入 analysis_datasets，异常时仅按当前用户与新数据集标识回滚清理；Parquet 路径仅由服务端受控目录生成。",
+      "verification": "tests/bi-modeling-flow-pipeline.test.js 验证算子流预览、SQL 沙箱隔离、字段权限过滤与物化数据集读写。"
+    },
+    {
+      "file": "server/repositories/presentation-native.js",
+      "count": 22,
+      "rationale": "原稿离线工作台仓储集中封装租户与所有者隔离、版本读取、条件租约、并发接纳和事务提交。原稿版本写入同时锁定所属任务与文稿，校验活跃租约、取消/到期及预期版本；清理候选只供后台维护使用，文件删除仍由受控任务目录校验。 CAS引用计数随版本在同一事务中增加，避免版本已提交但引用登记失败导致内容被回收。 最终版本/交付登记与任务完成共同受事务内任务行锁约束，取消与提交按同一行锁串行化，避免已取消任务登记部分成功。",
+      "verification": "tests/presentation-native-postgres.test.js 覆盖跨账号拒绝、旧租约、取消、版本冲突、幂等重试与并发接纳；浏览器和真实容器验证编辑及视频交付。"
     }
   ]
 }

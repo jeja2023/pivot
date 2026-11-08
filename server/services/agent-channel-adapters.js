@@ -122,6 +122,7 @@ function outboundInteractionForProvider(interaction = {}) {
 async function enqueueChannelDelivery(user, input = {}) {
     const binding = await queryOne("SELECT * FROM agent_channel_bindings WHERE id = ? AND user_id = ? AND status = 'active'", [String(input.bindingId || ''), user.id]);
     if (!binding) return null;
+    if (input.interaction?.analysisSource) await require('./data-analysis/bi/tools').assertModelDelivery({ sender: user, runId: input.interaction.analysisSource.runId, recipientUserIds: input.interaction.analysisSource.recipientUserIds, channelType: binding.channel_type });
     const bindingConfig = parseJson(binding.config, {});
     const requestedPlatform = String(input.platform || input.interaction?.platform || '').trim().toLowerCase();
     const boundPlatform = String(bindingConfig.platform || '').trim().toLowerCase();
@@ -341,7 +342,13 @@ async function deliverChannelDelivery(deliveryId, options = {}) {
         if (!loadedDelivery) throw Object.assign(new Error('渠道投递关联配置不存在。'), { code: 'CHANNEL_DELIVERY_BINDING_MISSING' });
         const user = await queryOne('SELECT id, username, nickname, unit, role FROM users WHERE id = ?', [delivery.user_id]);
         if (!user) throw Object.assign(new Error('渠道投递所属用户已不存在。'), { code: 'CHANNEL_DELIVERY_USER_MISSING' });
-        if (delivery.channel_type === 'web') publishUserEvent(delivery.user_id, 'agent.channel', { deliveryId: delivery.id, eventType: delivery.event_type, subject: delivery.subject, body: delivery.body, attachments: parseJson(delivery.attachments, []), interaction: parseJson(delivery.interaction, {}) });
+        const analysisSource = parseJson(delivery.interaction, {}).analysisSource;
+        const receipt = analysisSource && await require('./data-analysis/bi/tools').assertModelDelivery({ sender: user, runId: analysisSource.runId, recipientUserIds: analysisSource.recipientUserIds, channelType: delivery.channel_type });
+        if (delivery.channel_type === 'web') {
+            const publish = () => publishUserEvent(delivery.user_id, 'agent.channel', { deliveryId: delivery.id, eventType: delivery.event_type, subject: delivery.subject, body: delivery.body, attachments: parseJson(delivery.attachments, []), interaction: parseJson(delivery.interaction, {}) });
+            if (receipt) await require('./data-analysis/bi/delivery').consume(receipt, publish);
+            else publish();
+        }
         else if (delivery.channel_type === 'webhook') await deliverWebhook(delivery, delivery, user);
         else if (delivery.channel_type === 'email') await deliverEmail(delivery, delivery, user);
         else if (delivery.channel_type === 'im') await deliverIm(delivery, delivery, user);
@@ -363,7 +370,7 @@ async function deliverChannelDelivery(deliveryId, options = {}) {
         return delivered || null;
     } catch (error) {
         const attempts = Number(delivery.attempts || 0) + 1;
-        const dead = attempts >= MAX_ATTEMPTS;
+        const dead = attempts >= MAX_ATTEMPTS || /^ANALYSIS_MODEL_/.test(error.code || '');
         const settled = await queryOne(`
             UPDATE agent_channel_deliveries
             SET status = ?, attempts = ?, next_attempt_at = ?, last_error = ?,

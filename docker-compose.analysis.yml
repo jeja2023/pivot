@@ -1,0 +1,37 @@
+# 可选 Linux 单活 BI 协调覆盖。先载入固定镜像并准备全部目录，再显式叠加本文件。
+# Docker socket 权限等同宿主机管理权限，仅授予受信任的 API 协调进程；执行器不挂载该 socket。
+# 分析目录必须在 daemon 宿主机和协调容器内使用相同的绝对路径，预检将实际核对内容摘要。
+services:
+  pivot:
+    image: ${PIVOT_BI_CONTROLLER_IMAGE:?请指定已载入且固定摘要的 BI 协调镜像}
+    group_add:
+      - "${PIVOT_DOCKER_GID:?请指定宿主机 Docker socket 的用户组编号}"
+    environment:
+      DATA_ANALYSIS_MODEL_ENABLED: "true"
+      DATA_ANALYSIS_MODEL_RUNTIME: docker
+      DATA_ANALYSIS_MODEL_WORKER_IMAGE: ${PIVOT_BI_WORKER_IMAGE:?请指定已载入且固定摘要的 BI 执行器镜像}
+      PIVOT_ANALYSIS_DIR: ${PIVOT_BI_ANALYSIS_HOST_DIR:?请指定分析目录的共享绝对路径}
+      DATA_ANALYSIS_SECURITY_JOURNAL_DIR: ${PIVOT_BI_SECURITY_HOST_DIR:?请指定独立安全日志的绝对路径}
+      DATA_ANALYSIS_SECURITY_KEY_FILE: ${PIVOT_BI_SECURITY_KEY_FILE:?请指定分离安全密钥文件的绝对路径}
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PIVOT_BI_ANALYSIS_HOST_DIR:?请指定分析目录的共享绝对路径}
+        target: ${PIVOT_BI_ANALYSIS_HOST_DIR:?请指定分析目录的共享绝对路径}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PIVOT_BI_SECURITY_HOST_DIR:?请指定独立安全日志的绝对路径}
+        target: ${PIVOT_BI_SECURITY_HOST_DIR:?请指定独立安全日志的绝对路径}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${PIVOT_BI_SECURITY_KEY_FILE:?请指定分离安全密钥文件的绝对路径}
+        target: ${PIVOT_BI_SECURITY_KEY_FILE:?请指定分离安全密钥文件的绝对路径}
+        read_only: true
+        bind:
+          create_host_path: false

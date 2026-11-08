@@ -14,6 +14,7 @@ test('演示文稿可创建、编辑、刷新恢复并导出 PPTX', async ({ pag
     await expect(page.locator('#app')).toBeVisible();
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     const created = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations') && response.request().method() === 'POST');
+    await page.locator('#presentation-more-create-dropdown summary').click();
     await page.locator('#presentation-create-blank-btn').click();
     const result = await created;
     expect(result.ok()).toBeTruthy();
@@ -54,6 +55,7 @@ test('实时事件丢失时，轮询可识别访问撤销；临时服务错误�
     await expect(page.locator('#app')).toBeVisible();
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     const created = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations') && response.request().method() === 'POST');
+    await page.locator('#presentation-more-create-dropdown summary').click();
     await page.locator('#presentation-create-blank-btn').click();
     const id = (await (await created).json()).presentation.id;
     await expect(page.locator('#presentation-editor')).toBeVisible();

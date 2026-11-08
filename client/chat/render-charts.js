@@ -17,19 +17,27 @@ function normalizePivotChartSpec(raw) {
         spec = coerceLooseChartSpec(spec);
     }
     if (!spec || spec.type !== 'pivot_chart' || !Array.isArray(spec.labels) || !Array.isArray(spec.series)) return null;
+    const exact = spec.numericContract === 'decimal_string';
     return {
+        ...(exact ? { numericContract: 'decimal_string' } : {}),
         chartType: ['bar', 'line', 'area', 'pie'].includes(spec.chartType) ? spec.chartType : 'bar',
         title: String(spec.title || '图表'),
         labels: spec.labels.map(label => String(label ?? '')).slice(0, 80),
         series: spec.series.slice(0, 20).map(item => ({
             name: String(item?.name || '系列'),
-            data: Array.isArray(item?.data) ? item.data.map(value => Number(value) || 0).slice(0, 80) : []
+            data: Array.isArray(item?.data) ? item.data.map(value => exact && value === null ? null : Number(value) || 0).slice(0, 80) : [],
+            ...(exact ? { exactValues: (item?.data || []).slice(0, 80).map(exactChartDecimal) } : {})
         })),
         xAxis: spec.xAxis || null,
         yAxis: spec.yAxis || null,
         echartsOption: spec.echartsOption || spec.option || null,
         source: spec.source || {}
     };
+}
+
+function exactChartDecimal(value) {
+    if (value === null || !/^-?\d+(?:\.\d+)?$/.test(String(value)) || String(value).length > 100) return null;
+    return String(value);
 }
 
 function normalizeLooseChartType(input, seriesList = []) {
@@ -175,26 +183,27 @@ function coerceSimpleChartSpec(input) {
 function buildEchartsOptionFromPivotSpec(spec) {
     if (spec.echartsOption && typeof spec.echartsOption === 'object') return polishEchartsLayoutOption(sanitizeEchartsOption(spec.echartsOption));
     const chartType = spec.chartType === 'area' ? 'line' : spec.chartType;
+    const exactTooltip = spec.numericContract === 'decimal_string' ? { renderMode: 'richText', formatter: input => (Array.isArray(input) ? input : [input]).map(item => `${item.name}\n${item.seriesName}：${item.data?.exactValue ?? '无有效值'}`).join('\n') } : {};
     const baseTitle = { text: spec.title, left: 18, top: 16, textStyle: { fontSize: 15, fontWeight: 700, color: '#334155' } };
     if (chartType === 'pie') {
         const values = spec.series[0]?.data || [];
         return {
             title: baseTitle,
-            tooltip: { trigger: 'item' },
+            tooltip: { trigger: 'item', ...exactTooltip },
             legend: { top: 50, left: 'center', type: 'scroll' },
             series: [{
                 name: spec.series[0]?.name || '系列',
                 type: 'pie',
                 radius: ['35%', '68%'],
                 center: ['50%', '58%'],
-                data: spec.labels.map((label, index) => ({ name: label, value: values[index] || 0 }))
+                data: spec.labels.map((label, index) => ({ name: label, value: spec.numericContract === 'decimal_string' ? values[index] : values[index] || 0, ...(spec.numericContract === 'decimal_string' ? { exactValue: spec.series[0].exactValues[index] } : {}) }))
             }]
         };
     }
     return {
         title: baseTitle,
         color: ['#10a37f', '#2563eb', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'],
-        tooltip: { trigger: 'axis', confine: true },
+        tooltip: { trigger: 'axis', confine: true, ...exactTooltip },
         legend: { top: 50, right: 18, type: 'scroll' },
         grid: { left: 68, right: 32, top: 96, bottom: 64, containLabel: true },
         xAxis: {
@@ -219,7 +228,7 @@ function buildEchartsOptionFromPivotSpec(spec) {
         series: spec.series.map(item => ({
             name: item.name,
             type: chartType,
-            data: item.data,
+            data: spec.numericContract === 'decimal_string' ? item.data.map((value, index) => ({ value, exactValue: item.exactValues[index] })) : item.data,
             smooth: chartType === 'line',
             areaStyle: spec.chartType === 'area' ? {} : undefined,
             emphasis: { focus: 'series' }
@@ -397,6 +406,10 @@ function drawPivotChart(canvas, spec) {
     canvas.style.height = `${height}px`;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    if (spec.numericContract === 'decimal_string') {
+        ctx.fillText('图表组件未就绪，请查看精确数据表。', 24, 40);
+        return;
+    }
 
     const palette = ['#10a37f', '#2563eb', '#f59e0b', '#ef4444', '#7c3aed', '#0891b2'];
     const padLeft = 72;

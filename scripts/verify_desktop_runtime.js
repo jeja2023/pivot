@@ -11,6 +11,13 @@ if (expectedArch && process.arch !== expectedArch) {
 }
 
 let sqliteDriver = '';
+const sqliteBinding = process.env.PIVOT_DESKTOP_SQLITE_MANIFEST
+    ? require('./desktop_sqlite_binding').readDesktopSqliteBinding(process.env.PIVOT_DESKTOP_SQLITE_MANIFEST, process.platform, process.arch)
+    : null;
+const LegacyDatabase = require('better-sqlite3');
+const legacyDb = new LegacyDatabase(':memory:', sqliteBinding ? { nativeBinding: sqliteBinding.binding } : {});
+legacyDb.prepare('SELECT 1').get();
+legacyDb.close();
 try {
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(':memory:');
@@ -46,7 +53,13 @@ async function verifyBrowserRuntime() {
 }
 
 async function main() {
-    require('@duckdb/node-api');
+    const { DuckDBInstance } = require('@duckdb/node-api');
+    const instance = await DuckDBInstance.create(':memory:');
+    const connection = await instance.connect();
+    try {
+        const row = (await connection.runAndReadAll('SELECT 1 AS n')).getRowObjectsJson()[0];
+        if (Number(row.n) !== 1) throw new Error('DuckDB 实际查询自检失败。');
+    } finally { connection.closeSync(); instance.closeSync(); }
     const sharp = require('sharp');
     if (!sharp?.versions?.vips) throw new Error('Sharp/libvips 未正确加载。');
     require('unzipper');
@@ -57,6 +70,7 @@ async function main() {
         platform: process.platform,
         arch: process.arch,
         sqlite: sqliteDriver,
+        legacySqliteVerified: true,
         sharp: sharp.versions.sharp,
         vips: sharp.versions.vips,
         chromium,

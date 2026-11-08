@@ -86,11 +86,6 @@ async function listAgentArtifactVersions(artifactId, user) {
     return { artifact, versions };
 }
 
-async function nextArtifactVersion(artifactId) {
-    const row = await queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS version FROM agent_artifact_versions WHERE artifact_id = ?', [artifactId]);
-    return Number(row?.version || 1);
-}
-
 async function createOrUpdateRunArtifact({ runId, user, type = 'summary', title, content, note = '' } = {}) {
     if (String(type).trim() === 'mindmap') return require('./mindmaps/documents').save(user, { content, requestKey: `agent:${require('crypto').randomUUID()}`, note }, { runId }).then(result => getAgentArtifactForUser(result.id, user));
     const safeRunId = String(runId || '').trim();
@@ -139,7 +134,8 @@ async function createOrUpdateRunArtifact({ runId, user, type = 'summary', title,
  * 公文工作台等人工创作入口也必须经过 Artifact → Rendition → Delivery 链路，
  * 不能为了导出而在浏览器或桌面端另起二进制文件通路。
  */
-async function createStandaloneArtifact(user, body = {}) {
+async function createStandaloneArtifact(user, body = {}, options = {}) {
+    if (options.executor && String(body.type || '').trim() === 'mindmap') throw Object.assign(new Error('当前类型不支持嵌入已有交付事务。'), { status: 400 });
     if (String(body.type || '').trim() === 'mindmap') {
         const result = await require('./mindmaps/documents').save(user, { ...body, document: body.content, requestKey: body.requestKey || `artifact:${require('crypto').randomUUID()}` });
         return getAgentArtifactForUser(result.id, user);
@@ -162,34 +158,40 @@ async function createStandaloneArtifact(user, body = {}) {
     }
     const artifactId = Number.parseInt(body.artifactId ?? body.artifact_id, 10);
     if (Number.isSafeInteger(artifactId) && artifactId > 0) {
+        if (options.executor) return createAgentArtifactVersion(artifactId, user, { content: safeContent, note: safeNote }, options);
         const existing = await getAgentArtifactForUser(artifactId, user);
         if (!existing || existing.run_id) return null;
         return await createAgentArtifactVersion(artifactId, user, { content: safeContent, note: safeNote });
     }
     const now = getBeijingTimestamp();
     let createdId = 0;
-    await transaction(async trx => {
+    let createdRecord;
+    const persist = async trx => {
         const row = await trx.queryOne(`
             INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
             VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         `, [user.id, safeType, safeTitle, safeContent, safeNote, now, now]);
         createdId = row?.id;
+        createdRecord = row;
         const versionRow = await trx.queryOne(`
             INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
             VALUES (?, 1, ?, ?, ?, ?)
             RETURNING id
         `, [createdId, safeContent, safeNote, user.id, now]);
         await trx.execute('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?', [versionRow?.id, createdId]);
-    });
+    };
+    if (options.executor) await persist(options.executor); else await transaction(persist);
+    if (options.executor) return { ...createdRecord, id: createdId };
     return await getAgentArtifactForUser(createdId, user);
 }
 
-async function createAgentArtifactVersion(artifactId, user, body = {}) {
-    const artifact = await getAgentArtifactForUser(artifactId, user);
+async function createAgentArtifactVersion(artifactId, user, body = {}, options = {}) {
+    const artifact = options.executor ? await options.executor.queryOne("SELECT * FROM agent_artifacts WHERE id=? AND user_id=? AND run_id IS NULL AND status<>'deleted' FOR UPDATE", [artifactId, user.id]) : await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
     const content = String(body.content ?? artifact.content ?? '').trim();
     if (artifact.type === 'mindmap') {
+        if (options.executor) throw Object.assign(new Error('当前类型不支持嵌入已有交付事务。'), { status: 400 });
         const result = await require('./mindmaps/documents').save(user, { ...body, artifactId, document: content });
         return getAgentArtifactForUser(result.id, user);
     }
@@ -200,9 +202,10 @@ async function createAgentArtifactVersion(artifactId, user, body = {}) {
     }
     const note = String(body.note || '').trim().slice(0, 500);
     const now = getBeijingTimestamp();
-    const version = await nextArtifactVersion(artifact.id);
     let versionId = 0;
-    await transaction(async trx => {
+    const persist = async trx => {
+        const row = await trx.queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS version FROM agent_artifact_versions WHERE artifact_id = ?', [artifact.id]);
+        const version = Number(row?.version || 1);
         const versionRow = await trx.queryOne(`
             INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -214,7 +217,9 @@ async function createAgentArtifactVersion(artifactId, user, body = {}) {
             SET content = ?, note = ?, current_version_id = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
         `, [content, note, versionId, now, artifact.id, user.id]);
-    });
+    };
+    if (options.executor) { await persist(options.executor); return { ...artifact, content, note, current_version_id: versionId }; }
+    await transaction(persist);
     return await getAgentArtifactForUser(artifact.id, user);
 }
 

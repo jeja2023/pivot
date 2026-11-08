@@ -455,11 +455,7 @@ function validateMcpEndpointUrl(rawUrl) {
     return parsed;
 }
 
-function escapeCsvCell(value) {
-    let text = value === undefined || value === null ? '' : String(value);
-    if (/^[=+\-@]/.test(text)) text = `'${text}`;
-    return `"${text.replace(/"/g, '""')}"`;
-}
+const { escapeCsvCell } = require('./csv');
 
 function parseCsvLine(line) {
     const cells = [];

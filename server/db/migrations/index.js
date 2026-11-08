@@ -178,7 +178,21 @@ const migrationModules = [
     require('./knowledge-index-coverage'),
     require('./knowledge-ocr-resume'),
     require('./knowledge-source-deletion-approval'),
-    require('./knowledge-ocr-location')
+    require('./knowledge-ocr-location'),
+    require('./analysis-model-contracts'),
+    require('./analysis-global-budget'),
+    require('./analysis-controlled-ingestion'),
+    require('./analysis-retention-reconciliation'),
+    require('./analysis-model-ownership'),
+    require('./analysis-model-migration'),
+    require('./analysis-authorization-fences'),
+    require('./analysis-operations'),
+    require('./analysis-security-journal'),
+    require('./analysis-common-recovery'),
+    require('./analysis-release-controls'),
+    require('./analysis-model-result-cache'),
+    require('./analysis-source-metadata'),
+    require('./presentation-native-offline')
 ];
 
 module.exports = migrationModules

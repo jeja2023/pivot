@@ -57,5 +57,110 @@
     "line": 183,
     "reason": "法规纯文本解析器的同步局部收尾函数；不访问数据库、不返回 Promise。",
     "reviewedAt": "2026-10-18"
+  },
+  {
+    "file": "server/services/agent-skill-import-provenance.js",
+    "callee": "visit",
+    "code": "visit(value, 0);",
+    "reason": "局部同步JSON递归校验函数，无数据库或Promise返回。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/chat-intent-budget.js",
+    "callee": "cancel",
+    "code": "if (signal?.aborted) cancel();",
+    "reason": "局部同步AbortController.abort回调，无Promise返回。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/data-analysis/bi/flow-pipeline.js",
+    "callee": "visit",
+    "code": "for (const next of adjacency.get(id) || []) visit(next);",
+    "reason": "局部同步图遍历与环路检查，无Promise返回。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/data-analysis/bi/flow-pipeline.js",
+    "callee": "visit",
+    "code": "for (const id of adjacency.keys()) visit(id);",
+    "reason": "局部同步图遍历与环路检查，无Promise返回。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/long-term-memory/memory-candidate-policy.js",
+    "callee": "latest",
+    "code": "if (!previous || latest(candidate) >= latest(previous)) byKey.set(key, candidate);",
+    "reason": "局部同步消息编号最大值计算，无Promise返回。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-native-package.js",
+    "callee": "parse",
+    "code": "const document = parse(await workbook.file(sheetName).async('string'));",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-native-package.js",
+    "callee": "parse",
+    "code": "const name = `ppt/slides/slide${index + 1}.xml`, document = parse(await zip.file(name).async('string'));",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-charts.js",
+    "callee": "parse",
+    "code": "if (shared) all(parse(await shared.async('string')), NS.x, 'si').forEach(node => strings.push(all(node, NS.x, 't').map(item => item.textContent).join('')));",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-charts.js",
+    "callee": "parse",
+    "code": "for (const sheet of all(parse(await workbook.async('string')), NS.x, 'sheet')) {",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-charts.js",
+    "callee": "parse",
+    "code": "for (const cell of all(parse(await file.async('string')), NS.x, 'c')) {",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-charts.js",
+    "callee": "parse",
+    "code": "const document = parse(await file.async('string')), series = all(document, NS.c, 'ser');",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-charts.js",
+    "callee": "readWorkbook",
+    "code": "if (!workbookCache.has(dataRel.target)) workbookCache.set(dataRel.target, readWorkbook(await dataFile.async('nodebuffer')));",
+    "reason": "Promise先按工作簿路径缓存，随后由await workbookCache.get消费；不产生未处理调用。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-inspector.js",
+    "callee": "parse",
+    "code": "const document = parse(await zip.file(file).async('string')), records = objectRecords(document), byName = new Map();",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-pptx-inspector.js",
+    "callee": "parse",
+    "code": "if (!notes || !compact(text(parse(await notes.async('string')))).includes(compact(slide.speakerNotes))) add('EXPORT_NOTES_MISSING', null, '当前页的演讲者备注缺失或不完整。');",
+    "reason": "导入presentation-pptx-xml同步DOMParser；同名异步函数误报。",
+    "reviewedAt": "2026-11-08"
+  },
+  {
+    "file": "server/services/presentations/presentation-semantics.js",
+    "callee": "calculate",
+    "code": "const result = calculate(claim.calculation);",
+    "reason": "局部同步算术计算与边界校验，无Promise返回。",
+    "reviewedAt": "2026-11-08"
   }
 ]

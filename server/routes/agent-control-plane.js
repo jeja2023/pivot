@@ -44,6 +44,8 @@ const {
 const { listKnowledgeCollections } = require('../services/rag-documents');
 const { getAgentExperienceSummary, recordAgentExperienceEvent } = require('../services/agent-experience-events');
 const { importTools, prepareSkillImport } = require('../services/agent-skill-import-assistant');
+const { inspectSkillImport } = require('../services/agent-skill-format-adapters');
+const { getCodeReviewTemplate, listCodeReviewTemplates, codeReviewToolCatalog } = require('../services/agent-code-review-templates');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { getToolChainMetrics } = require('../services/tool-chain-metrics');
 
@@ -433,7 +435,15 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, data: [...skills, ...capabilities].slice(0, limit) });
     }));
     router.get('/agents/skills/import/tools', authMiddleware, asyncHandler(async (req, res) => {
-        res.json({ tools: importTools(await formatToolList(req.user)) });
+        res.json({ tools: importTools(await formatToolList(req.user)), templates: listCodeReviewTemplates() });
+    }));
+    router.get('/agents/skills/import/templates/:id', authMiddleware, asyncHandler(async (req, res) => {
+        const template = getCodeReviewTemplate(req.params.id);
+        res.json({ template, tools: importTools(codeReviewToolCatalog(await formatToolList(req.user))) });
+    }));
+    router.post('/agents/skills/import/inspect', authMiddleware, asyncHandler(async (req, res) => {
+        const inspected = inspectSkillImport(req.body || {});
+        res.json({ inspection: { identity: inspected.identity, compatibility: inspected.report } });
     }));
     router.post('/agents/skills/import/preview', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ proposal: prepareSkillImport(req.body || {}, await formatToolList(req.user)) });

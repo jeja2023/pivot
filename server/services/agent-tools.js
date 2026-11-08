@@ -362,6 +362,8 @@ function getBuiltInToolDefinitions(user) {
             alwaysRequiresApproval: true,
             input_schema: asJsonSchema({
                 bindingId: { type: 'string', maxLength: 128, description: '已配置的渠道绑定 ID。' },
+                analysisRunId: { type: 'string', maxLength: 120, description: '引用 BI 模型结果时必须携带正式运行 ID，仅允许绑定本人身份的站内渠道。' },
+                analysisRecipientUserIds: { type: 'array', maxItems: 100, items: { type: 'integer', minimum: 1 }, description: '模型结果的实际接收者身份，签发和发送时均重新检查。' },
                 platform: { type: 'string', enum: ['wecom', 'feishu', 'dingtalk'] },
                 subject: { type: 'string', maxLength: 255 },
                 body: { type: 'string', maxLength: 20000, description: '消息正文，支持工作流变量。' },
@@ -636,7 +638,7 @@ function getBuiltInToolDefinitions(user) {
             input_schema: asJsonSchema({}),
             admin: true
         },
-        ...getArtifactToolDefinitions(), ...require('./agent-tools-offline-office').offlineOfficeDefinitions()
+        ...getArtifactToolDefinitions(), ...require('./agent-tools-offline-office').offlineOfficeDefinitions(), ...require('./data-analysis/bi/tools').toolDefinitions()
     ].filter(tool => !tool.admin || adminOnly);
     // Docker 服务镜像只携带 Playwright 包，不携带 Chromium；在工具目录层
     // 隐藏不可用能力，避免模型规划后才触发审批再失败。
@@ -903,6 +905,7 @@ function executeAgentMerge(input = {}) {
 
 
 async function executeBuiltInTool(name, input = {}, user, context = {}) {
+    if (['analysis.modelCatalog', 'analysis.modelQuery', 'analysis.modelResult'].includes(name)) return require('./data-analysis/bi/tools').executeModelTool(name, input, user, context);
     if (['document.compare', 'viz.mindmap', 'finance.transactionSummary'].includes(name)) return await require('./agent-tools-offline-office').executeOfflineOffice(name, input, user, context);
     if (name === 'chat.read_source') return executeChatSource(input, user, context);
     assertDynamicCodeExecutionIsSandboxed(name, context);

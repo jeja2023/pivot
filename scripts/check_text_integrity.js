@@ -6,6 +6,8 @@ const rootDir = path.resolve(__dirname, '..');
 const ignoredDirs = new Set([
     '.git',
     'node_modules',
+    // 构建产物含固定的第三方发行包及Python环境，文本门禁只检查项目源码。
+    'artifacts',
     '.venv-speech',
     'data',
     'logs',

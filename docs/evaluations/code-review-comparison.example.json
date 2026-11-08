@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "fixture",
+  "description": "仅用于检查对照汇总工具的人工夹具，不是真实模型运行或收益数据。",
+  "pairs": [{
+    "caseId": "zero-value-chart",
+    "repeat": 1,
+    "baseline": {
+      "contextDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "modelConfigDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "instructionDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "detail": {
+        "run": {
+          "id": "fixture-baseline",
+          "model_id": "fixture-model",
+          "goal": "审查冻结样稿中的零值图表行为",
+          "status": "completed",
+          "input_tokens": 160,
+          "output_tokens": 40,
+          "total_tokens": 200,
+          "started_at": "2026-11-08T10:00:00+08:00",
+          "completed_at": "2026-11-08T10:00:03+08:00"
+        },
+        "steps": [{ "type": "tool" }, { "type": "tool" }],
+        "warnings": []
+      },
+      "quality": { "passed": true, "regressions": 0, "evidence": "人工构造的统计验证夹具" }
+    },
+    "candidate": {
+      "contextDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "modelConfigDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "instructionDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "detail": {
+        "run": {
+          "id": "fixture-candidate",
+          "model_id": "fixture-model",
+          "goal": "审查冻结样稿中的零值图表行为",
+          "status": "completed",
+          "input_tokens": 100,
+          "output_tokens": 40,
+          "total_tokens": 140,
+          "started_at": "2026-11-08T10:00:00+08:00",
+          "completed_at": "2026-11-08T10:00:02+08:00"
+        },
+        "steps": [{ "type": "tool" }],
+        "warnings": []
+      },
+      "quality": { "passed": true, "regressions": 0, "evidence": "人工构造的统计验证夹具" }
+    }
+  }]
+}

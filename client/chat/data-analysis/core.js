@@ -23,7 +23,8 @@
             try { data = res.status === 204 ? {} : await res.json(); }
             catch (_) { throw Object.assign(new Error('服务未返回有效数据，请刷新后重试。'), { status: res.status }); }
             if (!res.ok) {
-                throw Object.assign(new Error(data?.error?.message || data?.error || `请求失败：${res.status}，请稍后重试。`), { status: res.status, code: data?.code || data?.error?.code || '' });
+                throw Object.assign(new Error(data?.error?.message || data?.error || `请求失败：${res.status}，请稍后重试。`), { status: res.status, code: data?.code || data?.error?.code || '',
+                    applied: data?.applied === true, securityConfirmationPending: data?.securityConfirmationPending === true });
             }
             return data;
         } catch (error) {
@@ -212,11 +213,19 @@
     }
 
     app.showDataAnalysisApp = async function (options = {}) {
+        await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled('data-analysis');
         const view = app.ensureView();
         if (!view) return;
         const requestedDatasetId = String(options?.datasetId || '').trim();
         const explicitTab = String(options?.tab || options?.view || '').trim();
-        const requestedTab = normalizeTab(explicitTab || getStoredActiveTab());
+        if (!explicitTab && state.modelingHostApp === 'data-modeling') {
+            app.persistActiveTab?.(state.lastAnalysisTab || 'overview');
+        }
+        state.modelingHostApp = 'data-analysis';
+        let requestedTab = normalizeTab(explicitTab || getStoredActiveTab());
+        const availability = window.Pivot.moduleApi?.('apps.availability');
+        if (requestedTab === 'modeling' && availability?.isEnabled && !availability.isEnabled('data-modeling')) requestedTab = 'overview';
+        availability?.syncRelatedEntrances?.();
         resetAiWorkspace();
         if (requestedTab === 'governance') await app.loadGovernance?.('');
         if (requestedTab === 'assets') await app.loadAssets?.('');
@@ -225,6 +234,10 @@
         document.getElementById('apps-home-view')?.classList.add('hidden');
         document.getElementById('official-writing-view')?.classList.add('hidden');
         document.getElementById('regulations-view')?.classList.add('hidden');
+        document.getElementById('ocr-view')?.classList.add('hidden');
+        document.getElementById('pdf-tools-view')?.classList.add('hidden');
+        document.getElementById('presentations-view')?.classList.add('hidden');
+        document.getElementById('mindmaps-view')?.classList.add('hidden');
         view.classList.remove('hidden');
         document.getElementById('apps-back-btn')?.classList.remove('hidden');
         if (typeof setAppsTitle === 'function') {
@@ -232,7 +245,7 @@
         }
         await window.Pivot.legacy.PivotAppModels?.refresh?.('data-analysis', 'data-analysis-ai-model');
         if (typeof app.activateTab === 'function') app.activateTab(requestedTab);
-        await loadDatasets({ keepActive: true, loadActiveDetail: !['governance', 'assets'].includes(requestedTab) || Boolean(requestedDatasetId) });
+        await loadDatasets({ keepActive: true, loadActiveDetail: !['governance', 'assets', 'modeling'].includes(requestedTab) || Boolean(requestedDatasetId) });
         if (requestedTab === 'governance') {
             if (state.governanceDatasetId) await app.loadGovernance?.(state.governanceDatasetId, { silent: true });
             else app.renderGovernance?.();
@@ -250,6 +263,33 @@
             await app.loadCleaningWorkspace?.(state.cleaningDatasetId || state.activeId, { resetPreview: true });
         }
         resumeAiWorkspace();
+    };
+
+    app.showDataModelingApp = async function (options = {}) {
+        await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled('data-modeling');
+        const view = app.ensureView();
+        if (!view) return;
+        window.Pivot.moduleApi?.('apps.availability')?.syncRelatedEntrances?.();
+        state.modelingHostApp = 'data-modeling';
+        resetAiWorkspace();
+        window.Pivot.legacy.setAppsSessionValue?.('pivot_apps_active_app', 'data-modeling');
+        document.getElementById('apps-home-view')?.classList.add('hidden');
+        document.getElementById('official-writing-view')?.classList.add('hidden');
+        document.getElementById('regulations-view')?.classList.add('hidden');
+        document.getElementById('ocr-view')?.classList.add('hidden');
+        document.getElementById('pdf-tools-view')?.classList.add('hidden');
+        document.getElementById('presentations-view')?.classList.add('hidden');
+        document.getElementById('mindmaps-view')?.classList.add('hidden');
+        view.classList.remove('hidden');
+        document.getElementById('apps-back-btn')?.classList.remove('hidden');
+        if (typeof setAppsTitle === 'function') {
+            setAppsTitle('数据建模', '通过可视化画布拖拽关联多表，统一定义事实粒度、分析维度与业务指标口径。');
+        }
+        if (typeof app.activateTab === 'function') app.activateTab('modeling');
+        await loadDatasets({ keepActive: true, loadActiveDetail: false });
+        if (options?.modelId && typeof app.modeling?.loadModel === 'function') {
+            await app.modeling.loadModel(String(options.modelId));
+        }
     };
 
     Object.assign(app, {

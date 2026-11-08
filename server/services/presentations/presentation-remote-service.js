@@ -91,13 +91,15 @@ function createRemoteService(deps) {
         if (!row) return null;
         const content = parseJson(row.content_json, null);
         if (!content) return null;
+        const publicContent = remotePublicContent(content);
         return {
             presentationId: row.client_id,
             title: row.title,
             version: Number(row.current_version || 0),
+            revision: crypto.createHash('sha256').update(JSON.stringify(publicContent)).digest('hex'),
             currentSlideIndex: Math.max(0, Math.min(Number(row.current_slide_index || 0), Math.max(0, content.slides.length - 1))),
             expiresAt: row.expires_at,
-            content: remotePublicContent(content)
+            content: publicContent
         };
     }
 

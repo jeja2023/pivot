@@ -84,20 +84,21 @@ for (const filePath of targetFiles) {
     }
 
     walkAst(ast, null, (node, _parent) => {
-        if (node.type === 'FunctionDeclaration' && node.async && node.id?.name) {
+        // 异步生成器返回迭代器而非 Promise，由 for await 或 yield* 消费。
+        if (node.type === 'FunctionDeclaration' && node.async && !node.generator && node.id?.name) {
             if (!asyncFunctions.has(node.id.name)) asyncFunctions.set(node.id.name, new Set());
             asyncFunctions.get(node.id.name).add(filePath);
         } else if (node.type === 'VariableDeclarator' && node.id?.name) {
-            if (node.init && (node.init.type === 'ArrowFunctionExpression' || node.init.type === 'FunctionExpression') && node.init.async) {
+            if (node.init && (node.init.type === 'ArrowFunctionExpression' || node.init.type === 'FunctionExpression') && node.init.async && !node.init.generator) {
                 if (!asyncFunctions.has(node.id.name)) asyncFunctions.set(node.id.name, new Set());
                 asyncFunctions.get(node.id.name).add(filePath);
             }
-        } else if (node.type === 'Property' && node.value && (node.value.type === 'ArrowFunctionExpression' || node.value.type === 'FunctionExpression') && node.value.async) {
+        } else if (node.type === 'Property' && node.value && (node.value.type === 'ArrowFunctionExpression' || node.value.type === 'FunctionExpression') && node.value.async && !node.value.generator) {
             if (node.key?.name) {
                 if (!asyncFunctions.has(node.key.name)) asyncFunctions.set(node.key.name, new Set());
                 asyncFunctions.get(node.key.name).add(filePath);
             }
-        } else if (node.type === 'MethodDefinition' && node.value?.async && node.key?.name) {
+        } else if (node.type === 'MethodDefinition' && node.value?.async && !node.value.generator && node.key?.name) {
             if (!asyncFunctions.has(node.key.name)) asyncFunctions.set(node.key.name, new Set());
             asyncFunctions.get(node.key.name).add(filePath);
         }

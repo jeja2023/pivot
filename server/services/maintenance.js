@@ -549,6 +549,11 @@ async function runDocumentProcessingCleanup() {
     }
 }
 
+async function runPresentationNativeCleanup() {
+    try { await require('./presentations/native/jobs').cleanup(); }
+    catch (error) { logger.warn({ err: error.message }, '原稿离线任务临时文件清理失败'); }
+}
+
 async function sweepAgentResidency() {
     try {
         const changes = await agentResidencyStore.sweepResidents();
@@ -579,7 +584,7 @@ function startMaintenanceTasks() {
     const dailyJobs = [
         () => cleanupOldLogs(retentionDays), () => cleanupApiCallLogs(apiCallLogRetentionDays),
         cleanupExpiredRefreshTokens, cleanupRateLimitCounters, () => cleanupSoftDeletedStorageJob(storageGcRetentionDays),
-        () => reconcileUploadStorageJob(storageGcRetentionDays), runAnalysisWorkspaceCleanup, runDocumentProcessingCleanup,
+        () => reconcileUploadStorageJob(storageGcRetentionDays), runAnalysisWorkspaceCleanup, runDocumentProcessingCleanup, runPresentationNativeCleanup,
         () => backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }), optimizeDatabase
     ];
     const runDaily = () => Promise.all(dailyJobs.map(job => tasks.run(job)));
@@ -590,6 +595,11 @@ function startMaintenanceTasks() {
     tasks.every(DOCUMENT_JOB_RECOVERY_INTERVAL_MS, recoverDocumentProcessingJobs,
         err => logger.warn({ err: err.message }, '文档处理任务恢复轮询失败'),
         { immediate: true, initialOnError: err => logger.warn({ err: err.message }, '文档处理任务恢复失败') });
+    tasks.every(5 * 60 * 1000, () => require('./data-analysis/bi/integrity').reconcileAnalysisObjects(),
+        err => logger.warn({ err: err.message }, '数据建模完整性巡检失败'), { immediate: true });
+    tasks.every(1000, () => require('./data-analysis/bi/runner').dispatchModelJobs(), undefined, { immediate: true });
+    tasks.every(1000, () => require('./data-analysis/bi/security-journal').flush(), err => logger.warn({ err: err.message }, '独立安全记录持久确认失败'), { immediate: true });
+    tasks.every(15000, () => require('./data-analysis/bi/operations').tick(), err => logger.warn({ err: err.message }, '数据建模合成监控与告警检查失败'), { immediate: true });
     tasks.every(DAY_MS, runDaily, undefined, { immediate: true });
 
     logger.info({

@@ -69,6 +69,7 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'system.modelRuntime': ['system.observe'],
     // 文档渲染与产物交付（落地方案 §7）
     'presentation.create': ['document.render'],
+    'presentation.master': ['document.render', 'model.invoke'],
     'presentation.design_info': ['document.render'],
     'presentation.review': ['document.render', 'model.invoke'],
     'presentation.review_deck': ['document.render', 'model.invoke'],

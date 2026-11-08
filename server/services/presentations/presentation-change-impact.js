@@ -20,7 +20,7 @@ function changedFields(before = {}, after = {}) {
         x: '横向位置', y: '纵向位置', width: '宽度', height: '高度', rotation: '旋转角度', zIndex: '层级',
         style: '视觉样式', visible: '显示状态', sourceRefs: '来源引用',
         columns: '表格列', rows: '表格数据', chartType: '图表类型', title: '图表标题', data: '图表数据', options: '图表选项',
-        assetRef: '素材引用', fit: '图片适应方式', opacity: '透明度', items: '图示节点', shapeType: '形状类型'
+        assetRef: '素材引用', fit: '图片适应方式', opacity: '透明度', items: '图示节点', graph: '图示连接关系', diagramType: '图示布局', shapeType: '形状类型', adjustments: '形状几何参数'
     };
     return Object.entries(fields).flatMap(([key, label]) => canonicalJson(before[key] ?? null) === canonicalJson(after[key] ?? null) ? [] : [label]);
 }
@@ -41,6 +41,8 @@ function mergeLockedElements(currentSlide = {}, proposedSlide = {}) {
         id: current.id || proposed.id,
         index: Number.isInteger(current.index) ? current.index : proposed.index,
         review: current.review || proposed.review,
+        ...(proposed.intent || current.intent ? { intent: proposed.intent || current.intent } : {}),
+        ...(proposed.claims || current.claims ? { claims: proposed.claims || current.claims } : {}),
         sourceRefs: [...new Set([...(current.sourceRefs || []), ...(proposed.sourceRefs || [])])],
         elements,
         protectedLockedElementIds: protectedIds

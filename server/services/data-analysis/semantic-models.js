@@ -52,7 +52,7 @@ function metricRecord(row) {
 
 function modelRecord(row) {
     return {
-        id: row.id, userId: Number(row.user_id), name: row.name, description: row.description || '',
+        id: row.id, userId: Number(row.user_id), name: row.name, description: row.description || '', modelKind: row.model_kind || 'exploration',
         scope: normalizeShareScope(row.scope), allowedUnits: row.allowed_units || '', allowedUserIds: row.allowed_user_ids || '',
         version: Number(row.version || 1), createdAt: row.created_at, updatedAt: row.updated_at
     };
@@ -89,6 +89,7 @@ async function saveMetricDefinition({ user, datasetId, body = {}, metricId = '' 
     if (metricConfig.fieldKey) await require('./governance').assertDatasetFieldsAccessible(user, dataset, [metricConfig.fieldKey]);
     const fallback = metricId ? (await queryOne('SELECT * FROM analysis_metric_definitions WHERE id = ?', [metricId])) || {} : {};
     if (metricId && Number(fallback.user_id) !== Number(user.id)) throw failure('指标不存在或无权编辑。', 404);
+    if (fallback.model_id) throw failure('正式模型指标请在数据建模草稿中维护。', 409, 'ANALYSIS_MODEL_UPGRADE_REQUIRED');
     const share = normalizeShareSettings(body, user, fallback);
     const allowedUserIds = await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
     const validFrom = body.validFrom || body.valid_from || null;
@@ -114,6 +115,7 @@ async function saveMetricDefinition({ user, datasetId, body = {}, metricId = '' 
 async function evaluateMetricDefinition(user, metricId) {
     const row = await queryOne('SELECT * FROM analysis_metric_definitions WHERE id = ? AND deleted_at IS NULL', [metricId]);
     if (!row || !canAccessSharedResource(row, user, false)) throw failure('指标不存在或无权访问。', 404);
+    if (row.model_id) throw failure('正式模型指标请通过发布版本的统一分析接口计算。', 409, 'ANALYSIS_MODEL_UPGRADE_REQUIRED');
     const now = Date.now();
     if (row.valid_from && Date.parse(row.valid_from) > now) throw failure('当前指标尚未生效。', 409, 'ANALYSIS_METRIC_NOT_ACTIVE');
     if (row.valid_to && Date.parse(row.valid_to) <= now) throw failure('当前指标已过期，请选择有效口径。', 409, 'ANALYSIS_METRIC_EXPIRED');
@@ -122,9 +124,12 @@ async function evaluateMetricDefinition(user, metricId) {
 }
 
 async function getDataModel(user, modelId, { write = false, includeRelations = true } = {}) {
-    const row = await queryOne('SELECT * FROM analysis_data_models WHERE id = ? AND deleted_at IS NULL', [modelId]);
+    const row = await queryOne('SELECT m.*, u.username AS owner_name FROM analysis_data_models m LEFT JOIN users u ON u.id = m.user_id WHERE m.id = ? AND m.deleted_at IS NULL', [modelId]);
     if (!row || !canAccessSharedResource(row, user, write)) throw failure('数据模型不存在或无权访问。', 404);
-    const model = { ...modelRecord(row), isOwner: Number(row.user_id) === Number(user.id) };
+    if (row.model_kind === 'production') return require('./bi/models').getProductionModel(user, modelId, { write });
+    const owner = Number(row.user_id) === Number(user.id);
+    const ownerName = row.owner_name || (owner ? (user.username || '当前用户') : `用户 ${row.user_id}`);
+    const model = { ...modelRecord(row), ownerName, isOwner: owner };
     if (includeRelations) {
         const relations = await query('SELECT * FROM analysis_data_model_relations WHERE model_id = ? ORDER BY created_at ASC, id ASC', [row.id]);
         model.relations = relations.map(relationRecord);
@@ -133,15 +138,17 @@ async function getDataModel(user, modelId, { write = false, includeRelations = t
 }
 
 async function listDataModels(user, { limit = 100 } = {}) {
-    const rows = await listVisible('analysis_data_models', user, { limit });
-    return rows.filter(row => canAccessSharedResource(row, user, false)).map(row => ({ ...modelRecord(row), isOwner: Number(row.user_id) === Number(user.id) }));
+    return require('./bi/catalog').list(user, { limit });
 }
 
 async function saveDataModel({ user, body = {}, modelId = '' }) {
+    if ((body.modelKind !== undefined || body.model_kind !== undefined) && !['production', 'exploration'].includes(body.modelKind ?? body.model_kind)) throw failure('模型类型无效。');
+    if (!modelId && (body.modelKind === 'production' || body.model_kind === 'production')) return require('./bi/models').createProductionModel({ user, body });
     const name = text(body.name, 120);
     if (!name) throw failure('数据模型名称不能为空。');
     const fallback = modelId ? (await queryOne('SELECT * FROM analysis_data_models WHERE id = ?', [modelId])) || {} : {};
     if (modelId && Number(fallback.user_id) !== Number(user.id)) throw failure('数据模型不存在或无权编辑。', 404);
+    if (fallback.model_kind === 'production') return require('./bi/models').updateProductionModel({ user, modelId, body });
     const share = normalizeShareSettings(body, user, fallback);
     const allowedUserIds = await filterExistingShareUserIds(share.allowedUserIds, { excludeUserId: user.id });
     const now = getBeijingTimestamp();
@@ -170,7 +177,7 @@ async function prepareRelation(user, body) {
     const requestedCardinality = String(body.cardinality || '').toLowerCase();
     if (requestedCardinality && !CARDINALITIES.has(requestedCardinality)) throw failure('关联对应基数无效，请重新选择。');
     const cardinality = requestedCardinality || 'many_to_one';
-    const quality = await relationQuality(left, right, { leftFieldKey, rightFieldKey, joinType, cardinality });
+    const quality = await relationQuality(left, right, { leftFieldKey, rightFieldKey, joinType, cardinality, userId: user.id });
     const current = await Promise.all([getDatasetForUser(user, leftDatasetId), getDatasetForUser(user, rightDatasetId)]);
     if (current.some((dataset, index) => Number(dataset.source_version || 1) !== Number([left, right][index].source_version || 1))) throw failure('检查期间数据或字段规则已变化，请重新检查关联质量。', 409);
     await Promise.all(current.map((dataset, index) => require('./governance').assertDatasetFieldsAccessible(user, dataset, [index ? rightFieldKey : leftFieldKey])));
@@ -178,13 +185,15 @@ async function prepareRelation(user, body) {
 }
 
 async function previewDataModelRelation({ user, modelId, body = {} }) {
-    await getDataModel(user, modelId, { write: true, includeRelations: false });
+    const { row } = await getDataModel(user, modelId, { write: true, includeRelations: false });
+    if (row.model_kind === 'production') throw failure('请在数据建模工作区编辑正式模型草稿。', 409, 'ANALYSIS_MODEL_UPGRADE_REQUIRED');
     const relation = await prepareRelation(user, body);
     return { quality: relation.quality, warnings: relation.quality.warnings };
 }
 
 async function addDataModelRelation({ user, modelId, body = {}, relationId = '' }) {
     const { row: model } = await getDataModel(user, modelId, { write: true, includeRelations: false });
+    if (model.model_kind === 'production') throw failure('请在数据建模工作区编辑正式模型草稿。', 409, 'ANALYSIS_MODEL_UPGRADE_REQUIRED');
     const prepared = await prepareRelation(user, body);
     const id = relationId || analysisId('relation');
     const values = { ...prepared, editing: Boolean(relationId) };
@@ -209,15 +218,20 @@ async function deleteDataModelRelation({ user, modelId, relationId, expectedVers
     });
 }
 
-async function runDataModelJoin({ user, modelId, relationId = '', limit = 100 } = {}) {
+async function runDataModelJoin(options) {
+    return withAnalysisSlot(() => runDataModelJoinInSlot(options), { userId: options.user.id });
+}
+
+async function runDataModelJoinInSlot({ user, modelId, relationId = '', limit = 100 } = {}) {
     const { model } = await getDataModel(user, modelId);
+    if (model.modelKind === 'production') throw failure('正式模型请使用统一指标分析接口。', 409, 'ANALYSIS_MODEL_UPGRADE_REQUIRED');
     const relation = (model.relations || []).find(item => item.id === relationId || (!relationId && item.status === 'active'));
     if (!relation || relation.status !== 'active') throw failure('未找到可运行的数据模型关联。', 404);
     const [left, right] = await Promise.all([getDatasetForUser(user, relation.leftDatasetId), getDatasetForUser(user, relation.rightDatasetId)]);
     const [leftColumns, rightColumns] = await Promise.all([require('./governance').getAccessibleDatasetColumns(user, left), require('./governance').getAccessibleDatasetColumns(user, right)]);
     await Promise.all([require('./governance').assertDatasetFieldsAccessible(user, left, [relation.leftFieldKey]), require('./governance').assertDatasetFieldsAccessible(user, right, [relation.rightFieldKey])]);
     const safeLimit = Math.min(Math.max(Number.parseInt(limit, 10) || 100, 1), 5000);
-    const quality = await relationQuality(left, right, relation);
+    const quality = await relationQuality(left, right, { ...relation, userId: user.id });
     const select = [
         ...leftColumns.slice(0, 40).map(column => `l.${sqlIdent(column.key)} AS ${sqlIdent(`左_${column.name}`)}`),
         ...rightColumns.slice(0, 40).map(column => `r.${sqlIdent(column.key)} AS ${sqlIdent(`右_${column.name}`)}`)
@@ -237,7 +251,7 @@ async function runDataModelJoin({ user, modelId, relationId = '', limit = 100 } 
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
     const truncated = rows.length > safeLimit;
     const result = truncated ? rows.slice(0, safeLimit) : rows;
     return { model, relation: { ...relation, quality }, warnings: quality.warnings, columns: result.length ? Object.keys(result[0]) : [...leftColumns.slice(0, 40).map(column => `左_${column.name}`), ...rightColumns.slice(0, 40).map(column => `右_${column.name}`)], rows: result, rowCount: result.length, truncated };

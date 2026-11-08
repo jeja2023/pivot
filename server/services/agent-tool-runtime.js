@@ -194,6 +194,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         await sharedLease.release();
     };
     try {
+    let modelOutput = null;
     const output = await defaultToolOrchestrator.execute({
         run: policyRun,
         tool,
@@ -288,6 +289,7 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
                     ...(executionGrant ? { executionGrant: executionGrant.token, executionGrantSummary: executionGrant.summary } : {})
                 });
             }
+            if (['analysis.modelCatalog', 'analysis.modelQuery', 'analysis.modelResult'].includes(safeName)) modelOutput = output;
             require('./tool-result-status').assertToolResultSuccess(output);
             const outputIssues = validateToolOutput(tool, policyEvaluation.toolItem, output);
             if (outputIssues.length) {
@@ -304,6 +306,12 @@ async function executeToolByName(name, input, user, toolList = [], context = {})
         }
     });
     await releaseGuards();
+    if (['analysis.modelCatalog', 'analysis.modelQuery', 'analysis.modelResult'].includes(safeName)) {
+        const delivery = require('./data-analysis/bi/delivery');
+        // 检查点只重放数据，不能重放授权决定；缺少本次执行结果时按当前身份重新解析同一幂等请求。
+        const current = modelOutput ? delivery.inherit(output, modelOutput) : await require('./data-analysis/bi/tools').executeModelTool(safeName, policyEvaluation.input, user, context);
+        return delivery.consume(current, value => value);
+    }
     return output;
     } catch (error) {
         await releaseGuards({ error });

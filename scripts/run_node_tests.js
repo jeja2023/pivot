@@ -2,6 +2,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('node:crypto');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const root = path.resolve(__dirname, '..');
@@ -58,6 +59,8 @@ function normalizeWorkerCount() {
 function createWorkerEnvironment(workerIndex) {
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-node-tests-${workerIndex}-`));
     const testSchema = `pivot_test_${process.pid}_${workerIndex}_${Date.now().toString(36)}`;
+    const securityKey = path.join(testRoot, 'security-journal.key');
+    fs.writeFileSync(securityKey, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
     return {
         testRoot,
         env: {
@@ -67,6 +70,8 @@ function createWorkerEnvironment(workerIndex) {
             DATA_DIR: path.join(testRoot, 'data'),
             PIVOT_UPLOAD_DIR: path.join(testRoot, 'uploads'),
             PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),
+            DATA_ANALYSIS_SECURITY_JOURNAL_DIR: path.join(testRoot, 'independent-security'),
+            DATA_ANALYSIS_SECURITY_KEY_FILE: securityKey,
             LOG_DIR: path.join(testRoot, 'logs'),
             DEFAULT_ADMIN_PASSWORD: '',
             JWT_SECRET: 'pivot-node-tests-jwt-secret-012345678901234567890123',
@@ -99,7 +104,8 @@ function runNodeTestProcess(files, env) {
     return new Promise((resolve, reject) => {
         const child = cp.spawn(process.execPath, [
             '--test',
-            '--test-timeout=300000',
+            // 文件外层需容纳容量与物理恢复用例；各用例自己的业务时限仍独立生效。
+            '--test-timeout=2400000',
             '--test-concurrency=1',
             '--test-reporter=spec',
             ...nodeTestOptions,

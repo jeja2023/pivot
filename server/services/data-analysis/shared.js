@@ -7,7 +7,7 @@ const { DuckDBInstance } = require('@duckdb/node-api');
 const { queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { logger } = require('../../logger');
-const { analysisSemaphore } = require('../concurrency');
+const { withRuntimeBudget, executionSignal } = require('./runtime-budget');
 const { canAccessSharedResource, normalizeShareScope } = require('../unit-visibility');
 
 const projectRoot = path.resolve(__dirname, '../../..');
@@ -250,7 +250,8 @@ function serializeDataset(row) {
     };
 }
 
-async function resolveAnalysisUser(userOrId) {
+async function resolveAnalysisUser(userOrId, { maintenance = false } = {}) {
+    if (!maintenance) await require('./bi/security-journal').assertAccess([{ kind: 'principal', id: String(userOrId?.id || userOrId) }]);
     if (userOrId && typeof userOrId === 'object' && Number(userOrId.id) > 0) return userOrId;
     const userId = Number.parseInt(userOrId, 10);
     if (!Number.isSafeInteger(userId) || userId <= 0) return null;
@@ -261,22 +262,19 @@ async function resolveAnalysisUser(userOrId) {
 }
 
 async function getDatasetForUser(userOrId, datasetId, { write = false } = {}) {
-    const user = await resolveAnalysisUser(userOrId);
-    if (!user || user.deleted_at || String(user.status || 'active') !== 'active') {
-        const err = new Error('数据集不存在或无权访问。');
-        err.status = 404;
-        throw err;
-    }
-    const row = await queryOne(`
-        SELECT * FROM analysis_datasets
-        WHERE id = ? AND deleted_at IS NULL
-    `, [datasetId]);
-    if (!row || !canAccessSharedResource(row, user, write)) {
-        const err = new Error('数据集不存在或无权访问。');
-        err.status = 404;
-        throw err;
-    }
-    return row;
+    const security = require('./bi/security-journal');
+    const userId = Number(userOrId?.id || userOrId);
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw Object.assign(new Error('数据集不存在或无权访问。'), { status: 404 });
+    return require('../../db/client').transaction(async trx => {
+        const authorization = require('../../repositories/analysis-authorization');
+        await authorization.lockPrincipals(trx, [String(userId)]);
+        await authorization.lockReadResources(trx, { modelIds: [], datasetIds: [datasetId] });
+        const user = await trx.queryOne('SELECT id,username,nickname,unit,role,status,deleted_at FROM users WHERE id=?', [userId]);
+        const row = await trx.queryOne('SELECT * FROM analysis_datasets WHERE id=? AND deleted_at IS NULL', [datasetId]);
+        if (!user || user.deleted_at || user.status !== 'active' || !row || !canAccessSharedResource(row, user, write)) throw Object.assign(new Error('数据集不存在或无权访问。'), { status: 404 });
+        await security.assertResources(trx, [{ kind: 'principal', id: String(userId) }, { kind: 'dataset', id: datasetId }]);
+        return row;
+    });
 }
 
 function getDatasetPaths(row) {
@@ -290,6 +288,9 @@ async function createDuckConnection() {
         threads: String(Math.max(1, Math.min(os.cpus()?.length || 2, Number.parseInt(process.env.DATA_ANALYSIS_DUCKDB_THREADS || '4', 10) || 4)))
     });
     const connection = await instance.connect();
+    const signal = executionSignal();
+    if (signal?.aborted) { connection.closeSync(); instance.closeSync(); throw Object.assign(new Error('分析执行已取消。'), { code: 'ANALYSIS_MODEL_LEASE_LOST', status: 409 }); }
+    signal?.addEventListener('abort', () => { try { connection.interrupt?.(); } catch (_) { /* 已关闭的连接无需中断。 */ } }, { once: true });
     await connection.run(`SET temp_directory=${sqlLiteral(tempRoot)}`);
     await connection.run(`SET memory_limit=${sqlLiteral(DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT)}`);
     return { instance, connection };
@@ -327,23 +328,8 @@ async function duckReadAll(sql) {
     }
 }
 
-// 重型 DuckDB 操作的并发闸：限制同时执行的查询数，过载时把信号量的 503
-// 透传为带 status 的错误，交由路由层 asyncHandler 返回友好提示。
-async function withAnalysisSlot(fn) {
-    try {
-        await analysisSemaphore.acquire();
-    } catch (e) {
-        const err = new Error(e.message || '数据分析服务繁忙，请稍后重试。');
-        err.status = e.statusCode || 503;
-        err.code = e.code || 'ANALYSIS_OVERLOADED';
-        throw err;
-    }
-    try {
-        return await fn();
-    } finally {
-        analysisSemaphore.release();
-    }
-}
+// 数据库持久预算覆盖所有执行类型，信号量作为进程内第二道保护。
+async function withAnalysisSlot(fn, options) { return withRuntimeBudget(fn, options); }
 
 async function parquetToRows(parquetPath, { limit = 100, offset = 0 } = {}) {
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), MAX_QUERY_LIMIT);

@@ -77,7 +77,7 @@ const { buildChart } = require('../../services/data-analysis');
 const { normalizePresentation } = require('../../services/presentations/presentation-schema');
 const { getPresentationMetricsSnapshot, recordPresentationOutcome } = require('../../services/presentations/presentation-metrics');
 const { isAdmin } = require('../../permissions');
-const { MAX_MATERIAL_TEXT_CHARS, materialToPresentationSource, normalizeMaterials: normalizePresentationMaterials } = require('../../services/presentations/presentation-evidence');
+const { MAX_MATERIAL_TEXT_CHARS, normalizeMaterials: normalizePresentationMaterials } = require('../../services/presentations/presentation-evidence');
 const { buildSlideChangeImpact, mergeLockedElements } = require('../../services/presentations/presentation-change-impact');
 const { buildPresentationDataNarrative } = require('../../services/presentations/presentation-data-narrative');
 const { buildPresentationDeliveryGuide } = require('../../services/presentations/presentation-delivery-guide');
@@ -231,6 +231,9 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     const presentationFile = field => [presentationUpload.single(field), uploadSecurityMiddleware];
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
     require('./presentation-design').registerPresentationDesignRoutes(router, { authMiddleware, asyncHandler, writeLog });
+    require('./presentation-master').registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler, writeLog });
+    require('./presentation-storyline').registerPresentationStorylineRoutes(router, { authMiddleware, asyncHandler, writeLog });
+    require('./presentation-native').registerPresentationNativeRoutes(router, { authMiddleware, asyncHandler, writeLog });
 
     router.get('/apps/presentations/metrics', authMiddleware, asyncHandler(async (req, res) => {
         if (!isAdmin(req.user)) return res.status(403).json({ error: '只有管理员可以查看 PPT 运营指标。', code: 'PRESENTATION_METRICS_ADMIN_REQUIRED' });
@@ -471,11 +474,12 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             malformedJsonRecoveryAuditSuffix: ' 紧凑格式重试',
             malformedJsonFailureMessage: 'AI 返回的页面数据格式不完整，系统已按紧凑格式自动重试一次仍无法完成。请减少页数或补充材料后重新生成。',
             parse: async result => {
-                const proposal = await require('../../services/presentations/presentation-ai').compilePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials });
+                const proposal = await require('../../services/presentations/presentation-ai').compilePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials,
+                    productionProfile: require('../../services/presentations/presentation-production-profile').fromRequest(requestBody) });
                 if (proposal.presentation) {
                     const sourceIds = new Set(requestBody.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                     proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
-                    proposal.presentation = normalizePresentation({ ...proposal.presentation, sources: requestBody.materials.map(materialToPresentationSource) });
+                    proposal.presentation = normalizePresentation(proposal.presentation);
                 }
                 return { proposal, validation: runPresentationValidation(proposal.presentation) };
             }
@@ -487,7 +491,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (!body.outline && !body.presentation) return res.status(400).json({ error: '请提供当前大纲或演示文稿。', code: 'PRESENTATION_CONTEXT_REQUIRED' });
         const requestedSlides = Math.max(1, Math.min(Number.parseInt(body.additionalSlideCount || body.additional_slide_count, 10) || 1, 10));
         return runAiRequest(req, res, { ...body, additionalSlideCount: requestedSlides }, buildContinueMessages({ ...body, additionalSlideCount: requestedSlides }), { source: 'presentation_continue', auditAction: 'PPT AI继续生成', maxTokens: Math.min(6000, 1100 * requestedSlides), retryMalformedJson: true, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+            const proposal = parsePresentationProposal(result.content, { title: body.title || body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials, productionProfile: require('../../services/presentations/presentation-production-profile').fromRequest(body) });
             if (!Array.isArray(proposal.presentation?.slides) || proposal.presentation.slides.length !== requestedSlides) {
                 const error = new Error('AI 返回的新增页数与请求不一致，请重试。'); error.status = 422; error.code = 'PRESENTATION_AI_CONTINUE_COUNT_INVALID'; throw error;
             }
@@ -547,10 +551,11 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
             if (!storedSlide) return res.status(404).json({ error: '待改写页面不存在或无权访问。', code: 'PRESENTATION_SLIDE_NOT_FOUND' });
             if (storedSlide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成改写建议。', code: 'PRESENTATION_SLIDE_APPROVED' });
             body.slide = storedSlide;
+            body.productionProfile = current.content.metadata?.productionProfile;
         }
         if (body.slide.review?.status === 'approved') return res.status(409).json({ error: '当前页面已批准。请先解除批准，再生成改写建议。', code: 'PRESENTATION_SLIDE_APPROVED' });
         return runAiRequest(req, res, body, buildRewriteMessages(body), { source: 'presentation_rewrite', auditAction: 'PPT AI页面改写', maxTokens: 3500, retryMalformedJson: true, parse: async result => {
-            const proposal = parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials });
+            const proposal = parsePresentationProposal(result.content, { title: body.title, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language, sources: body.materials, productionProfile: require('../../services/presentations/presentation-production-profile').fromRequest(body) });
             const proposed = proposal.presentation?.slides?.[0];
             if (!proposed) throw new Error('AI 未返回可改写页面。');
             const merged = mergeLockedElements(body.slide, proposed);

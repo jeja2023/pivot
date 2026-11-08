@@ -6,6 +6,7 @@ const { assertRegisteredCapabilities, normalizeCapabilityList } = require('./age
 const { toLegacyScope } = require('./agent-skill-scope');
 const { withControlPlaneFallback } = require('./agent-control-plane-state');
 const { canonicalJson } = require('./canonical-json');
+const { normalizeSkillImportProvenance, skillInstructionsForRuntime } = require('./agent-skill-import-provenance');
 
 function parseSkillManifest(value) {
     if (value && typeof value === 'object') return JSON.parse(JSON.stringify(value));
@@ -36,6 +37,10 @@ function validateSkillManifest(manifestValue, options = {}) {
         return { valid: false, errors: [`SKILL.yaml 解析失败：${error.message}`], manifest: {}, permissions: [], capabilities: [], tools: [], computedDigest: '' };
     }
     const errors = [];
+    if (manifest.importSource !== undefined) {
+        try { manifest.importSource = normalizeSkillImportProvenance(manifest.importSource); }
+        catch (error) { errors.push(error.message); }
+    }
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$/.test(String(manifest.id || ''))) errors.push('manifest.id 必须是稳定的技能标识。');
     if (!String(manifest.name || '').trim()) errors.push('manifest.name 不能为空。');
     if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(manifest.version || ''))) errors.push('manifest.version 必须符合 SemVer。');
@@ -177,7 +182,7 @@ async function getAgentSkillExecutionContext(user, reference) {
             skillName: release.name,
             skillVersion: release.version,
             skillTitle: release.title || context.skillId,
-            skillInstructions: String(release.instructions_md || '').slice(0, 16000),
+            skillInstructions: skillInstructionsForRuntime(parseSkillManifest(release.manifest_json || release.manifest_yaml || '{}'), release.instructions_md).slice(0, 16000),
             skillScope: release.rollout_scope,
             releaseId: release.id,
             skillVersionId: release.skill_version_id,
@@ -247,12 +252,14 @@ async function findBestPersonalSkill(user, goal, options = {}) {
     const candidates = (releases || []).filter(release => release.owner_key === ownerKey && release.rollout_scope === 'personal' && release.status === 'published').map(release => {
         let manifest = {};
         try { manifest = parseSkillManifest(release.manifest_json || release.manifest_yaml || '{}'); } catch (_) {}
+        // 外部指引的显式调用标记只收紧自动匹配，不改变任何授权或发布状态。
+        if (manifest.importSource?.originalFields?.metadata?.activation === 'explicit') return null;
         const haystack = [release.name, manifest.title, manifest.description, ...(Array.isArray(manifest.tags) ? manifest.tags : [])].join(' ').toLowerCase();
         const matched = terms.filter(term => haystack.includes(term));
         const bigramHits = [...new Set(chineseBigrams.filter(term => haystack.includes(term)))];
         const score = matched.length * 2 + Math.min(bigramHits.length, 6) + (manifest.tags || []).filter(tag => text.includes(String(tag).toLowerCase())).length;
         return { release, manifest, matched, bigramHits, score };
-    }).filter(item => item.score >= Number(options.minScore || 2)).sort((a, b) => b.score - a.score || String(b.release.published_at || '').localeCompare(String(a.release.published_at || '')));
+    }).filter(item => item && item.score >= Number(options.minScore || 2)).sort((a, b) => b.score - a.score || String(b.release.published_at || '').localeCompare(String(a.release.published_at || '')));
     let selected = null;
     for (const candidate of candidates) {
         const repository = require('../repositories/agent-learning-evaluation');

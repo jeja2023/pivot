@@ -2,6 +2,12 @@
 
 function resolveDesignLayout(layout, slide) {
     if (!layout || !String(layout.id).startsWith('design-')) return layout;
+    if ((slide.elements || []).some(element => element.type === 'diagram' && !element.locked)) {
+        return { ...layout, placeholders: [
+            ...(layout.placeholders || []).filter(slot => slot.role === 'title'),
+            { id: 'slot_diagram', role: 'diagram', kind: 'diagram', x: 88, y: 224, width: 1112, height: 400 }
+        ], decorations: (layout.decorations || []).filter(element => !/^step_|^card_|^flow_/.test(element.id)) };
+    }
     if (layout.editorial) return require('./presentation-editorial-layout').resolveEditorialLayout(layout, slide);
     const kind = layout.id.slice(7);
     if (!['key-metrics', 'timeline', 'three-card', 'roadmap'].includes(kind)) return layout;

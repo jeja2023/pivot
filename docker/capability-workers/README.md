@@ -28,6 +28,8 @@ docker build --build-arg BASE_IMAGE=pivot:latest -f docker/capability-workers/te
 
 ## 已签名信任清单
 
+v0.7.133起也接受完整`sha256:64位镜像ID`作为不可变身份，适合Docker离线导入；该ID仍须在正式签名清单中，执行保持`--pull=never`及原有隔离参数。它与仓库摘要是两种明确身份，不接受标签、短ID或tar文件校验值作为执行镜像。PPT一键工具使用独立信任文件，不替换这里其他Worker的清单。
+
 生产部署将 `PIVOT_CAPABILITY_WORKER_SIGNATURE_REQUIRED=true`，并配置包含 `images` 和 detached `signature` 的 JSON 清单及对应 PEM 公钥。清单的签名前正文采用递归字典序 JSON，签名算法固定为 `RSA-SHA256`（清单不能自行降级）；每个条目必须同时锁定 `image@sha256` 和允许的命令串，例如：
 
 ```json

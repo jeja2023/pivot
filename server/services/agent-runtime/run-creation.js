@@ -1,6 +1,7 @@
 // 拆自 agent-runtime/index.js：智能体任务创建与参数校验工厂
 const { queryOne, execute } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
+const { skillInstructionsForRuntime } = require('../agent-skill-import-provenance');
 const { getRunnableModelForUserAsync } = require('../models');
 const { normalizeStrategy: normalizeRouterStrategy } = require('../model-router');
 const { assertTemplateAccess } = require('../agent-templates');
@@ -217,7 +218,7 @@ function createAgentRunFactory(deps = {}) {
             const version = await require('../agent-releases').getSkillVersion(evaluationSkillVersionId, user, { action: 'write' });
             if (!version || version.status !== 'validated') throw new Error('候选经验尚未通过隔离验证，不能开始评测。');
             const context = require('../agent-skills').buildSkillExecutionContext(version.manifest_yaml);
-            runMetadata.skillInstructions = String(version.instructions_md || '').slice(0, 16000);
+            runMetadata.skillInstructions = skillInstructionsForRuntime(require('../agent-skills').parseSkillManifest(version.manifest_json || version.manifest_yaml), version.instructions_md).slice(0, 16000);
             runMetadata.skillConstraints = { present: true, reference: context.skillId, capabilities: context.skillCapabilities, tools: context.skillTools };
             runMetadata.evaluationCandidate = { versionId: String(version.id), digest: version.content_digest };
         }

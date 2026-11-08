@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "suffix": "d6a93b2e56d8",
+  "productionCertified": false,
+  "startedAt": "2026-11-07T01:18:00.575Z",
+  "controllerImage": "sha256:1c57c3c39737a838febe07d89334570d7fe3cafdc75b695cff7ecc5becb1f646",
+  "workerImage": "sha256:069eb1aeaf3dfcd1ffaa596990aa80e7f2d06824d608d6e1e4a6cab66a3557c8",
+  "daemonVisibleMount": "/var/lib/docker/volumes/pivot-bi-acceptance-d6a93b2e56d8/_data",
+  "exitCode": 0,
+  "finishedAt": "2026-11-07T01:21:42.772Z",
+  "containerInspect": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-07T01:18:29.400996671Z",
+    "FinishedAt": "2026-11-07T01:21:42.070875368Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 6,
+      "Log": [
+        {
+          "Start": "2026-11-07T01:19:21.188500037Z",
+          "End": "2026-11-07T01:19:21.257212763Z",
+          "ExitCode": 1,
+          "Output": ""
+        },
+        {
+          "Start": "2026-11-07T01:19:51.257081098Z",
+          "End": "2026-11-07T01:19:51.393177046Z",
+          "ExitCode": 1,
+          "Output": ""
+        },
+        {
+          "Start": "2026-11-07T01:20:21.391942104Z",
+          "End": "2026-11-07T01:20:21.490295438Z",
+          "ExitCode": 1,
+          "Output": ""
+        },
+        {
+          "Start": "2026-11-07T01:20:51.490303652Z",
+          "End": "2026-11-07T01:20:51.567756151Z",
+          "ExitCode": 1,
+          "Output": ""
+        },
+        {
+          "Start": "2026-11-07T01:21:21.566648798Z",
+          "End": "2026-11-07T01:21:22.027202399Z",
+          "ExitCode": 1,
+          "Output": ""
+        }
+      ]
+    }
+  },
+  "sourcePackageVersion": "0.7.118",
+  "verificationLog": ".codex-tmp/bi-m5-linux-coordinator-third.log",
+  "scope": "固定候选制品的本机隔离工程验证，最终交付制品另记录",
+  "tests": 8,
+  "skipped": 0
+}

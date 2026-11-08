@@ -65,6 +65,8 @@ async function main() {
     const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-e2e-tests-'));
     const fakeModelLogPath = path.join(testRoot, 'fake-model.log');
     const testSchema = `pivot_e2e_${process.pid}_${Date.now().toString(36)}`;
+    const securityKey = path.join(testRoot, 'security-journal.key');
+    fs.writeFileSync(securityKey, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
     const port = await reserveAvailablePort();
     const fakeModel = await startFakeModelServer(fakeModelLogPath);
     if (process.env.PIVOT_E2E_DEBUG === 'true') console.error(`[e2e-debug] 假模型地址：${fakeModel.url}`);
@@ -77,10 +79,13 @@ async function main() {
         DATA_DIR: path.join(testRoot, 'data'),
         PIVOT_UPLOAD_DIR: path.join(testRoot, 'uploads'),
         PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),
+        DATA_ANALYSIS_SECURITY_JOURNAL_DIR: path.join(testRoot, 'independent-security'),
+        DATA_ANALYSIS_SECURITY_KEY_FILE: securityKey,
         LOG_DIR: path.join(testRoot, 'logs'),
         PIVOT_E2E_OUTPUT_DIR: path.join(testRoot, 'results'),
         PIVOT_E2E_BASE_URL: `http://127.0.0.1:${port}`,
         PIVOT_E2E_ISOLATED: 'true',
+        PIVOT_ALERT_WEBHOOK_URL: '',
         PORT: String(port),
         DATABASE_URL: databaseUrl,
         PG_TEST_SCHEMA: testSchema,

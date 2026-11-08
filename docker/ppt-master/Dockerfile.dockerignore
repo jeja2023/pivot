@@ -1,0 +1,11 @@
+**
+!docker/
+!docker/ppt-master/
+!docker/ppt-master/**
+!config/
+!config/ppt-master-engine.json
+!artifacts/
+!artifacts/ppt-master-runtime/
+!artifacts/ppt-master-runtime/**
+**/__pycache__/**
+**/*.pyc

@@ -18,6 +18,7 @@ test('PPT 保存失败时返回列表保留编辑，重试成功后才能离开�
     await login(page);
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     const created = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations') && response.request().method() === 'POST');
+    await page.locator('#presentation-more-create-dropdown summary').click();
     await page.locator('#presentation-create-blank-btn').click();
     const id = (await (await created).json()).presentation.id;
     await expect(page.locator('#presentation-title-input')).toBeVisible();

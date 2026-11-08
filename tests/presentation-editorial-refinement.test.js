@@ -13,7 +13,7 @@ const { normalizePresentation } = require('../server/services/presentations/pres
 
 test('新版目录与结论保留完整标题，问题和安排按相同的行对齐，原版本仍可读取', async () => {
     const template = getBuiltInTemplate('learning-studio');
-    assert.equal(template.version, 2); assert.equal(getBuiltInTemplate('learning-studio', 1).version, 1);
+    assert.equal(template.version, 3); assert.equal(getBuiltInTemplate('learning-studio', 1).version, 1); assert.equal(getBuiltInTemplate('learning-studio', 2).version, 2);
     assert.equal(getBuiltInTemplate('learning-studio', 99), null);
     const content = (await compileDesignPlan(sample, template)).presentation;
     const metrics = await createTextMetrics(content);
@@ -45,7 +45,7 @@ test('旧稿主动重套新版可拆出原有段落，内容和来源保留，�
     const previous = (await compileDesignPlan(sample, getBuiltInTemplate('learning-studio', 1))).presentation;
     const before = previous.slides[3].elements.filter(element => !element.locked && element.type === 'text').map(element => element.content.text).join('\n\n');
     const template = getBuiltInTemplate('learning-studio');
-    const updated = applyTemplateLayoutLayers({ ...previous, template: { id: template.id, version: 2, snapshotDigest: template.snapshotDigest } }, template, { reflow: true, normalizePresentation });
+    const updated = applyTemplateLayoutLayers({ ...previous, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest } }, template, { reflow: true, normalizePresentation });
     const after = updated.slides[3].elements.filter(element => !element.locked && element.type === 'text').map(element => element.content.text).join('\n\n');
     assert.equal(before, after);
     assert.ok(updated.slides[3].elements.find(element => element.id === 'title').width >= 1000);

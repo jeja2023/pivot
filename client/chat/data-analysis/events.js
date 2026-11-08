@@ -24,19 +24,40 @@
     const resumeAiWorkspace = (...args) => app.resumeAiWorkspace?.(...args), normalizeTab = (...args) => app.normalizeTab(...args);
     const persistActiveTab = (...args) => app.persistActiveTab(...args), createVisualQuery = (...args) => app.createVisualQuery(...args);
 
-    function activateTab(tab) {
+    function activateTab(tab, { confirmed = false } = {}) {
         const previousTab = document.querySelector('.data-analysis-tab.active')?.dataset.dataAnalysisTab;
         const targetTab = normalizeTab(tab);
+        const availability = window.Pivot.moduleApi?.('apps.availability');
+        if (availability?.isEnabled && !availability.isEnabled(targetTab === 'modeling' ? 'data-modeling' : 'data-analysis')) {
+            toast('该应用已关闭，请联系系统 admin 开启。', 'warning');
+            return;
+        }
+        if (!confirmed && previousTab === 'modeling' && targetTab !== previousTab && app.hasUnsavedModelingChanges?.()) {
+            void app.confirmLeaveModeling?.().then(leave => { if (leave) { app.modeling?.reset(); activateTab(targetTab, { confirmed: true }); } });
+            return;
+        }
+        if (targetTab !== 'modeling') state.lastAnalysisTab = targetTab;
         if (previousTab !== targetTab && targetTab === 'governance') app.loadGovernance?.('');
         if (previousTab !== targetTab && targetTab === 'assets') app.loadAssets?.('');
-        const preservesAnalysisContext = ['governance', 'assets', 'dashboards'].includes(targetTab);
+        const preservesAnalysisContext = ['governance', 'modeling', 'assets', 'dashboards'].includes(targetTab);
         if (previousTab && previousTab !== targetTab && !preservesAnalysisContext) clearTabData(previousTab);
+        document.querySelector('.data-analysis-panel')?.classList.toggle('is-modeling-immersive', targetTab === 'modeling');
         document.querySelectorAll('.data-analysis-tab').forEach(button => {
             button.classList.toggle('active', button.dataset.dataAnalysisTab === targetTab);
         });
         document.querySelectorAll('.data-analysis-tab-panel').forEach(panel => {
             panel.classList.toggle('hidden', panel.id !== `data-analysis-${targetTab}-panel`);
         });
+        if (targetTab !== 'modeling' && (window.Pivot.legacy.getAppsSessionValue?.('pivot_apps_active_app') || window.sessionStorage?.getItem?.('pivot_apps_active_app')) === 'data-modeling') {
+            if (typeof window.Pivot.legacy.setAppsSessionValue === 'function') window.Pivot.legacy.setAppsSessionValue('pivot_apps_active_app', 'data-analysis');
+            else window.sessionStorage?.setItem?.('pivot_apps_active_app', 'data-analysis');
+            state.modelingHostApp = 'data-analysis';
+        }
+        const applyTitle = window.Pivot.moduleApi?.('workspaces.apps')?.setAppsTitle || (typeof setAppsTitle === 'function' ? setAppsTitle : null);
+        if (applyTitle && !document.getElementById('data-analysis-view')?.classList.contains('hidden')) {
+            if (targetTab === 'modeling') applyTitle('数据建模', '通过可视化画布拖拽关联多表，统一定义事实粒度、分析维度与业务指标口径。');
+            else applyTitle('数据分析', '上传表格数据，完成字段画像、数据比对、统计分析、图表生成和智能分析洞察。');
+        }
         if (targetTab === 'ai') resumeAiWorkspace();
         app.onDataAnalysisTabActivated?.(targetTab);
         // 切换 Tab 时同步更新顶部标题和简介

@@ -159,7 +159,7 @@ async function runPivot(userId, datasetId, input = {}) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: Number(userId?.id || userId) });
 
     const rowTotals = pivotTotalsMap(rowTotalRecords);
     const colTotals = pivotTotalsMap(colTotalRecords);
@@ -343,7 +343,7 @@ async function runUserQuery(userId, datasetId, input = {}) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: Number(userId?.id || userId) });
     const truncated = result.rows.length > limit;
     const rows = truncated ? result.rows.slice(0, limit) : result.rows;
     const resultColumns = result.columns;

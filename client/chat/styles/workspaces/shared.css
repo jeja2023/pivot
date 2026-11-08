@@ -53,6 +53,22 @@
     color: var(--danger);
 }
 
+body.dark-mode .workspace-modal-close,
+.dark-mode .workspace-modal-close,
+[data-theme="dark"] .workspace-modal-close {
+    border-color: rgba(239, 68, 68, 0.45);
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+}
+
+body.dark-mode .workspace-modal-close:hover,
+.dark-mode .workspace-modal-close:hover,
+[data-theme="dark"] .workspace-modal-close:hover {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.22);
+    color: #fca5a5;
+}
+
 .workspace-modal-body {
     flex: 1;
     min-height: 0;

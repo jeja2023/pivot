@@ -34,6 +34,8 @@ test('项目 Python 基线在主镜像、语音镜像和离线依赖准备中一
     const mainImage = dockerfile.match(/^ARG PYTHON_IMAGE=(.+)$/m)?.[1];
     const speechImage = speechDockerfile.match(/^ARG SPEECH_PYTHON_IMAGE=(.+)$/m)?.[1];
     assert.ok(nodeImage?.endsWith('node:22-bookworm'));
+    assert.match(dockerfile, /ARG RUNTIME_NODE_IMAGE=node:22\.23\.4-bookworm-slim/);
+    assert.match(dockerfile, /FROM \$\{RUNTIME_NODE_IMAGE\} AS python-base/);
     assert.ok(mainImage?.endsWith(`python:${baseline}-bookworm`));
     assert.ok(speechImage?.endsWith(`python:${baseline}-bookworm`));
     assert.match(dockerfile, /FROM python-base AS speech-recognition/);

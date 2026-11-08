@@ -9,7 +9,7 @@
  * 3. 版本对比必须能直接看出能力与工具声明的变化（权限变更可见）。
  */
 const { query, queryOne } = require('../db/client');
-const { validateSkillManifest } = require('./agent-skills');
+const { validateSkillManifest, parseSkillManifest } = require('./agent-skills');
 const { buildSkillSourceMarkdown, parseSkillSourceMarkdown } = require('./agent-skill-source');
 const { createSkillVersion, getSkillVersion } = require('./agent-releases');
 const { capabilitiesCoverTool, normalizeCapabilityList } = require('./agent-capability-registry');
@@ -152,12 +152,7 @@ async function createSkillDraftFromRun(user, runId) {
 async function exportSkillVersionMarkdown(user, versionId) {
     const version = await getSkillVersion(versionId, user);
     if (!version) return null;
-    let manifest = {};
-    try {
-        manifest = JSON.parse(version.manifest_json || version.manifest_yaml || '{}') || {};
-    } catch (_) {
-        manifest = {};
-    }
+    const manifest = readManifest(version);
     return {
         version,
         markdown: buildSkillSourceMarkdown(manifest, version.instructions_md || '')
@@ -176,14 +171,14 @@ function diffStringLists(before = [], after = []) {
 
 function readManifest(version) {
     try {
-        return JSON.parse(version.manifest_json || version.manifest_yaml || '{}') || {};
+        return parseSkillManifest(version.manifest_json || version.manifest_yaml || '{}');
     } catch (_) {
         return {};
     }
 }
 
 function diffScalarFields(beforeManifest, afterManifest) {
-    const fields = ['id', 'name', 'version', 'title', 'description', 'publisher', 'schemaVersion'];
+    const fields = ['id', 'name', 'version', 'title', 'description', 'publisher', 'schemaVersion', 'license', 'importSource'];
     return fields
         .map(field => ({ field, before: beforeManifest[field] ?? null, after: afterManifest[field] ?? null }))
         .filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after));

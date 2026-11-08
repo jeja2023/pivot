@@ -166,7 +166,7 @@ async function resolveSemanticModel(modelId, user) {
     return null;
 }
 
-async function getSemanticSourceStats(datasetRow, textColumn) {
+async function getSemanticSourceStats(user, datasetRow, textColumn) {
     const { parquetPath } = getDatasetPaths(datasetRow);
     return await withAnalysisSlot(async () => {
         const { instance, connection } = await createDuckConnection();
@@ -185,7 +185,7 @@ async function getSemanticSourceStats(datasetRow, textColumn) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
 }
 
 async function createSemanticAnalysisJob({ user, datasetId, textField, idField = '', instruction, modelId = null, batchTokens, maxOutputTokens } = {}) {
@@ -209,7 +209,7 @@ async function createSemanticAnalysisJob({ user, datasetId, textField, idField =
         err.status = 400;
         throw err;
     }
-    const stats = await getSemanticSourceStats(dataset, textColumn);
+    const stats = await getSemanticSourceStats(user, dataset, textColumn);
     if (stats.totalRows <= 0) {
         const err = new Error('数据集没有可分析的数据行。');
         err.status = 400;
@@ -254,7 +254,7 @@ async function createSemanticAnalysisJob({ user, datasetId, textField, idField =
     return await getSemanticJobDetail(user.id, jobId);
 }
 
-async function loadSemanticRows(datasetRow, textColumn, idColumn) {
+async function loadSemanticRows(user, datasetRow, textColumn, idColumn) {
     const { parquetPath } = getDatasetPaths(datasetRow);
     return await withAnalysisSlot(async () => {
         const { instance, connection } = await createDuckConnection();
@@ -276,7 +276,7 @@ async function loadSemanticRows(datasetRow, textColumn, idColumn) {
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
 }
 
 async function ensureSemanticBatches(job, batches) {
@@ -772,7 +772,7 @@ async function processSemanticAnalysisJob(job) {
     const model = await resolveSemanticModel(job.model_id, user);
     if (!model || model.secret_error) throw new Error(model?.secret_error || '任务模型不可用。');
     const options = jsonParse(job.options_json, {});
-    const rows = await loadSemanticRows(dataset, textColumn, idColumn);
+    const rows = await loadSemanticRows(user, dataset, textColumn, idColumn);
     const batches = buildSemanticSegments(rows, options.batchTokens || DEFAULT_BATCH_TOKEN_BUDGET, options.maxSegmentsPerBatch);
     await ensureSemanticBatches(job, batches);
     await execute(`UPDATE analysis_semantic_jobs SET analyzed_rows = ?, total_batches = ?, updated_at = ? WHERE id = ?`, [rows.length, batches.length, getBeijingTimestamp(), job.id]);

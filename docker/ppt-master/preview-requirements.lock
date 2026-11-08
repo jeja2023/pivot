@@ -1,0 +1,7 @@
+# 离线公式预览依赖；只在构建期安装，运行时不下载字体或模型。
+matplotlib==3.11.2
+contourpy==1.4.0
+cycler==0.12.1
+fonttools==4.68.0
+kiwisolver==1.5.1
+pyparsing==3.3.3

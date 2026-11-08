@@ -8,6 +8,7 @@ const { createTextMetrics, fitDesignPresentation } = require('./presentation-tex
 const DATA_LAYOUTS = new Set(['cover', 'section', 'quote', 'key-metrics', 'chart', 'table', 'image-focus']);
 
 function splitSemanticPage(slide) {
+    if (slide.diagram) return null;
     const kind = String(slide.layout || 'content').replace(/^design-/, '');
     if (DATA_LAYOUTS.has(kind)) return null;
     const arrays = ['points', 'left', 'right'].filter(key => Array.isArray(slide[key]) && slide[key].length);
@@ -21,16 +22,18 @@ function splitSemanticPage(slide) {
 async function compileDesignPlan(input, template, sources = [], options = {}) {
     if (!Array.isArray(input.slides) || !input.slides.length || input.slides.length > 60) throw presentationError('请提供一至六十页完整内容。');
     if (typeof input.title !== 'string' || !input.title.trim() || input.slides.some(slide => !slide || typeof slide !== 'object' || Array.isArray(slide))) throw presentationError('请提供有效标题与逐页内容对象。');
+    sources = require('./presentation-evidence').bindPresentationEvidence(sources, input.slides);
     const metrics = await createTextMetrics({ theme: (template.definition || template).theme }, options);
-    const slides = [], warnings = [], plannedPages = input.slides.length;
+    const slides = [], warnings = [], plannedPages = input.slides.length, splitPages = new Set();
     let last;
     for (let index = 0; index < input.slides.length; index++) {
+        const startPage = slides.length;
         const pending = [{ slide: { ...input.slides[index], layout: input.slides[index].layout || input.slides[index].layoutId || (index ? 'content' : 'cover') }, depth: 0 }];
         let parts = 0;
         while (pending.length) {
             options.signal?.throwIfAborted();
             const current = pending.shift();
-            let content = buildDesignPresentation({ title: input.title, slides: [current.slide] }, template, sources);
+            let content = buildDesignPresentation({ title: input.title, slides: [current.slide], productionProfile: input.productionProfile || options.productionProfile }, template, sources);
             if (options.aspectRatio === '4:3') content = { ...content, aspectRatio: '4:3', width: 960 };
             content = applyTemplateLayoutLayers(content, template, { reflow: true, normalizePresentation });
             content = await fitDesignPresentation(content, options);
@@ -47,9 +50,18 @@ async function compileDesignPlan(input, template, sources = [], options = {}) {
             slides.push({ ...content.slides[0], id: `slide_${index + 1}_part_${parts}`, index: slides.length });
             last = content;
         }
-        if (parts > 1) warnings.push(`原第 ${index + 1} 页为完整保留内容与可读字号，已拆为 ${parts} 页。`);
+        if (parts > 1) {
+            warnings.push(`原第 ${index + 1} 页为完整保留内容与可读字号，已拆为 ${parts} 页。`);
+            for (const slide of slides.slice(startPage)) splitPages.add(slide.id);
+            if (input.slides[index].claims?.length) warnings.push(`原第 ${index + 1} 页拆分后，请核对各页论点归属；证据保留，页面内容绑定待复核。`);
+        }
     }
-    return { presentation: normalizePresentation({ ...last, title: input.title, slides, metadata: { ...last.metadata, language: options.language || last.metadata.language, designSkillVersion: '1.1.0', aiGenerated: true } }),
+    for (const slide of slides) if (slide.claims?.length) {
+        if (splitPages.has(slide.id)) { slide.claims = slide.claims.map(({ basisDigest: _basisDigest, ...claim }) => claim); continue; }
+        const basisDigest = require('./presentation-semantics').slideContentDigest(slide);
+        slide.claims = slide.claims.map(claim => ({ ...claim, basisDigest }));
+    }
+    return { presentation: normalizePresentation({ ...last, title: input.title, slides, metadata: { ...last.metadata, language: options.language || last.metadata.language, designSkillVersion: '2.0.0', aiGenerated: true } }),
         warnings, plannedPages, generatedPages: slides.length };
 }
 

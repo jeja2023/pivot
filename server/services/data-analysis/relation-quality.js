@@ -2,7 +2,7 @@
 
 const { getDatasetPaths, sqlIdent, sqlLiteral, createDuckConnection, withAnalysisSlot, withDuckTimeout } = require('./shared');
 
-async function relationQuality(left, right, { leftFieldKey, rightFieldKey, joinType = 'left', cardinality = 'many_to_one' }) {
+async function relationQuality(left, right, { leftFieldKey, rightFieldKey, joinType = 'left', cardinality = 'many_to_one', userId }) {
     return withAnalysisSlot(async () => {
         const { instance, connection } = await createDuckConnection();
         try {
@@ -43,7 +43,7 @@ async function relationQuality(left, right, { leftFieldKey, rightFieldKey, joinT
             if (quality.unmatchedLeftRows) quality.warnings.push(`左表有 ${quality.unmatchedLeftRows} 行未匹配；${joinType === 'inner' ? '内关联会排除这些记录' : '左关联会保留这些记录并将右表字段置空'}。`);
             return quality;
         } finally { connection.closeSync(); instance.closeSync(); }
-    });
+    }, { userId: userId });
 }
 
 module.exports = { relationQuality };

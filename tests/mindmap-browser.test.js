@@ -108,22 +108,28 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
         await page.locator('#mindmap-layout').selectOption('fishbone'); await page.getByRole('button', { name: '保存', exact: true }).click();
         await page.waitForFunction(() => document.querySelector('#mindmap-save-status').textContent.includes('已保存'));
         assert.equal((await (await fetch(origin + '/api/apps/mindmaps/' + artifactId)).json()).document.presentation.layout, 'fishbone');
-        await page.locator('#xmind-export-btn').click();
-        await page.locator('[data-mm-action="export-format"][data-format="json"]').click();
-        const downloadButton = page.getByRole('button', { name: '下载文件', exact: true }); await downloadButton.waitFor({ timeout: 20000 });
-        const downloadEvent = page.waitForEvent('download'); await downloadButton.click(); const download = await downloadEvent;
+        const exportFile = async format => {
+            // 先确认本次任务已提交，避免旧导出的下载按钮被下一次格式测试误用。
+            const submitted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/exports'));
+            await page.locator('#xmind-export-btn').click();
+            await page.locator('[data-mm-action="export-format"][data-format="' + format + '"]').click();
+            const response = await submitted; assert.equal(response.status(), 202);
+            assert.equal((await response.json()).job.format, format);
+            const downloadButton = page.getByRole('button', { name: '下载文件', exact: true });
+            await downloadButton.waitFor({ timeout: 25000 });
+            const completed = page.waitForEvent('download', { predicate: file => file.suggestedFilename().endsWith('.' + format) });
+            await downloadButton.click();
+            return completed;
+        };
+        const download = await exportFile('json');
         const text = fs.readFileSync(await download.path(), 'utf8'); assert.equal(JSON.parse(text).presentation.layout, 'fishbone');
         assert.equal(JSON.parse(text).relations[0].text, '关联说明'); assert.equal(JSON.parse(text).summaries[0].text, '工作阶段概要');
         assert.equal(JSON.parse(text).presentation.customTheme.label, '验收主题');
-        await page.locator('#xmind-export-btn').click();
-        await page.locator('[data-mm-action="export-format"][data-format="svg"]').click();
-        await downloadButton.waitFor({ timeout: 20000 }); const svgEvent = page.waitForEvent('download'); await downloadButton.click(); const svgFile = await svgEvent;
+        const svgFile = await exportFile('svg');
         assert.match(fs.readFileSync(await svgFile.path(), 'utf8'), /工作阶段概要/);
         for (const format of ['pdf', 'xmind', 'opml', 'mm']) {
-            await page.locator('#xmind-export-btn').click();
-            await page.locator(`[data-mm-action="export-format"][data-format="${format}"]`).click();
-            await downloadButton.waitFor({ timeout: 25000 }); const fileEvent = page.waitForEvent('download'); await downloadButton.click(); const file = await fileEvent;
-            const bytes = fs.readFileSync(await file.path()); assert.ok(bytes.length > 100); assert.ok(file.suggestedFilename().endsWith('.' + format), `${format}：实际文件名 ${file.suggestedFilename()}`);
+            const file = await exportFile(format);
+            const bytes = fs.readFileSync(await file.path()); assert.ok(bytes.length > 100); assert.ok(file.suggestedFilename().endsWith('.' + format), format + '：实际文件名 ' + file.suggestedFilename());
             if (format === 'pdf') assert.equal(bytes.subarray(0, 4).toString(), '%PDF');
             if (format === 'xmind') assert.ok((await require('jszip').loadAsync(bytes)).file('content.json'));
         }

@@ -837,6 +837,7 @@ app.use((err, req, res, _next) => {
     const exposeMessage = isClientError || status === 503 || err.expose === true;
     res.status(status).json({
         error: exposeMessage ? err.message : '服务器内部错误，请联系管理员',
+        ...(err.securityConfirmationPending === true ? { code: 'ANALYSIS_SECURITY_COMMITTED_PENDING', applied: true, securityConfirmationPending: true } : {}),
         ...(isClientError && err.code ? { code: err.code } : {})
     });
 });

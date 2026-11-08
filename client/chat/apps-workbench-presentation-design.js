@@ -16,6 +16,13 @@
         const list = document.getElementById('presentation-issues-list'); if (!list) return;
         list.replaceChildren(); const issues = state.active?.validation?.issues || [];
         const note = document.createElement('div'); note.className = 'presentation-empty-note'; note.textContent = reviewMessage(state); list.appendChild(note);
+        const production = state.active?.validation?.productionReview;
+        if (production) {
+            const summary = document.createElement('div'); summary.className = 'presentation-evidence-card';
+            const current = production.localRevision === state.editRevision && production.localVersion === state.active.version;
+            summary.textContent = current ? `交付检查：${production.summary.blocking}项阻断、${production.summary.warnings}项建议；原生文件${production.checks.native.status === 'passed' ? '核验通过' : '尚未通过'}。${production.scope}` : '文稿已变化，交付检查报告仅对应旧版本，请重新检查。';
+            list.appendChild(summary);
+        }
         if (!issues.length) { const empty = document.createElement('div'); empty.className = 'presentation-empty-note'; empty.textContent = '暂无问题。导出前仍可再次执行质量检查。'; list.appendChild(empty); return; }
         for (const issue of issues) {
             const item = document.createElement('button'); item.type = 'button'; item.className = `presentation-issue is-${issue.level || 'info'}`;
@@ -49,7 +56,7 @@
     const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
     function showDeckTask(task, state, helpers, id) {
-        const panel = document.getElementById('presentation-design-task-status'); if (!panel) return;
+        const panel = document.getElementById((task.mode || task.result?.mode) === 'production' ? 'presentation-production-task-status' : 'presentation-design-task-status'); if (!panel) return;
         panel.replaceChildren();
         const progress = task.progress || {}, text = document.createElement('p');
         text.textContent = task.stale ? '文稿已变化，此检查仅对应旧版本，请重新检查。' : running(task)
@@ -82,7 +89,7 @@
             });
             panel.appendChild(apply);
         }
-        if (task.status === 'completed' && !task.stale && !task.result?.proposal && task.result?.reviews?.length) {
+        if (task.status === 'completed' && !task.stale && !task.result?.proposal && (task.result?.reviews?.length || task.result?.productionReview)) {
             const view = document.createElement('button'); view.type = 'button'; view.className = 'btn-secondary'; view.textContent = '查看整稿检查结果';
             view.addEventListener('click', () => helpers.switchPanel('issues')); panel.appendChild(view);
         }
@@ -95,6 +102,11 @@
             if (!running(task)) {
                 if (!task.stale && !state.dirty && state.editRevision === revision && task.status === 'completed') {
                     const previous = state.active.validation || { issues: [] };
+                    if (task.result?.productionReview) {
+                        state.active.validation = { ...previous, ...task.result.validation, visualReview: previous.visualReview,
+                            productionReview: { ...task.result.productionReview, localRevision: state.editRevision, localVersion: state.active.version } };
+                        helpers.renderIssues(); return;
+                    }
                     const issues = (task.result?.reviews || []).flatMap(review => review.issues || []);
                     const proposal = Boolean(task.result?.proposal);
                     state.active.validation = { ...previous, visualReview: { status: proposal ? 'proposal' : task.result?.visualStatus,
@@ -114,8 +126,9 @@
 
     async function startDeckTask(state, helpers, mode) {
         if (!state.active?.id) return;
-        const model = mode === 'layout' ? '' : helpers.requirePresentationAiModel(); if (mode !== 'layout' && !model) return;
-        const buttons = ['presentation-deck-review-btn', 'presentation-deck-layout-btn'].map(id => document.getElementById(id));
+        const needsModel = ['visual', 'visual_repair'].includes(mode);
+        const model = needsModel ? helpers.requirePresentationAiModel() : ''; if (needsModel && !model) return;
+        const buttons = ['presentation-deck-review-btn', 'presentation-deck-layout-btn', 'presentation-production-review-btn'].map(id => document.getElementById(id));
         buttons.forEach(button => { if (button) button.disabled = true; });
         try {
             if (state.dirty) await helpers.saveActive();
@@ -131,6 +144,7 @@
         const id = state.active?.id; if (!id) return;
         const revision = state.editRevision, sequence = state.designTaskSequence = (state.designTaskSequence || 0) + 1;
         document.getElementById('presentation-design-task-status')?.replaceChildren();
+        document.getElementById('presentation-production-task-status')?.replaceChildren();
         try {
             const data = await helpers.requestJson(taskUrl(id, 'latest'));
             if (data.task && state.active?.id === id) await followDeckTask(data.task, state, helpers, id, revision, sequence);

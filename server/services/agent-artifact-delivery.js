@@ -88,8 +88,9 @@ function buildDeliveryDownloadSignaturePayload({ nonce, deviceId, renditionId, t
 }
 
 /** 附加式审计事件。只保存目录末级提示与文件名，绝不保存终端完整绝对路径。 */
-async function recordDeliveryEvent(event = {}) {
-    await execute(`
+async function recordDeliveryEvent(event = {}, options = {}) {
+    const client = options.executor || { execute };
+    await client.execute(`
         INSERT INTO agent_artifact_delivery_events
             (tenant_id, intent_id, rendition_id, run_id, tool_call_id, actor_type, actor_id, event_type,
              channel, device_id, path_hint, content_digest, decision_reason)

@@ -23,7 +23,8 @@ function skillCandidate(release) {
         tools: stringList(manifest.tools),
         scope: String(release.rollout_scope || ''),
         inputs: contractObject(manifest.inputs),
-        outputs: contractObject(manifest.outputs)
+        outputs: contractObject(manifest.outputs),
+        ...(manifest.importSource ? { compatibility: { scope: 'instructions_only', runtimeVerified: false, format: manifest.importSource.format } } : {})
     };
 }
 

@@ -36,9 +36,14 @@ function buildTaskPresentation(input, template, sources = []) {
     if (!Array.isArray(input.slides) || !input.slides.length || input.slides.length > 60) throw presentationError('请提供完整的逐页内容，页数为 1 至 60 页。');
     const title = checkedText(input.title, 160, 'PPT 标题', true);
     if ((template.definition || template).layouts?.some(layout => String(layout.id).startsWith('design-'))) return require('./presentation-design-content').buildDesignPresentation(input, template, sources);
+    if (input.slides.some(slide => slide.diagram)) throw presentationError('当前模板不支持语义图示，请选择咨询式简报、政企正式或培训讲解模板。');
+    sources = require('./presentation-evidence').bindPresentationEvidence(sources, input.slides);
     const theme = (template.definition || template).theme;
-    const sourceRefs = sources.map(source => source.id);
+    const sourceIds = new Set(sources.map(source => source.id));
     const slides = input.slides.map((slide, index) => {
+        if (slide.sourceRefs !== undefined && !Array.isArray(slide.sourceRefs)) throw presentationError('逐页来源必须是标识数组。');
+        const sourceRefs = slide.sourceRefs === undefined ? sources.length === 1 ? [sources[0].id] : [] : [...new Set(slide.sourceRefs)];
+        if (sourceRefs.some(ref => !sourceIds.has(ref))) throw presentationError('页面引用了不存在的材料来源。', 400, 'PRESENTATION_SOURCE_REF_INVALID');
         const layout = slide.layout || (index === 0 ? 'cover' : 'content');
         if (!['cover', 'content', 'two-column', 'section', 'summary', 'table', 'chart'].includes(layout)) throw presentationError('页面布局无效。');
         const heading = checkedText(slide.title, 90, '页面标题', true);
@@ -65,10 +70,16 @@ function buildTaskPresentation(input, template, sources = []) {
         } else elements.push(...pointElements(points, { x: isCover ? 96 : 72, y: isCover ? 340 : 180, width: isCover ? 1088 : 1136, height: isCover ? 245 : 420 }, theme, sourceRefs, 'point'));
         if (!isCover && elements.length < 2) throw presentationError(`第 ${index + 1} 页没有正文内容，请补充后再生成。`);
         return { id: `slide_${index + 1}`, type: isCover ? layout : 'content', layoutId: layout === 'content' || layout === 'table' || layout === 'chart' ? 'title-content' : layout,
-            elements, speakerNotes: checkedText(slide.speakerNotes, 4000, '讲稿备注'), sourceRefs };
+            elements, speakerNotes: checkedText(slide.speakerNotes, 4000, '讲稿备注'), sourceRefs,
+            ...(slide.intent === undefined ? {} : { intent: slide.intent }), ...(slide.claims === undefined ? {} : { claims: slide.claims }) };
     });
-    return normalizePresentation({ title, aspectRatio: '16:9', theme, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest },
-        sources, slides, metadata: { generatedBy: 'presentation.create' } });
+    const content = normalizePresentation({ title, aspectRatio: '16:9', theme, template: { id: template.id, version: template.version, snapshotDigest: template.snapshotDigest },
+        sources, slides, metadata: { generatedBy: 'presentation.create', ...(input.productionProfile ? { productionProfile: input.productionProfile } : {}) } });
+    for (const slide of content.slides) if (slide.claims?.length) {
+        const basisDigest = require('./presentation-semantics').slideContentDigest(slide);
+        slide.claims = slide.claims.map(claim => ({ ...claim, basisDigest }));
+    }
+    return content;
 }
 
 module.exports = { buildTaskPresentation };

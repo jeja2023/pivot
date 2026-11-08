@@ -8,9 +8,11 @@ const JSZip = require('jszip');
 const { PDFDocument, rgb, degrees } = require('pdf-lib');
 const fontkit = require('@pdf-lib/fontkit');
 const sharp = require('sharp');
+const graphics = require('../../../client/chat/presentation-graphics');
+const geometry = require('./presentation-geometry');
 const { normalizePresentation } = require('./presentation-schema');
 
-const PRESENTATION_RENDERER_VERSION = 'presentation-0.7.107';
+const PRESENTATION_RENDERER_VERSION = 'ppt-studio-2.0.0';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const PDF_MIME = 'application/pdf';
 const PNG_MIME = 'image/png';
@@ -58,67 +60,7 @@ function elementFontSizePx(element) {
     return Number(element.style?.fontSize || 18);
 }
 
-function createChartSvg(element, width, height) {
-    const rows = element.data?.rows || [];
-    const values = rows.map(row => Number(row[1]) || 0);
-    const maximum = Math.max(1, ...values.map(value => Math.abs(value)));
-    const colors = element.options?.colors?.length ? element.options.colors : ['#1769AA', '#5B8FF9', '#61DDAA', '#F59E0B'];
-    const labelSize = element.options?.labelFontSize || 14;
-    const pad = { top: element.title || element.options?.showLabels ? labelSize + 18 : 12, right: 14, bottom: labelSize + 24, left: 38 };
-    const graphWidth = Math.max(1, width - pad.left - pad.right);
-    const graphHeight = Math.max(1, height - pad.top - pad.bottom);
-    let pieces = `<rect width="${width}" height="${height}" fill="#FFFFFF"/><line x1="${pad.left}" y1="${pad.top + graphHeight}" x2="${pad.left + graphWidth}" y2="${pad.top + graphHeight}" stroke="#CBD5E1"/><line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + graphHeight}" stroke="#CBD5E1"/>`;
-    if (element.title) pieces += `<text x="${pad.left}" y="20" font-size="15" font-weight="700" fill="#1F2937">${escapeXml(element.title)}</text>`;
-    if (element.chartType === 'pie') {
-        const total = values.reduce((sum, value) => sum + Math.max(0, value), 0) || 1;
-        const radius = Math.min(graphWidth, graphHeight) * 0.36;
-        const cx = pad.left + graphWidth / 2;
-        const cy = pad.top + graphHeight / 2;
-        let start = -Math.PI / 2;
-        values.forEach((value, index) => {
-            const angle = Math.max(0, value) / total * Math.PI * 2;
-            const end = start + angle;
-            const x1 = cx + radius * Math.cos(start);
-            const y1 = cy + radius * Math.sin(start);
-            const x2 = cx + radius * Math.cos(end);
-            const y2 = cy + radius * Math.sin(end);
-            const large = angle > Math.PI ? 1 : 0;
-            pieces += `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z" fill="${colors[index % colors.length]}"/>`;
-            start = end;
-        });
-    } else if (element.chartType === 'line' || element.chartType === 'area') {
-        const points = values.map((value, index) => {
-            const x = pad.left + (values.length <= 1 ? graphWidth / 2 : graphWidth * index / (values.length - 1));
-            const y = pad.top + graphHeight - (value / maximum) * graphHeight;
-            return [x, y];
-        });
-        if (points.length) {
-            const line = points.map(point => point.join(',')).join(' ');
-            if (element.chartType === 'area') {
-                pieces += `<polygon points="${pad.left},${pad.top + graphHeight} ${line} ${pad.left + graphWidth},${pad.top + graphHeight}" fill="${colors[0]}" fill-opacity="0.22"/>`;
-            }
-            pieces += `<polyline points="${line}" fill="none" stroke="${colors[0]}" stroke-width="3"/>`;
-            points.forEach(point => { pieces += `<circle cx="${point[0]}" cy="${point[1]}" r="3.5" fill="${colors[0]}"/>`; });
-        }
-    } else {
-        const gap = Math.max(4, graphWidth / Math.max(1, values.length) * 0.2);
-        const barWidth = Math.max(3, (graphWidth - gap * (values.length + 1)) / Math.max(1, values.length));
-        values.forEach((value, index) => {
-            const barHeight = Math.max(0, value / maximum * graphHeight);
-            const x = pad.left + gap + index * (barWidth + gap);
-            const y = pad.top + graphHeight - barHeight;
-            pieces += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="3" fill="${colors[index % colors.length]}"/>`;
-            if (element.options?.showLabels) pieces += `<text x="${x + barWidth / 2}" y="${y - 8}" text-anchor="middle" font-size="${labelSize}" fill="#344054">${escapeXml(value)}</text>`;
-        });
-    }
-    rows.forEach((row, index) => {
-        const barGap = Math.max(4, graphWidth / Math.max(1, rows.length) * 0.2);
-        const barWidth = (graphWidth - barGap * (rows.length + 1)) / Math.max(1, rows.length);
-        const x = element.chartType === 'bar' ? pad.left + barGap + index * (barWidth + barGap) + barWidth / 2 : pad.left + (rows.length <= 1 ? graphWidth / 2 : graphWidth * index / (rows.length - 1));
-        pieces += `<text x="${x}" y="${height - 12}" text-anchor="middle" font-size="${labelSize}" fill="#64748B">${escapeXml(String(row[0]))}</text>`;
-    });
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${pieces}</svg>`;
-}
+const createChartSvg = graphics.chartSvg;
 
 function rawDataUri(asset) {
     if (!asset?.buffer || !asset?.mimeType) return '';
@@ -135,21 +77,7 @@ function mediaExtension(mimeType, fallback = 'mp4') {
     return fallback;
 }
 
-function diagramSvg(element) {
-    const count = element.items.length; const horizontal = element.diagramType !== 'hierarchy';
-    const gap = 18; const width = element.width; const height = element.height;
-    const nodeWidth = horizontal ? Math.max(80, (width - gap * (count - 1)) / count) : Math.max(100, width * 0.45);
-    const nodeHeight = horizontal ? Math.max(48, height * 0.55) : Math.max(38, (height - gap * (count - 1)) / count);
-    const pieces = [];
-    element.items.forEach((text, index) => {
-        const x = horizontal ? index * (nodeWidth + gap) : (width - nodeWidth) / 2;
-        const y = horizontal ? (height - nodeHeight) / 2 : index * (nodeHeight + gap);
-        if (index > 0) { const px = horizontal ? x - gap : width / 2; const py = horizontal ? height / 2 : y - gap; const ax = horizontal ? x - 5 : width / 2; const ay = horizontal ? height / 2 : y - 5; pieces.push('<line x1="' + px + '" y1="' + py + '" x2="' + ax + '" y2="' + ay + '" stroke="' + element.style.stroke + '" stroke-width="2" marker-end="url(#arrow)"/>'); }
-        pieces.push('<rect x="' + x + '" y="' + y + '" width="' + nodeWidth + '" height="' + nodeHeight + '" rx="12" fill="' + element.style.fill + '" stroke="' + element.style.stroke + '"/>');
-        pieces.push('<text x="' + (x + nodeWidth / 2) + '" y="' + (y + nodeHeight / 2 + element.style.fontSize * 0.35) + '" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="' + element.style.fontSize + '" fill="' + element.style.textColor + '">' + escapeXml(text) + '</text>');
-    });
-    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="' + element.style.stroke + '"/></marker></defs>' + pieces.join('') + '</svg>';
-}
+const diagramSvg = graphics.diagramSvg;
 
 function transitionXml(transition) {
     if (!transition || transition.type === 'none') return '';
@@ -234,15 +162,8 @@ async function slideSvg(slide, presentation, options = {}) {
     if (backgroundData) pieces.push(`<image href="${backgroundData}" x="0" y="0" width="${presentation.width}" height="${presentation.height}" opacity="${slide.background.opacity}" preserveAspectRatio="xMidYMid slice"/>`);
     for (const element of slide.elements.filter(item => item.visible)) {
         if (element.type === 'shape') {
-            const fillOpacity = element.style.opacity;
-            if (element.shapeType === 'ellipse') {
-                pieces.push(`<ellipse cx="${element.x + element.width / 2}" cy="${element.y + element.height / 2}" rx="${element.width / 2}" ry="${element.height / 2}" fill="${element.style.fill}" fill-opacity="${fillOpacity}" stroke="${element.style.stroke}" stroke-width="${element.style.strokeWidth}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})"/>`);
-            } else if (element.shapeType === 'line') {
-                pieces.push(`<line x1="${element.x}" y1="${element.y}" x2="${element.x + element.width}" y2="${element.y + element.height}" stroke="${element.style.stroke}" stroke-width="${element.style.strokeWidth}"/>`);
-            } else {
-                const radius = element.shapeType === 'roundRect' ? Math.min(element.style.radius, element.width / 2, element.height / 2) : 0;
-                pieces.push(`<rect x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" rx="${radius}" fill="${element.style.fill}" fill-opacity="${fillOpacity}" stroke="${element.style.stroke}" stroke-width="${element.style.strokeWidth}" transform="rotate(${element.rotation} ${element.x + element.width / 2} ${element.y + element.height / 2})"/>`);
-            }
+            const svg = geometry.shapeSvg(element).replace(/^<svg[^>]*>|<\/svg>$/g, '');
+            pieces.push(`<g transform="translate(${element.x} ${element.y}) rotate(${element.rotation} ${element.width / 2} ${element.height / 2})">${svg}</g>`);
             continue;
         }
         if (element.type === 'image') {
@@ -411,14 +332,17 @@ async function renderPdf(presentation, options = {}) {
         for (const element of slide.elements.filter(item => item.visible)) {
             const y = height - (element.y + element.height) * 0.75;
             if (element.type === 'shape') {
-                const fill = hexToRgb(element.style.fill);
-                const stroke = hexToRgb(element.style.stroke);
-                if (element.shapeType === 'line') {
-                    page.drawLine({ start: { x: element.x * 0.75, y: height - element.y * 0.75 }, end: { x: (element.x + element.width) * 0.75, y: height - (element.y + element.height) * 0.75 }, thickness: element.style.strokeWidth, color: rgb(stroke.r, stroke.g, stroke.b) });
-                } else if (element.shapeType === 'ellipse') {
-                    page.drawEllipse({ x: (element.x + element.width / 2) * 0.75, y: height - (element.y + element.height / 2) * 0.75, xScale: element.width * 0.375, yScale: element.height * 0.375, color: rgb(fill.r, fill.g, fill.b), borderColor: rgb(stroke.r, stroke.g, stroke.b), borderWidth: element.style.strokeWidth });
-                } else {
-                    page.drawRectangle({ x: element.x * 0.75, y, width: element.width * 0.75, height: element.height * 0.75, color: rgb(fill.r, fill.g, fill.b), opacity: element.style.opacity, borderColor: rgb(stroke.r, stroke.g, stroke.b), borderWidth: element.style.strokeWidth });
+                const scene = geometry.shapeScene(element.shapeType, element.width, element.height, geometry.effectiveAdjustments(element));
+                const angle = element.rotation * Math.PI / 180, cx = element.width / 2, cy = element.height / 2;
+                const left = element.x + cx - Math.cos(angle) * cx + Math.sin(angle) * cy;
+                const top = element.y + cy - Math.sin(angle) * cx - Math.cos(angle) * cy;
+                for (const path of scene.paths) {
+                    const fill = path.fill === 'none' ? null : hexToRgb(geometry.shade(element.style.fill, path.fill));
+                    const stroke = path.stroke && element.style.strokeWidth ? hexToRgb(element.style.stroke) : null;
+                    if (!fill && !stroke) continue;
+                    page.drawSvgPath(path.d, { x: left * 0.75, y: height - top * 0.75, scale: 0.75, rotate: degrees(-element.rotation),
+                        color: fill ? rgb(fill.r, fill.g, fill.b) : undefined, opacity: element.style.opacity,
+                        borderColor: stroke ? rgb(stroke.r, stroke.g, stroke.b) : undefined, borderWidth: stroke ? element.style.strokeWidth : 0 });
                 }
                 continue;
             }
@@ -480,7 +404,7 @@ async function renderPdf(presentation, options = {}) {
 }
 
 function pointOptions(element, presentation) {
-    const widthIn = presentation.aspectRatio === '4:3' ? 10 : 13.333;
+    const widthIn = presentation.aspectRatio === '4:3' ? 10 : 40 / 3;
     const heightIn = 7.5;
     return { x: element.x / presentation.width * widthIn, y: element.y / presentation.height * heightIn, w: element.width / presentation.width * widthIn, h: element.height / presentation.height * heightIn };
 }
@@ -529,29 +453,31 @@ async function renderPptx(presentation, options = {}) {
                 continue;
             }
             if (element.type === 'table') {
-                slide.addTable([element.columns, ...element.rows], {
+                const rows = [element.columns, ...element.rows].map((row, index) => row.map(value => ({ text: String(value), options: {
+                    fill: index === 0 ? pptColor(element.style.headerFill) : pptColor(element.style.cellFill),
+                    color: index === 0 ? pptColor(element.style.headerColor) : pptColor(element.style.cellColor), bold: index === 0
+                } })));
+                slide.addTable(rows, {
                     ...pos, border: { type: 'solid', color: pptColor(element.style.borderColor), pt: 0.5 },
                     fontFace: presentation.theme.fonts.body, fontSize: element.style.fontSize * 0.75,
                     color: pptColor(element.style.cellColor), fill: pptColor(element.style.cellFill),
                     bold: false, margin: 0.05,
                     rowH: pos.h / Math.max(1, element.rows.length + 1),
-                    autoFit: false, objectName: exportedAnimationName(element)
+                    autoFit: false, autoPage: false, objectName: exportedAnimationName(element)
                 });
                 continue;
             }
             if (element.type === 'image') {
                 const asset = await options.assetResolver?.(element.assetRef);
-                if (!asset?.buffer || !asset?.mimeType) continue;
+                if (!asset?.buffer || !asset?.mimeType) throw new Error('图片素材不可读取，请重新上传或恢复素材后导出。');
                 const data = await resolveDataUri(element.assetRef, async () => asset);
                 slide.addImage({ data, ...pos, transparency: Math.round((1 - element.opacity) * 100), objectName: exportedAnimationName(element) });
                 continue;
             }
             if (element.type === 'media') {
                 const asset = await options.assetResolver?.(element.assetRef);
-                if (asset?.buffer && asset?.mimeType) {
-                    try { slide.addMedia({ type: element.mediaType, data: rawDataUri(asset), ext: mediaExtension(asset.mimeType, element.mediaType === 'audio' ? 'mp3' : 'mp4'), ...pos }); }
-                    catch (_) { slide.addShape(pptx.ShapeType.rect, { ...pos, fill: { color: '0F172A' }, line: { color: '64748B', width: 1 } }); slide.addText(element.mediaType === 'audio' ? '音频媒体' : '视频媒体', { ...pos, color: 'FFFFFF', fontSize: 14, align: 'center', valign: 'mid' }); }
-                }
+                if (!asset?.buffer || !asset?.mimeType) throw new Error('音视频素材不可读取，请重新上传或恢复素材后导出。');
+                slide.addMedia({ type: element.mediaType, data: rawDataUri(asset), ext: mediaExtension(asset.mimeType, element.mediaType === 'audio' ? 'mp3' : 'mp4'), ...pos, objectName: exportedAnimationName(element) });
                 continue;
             }
             if (element.type === 'attachment') {
@@ -560,30 +486,25 @@ async function renderPptx(presentation, options = {}) {
                 continue;
             }
             if (element.type === 'diagram') {
-                const count = element.items.length; const horizontal = element.diagramType !== 'hierarchy';
-                const gap = 0.12; const nodeW = horizontal ? Math.max(0.8, (pos.w - gap * (count - 1)) / count) : Math.max(1.2, pos.w * 0.45); const nodeH = horizontal ? Math.max(0.45, pos.h * 0.55) : Math.max(0.35, (pos.h - gap * (count - 1)) / count);
-                element.items.forEach((text, index) => { const x = horizontal ? pos.x + index * (nodeW + gap) : pos.x + (pos.w - nodeW) / 2; const y = horizontal ? pos.y + (pos.h - nodeH) / 2 : pos.y + index * (nodeH + gap); if (index > 0) { const prevX = horizontal ? x - gap : pos.x + pos.w / 2; const prevY = horizontal ? pos.y + pos.h / 2 : y - gap; const nextX = horizontal ? x - 0.04 : pos.x + pos.w / 2; const nextY = horizontal ? pos.y + pos.h / 2 : y - 0.04; slide.addShape(pptx.ShapeType.line, { x: prevX, y: prevY, w: nextX - prevX, h: nextY - prevY, line: { color: pptColor(element.style.stroke), width: 1.5, beginArrowType: 'none', endArrowType: 'triangle' } }); } slide.addShape(pptx.ShapeType.roundRect, { x, y, w: nodeW, h: nodeH, fill: { color: pptColor(element.style.fill) }, line: { color: pptColor(element.style.stroke), width: 1 } }); slide.addText(text, { x, y, w: nodeW, h: nodeH, margin: 0.03, color: pptColor(element.style.textColor), fontSize: element.style.fontSize * 0.75, align: 'center', valign: 'mid', fit: 'shrink' }); });
+                require('./presentation-native-diagram').addNativeDiagram(slide, pptx, element, pos, presentation.theme.fonts.body);
                 continue;
             }
             if (element.type === 'chart') {
                 const categories = element.data.rows.map(row => String(row[0]));
                 const series = element.data.columns.slice(1).map((name, seriesIndex) => ({ name, labels: categories, values: element.data.rows.map(row => Number(row[seriesIndex + 1]) || 0) }));
                 const chartType = pptx.ChartType[element.chartType] || pptx.ChartType.bar;
-                try {
-                    const labelSize = (element.options.labelFontSize || 14) * 0.75;
-                    slide.addChart(chartType, series, { ...pos, catAxisLabelFontFace: presentation.theme.fonts.body, valAxisLabelFontFace: presentation.theme.fonts.body,
+                const labelSize = (element.options.labelFontSize || 14) * 0.75;
+                slide.addChart(chartType, series, { ...pos, catAxisLabelFontFace: presentation.theme.fonts.body, valAxisLabelFontFace: presentation.theme.fonts.body,
                         catAxisLabelFontSize: labelSize, valAxisLabelFontSize: labelSize, dataLabelFontSize: labelSize, dataLabelColor: pptColor(presentation.theme.colors.text),
-                        valGridLine: { color: 'D3DCD4', width: 0.5 }, showLegend: element.options.showLegend, showValue: element.options.showLabels, showTitle: Boolean(element.title), title: element.title || undefined, chartColors: element.options.colors.map(pptColor), showCatName: false });
-                } catch (_) {
-                    const chartData = await sharp(Buffer.from(createChartSvg(element, Math.round(element.width), Math.round(element.height)))).png().toBuffer();
-                    slide.addImage({ data: `data:image/png;base64,${chartData.toString('base64')}`, ...pos });
-                }
+                        valGridLine: { color: 'D3DCD4', width: 0.5 }, showLegend: element.options.showLegend, showValue: element.options.showLabels, showTitle: Boolean(element.title), title: element.title || undefined, chartColors: (element.options.colors.length ? element.options.colors : graphics.PALETTE).map(pptColor), showCatName: false,
+                        objectName: exportedAnimationName(element), barDir: 'col' });
             }
         }
         if (options.includeNotes !== false && slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
     }
     const raw = await pptx.write({ outputType: 'nodebuffer' });
-    return await applyPptxMotion(Buffer.from(raw), presentation);
+    const native = await require('./presentation-native-package').applyNativePresentationObjects(Buffer.from(raw), presentation);
+    return await applyPptxMotion(native, presentation);
 }
 
 async function renderPresentation(input, format, options = {}) {

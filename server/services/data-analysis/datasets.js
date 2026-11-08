@@ -368,7 +368,7 @@ async function importDataset({ user, file, name }) {
     try {
         // 导入分流由 ingestUpload 内部完成（CSV 走 DuckDB 快路径，XLSX/XLS 走 JS 解析），
         // 两路最终都把数据落成 c_N 列的 Parquet，并统一用 profileViaSql 计算画像（口径一致）。
-        const ingest = await withAnalysisSlot(() => ingestUpload({ datasetDir, file, ext }));
+        const ingest = await withAnalysisSlot(() => ingestUpload({ datasetDir, file, ext }), { userId: user.id });
         const now = getBeijingTimestamp();
         const datasetName = normalizeDatasetName(ingest.sourceName, name);
         await execute(`
@@ -421,6 +421,7 @@ async function listDatasets(userOrId) {
         ORDER BY datasets.updated_at DESC, datasets.created_at DESC
     `, [user.id]);
     const visibleRows = rows.filter(row => canAccessSharedResource(row, user, false));
+    await require('./bi/security-journal').assertAccess(visibleRows.map(row => ({ kind: 'dataset', id: row.id })));
     const sharedIds = visibleRows.filter(row => Number(row.user_id) !== Number(user.id)).map(row => row.id);
     const governance = await require('./governance').getFieldGovernanceForDatasets(sharedIds);
     return visibleRows.map(row => {
@@ -488,7 +489,7 @@ async function getDatasetDetail(userId, datasetId, options = {}) {
     const allowedKeys = new Set(allowedColumns.map(column => column.key));
     dataset.columns = allowedColumns;
     dataset.profile = dataset.profile.filter(column => allowedKeys.has(column.key));
-    const previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: pageSize, offset }));
+    const previewRows = await withAnalysisSlot(() => parquetToRows(parquetPath, { limit: pageSize, offset }), { userId: Number(userId?.id || userId) });
     dataset.previewRows = previewRows.map(item => Object.fromEntries(Object.entries(item).filter(([key]) => allowedKeys.has(key))));
     return dataset;
 }
@@ -518,6 +519,7 @@ async function purgeDatasetArtifacts(userId, datasetId) {
 
 async function softDeleteDataset(userId, datasetId) {
     const row = await getDatasetForUser(userId, datasetId, { write: true });
+    await require('../../repositories/analysis-objects').protectDatasetDeletion(datasetId);
     await require('../../repositories/analysis-transactions').purgeDataset(datasetId);
     // 数据文件即将被移除，主动取消仍在运行的全量语义任务，避免 worker 对失效 Parquet 重试。
     await execute(`
@@ -590,12 +592,14 @@ async function updateDataset(userOrId, datasetId, updates = {}) {
 async function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_MS, tmpRetentionMs = TMP_RETENTION_MS } = {}) {
     const now = Date.now();
     let removed = 0;
+    const { protectedTempRoots, cleanupModelTemporaryFiles } = require('./bi/temp-cleanup');
     const sweep = async (root, retentionMs) => {
         const entries = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => null);
         if (!entries) {
             return; // 目录尚未创建则跳过
         }
         for (const entry of entries) {
+            if (entry.isSymbolicLink() || root === tempRoot && protectedTempRoots.has(entry.name)) continue;
             const target = path.join(root, entry.name);
             try {
                 const stat = await fs.promises.stat(target);
@@ -612,6 +616,7 @@ async function cleanupAnalysisWorkspace({ exportRetentionMs = EXPORT_RETENTION_M
         .filter(entry => entry.isDirectory());
     for (const dir of userDirs) await sweep(path.join(exportRoot, dir.name), exportRetentionMs);
     await sweep(tempRoot, tmpRetentionMs);
+    removed += (await cleanupModelTemporaryFiles({ retentionMs: tmpRetentionMs, now })).removed;
     if (removed) logger.info({ removed }, '数据分析工作区清理完成');
     return { removed };
 }
@@ -723,7 +728,7 @@ async function createDatasetFromRows({ user, name, rows, sourceType = 'database'
                 previewRows,
                 fileSize: (await fs.promises.stat(parquetPath)).size
             };
-        });
+        }, { userId: user.id });
         const now = getBeijingTimestamp();
         await execute(`
             INSERT INTO analysis_datasets (

@@ -7,7 +7,7 @@ function registerPresentationDesignRoutes(router, { authMiddleware, asyncHandler
     router.get('/apps/presentations/design/info', authMiddleware, asyncHandler(async (req, res) => res.json(await actions.designInfo(req.user))));
     router.post('/apps/presentations/:id/design-tasks', authMiddleware, asyncHandler(async (req, res) => {
         const { mode = 'visual', model = '' } = req.body || {};
-        if (!['visual', 'layout', 'visual_repair'].includes(mode) || typeof model !== 'string' || model.length > 160) return res.status(400).json({ error: '请选择有效的检查方式和模型。' });
+        if (!['visual', 'layout', 'visual_repair', 'production'].includes(mode) || typeof model !== 'string' || model.length > 160) return res.status(400).json({ error: '请选择有效的检查方式和模型。' });
         const task = await qualityTasks.createQualityTask(req.user, { presentationId: req.params.id, mode, modelId: model });
         writeLog(req, '创建PPT整稿检查', `文稿: ${req.params.id}，任务: ${task.id}，方式: ${mode}`);
         res.status(202).json({ task });

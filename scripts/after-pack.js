@@ -55,6 +55,17 @@ async function afterPack(context) {
     const arch = normalizeArch(context.arch);
     const packageRoot = path.join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules', 'better-sqlite3');
     assertInside(appOutDir, packageRoot);
+    if (process.env.PIVOT_DESKTOP_SQLITE_MANIFEST) {
+        const { readDesktopSqliteBinding } = require('./desktop_sqlite_binding');
+        const binding = readDesktopSqliteBinding(process.env.PIVOT_DESKTOP_SQLITE_MANIFEST, platform, arch);
+        const version = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')).version;
+        if (version !== binding.packageVersion) throw new Error('SQLite 构建版本与实际打包依赖不符。');
+        const destination = path.join(packageRoot, 'build', 'Release', 'better_sqlite3.node');
+        assertInside(packageRoot, destination);
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.copyFileSync(binding.binding, destination);
+        console.log(`[afterPack] 已安装实际 Electron ${binding.electronVersion} / ABI ${binding.abi} 查询验证的 SQLite 绑定。`);
+    }
     const prebuilds = path.join(packageRoot, 'prebuilds');
     const wanted = targetPrebuildNames(platform, arch);
     let retainedPrebuild = false;
@@ -82,6 +93,9 @@ async function afterPack(context) {
     const removedLocales = pruneElectronLocales(appOutDir);
     const binaryInfo = retainedPrebuild ? `保留 ${[...wanted].join(', ')}` : '保留 build/Release 原生二进制';
     console.log(`[afterPack] 已裁剪 better-sqlite3：${platform}/${arch}，${binaryInfo}；Electron 语言包保留 ${[...configuredElectronLocales()].sort().join(', ')}，移除 ${removedLocales.length} 个。`);
+    if (context.packager?.appInfo) {
+        require('./desktop_sqlite_binding').verifyPackagedDesktopSqlite(context, platform, arch);
+    }
 }
 
 module.exports = afterPack;

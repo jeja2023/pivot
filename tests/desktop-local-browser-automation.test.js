@@ -36,9 +36,9 @@ test('桌面本机浏览器真实打开、读取、点击、截图并执行确�
     if (!address) return t.skip('没有可供隔离测试的本机网络地址');
     let clicks = 0;
     const server = http.createServer((req, res) => {
-        if (req.url === '/mark') { clicks++; res.writeHead(204); res.end(); return; }
+        if (req.url === '/mark') { clicks++; res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<p>已提交</p>'); return; }
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<html><head><title>测试页面</title></head><body><p>测试内容</p><button id="send" onclick="fetch(\'/mark\')">提交</button></body></html>');
+        res.end('<html><head><title>测试页面</title></head><body><p>测试内容</p><form method="post" action="/mark"><button id="send" type="submit">提交</button></form></body></html>');
     });
     await new Promise(resolve => server.listen(0, address, resolve));
     const url = `http://${address}:${server.address().port}/`;

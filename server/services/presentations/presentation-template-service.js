@@ -98,7 +98,7 @@ async function resolveTemplateForUser(user, templateId, { includeDefinition = tr
     return null;
 }
 
-async function resolveTemplateVersionForUser(user, templateId, version, { includeDefinition = true, historical = false } = {}) {
+async function resolveTemplateVersionForUser(user, templateId, version, { includeDefinition = true, historical = false, forCreation = false } = {}) {
     const id = String(templateId || 'business-blue').trim() || 'business-blue';
     const builtIn = getBuiltInTemplate(id);
     if (builtIn) { const historicalTemplate = getBuiltInTemplate(id, version || builtIn.version); return historicalTemplate ? systemTemplateToPublic(historicalTemplate) : null; }
@@ -125,6 +125,7 @@ async function resolveTemplateVersionForUser(user, templateId, version, { includ
         }
         return null;
     }
+    if (forCreation && Number(row.owner_user_id) !== Number(user.id) && row.status !== 'published') return null;
     return templateVersionToPublic(row, {
         version: row.snapshot_version,
         definition_json: row.snapshot_definition_json,

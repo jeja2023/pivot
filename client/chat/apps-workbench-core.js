@@ -33,6 +33,16 @@ const PIVOT_APP_REGISTRY = [
         openMode: 'inline'
     },
     {
+        id: 'data-modeling',
+        name: '数据建模',
+        category: '数据工具',
+        description: '通过可视化画布拖拽关联多表，统一定义事实粒度、分析维度与业务指标口径。',
+        icon: 'data-modeling',
+        tags: ['拖拽画布', '多表关联', '统一指标'],
+        status: 'available',
+        openMode: 'inline'
+    },
+    {
         id: 'regulations',
         name: '法规查询',
         category: '法规检索',
@@ -421,6 +431,18 @@ function getAppIconSvg(icon) {
             </svg>
         `;
     }
+    if (icon === 'data-modeling') {
+        return `
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="6" rx="1.5"></rect>
+                <rect x="14" y="3" width="7" height="6" rx="1.5"></rect>
+                <rect x="8.5" y="15" width="7" height="6" rx="1.5"></rect>
+                <path d="M10 6h4"></path>
+                <path d="M6.5 9v3a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V9"></path>
+                <path d="M12 14v1"></path>
+            </svg>
+        `;
+    }
     if (icon === 'scan-text') {
         return `
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -460,36 +482,7 @@ function getAppIconSvg(icon) {
 }
 
 function renderAppsGrid() {
-    const grid = document.getElementById('apps-grid');
-    const empty = document.getElementById('apps-empty');
-    if (!grid || !empty) return;
-    const apps = PIVOT_APP_REGISTRY;
-    empty.classList.toggle('hidden', apps.length > 0);
-    if (apps.length === 0) {
-        PivotSafeHtml.setHtml(empty, '暂无可用应用');
-        PivotSafeHtml.setHtml(grid, '');
-        return;
-    }
-    PivotSafeHtml.setHtml(grid, apps.map(app => `
-        <button class="app-card" type="button" data-app-id="${escapeAppsHtml(app.id)}" aria-label="打开${escapeAppsHtml(app.name)}">
-            <div class="app-card-head">
-                <span class="app-card-icon app-card-icon-${escapeAppsHtml(app.id)}">${getAppIconSvg(app.icon)}</span>
-                <div class="app-card-badges">
-                    <span class="app-card-category">${escapeAppsHtml(app.category)}</span>
-                    <em class="app-card-status">${app.status === 'available' ? '可用' : '规划中'}</em>
-                </div>
-            </div>
-            <div class="app-card-main">
-                <strong class="app-card-title">${escapeAppsHtml(app.name)}</strong>
-                <p class="app-card-desc">${escapeAppsHtml(app.description)}</p>
-                ${Array.isArray(app.tags) && app.tags.length ? `
-                    <div class="app-card-tags">
-                        ${app.tags.map(tag => `<span class="app-card-tag">${escapeAppsHtml(tag)}</span>`).join('')}
-                    </div>
-                ` : ''}
-            </div>
-        </button>
-    `).join(''));
+    window.Pivot.moduleApi('apps.availability')?.render(PIVOT_APP_REGISTRY);
 }
 
 function setAppsTitle(title, desc) {
@@ -529,6 +522,7 @@ function showAppsHome() {
 }
 
 async function showOfficialWritingApp() {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('official-writing');
     const createButtons = ['official-writing-create-doc-btn', 'official-writing-new-doc-btn', 'official-writing-import-backup-btn'];
     createButtons.forEach(id => { const button = document.getElementById(id); if (button) button.disabled = true; });
     setStoredAppsActiveApp('official-writing');
@@ -571,6 +565,7 @@ async function showOfficialWritingApp() {
     createButtons.forEach(id => { const button = document.getElementById(id); if (button) button.disabled = false; });
 }
 async function showDataAnalysisAppFromRegistry() {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('data-analysis');
     if (typeof window.Pivot.legacy.showDataAnalysisApp === 'function') {
         await window.Pivot.legacy.showDataAnalysisApp();
         return;
@@ -579,7 +574,22 @@ async function showDataAnalysisAppFromRegistry() {
     await window.Pivot.legacy.showDataAnalysisApp?.();
 }
 
+async function showDataModelingAppFromRegistry(options = {}) {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('data-modeling');
+    const existing = window.Pivot?.moduleApi?.('apps.dataAnalysis');
+    if (typeof existing?.showDataModelingApp === 'function') {
+        return await existing.showDataModelingApp(options);
+    }
+    await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-data-analysis.js');
+    const loaded = window.Pivot?.moduleApi?.('apps.dataAnalysis');
+    if (typeof loaded?.showDataModelingApp !== 'function') {
+        throw new Error('数据建模模块未能完成加载，请刷新页面后重试。');
+    }
+    return await loaded.showDataModelingApp(options);
+}
+
 async function showRegulationsAppFromRegistry() {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('regulations');
     if (typeof window.Pivot.legacy.showRegulationsApp === 'function') {
         await window.Pivot.legacy.showRegulationsApp();
         return;
@@ -589,6 +599,7 @@ async function showRegulationsAppFromRegistry() {
 }
 
 async function showOcrAppFromRegistry() {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('ocr');
     if (typeof window.Pivot.legacy.showOcrApp === 'function') {
         await window.Pivot.legacy.showOcrApp();
         return;
@@ -600,6 +611,7 @@ async function showOcrAppFromRegistry() {
 }
 
 async function showPdfToolsAppFromRegistry() {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('pdf-tools');
     if (typeof window.Pivot.legacy.showPdfToolsApp === 'function') {
         await window.Pivot.legacy.showPdfToolsApp();
         return;
@@ -609,6 +621,7 @@ async function showPdfToolsAppFromRegistry() {
 }
 
 async function showPresentationsAppFromRegistry(options = {}) {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('presentations');
     setStoredAppsActiveApp('presentations');
     const presentations = window.Pivot?.moduleApi?.('apps.presentations');
     if (typeof presentations?.showPresentationsApp === 'function') {
@@ -627,6 +640,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
 }
 
 async function showMindmapsAppFromRegistry(options = {}) {
+    await window.Pivot.moduleApi('apps.availability').ensureEnabled('mindmaps');
     await window.Pivot.loadScriptOnce('/chat/apps-workbench-mindmaps.js');
     return window.Pivot.moduleApi('apps.mindmaps').show(options);
 }
@@ -654,6 +668,13 @@ function openRegisteredApp(appId) {
     }
     if (app.id === 'data-analysis') {
         showDataAnalysisAppFromRegistry()
+            .then(() => setAppsWorkbenchState())
+            .catch(error => {
+                handleFailure(error);
+            });
+    }
+    if (app.id === 'data-modeling') {
+        showDataModelingAppFromRegistry()
             .then(() => setAppsWorkbenchState())
             .catch(error => {
                 handleFailure(error);
@@ -691,7 +712,8 @@ function openRegisteredApp(appId) {
 }
 
 window.Pivot?.exposeModule?.('workspaces.apps', {
-    listApps: () => PIVOT_APP_REGISTRY.map(app => ({ ...app, tags: [...(app.tags || [])] })),
+    listApps: () => (window.Pivot.moduleApi('apps.availability')?.visibleApps(PIVOT_APP_REGISTRY) || []).map(app => ({ ...app, tags: [...(app.tags || [])] })),
+    setAppsTitle,
     getAppsSessionValue,
     setAppsSessionValue,
     setAppsWorkbenchState,
@@ -700,7 +722,8 @@ window.Pivot?.exposeModule?.('workspaces.apps', {
     setStoredAppsActiveApp,
     showRegulationsAppFromRegistry,
     showPresentationsAppFromRegistry,
-    showMindmapsAppFromRegistry
+    showMindmapsAppFromRegistry,
+    showDataModelingAppFromRegistry
 }, [
     { globalName: 'getAppsSessionValue', exportName: 'getAppsSessionValue' },
     { globalName: 'setAppsSessionValue', exportName: 'setAppsSessionValue' },

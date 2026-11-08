@@ -59,10 +59,15 @@ test('真实浏览器打开 5000 节点、编辑中文并撤销，布局与导�
         await page.evaluate(() => window.capacityEditor.destroy());
     } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 });
-test('5000 节点大图可交付完整安全 SVG，位图尺寸有界', { timeout: 90000 }, async () => {
+test('5000 节点大图可交付完整安全 SVG', { timeout: 90000 }, async () => {
     const input = largeTree(); const renderer = require('../server/services/mindmaps/renderer');
     const output = await renderer.render(input, 'svg'); const svg = output.buffer.toString('utf8');
     assert.equal(output.mimeType, 'image/svg+xml'); assert.ok(svg.includes('企业项目总览')); assert.ok(svg.includes('4999')); assert.ok(output.buffer.length < 16 * 1024 * 1024); assert.ok(!svg.includes('foreignObject'));
+});
+
+test('5000 节点大图可交付尺寸有界的位图', { timeout: 90000 }, async () => {
+    // 两种格式各自启动独立渲染进程，分别保留原90秒用例上限和引擎65秒回收保护。
+    const input = largeTree(); const renderer = require('../server/services/mindmaps/renderer');
     const png = await renderer.render(input, 'png'); const dimensions = await require('sharp')(png.buffer).metadata(); assert.ok(dimensions.width <= 4000 && dimensions.height <= 4000);
     await fs.mkdir('output/mindmaps', { recursive: true }); await fs.writeFile('output/mindmaps/capacity-export.png', png.buffer);
 });

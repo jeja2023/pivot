@@ -1,6 +1,7 @@
 {
   "CI": "CI/CD 流水线自动注入的环境变量，用于运行环境识别。",
   "DISPLAY": "Linux X11 显示服务环境变量，由系统或桌面会话自动注入。",
+  "DOCKER_CONFIG": "Docker CLI 自身的运行时配置目录，仅受控控制进程使用，不传入分析执行器。",
   "DOTENV_CONFIG_QUIET": "用于静音 dotenv/dotenvx 第三方控制台提示与注入日志。",
   "HEADLESS": "自动化测试或无头运行模式开关，非持久业务配置。",
   "KUBERNETES_SERVICE_HOST": "Kubernetes 自动注入，用于环境识别，不应由 .env 配置。",
@@ -10,6 +11,10 @@
   "PIVOT_TEST_PG_SYNC": "PostgreSQL 测试同步 facade 开关。",
   "PIVOT_TEST_SYNC_BRIDGE_DIR": "测试同步桥临时目录。",
   "TEST_DATABASE_URL": "测试数据库连接串，仅供自动化测试。",
+  "SYSTEMROOT": "Windows 进程启动所需的操作系统目录，由系统注入。",
+  "TEMP": "操作系统提供的用户临时目录，不属于应用持久配置。",
+  "TMP": "操作系统提供的临时目录备用变量，不属于应用持久配置。",
+  "USERPROFILE": "Windows 用户目录，由系统提供给 Docker CLI，不传入分析执行器。",
   "WAYLAND_DISPLAY": "Linux Wayland 显示服务环境变量，由系统或桌面会话自动注入。",
   "WINDIR": "Windows 系统目录环境变量，由操作系统自动注入。"
 }

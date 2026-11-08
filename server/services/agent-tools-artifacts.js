@@ -71,7 +71,7 @@ function resolveToolCallId(context = {}) {
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
-    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
+    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.master'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
     if (name === 'diagram.render_svg') return require('./tool-result-artifacts').materializeToolArtifact({ structuredContent: { pivotArtifact: {
         kind: 'diagram', title: input.title, svg: input.svg, format: input.format || 'svg' } } }, user, context);
     if (name === 'presentation.create_from_artifact') {

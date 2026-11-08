@@ -8,7 +8,8 @@ const { normalizeDefinition, verifyWorkerSignature } = require('../server/servic
 const WORKERS = Object.freeze([
     ['code', 'PIVOT_AGENT_CODE_WORKER_IMAGE', 'PIVOT_AGENT_CODE_WORKER_COMMAND', 'node,/runner/runner.js'],
     ['terminal', 'PIVOT_AGENT_TERMINAL_WORKER_IMAGE', 'PIVOT_AGENT_TERMINAL_WORKER_COMMAND', 'node,/runner/runner.js'],
-    ['foreach', 'PIVOT_AGENT_FOREACH_WORKER_IMAGE', 'PIVOT_AGENT_FOREACH_WORKER_COMMAND', 'node,/runner/agent-foreach-worker.js']
+    ['foreach', 'PIVOT_AGENT_FOREACH_WORKER_IMAGE', 'PIVOT_AGENT_FOREACH_WORKER_COMMAND', 'node,/runner/agent-foreach-worker.js'],
+    ['ppt_master', 'PIVOT_PPT_MASTER_IMAGE', '', 'python,/runner/runner.py']
 ]);
 
 function parseCommand(value, fallback) { return String(value || fallback).split(',').map(item => item.trim()).filter(Boolean).slice(0, 8); }
@@ -28,7 +29,7 @@ function preflightCapabilityWorkers(env = process.env, deps = {}) {
         const image = String(env[imageKey] || '').trim();
         if (!image) { workers.push({ name, configured: false, ready: false }); continue; }
         let trust;
-        try { trust = verifyWorkerSignature(normalizeDefinition({ image, command: parseCommand(env[commandKey], fallbackCommand) }), { env }); }
+        try { trust = verifyWorkerSignature(normalizeDefinition({ image, command: parseCommand(env[commandKey], fallbackCommand) }), { env: name === 'ppt_master' ? require('../server/services/presentations/master/deployment').workerEnv(env) : env }); }
         catch (error) { workers.push({ name, configured: true, ready: false, errorCode: error.code || 'worker_untrusted' }); blockers.push(`${name}:signature`); continue; }
         const inspected = (deps.inspectImage || inspectImage)(command, image, deps.spawnSync);
         const ready = inspected.present === true;

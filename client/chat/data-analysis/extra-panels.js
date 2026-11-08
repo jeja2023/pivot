@@ -44,6 +44,7 @@
         <span class="data-analysis-picker-label">治理数据集</span>
         <select id="data-analysis-governance-dataset" class="form-input data-analysis-picker-select"></select>
             </label>
+            <button id="data-analysis-source-metadata" class="btn-secondary" type="button">来源业务信息</button>
             <button id="data-analysis-governance-refresh" class="btn-secondary" type="button" title="刷新治理信息">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
         <span>刷新治理信息</span>
@@ -69,9 +70,9 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
         <span>业务指标口径</span>
             </button>
-            <button id="data-analysis-open-model-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-model-modal">
+            <button id="data-analysis-open-model-modal" class="btn-secondary btn-sm" type="button">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
-        <span>跨表关联模型</span>
+        <span>打开数据建模</span>
             </button>
             <button id="data-analysis-open-scale-modal" class="btn-secondary btn-sm" type="button" data-analysis-modal-trigger="data-analysis-scalability-modal">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
@@ -262,11 +263,12 @@ ${app.dataModelPanelMarkup}
                         <span id="data-analysis-scale-file-name" class="data-analysis-file-chosen-text">未选择任何文件</span>
                         <input id="data-analysis-scale-increment-file" class="data-analysis-hidden-file-input" type="file" accept=".csv,.xlsx,.xls,.sqlite,.sqlite3,.db">
                     </div>
+                    <label>追加批次（可选）<input id="data-analysis-scale-increment-batch" class="form-input" maxlength="128" placeholder="不填时按原文件摘要识别重复批次"></label>
                     <button id="data-analysis-scale-append" class="btn-secondary btn-sm" type="button">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                         <span>追加为新版本</span>
                     </button>
-                    <small>字段顺序必须与当前数据集一致；旧版本文件会保留用于回放。</small>
+                    <small>字段顺序必须与当前数据集一致；同批次重试不会重复追加。来源业务期间请在合并后核对补录。</small>
                 </div>
                 <div class="data-analysis-pipe-box">
                     <div class="data-analysis-pipe-box-head">

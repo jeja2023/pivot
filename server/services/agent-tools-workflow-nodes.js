@@ -484,13 +484,14 @@ async function executeWorkflowNotify(input = {}, user = null, context = {}) {
     const delivery = await enqueueChannelDelivery(user, {
         bindingId,
         platform: '',
-        requirePlatform: true,
+        requirePlatform: !input.analysisRunId,
         eventType: String(input.eventType || 'workflow.notify').slice(0, 80),
         subject: String(input.subject || input.title || '').slice(0, 255),
         body,
         idempotencyKey,
         interaction: {
-            format: String(input.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text'
+            format: String(input.format || 'text').toLowerCase() === 'markdown' ? 'markdown' : 'text',
+            ...(input.analysisRunId ? { analysisSource: { runId: input.analysisRunId, recipientUserIds: input.analysisRecipientUserIds } } : {})
         }
     });
     if (!delivery) throw new Error('通知渠道不存在、未启用或当前用户无权使用。');

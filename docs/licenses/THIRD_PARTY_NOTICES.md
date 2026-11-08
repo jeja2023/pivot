@@ -5,9 +5,17 @@
 | 组件 | 用途 | 许可 |
 | --- | --- | --- |
 | sharp | 图片处理 Node.js 绑定 | Apache-2.0 |
+| Ponytail 5.3.3 指引适配 | 中文代码审查、仓库审计与复用原则参考 | MIT |
 | libvips（由 sharp 预编译二进制携带） | 图片编解码与变换 | LGPL-3.0-or-later |
 | KaTeX | 公式排版 | MIT |
 | ECharts | 图表渲染 | Apache-2.0 |
+| Apache POI DrawingML 预设形状数据（187 类） | 原生形状的浏览器/服务端几何求值 | Apache-2.0 |
+| PPT Master 形状/几何接口参考 | DrawingML 数据来源追溯与公式/圆弧行为参考 | MIT |
+| PPT Master 6.8.0 完整技能发行包 | 固定工作流、模板、转换与公式工具 | MIT；包内第三方资源各自许可随原包保留 |
+| LibreOffice Impress（Debian发行包） | 离线原稿静态预览 | MPL-2.0 / LGPL及所含组件各自许可，详见镜像内copyright文件 |
+| Poppler（Debian poppler-utils） | 本地PDF页面栅格化 | GPL及所含组件各自许可，详见镜像内copyright文件 |
+| FFmpeg / libx264（Debian发行包） | 本地页面视频与音频编码 | 构建配置决定的GPL/LGPL及相关许可，详见镜像内copyright文件 |
+| Matplotlib 3.11.2 及随包数学字体 | 离线预览副本中的独立公式排版 | Matplotlib许可及字体各自许可，完整声明保留在Python包与dist-info目录 |
 | Mermaid 11.17.2（离线静态构建） | 回复中的图形预览 | MIT；所含依赖许可见资源清单 |
 | SimpleMindMap 0.14.0-fix.3（裁剪构建） | 思维导图编辑、布局与导出 | MIT |
 | Yjs 13.6.33 / lib0 | 思维导图字段级协作合并与本地撤销 | MIT |
@@ -35,3 +43,13 @@ Vosk 运行库由固定版本 Python 依赖安装，其第三方依赖许可随�
 主镜像中的 CPython 3.12 来自 [Python 官方 Docker 镜像](https://github.com/docker-library/python)，解释器自带的 `LICENSE.txt` 随标准库目录保留；项目未修改解释器源码。系统软件可能因发行版依赖保留自己的 Python，项目通过 `/usr/local/bin/python3.12` 明确选择运行时。
 
 CPU 语音 Python 包的许可证、作者和版本元数据随虚拟环境中的 `dist-info` 保留。模型权重由管理员单独导入，不打包进主镜像；交付时须连同模型仓库的说明及许可一并保留。
+
+## Ponytail 指引
+
+Ponytail 指引固定参考 [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail/tree/96608e078b2d5ea607c5c3b8b5a54d1c1fba6846) 的 5.3.3 版本，提交 `96608e078b2d5ea607c5c3b8b5a54d1c1fba6846`。中文适配保存在 `server/skills/code-review/SKILL.md` 和 `server/skills/code-audit/SKILL.md`，采用 Pivot 的只读工具、显式调用与验收边界，不包含原插件的生命周期脚本、模式持久化或统计面板。完整原始 MIT 许可与版权声明见同目录 `PONYTAIL-MIT.txt`，随服务端和桌面发行保留。
+
+## DrawingML 预设形状
+
+原稿/视频执行镜像中的Debian组件通过发行包安装，未删除 `/usr/share/doc/<package>/copyright`，各包版本和对应源代码由Debian相同发行版及安全更新仓库提供。正式离线分发时须随镜像保留版权声明及适用许可，并提供与实际二进制对应的源代码获取或随附方式；不能以PPT Master的MIT许可覆盖LibreOffice、Poppler、FFmpeg或字体的独立许可。
+
+固定来源与转换方式见 `client/vendor/presentation/NOTICE.md`。运行时目录由 Apache POI 5.4.1 的形状数据机械转换，随发行版保留 Apache-2.0 完整文本；PPT Master 的 MIT 声明同时保留。文件位于 `client/vendor/presentation/`，不依赖在线下载。

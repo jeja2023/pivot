@@ -147,6 +147,8 @@ test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保�
         await pool().query('DELETE FROM presentation_templates WHERE tenant_id = $1', [tenantId]);
         await pool().query('DELETE FROM agent_artifacts WHERE user_id = $1', [user.id]);
         await pool().query('DELETE FROM agent_artifact_objects WHERE owner_user_id = $1', [user.id]);
+        // 独立保留的审计版本可引用测试创建者；账号清理不应掩盖正文断言结果。
+        await pool().query('UPDATE agent_artifact_versions SET created_by = NULL WHERE created_by = $1', [user.id]);
         await pool().query('DELETE FROM users WHERE id = $1', [user.id]);
         await pool().query('DELETE FROM organizations WHERE id = $1', [tenantId]);
     }

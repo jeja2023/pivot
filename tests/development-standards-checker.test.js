@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     buildBaseRefCandidates,
     extractMessageStringLiterals,
+    extractHtmlText,
     isSkippableGeneratedFile,
     resolveChangedDiffArgs
 } = require('../scripts/check_development_standards');
@@ -32,4 +33,11 @@ test('PR 增量范围使用目标分支 merge-base，普通推送回退到上一
     );
     assert.deepEqual(resolveChangedDiffArgs({}, () => '', () => true), ['HEAD']);
     assert.deepEqual(resolveChangedDiffArgs({}, () => '', () => false), ['HEAD^', 'HEAD']);
+});
+
+test('界面文案检查保留真实标签文字，忽略JavaScript数值比较与SVG动态拼接', () => {
+    assert.deepEqual(extractHtmlText('if (minutes > 720 || seconds < 0) return;'), []);
+    assert.deepEqual(extractHtmlText('if (fraction >= 1 - 1e-10) pieces.push(`<circle cx="${cx}"/>`);'), []);
+    assert.deepEqual(extractHtmlText('<div>Hello<br/>World<span>Save now</span></div>'), ['Hello', 'World', 'Save now']);
+    assert.deepEqual(extractHtmlText('<span class="label">保存</span>'), ['保存']);
 });

@@ -1,0 +1,87 @@
+'use strict';
+/* global window */
+const { test, expect } = require('@playwright/test');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const Zip = require('jszip');
+const { fixture } = require('../../scripts/test_support/ppt_native_fixture');
+
+function testAudio() {
+    const rate = 24000, samples = rate, buffer = Buffer.alloc(44 + samples * 2);
+    buffer.write('RIFF'); buffer.writeUInt32LE(buffer.length - 8, 4); buffer.write('WAVEfmt ', 8); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(rate, 24); buffer.writeUInt32LE(rate * 2, 28); buffer.writeUInt16LE(2, 32); buffer.writeUInt16LE(16, 34); buffer.write('data', 36); buffer.writeUInt32LE(samples * 2, 40);
+    for (let index = 0; index < samples; index++) buffer.writeInt16LE(Math.round(Math.sin(index / rate * 440 * Math.PI * 2) * 4000), 44 + index * 2);
+    return buffer;
+}
+
+test('原稿离线导入、浏览器编辑、版本恢复、PPTX往返与带音轨MP4交付', async ({ page }, testInfo) => {
+    test.setTimeout(600000);
+    test.skip(process.env.PIVOT_PPT_MASTER_ENABLED !== 'true', '需要已登记的离线原稿运行镜像');
+    const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } }); expect(login.ok()).toBeTruthy();
+    const accessToken = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_access_token')?.value;
+    expect(accessToken).toBeTruthy();
+    const csrf = async () => ({ 'x-csrf-token': (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await page.locator('#presentation-more-create-dropdown summary').click();
+    await page.locator('[data-presentation-native-open]').first().click();
+    await page.locator('#presentation-native-upload').setInputFiles({ name: '离线原稿验收.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: await fixture() });
+    const begin = page.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST'); await page.locator('#presentation-native-import').click();
+    const started = await begin; expect(started.ok()).toBeTruthy(); const taskId = (await started.json()).task.id;
+    const getJob = async id => {
+        const response = await page.request.get('/api/apps/presentations/native/jobs/' + id, { headers: { Authorization: 'Bearer ' + accessToken } }), body = await response.json();
+        if (!response.ok() || !body.task) throw new Error(`读取原稿任务失败（${response.status()}）：${body.code || body.error || '响应缺少任务'}`);
+        return body.task;
+    };
+    await expect.poll(async () => (await getJob(taskId)).status, { timeout: 150000 }).toBe('completed');
+    const firstJob = await getJob(taskId), documentId = firstJob.result.documentId;
+    await expect(page.locator('#presentation-native-version')).toHaveValue('1', { timeout: 15000 });
+    const original = (await (await page.request.get('/api/apps/presentations/native/documents/' + documentId)).json()).document;
+    const rich = original.manifest.slides[0].objects.find(object => object.name === '验收富文本');
+    await page.locator('#presentation-native-object').selectOption(rich.id);
+    await page.getByRole('textbox', { name: '文字分段1', exact: true }).fill('浏览器离线修改');
+    const savedResponse = page.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST'); await page.locator('#presentation-native-save').click();
+    const saved = await savedResponse; expect(saved.ok()).toBeTruthy(); const editId = (await saved.json()).task.id;
+    await expect.poll(async () => (await getJob(editId)).status, { timeout: 150000 }).toBe('completed');
+    await expect(page.locator('#presentation-native-version')).toHaveValue('2', { timeout: 15000 });
+    const stale = await page.request.post('/api/apps/presentations/native/jobs', { headers: await csrf(), data: { kind: 'patch', documentId, baseVersion: 1, patches: [{ slideIndex: 0, objectId: rich.id, frame: { x: 20 } }] } }); expect(stale.status()).toBe(409);
+    const download = page.waitForEvent('download'); await page.getByRole('button', { name: '下载此版本PPTX', exact: true }).click(); const downloaded = await download;
+    const downloadedBytes = await fs.readFile(await downloaded.path()), exported = await Zip.loadAsync(downloadedBytes);
+    expect(await exported.file('ppt/slides/slide1.xml').async('string')).toContain('浏览器离线修改');
+    const originalZip = await Zip.loadAsync(await fixture()); expect(await exported.file('ppt/slides/slide3.xml').async('string')).toBe(await originalZip.file('ppt/slides/slide3.xml').async('string'));
+    await page.locator('#presentation-native-version').selectOption('1');
+    await expect(page.locator('#presentation-native-notice')).toContainText('· v1。');
+    const restoreResponse = page.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST');
+    await page.getByRole('button', { name: '恢复所选历史版本', exact: true }).click(); const restore = await restoreResponse; expect(restore.ok()).toBeTruthy(); const restoreId = (await restore.json()).task.id;
+    await expect.poll(async () => (await getJob(restoreId)).status, { timeout: 150000 }).toBe('completed');
+    await expect(page.locator('#presentation-native-version')).toHaveValue('3', { timeout: 15000 });
+    const restored = (await (await page.request.get('/api/apps/presentations/native/documents/' + documentId)).json()).document;
+    expect(restored.manifest.slides[0].objects.find(object => object.id === rich.id).runs[0].text).toBe('离线');
+    await page.locator('#presentation-native-upload').setInputFiles({ name: '再导入原稿.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', buffer: downloadedBytes });
+    const importedResponse = page.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST'); await page.locator('#presentation-native-import').click();
+    const imported = await importedResponse; const importId = (await imported.json()).task.id;
+    await expect.poll(async () => (await getJob(importId)).status, { timeout: 150000 }).toBe('completed');
+    const importedId = (await getJob(importId)).result.documentId;
+    await expect(page.locator('#presentation-native-documents')).toHaveValue(importedId, { timeout: 15000 });
+    const reimported = (await (await page.request.get('/api/apps/presentations/native/documents/' + importedId)).json()).document;
+    expect(reimported.manifest.slides[0].objects.find(object => object.id === rich.id).runs[0].text).toBe('浏览器离线修改');
+    await page.getByRole('button', { name: '离线导出MP4', exact: true }).click();
+    await page.getByRole('spinbutton', { name: '每页基础停留秒数', exact: true }).fill('1');
+    await page.locator('[data-narration-slide="0"]').setInputFiles({ name: '旁白音轨验收提示音.wav', mimeType: 'audio/wav', buffer: testAudio() });
+    await page.locator('#presentation-native-video-accept').check();
+    const videoResponse = page.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST'); await page.getByRole('button', { name: '开始离线视频导出', exact: true }).click();
+    const videoTask = await videoResponse; expect(videoTask.ok()).toBeTruthy(); const videoId = (await videoTask.json()).task.id;
+    await expect.poll(async () => (await getJob(videoId)).status, { timeout: 150000 }).toBe('completed');
+    const completed = await getJob(videoId); expect(completed.result.report.narratedSlides).toBe(1); expect(completed.result.report.animationPlayback).toBe('not_included');
+    const mp4Download = page.waitForEvent('download'); await page.getByRole('button', { name: '下载MP4视频', exact: true }).click(); const mp4 = await mp4Download;
+    const videoBytes = await fs.readFile(await mp4.path()); expect(videoBytes.subarray(4, 8).toString()).toBe('ftyp'); expect(videoBytes.length).toBeGreaterThan(10000);
+    const evidence = process.env.E2E_PPT_NATIVE_EVIDENCE_DIR || testInfo.outputPath('evidence'); await fs.mkdir(evidence, { recursive: true });
+    await fs.writeFile(path.join(evidence, 'edited-browser.pptx'), downloadedBytes); await fs.writeFile(path.join(evidence, 'narrated-page-video.mp4'), videoBytes); await fs.writeFile(path.join(evidence, 'browser-result.json'), JSON.stringify(completed, null, 2));
+    await page.locator('#presentation-native-status').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(evidence, 'desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 }); const dialog = page.getByRole('dialog', { name: '原稿编辑与离线视频' });
+    expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy(); await page.screenshot({ path: path.join(evidence, 'mobile.png') });
+    await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await page.locator('#presentation-more-create-dropdown summary').click();
+    await page.locator('[data-presentation-native-open]').first().click();
+    await expect(page.getByRole('button', { name: '下载MP4视频', exact: true })).toBeVisible();
+});

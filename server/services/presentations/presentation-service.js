@@ -399,10 +399,13 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     const activeTemplate = await resolveTemplateVersionForUser(user, templateId, templateVersion, { historical: true }) || await resolveTemplateForUser(user, templateId);
     if (!activeTemplate) throw publicError('所选模板不存在或无权使用。', 404, 'PRESENTATION_TEMPLATE_NOT_FOUND');
     const previousContent = parseJson(current.content_json, {});
+    const expectedContent = options.expectedContentDigest ? serializeJson(previousContent) : null;
+    if (options.expectedContentDigest && computePresentationDigest(previousContent) !== options.expectedContentDigest) throw publicError('文稿或制作目标已变化，请重新生成方案。', 409, 'PRESENTATION_STORY_STALE');
     const submittedMetadata = { ...((body.content && body.content.metadata) || {}), planApproval: previousContent.metadata?.planApproval || null };
     const reviewSafeContent = preserveSlideReviews(previousContent, body.content || {}, { allowReviewMutation: options.allowReviewMutation === true });
     let content = normalizePresentation({ ...reviewSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
-    content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow' });
+    content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow',
+        recolor: body.templateApplyMode === 'theme' || body.template_apply_mode === 'theme' || templateId !== current.template_id || Number(templateVersion) !== Number(current.template_version) });
     content = applyTemplateBrandControls(content, activeTemplate);
     if (body.templateApplyMode === 'reflow') content = await require('./presentation-text-metrics').fitDesignPresentation(content);
     const trustedAssetRefs = collectPresentationAssetRefs(parseJson(current.content_json, {}));
@@ -419,9 +422,9 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
                 UPDATE presentation_documents
                 SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, status = ?,
                     template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, updated_at = NOW()
-                WHERE id = ? AND current_version = ? AND deleted_at IS NULL
+                WHERE id = ? AND current_version = ? AND deleted_at IS NULL AND (?::jsonb IS NULL OR content_json::jsonb=?::jsonb)
                 RETURNING *
-            `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion]);
+            `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion, expectedContent, expectedContent]);
             if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
             return document;
         });
@@ -443,33 +446,35 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     // presentation_versions.created_by 与路由审计记录。这样既允许协作者保存，
     // 又不会把 Artifact 所有权或下载边界意外转移给协作者。
     const artifactOwner = Number(current.owner_user_id) === Number(user.id) ? user : { id: Number(current.owner_user_id) };
-    let artifact = current.artifact_id ? await createStandaloneArtifact(artifactOwner, {
-        artifactId: current.artifact_id,
-        type: 'presentation',
-        title,
-        content: contentJson,
-        preserveWhitespace: true,
-        note: String(body.note || '保存演示文稿').trim().slice(0, 500)
-    }) : null;
-    if (!artifact) {
-        artifact = await createStandaloneArtifact(artifactOwner, {
+    const nextVersion = baseVersion + 1;
+    const updated = await transaction(async trx => {
+        const document = await trx.queryOne(`
+            UPDATE presentation_documents
+            SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, updated_at = NOW()
+            WHERE id = ? AND current_version = ? AND deleted_at IS NULL AND (?::jsonb IS NULL OR content_json::jsonb=?::jsonb)
+            RETURNING *
+        `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion, expectedContent, expectedContent]);
+        if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
+        let artifact = current.artifact_id ? await createStandaloneArtifact(artifactOwner, {
+            artifactId: current.artifact_id,
             type: 'presentation',
             title,
             content: contentJson,
             preserveWhitespace: true,
             note: String(body.note || '保存演示文稿').trim().slice(0, 500)
-        });
-    }
-    const resolvedArtifactId = artifact?.id || current.artifact_id || null;
-    const nextVersion = baseVersion + 1;
-    const updated = await transaction(async trx => {
-        const document = await trx.queryOne(`
-            UPDATE presentation_documents
-            SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, artifact_id = COALESCE(?, artifact_id), updated_at = NOW()
-            WHERE id = ? AND current_version = ? AND deleted_at IS NULL
-            RETURNING *
-        `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, resolvedArtifactId, current.id, baseVersion]);
-        if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
+        }, { executor: trx }) : null;
+        if (!artifact) {
+            artifact = await createStandaloneArtifact(artifactOwner, {
+                type: 'presentation',
+                title,
+                content: contentJson,
+                preserveWhitespace: true,
+                note: String(body.note || '保存演示文稿').trim().slice(0, 500)
+            }, { executor: trx });
+        }
+        if (artifact && Number(artifact.id) !== Number(document.artifact_id)) {
+            await trx.execute('UPDATE presentation_documents SET artifact_id=? WHERE id=?', [artifact.id, current.id]); document.artifact_id = artifact.id;
+        }
         await trx.execute(`
             INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())

@@ -1,0 +1,1989 @@
+/* 数据建模一体化画布工作台样式：遵循全局 CSS 变量规范，支持右侧弹出式抽屉、算子库与底部实时数据预览 */
+
+.data-analysis-panel.is-modeling-immersive {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+}
+
+.data-analysis-panel.is-modeling-immersive>.data-analysis-sidebar,
+.data-analysis-panel.is-modeling-immersive .data-analysis-toolbar {
+    display: none;
+}
+
+.data-analysis-panel.is-modeling-immersive>.data-analysis-main {
+    border: 0;
+    border-radius: 0;
+    background: var(--bg-main);
+    overflow-y: auto;
+}
+
+#data-analysis-modeling-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    padding: 10px 14px 18px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    background: var(--bg-main);
+}
+
+.modeling-workspace,
+.modeling-list-view,
+.modeling-editor-view,
+.modeling-studio-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* 顶部统一卡片工具栏 */
+.modeling-surface-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 9px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.modeling-filter-bar,
+.modeling-bar-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+}
+
+.modeling-search-input.form-input {
+    width: 220px;
+    max-width: 100%;
+    height: 34px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+.modeling-filter-select.form-input {
+    width: auto;
+    min-width: 138px;
+    max-width: 100%;
+    height: 34px;
+    padding: 0 28px 0 10px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+.modeling-surface-bar .btn-primary,
+.modeling-surface-bar .btn-secondary,
+.modeling-card-header .btn-primary,
+.modeling-card-header .btn-secondary,
+.modeling-result-head .btn-primary,
+.modeling-result-head .btn-secondary {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.modeling-surface-bar .btn-secondary.is-selected,
+.modeling-canvas-toolbar .btn-secondary.is-selected,
+.modeling-mini-btn.btn-secondary.is-selected {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    color: var(--primary);
+}
+
+/* 列表页简明引导条 */
+.modeling-guide-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 14px;
+    background: color-mix(in srgb, var(--primary) 6%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border));
+    border-radius: 8px;
+    font-size: 0.78rem;
+    color: var(--text-main);
+}
+
+.modeling-guide-title {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.modeling-guide-item {
+    font-weight: 500;
+}
+
+.modeling-guide-sep {
+    color: var(--text-muted);
+}
+
+/* 编辑器标题头与保存徽标 */
+.modeling-editor-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 260px;
+}
+
+.modeling-editor-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.modeling-editor-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+}
+
+.modeling-editor-name {
+    font-size: 0.96rem;
+    font-weight: 700;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 320px;
+}
+
+.modeling-version-pill,
+.modeling-save-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.73rem;
+    font-weight: 600;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
+.modeling-save-pill[data-state="saved"] {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+
+.modeling-save-pill[data-state="unsaved"],
+.modeling-save-pill[data-state="saving"] {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+
+.modeling-save-pill[data-state="failed"] {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+
+.modeling-status-line {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+/* 更多菜单下拉 */
+.modeling-more {
+    position: relative;
+}
+
+.modeling-more-trigger {
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-main);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+.modeling-more-trigger::-webkit-details-marker {
+    display: none;
+}
+
+.modeling-more-trigger::after {
+    content: '▾';
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.modeling-more-trigger:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.modeling-more[open]>.modeling-more-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 35;
+    min-width: 176px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+}
+
+.modeling-more-menu .btn-secondary {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    height: 32px;
+    border-color: transparent;
+    background: transparent;
+}
+
+.modeling-more-menu .btn-secondary:hover {
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+    color: var(--primary);
+}
+
+/* 通用语义徽标 */
+.modeling-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    color: var(--text-muted);
+}
+
+.modeling-badge.is-success {
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+}
+
+.modeling-badge.is-info {
+    color: var(--text-main);
+    background: color-mix(in srgb, var(--primary) 8%, var(--bg-main));
+    border-color: color-mix(in srgb, var(--primary) 22%, var(--border));
+}
+
+.modeling-badge.is-warning {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+}
+
+.modeling-badge.is-danger {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+}
+
+/* 一体化全屏画布工作台骨架 */
+.modeling-studio-shell {
+    position: relative;
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+    min-width: 0;
+    min-height: calc(100vh - 186px);
+}
+
+.modeling-studio-shell.is-palette-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.modeling-studio-shell.has-drawer {
+    grid-template-columns: 248px minmax(0, 1fr) 416px;
+}
+
+.modeling-studio-shell.has-drawer.has-wide-drawer {
+    grid-template-columns: 248px minmax(0, 1fr) minmax(440px, 520px);
+}
+
+.modeling-studio-shell.is-palette-collapsed.has-drawer {
+    grid-template-columns: minmax(0, 1fr) 416px;
+}
+
+.modeling-studio-shell.is-palette-collapsed.has-drawer.has-wide-drawer {
+    grid-template-columns: minmax(0, 1fr) minmax(440px, 540px);
+}
+
+.modeling-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.modeling-rail-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.modeling-rail-section+.modeling-rail-section {
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.modeling-rail-head,
+.modeling-drawer-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.modeling-rail-head h5 {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.modeling-drawer-subhead>span:first-child {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.modeling-rail-count {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.modeling-rail-tip {
+    margin: 0;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* 左侧内置算子与数据集库 */
+.modeling-op-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.modeling-op-item.btn-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    height: 32px;
+    padding: 0 6px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    min-width: 0;
+}
+
+.modeling-op-item[draggable="true"] {
+    cursor: grab;
+}
+
+.modeling-op-badge {
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    background: color-mix(in srgb, var(--primary) 14%, var(--surface));
+    color: var(--primary);
+}
+
+.modeling-op-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.modeling-compact-search.form-input {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    border-radius: 7px;
+}
+
+.modeling-canvas-sources,
+.modeling-node-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 210px;
+    overflow-y: auto;
+    min-width: 0;
+}
+
+.modeling-source-item.btn-secondary,
+.modeling-node-item.btn-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    height: 32px;
+    padding: 0 9px;
+    border-radius: 7px;
+    font-size: 0.78rem;
+    text-align: left;
+    min-width: 0;
+}
+
+.modeling-source-item[draggable="true"] {
+    cursor: grab;
+}
+
+.modeling-source-name,
+.modeling-node-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.modeling-source-tag {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.modeling-node-item.btn-secondary.is-selected {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+    color: var(--primary);
+}
+
+.modeling-node-role {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.67rem;
+    font-weight: 700;
+    background: var(--bg-main);
+    color: var(--text-muted);
+}
+
+.modeling-node-role.is-fact {
+    background: color-mix(in srgb, var(--primary) 15%, var(--surface));
+    color: var(--primary);
+}
+
+/* 中央大视野画布容器 */
+.modeling-canvas-stage {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.modeling-canvas-toolbar-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-wrap: wrap;
+}
+
+.modeling-canvas-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.modeling-canvas-actions,
+.modeling-canvas-zoom-group,
+.modeling-canvas-quick-edit {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.modeling-canvas-toolbar-wrap .btn-secondary {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.77rem;
+    border-radius: 6px;
+}
+
+.modeling-grain-pill.btn-secondary {
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+    color: var(--warning);
+}
+
+.modeling-canvas-grain-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--primary) 4%, var(--surface));
+    font-size: 0.75rem;
+    color: var(--text-main);
+}
+
+.modeling-zoom-label {
+    min-width: 42px;
+    text-align: center;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.modeling-canvas-hint {
+    flex: 1 1 180px;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modeling-graph-container {
+    flex: 1 1 auto;
+    overflow: auto;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 460px;
+    background-color: var(--bg-main);
+    background-image: radial-gradient(color-mix(in srgb, var(--text-muted) 22%, transparent) 1px, transparent 1px);
+    background-size: 18px 18px;
+    cursor: grab;
+}
+
+.modeling-graph-container.is-panning {
+    cursor: grabbing;
+}
+
+.modeling-graph-container.is-drag-over {
+    outline: 2px dashed var(--primary);
+    outline-offset: -4px;
+    background-color: color-mix(in srgb, var(--primary) 5%, var(--bg-main));
+}
+
+.modeling-graph {
+    display: block;
+    min-width: 100%;
+    min-height: 450px;
+}
+
+/* 紧凑单圆点 SVG 节点卡片与双模连线 */
+.modeling-graph path {
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 2px;
+}
+
+.modeling-graph marker path {
+    fill: var(--text-muted);
+    stroke: none;
+}
+
+.modeling-graph text {
+    fill: var(--text-main);
+    font-family: inherit;
+    font-size: 12px;
+    user-select: none;
+}
+
+.modeling-graph-node {
+    cursor: pointer;
+    touch-action: none;
+}
+
+.modeling-graph-node:focus {
+    outline: none;
+}
+
+.modeling-graph-node .modeling-node-card {
+    fill: var(--surface);
+    stroke: var(--border);
+    stroke-width: 1.6px;
+}
+
+.modeling-graph-node .modeling-node-accent {
+    fill: var(--primary);
+    stroke: none;
+}
+
+.modeling-graph-node.is-dimension .modeling-node-accent {
+    fill: color-mix(in srgb, var(--primary) 55%, var(--text-muted));
+}
+
+.modeling-graph-node.is-operator .modeling-node-accent {
+    fill: var(--warning);
+}
+
+.modeling-graph-node.is-op-sql .modeling-node-accent {
+    fill: var(--primary);
+}
+
+.modeling-graph-node .modeling-node-badge-bg {
+    fill: color-mix(in srgb, var(--primary) 13%, var(--surface));
+    stroke: none;
+}
+
+.modeling-graph-node.is-operator .modeling-node-badge-bg {
+    fill: color-mix(in srgb, var(--warning) 15%, var(--surface));
+}
+
+.modeling-graph-node .modeling-node-badge-text {
+    fill: var(--primary);
+    font-size: 10.5px;
+    font-weight: 700;
+}
+
+.modeling-graph-node.is-operator .modeling-node-badge-text {
+    fill: var(--warning);
+}
+
+.modeling-graph-node.is-selected .modeling-node-card,
+.modeling-graph-node:focus .modeling-node-card {
+    stroke: var(--primary);
+    stroke-width: 2.3px;
+}
+
+.modeling-graph-node.is-previewing .modeling-node-card {
+    stroke: var(--primary);
+    stroke-width: 2.4px;
+}
+
+.modeling-graph-node.is-connection-target .modeling-node-card {
+    stroke: var(--primary);
+    stroke-width: 2.3px;
+    stroke-dasharray: 6 3;
+}
+
+.modeling-canvas-heading {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.modeling-graph .modeling-canvas-subtext {
+    fill: var(--text-muted);
+    font-size: 11px;
+}
+
+.modeling-graph .modeling-canvas-port {
+    fill: var(--surface);
+    stroke: var(--text-muted);
+    stroke-width: 2.2px;
+    cursor: crosshair;
+    transition: fill 0.12s ease, stroke 0.12s ease;
+}
+
+.modeling-graph .modeling-canvas-port:hover,
+.modeling-graph .modeling-canvas-port:focus,
+.modeling-graph .modeling-canvas-port.is-active-port {
+    stroke: var(--primary);
+    fill: var(--primary);
+    outline: none;
+}
+
+.modeling-graph .modeling-canvas-port[aria-disabled="true"] {
+    cursor: default;
+}
+
+.modeling-canvas-edge {
+    cursor: pointer;
+}
+
+.modeling-canvas-edge:focus {
+    outline: none;
+}
+
+.modeling-graph .modeling-canvas-edge-hit {
+    stroke: transparent;
+    stroke-width: 16px;
+}
+
+.modeling-canvas-edge.is-flow-edge .modeling-canvas-edge-line {
+    stroke: color-mix(in srgb, var(--primary) 72%, var(--text-muted));
+    stroke-dasharray: 6 3;
+}
+
+.modeling-canvas-edge .modeling-edge-pill {
+    fill: var(--surface);
+    stroke: var(--border);
+    stroke-width: 1px;
+}
+
+.modeling-canvas-edge text {
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.modeling-canvas-edge:hover .modeling-canvas-edge-line,
+.modeling-canvas-edge:focus .modeling-canvas-edge-line {
+    stroke: var(--primary);
+    stroke-width: 2.5px;
+}
+
+.modeling-canvas-edge:hover .modeling-edge-pill,
+.modeling-canvas-edge:focus .modeling-edge-pill {
+    stroke: var(--primary);
+}
+
+.modeling-graph .modeling-canvas-preview {
+    stroke: var(--primary);
+    stroke-width: 2.2px;
+    stroke-dasharray: 6 4;
+    pointer-events: none;
+}
+
+/* 右侧弹出式配置抽屉（按需展开，不遮挡画布工具栏与底部数据预览） */
+.modeling-node-drawer {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    max-height: calc(100vh - 186px);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+.modeling-node-drawer.is-wide {
+    width: 100%;
+}
+
+.modeling-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.modeling-drawer-tabs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.modeling-drawer-tab.btn-secondary {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 0.75rem;
+    border-radius: 6px;
+    border-color: transparent;
+    background: var(--bg-main);
+    color: var(--text-muted);
+}
+
+.modeling-drawer-tab.btn-secondary.is-active {
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.modeling-drawer-header>.btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.75rem;
+    border-radius: 6px;
+}
+
+.modeling-drawer-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.modeling-drawer-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.modeling-drawer-toolbar .btn-primary,
+.modeling-drawer-toolbar .btn-secondary,
+.modeling-drawer-actions .btn-primary,
+.modeling-drawer-actions .btn-secondary,
+.modeling-drawer-actions .btn-danger {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.77rem;
+    border-radius: 6px;
+}
+
+.modeling-drawer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.modeling-drawer-section+.modeling-drawer-section {
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.modeling-drawer-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.modeling-drawer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* 抽屉内节点详情、字段搜索、算子表单与内置函数助手 */
+.modeling-inspector-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+}
+
+.modeling-inspector-title {
+    font-size: 0.88rem;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modeling-inspector-meta {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.modeling-inspector-meta strong {
+    color: var(--text-main);
+}
+
+.modeling-relation-mini {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    font-size: 0.77rem;
+}
+
+.modeling-relation-mini strong {
+    display: block;
+    color: var(--text-main);
+}
+
+.modeling-relation-mini small {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.modeling-fields-section {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.modeling-field-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 310px;
+    overflow-y: auto;
+}
+
+.modeling-field-empty {
+    padding: 10px;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.modeling-field-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    min-width: 0;
+}
+
+.modeling-field-main {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.modeling-field-name {
+    font-size: 0.78rem;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modeling-field-quick {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.modeling-mini-btn.btn-secondary {
+    height: 22px;
+    padding: 0 6px;
+    font-size: 0.69rem;
+    border-radius: 4px;
+}
+
+.modeling-mini-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.modeling-mini-tag.is-key {
+    background: color-mix(in srgb, var(--primary) 14%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+    color: var(--primary);
+}
+
+.modeling-flow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.modeling-flow-row-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+}
+
+.modeling-flow-row-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.modeling-flow-row-top>.form-input {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 0.77rem;
+}
+
+.modeling-flow-row-card>.form-input:not(textarea) {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 0.77rem;
+}
+
+.modeling-code-input.form-input {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.77rem;
+    line-height: 1.45;
+    padding: 6px 8px;
+}
+
+.modeling-sql-textarea.form-input {
+    min-height: 120px;
+}
+
+.modeling-select-col-list {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.modeling-select-col-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 128px;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+}
+
+.modeling-select-col-row .form-input {
+    height: 26px;
+    padding: 0 6px;
+    font-size: 0.74rem;
+}
+
+.modeling-fn-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+}
+
+.modeling-chip-wrap,
+.modeling-fn-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.modeling-chip-btn.btn-secondary {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    border-radius: 999px;
+}
+
+.modeling-edge-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 0.74rem;
+}
+
+.modeling-fn-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    max-height: 186px;
+    overflow-y: auto;
+}
+
+.modeling-fn-card.btn-secondary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    height: auto;
+    padding: 5px 7px;
+    border-radius: 6px;
+    text-align: left;
+    min-width: 0;
+}
+
+.modeling-fn-card strong {
+    font-size: 0.72rem;
+    color: var(--primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.modeling-fn-card span {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* 底部可折叠实时数据运行预览面板 */
+.modeling-preview-dock {
+    display: flex;
+    flex-direction: column;
+    max-height: 290px;
+    border-top: 2px solid color-mix(in srgb, var(--primary) 32%, var(--border));
+    background: var(--surface);
+    min-width: 0;
+}
+
+.modeling-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--primary) 4%, var(--surface));
+}
+
+.modeling-preview-title-wrap,
+.modeling-preview-stats,
+.modeling-preview-steps {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.8rem;
+}
+
+.modeling-preview-steps-label {
+    font-size: 0.73rem;
+    color: var(--text-muted);
+}
+
+.modeling-step-chip.btn-secondary {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    border-radius: 999px;
+}
+
+.modeling-step-chip.btn-secondary.is-active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--surface);
+}
+
+.modeling-preview-header .modeling-bar-actions .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.75rem;
+    border-radius: 6px;
+}
+
+.modeling-preview-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 12px 10px;
+}
+
+.modeling-preview-table-wrap {
+    max-height: 215px;
+    overflow: auto;
+}
+
+.modeling-preview-th {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.modeling-preview-th small {
+    font-size: 0.66rem;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+/* 通用数据卡片与全局表格精修 */
+.modeling-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.modeling-list-card {
+    padding: 0;
+    overflow: hidden;
+}
+
+.modeling-list-card .table-container {
+    border: 0;
+    border-radius: 0;
+}
+
+.modeling-card-header,
+.modeling-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.modeling-card-header h5 {
+    margin: 0 0 2px;
+    font-size: 0.86rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.modeling-card-header .text-muted {
+    font-size: 0.75rem;
+}
+
+.modeling-title-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.modeling-title-inline h5 {
+    margin: 0;
+}
+
+.modeling-workspace .table-container {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.modeling-workspace .data-table {
+    width: 100%;
+    min-width: 480px;
+    table-layout: auto;
+}
+
+.modeling-list-card .data-table {
+    min-width: 920px;
+    border-collapse: collapse;
+}
+
+.modeling-list-card .data-table th,
+.modeling-list-card .data-table td {
+    height: 38px;
+    min-height: 38px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    vertical-align: middle;
+    box-sizing: border-box;
+    line-height: 1.25;
+}
+
+.modeling-list-card .data-table th {
+    height: 36px;
+    min-height: 36px;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.modeling-list-card .data-table tbody tr {
+    background: var(--bg-main);
+    transition: background 0.12s ease;
+}
+
+.modeling-list-card .data-table tbody tr:hover {
+    background: var(--bg-hover);
+}
+
+.modeling-list-card .col-index {
+    width: 52px;
+    text-align: center;
+}
+
+.modeling-list-card .col-actions {
+    min-width: 140px;
+    text-align: center;
+}
+
+.modeling-preview-dock .data-table {
+    min-width: 360px;
+}
+
+.modeling-cell-name {
+    color: var(--text-main);
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+.modeling-cell-desc {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320px;
+}
+
+.modeling-cell-primary {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 320px;
+}
+
+.modeling-cell-primary strong {
+    font-size: 0.83rem;
+    color: var(--text-main);
+}
+
+.modeling-cell-primary span,
+.modeling-ellipsis {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 300px;
+    display: block;
+}
+
+.modeling-cell-time {
+    white-space: nowrap;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.modeling-row-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 24px;
+    min-height: 24px;
+    white-space: nowrap;
+}
+
+.modeling-row-actions .btn-secondary,
+.modeling-row-actions .data-analysis-table-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    color: var(--text-main);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
+.modeling-row-actions .btn-secondary:hover,
+.modeling-row-actions .data-analysis-table-btn:hover {
+    border-color: var(--primary);
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.modeling-row-actions .data-analysis-table-btn.is-danger,
+.modeling-row-actions .btn-secondary.is-danger {
+    border-color: var(--danger);
+    background: var(--bg-main);
+    color: var(--danger);
+}
+
+.modeling-row-actions .data-analysis-table-btn.is-danger:hover,
+.modeling-row-actions .btn-secondary.is-danger:hover {
+    border-color: var(--danger);
+    background: var(--bg-hover);
+    color: var(--danger);
+}
+
+#modeling-list-pagination.workspace-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 10px;
+}
+
+#modeling-list-pagination.workspace-pagination .btn-secondary {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+#modeling-list-pagination.workspace-pagination span {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.modeling-num-cell {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.modeling-total-row td {
+    background: color-mix(in srgb, var(--primary) 6%, var(--bg-main));
+    font-weight: 700;
+}
+
+/* 空状态与状态提示块 */
+.modeling-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 42px 20px;
+    text-align: center;
+}
+
+.modeling-empty-state h4 {
+    margin: 0;
+    font-size: 0.98rem;
+    color: var(--text-main);
+}
+
+.modeling-empty-state p {
+    margin: 0;
+    max-width: 480px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+.modeling-empty-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.modeling-empty-inline {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 12px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 0.79rem;
+}
+
+.modeling-empty-inline p {
+    margin: 0;
+}
+
+.modeling-notice {
+    padding: 8px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    font-size: 0.78rem;
+    color: var(--text-main);
+    line-height: 1.45;
+}
+
+.modeling-notice.is-info {
+    border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+    background: color-mix(in srgb, var(--primary) 7%, var(--surface));
+}
+
+.modeling-notice.is-warning {
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+
+.modeling-notice.is-danger {
+    border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+    color: var(--danger);
+}
+
+/* 试算与分析面板 */
+.modeling-trial-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+
+.modeling-trial-top-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+}
+
+.modeling-trial-top-row>label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.modeling-trial-selectors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.modeling-result-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.79rem;
+}
+
+.modeling-consumer-box {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* 多选框（免按 Ctrl 点选 + 快捷全选清空） */
+.modeling-multi-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.modeling-multi-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.modeling-multi-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.modeling-multi-actions .btn-secondary {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+    border-radius: 5px;
+}
+
+.modeling-multi-select.form-input {
+    min-height: 112px;
+    padding: 4px;
+    border-radius: 8px;
+}
+
+.modeling-multi-select.form-input option {
+    padding: 6px 10px;
+    margin-bottom: 2px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.modeling-multi-select.form-input option:checked {
+    background: color-mix(in srgb, var(--primary) 16%, var(--surface));
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.modeling-field-label {
+    font-size: 0.79rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.modeling-field-hint,
+.modeling-dialog-note {
+    margin: 0;
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.modeling-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.79rem;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+/* 建模统一弹窗与渐进披露折叠组 */
+.modeling-dialog {
+    width: min(820px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    box-sizing: border-box;
+}
+
+.modeling-dialog .workspace-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 12px 12px 0 0;
+}
+
+.modeling-dialog h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.modeling-dialog form {
+    overflow: auto;
+    min-height: 0;
+}
+
+.modeling-dialog .workspace-modal-body.modeling-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 16px 18px;
+    background: var(--surface);
+    box-sizing: border-box;
+}
+
+.modeling-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.modeling-form fieldset,
+.modeling-form>p,
+.modeling-form>h4,
+.modeling-form>div,
+.modeling-form>details,
+.modeling-form>.modeling-checkbox,
+.modeling-form>.modeling-span-full {
+    grid-column: 1 / -1;
+}
+
+.modeling-inline-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.modeling-form fieldset {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 12px;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.modeling-form fieldset>legend {
+    padding: 0 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.modeling-form fieldset>div,
+.modeling-form fieldset>.modeling-expression-node,
+.modeling-form fieldset>button {
+    grid-column: 1 / -1;
+}
+
+#modeling-metric-currency>div {
+    grid-column: auto;
+}
+
+.modeling-form .modeling-checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.modeling-checkbox-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.modeling-advanced-panel {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+    padding: 0;
+    min-width: 0;
+}
+
+.modeling-advanced-panel>summary {
+    padding: 10px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.modeling-advanced-panel[open]>summary {
+    border-bottom: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+.modeling-advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 12px;
+}
+
+.modeling-advanced-grid>fieldset,
+.modeling-advanced-grid>.modeling-multi-group {
+    grid-column: 1 / -1;
+}
+
+.modeling-dialog-footer {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+#modeling-dialog-error {
+    margin-right: auto;
+    color: var(--danger);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+}
+
+.modeling-expression-node {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    border-left: 2px solid var(--primary);
+    padding-left: 10px;
+    max-width: 100%;
+}
+
+.modeling-expression-node>select {
+    width: 160px;
+    max-width: 100%;
+}
+
+.modeling-expression-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 120px;
+    flex: 1;
+}
+
+.modeling-filter-row {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+    margin-bottom: 8px;
+}
+
+.modeling-filter-row>label {
+    flex: 1 1 150px;
+}
+
+.modeling-workspace .workspace-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* 迁移对照区块统一卡片样式 */
+#modeling-content section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+#modeling-content section h5 {
+    margin: 0;
+    font-size: 0.86rem;
+}
+
+#modeling-content section p {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* 平板与窄屏响应式适配 */
+@media (max-width: 1080px) {
+
+    .modeling-studio-shell,
+    .modeling-studio-shell.has-drawer,
+    .modeling-studio-shell.has-drawer.has-wide-drawer,
+    .modeling-studio-shell.is-palette-collapsed.has-drawer,
+    .modeling-studio-shell.is-palette-collapsed.has-drawer.has-wide-drawer {
+        grid-template-columns: minmax(0, 1fr);
+        min-height: auto;
+    }
+
+    .modeling-node-drawer,
+    .modeling-node-drawer.is-wide {
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        max-height: none;
+    }
+}
+
+@media (max-width: 720px) {
+    #data-analysis-modeling-panel {
+        padding: 8px 10px 16px;
+    }
+
+    .modeling-trial-top-row,
+    .modeling-trial-selectors,
+    .modeling-inline-pair,
+    .modeling-fn-grid,
+    .modeling-select-col-row,
+    .modeling-dialog .workspace-modal-body.modeling-form,
+    .modeling-form fieldset,
+    .modeling-advanced-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .modeling-filter-bar,
+    .modeling-search-input.form-input,
+    .modeling-filter-select.form-input {
+        width: 100%;
+    }
+
+    .modeling-canvas-hint {
+        white-space: normal;
+    }
+
+    .modeling-dialog {
+        width: calc(100vw - 16px);
+        max-height: calc(100vh - 24px);
+    }
+}

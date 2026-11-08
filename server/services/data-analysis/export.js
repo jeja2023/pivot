@@ -135,7 +135,7 @@ async function exportDataset(userId, datasetId, format = 'csv') {
         } else {
             await duckWriteXlsx(parquetPath, columns, filePath, row.name);
         }
-    });
+    }, { userId: Number(userId?.id || userId) });
     await recordArtifact({
         userId: actor.id,
         datasetId,

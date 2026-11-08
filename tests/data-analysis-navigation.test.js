@@ -141,7 +141,7 @@ test('数据清洗页签可被保存恢复，离开时会清理临时规则与�
 test('数据分析入口未指定页签时使用已保存的页签', () => {
     const core = read('client/chat/data-analysis/core.js');
 
-    assert.match(core, /const requestedTab = normalizeTab\(explicitTab \|\| getStoredActiveTab\(\)\);/);
+    assert.match(core, /let requestedTab = normalizeTab\(explicitTab \|\| getStoredActiveTab\(\)\);/);
 });
 
 test('数据分析侧边菜单统一采用导航样式，不混入通用操作按钮样式', () => {
@@ -154,9 +154,96 @@ test('数据分析侧边菜单统一采用导航样式，不混入通用操作�
 });
 
 test('字段治理、分析资产和仪表盘拥有独立的工作台标题与说明', () => {
-    const view = read('client/chat/data-analysis/view.js');
+    const app = {}, title = {}, meta = {};
+    const context = { window: { Pivot: { legacy: { PivotDataAnalysis: app } } }, document: {
+        getElementById(id) { return id === 'data-analysis-title' ? title : id === 'data-analysis-meta' ? meta : null; },
+        querySelector() { return null; }
+    } };
+    vm.runInNewContext(read('client/chat/data-analysis/navigation-metadata.js'), context);
+    vm.runInNewContext(read('client/chat/data-analysis/view.js'), context);
+    for (const [tab, expectedTitle, description] of [['governance', '字段治理', /^统一维护字段定义/], ['assets', '分析资产', /^保存、共享和复跑当前图表/], ['dashboards', '仪表盘', /^组合分析资产形成协作看板/]]) {
+        app.updateToolbarHeader(tab);
+        assert.equal(title.textContent, expectedTitle); assert.match(meta.textContent, description);
+    }
+    app.updateToolbarHeader('unknown-tab'); assert.equal(title.textContent, '数据总览');
+    const loader = read('client/chat/apps-workbench-data-analysis.js');
+    const metadataIndex = loader.indexOf('/chat/data-analysis/navigation-metadata.js'), viewIndex = loader.indexOf('/chat/data-analysis/view.js');
+    assert.ok(metadataIndex >= 0 && viewIndex > metadataIndex);
+});
 
-    assert.match(view, /governance:\s*\{\s*title:\s*'字段治理',\s*desc:\s*'统一维护字段定义/);
-    assert.match(view, /assets:\s*\{\s*title:\s*'分析资产',\s*desc:\s*'保存、共享和复跑当前图表/);
-    assert.match(view, /dashboards:\s*\{\s*title:\s*'仪表盘',\s*desc:\s*'组合分析资产形成协作看板/);
+test('数据建模注册为应用中心独立并列应用，且激活时自动进入全宽沉浸布局并支持一键互跳恢复', () => {
+    const appsCore = read('client/chat/apps-workbench-core.js');
+    assert.match(appsCore, /id:\s*'data-modeling'[\s\S]*?name:\s*'数据建模'/);
+    assert.match(appsCore, /showDataModelingAppFromRegistry/);
+
+    const sessionStorage = createSessionStorage();
+    const panel = createElement('data-analysis-panel-root');
+    const titles = [];
+    const availableApps = new Set(['data-analysis', 'data-modeling']);
+    const window = {
+        sessionStorage,
+        Pivot: {
+            legacy: {},
+            moduleApi(name) {
+                if (name === 'apps.availability') return { isEnabled: id => availableApps.has(id) };
+                if (name === 'workspaces.apps') {
+                    return { setAppsTitle(title, subtitle) { titles.push({ title, subtitle }); } };
+                }
+                return null;
+            }
+        }
+    };
+    const context = { window, String, Number, Set };
+    vm.runInNewContext(read('client/chat/data-analysis/context.js'), context, {
+        filename: 'client/chat/data-analysis/context.js'
+    });
+    const tabs = ['overview', 'modeling', 'chart'].map(tab => createElement('', tab));
+    const panels = tabs.map(tab => createElement(`data-analysis-${tab}-panel`));
+    context.document = {
+        querySelector(selector) {
+            if (selector === '.data-analysis-panel') return panel;
+            if (selector === '.data-analysis-tab.active') return tabs.find(tab => tab.classList.contains('active')) || null;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '.data-analysis-tab') return tabs;
+            if (selector === '.data-analysis-tab-panel') return panels;
+            return [];
+        },
+        getElementById() { return null; }
+    };
+    const app = context.window.Pivot.legacy.PivotDataAnalysis;
+    app.toast = () => {};
+    app.updateToolbarHeader = () => {};
+    app.renderChart = () => {};
+    let activatedModelingCount = 0;
+    app.onDataAnalysisTabActivated = tab => { if (tab === 'modeling') activatedModelingCount += 1; };
+    vm.runInNewContext(read('client/chat/data-analysis/events.js'), context, {
+        filename: 'client/chat/data-analysis/events.js'
+    });
+
+    app.activateTab('chart');
+    assert.equal(app.state.lastAnalysisTab, 'chart');
+    assert.equal(panel.classList.contains('is-modeling-immersive'), false);
+
+    app.activateTab('modeling');
+    assert.equal(panel.classList.contains('is-modeling-immersive'), true);
+    assert.equal(activatedModelingCount, 1);
+    assert.equal(titles.at(-1)?.title, '数据建模');
+
+    sessionStorage.setItem('pivot_apps_active_app', 'data-modeling');
+    app.activateTab(app.state.lastAnalysisTab);
+    assert.equal(panel.classList.contains('is-modeling-immersive'), false);
+    assert.equal(sessionStorage.getItem('pivot_apps_active_app'), 'data-analysis');
+    assert.equal(titles.at(-1)?.title, '数据分析');
+    availableApps.delete('data-modeling');
+    app.activateTab('modeling');
+    assert.equal(panel.classList.contains('is-modeling-immersive'), false);
+    assert.equal(activatedModelingCount, 1);
+    availableApps.add('data-modeling');
+    availableApps.delete('data-analysis');
+    app.activateTab('modeling');
+    app.activateTab('chart');
+    assert.equal(panel.classList.contains('is-modeling-immersive'), true);
+    assert.equal(titles.at(-1)?.title, '数据建模');
 });

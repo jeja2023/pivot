@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const express = require('express');
-const { asyncHandler } = require('../http');
+const { handler: asyncHandler } = require('../services/data-analysis/bi/delivery');
 const { callMcpJsonRpc, getAccessibleMcpServer, executeMcpTool } = require('../services/mcp-client');
 const { executeBuiltInTool } = require('../services/agent-tools');
 const { formatToolList } = require('../services/agent-tool-catalog');

@@ -20,7 +20,7 @@ async function accessible(user, id, editing = false) {
 async function runQualityTask(id, user, input, deps = {}) {
     const store = deps.store || taskStore, getDocument = deps.getDocument || accessible, publish = deps.publish || repository.writeProgress;
     const controller = store.beginExecution(id), signal = controller.signal;
-    const result = { contentDigest: input.contentDigest, progress: { completed: 0, total: 0, phase: 'preparing' }, reviews: [], changedSlides: [], visualStatus: 'not_requested' };
+    const result = { mode: input.mode, contentDigest: input.contentDigest, progress: { completed: 0, total: 0, phase: 'preparing' }, reviews: [], changedSlides: [], visualStatus: 'not_requested' };
     const ensureCurrent = async () => {
         signal.throwIfAborted();
         const task = await store.getForUser(id, user);
@@ -29,7 +29,7 @@ async function runQualityTask(id, user, input, deps = {}) {
             const run = await (deps.getRun || repository.parentStatus)(input.runId, user.id);
             if (!run || ['completed', 'completed_with_errors', 'partial', 'cancelled', 'deleted', 'failed', 'error', 'needs_input'].includes(run.status)) throw presentationError('所属任务已停止，本次整稿检查不再继续。', 409, 'PRESENTATION_PARENT_STOPPED');
         }
-        const document = await getDocument(user, input.presentationId, input.mode !== 'visual');
+        const document = await getDocument(user, input.presentationId, !['visual', 'production'].includes(input.mode));
         if (computePresentationDigest(document.content) !== result.contentDigest) throw presentationError('文稿已修改，旧版本检查已停止，请检查最新文稿。', 409, 'PRESENTATION_CHECK_STALE');
         return document;
     };
@@ -40,7 +40,7 @@ async function runQualityTask(id, user, input, deps = {}) {
         const options = { signal, assetResolver: async ref => assets.get(ref) || null };
         result.progress.total = document.content.slides.length;
         await publish(id, user, result);
-        if (input.mode !== 'visual') {
+        if (['layout', 'visual_repair'].includes(input.mode)) {
             const template = await (deps.resolveTemplate || service.resolveTemplateVersionForUser)(user, document.template.id, document.template.version, { historical: true });
             if (!template) throw new Error('模板版本不可用，请重新选择模板。');
             const optimized = await (deps.optimize || optimizeDesignLayout)(document.content, template, { ...options,
@@ -53,7 +53,14 @@ async function runQualityTask(id, user, input, deps = {}) {
             }
             result.validation = optimized.validation;
         }
-        if (input.mode !== 'layout') {
+        if (input.mode === 'production') {
+            result.progress = { completed: 0, total: document.content.slides.length, phase: 'production', message: '正在检查事实、版式和最终文件' };
+            await publish(id, user, result);
+            result.productionReview = await (deps.productionReview || require('./presentation-production-review').reviewPresentationProduction)(workingContent, { ...options,
+                onProgress: async progress => { result.progress = progress; await ensureCurrent(); await publish(id, user, result); } });
+            result.validation = { status: result.productionReview.status, summary: result.productionReview.summary, issues: result.productionReview.issues, semantics: result.productionReview.checks.evidence };
+        }
+        if (['visual', 'visual_repair'].includes(input.mode)) {
             for (let index = 0; index < document.content.slides.length; index++) {
                 document = await ensureCurrent();
                 result.progress = { completed: index, total: document.content.slides.length, phase: 'visual', message: `正在复核第 ${index + 1} 页` };
@@ -70,9 +77,10 @@ async function runQualityTask(id, user, input, deps = {}) {
         }
         await ensureCurrent();
         result.progress.phase = 'finished';
-        result.progress.completed = input.mode === 'layout' ? document.content.slides.length : result.reviews.filter(review => review.status !== 'unavailable').length;
+        result.progress.completed = ['layout', 'production'].includes(input.mode) ? document.content.slides.length : result.reviews.filter(review => review.status !== 'unavailable').length;
         result.checkedContentDigest = computePresentationDigest(workingContent);
-        result.message = input.mode === 'layout' ? `已提出 ${result.changedSlides.length} 页排版优化建议，确认后应用；未执行视觉模型复核。`
+        result.message = input.mode === 'production' ? `已检查${result.progress.completed}页及最终PPTX：${result.productionReview.summary.blocking}项阻断、${result.productionReview.summary.warnings}项建议。视觉与Office检查范围见报告。`
+            : input.mode === 'layout' ? `已提出 ${result.changedSlides.length} 页排版优化建议，确认后应用；未执行视觉模型复核。`
             : result.visualStatus === 'unavailable' ? '视觉模型不可用，整稿尚未通过视觉复核。'
                 : `已复核 ${result.progress.completed} 页，${result.visualStatus === 'passed' ? '未发现新增视觉问题' : '请处理检查列出的问题'}。`;
         await store.complete(id, user, result);
@@ -86,15 +94,15 @@ async function runQualityTask(id, user, input, deps = {}) {
 
 async function createQualityTask(user, input, context = {}) {
     const mode = input.mode || 'visual';
-    if (!['visual', 'layout', 'visual_repair'].includes(mode)) throw presentationError('检查方式无效。');
-    const document = await accessible(user, input.presentationId, mode !== 'visual');
+    if (!['visual', 'layout', 'visual_repair', 'production'].includes(mode)) throw presentationError('检查方式无效。');
+    const document = await accessible(user, input.presentationId, !['visual', 'production'].includes(mode));
     context.signal?.throwIfAborted();
     const payload = { presentationId: document.id, contentDigest: computePresentationDigest(document.content), mode, modelId: String(input.modelId || ''), runId: String(context.run?.id || '') };
     const existing = await repository.findWorking(user, payload);
     if (existing) return getQualityTask(user, document.id, existing.id);
     const task = await taskStore.create({ user, toolName: TOOL, inputRequest: payload, ttlMs: 15 * 60 * 1000 });
     setImmediate(() => { runQualityTask(task.id, user, payload, { budget: context.budget }).catch(error => require('../../logger').logger.warn({ taskId: task.id, code: error.code || 'PRESENTATION_CHECK_FAILED' }, '整稿检查任务未能保存结果')); });
-    return { ...task, progress: { completed: 0, total: document.content.slides.length, phase: 'preparing' }, sourceDigest: payload.contentDigest };
+    return { ...task, mode, progress: { completed: 0, total: document.content.slides.length, phase: 'preparing' }, sourceDigest: payload.contentDigest };
 }
 
 async function getQualityTask(user, presentationId, taskId) {
@@ -103,7 +111,7 @@ async function getQualityTask(user, presentationId, taskId) {
     if (!row || taskJson(row.input_request).presentationId !== document.id) return null;
     const task = await taskStore.getForUser(row.id, user), result = taskJson(row.result_json);
     if (!task) return null;
-    return { ...task, result, progress: result.progress || { completed: 0, total: document.content.slides.length, phase: 'preparing' },
+    return { ...task, mode: taskJson(row.input_request).mode, result, progress: result.progress || { completed: 0, total: document.content.slides.length, phase: 'preparing' },
         sourceDigest: result.contentDigest || taskJson(row.input_request).contentDigest,
         stale: (result.contentDigest || taskJson(row.input_request).contentDigest) !== computePresentationDigest(document.content) };
 }

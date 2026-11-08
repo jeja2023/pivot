@@ -16,7 +16,7 @@
                 <div id="apps-home-view" class="apps-home-view">
                     <div class="workspace-panel apps-panel">
                         <div id="apps-grid" class="apps-grid" aria-live="polite"></div>
-                        <div id="apps-empty" class="apps-empty hidden">暂无可用应用</div>
+                        <div id="apps-empty" class="apps-empty hidden" role="status" aria-live="polite">暂无可用应用</div>
                     </div>
                 </div>
 
@@ -516,12 +516,93 @@
                             <div class="presentation-library-head">
                                 <div>
                                     <h4>我的演示文稿</h4>
-                                    <p>从主题、模板或已有材料快速制作可编辑 PPT。</p>
+                                    <p>默认由AI设计；需要固定品牌时使用单位模板，也可沿用原稿设计。</p>
                                 </div>
                                 <div class="presentation-library-actions">
-                                    <button id="presentation-create-ai-btn" class="btn-primary" type="button">AI 创建</button>
-                                    <button id="presentation-create-blank-btn" class="btn-secondary" type="button">空白创建</button><button id="presentation-create-from-artifact-btn" class="btn-secondary" type="button">从 Agent 产物创建</button>
-                                    <button id="presentation-refresh-btn" class="btn-secondary" type="button">刷新</button>
+                                    <button id="presentation-create-ai-btn" class="btn-primary" type="button" title="智能生成演示文稿大纲与页面">
+                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                        </svg>
+                                        <span>AI 自由设计</span>
+                                    </button>
+                                    <details class="presentation-dropdown" id="presentation-catalog-dropdown">
+                                        <summary class="btn-secondary presentation-dropdown-summary" title="选择或管理设计模板">
+                                            <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                                <line x1="3" y1="9" x2="21" y2="9"/>
+                                                <line x1="9" y1="21" x2="9" y2="9"/>
+                                            </svg>
+                                            <span>模板库</span>
+                                            <svg class="presentation-dropdown-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                        </summary>
+                                        <div class="presentation-dropdown-menu" role="menu">
+                                            <button class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" data-presentation-catalog-open="all" title="查看所有通用与标准模板">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>浏览全部模板</strong>
+                                                    <small>通用汇报、学术答辩与行业主题</small>
+                                                </div>
+                                            </button>
+                                            <button class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" data-presentation-catalog-open="organization" title="使用经过单位授权与品牌锁定的规范模板">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>使用单位模板</strong>
+                                                    <small>统一品牌标识、标准字体与规范版式</small>
+                                                </div>
+                                            </button>
+                                            <div class="presentation-dropdown-divider" role="separator"></div>
+                                            <button class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" data-presentation-preserve title="上传旧 PPT 并沿用其母版、字体与排版风格">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>沿用原稿设计</strong>
+                                                    <small>导入已有 PPT，继承其视觉母版风格</small>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    </details>
+                                    <details class="presentation-dropdown" id="presentation-more-create-dropdown">
+                                        <summary class="btn-secondary presentation-dropdown-summary" title="更多创建与导入方式">
+                                            <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                                                <circle cx="12" cy="12" r="1"/>
+                                                <circle cx="19" cy="12" r="1"/>
+                                                <circle cx="5" cy="12" r="1"/>
+                                            </svg>
+                                            <span>更多创建</span>
+                                            <svg class="presentation-dropdown-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                                        </summary>
+                                        <div class="presentation-dropdown-menu presentation-dropdown-menu-right" role="menu">
+                                            <button id="presentation-create-from-artifact-btn" class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" title="将当前账号下的 Agent 产物转换为演示文稿初稿">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>从 Agent 产物创建</strong>
+                                                    <small>将对话或研报产物一键提炼转换为 PPT</small>
+                                                </div>
+                                            </button>
+                                            <button id="presentation-create-blank-btn" class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" title="从零新建空白演示文稿">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>空白创建</strong>
+                                                    <small>从空白画布开始自由布局与排版设计</small>
+                                                </div>
+                                            </button>
+                                            <div class="presentation-dropdown-divider" role="separator"></div>
+                                            <button class="btn-secondary presentation-dropdown-item" type="button" role="menuitem" data-presentation-native-open title="逐页精确解析 PPTX 并生成带音轨离线视频">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                                                <div class="presentation-dropdown-text">
+                                                    <strong>原稿编辑与离线视频</strong>
+                                                    <small>高精度母版图层重绘与离线视频合成</small>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    </details>
+                                    <button id="presentation-refresh-btn" class="btn-secondary" type="button" title="刷新文稿列表">
+                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                                            <polyline points="23 4 23 10 17 10"/>
+                                            <polyline points="1 20 1 14 7 14"/>
+                                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                                        </svg>
+                                        <span>刷新</span>
+                                    </button>
                                 </div>
                             </div>
                             <div class="presentation-library-filters">
@@ -691,7 +772,7 @@
                                 <main class="presentation-stage-wrap">
                                     <div class="presentation-stage-toolbar">
                                         <label>布局 <select id="presentation-layout-select" class="form-input"></select></label>
-                                        <label>缩放 <select id="presentation-zoom-select" class="form-input"><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="0.9">90%</option><option value="1" selected>100%</option><option value="1.1">110%</option></select></label><label>转场 <select id="presentation-transition-select" class="form-input"><option value="none">无</option><option value="fade">淡入淡出</option><option value="push">推进</option><option value="wipe">擦除</option><option value="split">分割</option><option value="cover">覆盖</option><option value="uncover">揭开</option></select></label>
+                                        <label>缩放 <select id="presentation-zoom-select" class="form-input"><option value="fit" selected>适应画布</option><option value="0.5">50%</option><option value="0.65">65%</option><option value="0.8">80%</option><option value="0.9">90%</option><option value="1">100%</option><option value="1.1">110%</option></select></label><label>转场 <select id="presentation-transition-select" class="form-input"><option value="none">无</option><option value="fade">淡入淡出</option><option value="push">推进</option><option value="wipe">擦除</option><option value="split">分割</option><option value="cover">覆盖</option><option value="uncover">揭开</option></select></label>
                                         <span id="presentation-slide-meta" class="presentation-slide-meta"></span>
                                     </div>
                                     <div id="presentation-stage-scroll" class="presentation-stage-scroll">
@@ -704,6 +785,7 @@
                                         <button type="button" data-presentation-panel="template">模板</button>
                                         <button type="button" data-presentation-panel="assets">素材</button>
                                         <button type="button" data-presentation-panel="ai">AI 助手</button>
+                                        <button class="btn-secondary" type="button" data-presentation-panel="story" title="故事线与制作目标">结构</button>
                                         <button type="button" data-presentation-panel="metrics">运营</button>
                                         <button type="button" data-presentation-panel="notes">备注</button>
                                         <button class="btn-secondary" type="button" data-presentation-panel="evidence">证据</button>
@@ -749,6 +831,8 @@
                                             </div>
                                             <div id="presentation-shape-style-fields" class="presentation-form-section hidden">
                                                 <div class="presentation-form-section-title">形状填充与边框</div>
+                                                <label>原生形状<select id="presentation-shape-type" class="form-input"></select></label>
+                                                <div id="presentation-shape-adjustments" class="presentation-property-grid"></div>
                                                 <div class="presentation-property-grid">
                                                     <label>填充颜色<input id="presentation-shape-fill" class="form-input" type="color"></label>
                                                     <label>边框颜色<input id="presentation-shape-stroke" class="form-input" type="color"></label>
@@ -756,6 +840,7 @@
                                                     <label>透明度<input id="presentation-shape-opacity" class="form-input" type="number" min="0" max="1" step="0.1"></label>
                                                 </div>
                                             </div>
+                                            <div id="presentation-diagram-style-fields" class="presentation-form-section hidden"></div>
                                             <div id="presentation-image-style-fields" class="presentation-form-section hidden">
                                                 <div class="presentation-form-section-title">图片样式与裁剪</div>
                                                 <div class="presentation-property-grid">
@@ -818,6 +903,7 @@
                                         <input id="presentation-template-package-input" class="hidden" type="file" accept=".json,.pptx,application/json,application/vnd.openxmlformats-officedocument.presentationml.presentation">
                                         <div id="presentation-template-import-report" class="presentation-template-import-report hidden" aria-live="polite"></div>
                                         <div id="presentation-template-list" class="presentation-template-list"></div>
+                                        <button class="btn-secondary" type="button" data-presentation-catalog-open="all">打开统一模板库与主题配色</button>
                                     </div>
                                     <div id="presentation-assets-panel" class="presentation-inspector-panel hidden">
                                         <div class="presentation-template-panel-head">
@@ -883,6 +969,7 @@
                                         <div id="presentation-evidence-list" class="presentation-evidence-list"></div>
                                     </div>
                                     <div id="presentation-ai-panel" class="presentation-inspector-panel hidden">
+                                        <button class="btn-secondary" type="button" data-presentation-master-open>使用完整制作流程</button>
                                         <div class="presentation-inspector-section-head">
                                             <strong>AI 辅助排版与润色</strong>
                                             <span class="presentation-ai-badge">智能助手</span>
@@ -921,15 +1008,26 @@
                                         </form>
                                         <div id="presentation-comments-list" class="presentation-comments-list"></div>
                                     </div>
+                                    <div id="presentation-story-panel" class="presentation-inspector-panel hidden"></div>
                                     <div id="presentation-issues-panel" class="presentation-inspector-panel hidden">
                                         <div class="presentation-issues-head">
                                             <div class="presentation-panel-title-group">
                                                 <strong>质量与合规检查</strong>
                                                 <small class="presentation-issues-sub">自动检测排版、规范与合规问题</small>
                                             </div>
-                                            <button id="presentation-check-issues-btn" class="btn-secondary" type="button">立即体检</button>
+                                        </div>
+                                        <div class="presentation-issues-actions">
+                                            <button id="presentation-check-issues-btn" class="btn-primary presentation-issue-action-btn is-check" type="button" title="执行文稿与页面质量检查">
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+                                                <span>立即体检</span>
+                                            </button>
+                                            <button id="presentation-production-review-btn" class="btn-secondary presentation-issue-action-btn is-delivery" type="button" title="执行交付规范与资产完整度核查">
+                                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                                                <span>交付检查</span>
+                                            </button>
                                         </div>
                                         <div id="presentation-issues-list" class="presentation-issues-list"></div>
+                                        <div id="presentation-production-task-status" aria-live="polite"></div>
                                         <div class="presentation-info-card">
                                             <div class="presentation-info-card-icon">
                                                 <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
@@ -1071,7 +1169,61 @@
                             </div>
                         </div>
 
-                        <div id="presentation-artifact-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-artifact-title"><div class="modal presentation-create-dialog"><div class="presentation-create-dialog-head"><h3 id="presentation-artifact-title">从 Agent 产物创建</h3><p>将当前账号下的文本产物转换为结构化、可编辑的 PPT 初稿，并保留来源引用。</p></div><form id="presentation-artifact-form" class="presentation-create-form"><label>选择产物<select id="presentation-artifact-select" class="form-input"></select></label><label>标题（可选）<input id="presentation-artifact-title-input" class="form-input" maxlength="160"></label><label>选择模板<select id="presentation-artifact-template" class="form-input"></select></label><div class="presentation-create-actions"><button id="presentation-artifact-cancel-btn" class="btn-secondary" type="button">取消</button><button class="btn-primary" type="submit">创建可编辑 PPT</button></div></form></div></div>
+                        <div id="presentation-artifact-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-artifact-title">
+                            <div class="modal presentation-create-dialog presentation-artifact-dialog">
+                                <div class="presentation-create-dialog-head">
+                                    <div class="presentation-create-dialog-title-row">
+                                        <div class="presentation-create-dialog-title-group">
+                                            <h3 id="presentation-artifact-title">从 Agent 产物创建</h3>
+                                            <p>将当前账号下的文本产物转换为结构化、可编辑的 PPT 初稿，并保留来源引用。</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <form id="presentation-artifact-form" class="presentation-create-form presentation-artifact-form">
+                                    <div class="presentation-artifact-tip">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="presentation-artifact-tip-icon">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                        </svg>
+                                        <span class="presentation-artifact-tip-text">系统将自动提炼文本段落层次与核心数据，按指定视觉规范生成演示页面并保留原始引用。</span>
+                                    </div>
+
+                                    <div class="presentation-artifact-field">
+                                        <label for="presentation-artifact-select" class="presentation-artifact-label">
+                                            <span class="presentation-label-text">选择来源产物 <strong class="presentation-required-star">*</strong></span>
+                                            <span class="presentation-label-hint">展示当前账号下可用于转换的文本产物</span>
+                                        </label>
+                                        <div class="presentation-select-wrapper">
+                                            <select id="presentation-artifact-select" class="form-input presentation-artifact-select" required></select>
+                                        </div>
+                                    </div>
+
+                                    <div class="presentation-artifact-field">
+                                        <label for="presentation-artifact-title-input" class="presentation-artifact-label">
+                                            <span class="presentation-label-text">演示文稿标题</span>
+                                            <span class="presentation-label-hint">选填，未填写时默认沿用产物标题</span>
+                                        </label>
+                                        <input id="presentation-artifact-title-input" class="form-input presentation-artifact-input" maxlength="160" placeholder="例如：2026年业务分析与规划简报">
+                                    </div>
+
+                                    <div class="presentation-artifact-field">
+                                        <label for="presentation-artifact-template" class="presentation-artifact-label">
+                                            <span class="presentation-label-text">视觉模板</span>
+                                            <span class="presentation-label-hint">选择契合汇报受众与主题风格的版式方案</span>
+                                        </label>
+                                        <div class="presentation-select-wrapper">
+                                            <select id="presentation-artifact-template" class="form-input presentation-artifact-select"></select>
+                                        </div>
+                                    </div>
+
+                                    <div class="presentation-create-actions presentation-artifact-actions">
+                                        <button id="presentation-artifact-cancel-btn" class="btn-secondary" type="button">取消</button>
+                                        <button class="btn-primary presentation-artifact-submit-btn" type="submit">创建可编辑 PPT</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
                         <div id="presentation-create-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-create-title">
                             <div class="modal presentation-create-dialog presentation-ai-create-dialog">
                                 <div class="presentation-create-dialog-head">
@@ -1143,8 +1295,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="presentation-create-label">
-                                                    <span class="presentation-label-text">选择模板</span>
+                                                    <span class="presentation-label-text">用途或单位模板（可保持默认）</span>
                                                     <select id="presentation-create-template" class="form-input"></select>
+                                                    <span id="presentation-create-design-note" class="presentation-empty-note hidden"></span>
                                                 </label>
                                             </div>
 

@@ -2,18 +2,23 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { importTools, prepareSkillImport } = require('../server/services/agent-skill-import-assistant');
+const { parseSkillSourceMarkdown } = require('../server/services/agent-skill-source');
 const catalog = [
     { name: 'rag.search', title: '知识库检索', capabilities: ['knowledge.search'], risk_level: 'low' },
     { name: 'mcp.8.browser.click', title: '点击网页', capabilities: ['network.browser_visit'], approval_required: true },
     { name: 'workspace.read', title: '不可直接调用' }
 ];
 
-test('外部技能转换保留正文，明确忽略原始工具和额外字段，只使用用户选择的工具', () => {
+test('外部技能转换保留正文和来源元数据，运行时只使用用户选择的工具', () => {
     const input = { title: '制度摘要', tools: ['rag.search'], markdown: '---\nname: external-skill\ndescription: 查询制度\nallowed-tools: dangerous\nmetadata:\n  version: 2\n---\n\n# 步骤\n按资料回答。' };
     const result = prepareSkillImport(input, catalog);
     assert.equal(result.preview.valid, true);
     assert.match(result.markdown, /按资料回答/);
-    assert.doesNotMatch(result.markdown, /allowed-tools|dangerous|metadata:/);
+    const native = parseSkillSourceMarkdown(result.markdown).manifest;
+    assert.equal(native['allowed-tools'], undefined); assert.equal(native.metadata, undefined);
+    assert.equal(native.importSource.originalFields['allowed-tools'], 'dangerous');
+    assert.equal(native.importSource.originalFields.metadata.version, 2);
+    assert.deepEqual(native.tools, ['rag.search']);
     assert.match(result.markdown, /knowledge.search/);
     assert.match(result.warnings.join(' '), /脚本、附件、依赖/);
     assert.match(result.warnings.join(' '), /allowed-tools/);

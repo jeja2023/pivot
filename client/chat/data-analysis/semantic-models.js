@@ -125,7 +125,7 @@
             ]);
             if (sequence !== listSequence) return;
             state.metrics = metrics.metrics || [];
-            state.dataModels = models.models || [];
+            state.dataModels = (models.models || []).filter(model => model.modelKind !== 'production');
             const target = state.dataModels.some(item => item.id === state.activeDataModelId) ? state.activeDataModelId : state.dataModels[0]?.id || '';
             if (target) await loadDataModel(target, { silent: true });
             else { state.activeDataModelId = ''; state.activeDataModel = null; renderMetrics(); renderModels(); }
@@ -343,5 +343,5 @@
         });
     }
 
-    Object.assign(app, { loadSemanticModels, bindSemanticModelEvents, renderMetrics, renderModels });
+    Object.assign(app, { loadSemanticModels, bindSemanticModelEvents, renderMetrics, renderModels, openLegacyDataModel: async id => { await loadSemanticModels({ silent: true }); await loadDataModel(id); app.openModal?.('data-analysis-model-modal'); } });
 })();

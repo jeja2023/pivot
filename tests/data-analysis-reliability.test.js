@@ -100,6 +100,7 @@ test('后台查询的取消和恢复按执行代次隔离，旧执行器不能�
     assert.equal(attempt.id, first.id);
     await queries.cancelAsyncQueryJob(user, first.id);
     await jobs.fail(attempt, { retry: true, message: '不应写回', backoffMs: 1 });
+    await require('../server/repositories/analysis-runtime-budget').settleStopped(attempt);
     assert.equal(await jobs.renew(attempt), false);
     assert.equal(await jobs.finish(attempt, { columns: [], previewRows: [], rowCount: 0, truncated: false, filePath: '' }, { id: 'not_created', title: '旧输出', metadata: {} }), false);
     assert.equal((await queries.getAsyncQueryJob(user, first.id)).status, 'cancelled');
@@ -107,11 +108,16 @@ test('后台查询的取消和恢复按执行代次隔离，旧执行器不能�
     const second = await queries.createAsyncQueryJob({ user, datasetId: dataset.id, sql: 'SELECT * FROM data', limit: 2 });
     const original = await jobs.claim(60000);
     await execute("UPDATE analysis_query_jobs SET locked_at = NOW() - INTERVAL '2 minutes' WHERE id = ?", [second.id]);
+    await execute("UPDATE analysis_query_jobs SET lease_expires_at=NOW()-INTERVAL '1 second' WHERE id=?", [second.id]);
+    assert.equal(await jobs.claim(60000), null, '租约过期不能直接复用仍可能在执行的容量');
+    await require('../server/repositories/analysis-runtime-budget').settleStopped(original);
+    await execute('UPDATE analysis_query_jobs SET next_run_at=NOW() WHERE id=?', [second.id]);
     const recovered = await jobs.claim(60000);
     assert.equal(recovered.attempts, original.attempts + 1);
     assert.equal(await jobs.renew(original), false);
     assert.equal(await jobs.renew(recovered), true);
     await queries.cancelAsyncQueryJob(user, second.id);
+    await require('../server/repositories/analysis-runtime-budget').settleStopped(recovered);
     const invalid = await queries.createAsyncQueryJob({ user, datasetId: dataset.id, sql: 'SELECT missing FROM data', limit: 2 });
     await queries.processAsyncQueryJobs({ limit: 1 });
     assert.equal((await queries.getAsyncQueryJob(user, invalid.id)).status, 'failed');

@@ -299,6 +299,8 @@ test('数据库集成：演示文稿评论线程组织、解决状态与协作�
         if (userIds.length) {
             await pool().query('DELETE FROM agent_artifacts WHERE user_id = ANY($1::int[])', [userIds]);
             await pool().query('DELETE FROM agent_artifact_objects WHERE owner_user_id = ANY($1::int[])', [userIds]);
+            // 审计版本可以独立保留；清理测试账号前解除其创建者引用。
+            await pool().query('UPDATE agent_artifact_versions SET created_by = NULL WHERE created_by = ANY($1::int[])', [userIds]);
             await pool().query('DELETE FROM users WHERE id = ANY($1::int[])', [userIds]);
         }
         if (tenantId) {

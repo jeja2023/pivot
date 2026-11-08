@@ -29,6 +29,7 @@ function planRelations(relations) {
 
 async function runDataModelAnalysis({ user, modelId, dimension, measure, aggregation = 'count', limit = 100 } = {}) {
     const { model } = await getDataModel(user, modelId);
+    if (model.modelKind === 'production') throw Object.assign(new Error('正式模型请使用统一指标分析接口。'), { status: 409, code: 'ANALYSIS_MODEL_UPGRADE_REQUIRED' });
     const plan = planRelations(model.relations || []);
     const datasets = new Map();
     for (const id of plan.datasetIds) {
@@ -68,7 +69,7 @@ async function runDataModelAnalysis({ user, modelId, dimension, measure, aggrega
             connection.closeSync();
             instance.closeSync();
         }
-    });
+    }, { userId: user.id });
     const warnings = ['汇总基于关联后的记录；一对多或多对多关系可能重复统计，请先预览关联质量并核对口径。'];
     if ([...datasets.values()].some(entry => entry.dataset.truncated || entry.dataset.is_truncated)) warnings.push('模型包含截断导入的数据集，结果仅覆盖已导入的数据范围。');
     return { columns: ['分组', '汇总值'], rows: rows.slice(0, safeLimit), truncated: rows.length > safeLimit, limit: safeLimit, datasetCount: datasets.size, warnings };

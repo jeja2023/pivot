@@ -10,7 +10,9 @@
 const crypto = require('crypto');
 const { canonicalJson } = require('../canonical-json');
 const { readTypedEnv } = require('../../config/env-registry');
-const { MAX_SOURCE_EXCERPT_CHARS } = require('./presentation-evidence');
+const { MAX_SOURCE_EXCERPT_CHARS, normalizeEvidenceSlices } = require('./presentation-evidence');
+const { normalizeSlideIntent, normalizeClaims, normalizeProductionProfile } = require('./presentation-semantics');
+const geometry = require('./presentation-geometry');
 
 const PRESENTATION_IR_VERSION = '1.0';
 const ASPECT_RATIOS = Object.freeze({
@@ -23,7 +25,7 @@ const TRANSITION_TYPES = Object.freeze(['none', 'fade', 'push', 'wipe', 'split',
 const DIAGRAM_TYPES = Object.freeze(['process', 'cycle', 'hierarchy', 'relationship']);
 const ANIMATION_TYPES = Object.freeze(['none', 'fade', 'zoom', 'wipe', 'fly']);
 const CHART_TYPES = Object.freeze(['bar', 'line', 'area', 'pie']);
-const SHAPE_TYPES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line']);
+const SHAPE_TYPES = Object.freeze(geometry.list());
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right', 'justify']);
 const V_ALIGNMENTS = Object.freeze(['top', 'middle', 'bottom']);
 const SLIDE_REVIEW_STATUSES = Object.freeze(['draft', 'approved']);
@@ -198,16 +200,31 @@ function normalizeElement(input, canvas, index) {
     if (type === 'diagram') {
         const diagramType = String(input.diagramType || input.diagram_type || 'process');
         if (!DIAGRAM_TYPES.includes(diagramType)) throw presentationError('不支持的图示类型。', 400, 'PRESENTATION_DIAGRAM_TYPE_INVALID');
-        const items = normalizeStringArray(input.items, 12, 240, '图示节点');
+        const graph = input.graph === undefined ? undefined : normalizeDiagramGraph(input.graph, diagramType);
+        const items = graph ? graph.nodes.map(node => node.label) : normalizeStringArray(input.items, 12, 240, '图示节点');
+        if (graph && input.items && JSON.stringify(input.items) !== JSON.stringify(items)) throw presentationError('图示节点文字与图结构不一致。', 400, 'PRESENTATION_DIAGRAM_INVALID');
         if (items.length < 2) throw presentationError('图示至少需要两个节点。', 400, 'PRESENTATION_DIAGRAM_INVALID');
-        return { ...base, diagramType, items, style: { fill: normalizeColor(input.style?.fill, '#EFF6FF'), stroke: normalizeColor(input.style?.stroke, '#2563EB'), textColor: normalizeColor(input.style?.textColor, '#1E3A8A'), fontSize: normalizeNumber(input.style?.fontSize, 16, 6, 48, '图示字号') } };
+        return { ...base, diagramType, items, ...(graph ? { graph } : {}), style: { fill: normalizeColor(input.style?.fill, '#EFF6FF'), stroke: normalizeColor(input.style?.stroke, '#2563EB'), textColor: normalizeColor(input.style?.textColor, '#1E3A8A'), fontSize: normalizeNumber(input.style?.fontSize, 16, 6, 48, '图示字号') } };
     }
     if (type === 'shape') {
         const shapeType = String(input.shapeType || 'rect');
         if (!SHAPE_TYPES.includes(shapeType)) throw presentationError('不支持的形状类型。', 400, 'PRESENTATION_SHAPE_INVALID');
+        let adjustments;
+        if (input.adjustments !== undefined) {
+            if (!isPlainObject(input.adjustments) || Object.keys(input.adjustments).length > 12) throw presentationError('形状调整参数无效。', 400, 'PRESENTATION_SHAPE_INVALID');
+            adjustments = {};
+            const allowed = new Set(geometry.definition(shapeType).adjustments.map(item => item[0]));
+            for (const [key, value] of Object.entries(input.adjustments)) {
+                if (!allowed.has(key) || typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 2147483647) throw presentationError('形状调整参数不存在或数值无效。', 400, 'PRESENTATION_SHAPE_INVALID');
+                adjustments[key] = Math.round(value);
+            }
+            try { geometry.shapeScene(shapeType, base.width, base.height, adjustments); }
+            catch (_) { throw presentationError('当前形状参数无法形成有效几何。', 400, 'PRESENTATION_SHAPE_INVALID'); }
+        }
         return {
             ...base,
             shapeType,
+            ...(adjustments ? { adjustments } : {}),
             style: {
                 fill: normalizeColor(input.style?.fill, '#FFFFFF'),
                 stroke: normalizeColor(input.style?.stroke, '#CBD5E1'),
@@ -248,11 +265,13 @@ function normalizeElement(input, canvas, index) {
         if (!Array.isArray(row) || row.length !== columns.length) throw presentationError(`图表第 ${rowIndex + 1} 行字段数不匹配。`, 400, 'PRESENTATION_CHART_INVALID');
         return row.map((value, cellIndex) => {
             if (cellIndex === 0) return normalizeBoundedText(value, '', 160, '图表分类', { allowEmpty: true });
+            if (value === null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) throw presentationError('图表数值不能为空或布尔值，请明确提供真实数值。', 400, 'PRESENTATION_CHART_INVALID');
             const number = Number(value);
-            if (!Number.isFinite(number)) throw presentationError('图表数值必须是数字。', 400, 'PRESENTATION_CHART_INVALID');
+            if (!Number.isFinite(number) || Math.abs(number) > 1e15) throw presentationError('图表数值必须是绝对值不超过10的15次方的有限数字，请按合适单位展示。', 400, 'PRESENTATION_CHART_INVALID');
             return Math.round(number * 1000000) / 1000000;
         });
     });
+    if (chartType === 'pie' && (columns.length !== 2 || rows.some(row => row[1] < 0) || !rows.some(row => row[1] > 0))) throw presentationError('饼图需要单个非负数值序列且合计大于零；比较多条序列或负数请使用柱形图或折线图。', 400, 'PRESENTATION_CHART_INVALID');
     return {
         ...base,
         chartType,
@@ -269,6 +288,38 @@ function normalizeElement(input, canvas, index) {
             queryDigest: normalizeBoundedText(input.binding.queryDigest, '', 128, '查询摘要', { allowEmpty: true })
         } : undefined
     };
+}
+
+function normalizeDiagramGraph(input, diagramType) {
+    const invalid = message => presentationError(message, 400, 'PRESENTATION_DIAGRAM_GRAPH_INVALID');
+    if (!isPlainObject(input) || !Array.isArray(input.nodes) || input.nodes.length < 2 || input.nodes.length > 30 || !Array.isArray(input.edges) || input.edges.length > 60) throw invalid('图结构须包含二至三十个节点和不超过六十条连接。');
+    const ids = new Set(), edgeIds = new Set(), pairs = new Set();
+    const nodes = input.nodes.map(node => {
+        if (!isPlainObject(node)) throw invalid('图示节点必须是对象。');
+        const id = normalizeId(node.id, '图示节点标识');
+        if (ids.has(id)) throw invalid('图示节点标识重复。');
+        ids.add(id);
+        return { id, label: normalizeBoundedText(node.label, '', 240, '图示节点文字') };
+    });
+    const edges = input.edges.map((edge, index) => {
+        if (!isPlainObject(edge)) throw invalid('图示连接必须是对象。');
+        const id = normalizeId(edge.id || `edge_${index + 1}`, '图示连接标识'), from = normalizeId(edge.from, '起点'), to = normalizeId(edge.to, '终点');
+        if (edgeIds.has(id) || !ids.has(from) || !ids.has(to) || from === to || pairs.has(`${from}:${to}`)) throw invalid('图示连接存在重复、缺失端点或自连接。');
+        edgeIds.add(id); pairs.add(`${from}:${to}`);
+        return { id, from, to, label: normalizeBoundedText(edge.label, '', 120, '连接文字', { allowEmpty: true }), directed: normalizeBoolean(edge.directed, true) };
+    });
+    if (diagramType === 'hierarchy') {
+        const children = new Map(nodes.map(node => [node.id, []])), incoming = new Map(nodes.map(node => [node.id, 0]));
+        edges.forEach(edge => { children.get(edge.from).push(edge.to); incoming.set(edge.to, incoming.get(edge.to) + 1); });
+        const queue = nodes.filter(node => !incoming.get(node.id)).map(node => node.id);
+        let visited = 0;
+        while (queue.length) {
+            const id = queue.shift(); visited++;
+            children.get(id).forEach(next => { incoming.set(next, incoming.get(next) - 1); if (!incoming.get(next)) queue.push(next); });
+        }
+        if (visited !== nodes.length) throw invalid('层级图包含循环，请修正连接或改用关系图。');
+    }
+    return { nodes, edges };
 }
 
 function normalizeSlide(input, canvas, index) {
@@ -305,6 +356,8 @@ function normalizeSlide(input, canvas, index) {
         elements,
         speakerNotes: normalizeBoundedText(input.speakerNotes, '', 12000, '演讲者备注', { allowEmpty: true, trim: false }),
         sourceRefs: normalizeStringArray(input.sourceRefs, 100, 160, '页面来源引用'),
+        ...(input.intent === undefined ? {} : { intent: normalizeSlideIntent(input.intent) }),
+        ...(input.claims === undefined ? {} : { claims: normalizeClaims(input.claims) }),
         review: normalizeSlideReview(input.review || { status: input.reviewStatus, approvedAt: input.approvedAt, approvedBy: input.approvedBy }),
         transition
     };
@@ -404,7 +457,8 @@ function normalizePresentation(input, options = {}) {
                 locator: normalizeBoundedText(source.locator, '', 500, '来源定位', { allowEmpty: true }),
                 digest: normalizeBoundedText(source.digest, '', 160, '来源摘要', { allowEmpty: true }),
                 excerpt: normalizeBoundedText(source.excerpt, '', MAX_SOURCE_EXCERPT_CHARS, '来源证据摘录', { allowEmpty: true, trim: false }),
-                excerptTruncated: normalizeBoolean(source.excerptTruncated ?? source.excerpt_truncated)
+                excerptTruncated: normalizeBoolean(source.excerptTruncated ?? source.excerpt_truncated),
+                ...(source.evidenceSlices === undefined ? {} : { evidenceSlices: normalizeEvidenceSlices(source.evidenceSlices, source.digest) })
             };
         }) : [],
         metadata: {
@@ -412,6 +466,7 @@ function normalizePresentation(input, options = {}) {
             designSkillVersion: normalizeBoundedText(input.metadata?.designSkillVersion, '', 32, '设计技能版本', { allowEmpty: true }),
             coverAssetRef: input.metadata?.coverAssetRef ? (() => { const ref = String(input.metadata.coverAssetRef).trim(); if (!CAS_REF_PATTERN.test(ref)) throw presentationError('封面图片必须引用受控素材对象。', 400, 'PRESENTATION_ASSET_REF_INVALID'); return ref; })() : '',
             language: normalizeBoundedText(input.metadata?.language, 'zh-CN', 24, '语言'),
+            ...(input.metadata?.productionProfile === undefined ? {} : { productionProfile: normalizeProductionProfile(input.metadata.productionProfile) }),
             updatedAt: normalizeBoundedText(input.metadata?.updatedAt, '', 64, '更新时间', { allowEmpty: true }),
             planApproval: input.metadata?.planApproval ? normalizeApprovedOutline(input.metadata.planApproval) : null
         }
@@ -427,7 +482,7 @@ function normalizePresentation(input, options = {}) {
         });
     }));
     result.slides.forEach(slide => {
-        [...slide.sourceRefs, ...slide.elements.flatMap(element => element.sourceRefs || [])].forEach(ref => {
+        [...slide.sourceRefs, ...slide.elements.flatMap(element => element.sourceRefs || []), ...(slide.claims || []).flatMap(claim => [...claim.sourceRefs, ...claim.evidence.map(item => item.sourceId)])].forEach(ref => {
             if (ref && !sourceIds.has(ref)) throw presentationError(`页面引用了不存在的来源：${ref}。`, 400, 'PRESENTATION_SOURCE_REF_INVALID');
         });
     });

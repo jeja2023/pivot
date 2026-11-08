@@ -73,9 +73,8 @@ function buildOutlineMessages(body = {}) {
         {
             role: 'user', content: [
                 `主题：${clamp(body.topic, 300)}`,
-                `目标受众：${clamp(body.audience || '一般管理者', 200)}`,
-                `演示目的：${clamp(body.purpose || '说明背景、方案与行动建议', 300)}`,
-                `演示时长：${clamp(body.duration || '', 60) || '未指定'}`,
+                require('./presentation-production-profile').prompt(require('./presentation-production-profile').fromRequest(body)),
+                body.duration ? `演示时长：${clamp(body.duration, 60)}` : '',
                 `目标页数：${pages}`,
                 `输出语言：${clamp(body.language || 'zh-CN', 40)}`,
                 `风格：${clamp(body.style || '专业、简洁、可演示', 200)}`,
@@ -107,6 +106,7 @@ function buildSlidesMessages(body = {}) {
         {
             role: 'user', content: [
                 `主题：${clamp(body.topic || outline.title, 300)}`,
+                require('./presentation-production-profile').prompt(require('./presentation-production-profile').fromRequest(body)),
                 `输出语言：${clamp(body.language || 'zh-CN', 40)}`,
                 body.instruction ? `当前页改写要求：${clamp(body.instruction, 1000)}` : '',
                 `模板：${template.name}，主色：${template.theme.colors.primary}，正文色：${template.theme.colors.text}`,
@@ -123,6 +123,7 @@ function buildSlidesMessages(body = {}) {
                     : `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
                 semantic ? '使用语义页面，不输出 elements、坐标或字号。layout从可用布局中选择并去除design-前缀；每页最多8条要点，每条不超过280字。双栏使用left/right，指标用metrics，图表或表格只填真实数据；无关字段省略。版式引擎负责字号、几何与溢出拆页，禁止静默省略关键事实。详细内容保留speakerNotes，不超过4000字。'
                     : '使用 text、shape、table、chart 元素，每页最多 16 个元素（含标题）；每个 text 不超过 240 字，speakerNotes 不超过 1600 字。优先使用允许布局中的槽位 role 作为元素 id，由模板确定几何。坐标基于 1280x720。正文通常不低于24px（导出18pt），文字过密时拆页或将细节移入备注。禁止任意外部URL。表格必须有 columns，rows 列数一致；图表必须至少有两个 data.columns 字段及真实数值行。',
+                '逐页提供实际使用的sourceRefs，不得把全部材料机械关联到每一页。使用intent记录purpose、takeaway、bridgeToNext（与下一页的衔接）、stage(opening/context/problem/evidence/proposal/decision/action/closing/content)、relation(none/comparison/sequence/hierarchy/causal/composition/timeline/decision)、durationSeconds。关键事实可用claims登记：{id,text,type:fact|calculation|assumption|recommendation,sourceRefs,evidence:[{sourceId,quote,locator}]}；quote必须逐字来自材料，不能编造。计算型论点另提供calculation:{operation:sum|difference|ratio|percent_change|average,values:[原始数值],result:计算结果,unit:单位}，并保留输入证据。假设与建议必须明确区分，来源标签本身不代表事实已核实。',
                 compact ? semantic ? '紧凑输出模式：只输出必要语义字段，完整保留所有页面、关键事实及数据，不输出坐标和空字段；先完成全部slides数组再闭合JSON。' : '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
             ].join('\n')
         }
@@ -141,13 +142,14 @@ function buildContinueMessages(body = {}) {
         { role: 'user', content: [
             '为现有演示文稿只新增 ' + additionalSlides + ' 页，不要重写或重复已有页面。',
             '文稿主题：' + clamp(presentation.title || body.title || body.topic || '演示文稿', 300),
+            require('./presentation-production-profile').prompt(require('./presentation-production-profile').fromRequest(body)),
             '补写要求：' + clamp(body.instruction || '延续当前结构补充后续内容。', 1000),
             '模板：' + template.name + '，主色：' + template.theme.colors.primary,
             '允许布局：' + templateLayoutSummary(template).map(item => item.id).join('、'),
             '已有页面摘要：' + JSON.stringify(existing).slice(0, 12000),
             materials ? '材料：\n' + materials : '材料：未提供。不得编造精确事实。',
             '仅返回新增页面，返回格式：{\"title\":\"...\",\"slides\":[{\"id\":\"slide_new_1\",\"type\":\"content\",\"layoutId\":\"' + contentLayoutId + '\",\"elements\":[...],\"speakerNotes\":\"\",\"sourceRefs\":[]}],\"assumptions\":[],\"warnings\":[]}',
-            'slides 数量必须恰好为 ' + additionalSlides + '；仅可使用 text、shape、table、chart 元素，不能引用外部 URL。'
+            'slides 数量必须恰好为 ' + additionalSlides + '；仅可使用 text、shape、table、chart 元素，不能引用外部 URL。每页使用intent记录purpose、takeaway、bridgeToNext、stage、relation、durationSeconds，延续已有逐页职责。'
         ].join('\n') }
     ];
 }
@@ -542,7 +544,7 @@ function repairAiPresentationProposal(proposal, options = {}) {
     return { ...proposal, slides, sources, warnings };
 }
 
-function parsePresentationProposal(content, { templateId = 'business-blue', template: suppliedTemplate, title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [] } = {}) {
+function parsePresentationProposal(content, { templateId = 'business-blue', template: suppliedTemplate, title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [], productionProfile } = {}) {
     let proposal = parseAiJsonObject(content, 'AI 返回的演示文稿 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID');
     if (!Array.isArray(proposal.slides)) return proposal;
     const template = templateForAi({ templateId, template: suppliedTemplate });
@@ -558,7 +560,7 @@ function parsePresentationProposal(content, { templateId = 'business-blue', temp
         theme: template.theme,
         slides: proposal.slides,
         sources: proposal.sources,
-        metadata: { aiGenerated: true, designSkillVersion: template.layouts.some(layout => layout.id.startsWith('design-')) ? '1.0.0' : '', language: clamp(language, 24) || 'zh-CN' }
+        metadata: { aiGenerated: true, designSkillVersion: template.layouts.some(layout => layout.id.startsWith('design-')) ? '1.0.0' : '', language: clamp(language, 24) || 'zh-CN', ...(productionProfile ? { productionProfile } : {}) }
     });
     return { ...proposal, presentation: contentObject };
 }
@@ -568,8 +570,8 @@ async function compilePresentationProposal(content, options = {}) {
     const template = templateForAi({ templateId: options.templateId, template: options.template });
     if (!Array.isArray(raw.slides) || raw.slides.some(slide => Array.isArray(slide?.elements))) return parsePresentationProposal(content, options);
     if (!template.layouts.some(layout => String(layout.id).startsWith('design-'))) return parsePresentationProposal(content, options);
-    const sources = (options.sources || []).map(source => require('./presentation-evidence').materialToPresentationSource(source));
-    const compiled = await require('./presentation-design-compiler').compileDesignPlan({ title: raw.title || options.title, slides: raw.slides }, template, sources, options);
+    const sources = options.sources || [];
+    const compiled = await require('./presentation-design-compiler').compileDesignPlan({ title: raw.title || options.title, slides: raw.slides, productionProfile: options.productionProfile }, template, sources, options);
     return { ...raw, ...compiled, warnings: [...(Array.isArray(raw.warnings) ? raw.warnings.map(String) : []), ...compiled.warnings] };
 }
 

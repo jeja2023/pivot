@@ -15,6 +15,7 @@
 const path = require('path');
 const yaml = require('js-yaml');
 const { normalizeCapabilityList } = require('./agent-capability-registry');
+const { normalizeSkillImportProvenance } = require('./agent-skill-import-provenance');
 
 const MAX_FRONTMATTER_BYTES = 16 * 1024;
 const MAX_INSTRUCTIONS_BYTES = 256 * 1024;
@@ -23,7 +24,7 @@ const MAX_INSTRUCTIONS_BYTES = 256 * 1024;
 const ALLOWED_FRONTMATTER_FIELDS = Object.freeze(new Set([
     'schemaVersion', 'id', 'name', 'version', 'title', 'description', 'publisher',
     'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates',
-    'dependencies', 'files', 'digest', 'package_digest', 'signature', 'keyId', 'license', 'tags'
+    'dependencies', 'files', 'digest', 'package_digest', 'signature', 'keyId', 'license', 'tags', 'importSource'
 ]));
 
 /** 明确拒绝的历史字段：scope 由发布动作决定，tests[].script 属包内脚本执行。 */
@@ -50,10 +51,17 @@ function isSkillSourceMarkdown(fileName) {
 
 /** 拒绝 YAML 锚点、别名、合并键与自定义标签：它们会让同一份文本产生多种展开结果。 */
 function assertNoYamlIndirection(text) {
-    if (/(^|\s)&[A-Za-z0-9_-]+/.test(text)) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 锚点。');
-    if (/(^|\s)\*[A-Za-z0-9_-]+/.test(text)) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 别名。');
-    if (/(^|\s)<<\s*:/.test(text)) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 合并键。');
-    if (/!!/.test(text)) throw sourceError('SKILL.md Frontmatter 不允许使用自定义 YAML 标签。');
+    let events;
+    try { events = yaml.parseEvents(text, { maxDepth: 16 }); }
+    catch (_) { throw sourceError('技能 YAML 语法无效或层级过深，请检查字段与缩进。'); }
+    // 仅检查实际语法事件，引用文本中的 &、*、!! 不应被误当成 YAML 行为。
+    for (const event of events) {
+        if (event.type === yaml.EVENT_ALIAS) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 别名。');
+        if (event.anchorStart >= 0) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 锚点。');
+        if (event.tagStart >= 0) throw sourceError('SKILL.md Frontmatter 不允许使用自定义 YAML 标签。');
+        if (event.type === yaml.EVENT_SCALAR && text.slice(event.valueStart, event.valueEnd) === '<<'
+            && /^(?:['"])?\s*:/.test(text.slice(event.valueEnd))) throw sourceError('SKILL.md Frontmatter 不允许使用 YAML 合并键。');
+    }
 }
 
 /**
@@ -83,7 +91,7 @@ function assertFieldWhitelist(manifest) {
         if (rejection) throw sourceError(rejection);
         if (!ALLOWED_FRONTMATTER_FIELDS.has(key)) unknown.push(key);
     });
-    if (unknown.length) throw sourceError(`SKILL.md Frontmatter 含未知字段：${unknown.join('、')}`);
+    if (unknown.length) throw sourceError(`SKILL.md Frontmatter 含未知字段：${unknown.join('、')}。外部格式请使用“创建/导入技能”的兼容预览转换。`);
 }
 
 /**
@@ -106,6 +114,7 @@ function parseSkillSourceMarkdown(text) {
     }
     assertFieldWhitelist(parsed);
     const manifest = { ...parsed };
+    if (manifest.importSource !== undefined) manifest.importSource = normalizeSkillImportProvenance(manifest.importSource);
     if (manifest.capabilities !== undefined) manifest.capabilities = normalizeCapabilityList(manifest.capabilities);
     if (Array.isArray(manifest.tools)) {
         manifest.tools = [...new Set(manifest.tools.map(item => String(item || '').trim()).filter(Boolean))];
@@ -118,7 +127,7 @@ function parseSkillSourceMarkdown(text) {
 function buildSkillSourceMarkdown(manifest = {}, instructions = '') {
     const ordered = {};
     ['schemaVersion', 'id', 'name', 'version', 'title', 'description', 'publisher',
-        'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates', 'dependencies', 'files', 'license', 'tags']
+        'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates', 'dependencies', 'files', 'license', 'tags', 'importSource']
         .forEach(key => {
             if (manifest[key] !== undefined && manifest[key] !== null && manifest[key] !== '') ordered[key] = manifest[key];
         });

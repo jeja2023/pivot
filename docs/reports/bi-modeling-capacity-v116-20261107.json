@@ -1,0 +1,817 @@
+{
+  "generatedAt": "2026-11-06T21:56:47.118Z",
+  "runtime": "docker",
+  "workerSha256": "35213251fa458fd64c2241f4449b2df6c6f1dd77861312d7821869924f489388",
+  "workerImage": "sha256:79d7038658f01d12864d08999961339601a6526595d6b8a676c5b0f4df4a2b58",
+  "sourceBefore": {
+    "commit": "50cd8aa124e51d10cdf3d01ca426a2c4941aad28",
+    "sha256": "0c0268a853ab380eaadd20d2a932af0b294a6920d0a34d50e4db146a21c24dce",
+    "files": 2443,
+    "bytes": 35772951
+  },
+  "sourceAfter": {
+    "commit": "50cd8aa124e51d10cdf3d01ca426a2c4941aad28",
+    "sha256": "0c0268a853ab380eaadd20d2a932af0b294a6920d0a34d50e4db146a21c24dce",
+    "files": 2443,
+    "bytes": 35772951
+  },
+  "sourceUnchanged": true,
+  "node": "v24.22.0",
+  "platform": "win32",
+  "hardware": {
+    "cpu": "Intel(R) Core(TM) i5-10500 CPU @ 3.10GHz",
+    "logicalCpus": 12,
+    "memoryBytes": 16944168960
+  },
+  "complete": true,
+  "results": [
+    {
+      "tier": "P-Standard",
+      "factRows": 200000,
+      "dimensionRows": 20000,
+      "columnsPerTable": 120,
+      "relations": 8,
+      "inputBytes": 124338063,
+      "inputs": [
+        {
+          "rows": 200000,
+          "columns": 120,
+          "bytes": 113947087,
+          "sha256": "5770a1d9a384a6b60ffb1182e73b825130471795aa26085b940bf48711cbe9a6",
+          "ingestionMs": 38312,
+          "executionMetrics": {
+            "workerMs": 14686,
+            "runtimeMs": 18421,
+            "userCpuMs": 10576,
+            "maxRssBytes": 582397952,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1374,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 515264512,
+            "inputResolutionMs": 329,
+            "resultRegistrationMs": 226
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 6831,
+          "executionMetrics": {
+            "workerMs": 3078,
+            "runtimeMs": 6344,
+            "userCpuMs": 1357,
+            "maxRssBytes": 167780352,
+            "queueWaitMs": 0,
+            "systemCpuMs": 333,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 92344320,
+            "inputResolutionMs": 10,
+            "resultRegistrationMs": 170
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 9004,
+          "executionMetrics": {
+            "workerMs": 4780,
+            "runtimeMs": 8433,
+            "userCpuMs": 2145,
+            "maxRssBytes": 173215744,
+            "queueWaitMs": 0,
+            "systemCpuMs": 484,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 98553856,
+            "inputResolutionMs": 9,
+            "resultRegistrationMs": 167
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 7485,
+          "executionMetrics": {
+            "workerMs": 3238,
+            "runtimeMs": 6911,
+            "userCpuMs": 1442,
+            "maxRssBytes": 173051904,
+            "queueWaitMs": 0,
+            "systemCpuMs": 427,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 97746944,
+            "inputResolutionMs": 13,
+            "resultRegistrationMs": 147
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 7292,
+          "executionMetrics": {
+            "workerMs": 3387,
+            "runtimeMs": 6756,
+            "userCpuMs": 1560,
+            "maxRssBytes": 178012160,
+            "queueWaitMs": 1000,
+            "systemCpuMs": 377,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 103243776,
+            "inputResolutionMs": 8,
+            "resultRegistrationMs": 242
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 6876,
+          "executionMetrics": {
+            "workerMs": 2897,
+            "runtimeMs": 6409,
+            "userCpuMs": 1307,
+            "maxRssBytes": 172945408,
+            "queueWaitMs": 0,
+            "systemCpuMs": 341,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 98000896,
+            "inputResolutionMs": 8,
+            "resultRegistrationMs": 141
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 6872,
+          "executionMetrics": {
+            "workerMs": 3042,
+            "runtimeMs": 6395,
+            "userCpuMs": 1337,
+            "maxRssBytes": 173043712,
+            "queueWaitMs": 0,
+            "systemCpuMs": 331,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 98086912,
+            "inputResolutionMs": 8,
+            "resultRegistrationMs": 154
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 6954,
+          "executionMetrics": {
+            "workerMs": 3082,
+            "runtimeMs": 6464,
+            "userCpuMs": 1442,
+            "maxRssBytes": 175132672,
+            "queueWaitMs": 0,
+            "systemCpuMs": 335,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 99860480,
+            "inputResolutionMs": 8,
+            "resultRegistrationMs": 224
+          }
+        },
+        {
+          "rows": 2500,
+          "columns": 120,
+          "bytes": 1298872,
+          "sha256": "33b202e7b583adb27f9a7bb85e154957532232c25909f41da9e0356736b54fce",
+          "ingestionMs": 7032,
+          "executionMetrics": {
+            "workerMs": 3177,
+            "runtimeMs": 6492,
+            "userCpuMs": 1312,
+            "maxRssBytes": 173510656,
+            "queueWaitMs": 0,
+            "systemCpuMs": 417,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 98029568,
+            "inputResolutionMs": 8,
+            "resultRegistrationMs": 148
+          }
+        }
+      ],
+      "runtimeContract": {
+        "engine": "v1.5.5",
+        "compilerVersion": "bi-compiler-v1",
+        "schema": {
+          "schemaVersion": "202611070008",
+          "runtimeProtocol": 2
+        },
+        "isolationCheckedAt": "2026-11-06T21:47:01.021Z",
+        "settings": {
+          "running": 2,
+          "userRunning": 1,
+          "queued": 16,
+          "userQueued": 3,
+          "duckMemoryBytes": 1073741824,
+          "hardMemoryBytes": 2147483648,
+          "threads": 2,
+          "spillBytes": 8589934592
+        }
+      },
+      "quality": {
+        "elapsedMs": 5308,
+        "targetMs": 60000,
+        "passed": true,
+        "fullScan": true,
+        "executionMetrics": {
+          "workerMs": 1125,
+          "runtimeMs": 4522,
+          "userCpuMs": 993,
+          "maxRssBytes": 261779456,
+          "queueWaitMs": 0,
+          "systemCpuMs": 244,
+          "peakSpillBytes": 0,
+          "cgroupPeakBytes": 189095936,
+          "inputResolutionMs": 561,
+          "resultRegistrationMs": 124
+        }
+      },
+      "queries": [
+        {
+          "kind": "common",
+          "sequence": 1,
+          "elapsedMs": 4414,
+          "groups": "1032",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 619,
+            "runtimeMs": 3864,
+            "userCpuMs": 605,
+            "maxRssBytes": 161792000,
+            "queueWaitMs": 0,
+            "systemCpuMs": 121,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 88023040,
+            "inputResolutionMs": 45,
+            "resultRegistrationMs": 237
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 71
+        },
+        {
+          "kind": "common",
+          "sequence": 2,
+          "elapsedMs": 5031,
+          "groups": "1032",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 651,
+            "runtimeMs": 4358,
+            "userCpuMs": 645,
+            "maxRssBytes": 166473728,
+            "queueWaitMs": 0,
+            "systemCpuMs": 110,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 92028928,
+            "inputResolutionMs": 67,
+            "resultRegistrationMs": 351
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 57
+        },
+        {
+          "kind": "common",
+          "sequence": 3,
+          "elapsedMs": 4592,
+          "groups": "1032",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 570,
+            "runtimeMs": 3962,
+            "userCpuMs": 677,
+            "maxRssBytes": 164995072,
+            "queueWaitMs": 1000,
+            "systemCpuMs": 106,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 90177536,
+            "inputResolutionMs": 72,
+            "resultRegistrationMs": 266
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 50
+        },
+        {
+          "kind": "complex",
+          "sequence": 1,
+          "elapsedMs": 5070,
+          "groups": "1080",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 1068,
+            "runtimeMs": 4429,
+            "userCpuMs": 1315,
+            "maxRssBytes": 322027520,
+            "queueWaitMs": 0,
+            "systemCpuMs": 179,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 248868864,
+            "inputResolutionMs": 73,
+            "resultRegistrationMs": 273
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 52
+        },
+        {
+          "kind": "complex",
+          "sequence": 2,
+          "elapsedMs": 4967,
+          "groups": "1080",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 1087,
+            "runtimeMs": 4352,
+            "userCpuMs": 1298,
+            "maxRssBytes": 319123456,
+            "queueWaitMs": 0,
+            "systemCpuMs": 177,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 246059008,
+            "inputResolutionMs": 56,
+            "resultRegistrationMs": 294
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 54
+        },
+        {
+          "kind": "complex",
+          "sequence": 3,
+          "elapsedMs": 5122,
+          "groups": "1080",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 1083,
+            "runtimeMs": 4490,
+            "userCpuMs": 1270,
+            "maxRssBytes": 320548864,
+            "queueWaitMs": 0,
+            "systemCpuMs": 190,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 247287808,
+            "inputResolutionMs": 74,
+            "resultRegistrationMs": 273
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 76
+        }
+      ],
+      "slo": {
+        "common": {
+          "samples": 3,
+          "p50Ms": 4592,
+          "p95Ms": 5031,
+          "p99Ms": 5031,
+          "targetMs": 5000,
+          "passed": false
+        },
+        "complex": {
+          "samples": 3,
+          "p50Ms": 5070,
+          "p95Ms": 5122,
+          "p99Ms": 5122,
+          "targetMs": null,
+          "passed": null
+        }
+      },
+      "certification": false,
+      "limitations": [
+        "本机隔离工程验证，未替代目标生产硬件认证。",
+        "文件系统缓存未受控；每次使用新的引擎进程，无查询结果缓存；另报持久结果读取耗时。",
+        "非七十二小时稳定性与三十天运行历史。"
+      ]
+    },
+    {
+      "tier": "P-Large",
+      "factRows": 1000000,
+      "dimensionRows": 2000000,
+      "columnsPerTable": 120,
+      "relations": 8,
+      "inputBytes": 1619071258,
+      "inputs": [
+        {
+          "rows": 1000000,
+          "columns": 120,
+          "bytes": 572840282,
+          "sha256": "d9012c475c005c8cda2b56ef5ccf1c5b86fc8edb95940ec6f6101b0ac70ca71a",
+          "ingestionMs": 114806,
+          "executionMetrics": {
+            "workerMs": 71835,
+            "runtimeMs": 76629,
+            "userCpuMs": 72386,
+            "maxRssBytes": 1738440704,
+            "queueWaitMs": 0,
+            "systemCpuMs": 5374,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 1665691648,
+            "inputResolutionMs": 1530,
+            "resultRegistrationMs": 477
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 33168,
+          "executionMetrics": {
+            "workerMs": 14881,
+            "runtimeMs": 18497,
+            "userCpuMs": 10382,
+            "maxRssBytes": 650399744,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1339,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 573886464,
+            "inputResolutionMs": 346,
+            "resultRegistrationMs": 213
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 27427,
+          "executionMetrics": {
+            "workerMs": 14873,
+            "runtimeMs": 18519,
+            "userCpuMs": 10387,
+            "maxRssBytes": 698564608,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1382,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 622366720,
+            "inputResolutionMs": 346,
+            "resultRegistrationMs": 210
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 27242,
+          "executionMetrics": {
+            "workerMs": 14864,
+            "runtimeMs": 18705,
+            "userCpuMs": 10243,
+            "maxRssBytes": 590491648,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1407,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 513277952,
+            "inputResolutionMs": 339,
+            "resultRegistrationMs": 210
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 28995,
+          "executionMetrics": {
+            "workerMs": 14716,
+            "runtimeMs": 18708,
+            "userCpuMs": 10267,
+            "maxRssBytes": 617218048,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1369,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 540532736,
+            "inputResolutionMs": 724,
+            "resultRegistrationMs": 283
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 27492,
+          "executionMetrics": {
+            "workerMs": 14750,
+            "runtimeMs": 18433,
+            "userCpuMs": 10100,
+            "maxRssBytes": 648634368,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1384,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 571871232,
+            "inputResolutionMs": 335,
+            "resultRegistrationMs": 207
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 28354,
+          "executionMetrics": {
+            "workerMs": 15262,
+            "runtimeMs": 19515,
+            "userCpuMs": 10969,
+            "maxRssBytes": 502181888,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1346,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 425091072,
+            "inputResolutionMs": 327,
+            "resultRegistrationMs": 213
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 27898,
+          "executionMetrics": {
+            "workerMs": 14894,
+            "runtimeMs": 18786,
+            "userCpuMs": 10508,
+            "maxRssBytes": 634753024,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1344,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 557658112,
+            "inputResolutionMs": 335,
+            "resultRegistrationMs": 179
+          }
+        },
+        {
+          "rows": 250000,
+          "columns": 120,
+          "bytes": 130778872,
+          "sha256": "7258ee07920af62828c3756fb97240426afbfbc80b9d8d289ec294c818d4a831",
+          "ingestionMs": 27834,
+          "executionMetrics": {
+            "workerMs": 15169,
+            "runtimeMs": 18984,
+            "userCpuMs": 10604,
+            "maxRssBytes": 551497728,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1476,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 474816512,
+            "inputResolutionMs": 354,
+            "resultRegistrationMs": 240
+          }
+        }
+      ],
+      "runtimeContract": {
+        "engine": "v1.5.5",
+        "compilerVersion": "bi-compiler-v1",
+        "schema": {
+          "schemaVersion": "202611070008",
+          "runtimeProtocol": 2
+        },
+        "isolationCheckedAt": "2026-11-06T21:47:01.021Z",
+        "settings": {
+          "running": 2,
+          "userRunning": 1,
+          "queued": 16,
+          "userQueued": 3,
+          "duckMemoryBytes": 1073741824,
+          "hardMemoryBytes": 2147483648,
+          "threads": 2,
+          "spillBytes": 8589934592
+        }
+      },
+      "quality": {
+        "elapsedMs": 11508,
+        "targetMs": 120000,
+        "passed": true,
+        "fullScan": true,
+        "executionMetrics": {
+          "workerMs": 5762,
+          "runtimeMs": 9995,
+          "userCpuMs": 5880,
+          "maxRssBytes": 771678208,
+          "queueWaitMs": 0,
+          "systemCpuMs": 736,
+          "peakSpillBytes": 0,
+          "cgroupPeakBytes": 699465728,
+          "inputResolutionMs": 1246,
+          "resultRegistrationMs": 121
+        }
+      },
+      "queries": [
+        {
+          "kind": "common",
+          "sequence": 1,
+          "elapsedMs": 9864,
+          "groups": "74767",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 5132,
+            "runtimeMs": 8467,
+            "userCpuMs": 4802,
+            "maxRssBytes": 357208064,
+            "queueWaitMs": 0,
+            "systemCpuMs": 383,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 283799552,
+            "inputResolutionMs": 91,
+            "resultRegistrationMs": 968
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 57
+        },
+        {
+          "kind": "common",
+          "sequence": 2,
+          "elapsedMs": 14184,
+          "groups": "74767",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 7447,
+            "runtimeMs": 12347,
+            "userCpuMs": 6306,
+            "maxRssBytes": 367177728,
+            "queueWaitMs": 0,
+            "systemCpuMs": 558,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 294133760,
+            "inputResolutionMs": 88,
+            "resultRegistrationMs": 1455
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 84
+        },
+        {
+          "kind": "common",
+          "sequence": 3,
+          "elapsedMs": 10833,
+          "groups": "74767",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 5256,
+            "runtimeMs": 8934,
+            "userCpuMs": 5077,
+            "maxRssBytes": 370819072,
+            "queueWaitMs": 0,
+            "systemCpuMs": 430,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 297693184,
+            "inputResolutionMs": 163,
+            "resultRegistrationMs": 1213
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 46
+        },
+        {
+          "kind": "complex",
+          "sequence": 1,
+          "elapsedMs": 17284,
+          "groups": "74815",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 11418,
+            "runtimeMs": 14852,
+            "userCpuMs": 11900,
+            "maxRssBytes": 967610368,
+            "queueWaitMs": 0,
+            "systemCpuMs": 953,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 896147456,
+            "inputResolutionMs": 83,
+            "resultRegistrationMs": 2113
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 62
+        },
+        {
+          "kind": "complex",
+          "sequence": 2,
+          "elapsedMs": 17475,
+          "groups": "74815",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 11500,
+            "runtimeMs": 15062,
+            "userCpuMs": 11688,
+            "maxRssBytes": 954535936,
+            "queueWaitMs": 0,
+            "systemCpuMs": 1034,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 882831360,
+            "inputResolutionMs": 101,
+            "resultRegistrationMs": 2073
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 64
+        },
+        {
+          "kind": "complex",
+          "sequence": 3,
+          "elapsedMs": 17317,
+          "groups": "74815",
+          "truncated": true,
+          "executionMetrics": {
+            "workerMs": 11327,
+            "runtimeMs": 15013,
+            "userCpuMs": 11829,
+            "maxRssBytes": 933642240,
+            "queueWaitMs": 0,
+            "systemCpuMs": 816,
+            "peakSpillBytes": 0,
+            "cgroupPeakBytes": 861970432,
+            "inputResolutionMs": 95,
+            "resultRegistrationMs": 1902
+          },
+          "cache": {
+            "engine": "fresh_process",
+            "filesystem": "uncontrolled",
+            "result": "miss_no_result_cache"
+          },
+          "storedResultReadMs": 53
+        }
+      ],
+      "slo": {
+        "common": {
+          "samples": 3,
+          "p50Ms": 10833,
+          "p95Ms": 14184,
+          "p99Ms": 14184,
+          "targetMs": 15000,
+          "passed": true
+        },
+        "complex": {
+          "samples": 3,
+          "p50Ms": 17317,
+          "p95Ms": 17475,
+          "p99Ms": 17475,
+          "targetMs": 30000,
+          "passed": true
+        }
+      },
+      "certification": false,
+      "limitations": [
+        "本机隔离工程验证，未替代目标生产硬件认证。",
+        "文件系统缓存未受控；每次使用新的引擎进程，无查询结果缓存；另报持久结果读取耗时。",
+        "非七十二小时稳定性与三十天运行历史。"
+      ]
+    }
+  ]
+}

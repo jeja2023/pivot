@@ -12,6 +12,6 @@ async function withDatasetColumns(user, datasetId, keys, operation) {
             await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
             return await shared.withDuckTimeout(connection, () => operation({ dataset, columns, connection }));
         } finally { connection.closeSync(); instance.closeSync(); }
-    });
+    }, { userId: user.id });
 }
 module.exports = { withDatasetColumns };

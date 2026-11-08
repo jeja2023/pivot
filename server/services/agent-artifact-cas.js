@@ -395,14 +395,15 @@ async function putStream(params = {}) {
  * GREATEST 保证计数不会被减成负数 —— 负值会让回收条件永远不成立，对象将永久残留。
  * @returns {Promise<number>} 调整后的引用计数
  */
-async function incrementRefCount(objectId, delta) {
+async function incrementRefCount(objectId, delta, options = {}) {
     const id = resolveObjectId(objectId);
     if (!id) throw casError('产物对象引用非法。', 400, 'ARTIFACT_CAS_REF_INVALID');
     const step = Number.parseInt(delta, 10);
     if (!Number.isSafeInteger(step) || step === 0) {
         throw casError('引用计数增量必须是非零整数。', 400, 'ARTIFACT_CAS_REFCOUNT_INVALID');
     }
-    const row = await queryOne(`
+    const client = options.executor || { queryOne };
+    const row = await client.queryOne(`
         UPDATE agent_artifact_objects
         SET ref_count = GREATEST(0, ref_count + CAST(? AS BIGINT))
         WHERE id = ?

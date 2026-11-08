@@ -109,7 +109,7 @@ async function compareDatasets(userId, input = {}) {
         UNION ALL SELECT 'duplicate_left', key, left_value, right_value FROM duplicate_left
         UNION ALL SELECT 'duplicate_right', key, left_value, right_value FROM duplicate_right
     `;
-    const rows = await withAnalysisSlot(() => duckReadAll(sql));
+    const rows = await withAnalysisSlot(() => duckReadAll(sql), { userId: Number(userId?.id || userId) });
     const matched = Number(rows.find(item => item.section === 'matched')?.key || 0);
     const matchedKeys = rows.filter(item => item.section === 'matched_keys').map(item => ({ key: item.key }));
     const onlyLeft = rows.filter(item => item.section === 'only_left').map(item => ({ key: item.key }));

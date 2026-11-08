@@ -1,6 +1,6 @@
 'use strict';
 
-const { asyncHandler } = require('../http');
+const { handler: asyncHandler } = require('../services/data-analysis/bi/delivery');
 const { formatToolList } = require('../services/agent-tool-catalog');
 const { executeToolByName, findAgentToolByName } = require('../services/agent-tool-runtime');
 const { PolicyError } = require('../services/agent-policy');

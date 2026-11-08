@@ -4,6 +4,7 @@ const sharp = require('sharp');
 const { normalizePresentation } = require('./presentation-schema');
 const { renderPresentation } = require('./presentation-renderer');
 const { runPresentationValidation } = require('./presentation-validation');
+const { diagramScene } = require('../../../client/chat/presentation-graphics');
 
 function makeIssue(level, code, slideId, message, suggestion = '') {
     return { level, code, slideId, elementId: null, message, suggestion };
@@ -16,6 +17,13 @@ async function runRenderedPresentationQuality(input, { assetResolver, signal } =
     const metrics = await require('./presentation-text-metrics').createTextMetrics(presentation, { assetResolver });
     for (const slide of presentation.slides) {
         signal?.throwIfAborted();
+        for (const element of slide.elements.filter(element => element.type === 'diagram' && element.visible)) {
+            const scene = diagramScene(element);
+            for (const node of scene.nodes) {
+                const proxy = { width: node.width, content: { text: node.label }, style: { fontSize: element.style.fontSize, fontFamily: presentation.theme.fonts.body, padding: 6 } };
+                if (metrics.lines(proxy).length * element.style.fontSize * 1.3 + 12 > node.height + 2) renderIssues.push({ ...makeIssue('blocking', 'DIAGRAM_TEXT_OVERFLOW', slide.id, `图示节点“${node.label}”的文字放不下。`, '扩大图示区域、简化节点标注并将详细说明保留到讲稿，或拆为多页。'), elementId: element.id, nodeId: node.id });
+            }
+        }
         if (String(slide.layoutId).startsWith('design-')) for (const element of slide.elements.filter(element => element.type === 'text' && element.visible)) {
             const height = metrics.lines(element).length * element.style.fontSize * element.style.lineHeight + element.style.padding * 2;
             if (height > element.height + 2) renderIssues.push({ ...makeIssue('blocking', 'MEASURED_TEXT_OVERFLOW', slide.id, '实际字体测量发现文字放不下。', '请调整布局、拆页或将详细内容放入讲稿，不要继续缩小正文。'), elementId: element.id });
@@ -40,6 +48,7 @@ async function runRenderedPresentationQuality(input, { assetResolver, signal } =
         status: blocking ? 'blocked' : warnings ? 'warning' : 'passed',
         summary: { slides: presentation.slides.length, renderedSlides: presentation.slides.length - renderIssues.filter(issue => issue.code === 'RENDER_FAILED').length, blocking, warnings, info: issues.length - blocking - warnings },
         issues,
+        semantics: structural.semantics,
         textMeasurement: metrics.measured ? 'controlled_font' : 'estimated',
         visualReview: { status: 'not_requested', message: '已完成结构与渲染检查，尚未进行视觉模型复核。' }
     };

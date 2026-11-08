@@ -57,11 +57,12 @@
                                 <span id="data-analysis-scale-file-name" class="data-analysis-file-chosen-text">未选择任何文件</span>
                                 <input id="data-analysis-scale-increment-file" class="data-analysis-hidden-file-input" type="file" accept=".csv,.xlsx,.xls,.sqlite,.sqlite3,.db">
                             </div>
+                            <label>追加批次（可选）<input id="data-analysis-scale-increment-batch" class="form-input" maxlength="128" placeholder="不填时按原文件摘要识别重复批次"></label>
                             <button id="data-analysis-scale-append" class="btn-secondary btn-sm" type="button">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                 <span>追加为新版本</span>
                             </button>
-                            <small>字段顺序必须与当前数据集一致；旧版本文件会保留用于回放。</small>
+                            <small>字段顺序必须与当前数据集一致；同批次重试不会重复追加。来源业务期间请在合并后核对补录。</small>
                         </div>
                         <div class="data-analysis-pipe-box">
                             <div class="data-analysis-pipe-box-head">
@@ -163,7 +164,8 @@
         const data = state.scalability || {};
         if (status) status.textContent = `当前版本 v${fmtNumber(data.sourceVersion || dataset.sourceVersion || 1)} · ${data.storageMode === 'managed_fs_partitioned' ? '已生成分区副本' : '托管本地 Parquet'}`;
         if (assets) {
-            const versions = (data.versions || []).map(item => listItem(`v${fmtNumber(item.version)} · ${item.operation} · ${fmtNumber(item.rowCount)} 行`)).join('') || listItem('尚未创建版本记录');
+            const operationLabels = { import: '原始导入', append: '批次追加', controlled_import: '后台分批导入', source_metadata: '来源信息补录', model_capture: '来源版本登记' };
+            const versions = (data.versions || []).map(item => listItem(`v${fmtNumber(item.version)} · ${operationLabels[item.operation] || '数据版本'} · ${fmtNumber(item.rowCount)} 行`)).join('') || listItem('尚未创建版本记录');
             const partitions = (data.partitions || []).slice(0, 8).map(item => listItem(`${item.fieldKey}=${item.value} · ${fmtNumber(item.rowCount)} 行`)).join('') || listItem('尚未生成分区');
             const materializations = (data.materializations || []).map(item => listItem(`${item.name} · ${fmtNumber(item.rowCount)} 行 · 源版本 v${fmtNumber(item.sourceVersion)}`)).join('') || listItem('尚未创建物化聚合');
             PivotSafeHtml.setHtml(assets, `<div><strong>版本</strong><ul>${versions}</ul><strong>分区</strong><ul>${partitions}</ul><strong>物化聚合</strong><ul>${materializations}</ul></div>`);
@@ -193,10 +195,15 @@
         const dataset = selectedDataset();
         const file = document.getElementById('data-analysis-scale-increment-file')?.files?.[0];
         if (!dataset || !file) return toast('请选择数据集和增量文件', 'warning');
+        const current = app.captureRequest('increment', () => selectedDataset()?.id || ''), userId = String(window.Pivot.legacy.currentUser?.id || '');
         const form = new FormData();
         form.append('file', file);
+        const batchId = document.getElementById('data-analysis-scale-increment-batch')?.value.trim();
+        if (batchId) form.append('inputBatchId', batchId);
+        form.append('expectedSourceRevision', String(dataset.sourceVersion));
         const result = await fetchJson(`${API}/datasets/${encodeURIComponent(dataset.id)}/increments`, { method: 'POST', body: form, timeoutMs: 300000 });
-        toast(`已追加 ${fmtNumber(result.appendedRows)} 行，生成版本 v${fmtNumber(result.sourceVersion)}`);
+        if (!current() || String(window.Pivot.legacy.currentUser?.id || '') !== userId) return;
+        toast(result.reused ? `此文件批次已追加，返回版本 v${fmtNumber(result.sourceVersion)}，未重复写入。` : `已追加 ${fmtNumber(result.appendedRows)} 行，生成版本 v${fmtNumber(result.sourceVersion)}`);
         const fileInput = document.getElementById('data-analysis-scale-increment-file');
         if (fileInput) fileInput.value = '';
         const nameEl = document.getElementById('data-analysis-scale-file-name');
