@@ -4,7 +4,7 @@
     const state = {
         templates: [], documents: [], assets: [], pendingAssetType: '', fontFaceUrls: new Map(), coverUrls: new Map(), imageUrls: new Map(), dataSets: [], versions: [],
         libraryFilters: { search: '', tag: '', favorite: false, templateId: '', status: '', createdBy: '', updatedFrom: '', updatedTo: '' }, libraryFilterTimer: null,
-        libraryPage: 1, libraryLimit: 10,
+        libraryPage: 1, libraryLimit: 15,
         active: null, selectedSlideId: '', selectedElementId: '', selectedElementIds: [], elementClipboard: null, panel: 'properties', zoom: 1, zoomMode: 'fit',
         history: [], historyIndex: -1, saveTimer: null, savePromise: null, saving: false, dirty: false, editRevision: 0, syncing: false, remoteVersionAvailable: false, remoteSession: null, drag: null,
         pendingOutline: null, pendingOutlineConfirmations: new Set(), pendingCreate: null, aiAbortController: null, aiRequestKey: '', templateImportReportExpanded: false, templateImportTaskId: '', pendingTemplateApplyMode: '',
@@ -225,7 +225,7 @@
         if (legacyList) legacyList.replaceChildren();
         if (!tableBody) return;
         tableBody.replaceChildren();
-        const total = state.documents.length, limit = Math.max(Number(state.libraryLimit) || 10, 1);
+        const total = state.documents.length, limit = Math.max(Number(state.libraryLimit) || 15, 1);
         const totalPages = Math.max(Math.ceil(total / limit), 1);
         state.libraryPage = Math.min(Math.max(Number(state.libraryPage) || 1, 1), totalPages);
         const startIndex = (state.libraryPage - 1) * limit;
