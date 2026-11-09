@@ -24,6 +24,7 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     }
     await unitTemplateBtn.click();
     await expect(page.locator('#presentation-catalog-filter')).toHaveValue('organization');
+    await expect(page.locator('#presentation-catalog-import')).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole('button', { name: '导入单位模板', exact: true })).toBeVisible();
     await page.locator('#presentation-catalog-filter').selectOption('all');
     await expect(page.locator('#presentation-catalog-body')).toContainText('咨询式简报');

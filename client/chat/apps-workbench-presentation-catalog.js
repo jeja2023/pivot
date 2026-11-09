@@ -117,7 +117,9 @@
 
         const file = node('input', 'hidden'); file.type = 'file'; file.accept = '.pptx,.json'; file.id = 'presentation-catalog-import-file';
         const upload = action('+ 导入单位模板', () => file.click(), true);
-        upload.id = 'presentation-catalog-import'; upload.classList.add('hidden', 'btn-primary', 'presentation-catalog-import-btn');
+        upload.id = 'presentation-catalog-import';
+        upload.setAttribute('aria-label', '导入单位模板');
+        upload.classList.add('hidden', 'btn-primary', 'presentation-catalog-import-btn');
         file.addEventListener('change', async () => {
             if (!file.files?.[0]) return; upload.disabled = true;
             try {
