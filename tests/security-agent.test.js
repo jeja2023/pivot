@@ -630,8 +630,8 @@ test('agent quick task uses a modal editor with complete actions', () => {
     assert.match(agentPartial, /class="agent-task-composer-templates-bar"[\s\S]*?id="agent-template-list"/);
     assert.match(source, /document\.querySelectorAll\('\[data-agent-save-template\]'\)\.forEach/);
     assert.match(source, /modal\.classList\.toggle\('hidden', !isOpen\)/);
-    assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?width: min\(760px,[\s\S]*?text-align: left;/);
-    assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?max-height: min\(860px, calc\(100dvh - 32px\)\);/);
+    assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?width: min\(980px,[\s\S]*?text-align: left;/);
+    assert.match(css, /\.agent-task-editor-modal\s*\{[\s\S]*?max-height: min\(900px, calc\(100dvh - 36px\)\);/);
     assert.match(css, /\.agent-task-editor-footer\s*\{/);
     assert.doesNotMatch(css, /\.agent-workbench\.task-composer-open/);
 });
