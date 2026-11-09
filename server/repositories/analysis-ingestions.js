@@ -74,7 +74,7 @@ async function submit(userId, id) {
         const jobId = `query_job_${crypto.randomUUID()}`;
         await objects.pin(chunks.map(part => part.object_id), { kind: 'run', referenceId: jobId }, trx);
         await trx.execute(`INSERT INTO analysis_query_jobs(id,user_id,dataset_id,sql_text,execution_kind,runtime_protocol,ingestion_session_id,request_key,request_hash,query_ast_json,deadline_at,queue_deadline_at,next_run_at)
-            VALUES (?,?,NULL,'','dataset_ingest',2,?,?,?,?::jsonb,NOW()+INTERVAL '420 seconds',NOW()+INTERVAL '120 seconds',NOW())`, [jobId, userId, id, session.request_key, manifestHash, JSON.stringify({ sessionId: id, manifestHash })]);
+            VALUES (?,?,NULL,'','dataset_ingest',2,?,?,?,?::jsonb,NOW()+INTERVAL '420 seconds',NOW()+INTERVAL '420 seconds',NOW())`, [jobId, userId, id, session.request_key, manifestHash, JSON.stringify({ sessionId: id, manifestHash })]);
         return trx.queryOne("UPDATE analysis_ingestion_sessions SET status='queued',manifest_hash=?,job_id=?,updated_at=NOW() WHERE id=? RETURNING *", [manifestHash, jobId, id]);
     });
 }
