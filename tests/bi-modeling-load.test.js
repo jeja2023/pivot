@@ -29,7 +29,7 @@ test('十个授权会话每五秒提交分析并混合刷新，超载单列且�
         app.use((err, _req, res, _next) => res.status(err.status || 500).json({ code: err.code }));
         server = http.createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
         const base = `http://127.0.0.1:${server.address().port}`;
-        poll = setInterval(() => runner.dispatchModelJobs(), 400);
+        poll = setInterval(() => runner.dispatchModelJobs(), 100);
         monitoring = setInterval(async () => {
             if (sampling) return; sampling = true;
             try {

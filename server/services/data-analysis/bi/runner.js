@@ -95,7 +95,6 @@ async function executeJob(job) {
         if (mayRelease) await jobs.releaseSlot(job);
         const target = path.resolve(outputRoot), parent = path.resolve(tempRoot, 'model-jobs');
         if (mayRelease && path.dirname(target) === parent && /^query_job_[a-zA-Z0-9-]+-\d+$/.test(path.basename(target))) await fs.rm(target, { recursive: true, force: true });
-        if (mayRelease && !stopping) dispatchModelJobs();
     }
 }
 
