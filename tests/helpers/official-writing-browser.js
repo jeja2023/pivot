@@ -25,6 +25,16 @@ async function createOfficialWritingPage(browser) {
             const parsed = new URL(url, 'http://localhost');
             const id = decodeURIComponent(parsed.pathname.split('/').pop());
             const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+            if (parsed.pathname === '/api/apps/catalog') {
+                return json({
+                    canManage: false,
+                    apps: [
+                        { id: 'official-writing', name: '公文起草', enabled: true },
+                        { id: 'data-analysis', name: '数据分析', enabled: true },
+                        { id: 'presentations', name: 'PPT制作', enabled: true }
+                    ]
+                });
+            }
             if (options.method === 'PUT') {
                 const body = JSON.parse(options.body);
                 const previous = window.testDocs.get(id);
@@ -54,7 +64,7 @@ async function createOfficialWritingPage(browser) {
         };
     });
     for (const file of ['common/vendor/purify.min.js', 'chat/safe-html.js', 'common/official-writing-document.js', 'common/official-writing-format.js',
-        ...['core', 'library', 'library-ui', 'surface', 'history', 'editor', 'suggestions', 'proofread', 'ai', 'rewrite', 'export', 'materials', 'attachments', 'rag', 'product'].map(name => `chat/apps-workbench-${name}.js`)]) {
+        ...['core', 'availability', 'library', 'library-ui', 'surface', 'history', 'editor', 'suggestions', 'proofread', 'ai', 'rewrite', 'export', 'materials', 'attachments', 'rag', 'product'].map(name => `chat/apps-workbench-${name}.js`)]) {
         await page.addScriptTag({ path: path.join(root, 'client', file) });
     }
     await page.evaluate(async () => {

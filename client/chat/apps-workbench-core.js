@@ -522,7 +522,7 @@ function showAppsHome() {
 }
 
 async function showOfficialWritingApp() {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('official-writing');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('official-writing');
     const createButtons = ['official-writing-create-doc-btn', 'official-writing-new-doc-btn', 'official-writing-import-backup-btn'];
     createButtons.forEach(id => { const button = document.getElementById(id); if (button) button.disabled = true; });
     setStoredAppsActiveApp('official-writing');
@@ -565,7 +565,7 @@ async function showOfficialWritingApp() {
     createButtons.forEach(id => { const button = document.getElementById(id); if (button) button.disabled = false; });
 }
 async function showDataAnalysisAppFromRegistry() {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('data-analysis');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('data-analysis');
     if (typeof window.Pivot.legacy.showDataAnalysisApp === 'function') {
         await window.Pivot.legacy.showDataAnalysisApp();
         return;
@@ -575,7 +575,7 @@ async function showDataAnalysisAppFromRegistry() {
 }
 
 async function showDataModelingAppFromRegistry(options = {}) {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('data-modeling');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('data-modeling');
     const existing = window.Pivot?.moduleApi?.('apps.dataAnalysis');
     if (typeof existing?.showDataModelingApp === 'function') {
         return await existing.showDataModelingApp(options);
@@ -589,7 +589,7 @@ async function showDataModelingAppFromRegistry(options = {}) {
 }
 
 async function showRegulationsAppFromRegistry() {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('regulations');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('regulations');
     if (typeof window.Pivot.legacy.showRegulationsApp === 'function') {
         await window.Pivot.legacy.showRegulationsApp();
         return;
@@ -599,7 +599,7 @@ async function showRegulationsAppFromRegistry() {
 }
 
 async function showOcrAppFromRegistry() {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('ocr');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('ocr');
     if (typeof window.Pivot.legacy.showOcrApp === 'function') {
         await window.Pivot.legacy.showOcrApp();
         return;
@@ -611,7 +611,7 @@ async function showOcrAppFromRegistry() {
 }
 
 async function showPdfToolsAppFromRegistry() {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('pdf-tools');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('pdf-tools');
     if (typeof window.Pivot.legacy.showPdfToolsApp === 'function') {
         await window.Pivot.legacy.showPdfToolsApp();
         return;
@@ -621,7 +621,7 @@ async function showPdfToolsAppFromRegistry() {
 }
 
 async function showPresentationsAppFromRegistry(options = {}) {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('presentations');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('presentations');
     setStoredAppsActiveApp('presentations');
     const presentations = window.Pivot?.moduleApi?.('apps.presentations');
     if (typeof presentations?.showPresentationsApp === 'function') {
@@ -640,7 +640,7 @@ async function showPresentationsAppFromRegistry(options = {}) {
 }
 
 async function showMindmapsAppFromRegistry(options = {}) {
-    await window.Pivot.moduleApi('apps.availability').ensureEnabled('mindmaps');
+    await window.Pivot.moduleApi?.('apps.availability')?.ensureEnabled?.('mindmaps');
     await window.Pivot.loadScriptOnce('/chat/apps-workbench-mindmaps.js');
     return window.Pivot.moduleApi('apps.mindmaps').show(options);
 }
