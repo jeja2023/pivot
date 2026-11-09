@@ -144,7 +144,16 @@
         const table = node('table', 'data-table compact-table presentation-catalog-table');
         const headRow = node('tr'), thead = node('thead'), tbody = node('tbody');
         tbody.id = 'presentation-catalog-body';
-        for (const title of ['序号', '模板', '来源', '版本', '可用方式', '操作']) headRow.appendChild(node('th', '', title));
+        const headers = [
+            { title: '序号', className: 'presentation-catalog-seq-th' },
+            { title: '模板名称', className: 'presentation-catalog-name-th' },
+            { title: '说明', className: 'presentation-catalog-desc-th' },
+            { title: '来源', className: 'presentation-catalog-source-th' },
+            { title: '版本', className: 'presentation-catalog-version-th' },
+            { title: '可用方式', className: 'presentation-catalog-supported-th' },
+            { title: '操作', className: 'presentation-catalog-controls-th' }
+        ];
+        for (const h of headers) headRow.appendChild(node('th', h.className, h.title));
         thead.appendChild(headRow); table.append(thead, tbody); scroll.appendChild(table);
 
         const emptyBox = node('div', 'presentation-catalog-empty hidden');
@@ -200,22 +209,22 @@
             if (status) status.textContent = `${choices.length}个可见模板。PPT Master模板通过完整制作流程使用；单位PPTX模板可选择保留原稿设计。`;
             for (let i = 0; i < choices.length; i++) {
                 const template = choices[i];
-                const tr = node('tr'), seq = node('td', 'presentation-catalog-seq-cell', String(i + 1)), name = node('td'), source = node('td'), version = node('td'), supported = node('td'), controls = node('td');
-                const titleWrap = node('div', 'presentation-catalog-template-info');
-                titleWrap.appendChild(node('strong', '', template.name));
-                if (template.description) {
-                    titleWrap.appendChild(node('small', 'presentation-catalog-template-desc', template.description));
-                }
-                name.appendChild(titleWrap);
-                name.title = template.description || template.name;
+                const tr = node('tr');
+                const seq = node('td', 'presentation-catalog-seq-cell', String(i + 1));
+                const name = node('td', 'presentation-catalog-name-cell', template.name);
+                name.title = template.name;
 
+                const desc = node('td', 'presentation-catalog-desc-cell', template.description || '—');
+                desc.title = template.description || template.name;
+
+                const source = node('td', 'presentation-catalog-source-cell');
                 const badgeClass = template.sourceLabel === '内置' ? 'is-system' : template.sourceLabel === 'PPT Master' ? 'is-engine' : 'is-org';
                 const badge = node('span', 'presentation-source-badge ' + badgeClass, template.sourceLabel);
                 source.appendChild(badge);
 
-                version.textContent = String(template.version);
-                version.className = 'presentation-catalog-version-cell';
+                const version = node('td', 'presentation-catalog-version-cell', String(template.version));
 
+                const supported = node('td', 'presentation-catalog-supported-cell');
                 if (template.supportedEngines.includes('structured')) {
                     supported.textContent = '在线编辑';
                 }
@@ -223,7 +232,9 @@
                     supported.textContent += (supported.textContent ? '、' : '') + '完整制作';
                 }
 
-                const buttons = node('div', 'presentation-catalog-actions'); controls.appendChild(buttons);
+                const controls = node('td', 'presentation-catalog-controls-cell');
+                const buttons = node('div', 'presentation-catalog-actions');
+                controls.appendChild(buttons);
                 if (template.supportedEngines.includes('structured')) {
                     buttons.appendChild(action(state.active ? '应用到当前文稿' : '按此模板创建', () => use(template), true));
                     if (!state.active) buttons.appendChild(action('空白创建', () => use(template, 'structured', true)));
@@ -232,7 +243,8 @@
                     const button = action(template.ownerType === 'engine' ? '使用此制作模板' : '保留单位模板设计', () => use(template, 'master'), template.ownerType === 'engine');
                     button.disabled = !catalog.engine.enabled; if (button.disabled) button.title = catalog.engine.message; buttons.appendChild(button);
                 }
-                tr.append(seq, name, source, version, supported, controls); host.appendChild(tr);
+                tr.append(seq, name, desc, source, version, supported, controls);
+                host.appendChild(tr);
             }
         } else {
             if (tableWrap) tableWrap.classList.add('hidden');

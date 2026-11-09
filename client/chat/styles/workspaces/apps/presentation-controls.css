@@ -48,8 +48,8 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 .presentation-catalog-dialog {
-    width: min(1200px, 96vw);
-    max-width: 1200px;
+    width: min(1360px, 96vw);
+    max-width: 1360px;
     height: min(90vh, 880px);
     max-height: 90vh;
     margin: auto;
@@ -223,6 +223,7 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 .presentation-catalog-table {
     width: 100%;
     margin: 0;
+    table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
 }
@@ -235,11 +236,14 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     box-shadow: 0 1px 0 var(--border);
 }
 
-.presentation-catalog-table th:first-child,
+.presentation-catalog-seq-th,
 .presentation-catalog-seq-cell {
-    width: 52px;
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
     text-align: center;
     white-space: nowrap;
+    box-sizing: border-box;
 }
 
 .presentation-catalog-seq-cell {
@@ -248,32 +252,81 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     font-family: var(--font-mono, monospace);
 }
 
-.presentation-catalog-table th:nth-child(3),
-.presentation-catalog-table td:nth-child(3) {
-    width: 90px;
-    text-align: center;
+.presentation-catalog-name-th,
+.presentation-catalog-name-cell {
+    width: 140px;
+    min-width: 120px;
+    max-width: 160px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
 }
 
-.presentation-catalog-table th:nth-child(4),
-.presentation-catalog-table td:nth-child(4) {
-    width: 72px;
-    text-align: center;
-    white-space: nowrap;
+.presentation-catalog-name-cell {
+    font-weight: 700;
+    color: var(--text-main);
+    font-size: 0.8rem;
 }
 
-.presentation-catalog-table th:nth-child(5),
-.presentation-catalog-table td:nth-child(5) {
+.presentation-catalog-desc-th,
+.presentation-catalog-desc-cell {
+    min-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
+}
+
+.presentation-catalog-desc-cell {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+}
+
+.presentation-catalog-source-th,
+.presentation-catalog-source-cell {
+    width: 88px;
+    min-width: 88px;
+    max-width: 88px;
+    text-align: center;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.presentation-catalog-version-th,
+.presentation-catalog-version-cell {
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
+    text-align: center;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+
+.presentation-catalog-version-cell {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.presentation-catalog-supported-th,
+.presentation-catalog-supported-cell {
     width: 110px;
+    min-width: 110px;
+    max-width: 110px;
     text-align: center;
     white-space: nowrap;
+    box-sizing: border-box;
 }
 
-.presentation-catalog-table th:last-child,
-.presentation-catalog-table td:last-child {
-    width: 1%;
+.presentation-catalog-controls-th,
+.presentation-catalog-controls-cell {
+    width: 180px;
+    min-width: 180px;
+    max-width: 180px;
     white-space: nowrap;
     text-align: right;
+    box-sizing: border-box;
 }
 
 .presentation-catalog-template-info {
