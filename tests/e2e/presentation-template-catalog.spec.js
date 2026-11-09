@@ -23,10 +23,10 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     await expect(page.locator('#presentation-catalog-filter')).toHaveValue('organization');
     await expect(page.locator('#presentation-catalog-import')).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole('button', { name: '导入单位模板', exact: true })).toBeVisible();
-    await page.locator('#presentation-catalog-filter').selectOption('all');
+    await page.locator('#presentation-catalog-tabs [data-catalog-group="all"]').click();
     await expect(page.locator('#presentation-catalog-body')).toContainText('咨询式简报');
     await expect(page.locator('#presentation-catalog-body')).not.toContainText('森林绿简报');
-    await page.locator('#presentation-catalog-filter').selectOption('theme');
+    await page.locator('#presentation-catalog-tabs [data-catalog-group="theme"]').click();
     await expect(page.locator('#presentation-catalog-body')).toContainText('森林绿简报');
     await page.getByRole('dialog', { name: '演示模板库' }).getByRole('button', { name: '关闭', exact: true }).click();
     const evidence = process.env.E2E_PPT_TEMPLATE_EVIDENCE_DIR || testInfo.outputPath('evidence'); await fs.mkdir(evidence, { recursive: true });
@@ -71,6 +71,7 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     await page.evaluate(id => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations', presentationId: id }), darkDocument.id);
     const restored = (await (await page.request.get('/api/apps/presentations/' + darkDocument.id)).json()).presentation;
     expect(restored.content.template.version).toBe(darkDocument.content.template.version); expect(restored.content.slides[0].background.fill).toBe(darkDocument.content.slides[0].background.fill);
+    await expect(page.locator('#presentation-stage')).toBeVisible({ timeout: 15000 });
     await page.locator('#presentation-stage').screenshot({ path: path.join(evidence, 'restored-cover.png') });
     const image = await sharp(path.join(evidence, 'restored-cover.png')).stats(); expect(image.channels[0].mean).toBeLessThan(180);
     expect(errors).toEqual([]);
@@ -85,7 +86,7 @@ test('AI自由设计与上游模板从统一入口进入完整制作，所选模
     await expect(page.locator('#presentation-master-operation')).toHaveValue('generate'); await expect(page.locator('#presentation-master-template-note')).toContainText('未指定固定模板');
     await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
     await page.getByRole('button', { name: '模板库', exact: true }).click();
-    await page.locator('#presentation-catalog-filter').selectOption('engine');
+    await page.locator('#presentation-catalog-tabs [data-catalog-group="engine"]').click();
     const row = page.locator('#presentation-catalog-body tr').filter({ hasText: '咨询决策' });
     await row.getByRole('button', { name: '使用此制作模板', exact: true }).click();
     await expect(page.locator('#presentation-master-template-note')).toContainText('咨询决策');

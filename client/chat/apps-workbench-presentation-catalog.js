@@ -108,6 +108,8 @@
             render();
         });
 
+        const actionsWrap = node('div', 'presentation-catalog-toolbar-actions');
+
         const searchWrap = node('div', 'presentation-catalog-search-wrap');
         searchWrap.appendChild(svgIcon([['circle', { cx: '11', cy: '11', r: '8' }], ['line', { x1: '21', y1: '21', x2: '16.65', y2: '16.65' }]], 14));
         const search = node('input', 'form-input presentation-catalog-search-input');
@@ -132,7 +134,8 @@
             finally { upload.disabled = false; file.value = ''; }
         });
 
-        bar.append(tabs, searchWrap, upload, file, filter);
+        actionsWrap.append(searchWrap, upload);
+        bar.append(tabs, actionsWrap, file, filter);
 
         const status = node('p', 'presentation-empty-note presentation-catalog-status');
         status.id = 'presentation-catalog-status'; status.setAttribute('aria-live', 'polite');
@@ -141,7 +144,7 @@
         const table = node('table', 'data-table compact-table presentation-catalog-table');
         const headRow = node('tr'), thead = node('thead'), tbody = node('tbody');
         tbody.id = 'presentation-catalog-body';
-        for (const title of ['模板', '来源', '版本', '可用方式', '操作']) headRow.appendChild(node('th', '', title));
+        for (const title of ['序号', '模板', '来源', '版本', '可用方式', '操作']) headRow.appendChild(node('th', '', title));
         thead.appendChild(headRow); table.append(thead, tbody); scroll.appendChild(table);
 
         const emptyBox = node('div', 'presentation-catalog-empty hidden');
@@ -195,8 +198,9 @@
             if (tableWrap) tableWrap.classList.remove('hidden');
             if (emptyBox) emptyBox.classList.add('hidden');
             if (status) status.textContent = `${choices.length}个可见模板。PPT Master模板通过完整制作流程使用；单位PPTX模板可选择保留原稿设计。`;
-            for (const template of choices) {
-                const tr = node('tr'), name = node('td'), source = node('td'), version = node('td'), supported = node('td'), controls = node('td');
+            for (let i = 0; i < choices.length; i++) {
+                const template = choices[i];
+                const tr = node('tr'), seq = node('td', 'presentation-catalog-seq-cell', String(i + 1)), name = node('td'), source = node('td'), version = node('td'), supported = node('td'), controls = node('td');
                 const titleWrap = node('div', 'presentation-catalog-template-info');
                 titleWrap.appendChild(node('strong', '', template.name));
                 if (template.description) {
@@ -228,7 +232,7 @@
                     const button = action(template.ownerType === 'engine' ? '使用此制作模板' : '保留单位模板设计', () => use(template, 'master'), template.ownerType === 'engine');
                     button.disabled = !catalog.engine.enabled; if (button.disabled) button.title = catalog.engine.message; buttons.appendChild(button);
                 }
-                tr.append(name, source, version, supported, controls); host.appendChild(tr);
+                tr.append(seq, name, source, version, supported, controls); host.appendChild(tr);
             }
         } else {
             if (tableWrap) tableWrap.classList.add('hidden');
