@@ -8,7 +8,7 @@ async function create({ id, userId, datasetId, sql, limit, sourceVersion }) {
     await transaction(async trx => {
         await budget.schedulingLock(trx); await budget.expireQueued(trx); await budget.assertQueue(trx, userId);
         await trx.execute(`INSERT INTO analysis_query_jobs (id, user_id, dataset_id, sql_text, requested_limit, source_version, status, progress, attempts, max_attempts, next_run_at, created_at, updated_at,deadline_at,queue_deadline_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, 0, 3, NOW(), NOW(), NOW(),NOW()+INTERVAL '180 seconds',NOW()+INTERVAL '180 seconds')`, [id, userId, datasetId, sql, limit, sourceVersion]);
+            VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, 0, 3, NOW(), NOW(), NOW(),NOW()+INTERVAL '300 seconds',NOW()+INTERVAL '300 seconds')`, [id, userId, datasetId, sql, limit, sourceVersion]);
     });
     return get(userId, id);
 }

@@ -72,7 +72,7 @@ async function createLegacy(userId) {
         const user = await trx.queryOne("SELECT id FROM users WHERE id=? AND status='active' AND deleted_at IS NULL", [userId]);
         if (!user) throw biError('ANALYSIS_MODEL_NOT_FOUND', '分析所属账号已失效。', 403);
         return trx.queryOne(`INSERT INTO analysis_query_jobs(id,user_id,dataset_id,sql_text,execution_kind,runtime_protocol,deadline_at,queue_deadline_at,next_run_at)
-            VALUES (?,?,NULL,'','legacy_operation',2,NOW()+INTERVAL '180 seconds',NOW()+INTERVAL '180 seconds',NOW()) RETURNING *`, [`analysis_legacy_${crypto.randomUUID()}`, userId]);
+            VALUES (?,?,NULL,'','legacy_operation',2,NOW()+INTERVAL '300 seconds',NOW()+INTERVAL '300 seconds',NOW()) RETURNING *`, [`analysis_legacy_${crypto.randomUUID()}`, userId]);
     });
 }
 

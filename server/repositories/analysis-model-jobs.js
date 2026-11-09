@@ -39,7 +39,7 @@ async function admit({ userId, modelId, kind, expectedVersion, definition = null
                 VALUES (?,?,?,?,?,?::jsonb,?,?,?,?,?,?::jsonb)`, [actualCheckId, modelId, userId, expectedVersion || current.model.version, publishedVersion, JSON.stringify(definition), semanticHash, rulesHash, manifestId, requestKey, requestHash, JSON.stringify(ast.migrationComparison ? { migrationComparison: ast.migrationComparison } : {})]);
         }
         const id = `query_job_${crypto.randomUUID()}`;
-        const seconds = ['model_check', 'model_refresh', 'model_export'].includes(kind) ? 420 : 180;
+        const seconds = ['model_check', 'model_refresh', 'model_export'].includes(kind) ? 420 : 300;
         const row = await trx.queryOne(`INSERT INTO analysis_query_jobs(id,user_id,dataset_id,sql_text,requested_limit,execution_kind,model_id,published_version,manifest_id,check_id,query_ast_json,authorization_vector_json,request_key,request_hash,deadline_at,queue_deadline_at,next_run_at,runtime_protocol,binding_revision,source_run_id,result_format)
             VALUES (?,?,NULL,'',?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,NOW()+(? * INTERVAL '1 second'),NOW()+(? * INTERVAL '1 second'),NOW(),2,?,?,?) RETURNING *`, [id, userId, ast.limit || 100, kind, modelId, publishedVersion, manifestId, actualCheckId, JSON.stringify(ast), JSON.stringify(current.vector), requestKey, requestHash, seconds, seconds, bindingRevision, sourceRunId, resultFormat]);
         if (manifestId) {
