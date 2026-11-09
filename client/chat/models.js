@@ -83,15 +83,6 @@ function renderRetrievalModelServices(settings = {}) {
     const embedding = settings.retrievalModelConfig || settings.embeddingConfig || {};
     const rerank = settings.rerankConfig || {};
     const rag = settings.ragConfig || {};
-    const ocr = settings.ocrConfig || window.Pivot?.ocrConfig || {};
-
-    const ocrEngine = settings.ocrEngineStatus?.http || window.Pivot?.ocrEngineStatus?.http || null;
-    const ocrAvailable = ocrEngine ? ocrEngine.available === true : null;
-    const ocrReadyClass = ocrAvailable === true ? 'is-ready' : (ocrAvailable === false ? 'is-warning' : '');
-    const ocrStatusText = ocrAvailable === true
-        ? '服务可用 · 外部 OCR 服务'
-        : (ocrAvailable === false ? `连接异常 (${ocrEngine?.error || '无法连接'})` : '外部 OCR 服务 (HTTP)');
-
     const canViewEmbeddingUrl = isSuperAdmin || (Boolean(embedding.isPersonal) && embedding.source?.url === 'user');
     const displayEmbeddingUrl = canViewEmbeddingUrl
         ? (embedding.apiUrl || '未配置服务地址')
@@ -99,16 +90,6 @@ function renderRetrievalModelServices(settings = {}) {
     const embeddingUrlTitle = canViewEmbeddingUrl
         ? displayEmbeddingUrl
         : (embedding.apiUrl ? '服务地址已脱敏' : '未配置服务地址');
-
-    const canViewOcrUrl = isSuperAdmin;
-    const rawOcrUrl = ocr.serviceUrl || (canViewOcrUrl ? 'http://ocr-service:9100' : '');
-    const isOcrConfigured = Boolean((ocr.serviceUrl && ocr.serviceUrl !== '未配置服务地址') || ocr.configured || ocrAvailable !== null);
-    const displayOcrUrl = canViewOcrUrl
-        ? (rawOcrUrl || '未配置服务地址')
-        : (isOcrConfigured ? '********' : '未配置服务地址');
-    const ocrUrlTitle = canViewOcrUrl
-        ? (rawOcrUrl || '未配置服务地址')
-        : (isOcrConfigured ? '服务地址已脱敏' : '未配置服务地址');
 
     const embeddingReady = Boolean(embedding.apiUrl && embedding.model);
     const rerankReady = rerank.enabled === true;
@@ -147,19 +128,7 @@ function renderRetrievalModelServices(settings = {}) {
                 ${configButton('policy', '配置策略')}
             </div>
         </article>
-        <article class="retrieval-model-service-card ${ocrReadyClass}">
-            <strong>OCR 识别服务</strong>
-            <span title="${escapeHtml(ocrUrlTitle)}">${escapeHtml(displayOcrUrl)}</span>
-            <small title="${escapeHtml(ocrStatusText)}">${escapeHtml(ocrStatusText)}</small>
-            <div class="retrieval-model-service-actions">
-                ${testButton('ocr', '测试')}
-                ${configButton('ocr', '配置')}
-            </div>
-        </article>
-        ${window.Pivot.moduleApi('settings.speech', {}).renderCard?.(settings.speechConfig) || ''}
-        ${window.Pivot.moduleApi('settings.pptMaster', {}).renderCard?.(settings.pptMasterConfig) || ''}
     `);
-    window.Pivot.moduleApi('settings.speech', {}).refreshStatus?.();
 }
 
 window.Pivot?.exposeModule?.('models.retrieval', { renderRetrievalModelServices });
@@ -176,21 +145,9 @@ window.Pivot.legacy.loadModels = async function(page = 1) {
     }
     const result = await modelRes.json();
     const settings = settingsRes.ok ? await settingsRes.json() : {};
-    if (settings.ocrConfig) window.Pivot.ocrConfig = settings.ocrConfig;
     renderRetrievalModelServices(settings);
     window.Pivot.getModule?.('settings.retrievalForm')?.updateEmbeddingSettingsForm?.(settings.retrievalModelConfig || settings.embeddingConfig, settings.rerankConfig);
     window.Pivot.legacy.bindEmbeddingModalEvents?.();
-    if (!window.Pivot?.ocrEngineStatus) {
-        apiFetch(`${API_BASE}/apps/ocr/engines`, { headers: authHeaders() })
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-                if (data?.engines) {
-                    window.Pivot.ocrEngineStatus = data.engines;
-                    renderRetrievalModelServices({ ...settings, ocrEngineStatus: data.engines });
-                }
-            })
-            .catch(() => {});
-    }
     const personalDefaultId = settings.personalDefaultModelId;
     const globalDefaultId = settings.defaultModelId;
     const data = result.data || [];

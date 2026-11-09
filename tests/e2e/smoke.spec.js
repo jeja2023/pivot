@@ -65,7 +65,7 @@ test.describe('Pivot browser smoke', () => {
                 constructor() { this.processLocally = false; }
                 static available() { return Promise.resolve('available'); }
                 start() { window.__voiceTest.active = this; setTimeout(() => this.onstart?.(), 0); }
-                abort() {}
+                abort() { }
             }
             Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: Recognition });
             if (useNative === true) {
@@ -75,9 +75,11 @@ test.describe('Pivot browser smoke', () => {
                     getVoiceRecognitionStatus: async () => ({ available: true, languages: ['zh-CN'] }),
                     onVoiceRecognitionEvent(callback) { listener = callback; return () => { listener = null; }; },
                     async startVoiceRecognition(input) {
-                        const active = { onresult(event) {
-                            listener?.({ id: input.id, type: 'result', text: event.results[0][0].transcript });
-                        } };
+                        const active = {
+                            onresult(event) {
+                                listener?.({ id: input.id, type: 'result', text: event.results[0][0].transcript });
+                            }
+                        };
                         window.__voiceTest.active = active;
                         listener?.({ id: input.id, type: 'started' });
                         return { success: true };
@@ -87,42 +89,54 @@ test.describe('Pivot browser smoke', () => {
             }
             if (useNative === 'server') {
                 Recognition.available = () => Promise.resolve('unavailable');
-                const node = () => ({ connect() {}, disconnect() {} });
-                Object.defineProperty(window, 'AudioContext', { configurable: true, value: class {
-                    constructor() { this.sampleRate = 16000; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; }
-                    createMediaStreamSource() { return node(); }
-                    createGain() { return { ...node(), gain: { value: 0 } }; }
-                    resume() { return Promise.resolve(); }
-                    close() { return Promise.resolve(); }
-                } });
-                Object.defineProperty(window, 'AudioWorkletNode', { configurable: true, value: class {
-                    constructor() {
-                        this.port = {};
-                        window.__voiceTest.active = { onresult: () => {
-                            this.port.onmessage({ data: new Float32Array(8000).fill(0.1) });
-                            this.port.onmessage({ data: new Float32Array(16000).fill(0) });
-                        } };
+                const node = () => ({ connect() { }, disconnect() { } });
+                Object.defineProperty(window, 'AudioContext', {
+                    configurable: true, value: class {
+                        constructor() { this.sampleRate = 16000; this.destination = {}; this.audioWorklet = { addModule: async () => { } }; }
+                        createMediaStreamSource() { return node(); }
+                        createGain() { return { ...node(), gain: { value: 0 } }; }
+                        resume() { return Promise.resolve(); }
+                        close() { return Promise.resolve(); }
                     }
-                    connect() {} disconnect() {}
-                } });
+                });
+                Object.defineProperty(window, 'AudioWorkletNode', {
+                    configurable: true, value: class {
+                        constructor() {
+                            this.port = {};
+                            window.__voiceTest.active = {
+                                onresult: () => {
+                                    this.port.onmessage({ data: new Float32Array(8000).fill(0.1) });
+                                    this.port.onmessage({ data: new Float32Array(16000).fill(0) });
+                                }
+                            };
+                        }
+                        connect() { } disconnect() { }
+                    }
+                });
             }
-            Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: {
-                getUserMedia: async () => ({ getTracks: () => [{ stop() { window.__voiceTest.stopped++; } }] })
-            } });
+            Object.defineProperty(window.navigator, 'mediaDevices', {
+                configurable: true, value: {
+                    getUserMedia: async () => ({ getTracks: () => [{ stop() { window.__voiceTest.stopped++; } }] })
+                }
+            });
             if (useNative === true) {
                 Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
                 Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: undefined });
             }
-            Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
-                getVoices: () => [{ name: 'Test local', lang: 'zh-CN', localService: true }],
-                cancel() {}, speak(utterance) { window.__voiceTest.spoken.push(utterance.text); setTimeout(() => utterance.onend?.(), 0); }
-            } });
+            Object.defineProperty(window, 'speechSynthesis', {
+                configurable: true, value: {
+                    getVoices: () => [{ name: 'Test local', lang: 'zh-CN', localService: true }],
+                    cancel() { }, speak(utterance) { window.__voiceTest.spoken.push(utterance.text); setTimeout(() => utterance.onend?.(), 0); }
+                }
+            });
             Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: class { constructor(text) { this.text = text; } } });
         }, native);
         let transcriptions = 0;
         if (native === 'server') {
-            await page.route('**/api/chat/voice-recognition', route => route.fulfill({ contentType: 'application/json',
-                body: JSON.stringify({ available: true, languages: ['zh-CN'], thirdPartyForwarding: false, audioRetention: 'none' }) }));
+            await page.route('**/api/chat/voice-recognition', route => route.fulfill({
+                contentType: 'application/json',
+                body: JSON.stringify({ available: true, languages: ['zh-CN'], thirdPartyForwarding: false, audioRetention: 'none' })
+            }));
             await page.route('**/api/chat/voice-transcriptions', route => {
                 const input = route.request().postDataJSON();
                 expect(input.language).toBe('zh-CN');
@@ -136,8 +150,10 @@ test.describe('Pivot browser smoke', () => {
         await ensureBrowserSession(page);
         const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
         const name = `Voice e2e ${Date.now()}`;
-        expect((await page.request.post('/api/models', { headers: { 'x-csrf-token': csrf },
-            data: { name, url: process.env.E2E_MODEL_URL, model_name: 'voice-e2e', supports_vision: 1 } })).ok()).toBeTruthy();
+        expect((await page.request.post('/api/models', {
+            headers: { 'x-csrf-token': csrf },
+            data: { name, url: process.env.E2E_MODEL_URL, model_name: 'voice-e2e', supports_vision: 1 }
+        })).ok()).toBeTruthy();
         const models = await (await page.request.get('/api/models?limit=100')).json();
         const model = models.data.find(item => item.name === name);
         const originalDefault = models.data.find(item => Number(item.is_default) === 1);
@@ -188,7 +204,7 @@ test.describe('Pivot browser smoke', () => {
         const detail = await (await page.request.get(`/api/sessions/${requests[0].sessionId}`)).json();
         expect(detail.messages || []).toHaveLength(0);
         if (originalDefault?.id) {
-            await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: originalDefault.id } }).catch(() => {});
+            await page.request.put('/api/settings/default-model', { headers: { 'x-csrf-token': csrf }, data: { default_model_id: originalDefault.id } }).catch(() => { });
         }
         if (native === 'server') expect(transcriptions).toBe(3);
     });
@@ -240,23 +256,25 @@ test.describe('Pivot browser smoke', () => {
             };
             Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: undefined });
             Object.defineProperty(window, 'webkitSpeechRecognition', { configurable: true, value: undefined });
-            Object.defineProperty(window.navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
-                record('stream-requested');
-                const context = new window.AudioContext();
-                const bytes = Uint8Array.from(window.atob(base64), value => value.charCodeAt(0));
-                const buffer = await context.decodeAudioData(bytes.buffer);
-                record('audio-decoded');
-                const sound = context.createBufferSource(); sound.buffer = buffer;
-                const output = context.createMediaStreamDestination(); sound.connect(output);
-                await context.resume();
-                window.__playSyntheticSpeech = () => sound.start();
-                // 合成轨道没有麦克风驱动；避免浏览器对设备约束的未决请求阻塞测试。
-                output.stream.getTracks()[0].applyConstraints = async () => {};
-                const stop = output.stream.getTracks()[0].stop.bind(output.stream.getTracks()[0]);
-                output.stream.getTracks()[0].stop = () => { stop(); void context.close(); };
-                record('stream-ready');
-                return output.stream;
-            } });
+            Object.defineProperty(window.navigator.mediaDevices, 'getUserMedia', {
+                configurable: true, value: async () => {
+                    record('stream-requested');
+                    const context = new window.AudioContext();
+                    const bytes = Uint8Array.from(window.atob(base64), value => value.charCodeAt(0));
+                    const buffer = await context.decodeAudioData(bytes.buffer);
+                    record('audio-decoded');
+                    const sound = context.createBufferSource(); sound.buffer = buffer;
+                    const output = context.createMediaStreamDestination(); sound.connect(output);
+                    await context.resume();
+                    window.__playSyntheticSpeech = () => sound.start();
+                    // 合成轨道没有麦克风驱动；避免浏览器对设备约束的未决请求阻塞测试。
+                    output.stream.getTracks()[0].applyConstraints = async () => { };
+                    const stop = output.stream.getTracks()[0].stop.bind(output.stream.getTracks()[0]);
+                    output.stream.getTracks()[0].stop = () => { stop(); void context.close(); };
+                    record('stream-ready');
+                    return output.stream;
+                }
+            });
         }, audioBase64);
         await ensureBrowserSession(page);
         const status = await (await page.request.get('/api/chat/voice-recognition')).json();
@@ -896,11 +914,15 @@ test.describe('Pivot browser smoke', () => {
 
     test('已识别扫描文档可通过列表补充旧版引用坐标', async ({ page }) => {
         await ensureBrowserSession(page);
-        await page.route('**/api/rag/docs?**', route => route.fulfill({ json: {
-            data: [{ id: 456, name: '旧扫描.pdf', status: 'ready', can_edit: true,
-                extraction_coverage_json: { processedPages: 12, complete: true } }],
-            total: 1, page: 1, limit: 15
-        } }));
+        await page.route('**/api/rag/docs?**', route => route.fulfill({
+            json: {
+                data: [{
+                    id: 456, name: '旧扫描.pdf', status: 'ready', can_edit: true,
+                    extraction_coverage_json: { processedPages: 12, complete: true }
+                }],
+                total: 1, page: 1, limit: 15
+            }
+        }));
         let calls = 0;
         await page.route('**/api/rag/docs/456/refresh-ocr-locations', route => {
             calls++;
@@ -1011,9 +1033,11 @@ test.describe('Pivot browser smoke', () => {
         await expect(failures.locator('tr').first().locator('td').first()).toHaveText('1');
         await expect(failures).toContainText('35 条');
         await expect(failures).not.toContainText('feedback');
-        await page.route('**/api/stats/observability/decision-failures?*', route => route.fulfill({ status: 200, json: {
-            kind: 'delivery', total: 69, hasMore: true, items: [{ runId: 'test-run-details', decisionId: 'test-decision-details', reasonCode: 'artifact_format_missing', label: '缺少用户要求的文件格式', missing: ['尚未生成PPTX'], ruleFailures: [], detailSource: 'event_snapshot' }]
-        } }));
+        await page.route('**/api/stats/observability/decision-failures?*', route => route.fulfill({
+            status: 200, json: {
+                kind: 'delivery', total: 69, hasMore: true, items: [{ runId: 'test-run-details', decisionId: 'test-decision-details', reasonCode: 'artifact_format_missing', label: '缺少用户要求的文件格式', missing: ['尚未生成PPTX'], ruleFailures: [], detailSource: 'event_snapshot' }]
+            }
+        }));
         await page.getByRole('button', { name: '查看任务核验失败明细' }).click();
         await expect(page.locator('#monitor-failure-details')).toContainText('尚未生成PPTX');
         await expect(page.locator('#monitor-failure-details')).toContainText('test-run-details');
@@ -1327,7 +1351,7 @@ test.describe('Pivot browser smoke', () => {
         expect(newest.distanceFromBottom).toBeLessThanOrEqual(5);
     });
 
-   test('chat input defaults to adaptive routing and keeps the plus menu for attachments only', async ({ page }) => {
+    test('chat input defaults to adaptive routing and keeps the plus menu for attachments only', async ({ page }) => {
         await page.setViewportSize({ width: 1024, height: 520 });
         await page.addInitScript(() => {
             window.localStorage.setItem('pivot_chat_mcp_tool_mode', 'manual');
@@ -1356,7 +1380,7 @@ test.describe('Pivot browser smoke', () => {
                 ]
             })
         }));
-       await ensureBrowserSession(page);
+        await ensureBrowserSession(page);
         await page.evaluate(() => {
             const models = window.Pivot.legacy._cachedModels || [];
             const visionModel = models.find(m => Number(m.supports_vision || 0) === 1);
@@ -1396,8 +1420,8 @@ test.describe('Pivot browser smoke', () => {
             const rect = panel.getBoundingClientRect();
             return { top: rect.top, bottom: rect.bottom, viewportHeight: window.innerHeight };
         });
-       expect(attachmentMenuBounds.top).toBeGreaterThanOrEqual(11.5);
-       expect(attachmentMenuBounds.bottom).toBeLessThanOrEqual(attachmentMenuBounds.viewportHeight - 11.5);
+        expect(attachmentMenuBounds.top).toBeGreaterThanOrEqual(11.5);
+        expect(attachmentMenuBounds.bottom).toBeLessThanOrEqual(attachmentMenuBounds.viewportHeight - 11.5);
 
         // 裸 @ 同时提供知识库、Wiki 综合和当前执行白名单内工具的能力范围选择；选中工具仅形成显式候选，
         // 不会绕过后续的本会话授权与重新发送步骤。
@@ -1428,7 +1452,7 @@ test.describe('Pivot browser smoke', () => {
         await expect.poll(() => page.evaluate(() => (
             window.Pivot.moduleApi('chat.inputMenu').getRouteOverrides(document.getElementById('user-input').value)
         ))).toEqual({ collections: [], tools: ['mcp.17.report.read_report'], wikiSpaces: [] });
-   });
+    });
 
     test('普通发送保持直答，明确委托会自动进入受控 Agent', async ({ page }) => {
         const requests = [];
@@ -1518,20 +1542,26 @@ test.describe('Pivot browser smoke', () => {
     test('自然纠正替代路由表单，管理员区分异常复核和自动归档', async ({ page }) => {
         await page.route('**/api/stats/observability/decision-feedback?*', route => {
             const archived = new URL(route.request().url()).searchParams.get('reviewStatus') === 'not_required';
-            return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{
-                feedback_id: archived ? 'archived' : 'incident', decision_id: 'decision-correction', scenario: 'chat.execution',
-                selected_action_id: 'agent_run', corrected_action_id: 'direct_answer', review_status: archived ? 'not_required' : 'pending',
-                username: 'admin', session_title: '纠正回归', query_preview: '请分析订单',
-                metadata: { note: '我只是问一下，不需要执行', reviewReasons: archived ? [] : ['execution_scope'],
-                    naturalCorrection: { sourceMessageId: 12, priorMessageId: 10, applied: { pausedRunIds: ['r'] } }, executionEvidence: [] }
-            }] }) });
+            return route.fulfill({
+                contentType: 'application/json', body: JSON.stringify({
+                    data: [{
+                        feedback_id: archived ? 'archived' : 'incident', decision_id: 'decision-correction', scenario: 'chat.execution',
+                        selected_action_id: 'agent_run', corrected_action_id: 'direct_answer', review_status: archived ? 'not_required' : 'pending',
+                        username: 'admin', session_title: '纠正回归', query_preview: '请分析订单',
+                        metadata: {
+                            note: '我只是问一下，不需要执行', reviewReasons: archived ? [] : ['execution_scope'],
+                            naturalCorrection: { sourceMessageId: 12, priorMessageId: 10, applied: { pausedRunIds: ['r'] } }, executionEvidence: []
+                        }
+                    }]
+                })
+            });
         });
         await ensureBrowserSession(page);
         const replay = await page.evaluate(() => {
             const holder = document.createElement('div');
             document.body.appendChild(holder);
             const streaming = window.Pivot.moduleApi('chat.streaming');
-            streaming.renderAssistantRouteMetadata(holder, { decisions: [{ decisionId: 'd', scenario: 'chat.execution', selectedActionId: 'agent_run', allowedActionIds: ['agent_run','direct_answer'] }] });
+            streaming.renderAssistantRouteMetadata(holder, { decisions: [{ decisionId: 'd', scenario: 'chat.execution', selectedActionId: 'agent_run', allowedActionIds: ['agent_run', 'direct_answer'] }] });
             const retiredControls = holder.querySelectorAll('[data-chat-trace-action="decision-feedback"], .chat-route-feedback-form').length;
             streaming.renderAssistantTraceEvent(holder, { type: 'route', status: 'corrected', message: '已暂停当前任务，并按本次要求调整处理方式' });
             const visibleText = holder.textContent;
@@ -1706,11 +1736,13 @@ test.describe('Pivot browser smoke', () => {
         await page.route(/\/api\/stats\/observability\/decision-evaluation-sets\/v2\/cases\?limit=500$/, async route => {
             await route.fulfill({
                 contentType: 'application/json',
-                body: JSON.stringify({ data: [{
-                    caseId: 'tools-consent-001', scenario: 'chat.tools', language: 'zh', reviewStatus: 'pending_human_review',
-                    inputContext: { requestState: { routingText: '用户请求调用外部工具，必须先征得授权。' } },
-                    candidates: [{ id: 'candidate_only', description: '等待工具授权', allowed: true }, { id: 'direct_answer', description: '直接回答', allowed: true }]
-                }] })
+                body: JSON.stringify({
+                    data: [{
+                        caseId: 'tools-consent-001', scenario: 'chat.tools', language: 'zh', reviewStatus: 'pending_human_review',
+                        inputContext: { requestState: { routingText: '用户请求调用外部工具，必须先征得授权。' } },
+                        candidates: [{ id: 'candidate_only', description: '等待工具授权', allowed: true }, { id: 'direct_answer', description: '直接回答', allowed: true }]
+                    }]
+                })
             });
         });
         await page.route(/\/api\/stats\/observability\/decision-evaluation-sets\/v2\/cases\/tools-consent-001\/review$/, async route => {

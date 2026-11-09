@@ -134,12 +134,41 @@ test('缓存迁移可重复执行，缺失缓存索引时停止就绪而不退�
     const pool = require('../server/db/pg-connection').getPgPool(), client = await pool.connect();
     try {
         const migration = require('../server/db/migrations/analysis-model-result-cache')[0];
-        await client.query('BEGIN'); await client.query('DROP INDEX idx_analysis_job_result_cache');
-        assert.equal(await migration.checkPg(client), false); await migration.upPg(client); await migration.upPg(client);
-        assert.equal(await migration.checkPg(client), true); await client.query('ROLLBACK');
-        await execute('DROP INDEX idx_analysis_job_result_cache');
-        await assert.rejects(require('../server/repositories/analysis-model-readiness').schemaContract(), error => error.code === 'ANALYSIS_MODEL_SCHEMA_INCOMPATIBLE');
-        await client.query('BEGIN'); await migration.upPg(client); await client.query('COMMIT');
+        const { runWithScopedSession } = require('../server/db/scoped-session');
+        const { schemaContract } = require('../server/repositories/analysis-model-readiness');
+        const schema = (await client.query('SELECT current_schema() AS name')).rows[0].name;
+        assert.match(schema, /^pivot_test_[a-z0-9_]+$/);
+        const fallback = `cache_fallback_${crypto.randomBytes(8).toString('hex')}`;
+        await client.query('BEGIN');
+        await client.query(`CREATE SCHEMA "${fallback}"`);
+        await client.query(`CREATE TABLE "${fallback}".analysis_query_jobs (LIKE "${schema}".analysis_query_jobs)`);
+        await client.query(`SET LOCAL search_path TO "${fallback}", "${schema}", public`);
+        await migration.upPg(client);
+        await client.query(`SET LOCAL search_path TO "${schema}", "${fallback}", public`);
+        const fallbackIndex = (await client.query('SELECT to_regclass($1)::oid AS id', [`${fallback}.idx_analysis_job_result_cache`])).rows[0].id;
+        assert.ok(fallbackIndex);
+        assert.equal(await migration.checkPg(client), true);
+        await runWithScopedSession(client, () => schemaContract());
+
+        // 后备命名空间的有效同名索引不能替代当前表缺失的索引。
+        await client.query(`DROP INDEX "${schema}".idx_analysis_job_result_cache`);
+        assert.equal(await migration.checkPg(client), false);
+        await assert.rejects(runWithScopedSession(client, () => schemaContract()), error => error.code === 'ANALYSIS_MODEL_SCHEMA_INCOMPATIBLE');
+        await migration.upPg(client); await migration.upPg(client);
+        assert.equal(await migration.checkPg(client), true);
+        await runWithScopedSession(client, () => schemaContract());
+
+        // 当前命名空间中的同名索引也必须属于实际查询表，不能仅按名称认定就绪。
+        await client.query(`DROP INDEX "${schema}".idx_analysis_job_result_cache`);
+        await client.query('CREATE TABLE cache_index_wrong_table (id BIGINT)');
+        await client.query('CREATE INDEX idx_analysis_job_result_cache ON cache_index_wrong_table(id)');
+        assert.equal(await migration.checkPg(client), false);
+        await assert.rejects(runWithScopedSession(client, () => schemaContract()), error => error.code === 'ANALYSIS_MODEL_SCHEMA_INCOMPATIBLE');
+        await client.query(`DROP INDEX "${schema}".idx_analysis_job_result_cache`);
+        await migration.upPg(client);
+        assert.equal(await migration.checkPg(client), true);
+        await runWithScopedSession(client, () => schemaContract());
+        assert.equal((await client.query('SELECT to_regclass($1)::oid AS id', [`${fallback}.idx_analysis_job_result_cache`])).rows[0].id, fallbackIndex);
     } finally { await client.query('ROLLBACK'); client.release(); }
 });
 

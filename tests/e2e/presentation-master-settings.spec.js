@@ -22,7 +22,7 @@ test('admin在页面测试、更换和停用PPT服务，配置即时生效并加
         expect((await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } })).ok()).toBeTruthy();
         await page.goto('/chat', { waitUntil: 'domcontentloaded' });
         await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'models' }));
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
         await page.locator('[data-ppt-service-config-open]').click(); await expect(page.locator('#ppt-master-endpoint')).toBeEnabled();
         await page.locator('#ppt-master-enabled').check(); await page.locator('#ppt-master-endpoint').fill(endpoint); await page.locator('#ppt-master-token').fill(token);
         await page.locator('#ppt-master-config-test').click(); await expect(page.locator('#ppt-master-config-status')).toContainText('协议检查通过');
@@ -34,9 +34,11 @@ test('admin在页面测试、更换和停用PPT服务，配置即时生效并加
         const ready = await (await page.request.get('/api/apps/presentations/master/info')).json(); expect(ready.engine.enabled).toBe(true); expect(ready.engine.version).toBe('service-settings-test');
         const evidence = path.resolve('artifacts/ppt-master-settings-acceptance'); await fs.mkdir(evidence, { recursive: true });
         await page.locator('#ppt-master-service-modal .model-modal').screenshot({ path: path.join(evidence, 'desktop.png') });
-        await page.locator('[data-ppt-service-close]').click(); await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.locator('[data-ppt-service-close]').click();
+        await expect(page.locator('#ppt-master-service-card')).toContainText(endpoint);
+        await page.reload({ waitUntil: 'domcontentloaded' });
         await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'models' }));
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
         await page.locator('[data-ppt-service-config-open]').click(); await expect(page.locator('#ppt-master-endpoint')).toHaveValue(endpoint); await expect(page.locator('#ppt-master-token')).toHaveValue('');
         await page.locator('#ppt-master-endpoint').fill(changedEndpoint); await page.locator('#ppt-master-config-test').click(); await expect(page.locator('#ppt-master-config-status')).toContainText('新服务的密钥');
         expect(seen.filter(item => item.port === second.address().port)).toHaveLength(0);
@@ -65,7 +67,7 @@ test('关闭后旧配置响应不能覆盖重新打开时的管理员输入', as
         else await route.fulfill({ json: { success: true, config: { revision: 'new', enabled: false, endpoint: 'http://new-service:8502', hasToken: true, canManage: true, source: 'settings' } } });
     });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
-    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'models' }));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
     await page.locator('[data-ppt-service-config-open]').click(); await arrived; await page.locator('[data-ppt-service-close]').click();
     await page.locator('[data-ppt-service-config-open]').click(); await expect(page.locator('#ppt-master-endpoint')).toHaveValue('http://new-service:8502');
     await page.locator('#ppt-master-endpoint').fill('http://editing-service:8502'); resolveOld();

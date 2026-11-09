@@ -262,6 +262,10 @@
 .retrieval-model-service-card.is-ready { border-color: var(--success); }
 .retrieval-model-service-card.is-warning { border-color: var(--warning); }
 .retrieval-model-service-card.is-loading { color: var(--text-muted); text-align: left; }
+.settings-service-entry { min-width: 0; flex: 1 1 280px; }
+.settings-service-entry h4 { margin: 0 0 6px; }
+.settings-service-entry > .model-modal-desc { margin: 0 0 12px; }
+.settings-service-entry .retrieval-model-service-card { width: 100%; box-sizing: border-box; }
 
 .retrieval-model-service-config {
     justify-self: start;

@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-11-09
-- Release baseline: v0.7.136
+- Release baseline: v0.7.138
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、桌面客户端
 - Evidence reviewed:
   - `README.md`：项目定位、功能边界和历史演进。
@@ -32,7 +32,16 @@
 - Every shared workflow response must redact direct HTTP credentials, and publishing or sharing a workflow containing sensitive HTTP literals is rejected.
 - Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
 
+## 智能体执行与交付验收（v0.7.138）
+
+- 模型工具协议与内部工具标识分层映射，历史消息、指定工具和增量响应保持相同关联；转换不改变实际工具目录、参数、权限及审批。内部步骤标识在执行、审计和产物间一致，超长值使用稳定摘要并保留受控原始关联。
+- 直接自然语言任务及旧空契约使用独立交付核验，回复非空不代表交付完成。真实缺少用户业务输入时等待补充；可自行修复的具体缺口在原授权和剩余额度内最多修复两次。核验不可用、来源撤销和预算耗尽不能记为成功。
+- 新任务默认风险容量覆盖多步发现和交付；显式限额、旧快照、父子任务边界及累计计费继续生效。缓存就绪以当前命名空间和目标表的有效索引为准，不能用后备同名对象替代。
+- 真实模型对照、合成业务夹具、工程回归和生产验收分别记录；19项历史失败复测通过不能替代全仓门禁或生产认证。发布范围与验证证据见[v0.7.138发布说明](../releases/v0.7.138-智能体执行与交付验收可靠性升级.md)。
+
 ## PPT 原稿编辑与离线视频
+
+- v0.7.137设置将“模型配置”和“应用服务”分开：前者维护聊天、向量、重排序模型与检索策略；后者集中OCR、语音识别和PPT Master等应用连接，直接展示全部服务并复用既有配置模块。应用服务页仅管理员可见，写入和测试继续服从各服务原有权限，不复制配置值或另建密钥存储体系。
 
 - v0.7.136系统admin可在模型配置页维护PPT Master全站连接并测试草稿，保存立即生效。地址和密钥加密保存且不回显密钥，更换地址不复用旧密钥；修改与任务接纳串行，运行/等待确认时提示先结束任务。页面设置优先于环境默认值，停用不回退旧连接，标准制作继续可用。
 

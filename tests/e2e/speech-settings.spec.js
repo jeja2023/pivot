@@ -4,7 +4,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-test('模型配置页统一管理语音 API，保存后生效且刷新保留，加密密钥不回显', async ({ page }) => {
+test('应用服务页统一管理语音 API，保存后生效且刷新保留，加密密钥不回显', async ({ page }) => {
     test.setTimeout(90000);
     const key = 'speech-e2e-private-service-key-32-characters';
     const gateway = http.createServer((req, res) => {
@@ -18,8 +18,8 @@ test('模型配置页统一管理语音 API，保存后生效且刷新保留，�
         const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } });
         expect(login.ok()).toBeTruthy(); await page.goto('/chat');
         await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'models' }));
-        await expect(page.locator('#retrieval-model-services-body')).toContainText('语音识别服务');
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
+        await expect(page.locator('#application-services-body')).toContainText('语音识别服务');
         await page.locator('[data-speech-config-open]').click();
         await expect(page.locator('#speech-provider')).toBeEnabled();
         await page.locator('#speech-provider').selectOption('gateway');
@@ -44,7 +44,7 @@ test('模型配置页统一管理语音 API，保存后生效且刷新保留，�
         await page.locator('[data-speech-close]').first().click();
         await page.reload();
         await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
-        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'models' }));
+        await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
         await page.locator('[data-speech-config-open]').click(); await expect(page.locator('#speech-provider')).toBeEnabled();
         await expect(page.locator('#speech-provider')).toHaveValue('gateway');
         await expect(page.locator('#speech-endpoint')).toHaveValue(`http://${origin}/transcribe`);

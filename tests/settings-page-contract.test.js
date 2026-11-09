@@ -115,6 +115,15 @@ test('检索模型服务统一从模型配置页进入，知识库仅展示状�
     const settingsRoute = read('server/routes/settings.js');
 
     assert.match(modelsHtml, /id="retrieval-model-services"/);
+    assert.doesNotMatch(modelsJs, /settings\.speech|settings\.pptMaster|data-retrieval-model-test="ocr"/);
+    const applicationServices = read('client/chat/application-services-settings.js');
+    assert.match(applicationServices, /data-retrieval-model-test="ocr"/);
+    assert.match(applicationServices, /settings\.speech/);
+    assert.match(applicationServices, /settings\.pptMaster/);
+    assert.match(read('client/chat/partials/settings/application-services.html'), /id="tab-content-app-services"/);
+    assert.match(read('client/chat/partials/settings/shell-start.html'), /id="tab-app-services"/);
+    assert.equal((read('client/chat/app/main.js').match(/\['ops', 'models', 'app-services'/g) || []).length, 2);
+    assert.match(read('client/chat/admin.js'), /ADMIN_ONLY_SETTINGS_TABS = new Set\(\['ops', 'app-services'/);
     assert.match(modelsJs, /data-retrieval-model-config-open/);
     assert.match(knowledgeHtml, /id="knowledge-retrieval-model-summary"/);
     assert.match(knowledgeHtml, /id="knowledge-retrieval-model-settings-btn"/);
@@ -283,9 +292,10 @@ test('非管理员与非个人配置模型查看模型配置时向量生成与OC
 
     // 前端模型管理卡片对非个人配置脱敏显示
     assert.match(modelsJs, /canViewEmbeddingUrl = isSuperAdmin \|\| \(Boolean\(embedding\.isPersonal\) && embedding\.source\?\.url === 'user'\)/);
-    assert.match(modelsJs, /canViewOcrUrl = isSuperAdmin/);
-    assert.match(modelsJs, /displayOcrUrl = canViewOcrUrl/);
-    assert.match(modelsJs, /isOcrConfigured \? '\*\*\*\*\*\*\*\*' : '未配置服务地址'/);
+    const applicationServices = read('client/chat/application-services-settings.js');
+    assert.match(applicationServices, /manager = isSuperAdminUser\(\)/);
+    assert.match(applicationServices, /manager \? ocr\.serviceUrl/);
+    assert.match(applicationServices, /'\*\*\*\*\*\*\*\*' : '未配置服务地址'/);
 
     // 知识库摘要提示脱敏
     assert.match(knowledgeSummaryJs, /canView = isSuperAdminUser\(\) \|\| \(Boolean\(embeddingConfig\?\.isPersonal\) && embeddingConfig\?\.source\?\.url === 'user'\)/);

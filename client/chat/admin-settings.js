@@ -575,14 +575,14 @@ function getRetrievalConfigSection(section) {
 
 function openRetrievalModelConfigSection(section) {
     if (!isSuperAdminUser()) {
-        showToast('基础模型与算法服务由系统管理员统一维护', 'info');
+        showToast('全站服务配置由系统admin账号统一维护', 'info');
         return false;
     }
     const safeSection = getRetrievalConfigSection(section);
     const config = RETRIEVAL_CONFIG_SECTIONS[safeSection];
     const modal = document.getElementById(config.modalId);
     if (!modal) {
-        showToast('模型配置面板尚未就绪，请刷新页面后重试', 'error');
+        showToast('服务配置面板尚未就绪，请刷新页面后重试', 'error');
         return false;
     }
     if (safeSection === 'policy') {
@@ -670,6 +670,7 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
                 ocrConfig: window.Pivot.ocrConfig,
                 ocrEngineStatus: window.Pivot.ocrEngineStatus
             });
+            window.Pivot.moduleApi('settings.applicationServices', {}).renderFromSettings?.({ ocrConfig: window.Pivot.ocrConfig, ocrEngineStatus: window.Pivot.ocrEngineStatus });
             showToast('OCR 识别服务配置已保存', 'success');
             setRetrievalModelModalVisibility(modal, false);
             return;
@@ -870,7 +871,7 @@ async function testOcrConnection(options = {}) {
 }
 
 window.Pivot.legacy.bindEmbeddingModalEvents = function() {
-    const serviceCards = document.getElementById('retrieval-model-services-body');
+    const serviceCards = document.getElementById('admin-container');
     const testBtn = document.getElementById('rag-embedding-test-btn');
     const rerankTestBtn = document.getElementById('rag-rerank-test-btn');
     const ocrTestBtn = document.getElementById('ocr-service-test-btn');

@@ -106,9 +106,9 @@ const downloadFileByFetch = async (url, filename) => {
 
 let pageState = { models: 1, users: 1, logs: 1, stats: 1, details: 1, attachments: 1, memories: 1, announcements: 1, apiCallLogs: 1, userRecords: 1, limit: 15, memoriesLimit: 20, logsLimit: 20 };
 
-const SETTINGS_TABS = ['users', 'models', 'evaluation-review', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
+const SETTINGS_TABS = ['users', 'models', 'app-services', 'evaluation-review', 'global-params', 'tool-policy', 'logs', 'monitor', 'usage', 'keys', 'memories', 'attachments', 'announcements', 'ops', 'account'];
 const LEGACY_SETTINGS_TAB_ALIASES = new Set(['stats', 'details', 'report']);
-const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'evaluation-review', 'announcements']);
+const ADMIN_ONLY_SETTINGS_TABS = new Set(['ops', 'app-services', 'global-params', 'users', 'tool-policy', 'logs', 'monitor', 'evaluation-review', 'announcements']);
 const SUPER_ADMIN_ONLY_SETTINGS_TABS = new Set(['tool-policy']);
 const SETTINGS_USAGE_SUBTAB_STORAGE_KEY = 'pivot_settings_usage_subtab';
 
@@ -206,6 +206,7 @@ function normalizeSettingsTab(tab, subtab) {
 const adminFeatureScripts = [
     '/chat/speech-settings.js',
     '/chat/ppt-master-settings.js',
+    '/chat/application-services-settings.js',
     '/chat/models.js',
     '/chat/models-actions.js',
     '/chat/users.js',
@@ -314,7 +315,7 @@ async function openAdminPanel(options = {}) {
     const descEl = adminContainer?.querySelector('.settings-workspace-header p');
     if (titleEl) titleEl.innerText = isAdmin ? '系统设置' : '个人设置';
     if (descEl) descEl.innerText = isAdmin
-        ? '集中管理模型、用户、审计、监控、用量审计、API 接入与账号安全。'
+        ? '集中管理模型、应用服务、用户、审计、监控、用量审计、API 接入与账号安全。'
         : '管理你的模型、附件、用量审计、API 接入与账号安全。';
 
     if (isAdmin) {
@@ -353,6 +354,7 @@ async function openAdminPanel(options = {}) {
 window.Pivot.exposeModule('workspaces.implementations', { openAdminPanel });
 
 window.Pivot.legacy.closeModal = () => {
+    window.Pivot.moduleApi('settings.applicationServices', {}).leave?.();
     const adminContainer = document.getElementById('admin-container');
     if (document.activeElement && (adminContainer?.contains(document.activeElement) || document.activeElement.id === 'admin-modal-close')) {
         document.activeElement.blur?.();
@@ -401,6 +403,7 @@ window.Pivot.legacy.switchTab = async (tab, options = {}) => {
         window.Pivot.legacy.clearSettingsDirty?.();
     }
     const tabs = SETTINGS_TABS;
+    if (tab !== 'app-services') window.Pivot.moduleApi('settings.applicationServices', {}).leave?.();
     tabs.forEach(t => document.getElementById(`tab-content-${t}`)?.classList.add('hidden'));
     document.querySelectorAll('.admin-tab').forEach(b => {
         const active = b.id === `tab-${tab}`;
@@ -465,6 +468,7 @@ async function loadTabDataInternal(tab, page = 1) {
         } else {
             pageState[tab] = page;
             if (tab === 'models') await window.Pivot.moduleApi('settings.quality').load(tab, page);
+            if (tab === 'app-services') await window.Pivot.moduleApi('settings.applicationServices').load();
             if (tab === 'evaluation-review') await window.Pivot.moduleApi('settings.quality').load(tab, page);
             if (tab === 'users' && window.Pivot.legacy.loadUsers) {
                 await window.Pivot.legacy.loadUsers(page);
