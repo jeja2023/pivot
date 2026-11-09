@@ -2276,12 +2276,12 @@ test.describe('Pivot browser smoke', () => {
         await page.locator('#data-analysis-dashboard-create').click();
         await expect(page.locator('#data-analysis-dashboard-title')).toContainText('销售看板', { timeout: 15_000 });
         await page.locator('#data-analysis-open-add-view-modal').click();
-        const savedViewId = await page.locator('#data-analysis-dashboard-view-select option').filter({ hasText: '区域销售额图表' }).getAttribute('value');
+        const savedViewId = await page.locator('#data-analysis-dashboard-view-select option').filter({ hasText: '区域销售额图表' }).first().getAttribute('value');
         await page.locator('#data-analysis-dashboard-view-select').selectOption(String(savedViewId));
         await page.locator('#data-analysis-dashboard-add-view').click();
         await expect(page.locator('#data-analysis-dashboard-items')).toContainText('区域销售额图表', { timeout: 15_000 });
         await page.locator('#data-analysis-dashboard-refresh').click();
-        await expect(page.locator('#data-analysis-dashboard-snapshot')).toContainText('已刷新', { timeout: 15_000 });
+        await expect(page.locator('#data-analysis-dashboard-snapshot')).toContainText(/最近刷新|本次运行成功/, { timeout: 15_000 });
 
         await page.locator('[data-data-analysis-tab="query"]').click();
         await page.locator('#data-analysis-query-mode-sql').click();

@@ -18,7 +18,7 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     await expect(page.getByRole('button', { name: 'AI 自由设计', exact: true })).toBeVisible();
-    const unitTemplateBtn = page.getByRole('button', { name: '使用单位模板', exact: true });
+    const unitTemplateBtn = page.locator('[data-presentation-catalog-open="organization"]');
     if (!await unitTemplateBtn.isVisible()) {
         await page.locator('#presentation-catalog-dropdown summary').click();
     }
@@ -89,7 +89,7 @@ test('AI自由设计与上游模板从统一入口进入完整制作，所选模
     const catalogSummary = page.locator('#presentation-catalog-dropdown summary');
     if (await catalogSummary.isVisible()) {
         await catalogSummary.click();
-        await page.getByRole('button', { name: '浏览全部模板', exact: true }).click();
+        await page.locator('[data-presentation-catalog-open="all"]').click();
     } else {
         await page.getByRole('button', { name: '模板库', exact: true }).click();
     }

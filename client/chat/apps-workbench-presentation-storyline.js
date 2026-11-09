@@ -183,7 +183,7 @@
         modelField.append(node('span', '', '调整模型'), modelSelect);
         rowAi.append(scopeField, modelField);
         card2.appendChild(rowAi);
-        if (!modelSelect.options.length) void window.Pivot?.legacy?.PivotAppModels?.refresh?.('presentations', modelSelect.id);
+        if (!modelSelect.options.length) void window.Pivot?.legacy?.PivotAppModels?.refresh?.('presentations', modelSelect);
 
         const instField = field('调整要求（可选）', 'presentation-story-instruction', instruction);
         const instInput = instField.querySelector('.form-input');

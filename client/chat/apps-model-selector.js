@@ -58,12 +58,12 @@
     }
 
     function getSelectedModel(appId, selectorId) {
-        const select = document.getElementById(selectorId);
+        const select = typeof selectorId === 'string' ? document.getElementById(selectorId) : selectorId;
         return String(readSavedModelId(appId) || select?.value || '').trim();
     }
 
     async function refresh(appId, selectorId) {
-        const select = document.getElementById(selectorId);
+        const select = typeof selectorId === 'string' ? document.getElementById(selectorId) : selectorId;
         if (!select) return '';
 
         if (typeof window.Pivot.legacy.loadSelectableModels !== 'function') {

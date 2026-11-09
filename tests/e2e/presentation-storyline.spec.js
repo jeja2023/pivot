@@ -35,7 +35,9 @@ test('整稿目标从创建带入结构，逐页叙事调整先预览再确认�
     await page.locator('#presentation-story-save').click();
     await expect(page.locator('#presentation-story-consumption')).toHaveValue('reading');
     await page.locator('#presentation-story-page-purpose').fill('先明确本页职责'); await page.locator('#presentation-story-bridge').fill('引出下一页的材料核对');
-    await page.locator('#presentation-story-instruction').fill('重排并突出后续行动'); await page.locator('#presentation-story-model').selectOption(String(model.id));
+    await page.locator('#presentation-story-instruction').fill('重排并突出后续行动');
+    await expect(page.locator(`#presentation-story-model option[value="${model.id}"]`)).toBeAttached({ timeout: 20000 });
+    await page.locator('#presentation-story-model').selectOption(String(model.id));
     await page.locator('#presentation-story-propose').click();
     await expect(page.locator('#presentation-story-status')).toContainText('方案已生成', { timeout: 20000 });
     const before = (await (await page.request.get(root)).json()).presentation;
