@@ -48,8 +48,8 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 .presentation-catalog-dialog {
-    width: min(1360px, 96vw);
-    max-width: 1360px;
+    width: min(1500px, 96vw);
+    max-width: 1500px;
     height: min(90vh, 880px);
     max-height: 90vh;
     margin: auto;
