@@ -14,7 +14,8 @@ services:
     cpus: 2
     stop_grace_period: 15s
     environment:
-      PPT_MASTER_TOKEN: ${PPT_MASTER_TOKEN:?请首次配置至少32位PPT服务访问密钥}
+      PPT_MASTER_TOKEN: "fbcd4e6c72c1f83be3f0d5cd8c0f09e6b04b89abcb2dbf6c3f5b8d8b1f9c20aa"
+      PPT_MASTER_PORT: "8502"
       PPT_MASTER_DATA_DIR: /data/jobs
     expose: ["8502"]
     volumes:

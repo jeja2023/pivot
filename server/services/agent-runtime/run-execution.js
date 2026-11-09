@@ -5,9 +5,7 @@ const { resolveRunLongTermMemory } = require('./run-memory');
 const { continueRunFromCheckpoint: continueRunFromCheckpointHelper } = require('./run-continuation');
 const { verifyTaskOutcome, taskVerificationFailureMessage } = require('../agent-verification');
 const { inferTaskType } = require('../agent-model-quality');
-const { recordWorkingObservation } = require('../agent-working-state');
 const { plannerCoreSection } = require('../agent-prompt-registry');
-const { attachWorkingMemoryOutputReference, persistWorkingMemoryOutput } = require('../agent-working-memory-artifacts');
 const { createAgentRunErrorHandler } = require('./run-error-handler');
 const { createRunPreparation } = require('./run-preparation');
 const { createRunBudgetGuard, createRemainingModelRequestMs, createRunDeadlineTimer } = require('./run-budget-guard');
@@ -134,6 +132,7 @@ const {
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
         await require('../agent-knowledge-boundary').prepareAgentKnowledgeBoundary(run, user, deps);
+        if (await require('../agent-child-wait').waitBeforePlanning({ run, user }, deps)) return;
         // 恢复路径先确认已持久化的控制应用；不会重放其指令。
         try { await acknowledgeAppliedAgentControlMessages(runId, user); } catch (error) {
             logger.warn({ runId, err: error.message }, '控制消息确认恢复失败，将在后续轮询重试');
@@ -252,9 +251,7 @@ const {
                 logger.warn({ runId, err: error.message }, '普通聊天 Agent 图片上下文转换失败，已使用文本上下文');
             }
         }
-        const resumeContext = runtimeMetadata.resumeContext && typeof runtimeMetadata.resumeContext === 'object'
-            ? runtimeMetadata.resumeContext
-            : {};
+        const resumeContext = await require('./resume-observations').resolveResumeObservations(run, runtimeMetadata, buildAgentResumeContext);
         observations = [
             ...(Array.isArray(resumeContext.observations) ? resumeContext.observations : []),
             ...(Array.isArray(resumeContext.recentFailures) ? resumeContext.recentFailures : [])
@@ -674,15 +671,15 @@ const {
             }
 
             const startedAt = Date.now();
-            const effectivePlanInput = normalizeToolInput(plan.tool, plan.input || {}, {
-                ...run,
-                model_id: run.model_id ?? modelCfg?.id,
-                chosen_model_id: run.chosen_model_id ?? modelCfg?.id
-            });
+            let effectivePlanInput = plan.input || {};
             let progressiveExecution; try {
+                effectivePlanInput = normalizeToolInput(plan.tool, effectivePlanInput, {
+                    ...run, model_id: run.model_id ?? modelCfg?.id, chosen_model_id: run.chosen_model_id ?? modelCfg?.id
+                });
                 progressiveExecution = await require('../agent-progressive-execution').resolveProgressiveExecution({ toolName: plan.tool, input: effectivePlanInput, user, toolList, state: toolDiscoveryState, run });
             } catch (toolResolutionError) {
                 if (require('../agent-execution-control').isExecutionControlError(toolResolutionError)) throw toolResolutionError;
+                toolResolutionError = require('../tool-input-validation').inputErrorForNormalization(toolResolutionError, findAgentToolByName(plan.tool, toolList));
                 const feedback = require('../tool-input-validation').toolInputFeedback(toolResolutionError);
                 observations.push({ step, tool: plan.tool, input: effectivePlanInput, error: toolResolutionError.message, ...(feedback ? { output: feedback } : {}) });
                 await insertStep(runId, step, { type: 'tool', title: `工具发现未完成：${plan.tool}`, toolName: plan.tool, input: effectivePlanInput, ...(feedback ? { output: feedback } : {}), errorMessage: toolResolutionError.message, status: 'error', contextHash: stepContext.contextHash });
@@ -728,18 +725,9 @@ const {
                 );
                 await assertRunNotCancelled(runId);
                 assertRunWithinBudget();
-                let compactOutput = compactToolOutputForModel(output, modelCfg);
-                try {
-                    const reference = compactOutput && typeof compactOutput === 'object' && (compactOutput.__partial === true || compactOutput.structuredContent?.__partial === true)
-                        ? await persistWorkingMemoryOutput(output, user, { tenantId: run.tenant_id || user.tenant_id || user.tenantId, force: true })
-                        : null;
-                    if (reference) compactOutput = attachWorkingMemoryOutputReference(compactOutput, reference);
-                } catch (error) {
-                    // 原文存储不可用时不能把摘要伪装为可完整追溯；仍保留工具事实并让验收看到缺口。
-                    if (compactOutput && typeof compactOutput === 'object' && !Array.isArray(compactOutput)) {
-                        compactOutput = { ...compactOutput, rawOutputStorageError: String(error.message || '原文存储失败').slice(0, 240) };
-                    }
-                }
+                const compactOutput = await require('../agent-tool-observation').prepareToolObservation({ run, user,
+                    tool: progressiveExecution.approvalToolName || plan.tool, output, modelCfg, compact: compactToolOutputForModel });
+                taskWorkingState = getRunMetadata(run).workingState || taskWorkingState;
                 await updateRun(runId, { status: 'observing', updated_at: getBeijingTimestamp() });
                 const knowledgeEvidence = require('../knowledge-tool-results').knowledgeEvidenceManifest(output);
                 observations.push({
@@ -748,11 +736,6 @@ const {
                     input: effectivePlanInput,
                     output: compactOutput,
                     ...(knowledgeEvidence ? { knowledgeEvidence } : {})
-                });
-                taskWorkingState = recordWorkingObservation(taskWorkingState, { tool: plan.tool, output: compactOutput }, taskContract, run.goal);
-                await setRunMetadata(runId, { taskContract, workingState: taskWorkingState });
-                await persistWorkingMemoryRevision({
-                    run, user, state: taskWorkingState, taskContract, reason: 'tool_observation'
                 });
                 await insertStep(runId, step, {
                     type: 'tool',
@@ -770,6 +753,7 @@ const {
                         toolName: plan.tool,
                         input: effectivePlanInput,
                         output: compactOutput,
+                        executedTool: require('../agent-learning-tool-evidence').executedToolEvidence(progressiveExecution.approvalTool, output),
                         policyDecision: 'allow',
                         status: 'success',
                         durationMs: Date.now() - startedAt,
@@ -786,6 +770,8 @@ const {
                 taskBudget.recordSuccess();
                 taskBudget.recordProgress(progressiveExecution.approvalToolName || plan.tool, progressiveExecution.approvalInput, output);
                 await taskBudget.persistUsageSnapshot();
+                if (await require('../agent-child-wait').deferAfterChildTool({ run, user, budget: taskBudget,
+                    toolName: progressiveExecution.approvalToolName || plan.tool, output }, deps)) return;
             } catch (toolErr) {
                 if (require('../agent-execution-control').isExecutionControlError(toolErr) || isRunCancelled(runId)) throw toolErr;
                 if (toolErr.code === 'AGENT_RECOVERY_REQUIRES_APPROVAL') {

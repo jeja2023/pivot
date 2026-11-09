@@ -9,6 +9,66 @@ const { createAgentStepContext } = require('../server/services/agent-step-contex
 const { TaskBudget } = require('../server/services/agent-budget');
 const NETWORK_TIMEOUT_DRILL_MS = 2_000;
 
+test('流式规划只去重工作状态中的准备全文，原始契约消息、目标和核验证据继续保留', async () => {
+    const run = { id: 'working-state-token-stream', user_id: 7, goal: '读取已授权文件并核验。', max_steps: 2 };
+    const output = { name: 'read', inputSchema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: '保留完整契约字段' } } } };
+    const observations = [{ tool: 'tools.describe', output }], original = globalThis.structuredClone(observations);
+    const state = { goal: run.goal, constraints: [{ id: 'scope', text: '只用当前授权范围', status: 'active' }],
+        evidence: [{ id: 'contract', source: 'tools.describe', text: JSON.stringify(output) }] };
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.callModelStreamingWithTools = async (_model, messages) => {
+        const working = messages.find(message => message.content?.startsWith('PIVOT_TASK_WORKING_STATE_BEGIN'));
+        assert(working); assert(!working.content.includes('目标：')); assert(!working.content.includes('保留完整契约字段'));
+        assert(working.content.includes('只用当前授权范围'));
+        assert(messages[0].content.includes(run.goal));
+        assert(messages.some(message => message.content?.includes('PIVOT_MCP_TOOL_RESULT_BEGIN') && message.content.includes('保留完整契约字段')));
+        return { content: '尚未执行业务读取，已确认当前授权契约。', hasToolCalls: false, toolCalls: [] };
+    };
+    deps.verifyAgentOutcome = async input => { assert.deepEqual(input.observations, original); return { outcomeStatus: 'needs_input', hardFailures: [] }; };
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [], observations,
+        chatContext: { taskWorkingState: state }, deadline: Date.now() + 30000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {} }, deps);
+    assert.equal(result.completed, true); assert.deepEqual(observations, original);
+});
+
+test('发现引用冲突作为执行前输入反馈修正，不降级原生工具协议或消耗连续失败额度', async () => {
+    const run = { id: 'reference-input-stream', user_id: 7, goal: '读取工具契约', max_steps: 3 };
+    const steps = [], observations = [], budget = new TaskBudget();
+    const deps = streamingDeps({ run, steps, events: [] });
+    let calls = 0;
+    deps.taskBudget = budget;
+    deps.callModelStreamingWithTools = async (_model, messages) => {
+        if (++calls === 1) return { content: '', hasToolCalls: true, toolCalls: [{ id: 'bad-ref', name: 'tools.describe',
+            arguments: { toolRef: { toolName: 'read' }, toolName: 'write' } }] };
+        const feedback = JSON.parse(messages.find(message => message.role === 'tool').content);
+        assert.equal(feedback.executed, false); assert.equal(feedback.repairable, true);
+        return { content: '引用冲突已识别，本次未执行业务操作。', hasToolCalls: false, toolCalls: [] };
+    };
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id,
+        toolList: [{ name: 'tools.describe', input_schema: { type: 'object' } }], observations,
+        deadline: Date.now() + 30000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {} }, deps);
+    assert.equal(result.completed, true); assert.equal(calls, 2); assert.equal(budget.counts.consecutive_errors, 0);
+    assert.equal(steps.some(step => step.title === '流式工具调用兜底'), false);
+    assert.equal(observations[0].output.code, 'TOOL_INPUT_INVALID');
+});
+
+test('流式规划消费的子任务完成回执同时进入独立核验，重复回执只保留一份', async () => {
+    const run = { id: 'child-receipt-stream', user_id: 7, goal: '汇总子任务结果', max_steps: 2 };
+    const message = { message_id: 'child-receipt', message_type: 'reply', from_run_id: 'child',
+        payload: { kind: 'delegation_completion', childRunId: 'child', status: 'completed', output: { sum: 31 } } };
+    const observations = [{ type: 'agent_control', messageId: message.message_id, payload: message.payload }];
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.pollAgentControlMessages = async () => [message, { ...message, message_id: 'second-receipt' }];
+    deps.callModelStreamingWithTools = async () => ({ content: '已汇总子任务结果31。', hasToolCalls: false, toolCalls: [] });
+    deps.verifyAgentOutcome = async input => {
+        assert.equal(input.observations.filter(item => item.messageId === 'child-receipt').length, 1);
+        assert.equal(input.observations.find(item => item.messageId === 'second-receipt').payload.output.sum, 31);
+        return { outcomeStatus: 'verified' };
+    };
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3 }, runId: run.id, toolList: [],
+        deadline: Date.now() + 30000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {}, observations }, deps);
+    assert.equal(result.completed, true);
+});
+
 test('知识任务在来源核验完成前不公开流式正文，撤权后只保存安全提示', async () => {
     const run = { id: 'knowledge-output-guard', user_id: 7, goal: '依据资料回答', max_steps: 2,
         metadata: { capabilityConstraints: { capabilities: ['knowledge.search'] } } };

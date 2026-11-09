@@ -79,7 +79,7 @@ class TaskBudget {
         this.policy = options.policy || null;
         this.priorElapsedSeconds = Math.max(0, Number(options.priorElapsedSeconds) || 0);
         for (const key of Object.keys(this.counts)) this.counts[key] = Math.max(0, Number(options.counts?.[key]) || 0);
-        this.progress = { count: 0, lastProgressRound: this.counts.steps, fingerprints: [], ...(options.progress || {}) };
+        this.progress = { count: 0, lastProgressRound: this.counts.steps, fingerprints: [], preparedTools: [], ...(options.progress || {}) };
         this.segmentStartSteps = Math.min(this.counts.steps, Math.max(0, Number(options.segmentStartSteps ?? this.counts.steps) || 0));
         this.segmentStartProgress = Math.min(Number(this.progress.count) || 0, Math.max(0, Number(options.segmentStartProgress ?? this.progress.count) || 0));
         this.segmentNumber = Math.max(1, Number(options.segmentNumber) || 1);
@@ -187,7 +187,16 @@ class TaskBudget {
     }
 
     recordProgress(tool, input, output) {
-        const fingerprint = require('./agent-execution-progress').progressFingerprint(tool, input, output);
+        const { preparationFingerprint, progressFingerprint } = require('./agent-execution-progress');
+        const preparations = tool === 'tools.describe' && output?.type === 'tools_descriptions'
+            ? (output.descriptions || []).map(description => preparationFingerprint(tool, description)) : [preparationFingerprint(tool, output)];
+        for (const preparation of preparations) {
+            if (preparation && !this.progress.preparedTools.includes(preparation)) {
+                this.progress.preparedTools = [...this.progress.preparedTools, preparation].slice(-128);
+                this.progress.lastProgressRound = this.counts.steps;
+            }
+        }
+        const fingerprint = progressFingerprint(tool, input, output);
         if (!fingerprint || this.progress.fingerprints.includes(fingerprint)) return false;
         this.progress.count += 1;
         this.progress.lastProgressRound = this.counts.steps;

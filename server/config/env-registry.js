@@ -35,6 +35,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     LOG_LEVEL: { group: '日志', type: 'enum', defaultValue: 'info', values: ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'], description: '结构化日志最低输出级别。' },
     LOG_FILE_MAX_BYTES: { group: '日志', type: 'integer', defaultValue: 52_428_800, min: 1_048_576, max: 1_073_741_824, description: '单个日志文件最大字节数。' },
     LOG_FILE_MAX_ARCHIVES: { group: '日志', type: 'integer', defaultValue: 5, min: 1, max: 100, description: '轮转日志保留份数。' },
+    AUDIT_LOG_CLEANUP_PAUSED: { group: '审计日志', type: 'boolean', defaultValue: false, invalidValue: true, description: '调查或争议处理期间暂停 audit_logs 自动删除；不影响新日志写入、查询和导出。异常值按暂停处理，恢复前先完成证据保全；部署配置变更后重启服务。' },
     PG_POOL_MAX: { group: 'PostgreSQL', type: 'integer', defaultValue: 30, min: 1, max: 200, description: 'PostgreSQL 连接池上限。' },
     PG_STATEMENT_TIMEOUT_MS: { group: 'PostgreSQL', type: 'integer', defaultValue: 20_000, min: 1_000, max: 600_000, description: '普通 SQL 单条执行超时。' },
     PG_ANALYZE_TIMEOUT_MS: { group: 'PostgreSQL 维护', type: 'integer', defaultValue: 60_000, min: 1_000, max: 120_000, description: '单张表 ANALYZE 的执行超时。' },
@@ -208,7 +209,7 @@ function normalizeBoolean(value, definition) {
     const normalized = String(value).trim().toLowerCase();
     if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
     if (['false', '0', 'no', 'off'].includes(normalized)) return false;
-    return Boolean(definition.defaultValue);
+    return Boolean(definition.invalidValue ?? definition.defaultValue);
 }
 
 function normalizeCsv(value, definition) {

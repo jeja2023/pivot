@@ -4,6 +4,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createRoundRunner } = require('./helpers/agent-round-runner');
 
+test('JSON规划的发现引用冲突回传可修正输入反馈，不中止任务或误判模型端点失败', async () => {
+    let calls = 0;
+    const current = createRoundRunner({ isStreamingToolsEnabled: () => false,
+        normalizeToolInput: require('../server/services/agent-policy').normalizeToolInput,
+        callModelText: async () => JSON.stringify(++calls === 1
+            ? { action: 'tool', tool: 'tools.describe', input: { toolRef: { toolName: 'read' }, toolName: 'write' } }
+            : { action: 'final', answer: '本次未执行业务操作，已识别引用冲突。' }) });
+    await current.start();
+    assert.deepEqual(current.errors, []); assert.equal(calls, 2); assert.equal(current.run.status, 'completed');
+    const failure = current.steps.find(step => step.type === 'tool');
+    assert.equal(failure.output.executed, false); assert.equal(failure.output.code, 'TOOL_INPUT_INVALID');
+    assert.equal(JSON.parse(current.run.usage_stats).counts.consecutive_errors, 0);
+});
+
 test('原生规划回退共享真实单段预算，安全续跑后累计工具与轮次继续计费', async () => {
     let nativeCalls = 0, jsonCalls = 0, tools = 0;
     const current = createRoundRunner({ isStreamingToolsEnabled: () => true,

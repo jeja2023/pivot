@@ -6,6 +6,7 @@ const { getBeijingTimestamp } = require('../time');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { computeNextScheduleRun } = require('./agent-schedules');
 const { normalizeStrategy: normalizeModelRouterStrategy } = require('./model-router');
+const { getRunnableModelForUserAsync } = require('./models');
 const { enqueueChannelDelivery } = require('./agent-channel-adapters');
 const {
     normalizeApprovalPolicy,
@@ -148,13 +149,16 @@ function normalizeAuthorization(raw = {}, source = {}) {
     const input = raw && typeof raw === 'object' ? raw : {};
     const timezone = String(input.timezone || input.time_zone || source.timezone || source.time_zone || 'Asia/Shanghai').trim().slice(0, 80);
     try { Intl.DateTimeFormat('en-US', { timeZone: timezone }); } catch (_) { throw invalid('持续目标时区无效。'); }
+    const rawModelId = input.modelId ?? input.model_id ?? source.modelId ?? source.model_id;
+    const modelId = rawModelId === undefined || rawModelId === null || rawModelId === '' ? null : Number(rawModelId);
+    if (modelId !== null && (!['string', 'number'].includes(typeof rawModelId) || !Number.isSafeInteger(modelId) || modelId <= 0)) throw invalid('持续目标的执行模型标识无效，请重新选择模型。');
     return {
         toolPolicy: normalizeToolPolicy(input.toolPolicy || input.tool_policy || source.toolPolicy || source.tool_policy),
         toolAllowlist: normalizeToolAllowlist(input.toolAllowlist || input.tool_allowlist || source.toolAllowlist || source.tool_allowlist),
         approvalPolicy: normalizeApprovalPolicy(input.approvalPolicy || input.approval_policy || source.approvalPolicy || source.approval_policy),
         networkPolicy: input.networkPolicy && typeof input.networkPolicy === 'object' ? input.networkPolicy : {},
         expiresAt: input.expiresAt || input.expires_at || null,
-        modelId: Number.parseInt(input.modelId ?? input.model_id ?? source.modelId ?? source.model_id, 10) || null,
+        modelId,
         modelRouter: normalizeModelRouterStrategy(input.modelRouter || input.model_router || source.modelRouter || source.model_router || 'fixed'),
         timezone,
         deliveryBindingIds: normalizeStringList(input.deliveryBindingIds || input.delivery_binding_ids || source.deliveryBindingIds || source.delivery_binding_ids, 10, 128),
@@ -253,6 +257,7 @@ async function createAgentGoal(user, body = {}, options = {}) {
     const bodyTrigger = body.triggerSpec || body.trigger_spec || {};
     const token = bodyTrigger.type === 'webhook' && !bodyTrigger.token && !bodyTrigger.tokenHash && !bodyTrigger.token_hash ? generateGoalToken() : null;
     const data = normalizeGoalInput(token ? { ...body, triggerSpec: { ...bodyTrigger, token } } : body);
+    await assertGoalModel(user, data.authorizationSpec);
     await assertGoalDeliveryBindings(user, data.authorizationSpec.deliveryBindingIds);
     const tenantId = options.tenantId || user.tenant_id || await getPrimaryTenantId(user.id);
     const now = getBeijingTimestamp();
@@ -268,18 +273,27 @@ async function createAgentGoal(user, body = {}, options = {}) {
 async function updateAgentGoal(id, user, body = {}) {
     const current = await queryOne('SELECT * FROM agent_goals WHERE id = ? AND user_id = ? AND status != \'deleted\'', [String(id || ''), user.id]);
     if (!current) return null;
+    const authorizationPatch = body.authorizationSpec || body.authorization_spec || {};
+    // 局部编辑保留原授权；先统一字段别名，避免旧字段覆盖新选择的模型。
+    const authorizationOverrides = Object.fromEntries(Object.entries(authorizationPatch).map(([key, value]) => [key === 'time_zone' ? 'timezone' : key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
     const data = normalizeGoalInput({
         ...parseRow(current),
         ...body,
         triggerSpec: body.triggerSpec || body.trigger_spec || parseJson(current.trigger_spec, {}),
-        authorizationSpec: body.authorizationSpec || body.authorization_spec || parseJson(current.authorization_spec, {}),
+        authorizationSpec: { ...parseJson(current.authorization_spec, {}), ...authorizationOverrides },
         budgetSpec: body.budgetSpec || body.budget_spec || parseJson(current.budget_spec, {})
     });
+    await assertGoalModel(user, data.authorizationSpec);
     await assertGoalDeliveryBindings(user, data.authorizationSpec.deliveryBindingIds);
     const now = getBeijingTimestamp();
     const nextRunAt = data.status === 'active' ? computeNextGoalRun(data.triggerSpec, now) : null;
     await execute(`UPDATE agent_goals SET title = ?, goal = ?, goal_kind = ?, priority = ?, status = ?, trigger_spec = ?, authorization_spec = ?, budget_spec = ?, cooldown_seconds = ?, max_failures = ?, next_run_at = ?::timestamptz, failure_count = 0, last_error = '', version = version + 1, paused_at = CASE WHEN ? = 'paused' THEN ?::timestamptz ELSE NULL END, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?`, [data.title, data.goal, data.kind, data.priority, data.status, JSON.stringify(data.triggerSpec), JSON.stringify(data.authorizationSpec), JSON.stringify(data.budgetSpec), data.cooldownSeconds, data.maxFailures, nextRunAt, data.status, data.status === 'paused' ? now : null, now, current.id, user.id]);
     return parseRow(await queryOne('SELECT * FROM agent_goals WHERE id = ?', [current.id]));
+}
+
+async function assertGoalModel(user, authorization = {}) {
+    if (!authorization.modelId) throw invalid('请选择持续目标的执行模型后重试。');
+    if (!await getRunnableModelForUserAsync(authorization.modelId, user)) throw invalid('持续目标的执行模型不可用或无权使用，请重新选择模型。');
 }
 
 async function assertGoalDeliveryBindings(user, bindingIds = []) {
@@ -363,6 +377,7 @@ async function runAgentGoalNow(goal, user, options = {}) {
     const triggerKey = String(options.triggerKey || `goal:${goal.id}:${options.scheduledFor || Date.now()}`).slice(0, 256);
     const existing = await queryOne('SELECT id, status FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, triggerKey]);
     if (existing) return { id: existing.id, deduped: true, status: existing.status };
+    await assertGoalModel(user, auth);
     const created = await run({
         user,
         goal: goal.goal,
@@ -455,6 +470,7 @@ async function previewAgentGoal(user, body = {}) {
     const data = normalizeGoalInput({ ...(body || {}), status: 'paused' });
     const run = ensureCreateRun();
     const auth = data.authorizationSpec;
+    await assertGoalModel(user, auth);
     const budget = data.budgetSpec;
     const previewId = `goal_preview_${crypto.randomUUID()}`;
     return await run({

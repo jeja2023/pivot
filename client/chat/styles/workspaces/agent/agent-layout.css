@@ -156,13 +156,17 @@
 }
 
 .agent-task-editor-modal {
-    width: min(760px, calc(100vw - 32px));
-    max-height: min(860px, calc(100dvh - 32px));
+    width: min(980px, calc(100vw - 36px));
+    max-height: min(900px, calc(100dvh - 36px));
     display: flex;
     flex-direction: column;
     padding: 0;
     overflow: hidden;
     text-align: left;
+}
+
+.agent-task-editor-modal .agent-config-modal-head {
+    padding: 14px 20px;
 }
 
 .agent-task-editor-modal .agent-config-modal-head > div {
@@ -198,6 +202,11 @@
     background: #fff;
 }
 
+.agent-task-editor-modal .agent-task-editor-body {
+    padding: 18px 20px;
+    gap: 14px;
+}
+
 .agent-task-editor-body .modal-form-field > span {
     color: var(--text-muted);
     font-size: 0.74rem;
@@ -217,7 +226,7 @@
 
 .agent-task-editor-modal .modal-form-field > textarea.agent-goal-input {
     width: 100%;
-    min-height: 112px;
+    min-height: 132px;
     flex: 0 0 auto;
     resize: vertical;
     line-height: 1.5;
@@ -236,8 +245,8 @@
 }
 
 .agent-task-editor-modal .agent-task-primary-fields .modal-form-field {
-    width: min(380px, 100%);
-    max-width: 380px;
+    width: min(480px, 100%);
+    max-width: 480px;
 }
 
 .agent-task-primary-fields .agent-model-trigger {
@@ -255,6 +264,10 @@
     padding: 14px 16px 16px;
     border-top: 1px solid var(--border);
     background: #fff;
+}
+
+.agent-task-editor-modal .agent-task-editor-footer {
+    padding: 14px 20px 16px;
 }
 
 .agent-task-editor-footer > div {

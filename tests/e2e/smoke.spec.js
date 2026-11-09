@@ -6,6 +6,7 @@ const XLSX = require('@e965/xlsx');
 const Sqlite = require('better-sqlite3');
 const { spawnSync } = require('node:child_process');
 const { expect, test } = require('@playwright/test');
+const { prepareGoalTestModel } = require('../helpers/agent-goal-e2e-model');
 
 if (process.env.PIVOT_E2E_DEBUG === 'true') {
     test.beforeEach(({ page }) => {
@@ -439,6 +440,7 @@ test.describe('Pivot browser smoke', () => {
 
     test('Agent 工作台 exposes profile wizard, goals, inbox and channel controls', async ({ page }) => {
         await ensureBrowserSession(page);
+        await prepareGoalTestModel(page);
         await expect(page.locator('#agent-workbench-modal')).toHaveCount(0);
         await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentWorkbench?.());
         await expect(page.locator('#agent-workbench-modal')).toBeVisible({ timeout: 15_000 });

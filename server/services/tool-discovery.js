@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 const { formatToolList } = require('./agent-tool-catalog');
 const { getCapabilityDefinition } = require('./agent-capability-registry');
+const { emptySearchFeedback, matchesDiscoveryFilters } = require('./tool-discovery-filters');
 
 const DEFAULT_DISCOVERY_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_DISCOVERY_CACHE_ENTRIES = 100;
@@ -35,21 +36,9 @@ function normalizeTerms(value) {
     return [...new Set([...words, ...cjkBigrams])].filter(term => !GENERIC_BUSINESS_TERMS.has(term)).slice(0, 30);
 }
 
-function matchesFilters(tool, filters = {}) {
-    const risk = String(filters.riskLevel || filters.risk_level || '').trim();
-    if (risk && String(tool.risk_level || tool.risk || '') !== risk) return false;
-    const source = String(filters.source || '').trim();
-    if (source && String(tool.source || '') !== source) return false;
-    const capability = String(filters.capability || '').trim();
-    if (capability && !(tool.capabilities || []).some(item => String(item) === capability)) return false;
-    const requireApproval = filters.requireApproval ?? filters.require_approval;
-    if (requireApproval === true && !Boolean(tool.approval_required || tool.requiresApproval)) return false;
-    return true;
-}
-
 function rankTools(query, tools = [], filters = {}) {
     const keywords = normalizeTerms(query);
-    return (tools || []).filter(tool => matchesFilters(tool, filters)).map(tool => {
+    return (tools || []).filter(tool => matchesDiscoveryFilters(tool, filters)).map(tool => {
         const capTitles = (tool.capabilities || []).map(cap => getCapabilityDefinition(cap)?.title || '').filter(Boolean);
         const aliases = BUSINESS_ALIASES[String(tool.name || '').replace(/^mcp\.\d+\./, '')] || '';
         const corpus = [tool.name, tool.title, tool.description, tool.serverName, aliases, ...(tool.capabilities || []), ...capTitles].join(' ').toLowerCase();
@@ -67,7 +56,7 @@ function toolRef(tool = {}) {
         definitionDigest: tool.definitionDigest || tool.definition_digest || digest({
             name: tool.name || tool.fullName || '', version: tool.version || '',
             inputSchema: tool.input_schema || tool.inputSchema || {}, outputSchema: tool.output_schema || tool.outputSchema || {},
-            capabilities: tool.capabilities || [], risk: tool.risk_level || tool.risk || '', source: tool.source || '',
+            capabilities: tool.capabilities || [], risk: tool.risk_level ?? tool.risk ?? '', source: tool.source || '',
             sideEffect: Boolean(tool.side_effect ?? tool.sideEffect), idempotent: Boolean(tool.idempotent),
             requiresApproval: Boolean(tool.approval_required || tool.requiresApproval || tool.alwaysRequiresApproval),
             concurrency: tool.concurrency || 'read', network: Boolean(tool.network),
@@ -85,7 +74,7 @@ function toSummary(entry = {}) {
         description: String(tool.description || '').slice(0, 800),
         source: tool.source || 'builtin',
         serverName: tool.serverName || '',
-        riskLevel: tool.risk_level || tool.risk || 'low',
+        riskLevel: tool.risk_level ?? tool.risk ?? 'low',
         capabilities: tool.capabilities || [],
         requiresApproval: Boolean(tool.approval_required || tool.requiresApproval),
         requiresConnection: Boolean(tool.authScopes?.length),
@@ -129,7 +118,7 @@ function catalogVersion(user, tools = [], input = {}, options = {}) {
         .map(tool => ({
             reference: toolRef(tool),
             source: String(tool?.source || 'builtin'),
-            riskLevel: String(tool?.risk_level || tool?.risk || 'low'),
+            riskLevel: String(tool?.risk_level ?? tool?.risk ?? 'low'),
             approvalRequired: Boolean(tool?.approval_required || tool?.requiresApproval || tool?.alwaysRequiresApproval),
             sideEffect: Boolean(tool?.side_effect),
             idempotent: Boolean(tool?.idempotent),
@@ -156,7 +145,7 @@ function discoveryCacheKey(input = {}, version = '', scope = {}) {
         query: String(input.query || '').trim(),
         limit: Math.min(Math.max(Number(input.limit) || 5, 1), 20),
         filters: input.filters && typeof input.filters === 'object' ? input.filters : {
-            capability: input.capability || '', riskLevel: input.riskLevel || input.risk_level || '', source: input.source || '',
+            capability: input.capability || '', riskLevel: input.riskLevel ?? input.risk_level ?? '', source: input.source || '',
             requireApproval: input.requireApproval ?? input.require_approval ?? null
         }
     });
@@ -201,11 +190,15 @@ async function searchToolsForUser(user, input = {}, deps = {}, options = {}) {
     const cache = options.discoveryCache || options.discovery_cache;
     const cached = readSearchCache(cache, cacheKey, nowValue);
     if (cached) return cached;
+    const businessTools = tools.filter(tool => !String(tool?.name || '').startsWith('tools.'));
+    const filters = input.filters || input;
+    const candidates = rank(query, businessTools, filters).slice(0, limit).map(toSummary);
     const value = {
         query,
-        candidates: rank(query, tools.filter(tool => !String(tool?.name || '').startsWith('tools.')), input.filters || input).slice(0, limit).map(toSummary),
-        totalAuthorizedTools: tools.filter(tool => !String(tool?.name || '').startsWith('tools.')).length,
-        catalogVersion: version
+        candidates,
+        totalAuthorizedTools: businessTools.length,
+        catalogVersion: version,
+        ...(!candidates.length ? { searchFeedback: emptySearchFeedback(businessTools, filters) } : {})
     };
     writeSearchCache(cache, cacheKey, value, nowValue, discoveryCacheTtl(options));
     return value;

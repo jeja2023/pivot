@@ -46,6 +46,12 @@ function canonicalReference(input = {}) {
 
 function normalizeDiscoveryInput(name, input = {}) {
     if (!['tools.execute', 'tools.describe'].includes(name) || !input || typeof input !== 'object' || Array.isArray(input)) return input;
+    if (name === 'tools.describe' && Object.hasOwn(input, 'toolRefs')) {
+        const toolRefs = require('./agent-tool-descriptions').normalizeDescriptionReferences(input);
+        const normalized = { ...input, toolRefs };
+        for (const key of ['toolRef', 'toolName', 'tool_ref', 'reference', 'tool_name', 'name', 'fullName', 'releaseId', 'release_id', 'definitionDigest', 'definition_digest']) delete normalized[key];
+        return normalized;
+    }
     const reference = canonicalReference(input);
     const normalized = { ...input };
     for (const key of ['toolRef', 'tool_ref', 'reference', 'tool_name', 'name', 'fullName', 'releaseId', 'release_id', 'definitionDigest', 'definition_digest']) delete normalized[key];

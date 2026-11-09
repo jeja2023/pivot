@@ -107,6 +107,7 @@
             else if (type === 'file') { const el = document.getElementById('agent-goal-directory'); if (el) el.value = spec.directory || ''; }
             else if (type === 'database') { const el = document.getElementById('agent-goal-query'); if (el) el.value = spec.query || ''; }
             const auth = goal.authorizationSpec || {};
+            if (document.getElementById('agent-goal-kind')) document.getElementById('agent-goal-kind').value = goal.kind || 'scheduled_job';
             if (document.getElementById('agent-goal-timezone')) document.getElementById('agent-goal-timezone').value = auth.timezone || 'Asia/Shanghai';
             if (document.getElementById('agent-goal-model-router')) document.getElementById('agent-goal-model-router').value = auth.modelRouter || 'fixed';
             if (document.getElementById('agent-goal-retention-days')) document.getElementById('agent-goal-retention-days').value = auth.resultRetentionDays || 30;
@@ -140,7 +141,7 @@
         if (modal) { modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true'); }
         const editIdInput = document.getElementById('agent-goal-edit-id');
         if (editIdInput) editIdInput.value = '';
-        personalExperience.clearGoalDraft();
+        personalExperience.resetGoalModal();
         document.getElementById('agent-goal-editor')?.reset();
     }
     function renderAgentControlPlane() {
@@ -181,9 +182,6 @@
                 </div>
                 <strong class="agent-goal-empty-hero-title">还没有运行中的自动化目标</strong>
                 <p class="agent-goal-empty-desc">把定时巡检、报表汇总与数据监控交给 Agent，持续在后台稳定运行。</p>
-                <div class="agent-goal-empty-actions">
-                    <button type="button" class="btn-primary btn-sm" data-agent-goal-create>+ 新建自动化目标</button>
-                </div>
                 <div class="agent-goal-quick-templates">
                     <span class="agent-goal-quick-title">推荐场景快速创建：</span>
                     <div class="agent-goal-template-chips">

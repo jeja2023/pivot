@@ -60,4 +60,9 @@ function toolInputFeedback(error) {
     return error instanceof ToolInputValidationError ? error.details.inputValidation : null;
 }
 
-module.exports = { ToolInputValidationError, inputErrorForDecision, toolInputFeedback };
+function inputErrorForNormalization(error, tool) {
+    return ['TOOL_DISCOVERY_REFERENCE_CONFLICT', 'TOOL_DISCOVERY_DESCRIBE_BATCH_INVALID'].includes(error?.code)
+        ? new ToolInputValidationError(tool, [error.message]) : error;
+}
+
+module.exports = { ToolInputValidationError, inputErrorForDecision, inputErrorForNormalization, toolInputFeedback };

@@ -18,6 +18,7 @@ async function recordAgentToolCall(data = {}) {
         entrypoint: data.entrypoint || data.stepContext?.entrypoint || 'agent',
         purpose: 'tool_call'
     });
+    if (data.executedTool) auditContext.executedTool = data.executedTool;
     const originalStepId = String(data.stepId || id);
     if (originalStepId.length > 64) auditContext.originalStepId = redactTraceValue(originalStepId);
     if (String(data.operationKey || '').length > 255) auditContext.originalOperationKey = redactTraceValue(data.operationKey);

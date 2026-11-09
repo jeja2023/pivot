@@ -14,7 +14,52 @@
         state.capabilityQuery = String(state.capabilityQuery || '');
         state.discoveredSkills = [];
         let skillDiscoveryRequest = 0;
+        let goalModelLoadSequence = 0;
         state.channelGatewayDetails = state.channelGatewayDetails instanceof Map ? state.channelGatewayDetails : new Map();
+
+        function cancelGoalModelLoad() { goalModelLoadSequence += 1; }
+
+        async function loadGoalModels(goal = null) {
+            const select = document.getElementById('agent-goal-model');
+            if (!select) return;
+            const sequence = ++goalModelLoadSequence;
+            const userId = window.Pivot.legacy.currentUser?.id;
+            const isCurrent = () => sequence === goalModelLoadSequence && userId === window.Pivot.legacy.currentUser?.id;
+            const setMessage = message => {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = message;
+                select.replaceChildren(option);
+                select.value = '';
+                select.disabled = true;
+            };
+            setMessage('正在加载执行模型…');
+            try {
+                const loader = window.Pivot.legacy.loadSelectableModels;
+                if (typeof loader !== 'function') throw new Error('模型列表未就绪，请关闭后重试。');
+                const loaded = await loader();
+                if (!isCurrent()) return;
+                const models = (loaded.models || []).filter(model => model.type !== 'embedding' && (model.status || 'active') === 'active');
+                if (!models.length) return setMessage('暂无可用模型，请先在设置中配置模型');
+                const boundId = String(goal?.authorizationSpec?.modelId || '');
+                const preferredId = goal ? boundId : String(loaded.defaultModelId || models[0].id);
+                const available = models.some(model => String(model.id) === preferredId);
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = goal && !available ? '原目标未绑定可用模型，请重新选择' : '请选择执行模型';
+                select.replaceChildren(placeholder);
+                for (const model of models) {
+                    const option = document.createElement('option');
+                    option.value = String(model.id);
+                    option.textContent = `${model.name || model.model_name || '未命名模型'}${model.user_id ? '（个人）' : ''}`;
+                    select.appendChild(option);
+                }
+                select.value = available ? preferredId : goal ? '' : String(models[0].id);
+                select.disabled = false;
+            } catch (error) {
+                if (isCurrent()) setMessage(error.message || '模型列表加载失败，请关闭后重试');
+            }
+        }
 
         function clearGoalDraft() {
             const token = document.getElementById('agent-goal-draft-token');
@@ -31,6 +76,12 @@
         function setGoalModalMode(goal) {
             const panel = document.getElementById('agent-goal-natural-panel');
             panel?.classList.toggle('hidden', Boolean(goal));
+            clearGoalDraft();
+            loadGoalModels(goal);
+        }
+
+        function resetGoalModal() {
+            cancelGoalModelLoad();
             clearGoalDraft();
         }
 
@@ -83,16 +134,19 @@
         }
 
         function goalFormPayload() {
+            const modelSelect = document.getElementById('agent-goal-model');
+            const modelId = Number(modelSelect?.value);
+            if (modelSelect?.disabled || !Number.isSafeInteger(modelId) || modelId <= 0) throw new Error('请先选择当前账号可用的执行模型；列表不可用时请关闭后重试。');
             const triggerType = document.getElementById('agent-goal-trigger')?.value || 'timer';
             const triggerSpec = triggerType === 'timer' ? { type: 'timer', frequency: 'daily', timeOfDay: document.getElementById('agent-goal-time')?.value || '09:00' } : triggerType === 'file' ? { type: 'file', directory: document.getElementById('agent-goal-directory')?.value || '' } : triggerType === 'database' ? { type: 'database', query: document.getElementById('agent-goal-query')?.value || '' } : { type: triggerType };
-            return { title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, kind: document.getElementById('agent-goal-kind')?.value || 'scheduled_job', triggerSpec, authorizationSpec: { timezone: document.getElementById('agent-goal-timezone')?.value || 'Asia/Shanghai', modelRouter: document.getElementById('agent-goal-model-router')?.value || 'fixed', deliveryBindingIds: document.getElementById('agent-goal-delivery-channel')?.value ? [document.getElementById('agent-goal-delivery-channel').value] : [], resultRetentionDays: document.getElementById('agent-goal-retention-days')?.value || 30 } };
+            return { title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, kind: document.getElementById('agent-goal-kind')?.value || 'scheduled_job', triggerSpec, authorizationSpec: { modelId, timezone: document.getElementById('agent-goal-timezone')?.value || 'Asia/Shanghai', modelRouter: document.getElementById('agent-goal-model-router')?.value || 'fixed', deliveryBindingIds: document.getElementById('agent-goal-delivery-channel')?.value ? [document.getElementById('agent-goal-delivery-channel').value] : [], resultRetentionDays: document.getElementById('agent-goal-retention-days')?.value || 30 } };
         }
 
         async function saveGoal(event, handlers = {}) {
             event.preventDefault();
             const editId = document.getElementById('agent-goal-edit-id')?.value;
-            const { draftToken, payload } = goalPayload(editId, goalFormPayload());
             try {
+                const { draftToken, payload } = goalPayload(editId, goalFormPayload());
                 if (editId) {
                     await apiJson(`${API_BASE}/agents/goals/${encodeURIComponent(editId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     handlers.close?.(); setNotice('持续目标已修改。', 'success');
@@ -335,7 +389,7 @@
             ['agent-goal-title', 'agent-goal-goal', 'agent-goal-time', 'agent-goal-directory', 'agent-goal-query'].forEach(id => document.getElementById(id)?.addEventListener('input', event => { if (event.isTrusted) clearGoalDraft(); }));
         }
 
-        return { bindControls, capabilityKindLabel, capabilityScopeLabel, capabilityTitleLabel, clearGoalDraft, goalPayload, handleGatewayAction, loadCapabilityCatalog, previewGoal, renderCapabilityCatalog, renderGatewayDetails, saveGoal, setCapabilityCatalogModalVisibility, setGoalModalMode };
+        return { bindControls, capabilityKindLabel, capabilityScopeLabel, capabilityTitleLabel, clearGoalDraft, goalPayload, handleGatewayAction, loadCapabilityCatalog, loadGoalModels, previewGoal, renderCapabilityCatalog, renderGatewayDetails, resetGoalModal, saveGoal, setCapabilityCatalogModalVisibility, setGoalModalMode };
     }
 
     window.Pivot?.exposeModule?.('agent.personalExperience', { create });

@@ -5503,8 +5503,45 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
 
 /* 持续目标模态弹窗 */
 .agent-goal-modal-dialog {
-    width: min(600px, calc(100vw - 32px));
+    width: min(840px, calc(100vw - 36px));
     text-align: left;
+}
+
+.agent-goal-modal-dialog .agent-config-modal-head {
+    padding: 12px 20px 10px;
+}
+
+.agent-goal-modal-dialog .agent-goal-modal-form {
+    padding: 12px 20px 10px;
+    gap: 9px;
+}
+
+.agent-goal-modal-dialog .agent-goal-natural-panel {
+    padding: 8px 12px;
+    gap: 6px;
+}
+
+.agent-goal-modal-dialog .agent-goal-natural-row textarea {
+    min-height: 42px;
+    height: 42px;
+    padding: 6px 10px;
+}
+
+.agent-goal-modal-dialog textarea.agent-goal-input {
+    min-height: 56px;
+    height: 56px;
+    padding: 6px 10px;
+    resize: vertical;
+}
+
+.agent-goal-modal-dialog .agent-goal-trigger-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.agent-goal-modal-dialog .agent-task-editor-footer {
+    padding: 10px 20px 12px;
 }
 
 .agent-goal-hint {

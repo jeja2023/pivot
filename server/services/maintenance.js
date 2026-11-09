@@ -25,13 +25,16 @@ const agentResidencyStore = createAgentResidencyStore();
 
 const maintenanceState = {
     startedAt: null,
-    retentionDays: null,
+    retentionDays: getAuditLogRetentionDays(),
     auditCleanup: {
         lastRunAt: null,
         lastSuccessAt: null,
         lastError: '',
         lastChanges: 0,
-        totalChanges: 0
+        totalChanges: 0,
+        retentionDays: getAuditLogRetentionDays(),
+        paused: readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED'),
+        lastSkippedAt: null
     },
     apiCallLogCleanup: {
         lastRunAt: null,
@@ -86,8 +89,13 @@ const maintenanceState = {
     }
 };
 
+function normalizeAuditLogRetentionDays(value, fallback = 365) {
+    const raw = String(value ?? '').trim();
+    return parsePositiveInt(/^\d+$/.test(raw) ? raw : '', fallback, 36500);
+}
+
 function getAuditLogRetentionDays() {
-    return parsePositiveInt(process.env.AUDIT_LOG_RETENTION_DAYS || '180', 180);
+    return normalizeAuditLogRetentionDays(process.env.AUDIT_LOG_RETENTION_DAYS);
 }
 
 function getApiCallLogRetentionDays() {
@@ -241,7 +249,18 @@ async function analyzeOneTable(table, remainingBudgetMs = ANALYZE_TIMEOUT_MS) {
 }
 
 async function cleanupOldLogs(days = getAuditLogRetentionDays()) {
+    days = normalizeAuditLogRetentionDays(days, getAuditLogRetentionDays());
     maintenanceState.auditCleanup.lastRunAt = getBeijingTimestamp();
+    maintenanceState.retentionDays = days;
+    maintenanceState.auditCleanup.retentionDays = days;
+    maintenanceState.auditCleanup.lastChanges = 0;
+    maintenanceState.auditCleanup.paused = readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED');
+    // 保全开关放在删除入口，手动调用和启动清理同样不能绕过调查保护。
+    if (maintenanceState.auditCleanup.paused) {
+        maintenanceState.auditCleanup.lastSkippedAt = maintenanceState.auditCleanup.lastRunAt;
+        logger.info('审计日志正在保全，已暂停到期清理');
+        return 0;
+    }
     try {
         const res = await execute("DELETE FROM audit_logs WHERE timestamp < (now() AT TIME ZONE 'Asia/Shanghai' - (? || ' days')::interval)", [String(days)]);
         const changes = Number(res || 0);
@@ -528,6 +547,10 @@ async function backupDatabase(options = {}) {
 function getMaintenanceStatus() {
     return {
         ...maintenanceState,
+        auditCleanup: {
+            ...maintenanceState.auditCleanup,
+            paused: readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED')
+        },
         running: Boolean(maintenanceState.startedAt)
     };
 }
@@ -575,6 +598,8 @@ function startMaintenanceTasks() {
     const backupDir = getBackupDir();
     maintenanceState.startedAt = getBeijingTimestamp();
     maintenanceState.retentionDays = retentionDays;
+    maintenanceState.auditCleanup.retentionDays = retentionDays;
+    maintenanceState.auditCleanup.paused = readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED');
     maintenanceState.apiCallLogCleanup.retentionDays = apiCallLogRetentionDays;
     maintenanceState.storageGc.retentionDays = storageGcRetentionDays;
     maintenanceState.backup.retentionDays = backupRetentionDays;

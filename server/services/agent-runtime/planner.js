@@ -180,7 +180,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             content: renderPromptSections(sections)
         },
         ...(contextConfig?.taskWorkingState && typeof contextConfig.taskWorkingState === 'object'
-            ? [{ role: 'system', content: buildWorkingStatePrompt(contextConfig.taskWorkingState) }]
+            ? [{ role: 'system', content: buildWorkingStatePrompt(contextConfig.taskWorkingState, { coveredGoal: goal }) }]
             : []),
         ...chatHistoryMessages(contextConfig),
         ...longTermMemoryContextMessages(contextConfig),

@@ -19,6 +19,17 @@ test('类型化配置注册表同步环境模板和说明文档', () => {
     assert.match(fs.readFileSync(path.join(root, 'docs', 'configuration-registry.md'), 'utf8'), /PG_ANALYZE_TOTAL_TIMEOUT_MS/);
 });
 
+test('审计保全开关缺省允许常规清理，配置异常时暂停删除', () => {
+    assert.equal(readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED', {}), false);
+    for (const value of ['true', '1', 'on', 'yes', 'flase', 'invalid']) {
+        assert.equal(readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED', { AUDIT_LOG_CLEANUP_PAUSED: value }), true);
+    }
+    for (const value of ['false', '0', 'off', 'no', '']) {
+        assert.equal(readTypedEnv('AUDIT_LOG_CLEANUP_PAUSED', { AUDIT_LOG_CLEANUP_PAUSED: value }), false);
+    }
+    assert.equal(readTypedEnv('PIVOT_DECISION_ALLOW_GLOBAL_TRAINING', { PIVOT_DECISION_ALLOW_GLOBAL_TRAINING: 'invalid' }), false);
+});
+
 test('跨租户训练默认必须同时具备命令行意图与数据治理批准', () => {
     assert.equal(readTypedEnv('PIVOT_DECISION_ALLOW_GLOBAL_TRAINING', {}), false);
     assert.equal(readTypedEnv('PIVOT_DECISION_ALLOW_GLOBAL_TRAINING', { PIVOT_DECISION_ALLOW_GLOBAL_TRAINING: 'true' }), true);

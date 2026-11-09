@@ -88,7 +88,10 @@ async function executeReadOnlyDiscoveredBatch(user, calls, context = {}, deps = 
         count: results.length,
         ...(results.some(output => output?.isError) ? { partial: true } : {}),
         ...(knowledgeEvidence ? { knowledgeEvidence } : {}),
-        results: results.map((output, index) => ({ toolName: descriptions[index].name, output }))
+        results: results.map((output, index) => ({ toolName: descriptions[index].name, output,
+            executedTool: require('./agent-learning-tool-evidence').executedToolEvidence({ name: descriptions[index].name,
+                idempotent: descriptions[index].idempotent, side_effect: descriptions[index].sideEffect,
+                capabilities: descriptions[index].capabilities, risk_level: descriptions[index].riskLevel }, output) }))
     };
 }
 
@@ -108,14 +111,14 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
             name: 'tools.search',
             title: '搜索可用工具',
             cacheable: true,
-            description: '在当前用户已授权的工具目录中按任务、能力和风险搜索少量候选工具；返回摘要和当前版本的 toolRef，不加载全部完整 Schema。',
+            description: '在当前用户已授权的工具目录中搜索少量候选工具；返回摘要和当前版本的 toolRef。首次通常只填 query 和 limit，不猜测来源、风险或能力筛选。空结果时按 searchFeedback 修正检索；有授权工具不等于关键词或筛选条件正确，不要直接要求用户重新授权。',
             input_schema: asJsonSchema({
                 query: { type: 'string', minLength: 2, maxLength: 1000 },
                 limit: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
-                capability: { type: 'string', maxLength: 160 },
-                riskLevel: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
-                source: { type: 'string', enum: ['builtin', 'mcp', 'api_operation'] },
-                requireApproval: { type: 'boolean' }
+                capability: { type: 'string', maxLength: 160, description: '可选，精确匹配已从候选或 searchFeedback 取得的能力标识，如 network.request；不是任务描述。不确定时省略，把自然语言需求写入 query。' },
+                riskLevel: { type: 'string', enum: require('./tool-discovery-filters').DISCOVERY_RISK_LEVELS, description: '可选，精确风险等级，low=1、medium=3、high=4、critical=5，并非风险上限；不确定时省略。' },
+                source: { type: 'string', enum: ['builtin', 'mcp', 'api_operation'], description: '可选，精确工具来源。不知道当前工具来源时省略，不默认限定为 builtin。' },
+                requireApproval: { type: 'boolean', description: '可选，true 仅查找需审批工具；省略或 false 不限定审批属性，实际执行仍严格审批。' }
             }, ['query']),
             output_schema: {
                 type: 'object', required: ['query', 'candidates', 'totalAuthorizedTools'],
@@ -123,7 +126,8 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
                     query: { type: 'string' },
                     candidates: { type: 'array', items: { type: 'object' } },
                     totalAuthorizedTools: { type: 'integer' },
-                    catalogVersion: { type: 'string', pattern: '^[a-f0-9]{64}$', description: '当前授权目录、发布版本和工具契约的不可逆摘要；变化时旧发现状态失效。' }
+                    catalogVersion: { type: 'string', pattern: '^[a-f0-9]{64}$', description: '当前授权目录、发布版本和工具契约的不可逆摘要；变化时旧发现状态失效。' },
+                    searchFeedback: { type: 'object', description: '空结果原因和当前授权范围内的可用筛选值；仅供修正检索，不会放宽权限或执行工具。' }
                 }
             }
         },
@@ -131,12 +135,15 @@ function getToolDiscoveryDefinitions(asJsonSchema) {
             name: 'tools.describe',
             title: '读取工具契约',
             cacheable: true,
-            description: '根据 toolRef 读取一个已授权工具的完整输入输出契约、风险、权限和执行要求。旧引用或发现状态过期时会刷新并返回最新契约，随后执行必须使用本次返回的 toolRef，不要猜测 releaseId 或 definitionDigest。',
+            description: '读取已授权工具的完整输入输出契约、风险、权限和执行要求。需要多个工具时优先用 toolRefs 一次读取至多8个契约，避免逐个往返；单个引用仍可用 toolRef。旧引用会刷新，随后执行必须使用本次返回的 toolRef，不要猜测版本或摘要。本工具只读契约，不执行业务。',
             input_schema: asJsonSchema({
                 toolRef: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: ['integer', 'null'] }, definitionDigest: { type: 'string' } }, required: ['toolName'] },
-                toolName: { type: 'string' }
+                toolName: { type: 'string' },
+                toolRefs: { type: 'array', minItems: 1, maxItems: require('./agent-tool-descriptions').MAX_DESCRIBE_TOOLS,
+                    description: '批量读取时只需本字段；使用 search 返回的引用，按输入顺序返回契约，每项仍计入工具预算。同名单个引用会去重，版本或摘要冲突则拒绝。',
+                    items: { type: 'object', properties: { toolName: { type: 'string' }, releaseId: { type: ['integer', 'null'] }, definitionDigest: { type: 'string' } }, required: ['toolName'] } }
             }, []),
-            output_schema: { type: 'object', anyOf: [{ required: ['toolRef', 'name', 'inputSchema'] }, { required: ['type', 'executed', 'reason', 'message'] }], properties: { toolRef: { type: 'object' }, name: { type: 'string' }, inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, referenceRefresh: { type: 'object' }, type: { type: 'string' }, executed: { type: 'boolean' }, reason: { type: 'string' }, message: { type: 'string' }, candidates: { type: 'array' } } }
+            output_schema: { type: 'object', anyOf: [{ required: ['toolRef', 'name', 'inputSchema'] }, { required: ['type', 'count', 'descriptions'] }, { required: ['type', 'executed', 'reason', 'message'] }], properties: { toolRef: { type: 'object' }, name: { type: 'string' }, inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, referenceRefresh: { type: 'object' }, type: { type: 'string' }, count: { type: 'integer', minimum: 1, maximum: 8 }, descriptions: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object' } }, executed: { type: 'boolean' }, reason: { type: 'string' }, message: { type: 'string' }, candidates: { type: 'array' } } }
         },
         {
             name: 'tools.execute',
@@ -176,7 +183,7 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
     }
     const state = context?.toolDiscoveryState;
     const {
-        assertDescribed, assertSearched, isDiscoveryRecoveryError, rememberDescription, rememberSearch
+        assertDescribed, isDiscoveryRecoveryError, rememberSearch
     } = require('./agent-tool-progressive-discovery');
     if (name === 'tools.search') {
         const { searchToolsForUser } = require('./tool-discovery');
@@ -198,47 +205,17 @@ async function executeToolDiscoveryMeta(name, input, user, context = {}, deps = 
         return { handled: true, value };
     }
     if (name === 'tools.describe') {
-        const { catalogVersion, describeToolForUser } = require('./tool-discovery');
+        const { describeAuthorizedTools, normalizeDescriptionReferences } = require('./agent-tool-descriptions');
+        if (Object.hasOwn(input, 'toolRefs')) {
+            const references = normalizeDescriptionReferences(input);
+            // 外层已为本次元工具记一次；批量的其余契约仍逐项消耗相同预算。
+            for (let index = 1; index < references.length; index++) context.budget?.consumeTool?.({ name, risk_level: 1 });
+            const descriptions = await describeAuthorizedTools(references, user, context, deps);
+            return { handled: true, value: { type: 'tools_descriptions', executed: false, count: descriptions.length, descriptions } };
+        }
         const reference = normalizeToolReference(input);
         if (!reference.toolName) return { handled: true, value: require('./tool-reference-input').missingReferenceResult(state) };
-        let refreshReason = '';
-        try {
-            assertSearched(state, reference);
-        } catch (searchErr) {
-            if (!['TOOL_DISCOVERY_SEARCH_REQUIRED', 'TOOL_DISCOVERY_SEARCH_EXPIRED'].includes(searchErr?.code)) throw searchErr;
-            if (searchErr.code === 'TOOL_DISCOVERY_SEARCH_EXPIRED') refreshReason = searchErr.code;
-        }
-        const options = {
-            toolPolicy: context.run?.tool_policy || context.run?.toolPolicy || 'all',
-            toolAllowlist: context.run?.tool_allowlist || context.run?.toolAllowlist || null
-        };
-        // 读取契约允许恢复旧引用，但必须先重建当前授权目录。固定这一次快照，
-        // 避免刷新过程中发布切换造成无限重试；execute 仍严格验证模型确认的引用。
-        const listTools = deps.toolDiscovery?.formatToolList || require('./agent-tool-catalog').formatToolList;
-        const tools = require('./agent-tool-discovery-scope').filterRunToolCatalog(await listTools(user, options), context.run || {}, user)
-            .filter(tool => !String(tool.name || '').startsWith('tools.'));
-        rememberSearch(state, { catalogVersion: catalogVersion(user, tools, {}, options) });
-        const describe = deps.toolDiscovery?.describeToolForUser || describeToolForUser;
-        const snapshot = { formatToolList: async () => tools };
-        let value;
-        try {
-            value = await describe(user, reference, snapshot, options);
-        } catch (error) {
-            if (error.code !== 'TOOL_REFERENCE_STALE') throw error;
-            refreshReason = error.code;
-            value = await describe(user, { toolName: reference.toolName }, snapshot, options);
-        }
-        if (refreshReason) {
-            value = {
-                ...value,
-                referenceRefresh: {
-                    reason: refreshReason, previousToolRef: { ...reference },
-                    message: '已读取当前授权工具的最新契约。请核对输入、风险和审批要求，并使用本次返回的 toolRef 执行。'
-                }
-            };
-        }
-        rememberSearch(state, { candidates: [{ toolRef: value.toolRef }] });
-        rememberDescription(state, value.toolRef, value);
+        const [value] = await describeAuthorizedTools([reference], user, context, deps);
         return { handled: true, value };
     }
     if (name === 'tools.execute') {

@@ -12,7 +12,7 @@
  */
 
 const { estimateMessagesTokens } = require('./context-budget');
-const { normalizeTaskWorkingState } = require('./agent-working-state');
+const { normalizeTaskWorkingState, workingEvidenceText } = require('./agent-working-state');
 
 const TOOL_BEGIN = 'PIVOT_MCP_TOOL_RESULT_BEGIN';
 const TOOL_END = 'PIVOT_MCP_TOOL_RESULT_END';
@@ -141,7 +141,7 @@ function workingMemoryPacket(state = {}) {
     const constraints = safe.constraints.map(item => itemLine(item, 'constraint', 360, true));
     const pending = safe.pendingWork.filter(item => item.status !== 'completed').map(item => itemLine(item, 'pending', 300, true));
     const decisions = safe.decisions.slice(-10).map(item => itemLine(item, 'decision', 260));
-    const evidence = safe.evidence.slice(-10).map(item => itemLine(item, 'evidence', 260));
+    const evidence = safe.evidence.map(item => itemLine({ ...item, text: workingEvidenceText(item) }, 'evidence', 260));
     return [
         WORKING_BEGIN,
         `目标：${compactText(safe.goal || '未提供', 1200)}`,

@@ -50,6 +50,7 @@ async function resolveRunLongTermMemory({
             await setRunMetadata(runId, {
                 memoryUsage: {
                     memoryIds: message.metadata?.memoryIds || [],
+                    references: require('../agent-memory-evidence').captureMemoryReferences(injectedMemoryMatches),
                     reasons: message.metadata?.usageReasons || [],
                     capturedAt: getBeijingTimestamp()
                 }

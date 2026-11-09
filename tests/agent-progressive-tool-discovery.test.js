@@ -32,6 +32,16 @@ test('progressive planner publishes only discovery meta tools', () => {
     assert.match(list[0].description, /search → describe → execute/);
 });
 
+test('规划器搜索只暴露关键词与数量，高级目录筛选API仍保留', () => {
+    const definitions = require('../server/services/agent-tools').getBuiltInToolDefinitions({ id: 1 });
+    const search = definitions.find(tool => tool.name === 'tools.search');
+    const [planner] = buildProgressivePlannerToolList([search]);
+    assert.deepEqual(Object.keys(planner.input_schema.properties), ['query', 'limit']);
+    assert.ok(search.input_schema.properties.capability);
+    assert.ok(search.input_schema.properties.riskLevel);
+    assert.ok(search.input_schema.properties.source);
+});
+
 test('discovered batch read runs only described idempotent reads and preserves result order', async () => {
     const state = createToolDiscoveryState();
     const first = { toolName: 'orders.search', releaseId: 1, definitionDigest: 'first' };

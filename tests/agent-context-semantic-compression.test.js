@@ -30,6 +30,22 @@ function toolObservation(step, size = 9000) {
     };
 }
 
+test('超过八条来源时仍保留早期事实和每个原文引用，压缩不能只剩最后几条', () => {
+    const { buildWorkingStatePrompt } = require('../server/services/agent-working-state');
+    const evidence = Array.from({ length: 16 }, (_, index) => ({ id: `part-${index}`, source: 'read',
+        text: index === 0 ? '首段关键标记：松鹤合规紫檀；数值9。' : `分段${index}数值${index * 7}。`,
+        rawOutputRef: 'artifact-cas://' + String(index + 1).padStart(64, '0'), status: 'observed' }));
+    const state = { goal: '沿链读取并保留第一段标记', evidence };
+    const prompt = buildWorkingStatePrompt(state);
+    assert.match(prompt, /松鹤合规紫檀/);
+    for (const item of evidence) assert(prompt.includes(item.rawOutputRef));
+    const result = compactAgentContextMessages([{ role: 'system', content: '固定规则' },
+        { role: 'user', content: prompt }, ...Array.from({ length: 8 }, (_, index) => toolObservation(index + 1)), { role: 'user', content: '给出总数与首段标记' }], { inputBudget: 6000, taskWorkingState: state });
+    const text = JSON.stringify(result.messages);
+    assert.match(text, /松鹤合规紫檀/);
+    for (const item of evidence) assert(text.includes(item.rawOutputRef));
+});
+
 test('semantic context compaction follows retrievable evidence, working memory, and history layers', () => {
     const state = {
         goal: '完成受控发布',

@@ -18,6 +18,11 @@ function buildProgressivePlannerToolList(toolList = []) {
         .filter(tool => META_TOOL_NAMES.has(String(tool?.name || '')))
         .map(tool => ({
             ...tool,
+            ...(tool.name === 'tools.search' ? { input_schema: {
+                ...tool.input_schema,
+                // 执行模型先按自然语言找候选；高级精确筛选仍留给目录API，避免模型猜错标识造成空检索。
+                properties: Object.fromEntries(Object.entries(tool.input_schema?.properties || {}).filter(([key]) => ['query', 'limit'].includes(key)))
+            } } : {}),
             description: `${String(tool.description || '').trim()} 必须遵循 search → describe → execute 顺序。`
         }));
 }

@@ -235,7 +235,12 @@ const loadMonitorSummary = async function(options = {}) {
                 return { label, title };
             };
 
-            const mAudit = formatMaintenanceItem(maintenance.auditCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.auditCleanup?.lastChanges || 0)} 条`);
+            const auditRetentionDays = maintenance.auditCleanup?.retentionDays ?? maintenance.retentionDays;
+            const auditRetentionText = auditRetentionDays ? `保留 ${formatMetricNumber(auditRetentionDays)} 天` : '保留期暂不可用';
+            const mAudit = maintenance.auditCleanup?.paused
+                ? { label: '保全中 · 暂停清理', title: `${auditRetentionText}；调查保全期间暂停自动删除，日志继续写入` }
+                : formatMaintenanceItem(maintenance.auditCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.auditCleanup?.lastChanges || 0)} 条`);
+            if (!maintenance.auditCleanup?.paused) mAudit.title += `；${auditRetentionText}`;
             const mApiLog = formatMaintenanceItem(maintenance.apiCallLogCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.apiCallLogCleanup?.lastChanges || 0)} 条`);
             const mToken = formatMaintenanceItem(maintenance.refreshTokenCleanup?.lastSuccessAt, `${formatMetricNumber(maintenance.refreshTokenCleanup?.lastChanges || 0)} 条`);
             const mBackup = formatMaintenanceItem(maintenance.backup?.lastSuccessAt, formatBytes(maintenance.backup?.lastSizeBytes || 0));

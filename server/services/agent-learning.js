@@ -108,7 +108,7 @@ async function enqueueAgentLearningJob(user, sourceRunId, triggerType = 'success
     if (metadata.evaluation || metadata.evaluationRunId) return { scheduled: false, reason: 'evaluation_run' };
     const settings = await getAgentLearningSettings(userId);
     if (trigger !== 'explicit' && !settings.autoLearning) return { scheduled: false, reason: 'disabled' };
-    if (['success', 'recovery'].includes(trigger) && (await listAgentToolCalls(runId, { limit: 500 })).filter(isSafeLearningCall).length < 2) return { scheduled: false, reason: 'insufficient_safe_steps' };
+    if (['success', 'recovery'].includes(trigger) && require('./agent-learning-tool-evidence').resolveLearningToolCalls(await listAgentToolCalls(runId, { limit: 500 })).filter(isSafeLearningCall).length < 2) return { scheduled: false, reason: 'insufficient_safe_steps' };
     const today = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const count = await queryOne("SELECT COUNT(*) AS count FROM agent_learning_jobs WHERE user_id = ? AND created_at >= ? AND status NOT IN ('failed', 'validation_failed')", [userId, today]);
     if (trigger !== 'explicit' && Number(count?.count || 0) >= settings.dailyLimit) return { scheduled: false, reason: 'daily_limit' };
@@ -293,7 +293,7 @@ async function processAgentLearningJob(row, options = {}) {
     if (run.session_id && !(await queryOne('SELECT id FROM sessions WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [run.session_id, row.user_id]))) {
         return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'source_session_deleted' } });
     }
-    const calls = await listAgentToolCalls(run.id, { limit: 500 });
+    const calls = require('./agent-learning-tool-evidence').resolveLearningToolCalls(await listAgentToolCalls(run.id, { limit: 500 }));
     if (calls.some(call => hasSensitiveContent(JSON.stringify({ input: call.input_payload || {}, error: call.error_message || '' })))) {
         return setJobResult(row.id, { status: 'completed', resultSummary: { skipped: true, reason: 'sensitive_trace' } });
     }

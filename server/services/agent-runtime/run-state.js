@@ -232,7 +232,10 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}, options =
         AND COALESCE(metadata->'pendingApproval'->>'requestedAt', '') = ?` : '';
     const parameters = [...entries.map(([, value]) => value), runId, ...allowedStatuses];
     if (binding) parameters.push(binding.tool || '', binding.inputHash || '', binding.key || '', binding.requestedAt || '');
-    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})${approvalWhere}`, parameters);
+    const lease = options.leaseBinding;
+    const leaseWhere = lease ? ' AND locked_by = ? AND realtime_lease_epoch = ?' : '';
+    if (lease) parameters.push(String(lease.owner || ''), String(lease.epoch || '0'));
+    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})${approvalWhere}${leaseWhere}`, parameters);
     if (changes) {
         await publishAgentRunEvent(runId, 'updated');
         if (fields.status) {

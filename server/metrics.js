@@ -418,6 +418,14 @@ async function renderPrometheusMetrics() {
             return { auditCleanup: {}, apiCallLogCleanup: {}, refreshTokenCleanup: {}, backup: { error: error.message }, optimize: {} };
         }
     })();
+    lines.push('# HELP pivot_audit_log_cleanup_paused 审计日志是否正在保全并暂停自动删除。');
+    lines.push('# TYPE pivot_audit_log_cleanup_paused gauge');
+    lines.push(line('pivot_audit_log_cleanup_paused', {}, maintenance.auditCleanup?.paused ? 1 : 0));
+    if (maintenance.auditCleanup?.retentionDays) {
+        lines.push('# HELP pivot_audit_log_retention_days 审计日志保留天数。');
+        lines.push('# TYPE pivot_audit_log_retention_days gauge');
+        lines.push(line('pivot_audit_log_retention_days', {}, maintenance.auditCleanup.retentionDays));
+    }
     lines.push('# HELP pivot_maintenance_last_success_timestamp_seconds Last successful maintenance task timestamp.');
     lines.push('# TYPE pivot_maintenance_last_success_timestamp_seconds gauge');
     [

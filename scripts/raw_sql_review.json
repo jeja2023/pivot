@@ -6,6 +6,12 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/agent-memory-evidence.js",
+      "count": 2,
+      "rationale": "独立核验只按参数化run_id及user_id读取本人任务的记忆摘要，并与memory_usage_events中同任务同用户的真实injected事件求交集，最多20项。调用方自报metadata或candidate事件不能形成依据；正文由现有记忆检索入口重新执行开关、作用域、状态、有效期和治理检查，并与注入时摘要比较。没有请求SQL拼接或跨用户读取。",
+      "verification": "agent-memory-evidence-postgres真实PostgreSQL回归通过：自报metadata、candidate和其他用户均无注入凭据；内容更正、停用和遗忘后旧快照均失效。agent-memory-evidence回归覆盖核验期间撤销及记忆不代替业务执行证据。"
+    },
+    {
       "file": "server/repositories/presentation-master-settings.js",
       "count": 2,
       "rationale": "PPT全站服务配置仅由系统admin路由写入，完整配置先按独立用途加密。仓储只接收固定设置键、预期旧密文、新密文及鉴权操作者；在与PPT任务接纳相同的事务锁下读取并比较旧值、核对活动任务，再参数化登记新值和审计操作者，避免多实例覆盖或中途切断任务。",

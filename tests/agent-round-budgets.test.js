@@ -61,6 +61,29 @@ test('发现和重复结果不当作新进展，时间戳变化与重排对象�
     await assert.rejects(budget.beginPlanningRound(), error => error.code === 'AGENT_NO_PROGRESS');
 });
 
+test('首次读取不同工具契约是有界准备，重复或恢复后读取不能伪造业务进展', async () => {
+    const policy = { ...profileRoundPolicy('standard', 10000), noProgressRounds: 3 };
+    const budget = new TaskBudget({ max_steps: 8 }, { policy });
+    const contract = name => ({ name, toolRef: { toolName: name, definitionDigest: 'current' }, inputSchema: { type: 'object' } });
+    for (let index = 0; index < 4; index++) {
+        await budget.beginPlanningRound();
+        assert.equal(budget.recordProgress('tools.describe', {}, contract(`business.read${index}`)), false);
+    }
+    assert.equal(budget.progress.count, 0);
+    assert.equal(budget.progress.lastProgressRound, 4);
+    assert.equal(budget.progress.count <= budget.segmentStartProgress, true, '准备不能授权自动续跑');
+    const resumed = new TaskBudget(budget.limits, { policy, counts: budget.counts, progress: budget.snapshot().progress });
+    for (let index = 0; index < 3; index++) {
+        await resumed.beginPlanningRound();
+        resumed.recordProgress('tools.describe', {}, { ...contract('business.read0'), toolRef: { toolName: 'business.read0', definitionDigest: `changed-${index}` } });
+    }
+    await assert.rejects(resumed.beginPlanningRound(), error => error.code === 'AGENT_NO_PROGRESS');
+    const capped = new TaskBudget({ max_steps: 1 }, { policy });
+    await capped.beginPlanningRound();
+    capped.recordProgress('tools.describe', {}, contract('business.read'));
+    await assert.rejects(capped.beginPlanningRound(), error => error.code === 'AGENT_BUDGET_EXCEEDED');
+});
+
 test('预算写入失败时在模型或外部工具执行前停止', async () => {
     const budget = new TaskBudget({ max_steps: 60 }, { persist: async () => { throw new Error('数据库不可用'); } });
     await assert.rejects(budget.beginPlanningRound(), error => error.code === 'AGENT_BUDGET_PERSIST_FAILED');

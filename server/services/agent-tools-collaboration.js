@@ -2,7 +2,6 @@
 
 const { query, queryOne } = require('../db/client');
 const { sendAgentControlMessage } = require('./agent-control');
-const { resolveChildDelegationConstraints } = require('./agent-collaboration');
 const { getDelegationRolePolicySnapshot } = require('./agent-delegation-role-policies');
 
 const MAX_CHILDREN_PER_SPAWN = 8;
@@ -13,7 +12,7 @@ function getAgentCollaborationToolDefinitions(asJsonSchema) {
     return [
         {
             name: 'agent.spawn', title: '创建自主子任务',
-            description: '创建继承父任务预算和权限边界的自主子任务。子任务可独立使用获授权工具并通过结构化结果回报。',
+            description: '创建继承父任务预算和权限边界的自主子任务。tasks 可一次创建多个独立子任务；顶层资源与工具参数作为共同默认，各子项可收紧。未指定子额度时会分配父任务余额并保留收尾空间。若返回 partial，必须保留已创建ID，不能重建这些任务。',
             input_schema: asJsonSchema({
                 goal: { type: 'string', maxLength: 12000 }, title: { type: 'string', maxLength: 160 }, agentName: { type: 'string', maxLength: 80 },
                 role: { type: 'string', maxLength: 30 }, instructions: { type: 'string', maxLength: 6000 }, modelId: { type: 'string' },
@@ -135,12 +134,13 @@ async function executeAgentSpawn(input = {}, user, context = {}) {
     const runtime = runtimeFor(context);
     if (typeof runtime.createAgentRun !== 'function') throw collaborationError('当前执行面未配置子任务运行时。', 'AGENT_CHILD_RUNTIME_UNAVAILABLE', 503);
     const children = [];
-    for (let index = 0; index < tasks.length; index += 1) {
-        const task = tasks[index] && typeof tasks[index] === 'object' ? tasks[index] : {};
-        const goal = String(task.goal || task.task || '').trim().slice(0, 12000);
-        if (!goal) throw collaborationError(`第 ${index + 1} 个子任务缺少目标。`, 'AGENT_CHILD_GOAL_REQUIRED');
-        const constraints = resolveChildDelegationConstraints({ ...run, rolePolicies: rolePolicySnapshot.policies }, task);
-        const child = await runtime.createAgentRun({
+    const ledger = tasks.length > 1 ? await require('./agent-run-resources').getAgentRunResources(run.id, user.id) : null;
+    const plan = require('./agent-spawn-planning').planSpawnTasks(input, run, rolePolicySnapshot.policies, ledger);
+    for (let index = 0; index < plan.length; index += 1) {
+        const { task, goal, constraints } = plan[index];
+        let child;
+        try {
+        child = await runtime.createAgentRun({
             user,
             parentRunId: run.id,
             goal,
@@ -172,6 +172,12 @@ async function executeAgentSpawn(input = {}, user, context = {}) {
                 }
             }
         });
+        } catch (error) {
+            if (!children.length) throw error;
+            return { type: 'agent_spawn', parentRunId: run.id, children, partial: true, complete: false,
+                failedTaskIndex: index + 1, code: error.code || 'AGENT_CHILD_CREATE_FAILED',
+                text: '本批仅部分子任务已创建，已返回真实ID。不要重复创建这些任务；核对剩余额度或失败原因后只处理未创建项。' };
+        }
         children.push({ id: child.id, title: child.title, status: child.status });
     }
     return { type: 'agent_spawn', parentRunId: run.id, children, text: `已创建 ${children.length} 个子任务。` };

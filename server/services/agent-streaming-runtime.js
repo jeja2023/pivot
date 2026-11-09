@@ -147,11 +147,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             ? `${systemPrompt}\n\n当前会话系统提示词：${String(chatAgent.systemPrompt).slice(0, 12000)}`
             : systemPrompt;
         const contextMessages = [
-            chatContext?.taskWorkingState ? { role: 'user', content: require('./agent-working-state').buildWorkingStatePrompt(chatContext.taskWorkingState) } : null,
+            chatContext?.taskWorkingState ? { role: 'user', content: require('./agent-working-state').buildWorkingStatePrompt(chatContext.taskWorkingState, { coveredGoal: run.goal }) } : null,
             chatContext?.longTermMemoryContext ? { role: 'user', content: typeof chatContext.longTermMemoryContext === 'object' ? String(chatContext.longTermMemoryContext.content || '') : String(chatContext.longTermMemoryContext) } : null,
             !chatContext?.longTermMemoryContext && chatAgent?.memoryContext ? { role: 'user', content: typeof chatAgent.memoryContext === 'object' ? String(chatAgent.memoryContext.content || '') : String(chatAgent.memoryContext) } : null,
             chatAgent?.ragContext ? { role: 'user', content: typeof chatAgent.ragContext === 'object' ? String(chatAgent.ragContext.content || '') : String(chatAgent.ragContext) } : null
         ].filter(Boolean);
+        const workingStateMessage = chatContext?.taskWorkingState ? contextMessages[0] : null;
         const resumeContext = deps.getRunMetadata?.(run)?.resumeContext;
         if (resumeContext?.previousError || resumeContext?.previousAnswer) {
             contextMessages.push({ role: 'user', content: `PIVOT_PREVIOUS_RESULT_BEGIN\n以下为上次执行结果和验收反馈，仅作续跑参考。结合本轮新指令修复缺口，不要重复已经完成的工作。\n${JSON.stringify({ answer: resumeContext.previousAnswer || '', error: resumeContext.previousError || '' })}\nPIVOT_PREVIOUS_RESULT_END` });
@@ -195,6 +196,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 else { budgetHint = { role: 'system', content: taskBudget.planningHint() }; conversation.push(budgetHint); }
             }
             if (Array.isArray(controlMessages)) {
+                const observedIds = new Set(observations.filter(item => item.type === 'agent_control').map(item => item.messageId));
+                observations.push(...controlMessages.filter(message => !observedIds.has(message.message_id)).map(message => ({
+                    type: 'agent_control', messageId: message.message_id, messageType: message.message_type,
+                    fromRunId: message.from_run_id || '', payload: message.payload
+                })));
                 controlMessages.forEach(message => conversation.push({
                     role: 'user',
                     content: `PIVOT_AGENT_CONTROL_BEGIN\n${JSON.stringify({
@@ -590,13 +596,12 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     preparedCalls.push({ call, tool: null, input: call.arguments || {}, unavailable: message });
                     continue;
                 }
-                const args = normalizeToolInput(call.name, call.arguments || {}, {
-                    ...run,
-                    model_id: run.model_id ?? modelCfg?.id,
-                    chosen_model_id: run.chosen_model_id ?? modelCfg?.id
-                });
+                let args = call.arguments || {};
                 let progressive;
                 try {
+                    args = normalizeToolInput(call.name, args, {
+                        ...run, model_id: run.model_id ?? modelCfg?.id, chosen_model_id: run.chosen_model_id ?? modelCfg?.id
+                    });
                     const { resolveProgressiveExecution } = require('./agent-progressive-execution');
                     progressive = await resolveProgressiveExecution({
                         toolName: call.name, input: args, user, toolList,
@@ -604,6 +609,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     });
                 } catch (error) {
                     if (require('./agent-execution-control').isExecutionControlError(error)) throw error;
+                    error = require('./tool-input-validation').inputErrorForNormalization(error, selectedTool);
                     preparedCalls.push({ call, tool: selectedTool, input: args, unavailable: error.message, error });
                     continue;
                 }
@@ -719,7 +725,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     continue;
                 }
                 if (executed.status === 'success') {
-                    const compactOutput = compactToolOutput(executed.output, modelCfg);
+                    const compactOutput = await require('./agent-tool-observation').prepareToolObservation({ run, user,
+                        tool: executed.approvalToolName || call.name, output: executed.output, modelCfg, compact: compactToolOutput });
+                    if (workingStateMessage && run.metadata?.workingState) workingStateMessage.content = require('./agent-working-state').buildWorkingStatePrompt(run.metadata.workingState, { coveredGoal: run.goal });
                     const knowledgeEvidence = require('./knowledge-tool-results').knowledgeEvidenceManifest(executed.output);
                     observations.push({ step, tool: call.name, input: args, output: compactOutput, ...(knowledgeEvidence ? { knowledgeEvidence } : {}) });
                     await deps.insertStep(runId, step, {
@@ -731,6 +739,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         runId, stepId: agentToolStepId(runId, step, call.id || call.name),
                         operationKey: `${runId}:${step}:${call.id || call.name}`, toolName: call.name,
                         input: args, output: compactOutput, policyDecision: 'allow', status: 'success',
+                        executedTool: require('./agent-learning-tool-evidence').executedToolEvidence(executed.approvalTool, executed.output),
                         durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                         ,stepContext, entrypoint: 'agent'
                     });
@@ -770,6 +779,13 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 if (toolErr.code === 'TOOL_DISCOVERY_NO_PROGRESS') {
                     throw toolErr;
                 }
+            }
+            // 同轮工具已全部执行；先持久化全部结果，再让等待中的父任务释放执行槽。
+            const waitingCall = executedCalls.findLast(executed => executed.status === 'success'
+                && ['agent.wait', 'agent.join'].includes(executed.approvalToolName || executed.call.name));
+            if (waitingCall && await require('./agent-child-wait').deferAfterChildTool({ run, user, budget: taskBudget,
+                toolName: waitingCall.approvalToolName || waitingCall.call.name, output: waitingCall.output }, deps)) {
+                return { completed: true, roundsUsed, waitingChildren: true };
             }
         }
         // 流式模式没有产出最终答案时，回退到 JSON 规划器。

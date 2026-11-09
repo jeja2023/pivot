@@ -41,12 +41,14 @@ test('confirmed goal only accepts explicit presentation-level snapshot overrides
     const signed = confirmedGoalDraftInput(USER, created.confirmationToken, { secret: SECRET, now: NOW + 1000 });
     const merged = mergeConfirmedGoalDraftOverrides(signed, {
         title: '篡改标题', triggerSpec: { type: 'webhook' },
-        authorizationSpec: { timezone: 'UTC', deliveryBindingIds: ['channel_allowed'], resultRetentionDays: 14, toolPolicy: 'all' }
+        authorizationSpec: { modelId: 17, modelRouter: 'auto-cost', timezone: 'UTC', deliveryBindingIds: ['channel_allowed'], resultRetentionDays: 14, toolPolicy: 'all' }
     });
     assert.equal(merged.title, signed.title);
     assert.equal(merged.triggerSpec.type, 'timer');
     assert.equal(merged.authorizationSpec.toolPolicy, 'builtin_only');
     assert.equal(merged.authorizationSpec.timezone, 'UTC');
+    assert.equal(merged.authorizationSpec.modelId, 17);
+    assert.equal(merged.authorizationSpec.modelRouter, 'auto-cost');
     assert.deepEqual(merged.authorizationSpec.deliveryBindingIds, ['channel_allowed']);
 });
 

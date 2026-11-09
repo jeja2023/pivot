@@ -31,6 +31,7 @@ function truncateTextByTokens(value, maxTokens) {
 }
 
 function compactToolOutputForModel(value, modelCfg = {}, options = {}) {
+    value = require('./agent-tool-output-context').projectMcpOutput(value);
     const budget = getModelContextBudget(modelCfg, { maxOutputTokens: options.maxOutputTokens });
     const configured = Number.parseInt(options.maxTokens, 10);
     const targetTokens = Number.isFinite(configured) && configured > 0
@@ -39,6 +40,10 @@ function compactToolOutputForModel(value, modelCfg = {}, options = {}) {
             budget.unbounded ? 24000 : Math.max(2000, Math.floor(budget.inputBudget * 0.45)),
             24000
         );
+    if (value?.type === 'tools_batch_read' && Array.isArray(value.results) && value.results.length) {
+        return require('./agent-tool-output-context').compactBatchOutput(value, targetTokens,
+            (output, maxTokens) => compactToolOutputForModel(output, modelCfg, { ...options, maxTokens }));
+    }
     // 知识证据只能截断到完整来源边界；不能把 JSON 字符串截断后丢失权限复核标识。
     if (value?.knowledgeSourceVersion === 1 && Array.isArray(value.matches)) {
         const matches = [];
@@ -97,6 +102,10 @@ function compactToolOutputForModel(value, modelCfg = {}, options = {}) {
     }
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     if (!text || estimateTokens(text) <= targetTokens) return value;
+    if (value?.structuredContent && !value.isError) {
+        const preview = require('./agent-tool-output-context').truncateJsonStrings(value.structuredContent, Math.max(128, Math.floor(targetTokens / 4)));
+        if (estimateTokens(JSON.stringify(preview)) <= targetTokens - 120) return { structuredContent: preview, __partial: true, originalChars: text.length, contextTokenBudget: targetTokens };
+    }
     return {
         __partial: true,
         originalChars: text.length,

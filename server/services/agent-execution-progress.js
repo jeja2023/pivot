@@ -28,4 +28,14 @@ function progressFingerprint(tool, input, output) {
     return crypto.createHash('sha256').update(String(tool)).update('\0').update(text).digest('hex');
 }
 
-module.exports = { progressFingerprint };
+function preparationFingerprint(tool, output) {
+    if (tool === 'tools.describe' && output?.type === 'tools_descriptions') return '';
+    // 契约准备只能为每个已授权工具获得一次停滞宽限，不算业务结果；换版本也不能反复续命。
+    if (tool !== 'tools.describe' || !output || output.error || output.isError || output.executed === false
+        || !output.inputSchema || typeof output.inputSchema !== 'object' || !output.toolRef?.definitionDigest) return '';
+    const name = String(output.toolRef.toolName || '');
+    if (!name || name.startsWith('tools.') || name !== output.name) return '';
+    return crypto.createHash('sha256').update(name).digest('hex');
+}
+
+module.exports = { preparationFingerprint, progressFingerprint };

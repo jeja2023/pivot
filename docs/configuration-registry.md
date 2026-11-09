@@ -54,6 +54,12 @@
 | `LOG_FILE_MAX_BYTES` | integer | `52428800` | 1048576–1073741824 | 单个日志文件最大字节数。 |
 | `LOG_FILE_MAX_ARCHIVES` | integer | `5` | 1–100 | 轮转日志保留份数。 |
 
+## 审计日志
+
+| 环境变量 | 类型 | 默认值 | 校验 | 说明 |
+| --- | --- | --- | --- | --- |
+| `AUDIT_LOG_CLEANUP_PAUSED` | boolean | `false` | true / false | 调查或争议处理期间暂停 audit_logs 自动删除；不影响新日志写入、查询和导出。异常值按暂停处理，恢复前先完成证据保全；部署配置变更后重启服务。 |
+
 ## PostgreSQL
 
 | 环境变量 | 类型 | 默认值 | 校验 | 说明 |
