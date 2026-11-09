@@ -48,8 +48,8 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 }
 
 .presentation-catalog-dialog {
-    width: min(1680px, 98vw);
-    max-width: 1680px;
+    width: min(1360px, 96vw);
+    max-width: 1360px;
     height: min(90vh, 880px);
     max-height: 90vh;
     margin: auto;
@@ -238,9 +238,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-seq-th,
 .presentation-catalog-seq-cell {
-    width: 48px;
-    min-width: 48px;
-    max-width: 48px;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
     text-align: center;
     white-space: nowrap;
     box-sizing: border-box;
@@ -254,9 +254,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-name-th,
 .presentation-catalog-name-cell {
-    width: 140px;
-    min-width: 120px;
-    max-width: 160px;
+    width: 150px;
+    min-width: 130px;
+    max-width: 170px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -271,7 +271,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-desc-th,
 .presentation-catalog-desc-cell {
-    min-width: 220px;
+    width: 320px;
+    min-width: 240px;
+    max-width: 380px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -285,9 +287,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-source-th,
 .presentation-catalog-source-cell {
-    width: 88px;
-    min-width: 88px;
-    max-width: 88px;
+    width: 140px;
+    min-width: 130px;
+    max-width: 150px;
     text-align: center;
     white-space: nowrap;
     box-sizing: border-box;
@@ -295,9 +297,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-version-th,
 .presentation-catalog-version-cell {
-    width: 64px;
-    min-width: 64px;
-    max-width: 64px;
+    width: 72px;
+    min-width: 72px;
+    max-width: 72px;
     text-align: center;
     white-space: nowrap;
     box-sizing: border-box;
@@ -311,9 +313,9 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-supported-th,
 .presentation-catalog-supported-cell {
-    width: 110px;
-    min-width: 110px;
-    max-width: 110px;
+    width: 120px;
+    min-width: 120px;
+    max-width: 120px;
     text-align: center;
     white-space: nowrap;
     box-sizing: border-box;
@@ -321,12 +323,12 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 
 .presentation-catalog-controls-th,
 .presentation-catalog-controls-cell {
-    width: 180px;
-    min-width: 180px;
-    max-width: 180px;
+    width: 240px;
+    min-width: 240px;
     white-space: nowrap;
     text-align: right;
     box-sizing: border-box;
+    overflow: visible;
 }
 
 .presentation-catalog-template-info {
