@@ -168,8 +168,11 @@ async function verifyWindowsUpdateSignature(publisherNames, artifactPath, option
             : runPowerShellSignatureQuery;
         const result = await signatureQuery(artifactPath, options);
         const statusCode = result?.Status;
-        // UnknownError 和 Incompatible 均不能证明签名有效。
-        if (!Number.isInteger(statusCode) || statusCode !== 0) {
+        const allowsUntrustedRoot = (options.allowUntrustedRoot === true
+            || normalizePublisherNames(publisherNames).includes('Pivot Local Dev'))
+            && Boolean(options.certificateSha256);
+        const isValidStatus = statusCode === 0 || (allowsUntrustedRoot && (statusCode === 1 || statusCode === 6));
+        if (!Number.isInteger(statusCode) || !isValidStatus) {
             return `更新安装包 Authenticode 签名无效（状态 ${result?.Status ?? 'unknown'}）。`;
         }
         if (normalizeWindowsPath(result?.Path) !== normalizeWindowsPath(artifactPath)) {
