@@ -86,9 +86,11 @@
                 const task = state.task;
                 if (action === 'save') {
                     const editRevision = state.editRevision;
-                    const findings = [...byId('policy-review-detail').querySelectorAll('[data-review-finding]')].map(element => ({ id: element.dataset.reviewFinding,
+                    const findings = [...byId('policy-review-detail').querySelectorAll('[data-review-finding]')].map(element => ({
+                        id: element.dataset.reviewFinding,
                         status: element.querySelector('[data-review-field="status"]').value, analysis: element.querySelector('[data-review-field="analysis"]').value,
-                        recommendation: element.querySelector('[data-review-field="recommendation"]').value }));
+                        recommendation: element.querySelector('[data-review-field="recommendation"]').value
+                    }));
                     const result = await request(`${API}/${task.id}/report`, { version: task.version, findings, notes: byId('policy-review-notes').value }, 'PUT');
                     if (!current() || state.task?.id !== task.id || state.task.version !== task.version) return;
                     state.task = result.task;
@@ -131,8 +133,10 @@
         const model = byId('policy-review-model');
         if (model.disabled || !model.value) return message('请选择当前账号可用的执行模型。');
         const text = byId('policy-review-material-text').value.trim();
-        const body = { title: byId('policy-review-report-title').value, asOf: byId('policy-review-date').value, scope: byId('policy-review-scope').value,
-            documentIds: [...state.selected.keys()], materialIds: state.materials.map(item => item.id), materials: text ? [{ title: byId('policy-review-material-title').value, text }] : [], modelId: model.value };
+        const body = {
+            title: byId('policy-review-report-title').value, asOf: byId('policy-review-date').value, scope: byId('policy-review-scope').value,
+            documentIds: [...state.selected.keys()], materialIds: state.materials.map(item => item.id), materials: text ? [{ title: byId('policy-review-material-title').value, text }] : [], modelId: model.value
+        };
         const fingerprint = JSON.stringify(body);
         if (state.fingerprint !== fingerprint) { state.fingerprint = fingerprint; state.requestKey = window.crypto.randomUUID(); }
         const current = capture(), operation = ++state.operation; state.busy = true; byId('policy-review-start').disabled = true;

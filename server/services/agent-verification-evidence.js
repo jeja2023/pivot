@@ -26,7 +26,7 @@ async function loadVerificationEvidence(runId, user, observations = [], deps = {
         visited.add(id); ancestry.add(id);
         const run = await (deps.run || runs.getRunForUser)(id, user.id);
         if (!run || run.deleted_at) throw incomplete('核验任务不存在或无权访问。');
-        await (deps.assertAccess || require('./knowledge-run-access').assertRunKnowledgeAccess)(id, user);
+        await (deps.assertAccess || require('./knowledge-run-access').assertRunKnowledgeAccess)(id, user, deps);
         const metadata = parseJsonObject(run.metadata) || {};
         const sourceRunIds = new Set();
         const resumedFrom = metadata.resumeContext?.sourceRunId;

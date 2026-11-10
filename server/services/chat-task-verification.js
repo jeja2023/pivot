@@ -89,8 +89,14 @@ async function verifyAutomaticTaskWithModel({ run, user, contract, answer, obser
 // 失败、缺口和核验异常也绑定同一模型身份，不能只给成功响应写身份而排除失败样本。
 async function verifyAutomaticTask(input, deps = {}) {
     input.signal?.throwIfAborted();
-    const model = await (deps.getModel || getRunnableModelForUserAsync)(input.run.chosen_model_id || input.run.model_id, input.user);
-    const result = await verifyAutomaticTaskWithModel(input, { ...deps, getModel: async () => model });
+    let model = null;
+    const result = await verifyAutomaticTaskWithModel(input, {
+        ...deps,
+        getModel: async (...args) => {
+            model = await (deps.getModel || getRunnableModelForUserAsync)(...args);
+            return model;
+        }
+    });
     const identity = require('./agent-model-quality').modelQualityIdentity(model || {});
     return identity ? { ...result, modelIdentity: identity } : result;
 }

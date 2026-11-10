@@ -44,17 +44,24 @@
                         </div>
                         <div id="agent-goal-draft-preview" class="agent-goal-draft-preview hidden" role="status" aria-live="polite"></div>
                     </section>
-                    <label class="modal-form-field">
-                        <span>目标名称</span>
-                        <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160"
-                            placeholder="例如：每日晨间项目风险与待办巡检" required>
-                    </label>
+                    <div class="modal-form-grid modal-form-grid--2">
+                        <label class="modal-form-field">
+                            <span>目标名称</span>
+                            <input id="agent-goal-title" class="form-input agent-title-input" maxlength="160"
+                                placeholder="例如：每日晨间项目风险与待办巡检" required>
+                        </label>
+                        <label class="modal-form-field">
+                            <span>所属项目（可选）</span>
+                            <select id="agent-goal-project" class="form-input"><option value="">不关联项目</option></select>
+                            <span class="agent-goal-hint">归档后停止接纳新任务。</span>
+                        </label>
+                    </div>
                     <label class="modal-form-field agent-task-goal-field">
                         <span>目标描述</span>
                         <textarea id="agent-goal-goal" class="form-input agent-goal-input" rows="2" maxlength="12000"
                             placeholder="清晰描述该持续目标每次被触发时需要执行的操作" required></textarea>
                     </label>
-                    <div class="modal-form-grid agent-goal-trigger-grid">
+                    <div class="modal-form-grid modal-form-grid--3 agent-goal-trigger-grid">
                         <label class="modal-form-field"><span>目标类型</span><select id="agent-goal-kind" class="form-input"><option value="scheduled_job">定时任务</option><option value="monitor">变化监控</option><option value="goal">完成即停止</option></select></label>
                         <label class="modal-form-field">
                             <span>触发方式</span>
@@ -90,7 +97,6 @@
                             </select>
                         </label>
                     </div>
-                    <label class="modal-form-field"><span>所属项目（可选）</span><select id="agent-goal-project" class="form-input"><option value="">不关联项目</option></select><span class="agent-goal-hint">每次触发使用当时有效的项目规则和资料范围；归档后停止接纳新任务。</span></label>
                     <div class="modal-form-grid modal-form-grid--3">
                         <label class="modal-form-field"><span>时区</span><input id="agent-goal-timezone" class="form-input" value="Asia/Shanghai" maxlength="80"></label>
                         <label class="modal-form-field"><span>结果投递渠道（可选）</span><select id="agent-goal-delivery-channel" class="form-input"><option value="">仅在 Pivot 待办中心查看</option></select></label>

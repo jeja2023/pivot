@@ -147,7 +147,7 @@ function taskVerificationFailureMessage(report = {}) {
     return `任务尚未完成：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
 }
 
-async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget, repairOptions = null } = {}) {
+async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget, repairOptions = null } = {}, deps = {}) {
     signal?.throwIfAborted();
     let metadata = run?.metadata;
     if (typeof metadata === 'string') {
@@ -164,7 +164,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
     ];
     let evidenceFailure = null;
     if (runId && run?.user_id) {
-        try { observations = await require('./agent-verification-evidence').loadVerificationEvidence(runId, user || { id: run.user_id }, observations); }
+        try { observations = await require('./agent-verification-evidence').loadVerificationEvidence(runId, user || { id: run.user_id }, observations, deps); }
         catch (error) {
             signal?.throwIfAborted();
             evidenceFailure = { passed: false, reason: error.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE' ? 'source_revoked'

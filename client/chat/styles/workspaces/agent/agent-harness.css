@@ -5501,52 +5501,105 @@ body.dark-mode .agent-assistant-memory-panel .agent-memory-chip:has(input:checke
     text-overflow: ellipsis;
 }
 
-/* 持续目标模态弹窗 */
+/* 持续目标模态弹窗：一屏完整呈现且消除垂直滚动条 */
 .agent-goal-modal-dialog {
-    width: min(840px, calc(100vw - 36px));
+    width: min(860px, calc(100vw - 32px));
     text-align: left;
 }
 
 .agent-goal-modal-dialog .agent-config-modal-head {
-    padding: 12px 20px 10px;
+    padding: 10px 20px 8px;
+}
+
+.agent-goal-modal-dialog .agent-config-modal-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.agent-goal-modal-dialog .agent-config-modal-head span {
+    margin-top: 2px;
+    font-size: 0.72rem;
 }
 
 .agent-goal-modal-dialog .agent-goal-modal-form {
-    padding: 12px 20px 10px;
-    gap: 9px;
+    padding: 10px 20px 8px;
+    gap: 8px;
+    overflow-y: auto;
 }
 
 .agent-goal-modal-dialog .agent-goal-natural-panel {
-    padding: 8px 12px;
-    gap: 6px;
+    padding: 6px 10px;
+    gap: 4px;
 }
 
 .agent-goal-modal-dialog .agent-goal-natural-row textarea {
-    min-height: 42px;
-    height: 42px;
-    padding: 6px 10px;
+    min-height: 36px;
+    height: 36px;
+    padding: 5px 8px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.agent-goal-modal-dialog .agent-goal-natural-row .btn-secondary {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 0.76rem;
+}
+
+.agent-goal-modal-dialog .modal-form-field {
+    gap: 4px;
+}
+
+.agent-goal-modal-dialog .modal-form-field > span {
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text-muted);
+}
+
+.agent-goal-modal-dialog .modal-form-field > input.agent-title-input,
+.agent-goal-modal-dialog .modal-form-field > .form-input {
+    height: 36px;
+    padding: 0 10px;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.agent-goal-modal-dialog .modal-form-field > select.form-input {
+    padding-right: 28px;
 }
 
 .agent-goal-modal-dialog textarea.agent-goal-input {
-    min-height: 56px;
-    height: 56px;
+    min-height: 48px;
+    height: 48px;
     padding: 6px 10px;
+    font-size: 0.82rem;
+    line-height: 1.4;
     resize: vertical;
 }
 
 .agent-goal-modal-dialog .agent-goal-trigger-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
 }
 
 .agent-goal-modal-dialog .agent-task-editor-footer {
-    padding: 10px 20px 12px;
+    padding: 8px 20px 10px;
+}
+
+.agent-goal-modal-dialog .agent-task-editor-footer .btn-primary,
+.agent-goal-modal-dialog .agent-task-editor-footer .btn-secondary {
+    height: 34px;
+    padding: 0 13px;
+    font-size: 0.78rem;
 }
 
 .agent-goal-hint {
     font-size: 0.7rem;
     color: var(--text-muted);
+    line-height: 1.25;
 }
 
 .agent-goal-notice {

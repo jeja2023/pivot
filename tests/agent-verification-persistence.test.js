@@ -38,7 +38,9 @@ test('预检索的知识库证据实际参与持久化验收，避免有答案�
     try {
         await execute("INSERT INTO agent_runs (id,user_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,'知识问答','请假规定是什么','verifying',?::jsonb,NOW(),NOW())", [runId, user.id, JSON.stringify(metadata)]);
         const run = await queryOne('SELECT * FROM agent_runs WHERE id = ?', [runId]);
-        const report = await verifyAndRecordTaskOutcome({ runId, run, user, answer: '年假应提前提交申请。[引用 1 | citation:policy-1]', observations: [] });
+        const report = await verifyAndRecordTaskOutcome({ runId, run, user, answer: '年假应提前提交申请。[引用 1 | citation:policy-1]', observations: [] }, {
+            getCitation: async () => ({ document: { isCurrentVersion: true }, quotedText: '年假应提前提交申请。' })
+        });
         assert.equal(report.outcomeStatus, 'verified');
         assert.equal(report.observationCount, 1);
         assert.equal((await getTaskVerificationForUser(runId, user)).outcomeStatus, 'verified');
