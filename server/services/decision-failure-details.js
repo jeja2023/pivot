@@ -9,6 +9,9 @@ const PROVIDER_REASONS = Object.freeze({ intent_timeout: '任务意图判断超�
     intent_provider_unavailable: '意图判断模型调用失败', intent_context_unavailable: '任务理解上下文不可用', intent_context_incomplete: '长请求需要补全原始上下文后再查询', provider_timeout: '决策组件调用超时',
     artifact_not_active: '决策模型制品未启用', provider_version_not_configured: '决策模型版本未配置' });
 function safe(value, limit = 240) { return redactRoutingText(String(value || '')).slice(0, limit); }
+function safeText(value, limit = 160) {
+    return String(value ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
 
 async function getDecisionFailureDetails(options = {}, deps = {}) {
     const kind = options.kind === 'provider' ? 'provider' : 'delivery';
@@ -27,22 +30,22 @@ async function getDecisionFailureDetails(options = {}, deps = {}) {
         const [countRows, records] = await Promise.all([countPromise, queryFn(sql, [interval, limit, offset])]);
         const items = records.map(row => {
             if (kind === 'provider') {
-                const provider = parse(row.provider), code = safe(provider.error);
-                return { decisionId: safe(row.decision_id, 128), scenario: safe(row.scenario, 80), occurredAt: row.occurred_at,
-                    providerId: safe(provider.providerId, 80), providerVersion: safe(provider.providerVersion, 128),
-                    reasonCode: code, label: PROVIDER_REASONS[code] || '决策组件调用异常', detail: code, durationMs: Math.max(0, Number(provider.durationMs) || 0) };
+                const provider = parse(row.provider), code = safeText(provider.error, 80);
+                return { decisionId: safeText(row.decision_id, 128), scenario: safeText(row.scenario, 80), occurredAt: row.occurred_at,
+                    providerId: safeText(provider.providerId, 80), providerVersion: safeText(provider.providerVersion, 128),
+                    reasonCode: code, label: PROVIDER_REASONS[code] || '决策组件调用异常', detail: safe(provider.error, 240), durationMs: Math.max(0, Number(provider.durationMs) || 0) };
             }
             const snapshot = parse(row.outcome_metadata).verification;
             const historical = !snapshot;
             const report = parse(row.verification_report || parse(row.run_metadata).taskVerification);
-            const detail = snapshot ? { reasonCode: safe(snapshot.reasonCode, 100), label: safe(snapshot.label), missing: Array.isArray(snapshot.missing) ? snapshot.missing.slice(0, 12).map(value => safe(value, 500)) : [],
-                ruleFailures: Array.isArray(snapshot.ruleFailures) ? snapshot.ruleFailures.slice(0, 12).map(rule => ({ key: safe(rule.key, 100), label: safe(rule.label), detail: safe(rule.detail, 300) })) : [], executionReason: safe(snapshot.executionReason, 500) } : verificationDetails(Object.keys(report).length ? report : null, { historical });
-            return { outcomeId: safe(row.id, 128), decisionId: safe(row.decision_id, 128), runId: safe(row.run_id, 160), occurredAt: row.occurred_at,
-                status: safe(row.run_status, 40), ...detail, detailSource: snapshot ? 'event_snapshot' : Object.keys(report).length ? 'current_report' : 'unavailable' };
+            const detail = snapshot ? { reasonCode: safeText(snapshot.reasonCode, 100), label: safe(snapshot.label), missing: Array.isArray(snapshot.missing) ? snapshot.missing.slice(0, 12).map(value => safe(value, 500)) : [],
+                ruleFailures: Array.isArray(snapshot.ruleFailures) ? snapshot.ruleFailures.slice(0, 12).map(rule => ({ key: safeText(rule.key, 100), label: safe(rule.label), detail: safe(rule.detail, 300) })) : [], executionReason: safe(snapshot.executionReason, 500) } : verificationDetails(Object.keys(report).length ? report : null, { historical });
+            return { outcomeId: safeText(row.id, 128), decisionId: safeText(row.decision_id, 128), runId: safeText(row.run_id, 160), occurredAt: row.occurred_at,
+                status: safeText(row.run_status, 40), ...detail, detailSource: snapshot ? 'event_snapshot' : Object.keys(report).length ? 'current_report' : 'unavailable' };
         });
         const total = Number(countRows[0]?.count || 0);
         return { kind, items, total, limit, offset, hasMore: offset + items.length < total, unavailable: false, window: kind === 'provider' ? '24h' : '30d' };
-    } catch (error) { return { kind, items: [], total: null, limit, offset, hasMore: false, unavailable: true, errorCode: safe(error.code || 'failure_details_unavailable', 80) }; }
+    } catch (error) { return { kind, items: [], total: null, limit, offset, hasMore: false, unavailable: true, errorCode: safeText(error.code || 'failure_details_unavailable', 80) }; }
 }
 
 module.exports = { getDecisionFailureDetails };

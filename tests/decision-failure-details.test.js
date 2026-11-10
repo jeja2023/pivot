@@ -51,15 +51,28 @@ test('事件快照优先于后来核验报告，旧事件明确标记当前报�
 
 test('语义核验区分缺失交付物、无效响应、模型不可用和调用超时', async () => {
     const input = { run: { id: 'run', model_id: 1 }, user: { id: 1 }, contract: { deliverables: ['完整报告'], acceptance: {} }, answer: '部分摘要' };
-    const deps = { getModel: async () => ({ id: 1 }) };
+    const deps = { getModel: async () => ({ id: 1 }), resolveMemoryEvidence: async () => ({ current: true, memories: [] }) };
     const missing = await verifyAutomaticTask(input, { ...deps, callModelJson: async () => ({ passed: true, coveredDeliverables: [], missing: [] }) });
     assert.equal(missing.reason, 'deliverables_missing'); assert.deepEqual(missing.missing, ['完整报告']);
     const invalid = await verifyAutomaticTask(input, { ...deps, callModelJson: async () => ({ passed: true }) });
     assert.equal(invalid.reason, 'verifier_invalid_response');
     const timeout = await verifyAutomaticTask(input, { ...deps, callModelJson: async () => { throw Object.assign(new Error('timeout'), { code: 'ECONNABORTED' }); } });
     assert.equal(timeout.reason, 'verifier_timeout');
-    const unavailable = await verifyAutomaticTask(input, { getModel: async () => null });
+    const unavailable = await verifyAutomaticTask(input, { ...deps, getModel: async () => null });
     assert.equal(unavailable.reason, 'verifier_unavailable');
+});
+
+test('组件与交付明细保留含有长数字的 UUID 及版本号标识，不被文本脱敏逻辑截断', async () => {
+    const uuidWithDigits = 'failure-details-84991092-0154-4979-8044-f1ce89d2ba6d';
+    const decisionWithDigits = 'decision-details-12345678-abcd-ef01-2345-6789abcdef01';
+    const rows = [
+        { id: uuidWithDigits, decision_id: decisionWithDigits, run_id: uuidWithDigits, outcome_metadata: {}, reason_code: 'source_not_fully_read', run_status: 'partial', run_metadata: { taskVerification: { outcomeStatus: 'needs_input', semanticVerification: { reason: 'source_not_fully_read' } } } }
+    ];
+    const data = await getDecisionFailureDetails({ kind: 'delivery' }, { query: async sql => sql.startsWith('SELECT COUNT') ? [{ count: 1 }] : rows });
+    assert.equal(data.items[0].runId, uuidWithDigits);
+    assert.equal(data.items[0].decisionId, decisionWithDigits);
+    assert.equal(data.items[0].outcomeId, uuidWithDigits);
+    assert.equal(data.items[0].reasonCode, 'source_not_fully_read');
 });
 
 test('真实数据库明细联接核验报告，并按24小时组件错误与30天失败事件计数', { skip: !process.env.DATABASE_URL }, async () => {
@@ -68,12 +81,19 @@ test('真实数据库明细联接核验报告，并按24小时组件错误与30�
     await execute("INSERT INTO agent_runs(id,user_id,title,goal,status,metadata) VALUES (?,?,'故障明细测试','测试','partial',?)", [runId, user.id, JSON.stringify({ taskVerification: { outcomeStatus: 'needs_input', semanticVerification: { reason: 'source_not_fully_read' } } })]);
     await execute("INSERT INTO decision_records(decision_id,scenario,user_id,request_state,candidate_actions,provider_outputs,policy_outcome,selected_action_id,created_at,updated_at) VALUES (?,'chat.execution',?,'{}','[]',?,'{}','direct_answer',NOW(),NOW())", [decisionId, user.id, JSON.stringify([{ providerId: 'chat-intent', providerVersion: '1', error: 'intent_timeout', durationMs: 30000 }])]);
     await execute("INSERT INTO decision_outcomes(id,decision_id,event_type,source,status,reason_code,result_reference,metadata,occurred_at,created_at) VALUES (?,?,'execution','runtime','failure','delivery_not_verified',?,'{}',NOW(),NOW())", [id, decisionId, runId]);
-    const delivery = await getDecisionFailureDetails({ kind: 'delivery', limit: 100 });
-    assert.equal(delivery.unavailable, false, JSON.stringify(delivery));
-    assert.equal(delivery.items.find(item => item.runId === runId).reasonCode, 'source_not_fully_read');
-    const provider = await getDecisionFailureDetails({ kind: 'provider', limit: 100 });
-    assert.equal(provider.unavailable, false, JSON.stringify(provider));
-    assert.equal(provider.items.find(item => item.decisionId === decisionId).label, '任务意图判断超时');
-    await execute('DELETE FROM decision_records WHERE decision_id=?', [decisionId]);
-    await execute('DELETE FROM agent_runs WHERE id=?', [runId]);
+    try {
+        const delivery = await getDecisionFailureDetails({ kind: 'delivery', limit: 100 });
+        assert.equal(delivery.unavailable, false, JSON.stringify(delivery));
+        const deliveryItem = delivery.items.find(item => item.runId === runId);
+        assert.ok(deliveryItem, `未在 delivery.items 中找到 runId=${runId}，返回项共 ${delivery.items.length} 条`);
+        assert.equal(deliveryItem.reasonCode, 'source_not_fully_read');
+        const provider = await getDecisionFailureDetails({ kind: 'provider', limit: 100 });
+        assert.equal(provider.unavailable, false, JSON.stringify(provider));
+        const providerItem = provider.items.find(item => item.decisionId === decisionId);
+        assert.ok(providerItem, `未在 provider.items 中找到 decisionId=${decisionId}，返回项共 ${provider.items.length} 条`);
+        assert.equal(providerItem.label, '任务意图判断超时');
+    } finally {
+        await execute('DELETE FROM decision_records WHERE decision_id=?', [decisionId]).catch(() => {});
+        await execute('DELETE FROM agent_runs WHERE id=?', [runId]).catch(() => {});
+    }
 });
