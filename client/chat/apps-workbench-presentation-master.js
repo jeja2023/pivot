@@ -39,7 +39,8 @@
     function errorText(error) { const message = String(error?.message || ''); return /[\u3400-\u9fff]/u.test(message) ? message : '处理未完成，请检查文件、网络或服务连接后重试。'; }
     function showError(error) { if (error.name === 'AbortError') return; const status = byId('presentation-master-status'); status.replaceChildren(node('p', '', errorText(error))); status.scrollIntoView?.({ block: 'nearest' }); }
     async function open(options = {}) {
-        if (!window.Pivot.moduleApi('apps.presentations.masterForm')) await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-master-form.js');
+        await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-goals.js');
+        await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-form.js');
         preparation?.abort(); ++epoch; returnFocus = document.activeElement;
         ensureModal(); byId('presentation-master-modal').classList.remove('hidden');
         const actor = String(window.Pivot.legacy?.currentUser?.id || ''), ownerModal = byId('presentation-master-modal');
