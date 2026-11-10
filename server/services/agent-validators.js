@@ -25,6 +25,9 @@ const ACTIVE_STATUSES = new Set([
     'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning',
     'running', 'verifying', 'approval_required', 'awaiting_approval', 'waiting_approval', 'awaiting_commit', 'resuming', 'needs_input'
 ]);
+const PAUSABLE_STATUSES = new Set([
+    'queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'running', 'resuming'
+]);
 // 统一智能体与工作流任务状态中文映射字典
 const AGENT_STATUS_LABELS = Object.freeze({
     awaiting_approval: '等待审批',
@@ -555,6 +558,7 @@ module.exports = {
     AUTO_STEPS_BY_RUN_MODE,
     MAX_STEPS_BY_RUN_MODE,
     ACTIVE_STATUSES,
+    PAUSABLE_STATUSES,
     MAX_GOAL_LENGTH,
     MAX_DAG_NODES,
     MAX_DAG_DEPENDENCIES,

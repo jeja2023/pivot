@@ -18,7 +18,7 @@ async function resolveAutomaticModelFailover({
     pickFailoverModel = async () => null
 } = {}) {
     if (routerStrategy === 'fixed' || !isRecoverableModelProviderFailure(error)) return null;
-    const model = await pickFailoverModel({ user, currentModel, messages, endpointStatusGetter });
+    const model = await pickFailoverModel({ user, currentModel, messages, endpointStatusGetter, error });
     return model ? { model, reason: modelProviderFailureReason(error) } : null;
 }
 

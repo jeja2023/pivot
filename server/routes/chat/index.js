@@ -449,7 +449,7 @@ function createChatRouter({
         // 显式 Agent 请求保持兼容。在普通对话中，
         // 服务端高置信度决策可直接接入同一治理运行时，无需手动模式选择或指令。
         const useChatAgent = chatMode === 'agent' || automaticExecution.action === 'agent_run';
-        if (useChatAgent && modelContent.length <= MAX_CHAT_AGENT_GOAL_LENGTH) {
+        if (useChatAgent) {
             try {
                 const sessionMessages = regenerationMessages || await sessionsRepository.listMessages(sessionId, userId);
                 const handoff = await createChatAgentHandoff({
@@ -516,24 +516,20 @@ function createChatRouter({
                 writeSse('[DONE]');
                 return res.end();
             } catch (error) {
-                if (error?.code === 'AGENT_GOAL_TOO_LONG') {
-                    req.log.warn({ sessionId, userId, contentLength: modelContent.length }, '普通聊天 Agent 目标超长，回退普通模型流');
-                } else {
-                    req.log.error({ sessionId, userId, err: error.message }, '普通聊天 Agent 接管失败');
-                    await writeChatErrorSse({
-                        writeSse,
-                        sessionId,
-                        userId,
-                        modelId: modelCfg.id,
-                        error: '连续 Agent 启动失败',
-                        detail: error.message,
-                        code: error.code || 'AGENT_HANDOFF_FAILED',
-                        persist: userMessagePersisted || regenerate,
-                        log: req.log
-                    });
-                    finishChatTrace('error', { mode: 'agent_handoff', error: error.message });
-                    return res.end();
-                }
+                req.log.error({ sessionId, userId, err: error.message }, '普通聊天 Agent 接管失败');
+                await writeChatErrorSse({
+                    writeSse,
+                    sessionId,
+                    userId,
+                    modelId: modelCfg.id,
+                    error: '连续 Agent 启动失败',
+                    detail: error.message,
+                    code: error.code || 'AGENT_HANDOFF_FAILED',
+                    persist: userMessagePersisted || regenerate,
+                    log: req.log
+                });
+                finishChatTrace('error', { mode: 'agent_handoff', error: error.message });
+                return res.end();
             }
         }
 

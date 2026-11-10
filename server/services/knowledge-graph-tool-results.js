@@ -19,6 +19,7 @@ function relationMatchesChunk(relation, row) {
 }
 
 async function executeKnowledgeGraphQuery(input, user, context = {}, deps = {}) {
+    const scopeRun = context.run ? { id: context.run.id, metadata: context.run.metadata } : {};
     const query = String(input.query || '').trim();
     if (!query) throw new Error('请填写知识图谱查询问题。');
     const scope = await resolveKnowledgeToolScope(user, input, context, deps);
@@ -32,8 +33,8 @@ async function executeKnowledgeGraphQuery(input, user, context = {}, deps = {}) 
 
     // 图谱原始上下文可能包含已失效的实体描述，只从当前可访问片段重建交付内容。
     const evidence = [...new Set((graph.relations || []).map(row => Number(row.source_chunk_id)))].map(chunkId => ({ chunkId, selected: true }));
-    const result = presentKnowledgeResult(query, { evidence }, rows.filter(row => row.citation_key && (graph.relations || [])
-        .some(relation => relationMatchesChunk(relation, row))));
+    const result = require('./chat-knowledge-revision').stampKnowledgeResult(presentKnowledgeResult(query, { evidence }, rows.filter(row => row.citation_key && (graph.relations || [])
+        .some(relation => relationMatchesChunk(relation, row)))), scopeRun);
     let current;
     try { current = await revalidateKnowledgeToolEvidence([{ output: result }], user, { ...deps, scope }); }
     catch (_) { throw graphUnavailable(); }

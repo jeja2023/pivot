@@ -4,9 +4,10 @@
 
 - Status: Active
 - Last refreshed: 2026-11-10
-- Release baseline: v0.7.147
+- Release baseline: v0.7.149
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `server/services/chat-agent-handoff.js`、`chat-auto-execution-handler.js`、`chat-task-knowledge-scope.js`、`chat-knowledge-revision.js`、`model-router.js` 及路由/聊天安全专项：长来源交接、来源撤销、资料修订、核验控制和端点可用性；范围与验证见[v0.7.149发布说明](../releases/v0.7.149-智能路由执行衔接与任务续接可靠性修复.md)。
   - `server/services/agent-responses-protocol.js`、`agent-tool-vision.js`、`agent-verification-evidence.js`、`agent-model-quality.js`、`agent-goal-context.js`：原生协议、工具图像、完整持久证据、唯一任务质量窗口和目标接续；实际验证与限制见 `docs/reports/Pivot智能体执行底座改造-20261110.md`。
   - `client/chat/agent-projects.js`、`server/services/agent-projects.js`、`agent-skill-resource-import.js`、`agent-skill-resources.js` 及对应HTTP/浏览器专项：项目修订、里程碑依据和静态资源读取撤权；版本说明见 `docs/releases/v0.7.147-智能体协议视觉核验与项目技能资源升级.md`。
   - `server/services/data-analysis/bi/flow-pipeline.js`、`flow-worker.js`、`flow-engine.js`、`client/chat/data-analysis/modeling-preview.js` 与 `tests/bi-modeling-flow-*.test.js`：节点持久执行、权限交付、来源血缘、数值规则与预览修订隔离；发布记录见 `docs/releases/v0.7.145-数据建模八项治理与计算一致性优化.md`。
@@ -400,6 +401,15 @@
 - 上下文读取、排队、模型和学习建议共用截止与取消信号；可选记忆和目录不可用不等于目标不明确。观测区分上下文、排队、上游和总等待时间。
 - 裁剪目录必须显示真实完整度，显式选择优先保留。长请求保留中段限制片段并标记不完整；需要业务工具时先受控读取完整原文，目录和实际执行均校验读取进度。
 - 工程边界集、保留验证集、入口级评测、多轮控制消息和真实模型证据分别记录；禁止行为、实现摘要和配置也是验收的一部分。
+
+## 智能路由执行衔接（v0.7.149）
+
+- 自动任务的目标长度与原始资料长度分别校验。长附件通过持久消息分页读取，业务工具执行前须读全来源；无法创建任务时明确返回失败，不把已经识别的任务静默改为普通回答。
+- 显式纠正、来源撤销先于短附件直答，核验阶段同样接受停止与暂停。任务控制复用运行时状态，等待审批和等待提交不得显示成已经结束。
+- 续接更换知识库或标签时重新校验权限与项目范围，更新运行选择并清除旧检索上下文。资料修订约束控制消息、JSON/流式规划和独立验收；旧结果保留审计与当前权限复核，但不再作为新范围的依据，迟到计划不能继续执行。
+- 自动模型策略先排除明确熔断和拒绝准入的端点，再比较成本、容量、负载或质量。端点故障不切换到同端点的另一模型；模型能力不兼容与端点故障分别处理，固定模型继续保持用户选择。
+
+修复范围、升级边界见[v0.7.149发布说明](../releases/v0.7.149-智能路由执行衔接与任务续接可靠性修复.md)，实际验证与剩余验收边界见[智能路由执行衔接修复记录](../reports/chat-routing-fixes-2026-11-10.md)。历史测试的版本身份及未通过记录保留，源码升版不表示生产验收通过。
 
 ## Open questions
 

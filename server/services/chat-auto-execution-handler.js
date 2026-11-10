@@ -16,6 +16,7 @@ const { applyChatRouteCorrection } = require('./chat-route-correction-handler');
 const { buildIntentFallback } = require('./chat-intent-fallback');
 const { readTypedEnv } = require('../config/env-registry');
 const { createChatIntentBudget } = require('./chat-intent-budget');
+const { ACTIVE_STATUSES } = require('./agent-validators');
 
 async function decideAutomaticChatExecution(options = {}, deps = {}) {
     const startedAt = Date.now();
@@ -44,8 +45,6 @@ async function decideWithinIntentBudget({
     let requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, sourceLength: modelContent.length });
     const initial = classifyChatAutoExecution({ prompt: intentPrompt });
     if (regenerate || ephemeralVoice || chatMode !== 'normal') return { action: 'direct_answer', reasonCode: 'not_evaluated' };
-    if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, providedSources, requestScope,
-        sourceLength: modelContent.length, user, modelCfg, sessionId, userMessageId, signal });
     const correction = detectChatRouteCorrection(intentPrompt, { includeMixed: true });
     if (correction) {
         const corrected = await applyChatRouteCorrection({ correction, intentPrompt, sessionId, userId, user, userMessageId, signal, sessionsRepository, log, writeSse }, deps);
@@ -54,6 +53,9 @@ async function decideWithinIntentBudget({
     }
     // 停止与遗忘属于用户控制权，关闭自动执行开关也不能使其失效。
     if (['control', 'memory'].includes(initial.action)) return initial;
+    // 附件直答只能跳过语义模型，不能跳过对活动任务的显式纠正与来源撤销。
+    if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, providedSources, requestScope,
+        sourceLength: modelContent.length, user, modelCfg, sessionId, userMessageId, signal });
     if (isDirectConversation(intentPrompt)) return { ...initial, action: 'direct_answer' };
     writeSse?.(JSON.stringify({ type: 'route', status: 'understanding', message: '正在理解任务并安排处理' }));
     try {
@@ -116,7 +118,7 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
         }
         if (decision.action === 'control') {
             const tasks = await (deps.listSessionTasks || ledger.listSessionTasks)(sessionId, userId);
-            const active = tasks.filter(run => ['queued','planning','running','executing','observing','diagnosing','replanning','resuming','needs_input','approval_required','waiting_approval','awaiting_approval','awaiting_commit'].includes(run.status));
+            const active = tasks.filter(run => ACTIVE_STATUSES.has(run.status));
             if (!active.length) content = '当前会话没有正在处理的任务。';
             else if (active.length > 1) content = '当前有多项任务正在处理，请指出要停止的任务名称。';
             else {
@@ -124,7 +126,11 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
                 const control = decision.control === 'pause' ? runtime.pauseAgentRun : runtime.cancelAgentRun;
                 const run = await control(active[0].id, user);
                 content = run?.status === 'cancelled' ? '已停止当前任务的后续处理；已经完成的操作保留记录。'
-                    : run?.status === 'needs_input' ? '已暂停当前任务，可以随后继续。' : '任务已结束，无需再次停止。';
+                    : run?.status === 'needs_input' ? '已暂停当前任务，可以随后继续。'
+                    : run?.status === 'awaiting_commit' ? '当前任务正在等待提交决定，请在任务详情中确认提交或回滚。'
+                    : /approval/.test(run?.status || '') ? '当前任务正在等待审批，请在任务详情中处理审批。'
+                    : run && !ACTIVE_STATUSES.has(run.status) ? '任务已结束，无需再次停止。'
+                    : '任务状态已变化，尚未确认停止，请在任务详情查看状态后重试。';
             }
         } else if (decision.action === 'memory') {
             const result = await (deps.handleChatMemoryRequest || handleChatMemoryRequest)({ prompt: visibleContent, user, sessionId, userMessageId, projectId });

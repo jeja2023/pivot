@@ -64,8 +64,14 @@ async function readRunKnowledgeAccess(runId, user, deps = {}) {
                 if (!citation || citation.document?.isCurrentVersion === false || !source.excerpts.every(excerpt => require('./rag-index/retrieval-context').normalizeInjectedKnowledgeText(citation.quotedText).includes(excerpt))) return blockedAccess();
             }
         }
-        const scope = observations.length ? await require('./knowledge-tool-results').resolveKnowledgeToolScope(evidence.actor, {}, { run: evidence.run }, deps.knowledge || {}) : {};
-        if (!await (deps.revalidate || revalidateKnowledgeToolEvidence)(observations, evidence.actor, { ...deps.knowledge, scope })) return blockedAccess();
+        const revision = require('./chat-knowledge-revision');
+        const hasRevision = revision.knowledgeScopeRevision(evidence.run) > 0;
+        const currentObservations = hasRevision ? observations.filter(item => !revision.isPriorKnowledgeObservation(item, evidence.run)) : observations;
+        // 更换资料范围不删除审计证据；旧证据仍受当前账号、版本和引用权限检查，
+        // 新一轮结果另按最新业务范围检查，不能用旧专题阻断新专题的合法续接。
+        if (hasRevision && !await (deps.revalidate || revalidateKnowledgeToolEvidence)(observations, evidence.actor, deps.knowledge || {})) return blockedAccess();
+        const scope = currentObservations.length ? await require('./knowledge-tool-results').resolveKnowledgeToolScope(evidence.actor, {}, { run: evidence.run }, deps.knowledge || {}) : {};
+        if (!await (deps.revalidate || revalidateKnowledgeToolEvidence)(currentObservations, evidence.actor, { ...deps.knowledge, scope })) return blockedAccess();
         return { current: true, tracked: inherited.some(item => item.tracked) || observations.length > 0 || Boolean(snapshot), knowledgeEvidence: mergeKnowledgeEvidence([...inherited.map(item => item.knowledgeEvidence), ...observations.map(item => item.knowledgeEvidence)]) };
     } catch (_) { return blockedAccess(); }
 }

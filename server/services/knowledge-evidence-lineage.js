@@ -23,7 +23,7 @@ function mergeKnowledgeEvidence(...values) {
         tracked = true;
         if (manifest.knowledgeSourceVersion !== 1 || !Array.isArray(manifest.sources) || manifest.knowledgeEvidenceIncomplete) incomplete = true;
         for (const source of Array.isArray(manifest.sources) ? manifest.sources : []) {
-            const key = JSON.stringify([source.chunkId, source.citationKey, source.contentDigest, source.indexVersion]);
+            const key = JSON.stringify([source.chunkId, source.citationKey, source.contentDigest, source.indexVersion, source.scopeRunId, source.scopeRevision]);
             if (sources.size >= 1000 && !sources.has(key)) { incomplete = true; continue; }
             sources.set(key, source);
         }

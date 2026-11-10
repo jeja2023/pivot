@@ -9,7 +9,6 @@
     "client/chat/agent-harness.js": 1106,
     "server/services/agent-tools.js": 1052,
     "server/services/rag-documents.js": 1045,
-    "server/routes/chat/index.js": 1003,
     "client/chat/agents-dag-editor.js": 1011
   },
   "largeFileByteThreshold": 61440,

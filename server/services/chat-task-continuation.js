@@ -7,14 +7,15 @@ const { updateAgentRunMetadataWithRetry } = require('./agent-run-metadata-patch'
 const { buildAgentResumeContext } = require('./agent-checkpoints');
 const { getAgentRunResources } = require('./agent-run-resources');
 const { normalizeTaskBudget } = require('./agent-budget');
+const { ACTIVE_STATUSES } = require('./agent-validators');
+const { prepareContinuationKnowledgeScope, applyContinuationKnowledgeScope } = require('./chat-task-knowledge-scope');
 
-const ACTIVE = new Set(['queued','planning','running','executing','observing','diagnosing','replanning','verifying','resuming','needs_input','approval_required','waiting_approval','awaiting_approval','awaiting_commit']);
 const parseConversationRunMetadata = value => typeof value === 'string' ? JSON.parse(value) : value || {};
 
 async function getConversationTasks(sessionId, userId) {
     return (await turns.listSessionTasks(sessionId, userId)).map(run => {
         const metadata = parseConversationRunMetadata(run.metadata);
-        return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE.has(run.status),
+        return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE_STATUSES.has(run.status),
             requestScope: { excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true, excludeWeb: metadata.capabilityConstraints?.excludeWeb === true, excludeData: metadata.capabilityConstraints?.excludeData === true, sourceOnly: metadata.capabilityConstraints?.sourceOnly === true },
             constraints: metadata.taskContract?.constraints || [], businessScope: metadata.taskContract?.businessScope || {}, deliverables: metadata.taskContract?.deliverables || [], acceptance: metadata.taskContract?.acceptance || {},
             requiredCapabilities: metadata.capabilityConstraints?.capabilities || [], decisionId: metadata.automaticExecution?.decisionId || null };
@@ -62,12 +63,14 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
     const tasks = await (deps.listSessionTasks || turns.listSessionTasks)(sessionId, user.id);
     const run = tasks.find(item => item.id === decision.continuationOf);
     if (!run) return { continued: false, reason: 'task_not_active' };
-    if (!ACTIVE.has(run.status)) return { continued: false, reason: 'task_completed', previousRun: run };
+    if (!ACTIVE_STATUSES.has(run.status)) return { continued: false, reason: 'task_completed', previousRun: run };
     const metadata = parseConversationRunMetadata(run.metadata);
     const requestScope = resolveChatRequestScope(sourceContent || instruction, { routeOverrides, ...(decision.requestScope || {}),
+        sourceOnly: metadata.capabilityConstraints?.sourceOnly === true || decision.requestScope?.sourceOnly === true,
         excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true || decision.requestScope?.excludeKnowledge === true,
         excludeWeb: metadata.capabilityConstraints?.excludeWeb === true || decision.requestScope?.excludeWeb === true,
         excludeData: metadata.capabilityConstraints?.excludeData === true || decision.requestScope?.excludeData === true });
+    const knowledgeSelection = await prepareContinuationKnowledgeScope({ decision, routeOverrides, requestScope, run, user, sessionId, userMessageId }, deps);
     const revisedSelection = Array.isArray(routeOverrides.tools) && routeOverrides.tools.length > 0;
     const excluded = routeOverrides.excludeTools === true;
     const selectedNames = revisedSelection ? routeOverrides.tools : metadata.chatBridge?.selectedTools || [];
@@ -82,9 +85,9 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
     const taskContractPatch = { goal: decision.objective || run.goal, constraints: decision.constraints || [], businessScope: decision.businessScope || metadata.taskContract?.businessScope || {}, deliverables: decision.deliverables || [],
         acceptance: { ...decision.acceptance, requireSemanticVerification: true,
             requireCompleteSource: metadata.taskContract?.acceptance?.requireCompleteSource === true || sourceContent.length > 12000 }, authorizationRef: `user_message:${userMessageId}` };
-    await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => {
+    const updatedMetadata = await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => {
         if (reviseScope && Number(current.chatToolScope?.sourceMessageId || 0) > Number(userMessageId)) throw new Error('工具范围已由更新的消息修改，请重新确认当前任务。');
-        return ({
+        const revised = {
         ...current,
         conversationTaskId: current.conversationTaskId || run.id,
         ...(reviseScope ? {
@@ -96,18 +99,23 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
         } : {}),
         requiredSourceMessages: [...new Set([...(current.requiredSourceMessages || []), ...(sourceContent.length > 12000 ? [userMessageId] : [])])],
         ...(current.capabilityConstraints?.present === true && Array.isArray(decision.requiredCapabilities) ? { capabilityConstraints: { ...current.capabilityConstraints,
-            requireSourceBeforeTools: current.capabilityConstraints.requireSourceBeforeTools === true || decision.inputContext?.complete === false,
+            requireSourceBeforeTools: current.capabilityConstraints.requireSourceBeforeTools === true || decision.inputContext?.complete === false || sourceContent.length > 12000,
             capabilities: [...new Set([...(excluded ? [] : decision.requiredCapabilities), ...(current.chatBridge ? ['conversation.read_source'] : []),
                 ...(!excluded && (revisedSelection || (current.capabilityConstraints?.capabilities?.length > 0 && current.routeCorrection?.routeOverrides?.excludeTools !== true
                     && JSON.stringify(current.chatBridge?.selectedTools || []) === JSON.stringify(selectedNames)))
                     ? selection.tools.flatMap(tool => tool.capabilities || []) : [])])].filter(capability => capabilityAllowedByRequestScope(capability, requestScope)),
             ...(requestScope.excludeKnowledge ? { excludeKnowledge: true } : {}), ...(requestScope.excludeWeb ? { excludeWeb: true } : {}),
             ...(requestScope.excludeData ? { excludeData: true } : {}),
+            ...(requestScope.sourceOnly ? { sourceOnly: true } : {}),
             authorizationRef: `user_message:${userMessageId}`, sourceMessageId: userMessageId } } : {}),
         ...(requestScope.excludeKnowledge ? { chatBridge: { ...(reviseScope ? { ...current.chatBridge, selectedTools: selection.names, mcpToolAllowlist, mcpEnabled: !excluded } : current.chatBridge), ragEnabled: false, ragContext: '' } } : {}),
         conversationMessageIds: [...new Set([...(current.conversationMessageIds || []), userMessageId])].slice(-100)
-    }); }, { userId: user.id, updateToolScope: reviseScope });
-    await (deps.sendAgentControlMessage || sendAgentControlMessage)({ user, toRunId: run.id, type: 'steer', idempotencyKey, payload: { instruction, source: 'chat', sourceMessageId: userMessageId, taskContractPatch } });
+        };
+        return applyContinuationKnowledgeScope(revised, knowledgeSelection, { run, userMessageId });
+    }, { userId: user.id, updateToolScope: reviseScope || Boolean(knowledgeSelection) });
+    if (updatedMetadata === null) throw new Error('当前任务已不可用，请刷新任务后重试。');
+    await (deps.sendAgentControlMessage || sendAgentControlMessage)({ user, toRunId: run.id, type: 'steer', idempotencyKey, payload: { instruction, source: 'chat', sourceMessageId: userMessageId, taskContractPatch,
+        ...(knowledgeSelection ? { knowledgeScope: updatedMetadata?.chatKnowledgeScope?.scope || knowledgeSelection.scope } : {}) } });
     if (run.status === 'needs_input') {
         await resumeWaitingConversationTask(run, user, deps);
     }

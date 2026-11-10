@@ -22,6 +22,7 @@ function scopeError() { return Object.assign(new Error('知识库选择范围不
 async function resolveKnowledgeToolScope(user, input = {}, context = {}, deps = {}) {
     const run = context.run || {};
     const metadata = parseJsonObject(run.metadata) || {};
+    if (metadata.chatBridge?.ragScope?.cleared === true || metadata.capabilityConstraints?.excludeKnowledge === true) throw scopeError();
     const config = parseJsonObject(run.context_config || run.contextConfig) || {};
     const requested = { collectionIds: input.collectionIds, tagNames: input.tagNames };
     if (Array.isArray(input.collectionIds) && input.collectionIds.some(id => !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) throw scopeError();
@@ -75,6 +76,7 @@ function knowledgeEvidenceManifest(value) {
 }
 
 async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
+    const scopeRun = context.run ? { id: context.run.id, metadata: context.run.metadata } : {};
     const query = String(input.query || '').trim();
     if (!query) throw new Error('请填写检索问题。');
     const scope = await resolveKnowledgeToolScope(user, input, context, deps);
@@ -85,7 +87,7 @@ async function executeKnowledgeSearch(input, user, context = {}, deps = {}) {
     if (result.ranking?.mode === 'retrieval_unavailable') throw Object.assign(new Error('知识库检索服务暂不可用，请稍后重试。'), { code: 'KNOWLEDGE_RETRIEVAL_UNAVAILABLE', status: 503, category: 'execution' });
     const selected = result.evidence || (result.matches || []).filter(match => match.selected === true);
     const rows = await (deps.readSourceChunks || require('../repositories/knowledge').readSourceChunks)(selected.map(match => match.chunkId), user, scope);
-    return presentKnowledgeResult(query, result, rows);
+    return require('./chat-knowledge-revision').stampKnowledgeResult(presentKnowledgeResult(query, result, rows), scopeRun);
 }
 
 async function revalidateKnowledgeToolEvidence(observations, user, deps = {}) {

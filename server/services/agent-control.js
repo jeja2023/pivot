@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { recordAgentEvent } = require('./agent-event-log');
+const { currentKnowledgeControlMessage } = require('./chat-task-knowledge-scope');
 
 const MESSAGE_TYPES = new Set(['steer', 'request', 'reply', 'system']);
 const MESSAGE_STATUSES = new Set(['pending', 'claimed', 'delivered', 'applied', 'acknowledged', 'expired']);
@@ -77,7 +78,7 @@ function applyMessagesToTaskContract(value, messages = {}, goal = '') {
 async function getControlRun(runId, userId) {
     if (!runId) return null;
     return queryOne(`
-        SELECT id, user_id, parent_run_id, status, deleted_at
+        SELECT id, user_id, parent_run_id, status, deleted_at, metadata
         FROM agent_runs
         WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `, [runId, userId]);
@@ -271,10 +272,13 @@ async function applyAgentControlMessages(runId, user, messages = []) {
         }
         if (!applied.length) return [];
         const metadata = parseJson(run.metadata, {});
+        // 资料范围已先通过 CAS 收紧；迟到的旧控制消息仍保留审计，但不能把旧目标
+        // 和旧资料要求重新注入模型、任务契约或工作状态。
+        const effectiveMessages = applied.map(message => currentKnowledgeControlMessage(message, metadata));
         const { applyControlMessagesToWorkingState } = require('./agent-working-state');
         const currentContract = metadata.taskContract || metadata.task_contract || {};
-        const { contract: taskContract } = applyMessagesToTaskContract(currentContract, applied, currentContract.goal || '');
-        const workingState = applyControlMessagesToWorkingState(metadata.workingState, applied, taskContract, taskContract.goal || '');
+        const { contract: taskContract } = applyMessagesToTaskContract(currentContract, effectiveMessages, currentContract.goal || '');
+        const workingState = applyControlMessagesToWorkingState(metadata.workingState, effectiveMessages, taskContract, taskContract.goal || '');
         const existing = Array.isArray(metadata.controlApplications?.messageIds)
             ? metadata.controlApplications.messageIds.map(String) : [];
         const messageIds = [...new Set([...existing, ...applied.map(message => message.message_id)])].slice(-100);
@@ -292,7 +296,7 @@ async function applyAgentControlMessages(runId, user, messages = []) {
             taskContract,
             workingState
         }), now, runId, userId]);
-        return applied.map(message => ({ ...message, taskContract, workingState }));
+        return effectiveMessages.map(message => ({ ...message, taskContract, workingState }));
     });
     if (appliedMessages.length) {
         try {
@@ -322,7 +326,7 @@ async function listAppliedAgentControlMessages(runId, user, { limit = 20 } = {})
         ORDER BY applied_at ASC, id ASC
         LIMIT ?
     `, [userId, runId, safeLimit]);
-    return rows.map(parseMessage);
+    return rows.map(row => currentKnowledgeControlMessage(parseMessage(row), parseJson(run.metadata, {})));
 }
 
 async function acknowledgeAppliedAgentControlMessages(runId, user, messages = []) {

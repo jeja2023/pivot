@@ -372,6 +372,7 @@ function getModelEndpointRuntimeStatus(models) {
 }
 
 module.exports = {
+    normalizeEndpointKey,
     acquireModelSlot,
     recordModelSuccess,
     recordModelFailure,

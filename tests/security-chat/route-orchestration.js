@@ -386,16 +386,18 @@ test('显式 Agent 模式允许普通聊天使用较长任务目标', async () =
     }
 });
 
-test('普通聊天超出会话 Agent 桥接上限时回退模型流', async () => {
+test('普通聊天长请求使用有界目标交接任务，完整来源保留分页读取要求', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['超长消息普通聊天回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_oversize_message', upstreamUrl: upstream.url });
-    let agentCalled = false;
+    let capturedRun;
     const routeServer = await startChatRouteServer({
         fixture,
         autoAgent: true,
-        agentRunFactory: async () => {
-            agentCalled = true;
-            throw new Error('超出聊天 Agent 上限的消息不应进入 Agent');
+        agentRunFactory: async options => {
+            capturedRun = options;
+            await require('../../server/db/client').execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES ('long-source-agent-run',?,?,?,?,'queued',?,NOW(),NOW())",
+                [fixture.userId, fixture.sessionId, options.title, options.goal, JSON.stringify(options.metadata)]);
+            return { id: 'long-source-agent-run', status: 'queued' };
         }
     });
 
@@ -405,11 +407,16 @@ test('普通聊天超出会话 Agent 桥接上限时回退模型流', async () =
             content: '超长消息内容'.repeat(2001),
             modelId: fixture.modelId
         });
-        assert.equal(agentCalled, false);
-        assert.match(result.streamedContent, /超长消息普通聊天回答正常/);
+        assert.ok(capturedRun.goal.length <= 12000);
+        assert.equal(capturedRun.metadata.capabilityConstraints.requireSourceBeforeTools, true);
+        assert.equal(capturedRun.metadata.taskContract.acceptance.requireCompleteSource, true);
+        assert.deepEqual(capturedRun.metadata.requiredSourceMessages, [capturedRun.metadata.chatBridge.userMessageId]);
+        assert.equal(result.findByType('agent_handoff')?.runId, 'long-source-agent-run');
+        assert.equal(result.streamedContent, '');
+        assert.equal(result.errorEvent, undefined);
         const messages = readSessionMessages(fixture);
         assert.equal(messages.filter(row => row.role === 'user').length, 1);
-        assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
+        assert.equal(messages.filter(row => row.role === 'assistant').length, 0);
     } finally {
         await routeServer.close();
         await upstream.close();
@@ -417,7 +424,7 @@ test('普通聊天超出会话 Agent 桥接上限时回退模型流', async () =
     }
 });
 
-test('普通聊天兼容旧版 Agent 目标校验并回退模型流', async () => {
+test('旧版任务目标校验拒绝时明确失败，不能用普通回答代替执行', async () => {
     const upstream = await startFakeUpstream({ replyChunks: ['旧版校验回退回答正常。'] });
     const fixture = createChatFixture({ prefix: 'chat_legacy_goal_limit', upstreamUrl: upstream.url });
     const routeServer = await startChatRouteServer({
@@ -437,8 +444,8 @@ test('普通聊天兼容旧版 Agent 目标校验并回退模型流', async () =
             modelId: fixture.modelId,
             chatMode: 'agent'
         });
-        assert.match(result.streamedContent, /旧版校验回退回答正常/);
-        assert.equal(result.errorEvent, undefined);
+        assert.equal(result.streamedContent, '');
+        assert.equal(result.errorEvent?.code, 'AGENT_GOAL_TOO_LONG');
         const messages = readSessionMessages(fixture);
         assert.equal(messages.filter(row => row.role === 'assistant').length, 1);
     } finally {

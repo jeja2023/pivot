@@ -29,6 +29,100 @@ test('独立文本草稿跳过分类并把占位符规则带入真实回答上�
     } finally { await route.close(); await upstream.close(); fixture.cleanup(); }
 });
 
+test('超过内联上限的附件交付通过HTTP建立任务，业务工具须等待完整分页读取', async () => {
+    const { execute, queryOne } = require('../server/db/client');
+    const { executeChatSource } = require('../server/services/chat-source-tool');
+    const { evaluateToolPolicy } = require('../server/services/agent-policy');
+    const request = '请分析附件并导出可下载的PDF。';
+    const upstream = await startFakeUpstream({ intentDecision: { action: 'agent_run', objective: '阅读附件并交付PDF',
+        requiredCapabilities: ['document.render', 'conversation.read_source', 'artifact.deliver'], routing: { knowledge: 'none', tools: 'task' }, acceptance: { artifactRequired: true } } });
+    const fixture = createChatFixture({ prefix: 'long_source_task', upstreamUrl: upstream.url, modelColumns: { max_input_tokens: 100000 } });
+    let captured;
+    const runId = `long-source-${fixture.sessionId}`;
+    const route = await startChatRouteServer({ fixture, agentExecutionEnabled: true, isRagEnabled: () => false,
+        agentRunFactory: async options => {
+            captured = options;
+            await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,?,?,?,'queued',?,NOW(),NOW())",
+                [runId, fixture.userId, fixture.sessionId, options.title, options.goal, JSON.stringify(options.metadata)]);
+            return { id: runId, status: 'queued' };
+        } });
+    try {
+        const content = `${request}\n---\n【参考文档: 合成材料.txt】\n${'合成材料。'.repeat(2500)}\n---`;
+        const response = await postChat(route.port, { sessionId: fixture.sessionId, modelId: fixture.modelId, content, displayContent: request,
+            chatMode: 'normal', ragPreference: 'auto', mcpEnabled: false });
+        assert.equal(response.errorEvent, undefined);
+        assert.equal(response.findByType('agent_handoff')?.runId, runId);
+        assert.equal(response.streamedContent, '');
+        assert.equal(captured.goal, '阅读附件并交付PDF');
+        assert.equal(captured.metadata.capabilityConstraints.requireSourceBeforeTools, true);
+        assert.deepEqual(captured.metadata.requiredSourceMessages, [captured.metadata.chatBridge.userMessageId]);
+        const tool = { name: 'document.render', source: 'builtin', capabilities: ['document.render'], idempotent: true, risk: 'low', input_schema: { type: 'object' } };
+        const policy = metadata => evaluateToolPolicy({ run: { metadata }, tool, user: fixture.user, allowApproval: true });
+        assert.ok(policy(captured.metadata).reasonCodes.includes('conversation_source_incomplete'));
+        let offset = 0, received = '';
+        do {
+            const page = await executeChatSource({ offset, limit: 8000 }, fixture.user, { run: { id: runId } });
+            received += page.text; offset = page.nextOffset;
+        } while (offset !== null);
+        assert.equal(received, content);
+        const stored = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId]);
+        assert.equal(policy(stored.metadata).reasonCodes.includes('conversation_source_incomplete'), false);
+        await assert.rejects(executeChatSource({}, { id: fixture.userId + 1000000 }, { run: { id: runId } }), error => error.code === 'CHAT_SOURCE_REVOKED');
+    } finally { await route.close(); await upstream.close(); fixture.cleanup(); }
+});
+
+test('任务目标校验失败明确返回错误，不再回退普通聊天流', async () => {
+    const upstream = await startFakeUpstream({ intentDecision: { action: 'agent_run', objective: '制作报告', requiredCapabilities: ['document.render'], routing: { knowledge: 'none', tools: 'task' } } });
+    const fixture = createChatFixture({ prefix: 'handoff_rejected', upstreamUrl: upstream.url });
+    const route = await startChatRouteServer({ fixture, agentExecutionEnabled: true, isRagEnabled: () => false,
+        agentRunFactory: async () => { throw Object.assign(new Error('目标超出当前任务范围，请拆分后重试。'), { code: 'AGENT_GOAL_TOO_LONG' }); } });
+    try {
+        const response = await postChat(route.port, { sessionId: fixture.sessionId, modelId: fixture.modelId, content: '请生成可下载的PDF报告', chatMode: 'normal' });
+        assert.equal(response.errorEvent?.code, 'AGENT_GOAL_TOO_LONG');
+        assert.equal(response.streamedContent, '');
+        assert.equal(response.findByType('agent_handoff'), undefined);
+    } finally { await route.close(); await upstream.close(); fixture.cleanup(); }
+});
+
+test('真实聊天续接携带新知识库选择，运行和控制消息均改用新专题', async () => {
+    const { queryOne, execute } = require('../server/db/client');
+    let runId = '';
+    const upstream = await startFakeUpstream({ handler: (req, res) => {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const input = JSON.parse(body || '{}');
+            const intent = input.messages?.some(message => String(message.content).includes('你是对话下一步决策器'));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ choices: [{ message: { content: intent ? JSON.stringify({ action: 'continue_run', continuationOf: runId,
+                objective: '依据新专题继续总结制度', requiredCapabilities: ['knowledge.search'], routing: { knowledge: 'required', tools: 'task' } }) : '合成回复' } }] }));
+        });
+    } });
+    const fixture = createChatFixture({ prefix: 'knowledge_continuation_http', upstreamUrl: upstream.url });
+    runId = `knowledge-http-${fixture.sessionId}`;
+    const first = await queryOne("INSERT INTO knowledge_collections (user_id,name,scope) VALUES (?,'原专题','personal') RETURNING id", [fixture.userId]);
+    const second = await queryOne("INSERT INTO knowledge_collections (user_id,name,scope) VALUES (?,'新专题','personal') RETURNING id", [fixture.userId]);
+    await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata) VALUES (?,?,?,'汇总制度','汇总制度','running',?)", [runId, fixture.userId, fixture.sessionId,
+        JSON.stringify({ chatBridge: { version: 1, ragEnabled: true, ragScope: { collectionIds: [Number(first.id)] }, ragContext: '旧专题内容' }, capabilityConstraints: { present: true, capabilities: ['knowledge.search'] } })]);
+    const route = await startChatRouteServer({ fixture, agentExecutionEnabled: true, isRagEnabled: () => false });
+    try {
+        const response = await postChat(route.port, { sessionId: fixture.sessionId, modelId: fixture.modelId, content: '@新专题 仅根据这个专题继续总结制度',
+            chatMode: 'normal', ragEnabled: true, ragPreference: 'auto', routeOverrides: { collections: [Number(second.id)] } });
+        assert.equal(response.errorEvent, undefined);
+        assert.match(response.events.find(event => event.type === 'message_saved' && event.role === 'assistant')?.content || '', /交给当前任务继续处理/);
+        const saved = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [runId]);
+        assert.deepEqual(saved.metadata.chatBridge.ragScope.collectionIds, [Number(second.id)]);
+        assert.equal(saved.metadata.chatBridge.ragContext, '');
+        const control = await queryOne('SELECT payload FROM agent_control_messages WHERE to_run_id = ?', [runId]);
+        assert.deepEqual(control.payload.knowledgeScope.collectionIds, [Number(second.id)]);
+    } finally {
+        await route.close(); await upstream.close();
+        await execute('DELETE FROM agent_control_messages WHERE to_run_id = ?', [runId]);
+        await execute('DELETE FROM knowledge_collections WHERE id IN (?,?)', [first.id, second.id]);
+        fixture.cleanup();
+    }
+});
+
 for (const [label, instruction, preference] of [
     ['普通附件分析', '请分析上传的文档，概括重点和风险。', 'auto'],
     ['明确禁止知识库', '请分析上传的文档，不检索知识库。', 'enabled'],

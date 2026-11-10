@@ -2,6 +2,7 @@
 
 const { getConversationTasks } = require('./chat-task-continuation');
 const { recordChatRouteCorrection, correctionRetrievalQuery } = require('./chat-route-correction');
+const { PAUSABLE_STATUSES } = require('./agent-validators');
 
 async function applyChatRouteCorrection({ correction, intentPrompt, sessionId, userId, user, userMessageId, signal, sessionsRepository, log, writeSse }, deps = {}) {
     let history = [];
@@ -36,7 +37,7 @@ async function applyChatRouteCorrection({ correction, intentPrompt, sessionId, u
             const paused = await (deps.pauseAgentRun || require('./agent-runtime').runs.pauseAgentRun)(task.id, user);
             if (!paused) throw new Error('纠正对象已经不可用');
             if (paused.status === 'needs_input') applied.pausedRunIds.push(task.id);
-            else if (/^(?:queued|planning|running|executing|observing|diagnosing|replanning|resuming)$/.test(paused.status)) throw new Error('暂停尚未确认');
+            else if (PAUSABLE_STATUSES.has(paused.status)) throw new Error('暂停尚未确认');
         }
     } catch (error) {
         if (signal?.aborted) throw error;

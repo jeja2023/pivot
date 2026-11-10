@@ -6,6 +6,8 @@ const { resolveChatRequestScope, constrainChatDecision, capabilityAllowedByReque
 const { resolveChatProject } = require('./chat-preference-context');
 const { resolveChatAgentBudget } = require('./agent-token-policy');
 const { AGENT_DEFAULT_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS } = require('./agent-runtime/runtime-env');
+const { normalizeAgentGoal, MAX_CHAT_AGENT_GOAL_LENGTH } = require('./agent-validators');
+const { currentUserText } = require('./chat-request-constraints');
 const {
     buildChatAgentMetadata,
     normalizeChatHistory,
@@ -41,6 +43,10 @@ async function createChatAgentHandoff({
     requestKey = ''
 } = {}) {
     if (typeof agentRunFactory !== 'function') throw new Error('Agent 运行时尚未初始化。');
+    const automatic = automaticExecution?.action === 'agent_run';
+    const goal = normalizeAgentGoal(automatic ? automaticExecution.objective || currentUserText(modelContent) : modelContent, { maxLength: MAX_CHAT_AGENT_GOAL_LENGTH });
+    const requiresSourceRead = automatic && modelContent.length > MAX_CHAT_AGENT_GOAL_LENGTH;
+    if (requiresSourceRead && !(Number(userMessageId) > 0)) throw Object.assign(new Error('原始资料尚未保存，请重新发送后重试。'), { code: 'CHAT_SOURCE_REQUIRED' });
     const requestScope = resolveChatRequestScope(modelContent, { routeOverrides, ragEnabled, ragScope, ...(automaticExecution?.requestScope || {}) });
     if (automaticExecution) automaticExecution = constrainChatDecision(automaticExecution, requestScope);
     const knowledgeSelected = Boolean(routeOverrides.collections?.length || routeOverrides.tagNames?.length);
@@ -65,7 +71,6 @@ async function createChatAgentHandoff({
         retrieveContext,
         isRagEnabled
     });
-    const automatic = automaticExecution && automaticExecution.action === 'agent_run';
     // 明确的自然语言委托可授权系统使用已有权限的能力。
     // Agent 运行时在执行前仍会依据策略和审批要求对每个候选工具进行评估。
     const requestedTools = routeOverrides.tools?.length ? routeOverrides.tools
@@ -92,13 +97,13 @@ async function createChatAgentHandoff({
         conversationTaskId,
         projectId: project.projectId,
         conversationMessageIds: [userMessageId].filter(Boolean),
-        requiredSourceMessages: automatic && modelContent.length > 12000 ? [userMessageId] : [],
+        requiredSourceMessages: requiresSourceRead ? [userMessageId] : [],
         capabilityConstraints: { excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb, excludeData: requestScope.excludeData === true, sourceOnly: requestScope.sourceOnly },
         ...(automatic ? {
             capabilityConstraints: { present: true, capabilities, excludeKnowledge: requestScope.excludeKnowledge, excludeWeb: requestScope.excludeWeb,
-                excludeData: requestScope.excludeData === true, sourceOnly: requestScope.sourceOnly, requireSourceBeforeTools: automaticExecution.inputContext?.complete === false, authorizationRef, budgetRef, sourceMessageId: userMessageId },
+                excludeData: requestScope.excludeData === true, sourceOnly: requestScope.sourceOnly, requireSourceBeforeTools: requiresSourceRead || automaticExecution.inputContext?.complete === false, authorizationRef, budgetRef, sourceMessageId: userMessageId },
             taskContract: {
-                goal: automaticExecution.objective || modelContent,
+                goal,
                 constraints: automaticExecution.constraints || [],
                 businessScope: automaticExecution.businessScope || {},
                 deliverables: automaticExecution.deliverables?.length ? automaticExecution.deliverables : [automaticExecution.objective || visibleContent],
@@ -163,7 +168,7 @@ async function createChatAgentHandoff({
     const run = await agentRunFactory({
         user,
         chatAgent: true,
-        goal: automatic ? automaticExecution.objective || modelContent : modelContent,
+        goal,
         modelId: modelCfg.id,
         sessionId,
         title: visibleContent || modelContent,

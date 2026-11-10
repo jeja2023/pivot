@@ -19,12 +19,14 @@ function observationKey(item) {
 async function loadVerificationEvidence(runId, user, observations = [], deps = {}) {
     const visited = new Set(), ancestry = new Set();
     const persisted = [];
+    let currentRun;
     async function loadRunEvidence(id) {
         if (ancestry.has(id)) throw incomplete('核验续跑记录存在循环。');
         if (visited.has(id)) return;
         if (visited.size >= 128) throw incomplete('核验续跑记录超过读取范围。');
         visited.add(id); ancestry.add(id);
         const run = await (deps.run || runs.getRunForUser)(id, user.id);
+        if (id === runId) currentRun = run;
         if (!run || run.deleted_at) throw incomplete('核验任务不存在或无权访问。');
         await (deps.assertAccess || require('./knowledge-run-access').assertRunKnowledgeAccess)(id, user, deps);
         const metadata = parseJsonObject(run.metadata) || {};
@@ -77,8 +79,11 @@ async function loadVerificationEvidence(runId, user, observations = [], deps = {
             persisted.push(record);
         }
         const controls = await (deps.controls || require('../repositories/agent-verification-records').listVerificationControls)(id, user.id);
-        for (const row of controls) persisted.push({ type: 'agent_control', sourceRunId: id, messageId: row.message_id,
-            messageType: row.message_type, observedAt: row.applied_at, fromRunId: row.from_run_id || '', payload: parseJsonObject(row.payload) || {} });
+        for (const row of controls) {
+            const current = require('./chat-task-knowledge-scope').currentKnowledgeControlMessage({ ...row, payload: parseJsonObject(row.payload) || {} }, metadata);
+            persisted.push({ type: 'agent_control', sourceRunId: id, messageId: row.message_id,
+                messageType: row.message_type, observedAt: row.applied_at, fromRunId: row.from_run_id || '', payload: current.payload });
+        }
         const current = persisted.splice(startIndex);
         current.sort((left, right) => new Date(left.observedAt || 0).getTime() - new Date(right.observedAt || 0).getTime());
         persisted.push(...current);
@@ -97,7 +102,7 @@ async function loadVerificationEvidence(runId, user, observations = [], deps = {
     if (persisted.length > MAX_RECORDS || Buffer.byteLength(JSON.stringify(persisted), 'utf8') > 32 * 1024 * 1024) {
         throw incomplete('核验执行记录超过本次读取容量。', 'VERIFICATION_CONTEXT_LIMIT');
     }
-    return persisted;
+    return persisted.map(item => require('./chat-knowledge-revision').projectKnowledgeObservation(item, currentRun));
 }
 
 module.exports = { loadVerificationEvidence };

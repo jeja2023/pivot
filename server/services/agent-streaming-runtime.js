@@ -152,7 +152,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             !chatContext?.longTermMemoryContext && chatAgent?.memoryContext ? { role: 'user', content: typeof chatAgent.memoryContext === 'object' ? String(chatAgent.memoryContext.content || '') : String(chatAgent.memoryContext) } : null,
             chatAgent?.ragContext ? { role: 'user', content: typeof chatAgent.ragContext === 'object' ? String(chatAgent.ragContext.content || '') : String(chatAgent.ragContext) } : null
         ].filter(Boolean);
-        const workingStateMessage = chatContext?.taskWorkingState ? contextMessages[0] : null;
+        let workingStateMessage = chatContext?.taskWorkingState ? contextMessages[0] : null;
         const resumeContext = deps.getRunMetadata?.(run)?.resumeContext;
         if (resumeContext?.previousError || resumeContext?.previousAnswer) {
             contextMessages.push({ role: 'user', content: `PIVOT_PREVIOUS_RESULT_BEGIN\n以下为上次执行结果和验收反馈，仅作续跑参考。结合本轮新指令修复缺口，不要重复已经完成的工作。\n${JSON.stringify({ answer: resumeContext.previousAnswer || '', error: resumeContext.previousError || '' })}\nPIVOT_PREVIOUS_RESULT_END` });
@@ -186,12 +186,22 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         roundsUsed = lastStep;
         let capabilityRecorded = false;
         let budgetHint = null;
+        let planningKnowledgeRevision = 0;
         for (let step = lastStep + 1; step <= sliceEndStep; step += 1) {
             await require('./agent-runtime/execution-budget').beginPlanningRound(taskBudget);
             roundsUsed = step;
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
             await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+            const plannedKnowledgeRevision = require('./chat-knowledge-revision').knowledgeScopeRevision(run);
+            if (plannedKnowledgeRevision !== planningKnowledgeRevision) {
+                const metadata = require('./agent-validators').parseJsonObject(run.metadata) || {};
+                workingStateMessage = { role: 'user', content: require('./agent-working-state').buildWorkingStatePrompt(metadata.workingState || {}, { coveredGoal: run.goal }) };
+                conversation.splice(1, conversation.length - 1, workingStateMessage, ...observationMessages(observations),
+                    { role: 'user', content: `资料范围已更新，仅使用当前范围重新检索并完成任务。${JSON.stringify(metadata.chatKnowledgeScope.scope)}` });
+                budgetHint = null;
+                planningKnowledgeRevision = plannedKnowledgeRevision;
+            }
             const controlMessages = await deps.pollAgentControlMessages?.(runId, user, { limit: 20 });
             if (taskBudget?.planningHint) {
                 if (budgetHint) budgetHint.content = taskBudget.planningHint();
@@ -518,6 +528,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 contextHash: stepContext?.contextHash || ''
             });
 
+            await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+            if (require('./chat-knowledge-revision').knowledgeScopeRevision(run) !== plannedKnowledgeRevision) continue;
             if (!result?.hasToolCalls) {
                 finalizingAnswer = true;
                 if (taskBudget) taskBudget.phase = 'finalization';
@@ -532,6 +544,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 answer = require('./knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+                if (require('./chat-knowledge-revision').knowledgeScopeRevision(run) !== plannedKnowledgeRevision) {
+                    finalizingAnswer = false;
+                    if (taskBudget) taskBudget.phase = 'execution';
+                    continue;
+                }
                 if (verification.repair?.allowed) {
                     const metadata = deps.getRunMetadata?.(run) || {};
                     run.metadata = { ...metadata, taskContract: verification.taskContract };
@@ -644,6 +661,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const callStart = Date.now();
                 await assertRunNotCancelled(runId);
                 await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+                if (require('./chat-knowledge-revision').knowledgeScopeRevision(run) !== plannedKnowledgeRevision) {
+                    throw Object.assign(new Error('资料范围已更新，正在重新规划本轮操作。'), { code: 'CHAT_KNOWLEDGE_SCOPE_CHANGED' });
+                }
                 assertRunWithinBudget();
                 const toolSpanId = await deps.startAgentTraceSpan?.(runId, {
                     type: 'tool',
@@ -757,6 +777,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     continue;
                 }
                 const toolErr = executed.error || new Error('工具执行失败');
+                if (toolErr.code === 'CHAT_KNOWLEDGE_SCOPE_CHANGED') {
+                    conversation.push(buildToolResultMessage(call.id, { executed: false, message: toolErr.message }));
+                    continue;
+                }
                 const inputFeedback = require('./tool-input-validation').toolInputFeedback(toolErr);
                 const failureOutput = { error: toolErr.message, code: toolErr.code, reasonCodes: toolErr.details?.reasonCodes, ...(inputFeedback || {}) };
                 observations.push({ step, tool: call.name, input: args, error: toolErr.message, ...(inputFeedback ? { output: inputFeedback } : {}) });

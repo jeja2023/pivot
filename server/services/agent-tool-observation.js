@@ -13,8 +13,10 @@ async function prepareToolObservation({ run, user, tool, output, modelCfg, compa
             if (reference) preview = attachWorkingMemoryOutputReference(preview, reference);
         } catch (error) { preview = { ...preview, rawOutputStorageError: String(error.message || '原文存储失败').slice(0, 240) }; }
     }
-    const summaries = require('./agent-tool-output-context').observationSummaries(preview);
     const metadata = await (deps.updateMetadata || require('./agent-run-metadata-patch').updateAgentRunMetadataWithRetry)(run.id, current => {
+        const projected = require('./chat-knowledge-revision').projectKnowledgeObservation({ output }, { ...run, metadata: current });
+        if (projected.output?.knowledgeScopeSuperseded) return current;
+        const summaries = require('./agent-tool-output-context').observationSummaries(preview);
         let state = current.workingState;
         for (const item of summaries) state = recordWorkingObservation(state, {
             tool: item.tool || tool, output: { ...item.output, rawOutputRef: preview?.rawOutputRef, rawOutputDigest: preview?.rawOutputDigest }, summary: item.summary
@@ -28,7 +30,8 @@ async function prepareToolObservation({ run, user, tool, output, modelCfg, compa
         await (deps.persistRevision || require('./agent-working-memory-revisions').persistWorkingMemoryRevision)({ run, user,
             state: metadata.workingState, taskContract: metadata.taskContract, reason: 'tool_observation' });
     }
-    return preview;
+    return require('./chat-knowledge-revision').projectKnowledgeObservation({ output: preview,
+        knowledgeEvidence: require('./knowledge-evidence-lineage').mergeKnowledgeEvidence(output) }, run).output;
 }
 
 module.exports = { prepareToolObservation };

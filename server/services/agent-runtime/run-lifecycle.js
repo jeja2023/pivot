@@ -1,5 +1,6 @@
 const { isPersistedDagOutputPartial, resolvePersistedDagOutput } = require('../agent-dag-output');
 const { transaction: dbTransaction } = require('../../db/client');
+const { PAUSABLE_STATUSES } = require('../agent-validators');
 
 function createRunLifecycle(deps = {}) {
 const {
@@ -107,12 +108,11 @@ async function pauseAgentRun(runId, user) {
     if (!run) return null;
     // `needs_input` 是既有的、可从检查点续跑的非终态。只暂停真正还在执行
     // 的阶段；审批和提交边界本来就在等待用户，不能被伪装成另一种暂停。
-    const pausableStatuses = new Set(['queued', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'running', 'resuming']);
-    if (!pausableStatuses.has(String(run.status || ''))) return run;
+    if (!PAUSABLE_STATUSES.has(String(run.status || ''))) return run;
     const pauseError = new Error('智能体运行已由用户暂停，可从安全检查点续跑。');
     pauseError.code = 'AGENT_RUN_PAUSED';
     const now = getBeijingTimestamp();
-    const changed = await updateRunCas(runId, [...pausableStatuses], {
+    const changed = await updateRunCas(runId, [...PAUSABLE_STATUSES], {
         status: 'needs_input',
         error_message: '智能体运行已由用户暂停，可从安全检查点续跑。',
         updated_at: now,

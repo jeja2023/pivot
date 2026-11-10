@@ -14,6 +14,7 @@ const { executeAutomaticModelFailover } = require('./model-failover');
 const { recordPlannerModelEvent } = require('./planning-lifecycle');
 const { resolveApprovalKey } = require('../agent-approval-grants');
 const { prepareExecutionBudget, beginPlanningRound } = require('./execution-budget');
+const { knowledgeScopeRevision } = require('../chat-knowledge-revision');
 
 function createAgentRunner(deps = {}) {
 const {
@@ -363,6 +364,7 @@ const {
         let previousWorldState = null;
         const sliceEndStep = stopReason ? roundsUsed : roundsUsed + taskBudget.remainingSegmentRounds();
         let lastExecutedStep = roundsUsed;
+        let planningKnowledgeRevision = 0;
         for (let step = roundsUsed + 1; step <= sliceEndStep; step += 1) {
             lastExecutedStep = step;
             await beginPlanningRound(taskBudget);
@@ -370,6 +372,14 @@ const {
             assertRunWithinBudget();
             await assertRunNotCancelled(runId);
             await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+            const plannedKnowledgeRevision = knowledgeScopeRevision(run);
+            if (plannedKnowledgeRevision !== planningKnowledgeRevision) {
+                runtimeMetadata = getRunMetadata(run);
+                plannerChatHistory = [];
+                taskWorkingState = runtimeMetadata.workingState || null;
+                Object.assign(plannerChatContext, { chatHistory: [], chatAgent: runtimeMetadata.chatBridge, taskWorkingState });
+                planningKnowledgeRevision = plannedKnowledgeRevision;
+            }
             await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
             const claimedControlMessages = await claimAgentControlMessages(runId, user, { limit: 20 });
             const controlMessages = claimedControlMessages.length && typeof applyAgentControlMessages === 'function'
@@ -606,6 +616,8 @@ const {
             });
             if (!plannedUsageResult?.budgetExceeded) taskBudget.assertWithin();
             await assertRunNotCancelled(runId);
+            await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+            if (knowledgeScopeRevision(run) !== plannedKnowledgeRevision) continue;
             const plan = parseJsonObject(plannedText) || {};
             await insertStep(runId, step, {
                 type: 'plan',
@@ -647,6 +659,7 @@ const {
                 answer = require('../knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+                if (knowledgeScopeRevision(run) !== plannedKnowledgeRevision) { taskBudget.phase = 'execution'; continue; }
                 if (verification.repair?.allowed) {
                     taskBudget.phase = 'execution';
                     taskContract = verification.taskContract;
@@ -700,6 +713,7 @@ const {
                 await assertRunUserActive(user);
                 await assertRunNotCancelled(runId);
                 await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
+                if (knowledgeScopeRevision(run) !== plannedKnowledgeRevision) continue;
                 assertRunWithinBudget();
                 await updateRun(runId, { last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
                 const selectedTool = progressiveExecution.approvalTool;
@@ -910,6 +924,7 @@ const {
                         user,
                         currentModel: modelCfg,
                         messages: [{ role: 'user', content: run.goal || '' }],
+                        endpointStatusGetter: getModelEndpointRuntimeStatus,
                         taskType: require('../agent-model-quality').inferTaskType(run)
                     });
                     if (escalation) {
