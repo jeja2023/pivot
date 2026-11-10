@@ -90,12 +90,14 @@ async function verifyAutomaticTaskWithModel({ run, user, contract, answer, obser
 async function verifyAutomaticTask(input, deps = {}) {
     input.signal?.throwIfAborted();
     let model = null;
+    try {
+        model = await (deps.getModel || getRunnableModelForUserAsync)(input.run?.chosen_model_id || input.run?.model_id, input.user);
+    } catch (_) {
+        // 模型获取失败时不阻断前置硬性断言校验
+    }
     const result = await verifyAutomaticTaskWithModel(input, {
         ...deps,
-        getModel: async (...args) => {
-            model = await (deps.getModel || getRunnableModelForUserAsync)(...args);
-            return model;
-        }
+        ...(model ? { getModel: async () => model } : {})
     });
     const identity = require('./agent-model-quality').modelQualityIdentity(model || {});
     return identity ? { ...result, modelIdentity: identity } : result;

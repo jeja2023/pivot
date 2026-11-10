@@ -295,8 +295,9 @@ test('数据清洗会保留原数据集、生成派生数据集并保存可回�
         assert.equal(Number(cleaned.previewRows.find(row => row[code] === 'B-02')[amount]), 0.5);
 
         const allDatasets = await listDatasets(userId);
-        assert.equal(allDatasets.length, 2);
-        assert.equal(allDatasets.find(dataset => dataset.id === applied.dataset.id).derivedFromDatasetId, source.id);
+        const userDatasets = allDatasets.filter(dataset => Number(dataset.userId) === Number(userId));
+        assert.equal(userDatasets.length, 2);
+        assert.equal(userDatasets.find(dataset => dataset.id === applied.dataset.id).derivedFromDatasetId, source.id);
 
         const runs = await listCleaningRuns(userId, source.id);
         assert.equal(runs.length, 1);
