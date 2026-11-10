@@ -33,8 +33,8 @@ const input = { title: '文档生成的经营汇报', slides: [
 
 test('PPTX 与 SVG 有可发现的独立工具，普通文档图片转换不会冒充完整 PPT', () => {
     const tools = getBuiltInToolDefinitions();
-    for (const name of ['presentation.create', 'presentation.export', 'diagram.render_svg']) assert.ok(tools.some(tool => tool.name === name), name);
-    for (const name of ['presentation.create', 'presentation.export', 'diagram.render_svg']) {
+    for (const name of ['presentation.create', 'presentation.from_analysis', 'presentation.export', 'diagram.render_svg']) assert.ok(tools.some(tool => tool.name === name), name);
+    for (const name of ['presentation.create', 'presentation.from_analysis', 'presentation.export', 'diagram.render_svg']) {
         const contract = require('../server/services/agent-contracts').normalizeToolContract(tools.find(tool => tool.name === name));
         assert.equal(contract.side_effect, true); assert.equal(contract.concurrency, 'write');
         const visible = require('../server/services/agent-tool-discovery-scope').filterRunToolCatalog([contract], { metadata: { chatBridge: { mcpEnabled: false } } });

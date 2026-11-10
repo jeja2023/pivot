@@ -1,7 +1,7 @@
 'use strict';
 
 const { biError } = require('./errors');
-const { validateUserSql } = require('../query-pivot');
+const { validateUserSql } = require('../sql-validation');
 
 const FLOW_SQL_BLOCKLIST = /\b(ATTACH|DETACH|COPY|INSTALL|LOAD|PRAGMA|SET|RESET|EXPORT|IMPORT|CREATE|INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CALL|EXECUTE|PREPARE|read_csv|read_csv_auto|read_parquet|read_json|read_json_auto|read_text|read_blob|parquet_scan|glob|system|getenv|current_setting|duckdb_\w+| pragma_\w+)\b/i;
 
@@ -136,7 +136,7 @@ function validateFlowExpression(rawExpression, knownColumns = null) {
 
 function validateFlowCustomSql(rawSql) {
     try {
-        const validated = validateUserSql(rawSql);
+        const validated = validateUserSql(rawSql, { maxLength: 6000 });
         const stripped = stripQuotedLiteralsAndIdents(validated);
         if (FLOW_SQL_BLOCKLIST.test(stripped)) {
             invalidFlow('自定义 SQL 包含不允许的关键字，仅支持对上游输入表的只读 SELECT / WITH 查询。');

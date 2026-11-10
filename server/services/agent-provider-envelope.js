@@ -3,7 +3,7 @@ const PRIVATE_KEY_RE = /^(?:metadata|context|policy|approval|sandbox|lease|crede
 const MESSAGE_KEYS = new Set([
     'role', 'content', 'name', 'tool_call_id', 'tool_calls', 'function_call',
     'audio', 'refusal', 'prefix', 'type', 'id', 'call_id', 'name', 'arguments',
-    'output', 'status', 'summary'
+    'output', 'status', 'summary', 'encrypted_content'
 ]);
 
 function sanitizeContentPart(part) {
@@ -11,6 +11,7 @@ function sanitizeContentPart(part) {
     const result = {};
     if (part.type !== undefined) result.type = part.type;
     if (part.text !== undefined) result.text = part.text;
+    if (part.type === 'input_image' && typeof part.image_url === 'string') result.image_url = part.image_url;
     if (part.refusal !== undefined) result.refusal = part.refusal;
     if (part.image_url && typeof part.image_url === 'object') {
         result.image_url = {

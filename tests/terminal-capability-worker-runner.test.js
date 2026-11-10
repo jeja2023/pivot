@@ -9,6 +9,13 @@ const test = require('node:test');
 
 const runner = path.resolve(__dirname, '..', 'docker', 'capability-workers', 'terminal-runner', 'runner.js');
 
+test('终端 Runner 复用主镜像完整工具，并以非 root 身份检查协议入口', () => {
+    const dockerfile = fs.readFileSync(path.join(path.dirname(runner), 'Dockerfile'), 'utf8').replace(/\\\r?\n/g, ' ');
+    assert.match(dockerfile, /^ARG BASE_IMAGE=pivot:latest/m);
+    assert.doesNotMatch(dockerfile, /apt-get/);
+    assert.match(dockerfile, /USER node\s+RUN node --version && python3 --version && git --version && rg --version && node --check \/runner\/runner\.js/);
+});
+
 function runTerminalWorker(workspace, input) {
     return new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [runner], {

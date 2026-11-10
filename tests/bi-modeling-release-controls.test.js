@@ -71,7 +71,7 @@ test('统一分析接纳和领取受服务端及数据库保护，停止接纳�
     await runner.executeJob(claimed);
     assert.equal((await jobs.getModelCheck(user, model.id, created.check.id)).status, 'passed');
     const status = await controls.overview(admin); assert.equal(status.workload.idle, true);
-    const resumed = await action(admin, 'resume'); assert.equal(resumed.resumed, true); assert.equal(resumed.readiness.schema.schemaVersion, '202611070013');
+    const resumed = await action(admin, 'resume'); assert.equal(resumed.resumed, true); assert.equal(resumed.readiness.schema.schemaVersion, '202611090001');
     assert.equal((await repository.state()).admissionEnabled, true);
 }));
 

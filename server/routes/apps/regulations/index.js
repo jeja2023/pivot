@@ -10,6 +10,7 @@ function createRegulationsRouter({ authMiddleware, logAction, uploadLimiter, upl
     registerDocumentRoutes(router, deps);
     registerArticleRoutes(router, deps);
     registerAiRoutes(router, deps);
+    require('./reviews').registerReviewRoutes(router, deps);
 
     return router;
 }

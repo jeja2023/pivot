@@ -8,6 +8,8 @@ const ignoredDirs = new Set([
     'node_modules',
     // 构建产物含固定的第三方发行包及Python环境，文本门禁只检查项目源码。
     'artifacts',
+    // 运行证据包含冻结源码与模型原始载荷，按生成归档保留，不重复当作当前源码检查。
+    'output',
     '.venv-speech',
     'data',
     'logs',

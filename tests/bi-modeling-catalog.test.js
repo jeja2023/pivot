@@ -133,3 +133,27 @@ test('旧探索仍按范围可见，共享正式草稿不进入目录，草稿�
         assert.ok(revisions.length);
     });
 }));
+test('模型目录在二百条之后仍可按名称检索、稳定分页并返回真实筛选总数', { timeout: 90000 }, async () => fixture(async ({ user, model, fact }) => {
+    await confirmFixtureWrite(`INSERT INTO analysis_data_models(id,user_id,name,description,version,model_kind,definition_json,semantic_hash,business_owner,maintenance_contact,updated_at)
+        SELECT ?||n,?,'目录模型'||n,'分页样例',version,model_kind,definition_json,semantic_hash,business_owner,maintenance_contact,NOW()-n*INTERVAL '1 second'
+        FROM analysis_data_models CROSS JOIN generate_series(1,220) n WHERE id=?`, [`${model.id}_page_`, user.id, model.id]);
+    const directory = input => service.listDataModels(user, { page: 1, limit: 10, ...input });
+    const first = await directory({});
+    assert.equal(first.total, 221); assert.equal(first.models.length, 10);
+    await delivery.consume(first, value => { assert.equal(value.models.length, 10); });
+    await execute('UPDATE analysis_data_models SET updated_at=NOW() WHERE id=?', [model.id]);
+    const fractional = await directory({ search: model.name });
+    await delivery.consume(fractional, value => { assert.equal(value.total, 1); });
+    const second = await directory({ page: 2 });
+    assert.equal(new Set([...first.models, ...second.models].map(item => item.id)).size, 20);
+    const last = await directory({ search: '目录模型220' });
+    assert.equal(last.total, 1); assert.equal(last.models[0].id, `${model.id}_page_220`);
+    assert.equal((await directory({ page: 23 })).models.length, 1);
+    assert.equal((await directory({ ownership: 'shared' })).total, 0);
+    assert.equal((await directory({ lifecycle: 'published' })).total, 0);
+    assert.equal((await directory({ availability: 'available' })).total, 221);
+    await execute('UPDATE analysis_datasets SET deleted_at=NOW() WHERE id=?', [fact.id]);
+    assert.equal((await directory({ availability: 'available' })).total, 0);
+    assert.equal((await directory({ availability: 'source_unavailable' })).total, 221);
+    for (const input of [{ page: 0 }, { limit: 201 }, { ownership: 'invalid' }, { search: 'x'.repeat(121) }]) await assert.rejects(directory(input), error => error.code === 'ANALYSIS_MODEL_INPUT_INVALID');
+}));

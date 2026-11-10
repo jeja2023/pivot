@@ -91,6 +91,11 @@ function createRemoteService(deps) {
         if (!row) return null;
         const content = parseJson(row.content_json, null);
         if (!content) return null;
+        if (require('./presentation-analysis-sources').analysisSources(content).length) {
+            const owner = await require('../data-analysis/shared').resolveAnalysisUser(row.owner_user_id);
+            if (!owner) return null;
+            await require('./presentation-analysis-sources').assertAnalysisSources(content, owner);
+        }
         const publicContent = remotePublicContent(content);
         return {
             presentationId: row.client_id,
@@ -108,7 +113,7 @@ function createRemoteService(deps) {
         const objectId = parseCasRef(ref);
         if (!objectId) return null;
         const row = await queryOne(`
-            SELECT rs.tenant_id, COALESCE(d.content_json, v.content_json) AS content_json, a.object_id, a.mime_type, a.filename
+            SELECT rs.tenant_id, rs.owner_user_id, COALESCE(d.content_json, v.content_json) AS content_json, a.object_id, a.mime_type, a.filename
             FROM presentation_remote_sessions rs
             JOIN presentation_documents d ON d.id = rs.presentation_id AND d.deleted_at IS NULL
             LEFT JOIN presentation_versions v ON v.presentation_id = d.id AND v.version = d.current_version
@@ -116,6 +121,12 @@ function createRemoteService(deps) {
             WHERE rs.token_hash = ? AND rs.status = 'active' AND rs.expires_at > NOW() LIMIT 1
         `, [objectId, hash]);
         if (!row || !collectPresentationAssetRefs(parseJson(row.content_json, {})).includes(buildCasRef(objectId))) return null;
+        const content = parseJson(row.content_json, {});
+        if (require('./presentation-analysis-sources').analysisSources(content).length) {
+            const owner = await require('../data-analysis/shared').resolveAnalysisUser(row.owner_user_id);
+            if (!owner) return null;
+            await require('./presentation-analysis-sources').assertAnalysisSources(content, owner);
+        }
         const loaded = await readBuffer({ objectId: row.object_id, tenantId: row.tenant_id, tenantScoped: true });
         return { buffer: loaded.buffer, mimeType: row.mime_type, filename: row.filename };
     }

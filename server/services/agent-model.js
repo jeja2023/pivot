@@ -1,3 +1,4 @@
+const responsesProtocol = require('./agent-responses-protocol');
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { recordModelTokenUsage, buildThinkingControlPayload, isChatThinkingEnabled } = require('./models');
@@ -174,12 +175,12 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
 
 async function callModelJson(modelCfg, messages, options = {}) {
     return withAgentModelConcurrency(modelCfg, async () => {
-        const providerMessages = toProviderInput(messages);
+        const providerMessages = toProviderInput(await require('./agent-tool-vision').resolveToolVisionMessages(messages, modelCfg, options.user));
         assertProviderSafe(providerMessages);
-        const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        let targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         const temperature = typeof options.temperature === 'number' ? options.temperature : 0.2;
         const maxTokens = budgetedMaxTokens(modelCfg, messages, options);
-        const data = {
+        let data = {
             model: modelCfg.model_name || modelCfg.name,
             messages: createModelToolProtocol([], providerMessages).messages,
             stream: false,
@@ -190,6 +191,12 @@ async function callModelJson(modelCfg, messages, options = {}) {
             data.response_format = options.responseFormat;
         }
         applyAgentThinkingControls(data, modelCfg, options);
+        const responses = responsesProtocol.usesAgentResponses(modelCfg);
+        let responseProtocol;
+        if (responses) {
+            responseProtocol = responsesProtocol.responsesRequest(modelCfg, providerMessages, [], { ...options, maxTokens });
+            targetUrl = responseProtocol.url; data = responseProtocol.data;
+        }
         const response = await forwardChatCompletion({
             modelCfg,
             user: options.user || null,
@@ -201,7 +208,8 @@ async function callModelJson(modelCfg, messages, options = {}) {
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
         const promptCache = extractPromptCacheUsage(usage);
-        const finishReason = String(response.data?.choices?.[0]?.finish_reason || '');
+        const converted = responses ? responsesProtocol.responsesResult(response.data, modelCfg, responseProtocol.protocol) : null;
+        const finishReason = converted?.finishReason || String(response.data?.choices?.[0]?.finish_reason || '');
         if (options.usageRef && typeof options.usageRef === 'object') {
             options.usageRef.usage = usage;
             options.usageRef.promptCache = promptCache;
@@ -214,7 +222,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
         if (usage && typeof options.onUsage === 'function') {
             try { options.onUsage(usage); } catch (_) {}
         }
-        return response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
+        return converted ? converted.content : response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
     }, options);
 }
 
@@ -270,10 +278,13 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             try { options.onProgress?.({ phase, timing: snapshotTiming() }); } catch (_) {}
         };
         try {
-        const providerMessages = toProviderInput(messages);
+        const visionMessages = await require('./agent-tool-vision').resolveToolVisionMessages(messages, modelCfg, options.user);
+        const providerMessages = toProviderInput(visionMessages);
         assertProviderSafe(providerMessages);
         const toolProtocol = createModelToolProtocol(tools, providerMessages);
-        const accumulator = createToolCallAccumulator({ resolveToolName: toolProtocol.canonicalName });
+        const responses = responsesProtocol.usesAgentResponses(modelCfg)
+            ? responsesProtocol.responsesRequest(modelCfg, visionMessages, tools, { ...options, stream: true, maxTokens: budgetedMaxTokens(modelCfg, messages, options, tools) }) : null;
+        const accumulator = responses ? responsesProtocol.responsesAccumulator(modelCfg, responses.protocol) : createToolCallAccumulator({ resolveToolName: toolProtocol.canonicalName });
         const providerState = createProviderEventStateMachine({ onEvent: options.onProviderEvent });
         const payload = {
             model: modelCfg.model_name || modelCfg.name,
@@ -314,13 +325,13 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
                 }
             }
         });
-        const targetUrl = buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        const targetUrl = responses?.url || buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
         const { response, cleanup: cleanupStreamingRequest } = await forwardStreamingWithFirstResponseDeadline({
             modelCfg,
             user: options.user || null,
             url: targetUrl,
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
-            data: payload,
+            data: responses?.data || payload,
         }, options);
         try {
         await new Promise((resolve, reject) => {
@@ -374,7 +385,8 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
         if (provider.usage && typeof options.onUsage === 'function') {
             try { options.onUsage(provider.usage.raw || provider.usage); } catch (_) {}
         }
-        return { ...result, provider, timing: snapshotTiming() };
+        Object.assign(result, { provider, timing: snapshotTiming() });
+        return result;
         } catch (error) {
             if (error?.code === 'ECONNABORTED' && !timing.firstByteAt) {
                 error.code = 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT';

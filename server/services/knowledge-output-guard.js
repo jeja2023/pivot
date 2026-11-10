@@ -3,7 +3,7 @@
 function holdKnowledgeOutput(run = {}, observations = []) {
     let metadata = run.metadata || {};
     if (typeof metadata === 'string') { try { metadata = JSON.parse(metadata); } catch (_) { metadata = {}; } }
-    return Boolean(metadata.chatBridge?.ragContext || metadata.capabilityConstraints?.capabilities?.some(cap => String(cap).startsWith('knowledge.'))
+    return Boolean(metadata.skillResourceEvidence || metadata.parentHistory?.sourceRunId || metadata.goalContinuation || metadata.resumeContext?.sourceRunId || metadata.chatBridge?.ragContext || metadata.capabilityConstraints?.capabilities?.some(cap => String(cap).startsWith('knowledge.'))
         || observations.some(item => ['rag.search', 'knowledge.graph.query'].includes(item.tool) || item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1));
 }
 

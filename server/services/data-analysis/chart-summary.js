@@ -10,7 +10,6 @@ const {
     sqlLiteral,
     withAnalysisSlot,
     duckReadAll,
-    recordArtifact,
     jsonParse,
     serializeDataset,
     isProfileNumberColumn,
@@ -131,8 +130,8 @@ function percentile(values, ratio) {
     return values[lower] + (values[upper] - values[lower]) * (position - lower);
 }
 
-async function recordAdvancedChart({ actor, datasetId, chart, metadata }) {
-    await recordArtifact({ userId: actor.id, datasetId, type: 'chart', title: chart.title, content: JSON.stringify(chart), metadata });
+async function recordAdvancedChart({ actor, row, chart, metadata }) {
+    await require('./chart-snapshot').recordChartSnapshot({ actor, row, chart, metadata });
 }
 
 async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCol, yCol, y2Col, groupCol, aggregation, limit, colorPalette, colors, sortBy, sortOrder }) {
@@ -149,7 +148,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         const series = [{ name: yCol.name, data: rows.map(item => [Number(item.x), Number(item.y)]) }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation: 'raw' }, labels: [], series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
         chart.echartsOption = buildChartOption({ chartType, title, labels: [], series, xName: xCol.name, yName: yCol.name, colors });
-        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        await recordAdvancedChart({ actor, row, chart, metadata });
         return { chart, rows };
     }
     if (chartType === 'boxplot') {
@@ -167,7 +166,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         const series = [{ name: yCol.name, data: entries.map(item => [item.values[0], percentile(item.values, .25), percentile(item.values, .5), percentile(item.values, .75), item.values.at(-1)]) }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation: 'distribution' }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: raw.length, sampled: raw.length >= 20000 } };
         chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol.name, colors });
-        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        await recordAdvancedChart({ actor, row, chart, metadata });
         return { chart, rows: entries };
     }
     const valueExpr = aggregation === 'count' ? 'COUNT(*)' : `${aggregation.toUpperCase()}(${numericValueSql(sqlIdent(yCol.key))})`;
@@ -183,7 +182,7 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         const series = [{ name: yCol.name, axis: 0, data: rows.map(item => Number(item.primary_value) || 0) }, { name: y2Col.name, axis: 1, data: rows.map(item => Number(item.secondary_value) || 0) }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol.key, label: yCol.name, aggregation }, secondaryYAxis: { field: y2Col.key, label: y2Col.name, aggregation }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
         chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol.name, secondaryYName: y2Col.name, colors });
-        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        await recordAdvancedChart({ actor, row, chart, metadata });
         return { chart, rows };
     }
     const rows = await withAnalysisSlot(() => duckReadAll(`
@@ -198,14 +197,14 @@ async function buildAdvancedChart({ actor, row, datasetId, input, chartType, xCo
         const series = [{ name: yCol?.name || '数量', rowLabels, data: values }];
         const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol?.key || '__count__', label: yCol?.name || '数量', aggregation }, groupBy: { field: groupCol.key, label: groupCol.name }, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
         chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: yCol?.name || '数量', secondaryYName: groupCol.name, colors });
-        await recordAdvancedChart({ actor, datasetId, chart, metadata });
+        await recordAdvancedChart({ actor, row, chart, metadata });
         return { chart, rows };
     }
     const groups = groupCol && chartType === 'stacked_bar' ? Array.from(new Set(rows.map(item => String(item.group_label)))).slice(0, 12) : ['value'];
     const series = groups.map(group => ({ name: groupCol ? group : (aggregation === 'count' ? '数量' : yCol?.name || '数值'), data: labels.map(label => Number(rows.find(item => String(item.label) === label && (!groupCol || String(item.group_label) === group))?.value) || 0) }));
     const chart = { type: 'pivot_chart', version: 1, renderer: 'echarts', chartType, title, xAxis: { field: xCol.key, label: xCol.name }, yAxis: { field: yCol?.key || '__count__', label: aggregation === 'count' ? '数量' : yCol?.name || '数值', aggregation }, groupBy: groupCol ? { field: groupCol.key, label: groupCol.name } : null, labels, series, design: { limit, sortBy, sortOrder, colorPalette }, source: { datasetId, rows: row.row_count } };
     chart.echartsOption = buildChartOption({ chartType, title, labels, series, xName: xCol.name, yName: chart.yAxis.label, colors });
-    await recordAdvancedChart({ actor, datasetId, chart, metadata });
+    await recordAdvancedChart({ actor, row, chart, metadata });
     return { chart, rows };
 }
 
@@ -301,12 +300,8 @@ async function buildChart(userId, datasetId, input = {}) {
         yName: chart.yAxis.label,
         colors
     });
-    await recordArtifact({
-        userId: actor.id,
-        datasetId,
-        type: 'chart',
-        title,
-        content: JSON.stringify(chart),
+    await require('./chart-snapshot').recordChartSnapshot({
+        actor, row, chart,
         metadata: { chartType, xField: xCol.key, yField: yCol?.key || '', aggregation, limit, sortBy, sortOrder, colorPalette }
     });
     return { chart, rows };

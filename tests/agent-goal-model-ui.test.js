@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function createGoalUi(loader = async () => ({ models: [{ id: 11, name: '默认模型' }], defaultModelId: 11 })) {
+function createGoalUi(loader = async () => ({ models: [{ id: 11, name: '默认模型' }], defaultModelId: 11 }), projectLoader = null) {
     const nodes = new Map();
     for (const [id, value] of Object.entries({
         'agent-goal-model': '', 'agent-goal-title': '模型绑定测试', 'agent-goal-goal': '检查项目风险并汇总结果',
@@ -17,18 +17,20 @@ function createGoalUi(loader = async () => ({ models: [{ id: 11, name: '默认�
     select.options = [];
     select.replaceChildren = (...options) => { select.options = options; };
     select.appendChild = option => select.options.push(option);
+    if(projectLoader){const project={value:'',disabled:false,options:[],replaceChildren(...values){this.options=values;},append(value){this.options.push(value);}};nodes.set('agent-goal-project',project);}
     const calls = [];
     const notices = [];
     const legacy = { currentUser: { id: 7 }, loadSelectableModels: loader };
     let factory;
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/agent-personal-experience.js'), 'utf8'), {
         API_BASE: '/api',
+        Option: function(label,value){this.textContent=label;this.value=value;},
         document: { getElementById: id => nodes.get(id), createElement: () => ({}) },
         window: { Pivot: { legacy, exposeModule: (_name, api) => { factory = api.create; } } }
     });
     const api = factory({
         state: {}, setNotice: (message, kind) => notices.push({ message, kind }),
-        apiJson: async (url, options) => { calls.push({ url, body: JSON.parse(options.body) }); return {}; }
+        apiJson: async (url, options) => { if(projectLoader&&url.includes('/agents/projects'))return projectLoader(url); calls.push({ url, body: JSON.parse(options.body) }); return {}; }
     });
     return { api, nodes, select, calls, notices, legacy };
 }
@@ -114,4 +116,28 @@ test('持续目标模型的迟到加载不能覆盖新编辑、已关闭弹窗�
     await switched;
     assert.equal(ui.select.disabled, true);
     assert.equal(ui.select.options.length, 1);
+});
+
+
+test('持续目标项目选择拒绝归档绑定，迟到项目列表不能覆盖新编辑或关闭状态', async () => {
+    const pending = [], ui = createGoalUi(undefined, () => new Promise(resolve => pending.push(resolve)));
+    ui.api.setGoalModalMode({ authorizationSpec: { modelId: 11, projectId: 'project-old' } });
+    ui.api.setGoalModalMode({ authorizationSpec: { modelId: 11, projectId: 'project-new' } });
+    pending[1]({ data: [{ id: 'project-new', title: '新项目' }] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.nodes.get('agent-goal-project').value, 'project-new');
+    await ui.api.saveGoal({preventDefault(){}});
+    assert.equal(ui.calls.at(-1).body.authorizationSpec.projectId, 'project-new');
+    pending[0]({ data: [{ id: 'project-old', title: '旧项目' }] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.nodes.get('agent-goal-project').value, 'project-new');
+    ui.api.setGoalModalMode({ authorizationSpec: { modelId: 11, projectId: 'project-archived' } });
+    pending[2]({ data: [] }); await new Promise(resolve => setImmediate(resolve));
+    const before=ui.calls.length;await ui.api.saveGoal({preventDefault(){}});
+    assert.equal(ui.calls.length,before);assert.match(ui.notices.at(-1).message,/项目尚未就绪/);
+    ui.nodes.get('agent-goal-project').value = '';
+    await ui.api.saveGoal({preventDefault(){}});assert.equal(ui.calls.at(-1).body.authorizationSpec.projectId, '');
+    ui.api.setGoalModalMode(null); ui.api.resetGoalModal();
+    pending[3]({ data: [{ id: 'project-late', title: '迟到项目' }] }); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.nodes.get('agent-goal-project').disabled, true);
 });

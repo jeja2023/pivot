@@ -48,7 +48,7 @@ const { getAgentLearningSettings } = require('../agent-learning');
 const SKILL_METADATA_KEYS = Object.freeze([
     'skillConstraints', 'skillPermissions', 'skillCapabilities', 'skillTools',
     'skillContextPresent', 'skillLegacyUnrestricted', 'skillLegacyUnrestrictedUntil',
-    'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto',
+    'skillResourceEvidence', 'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto',
     'skillMatchReason', 'skillMatchScore', 'skillMatchTerms'
 ]);
 const { normalizeModelTaskBudget } = require('../agent-token-policy');
@@ -169,6 +169,7 @@ function createAgentRunFactory(deps = {}) {
         delete runMetadata.projectContextPack;
         const resolvedContext = await resolveAgentContextPack(user, normalizeContextConfig(contextConfig));
         if (resolvedContext.pack) runMetadata.projectContextPack = resolvedContext.pack;
+        if(resolvedContext.contextConfig.projectId)runMetadata.projectId=resolvedContext.contextConfig.projectId;
         // 档案与反馈只作为可审计的运行上下文快照保存；它们不会修改工具权限或审批策略。
         try {
             const profile = await getAgentProfile(user.id);

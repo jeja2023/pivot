@@ -87,3 +87,15 @@ test('提供方暂时故障只在自动路由下选择兼容候选，不把取�
     assert.equal(isRecoverableModelProviderFailure({ code: 'AGENT_RUN_CANCELLED' }), false);
     assert.equal(isRecoverableModelProviderFailure({ code: 'AGENT_BUDGET_EXCEEDED' }), false);
 });
+
+
+test('成本升级不会仅凭更贵价格选择同窗口模型，有任务质量证据时优先采纳', async () => {
+    const common = { user: { id: 7 }, currentModel: { id: 1, max_input_tokens: 8000, input_price_per_million: 1 },
+        candidateModels: [{ id: 2, max_input_tokens: 8000, input_price_per_million: 10 }], messages: [] };
+    assert.equal(await pickEscalationModel({ ...common, qualityProfiles: [] }), null);
+    const selected = await pickEscalationModel({ ...common, qualityProfiles: [
+        { modelId: 1, eligible: true, verifiedRateLowerBound: 0.8, verifiedRate: 0.9 },
+        { modelId: 2, eligible: true, verifiedRateLowerBound: 0.9, verifiedRate: 0.98 }
+    ] });
+    assert.equal(selected.id, 2);
+});

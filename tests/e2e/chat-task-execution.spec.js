@@ -199,6 +199,46 @@ test('审批卡不被模型流覆盖，明确绑定决定并在断线时保留�
     await expect(card).not.toContainText('结果已通过核验');
 });
 
+test('等待输入与核验故障显示具体缺口，部分完成不显示为完整成功', async ({ page }) => {
+    const { session } = await loginAndSession(page, '汇报交付待处理');
+    let status = 'needs_input';
+    let verification = { status: 'needs_input', label: '需要补充业务信息', needsBusinessInput: true, missing: ['请确认汇报统计期间'] };
+    const run = () => ({ id: 'waiting-report', session_id: session.id, status, title: '数据汇报', updated_at: new Date().toISOString(), terminal: status === 'partial' });
+    await page.route(/\/api\/agents\/runs\/chat-active(?:\?.*)?$/, route => route.fulfill({ json: { runs: [run()] } }));
+    await page.route('**/api/agents/runs/waiting-report/chat-feed?*', route => route.fulfill({ json: {
+        run: run(), verification, artifacts: [], events: [], cursor: { eventSeq: 1 }, nextAfter: 1, pollAfterMs: null
+    } }));
+    await openSession(page, session.id);
+    const card = page.locator('[data-chat-agent-run-id="waiting-report"]');
+    await expect(card.locator('.chat-task-verification')).toContainText('请补充：请确认汇报统计期间');
+    verification = { status: 'needs_input', label: '核验等待超时，已有结果已保留', missing: [], needsBusinessInput: false };
+    await refreshTask(page, 'waiting-report');
+    await expect(card.locator('.chat-task-verification')).toContainText('核验等待超时');
+    await expect(card.locator('.chat-task-verification')).not.toContainText('请补充');
+    status = 'partial';
+    await refreshTask(page, 'waiting-report');
+    await expect(card.locator('.chat-task-panel')).toHaveAttribute('data-task-completed', 'false');
+    await expect(card.locator('.chat-task-panel')).toHaveAttribute('data-tone', 'warning');
+});
+
+test('认证刷新暂不可用保留当前任务界面，恢复后继续使用原会话', async ({ page }) => {
+    const { session } = await loginAndSession(page, '服务恢复');
+    await openSession(page, session.id);
+    let unavailable = true;
+    await page.route('**/api/sessions?auth-recovery-test=1', route => route.fulfill({ status: 401, json: { code: 'TOKEN_EXPIRED' } }));
+    await page.route('**/api/auth/refresh', route => unavailable ? route.fulfill({ status: 503, json: { code: 'AUTH_SERVICE_UNAVAILABLE' } }) : route.continue());
+    const message = await page.evaluate(async () => {
+        try { await window.Pivot.api.fetch('/api/sessions?auth-recovery-test=1'); } catch (error) { return error.message; }
+    });
+    expect(message).toContain('认证服务暂时不可用');
+    await expect(page.locator('#app')).toBeVisible();
+    expect(await page.evaluate(() => Boolean(window.Pivot.legacy.currentUser?.id))).toBe(true);
+    unavailable = false;
+    await page.evaluate(() => window.Pivot.api.refreshAccessToken());
+    await expect(page.locator('#app')).toBeVisible();
+    expect((await page.request.get('/api/sessions')).ok()).toBeTruthy();
+});
+
 test('多任务卡补充与暂停绑定指定任务，历史翻页和迟到响应不串会话', async ({ page }) => {
     const { session, headers } = await loginAndSession(page, '多任务与执行历史');
     const created = await page.request.post('/api/sessions', { headers, data: { title: '另一会话' } });
@@ -263,7 +303,7 @@ test('多任务卡补充与暂停绑定指定任务，历史翻页和迟到响�
     await expect.poll(() => operations.length).toBe(1);
     expect(operations[0]).toMatchObject({ id: 'browser-task-b', action: 'control-messages', body: { type: 'steer', payload: { instruction: '只处理已付款订单，保留异常依据。' } } });
     await card.getByRole('button', { name: '暂停当前任务，可随后继续', exact: true }).click();
-    await expect(card).toContainText('等待补充信息或继续');
+    await expect(card).toContainText('任务有待处理事项');
     expect(operations[1].id).toBe('browser-task-b');
     await expect(page.locator('[data-chat-agent-run-id="browser-task-a"]')).toContainText('已保留资料检查结果');
     hold = true;

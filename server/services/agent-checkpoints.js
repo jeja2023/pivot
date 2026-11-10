@@ -336,6 +336,7 @@ module.exports = {
     listAgentCheckpoints,
     listAgentCheckpointsForUser,
     parseCheckpointState,
+    hydrateCheckpointState,
     recordAgentCheckpoint,
     serializeCheckpointState,
     summarizeAgentCheckpoints

@@ -43,7 +43,7 @@ async function probeAnalysisReadiness() {
         clearTimeout(timer);
         const limits = response.probe;
         if (!limits?.inputReadable || limits.inputSha256 !== crypto.createHash('sha256').update(bytes).digest('hex')) throw biError('ANALYSIS_MODEL_STORAGE_UNREADY', '执行器无法读取同一私有分析对象，请核对协调服务与容器宿主机的共享绝对路径和用户身份。', 503);
-        if (!['check', 'query', 'export', 'ingest', 'cancel', 'migration_compare', 'column_projection', 'runtime_metrics'].every(kind => limits?.capabilities?.includes(kind))) throw biError('ANALYSIS_MODEL_RUNTIME_UNREADY', '分析执行器未具备本版本所需能力，请先升级执行器再启用新任务。', 503);
+        if (!['check', 'query', 'export', 'ingest', 'node_flow', 'cancel', 'migration_compare', 'column_projection', 'runtime_metrics'].every(kind => limits?.capabilities?.includes(kind))) throw biError('ANALYSIS_MODEL_RUNTIME_UNREADY', '分析执行器未具备本版本所需能力，请先升级执行器再启用新任务。', 503);
         if (!limits?.outputWritable || !limits.extensionsDisabled || !limits.noCredentials || !limits.nonPrivileged && settings.mode === 'docker') throw biError('ANALYSIS_MODEL_RUNTIME_UNREADY', '分析执行器输出、扩展、凭据或身份检查未通过，请检查隔离配置。', 503);
         if (settings.mode === 'docker') {
             const cpu = String(limits.cpu).split(' ').map(Number);

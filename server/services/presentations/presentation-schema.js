@@ -268,7 +268,7 @@ function normalizeElement(input, canvas, index) {
             if (value === null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) throw presentationError('图表数值不能为空或布尔值，请明确提供真实数值。', 400, 'PRESENTATION_CHART_INVALID');
             const number = Number(value);
             if (!Number.isFinite(number) || Math.abs(number) > 1e15) throw presentationError('图表数值必须是绝对值不超过10的15次方的有限数字，请按合适单位展示。', 400, 'PRESENTATION_CHART_INVALID');
-            return Math.round(number * 1000000) / 1000000;
+            return number;
         });
     });
     if (chartType === 'pie' && (columns.length !== 2 || rows.some(row => row[1] < 0) || !rows.some(row => row[1] > 0))) throw presentationError('饼图需要单个非负数值序列且合计大于零；比较多条序列或负数请使用柱形图或折线图。', 400, 'PRESENTATION_CHART_INVALID');
@@ -288,6 +288,14 @@ function normalizeElement(input, canvas, index) {
             queryDigest: normalizeBoundedText(input.binding.queryDigest, '', 128, '查询摘要', { allowEmpty: true })
         } : undefined
     };
+}
+
+function normalizeAnalysisBinding(input) {
+    if (!isPlainObject(input) || !/^art_[A-Za-z0-9_]{1,100}$/.test(String(input.artifactId || ''))
+        || !Number.isSafeInteger(input.sourceVersion) || input.sourceVersion < 1) {
+        throw presentationError('分析图表来源绑定无效，请从数据分析重新生成。', 400, 'PRESENTATION_ANALYSIS_BINDING_INVALID');
+    }
+    return { artifactId: input.artifactId, datasetId: normalizeId(input.datasetId, '分析数据集标识'), sourceVersion: input.sourceVersion };
 }
 
 function normalizeDiagramGraph(input, diagramType) {
@@ -458,6 +466,7 @@ function normalizePresentation(input, options = {}) {
                 digest: normalizeBoundedText(source.digest, '', 160, '来源摘要', { allowEmpty: true }),
                 excerpt: normalizeBoundedText(source.excerpt, '', MAX_SOURCE_EXCERPT_CHARS, '来源证据摘录', { allowEmpty: true, trim: false }),
                 excerptTruncated: normalizeBoolean(source.excerptTruncated ?? source.excerpt_truncated),
+                ...(source.analysisBinding === undefined ? {} : { analysisBinding: normalizeAnalysisBinding(source.analysisBinding) }),
                 ...(source.evidenceSlices === undefined ? {} : { evidenceSlices: normalizeEvidenceSlices(source.evidenceSlices, source.digest) })
             };
         }) : [],

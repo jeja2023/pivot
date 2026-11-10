@@ -4,6 +4,10 @@ const { execFile, spawn } = require('child_process');
 const path = require('path');
 
 const MAX_REPORT_BYTES = 1024 * 1024;
+// JVM 冷启动可能超过五秒；失败只短暂缓存，避免瞬时负载长时间关闭验证能力。
+const HEALTH_PROBE_TIMEOUT_MS = 30_000;
+const HEALTH_SUCCESS_CACHE_MS = 60_000;
+const HEALTH_FAILURE_CACHE_MS = 5_000;
 let cachedHealth = null;
 let cachedAt = 0;
 let healthPending = null;
@@ -39,20 +43,27 @@ function commandInvocation(command, args) {
 }
 
 async function getVeraPdfHealth({ refresh = false } = {}) {
-    if (!refresh && cachedHealth && Date.now() - cachedAt < 60_000) return cachedHealth;
+    const cacheMs = cachedHealth?.available ? HEALTH_SUCCESS_CACHE_MS : HEALTH_FAILURE_CACHE_MS;
+    if (!refresh && cachedHealth && Date.now() - cachedAt < cacheMs) return cachedHealth;
     if (healthPending) return healthPending;
     healthPending = (async () => {
         try {
             const command = commandForVeraPdf();
             const invocation = commandInvocation(command, ['--version']);
             const output = await new Promise((resolve, reject) => execFile(invocation.command, invocation.args,
-                { shell: false, windowsHide: true, timeout: 5000, encoding: 'utf8', maxBuffer: 64 * 1024 },
+                { shell: false, windowsHide: true, timeout: HEALTH_PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', encoding: 'utf8', maxBuffer: 64 * 1024 },
                 (error, stdout, stderr) => error ? reject(error) : resolve(stdout || stderr)));
             const version = String(output || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
             cachedHealth = version ? { available: true, command, version }
-                : { available: false, command: '', version: '', message: '未检测到可用的 veraPDF CLI。' };
+                : { available: false, command: '', version: '', code: 'VERAPDF_UNAVAILABLE', message: 'veraPDF 未返回有效版本信息，请检查 CLI 与 JRE 后重试。' };
         } catch (error) {
-            cachedHealth = { available: false, command: '', version: '', message: `未检测到可用的 veraPDF CLI（${error.code || error.message || '配置异常'}）。` };
+            const timedOut = error.code === 'ETIMEDOUT' || (error.killed === true && error.signal === 'SIGKILL');
+            const message = timedOut
+                ? 'veraPDF 启动探测超时（30 秒），请稍后重试或检查服务器负载。'
+                : error.code === 'ENOENT'
+                    ? '未找到 veraPDF CLI 或 Java 运行环境，请检查部署路径与 JRE 后重试。'
+                    : 'veraPDF 启动探测失败，请检查 CLI 路径与 JRE 配置后重试。';
+            cachedHealth = { available: false, command: '', version: '', code: timedOut ? 'VERAPDF_HEALTH_TIMEOUT' : 'VERAPDF_UNAVAILABLE', message };
         }
         cachedAt = Date.now();
         return cachedHealth;
@@ -87,9 +98,9 @@ function runVeraPdf(command, args, { timeoutMs = 60_000 } = {}) {
 async function validatePdfA({ sourcePath, flavour = '0' }) {
     const health = await getVeraPdfHealth();
     if (!health.available) {
-        const error = new Error('当前部署未安装 veraPDF，无法验证 PDF/A 合规性。');
-        error.code = 'VERAPDF_UNAVAILABLE';
-        error.status = 503;
+        const error = new Error(health.message || 'veraPDF 暂不可用，请检查部署配置后重试。');
+        error.code = health.code || 'VERAPDF_UNAVAILABLE';
+        error.status = error.code === 'VERAPDF_HEALTH_TIMEOUT' ? 504 : 503;
         throw error;
     }
     const allowedFlavours = new Set(['0', '1a', '1b', '2a', '2b', '2u', '3a', '3b', '3u', '4', '4e', '4f']);

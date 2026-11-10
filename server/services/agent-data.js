@@ -10,15 +10,16 @@ const { getPrimaryTenantId } = require('./enterprise-access');
 
 async function exportAgentPersonalData(user) {
     const tenantId = user.tenant_id || await getPrimaryTenantId(user.id);
-    const [profile, memories, feedback, proposals, goals, channels] = await Promise.all([
+    const [profile, memories, feedback, proposals, goals, channels, projects] = await Promise.all([
         getAgentProfile(user.id),
         exportMemories(user.id, { status: 'all', type: '', search: '' }),
         listAgentFeedback(user, { limit: 200 }),
         listEvolutionProposals(user, { limit: 200 }),
         listAgentGoals(user, { limit: 200 }),
-        listAgentChannels(user)
+        listAgentChannels(user),
+        require('../repositories/agent-projects').exportForUser(user.id)
     ]);
-    return { exportedAt: getBeijingTimestamp(), userId: Number(user.id), tenantId, profile, memories, feedback, proposals, goals, channels };
+    return { exportedAt: getBeijingTimestamp(), userId: Number(user.id), tenantId, profile, memories, feedback, proposals, goals, channels, projects };
 }
 
 async function deleteAgentPersonalData(user, _options = {}) {
@@ -28,6 +29,7 @@ async function deleteAgentPersonalData(user, _options = {}) {
     await setLongTermMemoryEnabled(user.id, false);
     result.memoryJobsCancelled = await cancelMemoryExtractionJobs(user.id, { reason: 'PERSONAL_DATA_DELETED' });
     await transaction(async trx => {
+        result.projects = await require('../repositories/agent-projects').eraseForUser(user.id,trx);
         // 此接口是明确的个人数据擦除请求。它不同于普通“忘记”操作，会移除
         // 私有正文、来源、抑制项、使用事件和评测数据，而不是仅保留软删除标记。
         result.memoryUsageEvents = await trx.execute('DELETE FROM memory_usage_events WHERE user_id = ?', [user.id]);

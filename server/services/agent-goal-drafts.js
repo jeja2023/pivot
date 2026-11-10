@@ -294,7 +294,7 @@ function mergeConfirmedGoalDraftOverrides(goalInput, overrides = {}) {
     const raw = overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : {};
     const authorization = raw.authorizationSpec && typeof raw.authorizationSpec === 'object' ? raw.authorizationSpec : {};
     const allowed = {};
-    for (const key of ['modelId', 'modelRouter', 'timezone', 'deliveryBindingIds', 'resultRetentionDays']) {
+    for (const key of ['modelId', 'projectId', 'modelRouter', 'timezone', 'deliveryBindingIds', 'resultRetentionDays']) {
         if (Object.prototype.hasOwnProperty.call(authorization, key)) allowed[key] = authorization[key];
     }
     return {

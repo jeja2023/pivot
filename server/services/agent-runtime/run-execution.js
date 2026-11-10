@@ -214,6 +214,11 @@ const {
             }
         }
 
+        if (!dagRun && modelCfg) {
+            run.chosen_model_id = modelCfg.id;
+            run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
+        }
+        modelCfgForSummary = modelCfg;
         let runtimeMetadata = getRunMetadata(run);
         if (runtimeMetadata.chatBridge?.executionProfile === 'knowledge_qa') {
             modelCfg = { ...modelCfg, max_input_tokens: Math.min(Number(modelCfg.max_input_tokens) > 0 ? Number(modelCfg.max_input_tokens) : Infinity, 24576) };
@@ -289,6 +294,7 @@ const {
         const plannerChatContext = preparation.buildPlannerContext({
             chatBridge, plannerChatHistory, plannerCurrentMessage, longTermMemoryContext, runtimeMetadata, taskWorkingState
         });
+        plannerChatContext.goalContext = await require('../agent-goal-context').resolveGoalRunContext(run, user);
         const verifyOutcome = preparation.createOutcomeVerifier({
             runId, run, user, getTaskContract: () => taskContract, getObservations: () => observations, signal: runController.signal, budget: taskBudget
         });
@@ -318,7 +324,7 @@ const {
         let stopReason = '';
         if (isStreamingToolsEnabled(modelCfg)) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
-            if (chatBridge || longTermMemoryContext) {
+            if (chatBridge || longTermMemoryContext || plannerChatContext.goalContext || plannerChatContext.projectContextPack) {
                 streamingDeps.synthesizeFinalAnswer = (streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, options = {}) => (
                     synthesizeFinalAnswer(streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, {
                         ...options,
@@ -433,6 +439,8 @@ const {
                 skillTitle: getRunMetadata(run).skillTitle || '',
                 skillInstructions: getRunMetadata(run).skillInstructions || '',
                 longTermMemoryContext,
+                projectContextPack: runtimeMetadata.projectContextPack,
+                goalContext: plannerChatContext.goalContext,
                 taskWorkingState,
                 chatHistory: plannerChatHistory,
                 chatAgent: runtimeMetadata.chatBridge
@@ -585,6 +593,8 @@ const {
                 });
                 if (!failover) throw plannerError;
                 modelCfg = failover.model;
+                run.chosen_model_id = modelCfg.id;
+                run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
                 modelCfgForSummary = failover.model;
                 plannedText = failover.plannedText;
                 plannedTextUsageRef = failover.usageRef;
@@ -899,7 +909,8 @@ const {
                     const escalation = await pickEscalationModel({
                         user,
                         currentModel: modelCfg,
-                        messages: [{ role: 'user', content: run.goal || '' }]
+                        messages: [{ role: 'user', content: run.goal || '' }],
+                        taskType: require('../agent-model-quality').inferTaskType(run)
                     });
                     if (escalation) {
                         await insertStep(runId, (await listSteps(runId)).length + 1, {
@@ -909,6 +920,9 @@ const {
                         });
                         logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度较低，正在升级模型');
                         modelCfg = escalation;
+                        modelCfgForSummary = modelCfg;
+                        run.chosen_model_id = modelCfg.id;
+                        run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
                         await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
                             modelCfg.id, getBeijingTimestamp(), runId
                         ]);

@@ -5,7 +5,7 @@
     const labels = Object.freeze({
         queued: '等待执行', planning: '正在安排执行步骤', running: '正在处理任务', executing: '正在执行操作',
         observing: '正在检查操作结果', diagnosing: '正在检查异常原因', replanning: '正在调整处理方案',
-        resuming: '正在恢复任务', verifying: '正在核验结果', needs_input: '等待补充信息或继续',
+        resuming: '正在恢复任务', verifying: '正在核验结果', needs_input: '任务有待处理事项',
         approval_required: '等待操作授权', waiting_approval: '等待审批决定', awaiting_approval: '等待审批决定',
         awaiting_commit: '等待确认提交外部操作', completed: '任务已完成', completed_with_errors: '任务完成，部分步骤有异常',
         partial: '任务已结束，部分完成', error: '任务执行失败', failed: '任务执行失败', cancelled: '任务已停止', deleted: '任务不可用'

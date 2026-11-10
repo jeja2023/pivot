@@ -77,7 +77,8 @@
         const revision = state.editRevision;
         const data = await window.Pivot.moduleApi('apps.presentations.realtime').fetchCurrent({
             active: state.active, getActive: () => state.active,
-            request: id => requestJson(API + '/' + encodeURIComponent(id), { cache: 'no-store' }), onRevoked: revokePresentationAccess
+            request: id => requestJson(API + '/' + encodeURIComponent(id), { cache: 'no-store' }), onRevoked: revokePresentationAccess,
+            onSourceUnavailable: error => setStatus(error.message, 'warning')
         });
         if (!data) return false;
         const remote = data.presentation;
@@ -88,13 +89,13 @@
         }
         const keepSlideId = state.selectedSlideId; state.active = remote; state.selectedSlideId = remote.content?.slides?.some(slide => slide.id === keepSlideId) ? keepSlideId : remote.content?.slides?.[0]?.id || ''; state.selectedElementId = ''; state.remoteVersionAvailable = false; state.dirty = false; resetHistory(); renderEditor(); setSaveState('已同步远端版本', 'saved'); toast('已同步协作者的最新版本。'); return true;
     }
-    function revokePresentationAccess() {
+    function revokePresentationAccess(error) {
         if (!state.active?.id) return;
         persistence.invalidate();
         closePresenterMode(); stopPresentationRealtime(); stopPresentationSync(); collab()?.stopPresenceHeartbeat();
         state.active = null; state.selectedSlideId = ''; state.selectedElementId = ''; state.history = []; state.historyIndex = -1; state.dirty = false;
         byId('presentation-editor')?.classList.add('hidden'); byId('presentation-library')?.classList.remove('hidden');
-        toast('你已被移出该演示文稿，当前访问已撤销。', 'warning'); loadDocuments().catch(() => { });
+        toast(error?.code === 'PRESENTATION_ANALYSIS_UNAVAILABLE' ? '分析来源已不可访问，请重新选择有权使用的数据并生成汇报。' : '你已被移出该演示文稿，当前访问已撤销。', 'warning'); loadDocuments().catch(() => { });
     }
     function stopPresentationRealtime() { if (state.realtimeSource) { state.realtimeSource.close(); state.realtimeSource = null; } }
     function startPresentationRealtime() {

@@ -41,13 +41,13 @@ async function claim(trx, { owner, kinds, jobId = null, slots = readTypedEnv('DA
     const job = await trx.queryOne(`SELECT q.* FROM analysis_query_jobs q WHERE (q.runtime_protocol=2 OR q.execution_kind='dataset_sql')
         AND q.status IN ('queued','retry_wait') AND COALESCE(q.next_run_at,q.created_at)<=NOW() AND q.queue_deadline_at>NOW() AND q.deadline_at>NOW() AND q.cancel_requested_at IS NULL
         AND NOT EXISTS(SELECT 1 FROM analysis_runtime_slots s JOIN analysis_query_jobs active ON active.id=s.job_id WHERE active.user_id=q.user_id)
-        AND (q.execution_kind IN ('model_query','model_trial','dataset_sql','legacy_operation') OR NOT EXISTS(SELECT 1 FROM analysis_runtime_slots s JOIN analysis_query_jobs batch ON batch.id=s.job_id WHERE batch.execution_kind IN ('model_check','model_refresh','model_export','dataset_ingest')))
-        ORDER BY CASE WHEN q.created_at<NOW()-INTERVAL '30 seconds' THEN 0 WHEN q.execution_kind IN ('model_query','model_trial','dataset_sql','legacy_operation') THEN 1 ELSE 2 END,
+        AND (q.execution_kind IN ('model_query','model_trial','dataset_sql','legacy_operation','model_node_preview') OR NOT EXISTS(SELECT 1 FROM analysis_runtime_slots s JOIN analysis_query_jobs batch ON batch.id=s.job_id WHERE batch.execution_kind IN ('model_check','model_refresh','model_export','dataset_ingest','model_node_dataset')))
+        ORDER BY CASE WHEN q.created_at<NOW()-INTERVAL '30 seconds' THEN 0 WHEN q.execution_kind IN ('model_query','model_trial','dataset_sql','legacy_operation','model_node_preview') THEN 1 ELSE 2 END,
         COALESCE((SELECT MAX(history.started_at) FROM analysis_query_jobs history WHERE history.user_id=q.user_id),'-infinity'::timestamptz),q.created_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED`);
     // 各执行器只领取兼容类型；全局队首由对应执行器领取，避免跨类型绕过公平性。
     if (!job || !kinds.includes(job.execution_kind) || (jobId && job.id !== jobId)) return null;
     const epoch = Number(job.execution_epoch) + 1;
-    const seconds = ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300 : 180;
+    const seconds = ['model_check', 'model_refresh', 'model_export', 'dataset_ingest', 'model_node_dataset'].includes(job.execution_kind) ? 300 : 180;
     const containerId = (job.execution_kind.startsWith('model_') || job.execution_kind === 'dataset_ingest') ? `pivot-bi-${job.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 48)}-${epoch}` : null;
     const claimed = await trx.queryOne(`UPDATE analysis_query_jobs SET status='running',runtime_protocol=2,execution_epoch=?,lease_owner=?,lease_expires_at=NOW()+(? * INTERVAL '1 second'),container_id=?,slot_id=?,attempts=attempts+1,
         started_at=COALESCE(started_at,NOW()),locked_at=NOW(),execution_deadline_at=LEAST(deadline_at,NOW()+(? * INTERVAL '1 second')),progress=5,updated_at=NOW() WHERE id=? RETURNING *`, [epoch, owner, leaseSeconds, containerId, slot.id, seconds, job.id]);

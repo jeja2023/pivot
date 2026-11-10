@@ -10,7 +10,12 @@ const { normalizeContextConfig } = require('./agent-validators');
 
 async function resolveAgentContextPack(user, rawContextConfig = {}) {
     const contextConfig = normalizeContextConfig(rawContextConfig);
-    if (!contextConfig.collectionIds.length) return { contextConfig, pack: null };
+    const project=contextConfig.projectId?.startsWith('project_')?await require('./agent-projects').resolveProject(user,contextConfig.projectId):null;
+    if(project){
+        if(contextConfig.collectionIds.some(id=>!project.collectionIds.includes(id)))throw Object.assign(new Error('本次资料范围超出项目，请在项目中修改资料范围。'),{status:400,code:'AGENT_CONTEXT_PACK_SCOPE_INVALID'});
+        contextConfig.collectionIds=contextConfig.collectionIds.length?contextConfig.collectionIds:project.collectionIds;
+    }
+    if (!contextConfig.collectionIds.length && !project) return { contextConfig, pack: null };
     const accessible = await listKnowledgeCollections(user);
     const availableById = new Map(accessible.map(collection => [Number(collection.id), collection]));
     const missing = contextConfig.collectionIds.filter(id => !availableById.has(id));
@@ -32,6 +37,7 @@ async function resolveAgentContextPack(user, rawContextConfig = {}) {
         contextConfig,
         pack: {
             version: 1,
+            ...(project?{project}:{}),
             collectionIds: contextConfig.collectionIds,
             collections,
             snapshotAt: new Date().toISOString()

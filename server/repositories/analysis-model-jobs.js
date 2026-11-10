@@ -10,9 +10,10 @@ const budget = require('./analysis-runtime-budget');
 
 function conflict() { throw biError('ANALYSIS_MODEL_REQUEST_CONFLICT', '同一幂等标识已用于不同请求，请重新生成请求标识。', 409); }
 
-async function get(userId, id, client = { queryOne }) { return client.queryOne("SELECT * FROM analysis_query_jobs WHERE id=? AND user_id=? AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest')", [id, userId]); }
+async function get(userId, id, client = { queryOne }) { return client.queryOne("SELECT * FROM analysis_query_jobs WHERE id=? AND user_id=? AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset')", [id, userId]); }
 async function check(userId, modelId, id) { return queryOne('SELECT * FROM analysis_data_model_checks WHERE id=? AND user_id=? AND model_id=?', [id, userId, modelId]); }
 async function latestCheck(userId, modelId, revision) { return queryOne('SELECT * FROM analysis_data_model_checks WHERE user_id=? AND model_id=? AND draft_revision=? ORDER BY created_at DESC LIMIT 1', [userId, modelId, revision]); }
+async function listNodeJobs(userId, modelId) { return query("SELECT id,execution_kind,status,progress,last_error,created_at,query_ast_json->>'targetNodeId' AS target_node_id FROM analysis_query_jobs WHERE user_id=? AND model_id=? AND execution_kind IN ('model_node_preview','model_node_dataset') ORDER BY created_at DESC,id DESC LIMIT 20", [userId, modelId]); }
 
 async function admit({ userId, modelId, kind, expectedVersion, definition = null, semanticHash = null, rulesHash = null, publishedVersion = null, manifestId = null, checkId = null, requestKey, requestHash, query: ast = {}, authorize, resolveInput = null, bindingRevision = null, sourceRunId = null, resultFormat = 'ndjson', maxQueued = 16, maxUserQueued = 3 }) {
     return transaction(async trx => {
@@ -39,7 +40,7 @@ async function admit({ userId, modelId, kind, expectedVersion, definition = null
                 VALUES (?,?,?,?,?,?::jsonb,?,?,?,?,?,?::jsonb)`, [actualCheckId, modelId, userId, expectedVersion || current.model.version, publishedVersion, JSON.stringify(definition), semanticHash, rulesHash, manifestId, requestKey, requestHash, JSON.stringify(ast.migrationComparison ? { migrationComparison: ast.migrationComparison } : {})]);
         }
         const id = `query_job_${crypto.randomUUID()}`;
-        const seconds = ['model_check', 'model_refresh', 'model_export'].includes(kind) ? 420 : 300;
+        const seconds = ['model_check', 'model_refresh', 'model_export', 'model_node_dataset'].includes(kind) ? 420 : 300;
         const row = await trx.queryOne(`INSERT INTO analysis_query_jobs(id,user_id,dataset_id,sql_text,requested_limit,execution_kind,model_id,published_version,manifest_id,check_id,query_ast_json,authorization_vector_json,request_key,request_hash,deadline_at,queue_deadline_at,next_run_at,runtime_protocol,binding_revision,source_run_id,result_format)
             VALUES (?,?,NULL,'',?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,NOW()+(? * INTERVAL '1 second'),NOW()+(? * INTERVAL '1 second'),NOW(),2,?,?,?) RETURNING *`, [id, userId, ast.limit || 100, kind, modelId, publishedVersion, manifestId, actualCheckId, JSON.stringify(ast), JSON.stringify(current.vector), requestKey, requestHash, seconds, seconds, bindingRevision, sourceRunId, resultFormat]);
         if (manifestId) {
@@ -57,7 +58,7 @@ async function admit({ userId, modelId, kind, expectedVersion, definition = null
 }
 
 async function claim(options) {
-    return transaction(trx => budget.claim(trx, { ...options, kinds: ['model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest'] }));
+    return transaction(trx => budget.claim(trx, { ...options, kinds: ['model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset'] }));
 }
 async function renew(job, leaseSeconds = 30) { return budget.renew(job, leaseSeconds); }
 async function attachManifest(job, manifestId) {
@@ -122,7 +123,7 @@ async function fail(job, { code, message, retryable = false, runtimeMetrics = {}
 async function cancel(userId, id, { cause = 'user' } = {}) {
     if (!['user', 'system'].includes(cause)) throw biError('ANALYSIS_MODEL_INPUT_INVALID', '取消任务的来源无效，请重试。');
     return transaction(async trx => {
-        const row = await trx.queryOne("SELECT * FROM analysis_query_jobs WHERE id=? AND user_id=? AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest') FOR UPDATE", [id, userId]);
+        const row = await trx.queryOne("SELECT * FROM analysis_query_jobs WHERE id=? AND user_id=? AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset') FOR UPDATE", [id, userId]);
         if (!row) throw biError('ANALYSIS_MODEL_JOB_NOT_FOUND', '分析任务不存在或无权操作。', 404);
         if (!['queued', 'running', 'retry_wait', 'cancelling'].includes(row.status)) return row;
         if (row.status === 'cancelling') return row;
@@ -137,6 +138,6 @@ async function cancel(userId, id, { cause = 'user' } = {}) {
         return trx.queryOne('SELECT * FROM analysis_query_jobs WHERE id=? AND user_id=?', [id, userId]);
     });
 }
-async function expired() { return query("SELECT * FROM analysis_query_jobs WHERE execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest') AND status IN ('running','cancelling') AND (lease_expires_at<NOW() OR execution_deadline_at<NOW() OR cancel_requested_at IS NOT NULL)"); }
+async function expired() { return query("SELECT * FROM analysis_query_jobs WHERE execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset') AND status IN ('running','cancelling') AND (lease_expires_at<NOW() OR execution_deadline_at<NOW() OR cancel_requested_at IS NOT NULL)"); }
 
-module.exports = { get, check, latestCheck, admit, claim, renew, attachManifest, owned, complete, fail, cancel, expired, releaseSlot };
+module.exports = { get, check, latestCheck, listNodeJobs, admit, claim, renew, attachManifest, owned, complete, fail, cancel, expired, releaseSlot };

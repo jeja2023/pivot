@@ -301,37 +301,26 @@ function assessConfidence({ output = '', finishReason = '', minOutputChars = 20 
     return { confident: true, reason: 'pass' };
 }
 
-/**
- * auto-escalate 第二轮：从可用候选中挑一个比当前模型更强的（按"成本更高 OR 上下文更大"）
- * 输入：用户、当前模型、估算 token；输出：升级目标模型或 null（没有更强候选）
- */
-async function pickEscalationModel({ user, currentModel, messages = [], candidateModels = null }) {
+// 升级优先采用同类任务的有效质量证据；没有证据时仅允许扩大上下文容量。
+async function pickEscalationModel({ user, currentModel, messages = [], candidateModels = null, qualityProfiles = null, taskType = 'general' }) {
     if (!user || !currentModel) return null;
-    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
-        .filter(m => m.status !== 'usage_only' && m.id !== currentModel.id);
-    if (candidates.length === 0) return null;
+    const needsVision = messagesContainVisionInput(messages);
     const estimatedTokens = estimateMessageTokens(messages);
-    const currentPrice = modelTotalPrice(currentModel);
-    const currentMaxInput = Number(currentModel.max_input_tokens) || 0;
-    // 优先选"价格高于当前 + 能容纳输入"的候选；次选"上下文窗口更大"的
-    const stronger = candidates.filter(m => hasUsableInputWindow(m, estimatedTokens)).filter(model => {
-        const modelPrice = modelTotalPrice(model);
-        const modelMaxInput = Number(model.max_input_tokens) || 0;
-        return modelPrice > currentPrice || modelMaxInput > currentMaxInput;
-    });
-    if (stronger.length === 0) return null;
-    stronger.sort((a, b) => {
-        // 成本升级优先选择最小的价格增幅；同等价格下优先更大的上下文。
-        // 上下文更大且不涨价的候选同样是有效升级，不应被更贵但更弱的
-        // 候选遮蔽。
-        const aPriceDelta = Math.max(0, modelTotalPrice(a) - currentPrice);
-        const bPriceDelta = Math.max(0, modelTotalPrice(b) - currentPrice);
-        if (aPriceDelta !== bPriceDelta) return aPriceDelta - bPriceDelta;
-        const aLimit = Number(a.max_input_tokens) || Number.MAX_SAFE_INTEGER;
-        const bLimit = Number(b.max_input_tokens) || Number.MAX_SAFE_INTEGER;
-        return bLimit - aLimit;
-    });
-    return stronger[0];
+    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
+        .filter(model => model.status !== 'usage_only' && model.id !== currentModel.id && (!needsVision || modelSupportsVision(model)) && hasUsableInputWindow(model, estimatedTokens));
+    if (!candidates.length) return null;
+    let profiles = qualityProfiles;
+    if (!Array.isArray(profiles)) {
+        try { profiles = await require('./agent-model-quality').getModelQualityProfiles(user, taskType); } catch (_) { profiles = []; }
+    }
+    const current = profiles.find(profile => profile.modelId === Number(currentModel.id) && profile.eligible);
+    const better = profiles.filter(profile => profile.eligible && (!current || profile.verifiedRateLowerBound > current.verifiedRateLowerBound));
+    const proven = pickAutoQuality(candidates, better, estimatedTokens);
+    if (proven) return proven;
+    const currentWindow = Number(currentModel.max_input_tokens) || 0;
+    if (!currentWindow) return null;
+    return candidates.filter(model => Number(model.max_input_tokens) > currentWindow)
+        .sort((left, right) => Number(right.max_input_tokens) - Number(left.max_input_tokens) || modelTotalPrice(left) - modelTotalPrice(right))[0] || null;
 }
 
 module.exports = {

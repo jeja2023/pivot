@@ -95,8 +95,8 @@ async function health() {
         (SELECT COUNT(*) FROM analysis_integrity_findings WHERE resolved_at IS NULL) AS integrity_findings,
         (SELECT EXTRACT(EPOCH FROM NOW()-MAX(created_at)) FROM analysis_recovery_points WHERE status='verified') AS recovery_age_seconds,
         (SELECT EXTRACT(EPOCH FROM NOW()-MIN(created_at)) FROM analysis_audit_events WHERE delivered_at IS NULL) AS audit_lag_seconds,
-        (SELECT MAX(GREATEST(COALESCE((execution_metrics_json->>'maxRssBytes')::bigint,0),COALESCE((execution_metrics_json->>'cgroupPeakBytes')::bigint,0))) FROM analysis_query_jobs WHERE completed_at>NOW()-INTERVAL '5 minutes' AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest')) AS memory_peak_bytes,
-        (SELECT MAX((execution_metrics_json->>'peakSpillBytes')::bigint) FROM analysis_query_jobs WHERE completed_at>NOW()-INTERVAL '5 minutes' AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest')) AS spill_peak_bytes,
+        (SELECT MAX(GREATEST(COALESCE((execution_metrics_json->>'maxRssBytes')::bigint,0),COALESCE((execution_metrics_json->>'cgroupPeakBytes')::bigint,0))) FROM analysis_query_jobs WHERE completed_at>NOW()-INTERVAL '5 minutes' AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset')) AS memory_peak_bytes,
+        (SELECT MAX((execution_metrics_json->>'peakSpillBytes')::bigint) FROM analysis_query_jobs WHERE completed_at>NOW()-INTERVAL '5 minutes' AND execution_kind IN ('model_check','model_query','model_trial','model_refresh','model_export','dataset_ingest','model_node_preview','model_node_dataset')) AS spill_peak_bytes,
         (SELECT COUNT(*) FROM analysis_data_models m JOIN analysis_data_model_versions v ON v.model_id=m.id AND v.version=m.published_version
             JOIN analysis_model_data_bindings b ON b.model_id=m.id AND b.published_version=m.published_version
             JOIN analysis_source_manifests s ON s.id=b.manifest_id WHERE m.deleted_at IS NULL AND m.archived_at IS NULL AND (

@@ -500,7 +500,7 @@ async function renderPptx(presentation, options = {}) {
                         objectName: exportedAnimationName(element), barDir: 'col' });
             }
         }
-        if (options.includeNotes !== false && slideData.speakerNotes) slide.addNotes(slideData.speakerNotes.split('\n'));
+        if (options.includeNotes !== false && slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
     }
     const raw = await pptx.write({ outputType: 'nodebuffer' });
     const native = await require('./presentation-native-package').applyNativePresentationObjects(Buffer.from(raw), presentation);

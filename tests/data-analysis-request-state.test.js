@@ -86,3 +86,12 @@ test('表格导入请求使用与后台工作线程一致的有界期限，避�
     h.requests[0].resolve({ dataset: { id: '' } }); await turn();
     h.requests[1].resolve({ datasets: [] }); await importing;
 });
+
+test('相同数据集下账号切换也会使在途分析与汇报响应失效', () => {
+    const h = harness();
+    h.context.window.Pivot.legacy.currentUser = { id: 1 };
+    const current = h.app.captureRequest('chart-report');
+    assert.equal(current(), true);
+    h.context.window.Pivot.legacy.currentUser = { id: 2 };
+    assert.equal(current(), false);
+});

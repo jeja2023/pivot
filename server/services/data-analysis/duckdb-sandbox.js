@@ -1,4 +1,4 @@
-const { sqlLiteral } = require('./shared');
+const { sqlLiteral } = require('./bi/sql-expressions');
 
 // 仅在物化授权输入表后调用；指定输出文件可导出，其余外部访问均被禁用。
 async function lockDuckExternalAccess(connection, { allowedPaths = [] } = {}) {

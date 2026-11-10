@@ -376,7 +376,7 @@ function buildChatMcpPlannerMessages(_history, userPrompt, tools, taskState = nu
 async function callChatMcpPlanner(modelCfg, messages, user = null, options = {}) {
     const modelName = modelCfg.model_name || modelCfg.name || 'default';
     const headers = buildModelHeaders(modelCfg, { acceptJson: true });
-    if (shouldUseResponsesApi(modelName)) {
+    if (shouldUseResponsesApi(modelName, modelCfg)) {
         try {
             const targetUrl = buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false });
             const response = await forwardChatCompletion({
@@ -388,9 +388,8 @@ async function callChatMcpPlanner(modelCfg, messages, user = null, options = {})
                     model: modelName,
                     input: convertChatMessagesToResponsesInput(messages),
                     stream: false,
-                    temperature: 0,
-                    max_output_tokens: 600,
-                    ...buildThinkingControlPayload(modelCfg)
+                    store: false,
+                    max_output_tokens: 600
                 },
                 timeout: 120000,
                 signal: options.signal || null

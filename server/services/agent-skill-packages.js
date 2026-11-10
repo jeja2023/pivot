@@ -155,19 +155,32 @@ async function installSkillPackage(zipPath, options = {}) {
     const contentDigest = verified.package.digest;
     if (!/^[0-9a-f]{64}$/.test(contentDigest)) throw new Error('Skill 包内容摘要非法，拒绝安装。');
     const installDir = path.join(root, 'sha256', contentDigest);
-    await fsp.mkdir(installDir, { recursive: true, mode: 0o700 });
+    async function ensurePackageDirectory(directory) {
+        const resolved = path.resolve(directory), parent = path.dirname(resolved);
+        if (parent !== resolved) await ensurePackageDirectory(parent);
+        if(parent!==resolved){try { await fsp.mkdir(resolved, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }}
+        const stat = await fsp.lstat(resolved);
+        const real = await fsp.realpath(resolved);
+        const same = process.platform === 'win32' ? real.toLowerCase() === resolved.toLowerCase() : real === resolved;
+        if (!stat.isDirectory() || stat.isSymbolicLink() || !same) throw new Error('Skill 包安装目录经过链接，已拒绝写入。');
+    }
+    await ensurePackageDirectory(installDir);
     for (const entry of verified.package.entries) {
         const target = path.join(installDir, entry.name);
         const relative = path.relative(installDir, target);
         if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Skill 包安装路径越权。');
-        await fsp.mkdir(path.dirname(target), { recursive: true });
-        // 内容寻址目录是不可变制品：同摘要文件已存在即认为一致，不覆盖也不删除。
-        try {
-            await fsp.access(target);
-        } catch (_) {
-            await fsp.writeFile(target, entry.data, { mode: 0o600 });
+        await ensurePackageDirectory(path.dirname(target));
+        // 不跟随已存在的文件或目录链接，重用前核对字节而不是仅凭路径存在。
+        if (path.resolve(await fsp.realpath(path.dirname(target))) !== path.resolve(path.dirname(target))) throw new Error('Skill 包安装目录经过链接，已拒绝写入。');
+        try { await fsp.writeFile(target, entry.data, { mode: 0o600, flag: 'wx' }); }
+        catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+            const stat = await fsp.lstat(target);
+            if (!stat.isFile() || stat.isSymbolicLink() || !(await fsp.readFile(target)).equals(entry.data)) throw new Error('已安装 Skill 包内容已变化，不能重用。');
         }
     }
+    await require('./agent-skill-resources').readInstalledSkillResources(installDir, { root });
+
     return { ...verified, installDir, contentDigest };
 }
 

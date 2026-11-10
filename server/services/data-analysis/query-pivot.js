@@ -1,9 +1,9 @@
+const { validateUserSql } = require('./sql-validation');
 
 const {
     MAX_PREVIEW_ROWS,
     MAX_QUERY_LIMIT,
     DATA_ANALYSIS_QUERY_TIMEOUT_MS,
-    MAX_SQL_LEN,
     MAX_PIVOT_ROWS,
     MAX_PIVOT_COLS,
     jsonParse,
@@ -252,40 +252,6 @@ async function runPivot(userId, datasetId, input = {}) {
     });
     return result;
   }
-
-const SQL_BLOCKLIST = /\b(ATTACH|DETACH|COPY|INSTALL|LOAD|PRAGMA|SET|RESET|EXPORT|IMPORT|CREATE|INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CALL|read_csv|read_csv_auto|read_parquet|read_json|read_json_auto|read_text|read_blob|parquet_scan|glob|system|getenv)\b/i;
-
-function validateUserSql(sql) {
-    const raw = String(sql || '').trim();
-    if (!raw) {
-        const err = new Error('\u8BF7\u8F93\u5165\u67E5\u8BE2\u8BED\u53E5\u3002');
-        err.status = 400;
-        throw err;
-    }
-    if (raw.length > MAX_SQL_LEN) {
-        const err = new Error(`\u67E5\u8BE2\u8BED\u53E5\u8FC7\u957F\uFF08\u4E0A\u9650 ${MAX_SQL_LEN} \u5B57\u7B26\uFF09\u3002`);
-        err.status = 400;
-        throw err;
-    }
-    // \u53BB\u6389\u5355\u4E2A\u5C3E\u90E8\u5206\u53F7\u540E\uFF0C\u82E5\u4ECD\u542B\u5206\u53F7\u5219\u89C6\u4E3A\u591A\u8BED\u53E5\uFF0C\u62D2\u7EDD\u3002
-    const stripped = raw.replace(/;\s*$/, '');
-    if (stripped.includes(';')) {
-        const err = new Error('\u4EC5\u652F\u6301\u5355\u6761\u67E5\u8BE2\u8BED\u53E5\u3002');
-        err.status = 400;
-        throw err;
-    }
-    if (!/^\s*(SELECT|WITH)\b/i.test(stripped)) {
-        const err = new Error('\u4EC5\u652F\u6301\u4EE5 SELECT \u6216 WITH \u5F00\u5934\u7684\u53EA\u8BFB\u67E5\u8BE2\u3002');
-        err.status = 400;
-        throw err;
-    }
-    if (SQL_BLOCKLIST.test(stripped)) {
-        const err = new Error('\u67E5\u8BE2\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u5173\u952E\u5B57\uFF0C\u4EC5\u652F\u6301\u5BF9\u5F53\u524D\u6570\u636E\u96C6\u7684\u53EA\u8BFB\u67E5\u8BE2\u3002');
-        err.status = 400;
-        throw err;
-    }
-    return stripped;
-}
 
 function buildQuerySelectList(row, columns) {
     if (!columns.length) throw Object.assign(new Error('当前共享权限没有可查询字段，请联系数据集所有者。'), { status: 403, code: 'ANALYSIS_FIELD_ACCESS_DENIED' });

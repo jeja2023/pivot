@@ -9,6 +9,9 @@ const points = { type: 'array', maxItems: 8, items: { type: 'string', maxLength:
 
 function presentationToolDefinitions() {
     return [
+        { name: 'presentation.from_analysis', title: '从分析图表生成汇报PPT', capabilities: ['document.render'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
+            description: '用当前账号已生成的分析图表快照直接创建并导出可编辑汇报PPTX，保留图表数值、统计口径、来源版本和全部展示数据明细，无需重新抄写数值或调用模型生成页面。artifactId必须来自真实分析图表结果；数据或字段权限变化时需重新生成图表。支持柱形、折线、面积和饼图。版式阻断时返回源稿与具体缺口，不代表已交付。',
+            input_schema: schema({ artifactId: { type: 'string', pattern: '^art_[A-Za-z0-9_]{1,100}$' }, title: { type: 'string', maxLength: 90 } }, ['artifactId']) },
         { name: 'presentation.master', title: '完整PPT制作引擎', capabilities: ['document.render', 'model.invoke'], idempotent: false, side_effect: true, concurrency: 'write', cancellable: true,
             description: '使用固定版本PPT Master完整工作流生成PPT、创建模板或保留原稿设计地编辑PPTX。action=start登记后台任务，status查询真实进度，respond提交用户对具体确认的实际答复，cancel停止。需要平台已准备运行镜像。返回任务登记不是制作完成；最终交付原生PPTX与项目源包，复杂对象不自动变成Pivot画布。材料必须来自已授权来源，不编造确认或事实。',
             input_schema: schema({ action: { type: 'string', enum: ['start', 'status', 'respond', 'cancel', 'resume'], default: 'start' }, taskId: { type: 'string' },
@@ -76,7 +79,11 @@ async function executePresentationTool(name, input, user, context = {}) {
     context.signal?.throwIfAborted();
     let presentation;
     let designWarnings = [];
-    if (name === 'presentation.create') {
+    if (name === 'presentation.from_analysis') {
+        const requestKey = crypto.createHash('sha256').update(`${user.id}:${runId || context.stepId || context.toolCallId || ''}:${JSON.stringify(input)}`).digest('hex');
+        presentation = (await require('./presentations/presentation-analysis-report').createAnalysisReport(user, { ...input, requestKey }, { signal: context.signal })).presentation;
+        context.signal?.throwIfAborted();
+    } else if (name === 'presentation.create') {
         const identity = `${user.id}:${runId || context.stepId || context.toolCallId || ''}:${JSON.stringify(input)}`;
         const id = 'taskppt_' + crypto.createHash('sha256').update(identity).digest('hex').slice(0, 40);
         let sources = [];
@@ -103,7 +110,7 @@ async function executePresentationTool(name, input, user, context = {}) {
     const validation = await require('./presentations/presentation-render-quality').runRenderedPresentationQuality(presentation.content, { assetResolver: async ref => assets.get(ref) || null });
     if (validation.status === 'blocked') return { status: 'needs_revision', presentationId: presentation.id, slideCount: presentation.content.slides.length,
         validation, text: 'PPT 源稿已保留，但版式检查未通过，尚未生成文件。请按具体问题修改页面内容后重试，或到 PPT 制作应用编辑。' };
-    const format = name === 'presentation.create' ? 'pptx' : input.format || 'pptx';
+    const format = ['presentation.create', 'presentation.from_analysis'].includes(name) ? 'pptx' : input.format || 'pptx';
     const result = await service.createPresentationExport(user, presentation.id, format, { slideIndex: input.slideIndex || 0, showSourceRefs: false },
         { runId, signal: context.signal, toolCallId: context.stepId || context.toolCallId });
     const rendition = result.rendition;

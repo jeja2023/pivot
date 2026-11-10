@@ -7,7 +7,7 @@ function classify({ status = 200, code = '', cancelled = false } = {}) {
     if (cancelled) return 'cancelled';
     if ([401, 403, 404].includes(status)) return 'auth_denied';
     if (QUOTA_CODES.has(code)) return 'quota_exceeded';
-    if (status === 400 || /_(?:INPUT_INVALID|DEFINITION_INVALID|QUERY_INVALID|VERSION_CONFLICT|REQUEST_CONFLICT|CHECK_REQUIRED|WARNINGS_UNACCEPTED|INGESTION_INVALID)$/.test(code)) return 'invalid';
+    if (status === 400 || /_(?:INPUT_INVALID|DEFINITION_INVALID|QUERY_INVALID|FLOW_INVALID|VERSION_CONFLICT|REQUEST_CONFLICT|CHECK_REQUIRED|WARNINGS_UNACCEPTED|INGESTION_INVALID)$/.test(code)) return 'invalid';
     if (status >= 400) return 'platform_failure';
     return 'success';
 }
@@ -15,7 +15,7 @@ function classify({ status = 200, code = '', cancelled = false } = {}) {
 function operation(method, route) {
     if (method === 'GET') return /\/models\/?$/.test(route) ? 'list' : 'read';
     if (/\/(publish|rollback)$/.test(route)) return 'publish';
-    if (/\/(checks|queries|trial-queries|data-refresh|exports|submit|model-run|pivot)$/.test(route)) return 'submit';
+    if (/\/(checks|queries|trial-queries|data-refresh|exports|submit|model-run|pivot|node-preview|node-datasets)$/.test(route)) return 'submit';
     return ['PUT', 'POST', 'DELETE', 'PATCH'].includes(method) ? 'save' : 'other';
 }
 

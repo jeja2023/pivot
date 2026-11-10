@@ -137,7 +137,9 @@
         const sequence = requests.get(scope);
         const value = context();
         const epoch = state.datasetEpoch;
-        return () => requests.get(scope) === sequence && state.datasetEpoch === epoch && context() === value;
+        const account = String(window.Pivot.legacy.currentUser?.id || '');
+        return () => requests.get(scope) === sequence && state.datasetEpoch === epoch && context() === value
+            && String(window.Pivot.legacy.currentUser?.id || '') === account;
     }
 
     window.Pivot.legacy.PivotDataAnalysis = {

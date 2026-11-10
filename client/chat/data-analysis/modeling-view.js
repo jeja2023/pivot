@@ -78,17 +78,18 @@
 
     function renderList() {
         mount();
-        const rows = state.models.filter(model => {
-            if (state.search && !`${model.name} ${model.description || ''}`.toLocaleLowerCase().includes(state.search.toLocaleLowerCase())) return false;
-            if (state.ownership === 'mine' && !model.isOwner || state.ownership === 'shared' && model.isOwner) return false;
-            if (state.lifecycle !== 'all' && (model.modelKind === 'exploration' ? 'exploration' : model.lifecycle) !== state.lifecycle) return false;
-            return state.availability === 'all' || model.availability === state.availability;
-        });
-        state.listPage = Math.max(1, Math.min(state.listPage, Math.ceil(rows.length / 10) || 1));
+        if (state.listLoading || state.listError) {
+            html(byId('modeling-list-content'), `<div class="modeling-notice ${state.listError ? 'is-danger' : 'is-info'}" role="status">${esc(state.listError || '正在加载模型目录，请稍候…')}${state.listError ? button('refresh-list', '重试加载') : ''}</div>`);
+            html(byId('modeling-list-pagination'), '');
+            return;
+        }
+        const rows = state.models;
+        const hasFilters = Boolean(state.search || [state.ownership, state.lifecycle, state.availability].some(value => value !== 'all'));
+        state.listPage = Math.max(1, Math.min(state.listPage, Math.ceil(state.listTotal / 10) || 1));
         const pager = byId('modeling-list-pagination');
         if (!rows.length) {
             const hasDatasets = (app.state.datasets || []).length > 0;
-            html(byId('modeling-list-content'), `<div class="modeling-empty-state"><h4>${state.models.length ? '没有匹配筛选条件的模型' : '还没有创建数据模型'}</h4><p>${state.models.length ? '请调整上方搜索词或筛选条件后重试。' : hasDatasets ? `当前已有 ${app.state.datasets.length} 个可用数据集，点击下方按钮即可选取主表开始拖拽建模。` : '数据建模需要先上传表格数据集。您可以先前往数据分析上传 CSV 或 Excel 表格，再回来拖拽建模。'}</p><div class="modeling-empty-actions">${hasDatasets ? button('create-empty', '+ 立即新建数据模型', '', true) : button('goto-analysis-empty', '前往上传数据集', '', true)}${state.models.length ? button('reset-filters', '清空筛选条件') : ''}</div></div>`);
+            html(byId('modeling-list-content'), `<div class="modeling-empty-state"><h4>${hasFilters ? '没有匹配筛选条件的模型' : '还没有创建数据模型'}</h4><p>${hasFilters ? '请调整上方搜索词或筛选条件后重试。' : hasDatasets ? `当前已有 ${app.state.datasets.length} 个可用数据集，点击下方按钮即可选取主表开始拖拽建模。` : '数据建模需要先上传表格数据集。您可以先前往数据分析上传 CSV 或 Excel 表格，再回来拖拽建模。'}</p><div class="modeling-empty-actions">${hasDatasets ? button('create-empty', '+ 立即新建数据模型', '', true) : button('goto-analysis-empty', '前往上传数据集', '', true)}${hasFilters ? button('reset-filters', '清空筛选条件') : ''}</div></div>`);
             if (pager) {
                 if (typeof window.Pivot.legacy.renderWorkspacePagination === 'function') {
                     window.Pivot.legacy.renderWorkspacePagination(pager, { total: 0, page: 1, limit: 10, alwaysShow: false });
@@ -98,7 +99,7 @@
             }
         } else {
             const curUser = (typeof currentUser !== 'undefined' && currentUser) || window.Pivot?.legacy?.currentUser || null;
-            const listRows = rows.slice((state.listPage - 1) * 10, state.listPage * 10).map((model, offset) => {
+            const listRows = rows.map((model, offset) => {
                 const rowIndex = (state.listPage - 1) * 10 + offset + 1;
                 const descText = model.description || '未填写用途说明';
                 const ownerDisplay = model.ownerName || (model.isOwner ? (curUser?.username || '当前用户') : `用户 ${model.userId}`);
@@ -133,17 +134,17 @@
             if (pager) {
                 if (typeof window.Pivot.legacy.renderWorkspacePagination === 'function') {
                     window.Pivot.legacy.renderWorkspacePagination(pager, {
-                        total: rows.length,
+                        total: state.listTotal,
                         page: state.listPage,
                         limit: 10,
                         alwaysShow: true,
                         onPageChange: targetPage => {
                             state.listPage = targetPage;
-                            renderList();
+                            void m.loadList().catch(error => app.toast(error.message, 'error'));
                         }
                     });
                 } else {
-                    html(pager, `${button('previous-page', '上一页')}<span>第 ${state.listPage} / ${Math.max(1, Math.ceil(rows.length / 10))} 页 · 共 ${rows.length} 个模型</span>${button('next-page', '下一页')}`);
+                    html(pager, `${button('previous-page', '上一页')}<span>第 ${state.listPage} / ${Math.max(1, Math.ceil(state.listTotal / 10))} 页 · 共 ${state.listTotal} 个模型</span>${button('next-page', '下一页')}`);
                 }
             }
         }

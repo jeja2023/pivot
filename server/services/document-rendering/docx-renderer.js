@@ -24,7 +24,7 @@ const officialLayout = require('./official-layout');
 const { deriveDeterministicTimestamp, repackDeterministic } = require('./docx-package');
 
 /** 渲染器语义版本：参与 rendition 去重键，改版式必须升版本，否则历史交付不可复现。 */
-const RENDERER_VERSION = 'docx-2.0.1';
+const RENDERER_VERSION = 'docx-2.0.2';
 
 /** DOCX 的 MIME 类型。 */
 const MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -452,13 +452,14 @@ function buildLeadingParagraphs(ir, profile) {
     if (meta.doc_number) paragraphs.push(buildTextParagraph(meta.doc_number, profile.masthead, null));
     if (meta.title) {
         const resolved = resolveSpec(profile.title, null);
+        if (!profile.strict) resolved.color = '000000';
         const lines = profile.strict ? screenshot.arrangeTitle(meta.title) : [meta.title];
         const runs = [];
         lines.forEach((line, index) => {
             if (index) runs.push(new docx.TextRun({ break: 1 }));
             runs.push(buildTextRun(line, resolved, null));
         });
-        paragraphs.push(buildParagraph(resolved, runs, { keepNext: true, keepLines: true }));
+        paragraphs.push(buildParagraph(resolved, runs, { keepNext: true, keepLines: true, ...(!profile.strict ? { style: 'Title' } : {}) }));
     }
     if (meta.subtitle) paragraphs.push(buildTextParagraph(meta.subtitle, profile.subtitle, null));
     if (profile.strict && (meta.title || meta.subtitle)) paragraphs.push(...buildOfficialBlankLines(screenshot.GAP_LINES.afterTitle, profile));

@@ -55,7 +55,11 @@ async function listAgentArtifacts(user, limit = 30) {
         LIMIT ?
     `, [user.id, normalizePositiveInt(limit, 30, 1, 100)]);
     const visible = [];
-    for (const row of rows) if ((await require('./knowledge-run-access').inspectRunKnowledgeAccess(row.run_id, user)).current) visible.push(row);
+    for (const row of rows) {
+        if (!(await require('./knowledge-run-access').inspectRunKnowledgeAccess(row.run_id, user)).current) continue;
+        try { await require('./artifact-source-access').assertArtifactSources(row, user); } catch (_) { continue; }
+        visible.push(row);
+    }
     return visible;
 }
 
@@ -71,6 +75,7 @@ async function getAgentArtifactForUser(artifactId, user, options = {}) {
         WHERE a.id = ? AND a.user_id = ? ${includeDeleted ? '' : "AND a.status <> 'deleted'"}
     `, [artifactId, user.id]);
     if (artifact && !(await require('./knowledge-run-access').inspectRunKnowledgeAccess(artifact.run_id, user)).current) return null;
+    if (artifact) await require('./artifact-source-access').assertArtifactSources(artifact, user);
     return artifact;
 }
 
@@ -189,7 +194,7 @@ async function createStandaloneArtifact(user, body = {}, options = {}) {
 async function createAgentArtifactVersion(artifactId, user, body = {}, options = {}) {
     const artifact = options.executor ? await options.executor.queryOne("SELECT * FROM agent_artifacts WHERE id=? AND user_id=? AND run_id IS NULL AND status<>'deleted' FOR UPDATE", [artifactId, user.id]) : await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
-    const content = String(body.content ?? artifact.content ?? '').trim();
+    const content = await require('./artifact-source-access').protectVersion(artifact, String(body.content ?? artifact.content ?? '').trim(), user);
     if (artifact.type === 'mindmap') {
         if (options.executor) throw Object.assign(new Error('当前类型不支持嵌入已有交付事务。'), { status: 400 });
         const result = await require('./mindmaps/documents').save(user, { ...body, artifactId, document: content });

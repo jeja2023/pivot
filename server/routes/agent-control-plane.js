@@ -61,6 +61,7 @@ function parseRunMetadata(value) {
 
 function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLimiter } = {}) {
     const router = express.Router();
+    require('./agent-projects')(router, { authMiddleware, logAction });
     const automationGuard = typeof automationLimiter === 'function' ? automationLimiter : (_req, _res, next) => next();
     const writeLog = typeof logAction === 'function' ? logAction : () => {};
 

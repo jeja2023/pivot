@@ -56,7 +56,7 @@ async function runIsolated({ job, definition, query, sources, inputResult = null
     } else {
         command = process.execPath; args = ['--max-old-space-size=512', path.resolve(__dirname, '../../../workers/analysis-model-worker.js')];
     }
-    const payload = { protocol: 2, compilerVersion: BI_POLICY.compilerVersion, kind: ['probe', 'probe_cancel'].includes(job.execution_kind) ? job.execution_kind : job.execution_kind === 'dataset_ingest' ? 'ingest' : job.execution_kind === 'model_export' ? 'export' : ['model_check', 'model_refresh'].includes(job.execution_kind) ? 'check' : 'query', definition, query, sources: payloadSources,
+    const payload = { protocol: 2, compilerVersion: BI_POLICY.compilerVersion, kind: ['probe', 'probe_cancel'].includes(job.execution_kind) ? job.execution_kind : job.execution_kind === 'model_node_preview' ? 'node_preview' : job.execution_kind === 'model_node_dataset' ? 'node_dataset' : job.execution_kind === 'dataset_ingest' ? 'ingest' : job.execution_kind === 'model_export' ? 'export' : ['model_check', 'model_refresh'].includes(job.execution_kind) ? 'check' : 'query', definition, query, sources: payloadSources,
         inputResult: inputResult && (mode === 'docker' ? '/inputs/result.ndjson' : inputResult), resultFormat: job.result_format, metadata,
         outputRoot: mode === 'docker' ? '/output' : outputRoot, spillRoot: mode === 'docker' ? '/spill' : path.join(outputRoot, 'spill'), evaluationTime: Date.now() };
     const safeEnv = mode === 'docker' ? { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, USERPROFILE: process.env.USERPROFILE, DOCKER_CONFIG: process.env.DOCKER_CONFIG } : { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, TEMP: process.env.TEMP, TMP: process.env.TMP, LANG: 'C.UTF-8' };
@@ -72,11 +72,12 @@ async function runIsolated({ job, definition, query, sources, inputResult = null
     };
     const abort = () => { void kill().catch(() => child.kill('SIGKILL')); };
     let outputFailure = null, checkingOutput = null;
-    const outputWatcher = job.execution_kind === 'dataset_ingest' ? setInterval(() => {
+    const outputLabel = job.execution_kind === 'model_node_dataset' ? '节点输出' : '导入产物';
+    const outputWatcher = ['dataset_ingest', 'model_node_dataset'].includes(job.execution_kind) ? setInterval(() => {
         if (checkingOutput || terminated) return;
         checkingOutput = fs.stat(path.join(outputRoot, 'dataset.parquet')).then(stat => {
-            if (stat.size > 2 * 1024 ** 3) { outputFailure = biError('ANALYSIS_INGESTION_INVALID', '导入产物超过 2 GiB，已停止执行且未登记数据集。', 413); abort(); }
-        }).catch(error => { if (error.code !== 'ENOENT') { outputFailure = biError('ANALYSIS_INGESTION_INVALID', '导入产物空间校验失败，已停止执行。', 503); abort(); } }).finally(() => { checkingOutput = null; });
+            if (stat.size > 2 * 1024 ** 3) { outputFailure = biError(job.execution_kind === 'model_node_dataset' ? 'ANALYSIS_MODEL_CAPACITY_EXCEEDED' : 'ANALYSIS_INGESTION_INVALID', `${outputLabel}超过 2 GiB，已停止执行且未登记数据集。`, 413); abort(); }
+        }).catch(error => { if (error.code !== 'ENOENT') { outputFailure = biError(job.execution_kind === 'model_node_dataset' ? 'ANALYSIS_MODEL_STORAGE_UNREADY' : 'ANALYSIS_INGESTION_INVALID', `${outputLabel}空间校验失败，已停止执行。`, 503); abort(); } }).finally(() => { checkingOutput = null; });
     }, 250) : null;
     outputWatcher?.unref?.();
     signal?.addEventListener('abort', abort, { once: true });

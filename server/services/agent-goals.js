@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getPrimaryTenantId } = require('./enterprise-access');
 const { computeNextScheduleRun } = require('./agent-schedules');
@@ -152,6 +152,8 @@ function normalizeAuthorization(raw = {}, source = {}) {
     const rawModelId = input.modelId ?? input.model_id ?? source.modelId ?? source.model_id;
     const modelId = rawModelId === undefined || rawModelId === null || rawModelId === '' ? null : Number(rawModelId);
     if (modelId !== null && (!['string', 'number'].includes(typeof rawModelId) || !Number.isSafeInteger(modelId) || modelId <= 0)) throw invalid('持续目标的执行模型标识无效，请重新选择模型。');
+    const projectId=input.projectId??input.project_id??'';
+    if(typeof projectId!=='string'||projectId&&!/^project_[a-f0-9-]{36}$/.test(projectId))throw invalid('项目标识无效，请重新选择项目。');
     return {
         toolPolicy: normalizeToolPolicy(input.toolPolicy || input.tool_policy || source.toolPolicy || source.tool_policy),
         toolAllowlist: normalizeToolAllowlist(input.toolAllowlist || input.tool_allowlist || source.toolAllowlist || source.tool_allowlist),
@@ -159,6 +161,7 @@ function normalizeAuthorization(raw = {}, source = {}) {
         networkPolicy: input.networkPolicy && typeof input.networkPolicy === 'object' ? input.networkPolicy : {},
         expiresAt: input.expiresAt || input.expires_at || null,
         modelId,
+        projectId,
         modelRouter: normalizeModelRouterStrategy(input.modelRouter || input.model_router || source.modelRouter || source.model_router || 'fixed'),
         timezone,
         deliveryBindingIds: normalizeStringList(input.deliveryBindingIds || input.delivery_binding_ids || source.deliveryBindingIds || source.delivery_binding_ids, 10, 128),
@@ -292,6 +295,7 @@ async function updateAgentGoal(id, user, body = {}) {
 }
 
 async function assertGoalModel(user, authorization = {}) {
+    if(authorization.projectId)await require('./agent-projects').resolveProject(user,authorization.projectId);
     if (!authorization.modelId) throw invalid('请选择持续目标的执行模型后重试。');
     if (!await getRunnableModelForUserAsync(authorization.modelId, user)) throw invalid('持续目标的执行模型不可用或无权使用，请重新选择模型。');
 }
@@ -378,6 +382,7 @@ async function runAgentGoalNow(goal, user, options = {}) {
     const existing = await queryOne('SELECT id, status FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, triggerKey]);
     if (existing) return { id: existing.id, deduped: true, status: existing.status };
     await assertGoalModel(user, auth);
+    const goalContinuation = await require('./agent-goal-context').selectGoalContinuation(goal, user);
     const created = await run({
         user,
         goal: goal.goal,
@@ -392,11 +397,13 @@ async function runAgentGoalNow(goal, user, options = {}) {
         maxSteps: budget.maxSteps,
         maxTokenBudget: budget.maxTokenBudget,
         dedupeKey: triggerKey,
+        contextConfig: auth.projectId?{projectId:auth.projectId}:undefined,
         metadata: {
             source: 'goal',
             goalId: goal.id,
-            goalKind: GOAL_KINDS.includes(String(goal.goal_kind || goal.goalKind || '')) ? (goal.goal_kind || goal.goalKind) : 'scheduled_job',
+            goalKind: GOAL_KINDS.includes(String(goal.goal_kind || goal.goalKind || goal.kind || '')) ? (goal.goal_kind || goal.goalKind || goal.kind) : 'scheduled_job',
             goalVersion: goal.version,
+            ...(goalContinuation ? { goalContinuation } : {}),
             goalSnapshot: {
                 modelId: auth.modelId || null,
                 modelRouter: auth.modelRouter || 'fixed',
@@ -414,14 +421,13 @@ async function runAgentGoalNow(goal, user, options = {}) {
             triggerType: options.triggerType || triggerSpec.type || 'manual',
             triggerKey,
             triggerInputs: options.metadata || {}
-        },
-        contextConfig: options.metadata && typeof options.metadata === 'object' ? { goalTriggerInputs: options.metadata } : undefined
+        }
     });
     const now = getBeijingTimestamp();
     const claimToken = String(options.claimToken || '').trim();
     const claimClause = claimToken ? ' AND claim_token = ?' : '';
     await execute(`UPDATE agent_goals SET last_run_id = ?, last_trigger_key = ?, next_run_at = ?::timestamptz, updated_at = ?::timestamptz WHERE id = ? AND user_id = ?${claimClause}`, [created.id, triggerKey, options.nextRunAt || goal.next_run_at || null, now, goal.id, user.id, ...(claimToken ? [claimToken] : [])]);
-    if (String(goal.goal_kind || goal.goalKind || 'scheduled_job') !== 'monitor') {
+    if (String(goal.goal_kind || goal.goalKind || goal.kind || 'scheduled_job') !== 'monitor') {
         try { await createAgentNotificationCallback(user.id, created.id, 'goal', '持续目标已启动', goal.title); } catch (_) {}
     }
     return created;
@@ -498,7 +504,7 @@ async function previewAgentGoal(user, body = {}) {
                 maxFailures: data.maxFailures
             }
         },
-        contextConfig: { mode: 'none', notes: '这是持续目标的单次预览；不会创建、启用或修改任何调度。' }
+        contextConfig: { mode: 'none', ...(auth.projectId?{projectId:auth.projectId}:{}), notes: '这是持续目标的单次预览；不会创建、启用或修改任何调度。' }
     });
 }
 
@@ -625,17 +631,24 @@ async function dispatchAgentGoalWebhook(token, payload = {}, meta = {}) {
 }
 
 async function recordAgentGoalRunOutcome(runId, outcome) {
-    const run = await queryOne("SELECT id, user_id, metadata FROM agent_runs WHERE id = ? AND metadata->>'goalId' IS NOT NULL", [String(runId || '')]);
-    if (!run) return null;
-    const metadata = parseJson(run.metadata, {});
-    const goal = await queryOne('SELECT * FROM agent_goals WHERE id = ? AND user_id = ?', [metadata.goalId, run.user_id]);
-    if (!goal) return null;
-    const success = String(outcome || '') === 'success';
-    const failures = success ? 0 : Number(goal.failure_count || 0) + 1;
-    const paused = !success && failures >= Number(goal.max_failures || 5);
-    const completedGoal = success && String(goal.goal_kind || '') === 'goal';
-    await execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'completed' WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? OR ? THEN NULL ELSE next_run_at END, ended_at = CASE WHEN ? THEN ?::timestamptz ELSE ended_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ?::timestamptz WHERE id = ?", [failures, completedGoal, paused, completedGoal, paused, completedGoal, getBeijingTimestamp(), success, getBeijingTimestamp(), goal.id]);
-    return { goalId: goal.id, failureCount: failures, paused };
+    return await transaction(async trx => {
+        const run = await trx.queryOne("SELECT id, user_id, status, metadata FROM agent_runs WHERE id = ? AND metadata->>'goalId' IS NOT NULL FOR UPDATE", [String(runId || '')]);
+        if (!run) return null;
+        const metadata = parseJson(run.metadata, {});
+        const goal = await trx.queryOne('SELECT * FROM agent_goals WHERE id = ? AND user_id = ? FOR UPDATE', [metadata.goalId, run.user_id]);
+        // 旧版本、已暂停目标和重复回执不得完成新目标或重复增加失败次数。
+        if (!goal || goal.status !== 'active' || Number(metadata.goalVersion) !== Number(goal.version)
+            || !['completed', 'completed_with_errors', 'partial', 'failed', 'error', 'cancelled'].includes(run.status) || metadata.goalOutcomeRecorded === true) return { stale: true, goalId: metadata.goalId };
+        const verification = await trx.queryOne('SELECT outcome_status FROM agent_verifications WHERE run_id = ? AND user_id = ?', [run.id, run.user_id]);
+        const success = String(outcome || '') === 'success' && run.status === 'completed' && verification?.outcome_status === 'verified';
+        const failures = success ? 0 : Number(goal.failure_count || 0) + 1;
+        const paused = !success && failures >= Number(goal.max_failures || 5);
+        const completedGoal = success && String(goal.goal_kind || '') === 'goal';
+        const now = getBeijingTimestamp();
+        await trx.execute("UPDATE agent_goals SET failure_count = ?, status = CASE WHEN ? THEN 'completed' WHEN ? THEN 'paused' ELSE status END, next_run_at = CASE WHEN ? OR ? THEN NULL ELSE next_run_at END, ended_at = CASE WHEN ? THEN ?::timestamptz ELSE ended_at END, last_error = CASE WHEN ? THEN '' ELSE last_error END, updated_at = ?::timestamptz WHERE id = ?", [failures, completedGoal, paused, completedGoal, paused, completedGoal, now, success, now, goal.id]);
+        await trx.execute("UPDATE agent_runs SET metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb WHERE id = ?", [JSON.stringify({ goalOutcomeRecorded: true }), run.id]);
+        return { goalId: goal.id, failureCount: failures, paused };
+    });
 }
 
 module.exports = {

@@ -52,6 +52,7 @@ function getAgentContextConfig() {
     return {
         mode: document.getElementById('agent-context-mode')?.value || 'auto',
         notes: document.getElementById('agent-context-notes')?.value || '',
+        projectId: document.getElementById('agent-project-select')?.value || '',
         collectionIds: [...(document.getElementById('agent-context-collections')?.selectedOptions || [])]
             .map(option => option.value)
             .filter(Boolean)

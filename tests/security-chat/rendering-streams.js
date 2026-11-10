@@ -1014,7 +1014,8 @@ test('模型适配器将聊天消息转换为 Responses API 输入', () => {
             ]
         }
     ]);
-    assert.equal(converted[0].role, 'user');
+    assert.equal(converted[0].role, 'system');
+    assert.equal(converted[1].content[0].type, 'input_text');
     assert.match(converted[0].content, /security policy/);
     assert.deepEqual(converted[1].content[1], {
         type: 'input_image',

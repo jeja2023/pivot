@@ -198,7 +198,7 @@ async function validateSkillVersion(id, user, options = {}) {
         errors: supplyChain.errors
     };
     // 普通个人验证不要求签名；共享批准流程和 .skill.zip 导入会显式传 requireSignature=true。
-    const signatureRequired = options.requireSignature === true || Boolean(String(version.package_path || '').trim());
+    const signatureRequired = await require('./agent-skill-resource-import').requiresPackageSignature(version, manifest, options);
     const signatureAccepted = signature.verified || !signatureRequired;
     const declarative = runDeclarativeSkillChecks(checked);
     let sandbox = { passed: false, mode: 'not-run', sideEffects: true, packageScriptsExecuted: false };

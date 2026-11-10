@@ -12,7 +12,7 @@ function isLocalDevUrl(url) {
 
 function normalizeModelBaseUrl(url, options = {}) {
     const { appendV1 = true, appendV1ForLocal = true } = options;
-    let baseUrl = String(url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
+    let baseUrl = String(url || '').trim().replace(/\/+$/, '').replace(/\/(?:chat\/completions|responses)$/, '');
     if (appendV1 && !baseUrl.includes('/v1') && (appendV1ForLocal || !isLocalDevUrl(baseUrl))) {
         baseUrl += '/v1';
     }
@@ -25,12 +25,13 @@ function buildChatCompletionsUrl(url, options = {}) {
 }
 
 function buildResponsesUrl(url, options = {}) {
-    return `${normalizeModelBaseUrl(url, options).replace(/\/chat\/completions$/, '').replace(/\/+$/, '')}/responses`;
+    return `${normalizeModelBaseUrl(url, options).replace(/\/(?:chat\/completions|responses)$/, '').replace(/\/+$/, '')}/responses`;
 }
 
 const RESPONSES_API_MODEL_PATTERN = /(?:^|[/:\s_-])(?:gpt-5|o1|o3|o4)(?:[/:\s_.-]|$)/i;
 
-function shouldUseResponsesApi(modelName) {
+function shouldUseResponsesApi(modelName, modelCfg = {}) {
+    if (/\/responses\/?$/.test(String(modelCfg.url || ''))) return true;
     const name = String(modelName || '').trim();
     return RESPONSES_API_MODEL_PATTERN.test(name);
 }
@@ -71,15 +72,9 @@ function createSafeModelHttpAgents(modelCfg, user = null) {
 
 function convertChatMessagesToResponsesInput(messages = []) {
     return messages.map(message => {
-        let role = message.role;
+        const role = message.role;
         let content = message.content;
 
-        if (role === 'system') {
-            role = 'user';
-            if (typeof content === 'string') {
-                content = `[系统设定]: ${content}`;
-            }
-        }
 
         if (Array.isArray(content)) {
             content = content.map(part => {
@@ -89,7 +84,7 @@ function convertChatMessagesToResponsesInput(messages = []) {
                         image_url: part.image_url.url
                     };
                 }
-                return part;
+                return part?.type === 'text' ? { ...part, type: role === 'assistant' ? 'output_text' : 'input_text' } : part;
             });
         }
 

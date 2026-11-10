@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.142",
+  "version": "0.7.147",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -66,6 +66,7 @@
     "check": "npm run check:text && npm run check:desktop:linux && npm run check:large-files && npm run check:architecture && npm run check:pg-migrations && npm run check:pg-indexes && npm run check:secrets && npm run check:env-example && npm run check:config-registry && npm run check:decision-evaluation-set && npm run check:governance && npm run check:standards && npm run check:regression-matrix && npm run check:overrides && npm run check:licenses && npm run check:mindmap-vendor && npm run check:mermaid-vendor && npm run check:dead-exports && node scripts/check_syntax.js && node scripts/check_chat_assets.js && npm run check:safe-html && npm run check:async_db_calls && npm run check:sync_io_hotpaths && npm run check:window-globals && npm run check:e2e-smoke",
     "test:all": "node scripts/run_node_tests.js",
     "test:coverage": "node scripts/run_node_tests.js --experimental-test-coverage --test-coverage-lines=75 --test-coverage-functions=75 --test-coverage-branches=60",
+    "test:agent:frontier": "node scripts/run_node_tests.js tests/agent-frontier-protocol.test.js tests/agent-verification-evidence.test.js tests/agent-goal-context.test.js tests/agent-quality-window.test.js tests/agent-verification-context.test.js tests/agent-model-quality.test.js tests/agent-model-tool-protocol.test.js tests/agent-provider-sse-harness.test.js tests/agent-tool-output-context.test.js tests/agent-working-memory-artifacts.test.js",
     "test:agent:quality": "node scripts/run_node_tests.js tests/agent-model-tool-protocol.test.js tests/agent-execution-chain-regressions.test.js tests/agent-resume-budget.test.js tests/agent-round-budgets.test.js tests/agent-verification-repair.test.js tests/provider-usage-calibration.test.js tests/agent-model-quality.test.js tests/agent-auto-continuation.test.js tests/agent-planning-lifecycle.test.js tests/agent-lifecycle-hook-packages.test.js tests/agent-lifecycle-dispatcher.test.js tests/agent-runtime-lifecycle.test.js tests/agent-monitoring-slo.test.js tests/agent-domain-acceptance-evidence.test.js tests/agent-acceptance-evidence-ui.test.js tests/agent-capability-worker-grant.test.js tests/capability-worker-preflight.test.js tests/capability-worker-isolation-drill.test.js tests/workspace-recovery-snapshot.test.js tests/agent-code-runtime.test.js tests/agent-terminal-runtime.test.js tests/agent-non-idempotent-fault-matrix.test.js tests/agent-residency-multiprocess.test.js tests/agent-task-resource-multiprocess.test.js tests/agent-checkpoint-boundaries.test.js tests/agent-task-transactions-persistence.test.js tests/agent-control.test.js tests/agent-collaboration-restart.test.js tests/agent-collaboration-resource-conflicts.test.js tests/agent-delegation-role-policies.test.js tests/agent-delegation-role-policies-http.test.js tests/agent-progressive-tool-discovery.test.js tests/agent-browser.test.js tests/agent-browser-network-proxy.test.js tests/agent-browser-action-evidence.test.js tests/desktop-local-browser-automation.test.js tests/local-browser-connector-tools.test.js tests/agent-browser-sessions.test.js tests/agent-browser-session-leases.test.js tests/workflow-foreach-worker.test.js",
     "test:agent:parity": "node scripts/run_node_tests.js tests/agent-parity-scenarios.test.js tests/agent-tool-describe-batch.test.js tests/agent-memory-evidence.test.js tests/agent-memory-evidence-postgres.test.js tests/agent-tool-output-context.test.js tests/agent-learning-tool-evidence.test.js tests/agent-verification-context.test.js tests/agent-spawn-planning.test.js tests/agent-resume-observations.test.js tests/agent-child-wait.test.js tests/agent-child-wait-postgres.test.js tests/agent-provider-sse-harness.test.js tests/agent-round-runtime.test.js tests/agent-working-state-token.test.js tests/agent-capability-fallback.test.js tests/agent-context-semantic-compression.test.js tests/agent-context-compression-regression.test.js tests/agent-collaboration-restart.test.js tests/agent-collaboration-resource-conflicts.test.js tests/agent-postgres-integration.test.js",
     "test:agent:release-gates": "node scripts/run_node_tests.js tests/agent-evaluation-gates.test.js tests/agent-judge-governance.test.js tests/agent-workflow-breaker.test.js tests/agent-postgres-integration.test.js tests/agent-skill-discovery-integration.test.js tests/agent-skill-discovery-http.test.js tests/agent-run-evidence-routes-http.test.js",
@@ -126,7 +127,8 @@
     "benchmark:bi-modeling": "node scripts/benchmark_bi_modeling.js",
     "operations:bi-modeling": "node scripts/bi_operations.js",
     "security:bi-modeling": "node scripts/bi_security_recovery.js",
-    "backup:bi-modeling": "node scripts/bi_physical_backup.js"
+    "backup:bi-modeling": "node scripts/bi_physical_backup.js",
+    "test:agent:projects-resources": "node scripts/run_node_tests.js tests/agent-projects.test.js tests/agent-projects-browser.test.js tests/agent-context-packs.test.js tests/agent-skill-resources.test.js tests/agent-skill-resource-import.test.js tests/agent-skill-resource-import-browser.test.js tests/agent-skill-packages.test.js tests/agent-skill-import-client.test.js tests/agent-skill-import-assistant.test.js tests/agent-skill-format-adapters.test.js tests/agent-skill-governance.test.js"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.9.12",
@@ -146,7 +148,7 @@
     "@xmldom/xmldom": "^0.9.12",
     "axios": "^1.20.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "https://codeload.github.com/WiseLibs/better-sqlite3/tar.gz/refs/tags/v12.11.2",
+    "better-sqlite3": "12.11.1",
     "body-parser": "^2.4.0",
     "compression": "^1.8.1",
     "cors": "^2.8.5",

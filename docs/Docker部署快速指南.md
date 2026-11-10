@@ -1,5 +1,9 @@
 # Pivot Docker 部署快速指南
 
+v0.7.147 增加个人项目表迁移 `202611100001_agent_projects`，并汇总智能体协议、视觉核验和技能资源改造。升级需保留 PostgreSQL、CAS 与技能包目录；技能包默认位于 `DATA_DIR/agent-skills`，已自定义 `AGENT_SKILL_ROOT` 的部署继续保留原挂载。模型网关协议选择、迁移顺序及验收范围见[v0.7.147升级说明](releases/v0.7.147-智能体协议视觉核验与项目技能资源升级.md)。本次源码版本更新不会改写已有镜像、tar或桌面安装包。
+
+v0.7.144 已统一默认主镜像的 SQLite 下载来源、veraPDF 探测与 Git/ripgrep 打包方式；版本范围及验证记录见[发布说明](releases/v0.7.144-Docker单镜像完整打包与运行依赖修复.md)。普通构建命令无需新增参数。
+
 ## 一、基础部署（不含客户端下载）
 
 ```bash
@@ -13,6 +17,12 @@ docker-compose up -d
 # 浏览器打开 http://localhost:3000
 ```
 
+veraPDF 的启动探测上限为 30 秒，成功结果缓存 60 秒，失败结果仅缓存 5 秒；PDF 工具页的能力查询保留 35 秒等待时间。探测超时会明确提示检查服务器负载并稍后重试；CLI 或 JRE 缺失则提示检查部署配置。更新探测逻辑需要重新构建并交付主应用镜像。
+
+主镜像默认包含 Git、ripgrep 和 `/runner/runner.js` 终端协议入口，仍使用 slim 底座；直接执行上面的 `docker build -t pivot:latest .` 即可全部打包，无需额外构建参数或单独构建终端镜像。构建以非 root 身份自检命令和协议脚本，缺失会直接失败。导出时执行 `docker save -o pivot.tar pivot:latest`，即可将这些运行依赖一并交付。
+
+已启用受控终端的部署可将同一主镜像的完整 ID 或仓库摘要登记为终端执行镜像，命令沿用 `node,/runner/runner.js`；主服务仍默认启动 `server/index.js`，实际终端执行继续由隔离 Worker 承载。镜像信任和授权流程见 [Capability Workers](../docker/capability-workers/README.md)。
+
 ## 二、添加客户端下载功能
 
 ### 浏览器中文语音
@@ -20,6 +30,10 @@ docker-compose up -d
 标准主镜像在构建阶段安装 Vosk 离线识别运行库和模型，默认使用 `local`。需要 FunASR 双遍识别时，请部署独立语音网关并准备其模型和依赖。
 
 构建时可通过 `--build-arg NPM_REGISTRY=<受信任的 npm 镜像地址>` 指定依赖源；运行时不从该地址安装依赖。真正离线交付仍需在联网准备机构建并验收镜像，再导入生产环境。
+
+若旧版本构建在下载 `codeload.github.com/WiseLibs/better-sqlite3` 时出现 `ECONNRESET`，请同步更新 `package.json` 和 `package-lock.json` 后重新构建。当前依赖锁定为 npm 已发布的 `better-sqlite3@12.11.1`，安装包可通过 `NPM_REGISTRY` 指定的源下载；Docker 随后使用镜像内 Node 头文件编译 SQLite 绑定并执行内存查询自检。仅修改 registry 或增加重试次数无法替换依赖中写死的 GitHub 下载地址。
+
+此版本没有 Electron 43 预编译包，桌面客户端打包会使用现有源码编译回退，需要目标平台的原生编译工具链；Docker 构建不使用 Electron。
 
 升级时需重新构建镜像并重建容器：
 

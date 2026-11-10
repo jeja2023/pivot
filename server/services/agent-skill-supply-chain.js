@@ -149,6 +149,12 @@ function scanSkillPackageEntries(entries = [], manifest = {}) {
     checkCompressionRatio(safeEntries, errors);
     checkPackageJsonHooks(safeEntries, errors);
     checkManifestFileConsistency(safeEntries, manifest, errors);
+    errors.push(...require('./agent-skill-resource-import').validateResourceManifest(manifest));
+    for(const item of Array.isArray(manifest.resources)?manifest.resources:[]){
+        if(!item||typeof item!=='object')continue;
+        const entry=safeEntries.find(entry=>entry.name===item.path);
+        if(!entry||entry.data.length!==item.bytes||require('node:crypto').createHash('sha256').update(entry.data).digest('hex')!==item.digest)errors.push('技能配套文件与资源摘要不一致。');
+    }
     const lock = checkDependencyLock(safeEntries, manifest, errors);
     return {
         passed: errors.length === 0,

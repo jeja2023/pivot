@@ -91,12 +91,15 @@ WORKDIR /app
 COPY --from=docker-client /usr/local/bin/docker /usr/local/bin/docker
 COPY docker/analysis-controller/docker-cli-LICENSE.txt /app/licenses/DOCKER-CLI-APACHE-2.0.txt
 
-# 运行镜像只安装运行期组件、qpdf、veraPDF JRE、pg_dump 和 Agent Browser 所需 Chromium，
+# 运行镜像安装运行期组件、文档工具、受控终端 Git/ripgrep 和 Agent Browser 所需 Chromium，
 # 不携带编译器及开发头文件。
 RUN apt-get update && apt-get install -y --no-install-recommends \
   tzdata postgresql-common ca-certificates default-jre-headless chromium qpdf \
   && yes "" | /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh \
   && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
 ARG PIVOT_BUILD_REVISION=
@@ -127,6 +130,7 @@ COPY --chown=node:node client ./client
 COPY --chown=node:node scripts/build_chat_css.js ./scripts/build_chat_css.js
 COPY --chown=node:node scripts/official_fonts.js ./scripts/official_fonts.js
 COPY --chown=node:node scripts/preflight_capability_workers.js scripts/preflight_ppt_master.js ./scripts/
+COPY --chown=node:node docker/capability-workers/terminal-runner/runner.js /runner/runner.js
 COPY scripts/deploy_ppt_master.py /app/ppt-master-deploy/deploy_ppt_master.py
 COPY scripts/lib/ppt_release_bundle.py scripts/lib/ppt_release_deploy.py /app/ppt-master-deploy/lib/
 COPY --chown=node:node assets ./assets
@@ -159,6 +163,7 @@ RUN npm install --global "npm@${RUNTIME_NPM_VERSION}" --ignore-scripts --no-audi
   && npm cache clean --force
 
 USER node
+RUN node --version && python3 --version && git --version && rg --version && node --check /runner/runner.js
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

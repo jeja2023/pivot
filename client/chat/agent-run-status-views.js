@@ -48,6 +48,12 @@ const AGENT_VERIFICATION_REASON_NAMES = {
     source_revoked: '原始资料已失效或不可用',
     source_not_fully_read: '尚未读取完整资料',
     verifier_unavailable: '验收服务暂时不可用',
+    verifier_timeout: '核验等待超时，已有结果已保留',
+    verifier_invalid_response: '未获得有效核验结论，已有结果已保留',
+    user_input_required: '需要用户补充业务信息',
+    deliverables_missing: '交付内容仍有缺口',
+    artifact_format_missing: '尚未生成全部要求的文件格式',
+    budget_exceeded: '已达到执行预算',
     evidence: '缺少引用来源或佐证记录',
     invalid: '格式校验不通过',
     failed: '未满足验收条件'
@@ -73,7 +79,8 @@ function renderAgentVerification(verification = null) {
     const label = ({ verified: '验收通过', partial: '部分完成', needs_input: '核验有待处理项' })[status] || '验收结果';
     const hardFailures = Array.isArray(report.hardFailures) ? report.hardFailures : [];
     const failedRules = (Array.isArray(report.rules) ? report.rules : []).filter(rule => rule && rule.passed === false).slice(0, 8);
-    return `<section class="agent-verification ${agentEscape(status)}"><div class="agent-verification-head"><strong>${agentEscape(label)}</strong><span>${hardFailures.length ? `${hardFailures.length} 项硬性条件未通过` : '关键条件已核验'}</span></div>${failedRules.length ? `<ul>${failedRules.map(formatAgentVerificationItem).join('')}</ul>` : ''}</section>`;
+    const missing = (Array.isArray(report.semanticVerification?.missing) ? report.semanticVerification.missing : []).slice(0, 8);
+    return `<section class="agent-verification ${agentEscape(status)}"><div class="agent-verification-head"><strong>${agentEscape(label)}</strong><span>${hardFailures.length ? `${hardFailures.length} 项硬性条件未通过` : status === 'verified' ? '关键条件已核验' : '仍需核对交付结果'}</span></div>${failedRules.length ? `<ul>${failedRules.map(formatAgentVerificationItem).join('')}</ul>` : ''}${missing.length ? `<ul>${missing.map(item => `<li>${agentEscape(item)}</li>`).join('')}</ul>` : ''}</section>`;
 }
 
 function renderAgentEvidence(evidence = []) {

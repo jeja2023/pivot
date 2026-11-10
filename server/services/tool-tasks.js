@@ -37,6 +37,10 @@ function createToolTaskStore(deps = {}) {
     const controllers = new Map();
 
     async function readable(row, user) {
+        if (row?.tool_name === 'policy.review_report') {
+            if (parseJson(row.result_json).withdrawn) throw Object.assign(new Error('审查报告已撤回。'), { status: 403, code: 'POLICY_REVIEW_SOURCE_UNAVAILABLE' });
+            await require('./policy-review/sources').assertRequest(parseJson(row.input_request), user);
+        }
         if (!row || row.tool_name !== 'presentation.storyline') return row;
         const document = await require('./presentations/presentation-service').getPresentation(user, parseJson(row.input_request).presentationId);
         return document ? row : null;
@@ -77,6 +81,7 @@ function createToolTaskStore(deps = {}) {
     async function requestCancel(id, user) {
         const current = await readOne('SELECT * FROM tool_tasks WHERE id = ? AND user_id = ?', [id, user?.id || 0]);
         if (!current) return null;
+        if (current.tool_name === 'policy.review_report') return require('./policy-review/runtime').cancel(user, id);
         if (current.tool_name === 'presentation.storyline') return require('./presentations/storyline/tasks').cancel(user, parseJson(current.input_request).presentationId, id);
         const task = await expireIfNeeded(current);
         if (!['working', 'input_required'].includes(task.status)) return publicTask(task);

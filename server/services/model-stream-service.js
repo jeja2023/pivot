@@ -77,12 +77,12 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
     const orderedVisionHistory = normalizeChatStreamMessages(visionHistory, modelCfg);
     const baseUrl = normalizeModelBaseUrl(modelCfg.url, { appendV1ForLocal: false });
     const modelName = modelCfg.model_name || 'default';
-    const isResponsesApi = shouldUseResponsesApi(modelName);
+    const isResponsesApi = shouldUseResponsesApi(modelName, modelCfg);
     let targetUrl = isResponsesApi
         ? buildResponsesUrl(modelCfg.url, { appendV1ForLocal: false })
         : buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
     const headers = buildModelHeaders(modelCfg, { acceptJson: true });
-    const requestData = buildChatRequestData(modelCfg, modelName);
+    let requestData = buildChatRequestData(modelCfg, modelName);
     const promptCache = isResponsesApi ? buildChatPromptCache(modelCfg, { sessionId, userId }) : null;
 
     log.info({
@@ -108,7 +108,8 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
         }));
         log.info({ inputSummary }, '请求体结构');
         try {
-            requestData.input = responsesHistory;
+            requestData = { model: modelName, stream: true, store: false, input: responsesHistory,
+                ...(Number(modelCfg.max_tokens) > 0 ? { max_output_tokens: Number(modelCfg.max_tokens) } : {}) };
             if (promptCache) Object.assign(requestData, promptCache);
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,
@@ -139,9 +140,7 @@ async function openChatModelStream({ modelCfg, user, visionHistory, log, session
             if (![404, 405, 502, 503].includes(status)) throw err;
             log.warn({ status }, 'Responses API 暂不可用，正在自动回退到常规接口');
             targetUrl = buildChatCompletionsUrl(baseUrl, { appendV1ForLocal: false });
-            delete requestData.input;
-            delete requestData.prompt_cache_key;
-            delete requestData.prompt_cache_options;
+            requestData = buildChatRequestData(modelCfg, modelName);
             requestData.messages = orderedVisionHistory;
             const response = await forwardChatCompletion({
                 modelCfg, user, url: targetUrl, headers,

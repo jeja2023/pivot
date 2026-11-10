@@ -85,7 +85,7 @@ test('持续目标会阻止冷却窗口内重复运行，并在失败阈值后�
     await execute(`
         INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at)
         VALUES (?, ?, '目标可靠性运行', '验证冷却和熔断', 'error', ?::jsonb, NOW(), NOW())
-    `, [runId, user.id, JSON.stringify({ goalId })]);
+    `, [runId, user.id, JSON.stringify({ goalId, goalVersion: 1 })]);
     await execute(`
         INSERT INTO agent_goals (
             id, user_id, title, goal, priority, status, trigger_spec, authorization_spec, budget_spec,

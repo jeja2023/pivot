@@ -1,7 +1,12 @@
 'use strict';
 
-const { query, queryOne } = require('../db/client');
-const { getBeijingTimestamp } = require('../time');
+const { query } = require('../db/client');
+const { createHash } = require('node:crypto');
+
+function modelQualityIdentity(model = {}) {
+    if (!model.url || !(model.model_name || model.name)) return '';
+    return createHash('sha256').update(`${model.url}\n${model.model_name || model.name}`).digest('hex');
+}
 
 const MIN_QUALITY_SAMPLES = 30;
 const MAX_QUALITY_PROFILE_AGE_DAYS = 30;
@@ -20,26 +25,11 @@ function inferTaskType(run = {}) {
     return 'general';
 }
 
-async function recordModelQualityOutcome({ run, user, verification } = {}) {
-    const modelId = Number(run?.chosen_model_id || run?.model_id || 0);
-    const userId = Number(user?.id || run?.user_id || 0);
-    if (!modelId || !userId || !verification?.outcomeStatus) return null;
-    const taskType = inferTaskType(run);
-    const verified = verification.outcomeStatus === 'verified';
-    const partial = verification.outcomeStatus === 'partial';
-    const now = getBeijingTimestamp();
-    return await queryOne(`
-        INSERT INTO agent_model_quality_profiles (
-            user_id, model_id, task_type, sample_count, verified_count, partial_count, failed_count, updated_at
-        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-        ON CONFLICT (user_id, model_id, task_type) DO UPDATE SET
-            sample_count = agent_model_quality_profiles.sample_count + 1,
-            verified_count = agent_model_quality_profiles.verified_count + EXCLUDED.verified_count,
-            partial_count = agent_model_quality_profiles.partial_count + EXCLUDED.partial_count,
-            failed_count = agent_model_quality_profiles.failed_count + EXCLUDED.failed_count,
-            updated_at = EXCLUDED.updated_at
-        RETURNING *
-    `, [userId, modelId, taskType, verified ? 1 : 0, partial ? 1 : 0, !verified && !partial ? 1 : 0, now]);
+// 验收表以 run_id 唯一更新；读取权威结果，不再把重试累计成独立样本。
+async function recordModelQualityOutcome({ run, user } = {}) {
+    if (!run?.id || !user?.id) return null;
+    const profiles = await getModelQualityProfiles(user, inferTaskType(run));
+    return profiles.find(item => item.modelId === Number(run.chosen_model_id || run.model_id)) || null;
 }
 
 function wilsonLowerBound(successes, samples, z = 1.96) {
@@ -82,14 +72,32 @@ function assessModelQualityProfile(profile = {}, { now = new Date() } = {}) {
 
 async function getModelQualityProfiles(user, taskType = 'general', options = {}) {
     if (!user?.id) return [];
-    const rows = await query(`
-        SELECT user_id, model_id, task_type, sample_count, verified_count, partial_count, failed_count, updated_at
-        FROM agent_model_quality_profiles
-        WHERE user_id = ? AND task_type IN (?, 'general')
-        ORDER BY task_type = ? DESC, sample_count DESC, updated_at DESC
-    `, [user.id, taskType, taskType]);
-    const seen = new Set();
     const now = options.now instanceof Date ? options.now : new Date();
+    const cutoff = new Date(now.getTime() - MAX_QUALITY_PROFILE_AGE_DAYS * 86400000).toISOString();
+    const rows = await query(`
+        WITH outcomes AS (
+            SELECT COALESCE(r.chosen_model_id, r.model_id) AS model_id, v.outcome_status, v.created_at,
+                CASE WHEN r.run_mode = 'dag' THEN 'workflow'
+                    WHEN r.goal ~ '(检索|研究|来源|引用|知识库|政策|资料)' THEN 'research'
+                    WHEN lower(r.goal) ~ '(数据|sql|数据库|表格|统计|分析)' THEN 'analysis'
+                    WHEN lower(r.goal) ~ '(文档|报告|ppt|演示|word|pdf|写作)' THEN 'document'
+                    WHEN r.goal ~ '(浏览器|网页|网站|点击|登录)' THEN 'browser'
+                    ELSE 'general' END AS task_type
+            FROM agent_verifications v JOIN agent_runs r ON r.id = v.run_id AND r.user_id = v.user_id
+            JOIN models m ON m.id = COALESCE(r.chosen_model_id, r.model_id)
+            WHERE v.user_id = ? AND v.created_at >= ?::timestamptz AND v.created_at <= ?::timestamptz
+                AND COALESCE(v.report->>'executionModelIdentity', v.report->'semanticVerification'->>'modelIdentity') = encode(sha256(convert_to(m.url || chr(10) || COALESCE(NULLIF(m.model_name, ''), m.name, ''), 'UTF8')), 'hex')
+                AND r.deleted_at IS NULL AND r.status IN ('completed', 'completed_with_errors', 'partial', 'needs_input', 'failed', 'error')
+        )
+        SELECT model_id, task_type, COUNT(*) AS sample_count,
+            COUNT(*) FILTER (WHERE outcome_status = 'verified') AS verified_count,
+            COUNT(*) FILTER (WHERE outcome_status = 'partial') AS partial_count,
+            COUNT(*) FILTER (WHERE outcome_status NOT IN ('verified', 'partial')) AS failed_count,
+            MAX(created_at) AS updated_at
+        FROM outcomes WHERE model_id IS NOT NULL AND task_type IN (?, 'general')
+        GROUP BY model_id, task_type ORDER BY task_type = ? DESC, sample_count DESC, updated_at DESC
+    `, [user.id, cutoff, now.toISOString(), taskType, taskType]);
+    const seen = new Set();
     return rows.filter(row => {
         const key = String(row.model_id);
         if (seen.has(key)) return false;
@@ -111,6 +119,7 @@ module.exports = {
     assessModelQualityProfile,
     getModelQualityProfiles,
     inferTaskType,
+    modelQualityIdentity,
 
     recordModelQualityOutcome,
     wilsonLowerBound

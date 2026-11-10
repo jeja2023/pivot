@@ -20,6 +20,8 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'document.compare': ['document.render'],
     'viz.mindmap': ['viz.render'],
     'finance.transactionSummary': ['data.dataset.read'],
+    'skill.resources': ['artifact.read'],
+    'skill.read_resource': ['artifact.read'],
     'chat.read_source': ['conversation.read_source'],
     'agent.llm': ['model.invoke'],
     'agent.content_review': ['model.invoke', 'agent.review'],
@@ -69,6 +71,8 @@ const BUILTIN_TOOL_CAPABILITIES = Object.freeze({
     'system.modelRuntime': ['system.observe'],
     // 文档渲染与产物交付（落地方案 §7）
     'presentation.create': ['document.render'],
+    'policy.review_report': ['document.render', 'model.invoke'],
+    'presentation.from_analysis': ['document.render'],
     'presentation.master': ['document.render', 'model.invoke'],
     'presentation.design_info': ['document.render'],
     'presentation.review': ['document.render', 'model.invoke'],

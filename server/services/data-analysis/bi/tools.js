@@ -16,7 +16,7 @@ function toolDefinitions() {
     const fields = { modelId: { type: 'string', maxLength: 120 }, publishedVersion: { type: 'integer', minimum: 1 }, dimensions: { type: 'array', maxItems: 5, items: { type: 'string' } }, metrics: { type: 'array', maxItems: 10, items: { type: 'string' } },
         filters: { type: 'array', maxItems: 20, items: { type: 'object' } }, limit: { type: 'integer', minimum: 1, maximum: 5000 }, binding: { type: 'object' }, requestKey: { type: 'string', maxLength: 120 } };
     return [
-        { name: 'analysis.modelCatalog', title: '查看已发布分析模型', description: '按当前身份列出可用的已发布 BI 模型，或读取指定版本的可见维度、指标、有效期、单位及口径。来源不可用时不返回来源名称和定义。先使用此能力确认稳定 ID，不按名称猜测指标。', capabilities: ['data.dataset.read'], input_schema: { type: 'object', properties: { modelId: fields.modelId, publishedVersion: fields.publishedVersion }, additionalProperties: false } },
+        { name: 'analysis.modelCatalog', title: '查看已发布分析模型', description: '按当前身份列出可用的已发布 BI 模型，或读取指定版本的可见维度、指标、有效期、单位及口径。来源不可用时不返回来源名称和定义。先使用此能力确认稳定 ID，不按名称猜测指标。', capabilities: ['data.dataset.read'], input_schema: { type: 'object', properties: { modelId: fields.modelId, publishedVersion: fields.publishedVersion, page: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 200 }, search: { type: 'string', maxLength: 120 } }, additionalProperties: false } },
         { name: 'analysis.modelQuery', title: '运行正式模型分析', description: '使用明确的发布版本、可见维度/指标 ID 和结构化筛选创建持久分析任务，不接收 SQL，不修改模型。先展示已解析条件；口径、日期字段或范围存在歧义时必须向用户澄清，confirmed=true 只能用于用户已明确的条件或工作流中固定配置。返回任务 ID，随后用 analysis.modelResult 读取确定性结果。', capabilities: ['data.dataset.read'], input_schema: { type: 'object', properties: { ...fields, confirmed: { type: 'boolean' } }, required: ['modelId', 'publishedVersion', 'metrics', 'requestKey'], additionalProperties: false } },
         { name: 'analysis.modelResult', title: '读取正式模型运行结果', description: '按当前身份读取本人分析任务及精确十进制结果、总计范围、来源清单和截止时间。不可读取其他用户的缓存；失败时保留明确错误，不推测数值。', capabilities: ['data.dataset.read'], input_schema: { type: 'object', properties: { runId: { type: 'string', maxLength: 120 } }, required: ['runId'], additionalProperties: false } }
     ];
@@ -24,8 +24,8 @@ function toolDefinitions() {
 
 async function catalog(user, input) {
     if (!input.modelId) {
-        const list = await require('../semantic-models').listDataModels(user, { limit: 200 });
-        return { models: list.filter(model => model.modelKind === 'production' && model.publishedVersion && model.lifecycle !== 'archived').map(model => delivery.inherit({ id: model.id, name: model.name, description: model.description, publishedVersion: model.publishedVersion, availability: model.availability }, model)), text: '请选择明确的模型及发布版本，再读取指标口径。' };
+        const page = await require('./catalog').page(user, { page: input.page ?? 1, limit: input.limit ?? 50, search: input.search ?? '', lifecycle: 'published' });
+        return delivery.inherit({ ...page, models: page.models.map(model => ({ id: model.id, name: model.name, description: model.description, publishedVersion: model.publishedVersion, availability: model.availability })), text: '请选择明确的模型及发布版本，再读取指标口径；目录支持按页继续查找。' }, page);
     }
     const model = await modelForUser(user, input.modelId);
     const number = input.publishedVersion ?? Number(model.published_version);

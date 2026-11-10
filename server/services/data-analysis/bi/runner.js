@@ -34,12 +34,13 @@ async function executeJob(job) {
     };
     const timer = setInterval(() => { if (Date.now() - lastRenewal > 25000) controller.abort(); if (!heartbeat) heartbeat = renew().finally(() => { heartbeat = null; }); }, 2000);
     timer.unref?.();
-    const deadline = setTimeout(() => controller.abort(), ['model_check', 'model_refresh', 'model_export', 'dataset_ingest'].includes(job.execution_kind) ? 300000 : 180000);
+    const deadline = setTimeout(() => controller.abort(), ['model_check', 'model_refresh', 'model_export', 'dataset_ingest', 'model_node_dataset'].includes(job.execution_kind) ? 300000 : 180000);
     deadline.unref?.();
     try {
         const user = await resolveAnalysisUser(job.user_id);
         if (!user || user.deleted_at || user.status !== 'active') throw biError('ANALYSIS_MODEL_NOT_FOUND', '任务所属账号已失效，请检查账号状态。', 404);
         if (job.execution_kind === 'dataset_ingest') { await require('./ingestions').executeIngestion(job, { outputRoot, signal: controller.signal }); return; }
+        if (require('./flow-pipeline').isNodeJob(job)) { await require('./flow-pipeline').executeNodeJob(job, { outputRoot, signal: controller.signal }); return; }
         let definition;
         if (job.check_id) {
             const checked = await jobs.check(user.id, job.model_id, job.check_id);

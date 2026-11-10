@@ -17,7 +17,7 @@ class ArtifactManager {
 
   async assertCanReadArtifact(artifactId, userId) {
     const artifact = userId && await queryOne(
-      "SELECT id FROM agent_artifacts WHERE id = ? AND status <> 'deleted' AND (user_id = ? OR (status = 'public' AND type <> 'mindmap'))",
+      "SELECT id FROM agent_artifacts WHERE id = ? AND status <> 'deleted' AND type NOT IN ('policy_review_report','policy_review_material') AND (user_id = ? OR (status = 'public' AND type <> 'mindmap'))",
       [artifactId, String(userId)]
     );
     if (!artifact) throw Object.assign(new Error('Artifact 不存在或无权访问'), { status: 404 });
@@ -95,6 +95,7 @@ class ArtifactManager {
     if (!current) {
       throw new Error('Artifact 不存在或无权修改');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(current);
     if (current.type === 'mindmap') throw Object.assign(new Error('请通过思维导图应用保存，以保留版本与冲突保护。'), { status: 409 });
 
     // 记录版本历史并更新主记录
@@ -151,6 +152,7 @@ class ArtifactManager {
     if (!artifact || (artifact.type === 'mindmap' && artifact.status === 'deleted')) {
       throw new Error('Artifact 不存在');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(artifact);
 
     const uId = String(userId);
     // 检查访问权限（公开或所有者）
@@ -174,6 +176,7 @@ class ArtifactManager {
     if (!artifact || (artifact.type === 'mindmap' && artifact.status === 'deleted')) {
       throw new Error('Artifact 不存在或无权访问');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(artifact);
 
     const versions = await query(
       'SELECT * FROM agent_artifact_versions WHERE artifact_id = ? ORDER BY version DESC',
@@ -199,6 +202,7 @@ class ArtifactManager {
     if (!artifact) {
       throw new Error('Artifact 不存在或无权修改');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(artifact);
     if (artifact.type === 'mindmap') throw Object.assign(new Error('请在思维导图应用中恢复历史版本。'), { status: 409 });
 
     const targetVersion = await queryOne(
@@ -260,7 +264,7 @@ class ArtifactManager {
     } = options;
 
     const uId = String(userId);
-    const conditions = ['user_id = ?'];
+    const conditions = ["user_id = ? AND type NOT IN ('policy_review_report','policy_review_material')"];
     const params = [uId];
 
     if (type) {
@@ -297,7 +301,7 @@ class ArtifactManager {
     `, listParams);
 
     return {
-      artifacts: rows.map(a => this.formatArtifact(a)),
+      artifacts: require('../policy-review/artifact-boundary').filterGenericList(rows).map(a => this.formatArtifact(a)),
       total,
       limit: Number(limit) || 20,
       offset: Number(offset) || 0
@@ -343,6 +347,7 @@ class ArtifactManager {
     if (!artifact) {
       throw new Error('Artifact 不存在或无权分享');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(artifact);
     if (artifact.type === 'mindmap') throw Object.assign(new Error('当前思维导图仅支持本人访问。'), { status: 409 });
 
     const expiresAt = expiresIn
@@ -396,6 +401,7 @@ class ArtifactManager {
     if (!artifact || artifact.status === 'deleted' || artifact.type === 'mindmap') {
       throw new Error('Artifact 不存在或已下架');
     }
+    require('../policy-review/artifact-boundary').assertGenericAccess(artifact);
 
     return this.formatArtifact(artifact);
   }

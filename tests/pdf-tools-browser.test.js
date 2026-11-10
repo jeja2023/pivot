@@ -47,6 +47,7 @@ async function createPdfPage(browser) {
                 ? [...options.body.keys()].filter(key => key !== 'files')
                 : [];
             window.pdfRequests.push([url, options.method || 'GET', fields]);
+            if (url.endsWith('/capabilities')) window.pdfCapabilityTimeoutMs = options.timeoutMs;
             const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
             if (url.endsWith('/capabilities')) return json({
                 operations: [
@@ -77,6 +78,7 @@ test('PDF 工具浏览器工作区呈现排队状态、扩展操作和结果详�
     const browser = await chromium.launch({ headless: true });
     try {
         const page = await createPdfPage(browser);
+        assert.ok(await page.evaluate(() => window.pdfCapabilityTimeoutMs) >= 35000);
         await expect(page.locator('#pdf-job-table-body')).toContainText('排队中');
         await expect(page.locator('[data-pdf-job-cancel="101"]')).toBeVisible();
         const quickPreset = page.locator('[data-pdf-quick-preset="internal-watermark"]');

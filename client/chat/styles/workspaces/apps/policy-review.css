@@ -1,0 +1,17 @@
+.policy-review-overlay { z-index: 1600; }
+.policy-review-modal { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+.policy-review-modal .workspace-modal-body { display: grid; gap: 16px; overflow: auto; min-width: 0; }
+.policy-review-modal form, .policy-review-modal label { display: grid; gap: 8px; min-width: 0; }
+.policy-review-fields { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+.policy-review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-block: 12px; }
+.policy-review-actions .form-input { flex: 1; min-width: 160px; }
+.policy-review-modal p, .policy-review-finding { overflow-wrap: anywhere; }
+.policy-review-finding { padding-block: 12px; border-bottom: 1px solid var(--border); }
+.policy-review-finding summary { cursor: pointer; font-weight: 600; }
+.policy-review-finding label { margin-block: 10px; }
+.policy-review-modal .table-container { max-height: 340px; overflow: auto; }
+@media (max-width: 640px) {
+    .policy-review-modal { width: 100%; max-height: 100vh; }
+    .policy-review-fields { grid-template-columns: 1fr; }
+    .policy-review-actions > button { flex: 1; }
+}

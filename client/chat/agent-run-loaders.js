@@ -6,6 +6,7 @@ let agentRunsLoadSequence = 0;
 let agentContextCollectionsCache = [];
 
 async function loadAgentContextCollections() {
+    await window.Pivot.moduleApi('agent.projects')?.refreshSelect?.();
     const select = document.getElementById('agent-context-collections');
     if (!select) return [];
     const refresh = document.getElementById('agent-context-collections-refresh');

@@ -269,6 +269,7 @@ async function getPresentationRow(user, clientId, { includeContent = false } = {
           ))
           AND d.deleted_at IS NULL
     `, [user.id, user.id, tenant.tenantId, idStr, isArtifactId ? Number(idStr) : -1, isArtifactId, user.id, user.id]);
+    if (row && includeContent) await require('./presentation-analysis-sources').assertAnalysisSources(parseJson(row.content_json, {}), user, { ownerId: row.owner_user_id });
     return includeContent ? row : row && { ...row, content_json: undefined, validation_json: undefined };
 }
 
@@ -348,6 +349,7 @@ async function createPresentation(user, body = {}) {
     content = applyTemplateBrandControls(content, template);
     content = await require('./presentation-text-metrics').fitDesignPresentation(content);
     content = attachApprovedOutline(content, body.planApproval || body.plan_approval, user);
+    await require('./presentation-analysis-sources').assertAnalysisSources(content, user);
     await assertPresentationAssetOwnership(user, content);
     const validation = runPresentationValidation(content);
     const artifact = await createStandaloneArtifact(user, {
@@ -403,7 +405,9 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     if (options.expectedContentDigest && computePresentationDigest(previousContent) !== options.expectedContentDigest) throw publicError('文稿或制作目标已变化，请重新生成方案。', 409, 'PRESENTATION_STORY_STALE');
     const submittedMetadata = { ...((body.content && body.content.metadata) || {}), planApproval: previousContent.metadata?.planApproval || null };
     const reviewSafeContent = preserveSlideReviews(previousContent, body.content || {}, { allowReviewMutation: options.allowReviewMutation === true });
-    let content = normalizePresentation({ ...reviewSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
+    const sourceSafeContent = require('./presentation-analysis-sources').preserveAnalysisSources(previousContent, reviewSafeContent);
+    let content = normalizePresentation({ ...sourceSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
+    await require('./presentation-analysis-sources').assertAnalysisSources(content, user, { ownerId: current.owner_user_id });
     content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow',
         recolor: body.templateApplyMode === 'theme' || body.template_apply_mode === 'theme' || templateId !== current.template_id || Number(templateVersion) !== Number(current.template_version) });
     content = applyTemplateBrandControls(content, activeTemplate);
@@ -552,7 +556,9 @@ async function getPresentationVersion(user, clientId, version) {
     if (!current) return null;
     const row = await queryOne('SELECT * FROM presentation_versions WHERE presentation_id = ? AND version = ?', [current.id, Number.parseInt(version, 10)]);
     if (!row) return null;
-    return { version: Number(row.version), content: parseJson(row.content_json, null), validation: parseJson(row.validation_json, {}), note: row.note || '', createdAt: row.created_at };
+    const content = parseJson(row.content_json, null);
+    if (content) await require('./presentation-analysis-sources').assertAnalysisSources(content, user, { ownerId: current.owner_user_id });
+    return { version: Number(row.version), content, validation: parseJson(row.validation_json, {}), note: row.note || '', createdAt: row.created_at };
 }
 
 async function rollbackPresentation(user, clientId, version, note = '') {

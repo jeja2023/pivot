@@ -148,12 +148,12 @@
             const groups = (cfg.groupBy || []).filter(Boolean);
             const aggs = (cfg.aggregations || [])
                 .filter(item => item?.fn === 'count' || item?.field)
-                .map(item => item.alias || (item.fn === 'count' ? '记录条数' : `${item.field}_${item.fn}`));
+                .map(item => item.alias || (item.fn === 'count' ? '记录条数' : `${item.field}_${({ sum: '求和', avg: '均值', count_distinct: '去重数', min: '最小值', max: '最大值' })[item.fn] || item.fn}`));
             return [...groups, ...aggs];
         }
         if (flowNode.kind === 'select') {
             const active = (cfg.columns || []).filter(col => col.enabled !== false && col.field);
-            return active.length ? active.map(col => col.alias || col.field) : firstCols;
+            return active.length ? active.map(col => col.alias || col.field) : (cfg.columns || []).length ? [] : firstCols;
         }
         if (flowNode.kind === 'union') {
             const unionSet = new Set();
@@ -229,7 +229,7 @@
         }
         if (node.kind === 'select') {
             const activeCount = (cfg.columns || []).filter(item => item?.enabled !== false && item?.field).length;
-            const parts = [activeCount ? `保留 ${activeCount} 列` : '全部字段'];
+            const parts = [activeCount ? `保留 ${activeCount} 列` : (cfg.columns || []).length ? '未选择输出字段' : '全部字段'];
             if (cfg.deduplicate) parts.push('去重');
             if (cfg.sortField) parts.push('已排序');
             return parts.join(' · ');
@@ -472,6 +472,7 @@
                             <button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-cond="${idx}"${dis}>删除</button>
                         </div>
                         ${hideVal ? '' : `<input class="form-input" data-flow-cond-val="${idx}" value="${esc(cond.value ?? '')}" placeholder="${valPlaceholder}" maxlength="1000"${dis}>`}
+                        ${hideVal ? '' : `<select class="form-input" data-flow-cond-type="${idx}" aria-label="比较值类型"${dis}><option value="auto"${!cond.valueType || cond.valueType === 'auto' ? ' selected' : ''}>自动识别（编号建议选择文本）</option><option value="text"${cond.valueType === 'text' ? ' selected' : ''}>文本：保留编号前导零</option><option value="number"${cond.valueType === 'number' ? ' selected' : ''}>数值：按十进制比较</option></select>`}
                     </div>`;
             }).join('')}
             </div>
@@ -553,6 +554,7 @@
                             <button class="btn-secondary modeling-mini-btn" type="button" data-flow-remove-agg="${idx}"${dis}>删除</button>
                         </div>
                         <input class="form-input" data-flow-agg-alias="${idx}" value="${esc(agg.alias || '')}" placeholder="输出列名（留空自动生成）" maxlength="80"${dis}>
+                        ${['min', 'max'].includes(agg.fn) ? `<select class="form-input" data-flow-agg-type="${idx}" aria-label="最大最小值统计类型"${dis}><option value="number"${agg.valueType !== 'text' ? ' selected' : ''}>按数值统计</option><option value="text"${agg.valueType === 'text' ? ' selected' : ''}>按文本顺序统计</option></select>` : ''}
                     </div>`;
             }).join('')}
             </div>
@@ -720,8 +722,8 @@
             node.config[prop] = t.type === 'checkbox' ? t.checked : t.value;
             handled = true;
             if (prop === 'datasetId') needsRerender = true;
-        } else if (t.hasAttribute('data-flow-cond-field') || t.hasAttribute('data-flow-cond-op') || t.hasAttribute('data-flow-cond-val')) {
-            const idx = Number(t.dataset.flowCondField ?? t.dataset.flowCondOp ?? t.dataset.flowCondVal);
+        } else if (t.hasAttribute('data-flow-cond-field') || t.hasAttribute('data-flow-cond-op') || t.hasAttribute('data-flow-cond-val') || t.hasAttribute('data-flow-cond-type')) {
+            const idx = Number(t.dataset.flowCondField ?? t.dataset.flowCondOp ?? t.dataset.flowCondVal ?? t.dataset.flowCondType);
             if (!Array.isArray(node.config.conditions)) node.config.conditions = [];
             node.config.conditions[idx] = node.config.conditions[idx] || { field: '', operator: 'eq', value: '' };
             if (t.hasAttribute('data-flow-cond-field')) node.config.conditions[idx].field = t.value;
@@ -731,6 +733,7 @@
                 if (prevHide !== ['is_null', 'is_not_null'].includes(t.value)) needsRerender = true;
             }
             if (t.hasAttribute('data-flow-cond-val')) node.config.conditions[idx].value = t.value;
+            if (t.hasAttribute('data-flow-cond-type')) node.config.conditions[idx].valueType = t.value;
             handled = true;
         } else if (t.hasAttribute('data-flow-formula-name') || t.hasAttribute('data-flow-formula-expr')) {
             const idx = Number(t.dataset.flowFormulaName ?? t.dataset.flowFormulaExpr);
@@ -749,17 +752,17 @@
         } else if (t.hasAttribute('data-flow-agg-groups')) {
             node.config.groupBy = Array.from(t.selectedOptions || [], opt => opt.value);
             handled = true;
-        } else if (t.hasAttribute('data-flow-agg-fn') || t.hasAttribute('data-flow-agg-field') || t.hasAttribute('data-flow-agg-alias')) {
-            const idx = Number(t.dataset.flowAggFn ?? t.dataset.flowAggField ?? t.dataset.flowAggAlias);
+        } else if (t.hasAttribute('data-flow-agg-fn') || t.hasAttribute('data-flow-agg-field') || t.hasAttribute('data-flow-agg-alias') || t.hasAttribute('data-flow-agg-type')) {
+            const idx = Number(t.dataset.flowAggFn ?? t.dataset.flowAggField ?? t.dataset.flowAggAlias ?? t.dataset.flowAggType);
             if (!Array.isArray(node.config.aggregations)) node.config.aggregations = [];
             node.config.aggregations[idx] = node.config.aggregations[idx] || { field: '', fn: 'sum', alias: '' };
             if (t.hasAttribute('data-flow-agg-fn')) {
-                const wasCount = node.config.aggregations[idx].fn === 'count';
                 node.config.aggregations[idx].fn = t.value;
-                if (wasCount !== (t.value === 'count')) needsRerender = true;
+                needsRerender = true;
             }
             if (t.hasAttribute('data-flow-agg-field')) node.config.aggregations[idx].field = t.value;
             if (t.hasAttribute('data-flow-agg-alias')) node.config.aggregations[idx].alias = t.value;
+            if (t.hasAttribute('data-flow-agg-type')) node.config.aggregations[idx].valueType = t.value;
             handled = true;
         } else if (t.hasAttribute('data-flow-sel-on') || t.hasAttribute('data-flow-sel-alias')) {
             syncSelectColumnsFromDom(drawer, node);

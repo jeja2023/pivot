@@ -68,6 +68,7 @@ function createWorkerEnvironment(workerIndex) {
             TZ: 'Asia/Shanghai',
             PG_TIMEZONE: 'Asia/Shanghai',
             DATA_DIR: path.join(testRoot, 'data'),
+            AGENT_SKILL_ROOT: path.join(testRoot, 'skill-packages'),
             PIVOT_UPLOAD_DIR: path.join(testRoot, 'uploads'),
             PIVOT_ANALYSIS_DIR: path.join(testRoot, 'analysis'),
             DATA_ANALYSIS_SECURITY_JOURNAL_DIR: path.join(testRoot, 'independent-security'),

@@ -623,3 +623,46 @@ test('mock SSE harness covers approval pause and recoverable tool failure', asyn
         await closeServer(server);
     }
 });
+
+
+test('真实流式循环把工具截图送入下一次模型请求，持久观察恢复后仍是原生图像', async () => {
+    const { queryOne, execute } = require('../server/db/client');
+    const user = await queryOne('SELECT id,role,unit FROM users ORDER BY id LIMIT 1');
+    const run = { id: `vision-loop-${process.pid}-${Date.now()}`, user_id: user.id, goal: '读取截图后回答', max_steps: 3, run_mode: 'standard', metadata: {} };
+    const pixels = await require('sharp')({ create: { width: 5, height: 5, channels: 3, background: '#fff' } }).png().toBuffer();
+    const received = [], observations = [];
+    const server = await startMockProvider(received);
+    await execute("INSERT INTO agent_runs(id,user_id,title,goal,status,metadata) VALUES (?,?,'视觉循环','读取截图后回答','executing','{}')", [run.id, user.id]);
+    try {
+        const modelCfg = { id: 1, name: 'fixture', model_name: 'fixture', supports_vision: true, url: `http://127.0.0.1:${server.address().port}` };
+        const toolList = [{ name: 'test.echo', source: 'builtin', idempotent: true, input_schema: { type: 'object', properties: { value: { type: 'string' } } } }];
+        const deps = streamingDeps({ run, steps: [], events: [], maybePauseForApproval: async () => false,
+            executeToolByName: async () => ({ screenshot: pixels.toString('base64') }) });
+        deps.verifyAgentOutcome = async () => ({ outcomeStatus: 'verified', hardFailures: [] });
+        const result = await tryRunAgentStreaming({ run, user, modelCfg, runId: run.id, toolList, observations,
+            chatContext: { goalContext: { triggerInputs: { batch: 'batch-42' }, continuation: { previousAnswer: '前次仍待检查截图' } } },
+            deadline: Date.now() + 30000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {} }, deps);
+        assert.equal(result.completed, true);
+        assert.equal(received.length, 2);
+        const next = received[1].body.messages;
+        assert(next.some(item => typeof item.content === 'string' && item.content.includes('batch-42') && item.content.includes('前次仍待检查截图')));
+        assert(next.some(item => Array.isArray(item.content) && item.content.some(part => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,'))));
+        assert.equal(next.filter(item => item.role === 'tool').some(item => item.content.includes(pixels.toString('base64'))), false);
+        const restored = JSON.parse(JSON.stringify(observations));
+        const restoredMessages = require('../server/services/agent-runtime/planner').observationMessages(restored);
+        await callModelStreamingWithTools(modelCfg, restoredMessages, [], { user });
+        assert(received[2].body.messages.some(item => Array.isArray(item.content) && item.content.some(part => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,'))));
+    } finally { await closeServer(server); await execute('DELETE FROM agent_runs WHERE id=?', [run.id]); }
+});
+
+
+test('持续目标接续资料超出上下文时不降级原生协议或带残缺资料继续规划', async () => {
+    const run = { id: 'goal-context-limit', user_id: 7, goal: '接续原目标', max_steps: 2 };
+    const steps = [], deps = streamingDeps({ run, steps, events: [] });
+    deps.callModelStreamingWithTools = async () => { throw new Error('上下文不足不能发模型请求'); };
+    await assert.rejects(() => tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { max_input_tokens: 64 }, runId: run.id,
+        toolList: [], observations: [], chatContext: { goalContext: { triggerInputs: { text: '完整触发资料'.repeat(2000) } } },
+        deadline: Date.now() + 30000, assertRunWithinBudget() {}, assertRunNotCancelled: async () => {} }, deps),
+    error => ['AGENT_GOAL_CONTEXT_LIMIT', 'CONTEXT_LENGTH_EXCEEDED'].includes(error.code));
+    assert.equal(steps.some(step => step.title === '流式工具调用兜底'), false);
+});

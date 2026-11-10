@@ -157,6 +157,8 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         if (resumeContext?.previousError || resumeContext?.previousAnswer) {
             contextMessages.push({ role: 'user', content: `PIVOT_PREVIOUS_RESULT_BEGIN\n以下为上次执行结果和验收反馈，仅作续跑参考。结合本轮新指令修复缺口，不要重复已经完成的工作。\n${JSON.stringify({ answer: resumeContext.previousAnswer || '', error: resumeContext.previousError || '' })}\nPIVOT_PREVIOUS_RESULT_END` });
         }
+        contextMessages.push(...require('./agent-goal-context').goalContextMessages(chatContext.goalContext));
+        contextMessages.push(...require('./agent-projects').projectMessages(chatContext.projectContextPack?.project));
         const currentMessageParts = Array.isArray(chatAgent?.currentMessage?.content)
             ? chatAgent.currentMessage.content.filter(part => part && typeof part === 'object')
             : [];
@@ -331,6 +333,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 conversationForModel = fitMessagesToContextBudget(conversation, modelCfg, { contextWindowTokens: fallbackContextWindow });
             }
             conversationForModel = conversationForModel.messages;
+            require('./agent-goal-context').assertGoalContextPreserved(conversation, conversationForModel);
             const providerEvents = [];
             const remainingModelMs = Math.max(planningDeadline - Date.now(), 1_000);
             const modelRequestTimeoutMs = Math.min(resolveAgentRequestTimeoutMs(), remainingModelMs);
@@ -744,6 +747,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                         ,stepContext, entrypoint: 'agent'
                     });
                     conversation.push(buildToolResultMessage(call.id, compactOutput));
+                    conversation.push(...require('./agent-tool-vision').toolVisionMessages(compactOutput));
                     await deps.finishAgentTraceSpan?.(executed.toolSpanId, {
                         output: compactOutput, durationMs: executed.durationMs, contextHash: stepContext?.contextHash || ''
                     });
@@ -794,7 +798,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         // 答案生成后的验收或落库失败属于收尾故障，不能误判为原生工具不兼容再规划一遍。
         if (finalizingAnswer) throw streamErr;
         if (require('./agent-execution-control').isExecutionControlError(streamErr)) throw streamErr;
-        if (['KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_FINALIZATION_REQUIRED', 'AGENT_NO_PROGRESS', 'TOOL_DISCOVERY_NO_PROGRESS', 'AGENT_BUDGET_PERSIST_FAILED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
+        if (['SKILL_RESOURCE_UNAVAILABLE', 'AGENT_GOAL_CONTEXT_LIMIT', 'CONTEXT_LENGTH_EXCEEDED', 'KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_FINALIZATION_REQUIRED', 'AGENT_NO_PROGRESS', 'TOOL_DISCOVERY_NO_PROGRESS', 'AGENT_BUDGET_PERSIST_FAILED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);
         try {
             await (deps.recordNativeToolCallCapability || recordNativeToolCallCapability)(modelCfg, fallback);

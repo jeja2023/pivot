@@ -6,6 +6,18 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/policy-reviews.js",
+      "count": 17,
+      "rationale": "制度材料审查复用tool_tasks，所有读取和修改绑定用户与固定工具名。创建使用用户及请求摘要保证幂等，租约/截止/取消通过条件更新约束；修订与导出登记在行锁及预期版本下串行。制度条文按固定文档/版本参数读取且限制161条以发现超限，材料和报告仍使用既有Artifact/CAS。没有信任客户端路径、动态SQL或外部写入。",
+      "verification": "policy-review-runtime与policy-review-boundaries使用隔离PostgreSQL验证幂等、分批续跑、取消迟到写回、版本冲突、跨账号/私有模型/来源撤回与Word真实导出；policy-review.spec验证上传、逐条依据、修订、刷新、窄屏和实际下载。"
+    },
+    {
+      "file": "server/repositories/presentation-analysis-reports.js",
+      "count": 2,
+      "rationale": "只按参数化图表ID与所有者读取个人分析快照；业务层另行复核当前数据集、字段权限、来源版本和摘要。创建使用包含用户、图表和请求标识的摘要锁，非阻塞尝试失败即释放连接，避免重试占满连接池；回调复用现有文稿创建服务，没有动态SQL或外部写入。",
+      "verification": "tests/presentation-analysis-report.test.js：隔离PostgreSQL验证快照至可编辑PPT及真实PPTX导出、同请求并发复用、跨账号拒绝、来源变化后正文和下载拒绝；analysis-presentation.spec.js验证真实浏览器创建、刷新和下载。"
+    },
+    {
       "file": "server/repositories/agent-memory-evidence.js",
       "count": 2,
       "rationale": "独立核验只按参数化run_id及user_id读取本人任务的记忆摘要，并与memory_usage_events中同任务同用户的真实injected事件求交集，最多20项。调用方自报metadata或candidate事件不能形成依据；正文由现有记忆检索入口重新执行开关、作用域、状态、有效期和治理检查，并与注入时摘要比较。没有请求SQL拼接或跨用户读取。",
@@ -574,9 +586,9 @@
     },
     {
       "file": "server/repositories/analysis-model-jobs.js",
-      "count": 27,
-      "rationale": "模型持久任务沿用统一预算、代次、租约和当前授权事务。新增缓存身份在最终完成事务按实际当前授权向量计算，包含发布快照、清单与规范查询；命中仍是独立任务和审计，引用只在有效对象上原子登记。",
-      "verification": "bi-modeling-result-cache、pipeline、authorization、faults及budget验证缓存与正常任务的同一终态/授权/引用边界。"
+      "count": 28,
+      "rationale": "模型持久任务沿用统一预算、代次、租约和当前授权事务。新增缓存身份在最终完成事务按实际当前授权向量计算，包含发布快照、清单与规范查询；命中仍是独立任务和审计，引用只在有效对象上原子登记。 节点预览和物化复用同一准入、租约、取消、完成事务及幂等约束；新增节点历史查询按当前用户与模型绑定，只返回最近二十条任务元数据。",
+      "verification": "bi-modeling-result-cache、pipeline、authorization、faults及budget验证缓存与正常任务的同一终态/授权/引用边界。 tests/bi-modeling-flow-governance.test.js 覆盖关闭/归档拒绝、并发幂等、当前权限交付、物化提交撤权及取消。"
     },
     {
       "file": "server/repositories/analysis-model-publications.js",
@@ -653,8 +665,8 @@
     {
       "file": "server/repositories/analysis-model-catalog.js",
       "count": 3,
-      "rationale": "模型目录只批量读取可见摘要、最小图结构和字段键；当前身份从数据库重新解析，发送前以稳定顺序锁住全部模型并批量核对可见性、修订与发布指针，不向接收者返回来源或完整定义。所有数组和身份均绑定参数。",
-      "verification": "bi-modeling-catalog 覆盖千模型、多主体、单位及个人共享、真实 HTTP p95、字段撤权、已准备摘要撤权、旧探索与草稿冲突；bi-modeling-authorization 验证交付栅栏。"
+      "rationale": "模型目录只批量读取可见摘要、最小图结构和字段键；当前身份从数据库重新解析，发送前以稳定顺序锁住全部模型并批量核对可见性、修订与发布指针，不向接收者返回来源或完整定义。所有数组和身份均绑定参数。 模型目录通过同一权限 SQL 按服务端名称、归属、生命周期及来源状态筛选，再稳定排序分页并返回真实总数；所有筛选值采用参数绑定。",
+      "verification": "bi-modeling-catalog 覆盖千模型、多主体、单位及个人共享、真实 HTTP p95、字段撤权、已准备摘要撤权、旧探索与草稿冲突；bi-modeling-authorization 验证交付栅栏。 tests/bi-modeling-catalog.test.js 额外覆盖二百条之后检索、跨页去重、总数与来源删除筛选。"
     },
     {
       "file": "server/repositories/analysis-operations.js",
@@ -754,15 +766,45 @@
     },
     {
       "file": "server/repositories/analysis-flow-datasets.js",
-      "count": 2,
-      "rationale": "数据建模算子流节点输出物化为受控个人数据集时，在事务内按参数化绑定写入 analysis_datasets，异常时仅按当前用户与新数据集标识回滚清理；Parquet 路径仅由服务端受控目录生成。",
-      "verification": "tests/bi-modeling-flow-pipeline.test.js 验证算子流预览、SQL 沙箱隔离、字段权限过滤与物化数据集读写。"
+      "count": 3,
+      "rationale": "节点输出登记在现有任务完成事务内执行，仅接受隔离 Worker 完整产物；参数化写入数据集和不可变版本，保留全部来源、覆盖范围和原业务截止时间，同时固定输入及输出对象引用。取消、失效租约和当前来源撤权不能提交数据集。 历史任务只按数据集和运行标识读取对应不可变输出版本，原预览不会因后续字段治理或数据修订变化；读取及发送仍核对当前全部输出字段权限。",
+      "verification": "tests/bi-modeling-flow-governance.test.js 覆盖部分来源传播、多来源血缘、版本不可变、原水位、原子提交、并发幂等及取消/撤权边界。"
     },
     {
       "file": "server/repositories/presentation-native.js",
       "count": 22,
       "rationale": "原稿离线工作台仓储集中封装租户与所有者隔离、版本读取、条件租约、并发接纳和事务提交。原稿版本写入同时锁定所属任务与文稿，校验活跃租约、取消/到期及预期版本；清理候选只供后台维护使用，文件删除仍由受控任务目录校验。 CAS引用计数随版本在同一事务中增加，避免版本已提交但引用登记失败导致内容被回收。 最终版本/交付登记与任务完成共同受事务内任务行锁约束，取消与提交按同一行锁串行化，避免已取消任务登记部分成功。",
       "verification": "tests/presentation-native-postgres.test.js 覆盖跨账号拒绝、旧租约、取消、版本冲突、幂等重试与并发接纳；浏览器和真实容器验证编辑及视频交付。"
+    },
+    {
+      "file": "server/repositories/agent-goal-context.js",
+      "count": 2,
+      "rationale": "目标接续只读取同账号、同目标版本且未删除的运行与产物标识；正文交付继续逐次检查知识来源和产物授权，不继承审批或外部写入权限。",
+      "verification": "tests/agent-goal-context.test.js 覆盖跨账号、版本变化、未结束任务、触发参数、完整接续、来源撤销及循环引用拒绝。"
+    },
+    {
+      "file": "server/repositories/agent-verification-records.js",
+      "count": 2,
+      "rationale": "最终核验补齐当前账号任务中已应用的控制消息；使用绑定参数、任务所有者与未删除条件过滤，并以2001条探测2000条上限，超过范围明确拒绝核验。 同条件读取全部工具检查点以覆盖操作完成后界面步骤落库前中断的情况；未完成或结果不明的检查点不能作为成功依据。",
+      "verification": "tests/agent-verification-evidence.test.js 验证早期工具证据、跨Run接续、原文引用、重复操作保留和撤权拒绝。"
+    },
+    {
+      "file": "server/services/agent-goals.js",
+      "count": 35,
+      "rationale": "持续目标回执在同一事务锁定运行和目标，检查当前目标版本、活动状态、运行终态和真实验收记录；使用绑定参数更新失败计数及幂等回执标记，旧版本和重复回执不能改变当前目标。",
+      "verification": "tests/agent-goal-kinds.test.js 和 tests/agent-channel-delivery-reliability.test.js 验证旧版本、暂停、重复回执和失败熔断；tests/agent-goal-context.test.js 验证同版本接续。"
+    },
+    {
+      "file": "server/repositories/agent-projects.js",
+      "count": 11,
+      "rationale": "个人项目仓储按当前user_id读取和写入；账号行锁串行化配额与修订，版本条件阻止旧写覆盖。项目任务/产物由既有context_config关联，读取后业务层复核来源及产物权限；里程碑任务需同项目、同账号且真实verified。参数均绑定，不新增共享权限。 个人数据导出与明确擦除复用同一账号边界；擦除在现有个人数据事务内执行。",
+      "verification": "tests/agent-projects.test.js 覆盖HTTP鉴权、跨账号、旧令牌、并发修订、归档、任务工厂快照和里程碑证据；tests/agent-projects-browser.test.js 覆盖桌面/移动与保存冲突。"
+    },
+    {
+      "file": "server/repositories/agent-skill-resources.js",
+      "count": 1,
+      "rationale": "调用方先以真实任务绑定的发布版本检查当前use权限、来源和签名，再按服务端版本标识读取不可变包路径；客户端路径不能进入该查询，内容读取后再次复核发布版本。",
+      "verification": "tests/agent-skill-resources.test.js 和 tests/agent-skill-resource-import.test.js 覆盖版本变化、暂停、读取中撤权、路径越界、内容摘要和真实个人发布读取。"
     }
   ]
 }

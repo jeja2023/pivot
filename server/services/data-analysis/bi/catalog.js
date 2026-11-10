@@ -15,6 +15,15 @@ function summary(row, user, sources) {
     if (row.model_kind !== 'production') return model;
     Object.assign(model, { publishedVersion: row.published_version === null ? null : Number(row.published_version), lifecycle: row.archived_at ? 'archived' : row.published_version ? 'published' : 'draft',
         archivedAt: row.archived_at, businessOwner: row.business_owner, maintenanceContact: row.maintenance_contact, availability: 'available' });
+    if (Object.hasOwn(row, 'computed_availability')) {
+        model.availability = row.computed_availability;
+        if (model.availability === 'source_unavailable') model.message = '模型来源不可用，请联系模型维护者检查来源和字段权限。';
+        if (row.published_version) {
+            model.dataBinding = row.manifest_id ? { manifestId: row.manifest_id, revision: Number(row.binding_revision), checkId: row.check_id, dataState: row.data_state, lastRefreshError: row.last_refresh_error } : null;
+            model.dataTimes = (row.members_json || []).map(member => ({ nodeId: member.nodeId, ...member.watermark }));
+        }
+        return model;
+    }
     const graph = row.graph_json;
     const required = new Map(graph.nodes.map(node => [node.id, new Set(node.grainKeys || [])]));
     for (const relation of graph.relations) for (const pair of relation.keyPairs || []) {
@@ -55,4 +64,25 @@ async function list(user, { limit = 100 } = {}) {
     return rows.map(row => protect(summary(row, actor, sources), descriptor));
 }
 
-module.exports = { list };
+async function page(user, input = {}) {
+    const invalid = () => { throw require('./errors').biError('ANALYSIS_MODEL_INPUT_INVALID', '模型目录筛选或分页参数无效，请重新选择。'); };
+    const options = { page: input.page === undefined ? 1 : Number(input.page), limit: input.limit === undefined ? 10 : Number(input.limit),
+        search: input.search ?? '', ownership: input.ownership ?? 'all', lifecycle: input.lifecycle ?? 'all', availability: input.availability ?? 'all' };
+    if (!Number.isSafeInteger(options.page) || options.page < 1 || options.page > 1000000 || !Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 200
+        || typeof options.search !== 'string' || options.search.length > 120 || /[\u0000-\u001f]/.test(options.search)
+        || !['all', 'mine', 'shared'].includes(options.ownership) || !['all', 'draft', 'published', 'archived', 'exploration'].includes(options.lifecycle)
+        || !['all', 'available', 'pending', 'source_unavailable', 'refresh_failed'].includes(options.availability)) invalid();
+    options.search = options.search.trim();
+    const { actor, result, authorizationHash } = await transaction(async trx => {
+        const current = await authorization.authorize(trx, { userId: user.id, definition: { nodes: [] }, required: new Map() });
+        return { actor: current.user, result: await repository.page(current.user, options, trx), authorizationHash: current.authorizationHash };
+    });
+    const rows = result.rows;
+    const descriptor = { userId: actor.id, modelIds: rows.map(row => row.id), definition: { nodes: [] }, required: new Map(), beforeSend: (trx, current) => {
+        if (current.authorizationHash !== authorizationHash) throw require('./errors').biError('ANALYSIS_MODEL_VERSION_CONFLICT', '当前身份或共享范围已变化，请重新加载模型目录。', 409);
+        return repository.confirm(trx, current.user, rows);
+    } };
+    return protect({ models: rows.map(row => summary(row, actor, new Map())), total: result.total, page: result.page, limit: result.limit }, descriptor);
+}
+
+module.exports = { list, page };

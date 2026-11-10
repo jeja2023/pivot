@@ -24,7 +24,7 @@ const MAX_INSTRUCTIONS_BYTES = 256 * 1024;
 const ALLOWED_FRONTMATTER_FIELDS = Object.freeze(new Set([
     'schemaVersion', 'id', 'name', 'version', 'title', 'description', 'publisher',
     'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates',
-    'dependencies', 'files', 'digest', 'package_digest', 'signature', 'keyId', 'license', 'tags', 'importSource'
+    'dependencies', 'files', 'resources', 'digest', 'package_digest', 'signature', 'keyId', 'license', 'tags', 'importSource'
 ]));
 
 /** 明确拒绝的历史字段：scope 由发布动作决定，tests[].script 属包内脚本执行。 */
@@ -127,7 +127,7 @@ function parseSkillSourceMarkdown(text) {
 function buildSkillSourceMarkdown(manifest = {}, instructions = '') {
     const ordered = {};
     ['schemaVersion', 'id', 'name', 'version', 'title', 'description', 'publisher',
-        'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates', 'dependencies', 'files', 'license', 'tags', 'importSource']
+        'tools', 'capabilities', 'inputs', 'outputs', 'qualityGates', 'dependencies', 'files', 'resources', 'license', 'tags', 'importSource']
         .forEach(key => {
             if (manifest[key] !== undefined && manifest[key] !== null && manifest[key] !== '') ordered[key] = manifest[key];
         });

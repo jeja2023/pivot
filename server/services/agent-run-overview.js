@@ -7,7 +7,7 @@ function leanRun(run) {
     const { chatHistory: _history, parentHistory: _parent, ragContext: _rag, ...light } = metadata;
     if (light.chatBridge) light.chatBridge = { source: light.chatBridge.source, executionProfile: light.chatBridge.executionProfile,
         memoryUsageReasons: light.chatBridge.memoryUsageReasons, sessionId: light.chatBridge.sessionId, messageId: light.chatBridge.messageId };
-    if (light.projectContextPack) light.projectContextPack = { collections: light.projectContextPack.collections, projectId: light.projectContextPack.projectId };
+    if (light.projectContextPack) light.projectContextPack = { collections: light.projectContextPack.collections, projectId: light.projectContextPack.projectId, ...(light.projectContextPack.project?{project:{id:light.projectContextPack.project.id,title:light.projectContextPack.project.title,version:light.projectContextPack.project.version}}:{}) };
     return { ...run, metadata: light };
 }
 

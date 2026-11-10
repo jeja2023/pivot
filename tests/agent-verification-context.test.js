@@ -59,3 +59,61 @@ test('核验保留子任务完成回执与先后顺序，不重复传入子任�
     assert.equal(result[2].output.executed, false); assert.equal(result[2].output.contract, undefined);
     assert.equal(result[3].output.committed, true); assert(JSON.stringify(result).length < 1200);
 });
+
+test('长任务核验保留二十四项之前的业务依据和顺序', () => {
+    const observations = [{ tool: 'read', output: { text: '首份业务依据' } },
+        ...Array.from({ length: 25 }, (_, index) => ({ tool: 'read', output: { index } }))];
+    const result = verificationObservations(observations);
+    assert.equal(result.length, 26);
+    assert.equal(result[0].output.text, '首份业务依据');
+    assert.equal(result[25].output.index, 24);
+});
+
+test('核验上下文不足时拒绝用截断的依据或答案判定完成', async () => {
+    const { verifyAutomaticTask } = require('../server/services/chat-task-verification');
+    let modelCalls = 0;
+    const common = { run: { id: 'long-evidence', model_id: 1 }, user: { id: 1 }, contract: { acceptance: {}, deliverables: [] } };
+    const deps = { getModel: async () => ({ max_input_tokens: 2000 }), resolveMemoryEvidence: async () => ({ current: true, memories: [] }),
+        callModelJson: async () => { modelCalls++; return { passed: true, coveredDeliverables: [], missing: [] }; } };
+    const result = await verifyAutomaticTask({ ...common, answer: '答案'.repeat(12000), observations: [] }, deps);
+    assert.equal(result.passed, false);
+    assert.equal(result.reason, 'verification_context_limit');
+    assert.equal(modelCalls, 0);
+});
+
+test('足够的模型上下文将早期依据传给实际核验调用', async () => {
+    const { verifyAutomaticTask } = require('../server/services/chat-task-verification');
+    const observations = [{ tool: 'read', output: { text: '首份业务依据' } },
+        ...Array.from({ length: 25 }, (_, index) => ({ tool: 'read', output: { index } }))];
+    const result = await verifyAutomaticTask({ run: { id: 'long-evidence', model_id: 1 }, user: { id: 1 }, contract: { acceptance: {}, deliverables: [] }, answer: '完成', observations }, {
+        getModel: async () => ({ max_input_tokens: 16000 }), resolveMemoryEvidence: async () => ({ current: true, memories: [] }),
+        callModelJson: async (_model, messages) => {
+            const payload = JSON.parse(messages[1].content);
+            assert.equal(payload.observations.length, 26);
+            assert.equal(payload.observations[0].output.text, '首份业务依据');
+            return { passed: true, coveredDeliverables: [], missing: [] };
+        }
+    });
+    assert.equal(result.passed, true);
+});
+
+test('核验恢复受控原文并保留五百字之后的业务证据，缺失和跨账号引用拒绝', async () => {
+    const { resolveVerificationObservations } = require('../server/services/agent-verification-context');
+    const source = { text: '材料'.repeat(1000) + '末尾必要依据' };
+    const observation = { tool: 'read', output: { __partial: true, rawOutputRef: 'artifact-cas://' + 'a'.repeat(64), rawOutputDigest: 'digest' } };
+    const deps = { tenant: async () => ({ tenantId: 1 }), stat: async () => ({ owner_user_id: 1, kind: 'workmem_output', content_digest: 'digest', byte_size: 6000 }),
+        read: async params => { assert.equal(params.userId, 1); assert.notEqual(params.tenantScoped, true); return { buffer: Buffer.from(JSON.stringify(source)) }; } };
+    const result = await resolveVerificationObservations([observation], { id: 1 }, deps);
+    assert.equal(result[0].output.text, source.text);
+    await assert.rejects(() => resolveVerificationObservations([observation], { id: 2 }, deps), /无权访问/);
+    await assert.rejects(() => resolveVerificationObservations([{ output: { __partial: true } }], { id: 1 }, deps), /缺少/);
+});
+
+
+test('失败调用缺少输出时不会把原始参数再作为输出发送，零值和false保持原样', () => {
+    const result = verificationObservations([{ tool: 'write', input: { password: 'private-password' }, error: '失败' },
+        { tool: 'read', output: 0 }, { tool: 'read', output: false }], { fullOutput: true });
+    assert.equal(JSON.stringify(result).includes('private-password'), false);
+    assert.equal(result[0].output.executed, false);
+    assert.equal(result[1].output, 0); assert.equal(result[2].output, false);
+});

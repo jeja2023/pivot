@@ -61,6 +61,17 @@
             }
         }
 
+        async function loadGoalProjects(goal) {
+            const select=document.getElementById('agent-goal-project');if(!select)return;
+            const sequence=goalModelLoadSequence,userId=window.Pivot.legacy.currentUser?.id;
+            select.disabled=true;select.replaceChildren(new Option('正在加载项目…',''));
+            try{const data=await apiJson(`${API_BASE}/agents/projects?status=active&limit=100`);
+                if(sequence!==goalModelLoadSequence||userId!==window.Pivot.legacy.currentUser?.id)return;
+                const bound=goal?.authorizationSpec?.projectId||'';select.replaceChildren(new Option('不关联项目',''),...(data.data||[]).map(item=>new Option(item.title,item.id)));
+                if(bound&&!(data.data||[]).some(item=>item.id===bound))select.append(new Option('原项目不可用，请重新选择或取消关联','__unavailable__'));
+                select.value=bound&&!(data.data||[]).some(item=>item.id===bound)?'__unavailable__':bound;select.disabled=false;
+            }catch(error){if(sequence===goalModelLoadSequence&&userId===window.Pivot.legacy.currentUser?.id)select.replaceChildren(new Option(error.message||'项目加载失败，请关闭后重试',''));}
+        }
         function clearGoalDraft() {
             const token = document.getElementById('agent-goal-draft-token');
             const preview = document.getElementById('agent-goal-draft-preview');
@@ -78,6 +89,7 @@
             panel?.classList.toggle('hidden', Boolean(goal));
             clearGoalDraft();
             loadGoalModels(goal);
+            loadGoalProjects(goal);
         }
 
         function resetGoalModal() {
@@ -136,10 +148,12 @@
         function goalFormPayload() {
             const modelSelect = document.getElementById('agent-goal-model');
             const modelId = Number(modelSelect?.value);
+            const projectSelect=document.getElementById('agent-goal-project');
+            if(projectSelect?.disabled||projectSelect?.value==='__unavailable__')throw new Error('项目尚未就绪，请重新选择或取消关联。');
             if (modelSelect?.disabled || !Number.isSafeInteger(modelId) || modelId <= 0) throw new Error('请先选择当前账号可用的执行模型；列表不可用时请关闭后重试。');
             const triggerType = document.getElementById('agent-goal-trigger')?.value || 'timer';
             const triggerSpec = triggerType === 'timer' ? { type: 'timer', frequency: 'daily', timeOfDay: document.getElementById('agent-goal-time')?.value || '09:00' } : triggerType === 'file' ? { type: 'file', directory: document.getElementById('agent-goal-directory')?.value || '' } : triggerType === 'database' ? { type: 'database', query: document.getElementById('agent-goal-query')?.value || '' } : { type: triggerType };
-            return { title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, kind: document.getElementById('agent-goal-kind')?.value || 'scheduled_job', triggerSpec, authorizationSpec: { modelId, timezone: document.getElementById('agent-goal-timezone')?.value || 'Asia/Shanghai', modelRouter: document.getElementById('agent-goal-model-router')?.value || 'fixed', deliveryBindingIds: document.getElementById('agent-goal-delivery-channel')?.value ? [document.getElementById('agent-goal-delivery-channel').value] : [], resultRetentionDays: document.getElementById('agent-goal-retention-days')?.value || 30 } };
+            return { title: document.getElementById('agent-goal-title')?.value, goal: document.getElementById('agent-goal-goal')?.value, kind: document.getElementById('agent-goal-kind')?.value || 'scheduled_job', triggerSpec, authorizationSpec: { modelId, ...(projectSelect?{projectId:projectSelect.value}:{}), timezone: document.getElementById('agent-goal-timezone')?.value || 'Asia/Shanghai', modelRouter: document.getElementById('agent-goal-model-router')?.value || 'fixed', deliveryBindingIds: document.getElementById('agent-goal-delivery-channel')?.value ? [document.getElementById('agent-goal-delivery-channel').value] : [], resultRetentionDays: document.getElementById('agent-goal-retention-days')?.value || 30 } };
         }
 
         async function saveGoal(event, handlers = {}) {

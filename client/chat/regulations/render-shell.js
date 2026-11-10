@@ -52,6 +52,7 @@
                                     <div class="workspace-toolbar regulations-toolbar">
                                         <button id="regulations-open-search-btn" class="btn-primary regulations-search-entry-btn" type="button">检索</button>
                                         <button id="regulations-ai-open-btn" class="btn-secondary regulations-ai-entry-btn" type="button">AI问答</button>
+                                        <button id="regulations-review-open-btn" class="btn-secondary" type="button">材料审查</button>
                                         <button id="regulations-bookmarks-btn" class="btn-secondary" type="button">我的收藏</button>
                                         <button id="regulations-refresh-btn" class="btn-secondary" type="button">刷新</button>
                                         ${canImport ? '<button id="regulations-open-upload-btn" class="btn-secondary" type="button">导入文档</button>' : ''}

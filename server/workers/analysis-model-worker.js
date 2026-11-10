@@ -40,6 +40,10 @@ async function main() {
             const result = await require('../services/data-analysis/bi/ingest-worker').ingestCsvChunks(connection, payload);
             await respond({ protocol: 2, engine, result }); return;
         }
+        if (['node_preview', 'node_dataset'].includes(payload.kind)) {
+            const result = await require('../services/data-analysis/bi/flow-worker').executeFlow(connection, payload);
+            await respond({ protocol: 2, engine, result }); return;
+        }
         if (payload.kind === 'probe_cancel') {
             await fs.promises.writeFile(path.join(root, 'cancel-ready'), '开始计算', { flag: 'wx', mode: 0o644 });
             await connection.run('SELECT SUM(CAST(a.range AS HUGEINT)*b.range) FROM range(1000000000) a CROSS JOIN range(1000000000) b');
@@ -65,7 +69,7 @@ async function main() {
                 noCoordinatorSocket: await fs.promises.access('/var/run/docker.sock').then(() => false, () => true), capabilitiesDropped: /^CapEff:\s+0+$/m.test(identity), noNewPrivileges: /^NoNewPrivs:\s+1$/m.test(identity),
                 inputReadOnly: payload.inputResult ? await deniedWrite(payload.inputResult) : null,
                 rootReadOnly: process.platform === 'linux' ? await deniedWrite('/app/.analysis-write-probe') : false, spillBytes: spill ? String(spill.blocks * spill.bsize) : null,
-                capabilities: ['check', 'query', 'export', 'ingest', 'cancel', 'migration_compare', 'column_projection', 'runtime_metrics'], extensionsDisabled: !configured.external && !configured.install && !configured.load, noCredentials: !Object.keys(process.env).some(key => /^(DATABASE_URL|JWT_SECRET|DATA_ENCRYPTION_KEY|PGPASSWORD|OPENAI_API_KEY)$/.test(key)) };
+                capabilities: ['check', 'query', 'export', 'ingest', 'node_flow', 'cancel', 'migration_compare', 'column_projection', 'runtime_metrics'], extensionsDisabled: !configured.external && !configured.install && !configured.load, noCredentials: !Object.keys(process.env).some(key => /^(DATABASE_URL|JWT_SECRET|DATA_ENCRYPTION_KEY|PGPASSWORD|OPENAI_API_KEY)$/.test(key)) };
             await respond({ protocol: 2, engine, probe: limits });
             return;
         }

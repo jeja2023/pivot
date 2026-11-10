@@ -10,16 +10,48 @@ function blockedAccess() { return { current: false, reasonCode: 'KNOWLEDGE_SOURC
 async function readRunKnowledgeAccess(runId, user, deps = {}) {
     if (!runId) return { current: true, tracked: false };
     try {
+        const traversal = deps.traversal || { count: 0 };
+        if (++traversal.count > 256) return blockedAccess();
         const evidence = await (deps.read || require('../repositories/knowledge-run-evidence').readRunKnowledgeEvidence)(runId, user?.id);
         if (!evidence) return { current: false, notFound: true, reasonCode: 'RUN_NOT_FOUND', message: '智能体任务不存在或无权访问。' };
         if (!evidence.actor || evidence.actor.status === 'disabled' || evidence.actor.deleted_at || evidence.incomplete) return blockedAccess();
         const metadata = parseJsonObject(evidence.run.metadata) || {};
+        if(metadata.skillResourceEvidence)await require('./agent-skill-resources').assertSkillResourceEvidence(evidence.run,evidence.actor);
+        const sourceRunIds = [...new Set([metadata.goalContinuation?.sourceRunId, metadata.resumeContext?.sourceRunId, metadata.parentHistory?.sourceRunId].filter(id => id && id !== runId))];
+        if (metadata.goalContinuation?.sourceRunId === runId) return blockedAccess();
+        const inherited = [];
+        if (sourceRunIds.length) {
+            const visited = new Set(deps.visited || []);
+            if (visited.has(runId) || visited.size >= 128) return blockedAccess();
+            visited.add(runId);
+            for (const sourceRunId of sourceRunIds) {
+                const source = await readRunKnowledgeAccess(sourceRunId, user, { ...deps, visited, traversal });
+                if (!source.current) return blockedAccess();
+                inherited.push(source);
+            }
+        }
         const observations = [];
         for (const row of evidence.rows) {
-            const parsed = unpackKnowledgeOutput(row.output);
+            if (row.tool_name === 'policy.review_report') {
+                const binding = JSON.parse(row.output);
+                await require('./policy-review/sources').assertArtifact({ id: row.artifact_id, content: JSON.stringify(binding) }, evidence.actor);
+                continue;
+            }
+            if (row.tool_name === 'presentation.analysis') {
+                await require('./presentations/presentation-analysis-sources').assertAnalysisArtifact({ type: 'presentation', content: row.output }, evidence.actor);
+                continue;
+            }
+            let rawOutput = row.output;
+            let toolName = row.tool_name;
+            if (String(toolName).startsWith('checkpoint:')) {
+                toolName = toolName.slice('checkpoint:'.length);
+                const state = await require('./agent-checkpoints').hydrateCheckpointState(parseJsonObject(rawOutput) || {}, evidence.actor, { strict: true });
+                rawOutput = state.output;
+            }
+            const parsed = unpackKnowledgeOutput(rawOutput);
             const manifest = mergeKnowledgeEvidence(parsed.knowledgeEvidence, parsed.value);
             if (manifest) observations.push({ output: parsed.value, knowledgeEvidence: manifest });
-            else if (['rag.search', 'knowledge.graph.query'].includes(row.tool_name)
+            else if (['rag.search', 'knowledge.graph.query'].includes(toolName)
                 && ['completed', 'continued_error', 'success'].includes(row.status)) return blockedAccess();
         }
         const snapshot = require('./chat-rag-context').buildChatRagEvidenceObservation(metadata.chatBridge || {});
@@ -34,7 +66,7 @@ async function readRunKnowledgeAccess(runId, user, deps = {}) {
         }
         const scope = observations.length ? await require('./knowledge-tool-results').resolveKnowledgeToolScope(evidence.actor, {}, { run: evidence.run }, deps.knowledge || {}) : {};
         if (!await (deps.revalidate || revalidateKnowledgeToolEvidence)(observations, evidence.actor, { ...deps.knowledge, scope })) return blockedAccess();
-        return { current: true, tracked: observations.length > 0 || Boolean(snapshot), knowledgeEvidence: mergeKnowledgeEvidence(observations.map(item => item.knowledgeEvidence)) };
+        return { current: true, tracked: inherited.some(item => item.tracked) || observations.length > 0 || Boolean(snapshot), knowledgeEvidence: mergeKnowledgeEvidence([...inherited.map(item => item.knowledgeEvidence), ...observations.map(item => item.knowledgeEvidence)]) };
     } catch (_) { return blockedAccess(); }
 }
 

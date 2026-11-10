@@ -312,6 +312,7 @@ function getBuiltInToolDefinitions(user) {
             }
         },
         ...getToolDiscoveryDefinitions(asJsonSchema),
+        ...require('./agent-skill-resources').definitions(),
         {
             name: 'workflow.input',
             title: '工作流输入',
@@ -909,6 +910,7 @@ async function executeBuiltInTool(name, input = {}, user, context = {}) {
     if (['document.compare', 'viz.mindmap', 'finance.transactionSummary'].includes(name)) return await require('./agent-tools-offline-office').executeOfflineOffice(name, input, user, context);
     if (name === 'chat.read_source') return executeChatSource(input, user, context);
     assertDynamicCodeExecutionIsSandboxed(name, context);
+    if (['skill.resources','skill.read_resource'].includes(name)) return require('./agent-skill-resources').execute(name,input,user,context);
     if (ARTIFACT_TOOL_NAMES.includes(name)) return executeArtifactTool(name, input, user, context);
     if (name === 'agent.llm') return executeAgentLlmNode(input, user, context);
     if (name === 'agent.code') {

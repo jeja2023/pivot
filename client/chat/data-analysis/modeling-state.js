@@ -14,7 +14,7 @@
         selectedNodeId: '',
         selectedRelationId: '',
         selectedFlowEdgeId: '',
-        paletteCollapsed: false,
+        paletteCollapsed: Boolean(window.matchMedia?.('(max-width: 760px)')?.matches),
         paletteTab: 'datasets',
         datasetSearch: '',
         fieldSearch: '',
@@ -28,6 +28,17 @@
         epoch: 0,
         requests: new Map(),
         listPage: 1,
+        listTotal: 0,
+        listLoading: false,
+        listError: '',
+        dataRevision: 0,
+        previewStale: false,
+        nodeJob: null,
+        nodeJobs: [],
+        nodeTaskRevision: -1,
+        nodeSubmitting: false,
+        nodeHistoryOpen: false,
+        nodeRequests: new Map(),
         search: '',
         ownership: 'all',
         lifecycle: 'all',
@@ -70,6 +81,14 @@
         state.previewNodeId = '';
         state.previewData = null;
         state.previewError = '';
+        state.dataRevision++;
+        state.previewStale = false;
+        state.nodeJob = null;
+        state.nodeJobs = [];
+        state.nodeTaskRevision = -1;
+        state.nodeSubmitting = false;
+        state.nodeHistoryOpen = false;
+        state.nodeRequests.clear();
         state.schemaCache = Object.create(null);
         state.check = null;
         state.run = null;
@@ -89,11 +108,16 @@
         return () => state.requests.get(scope) === sequence && state.epoch === epoch && owner() === userId && (state.selected?.id || '') === modelId;
     }
     function changed() {
+        state.dataRevision++;
+        state.previewStale = Boolean(state.previewData);
+        state.previewLoading = false;
+        state.schemaCache = Object.create(null);
         state.dirty = true;
         state.saveState = 'unsaved';
         state.check = null;
         state.run = null;
         app.modeling.renderSaveState?.();
+        app.modeling.renderPreviewState?.();
     }
     async function canLeave() {
         if (!state.dirty) return true;

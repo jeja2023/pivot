@@ -73,14 +73,14 @@
     "reviewedAt": "2026-11-08"
   },
   {
-    "file": "server/services/data-analysis/bi/flow-pipeline.js",
+    "file": "server/services/data-analysis/bi/flow-graph.js",
     "callee": "visit",
     "code": "for (const next of adjacency.get(id) || []) visit(next);",
     "reason": "局部同步图遍历与环路检查，无Promise返回。",
     "reviewedAt": "2026-11-08"
   },
   {
-    "file": "server/services/data-analysis/bi/flow-pipeline.js",
+    "file": "server/services/data-analysis/bi/flow-graph.js",
     "callee": "visit",
     "code": "for (const id of adjacency.keys()) visit(id);",
     "reason": "局部同步图遍历与环路检查，无Promise返回。",

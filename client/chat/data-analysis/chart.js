@@ -131,6 +131,7 @@
                     ${metaHtml}
                 </div>
                 <div class="data-analysis-chart-actions">
+                    <button id="data-analysis-chart-presentation" class="btn-primary" type="button"${!state.chart.artifactId || !state.chart.source?.sourceVersion || !['bar', 'line', 'area', 'pie'].includes(state.chart.chartType) ? ' disabled title="请重新生成柱形图、折线图、面积图或饼图后创建汇报"' : ''}>${state.chart.reportPresentationId ? '打开汇报 PPT' : '生成汇报 PPT'}</button>
                     <button id="data-analysis-chart-png" class="btn-secondary" type="button">保存为图片</button>
                     <button id="data-analysis-chart-data-csv" class="btn-secondary" type="button">导出图表数据 (CSV)</button>
                 </div>
@@ -143,6 +144,30 @@
             </div>
         `);
         window.Pivot.legacy.renderPivotCharts?.(box);
+    }
+
+    async function createPresentationFromChart() {
+        const chart = state.chart;
+        if (!chart?.artifactId || !chart.source?.sourceVersion) throw new Error('请先重新生成图表，再创建汇报。');
+        const availability = window.Pivot.moduleApi('apps.availability');
+        if (availability?.isEnabled && !availability.isEnabled('presentations')) throw new Error('PPT 制作应用已关闭，请联系系统 admin 开启。');
+        await guardButton('data-analysis-chart-presentation', '正在准备汇报…', async () => {
+            const current = app.captureRequest('chart-report');
+            chart.reportRequestKey ||= window.crypto.randomUUID();
+            let result;
+            try {
+                result = await fetchJson('/api/apps/presentations/from-analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ artifactId: chart.artifactId, requestKey: chart.reportRequestKey }) });
+            } catch (error) {
+                if (current() && state.chart === chart) throw error;
+                return;
+            }
+            if (!current() || state.chart !== chart) return;
+            chart.reportPresentationId = result.presentation.id;
+            renderChart();
+            toast('可编辑汇报已保存，包含图表、统计范围和数据明细。请核对后导出。', 'success');
+            await window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations', presentationId: result.presentation.id });
+        });
     }
 
     // 把当前图表块导出为 PNG：优先用 ECharts 实例的 getDataURL，回退到 2D canvas 的 toDataURL。
@@ -261,6 +286,7 @@
         syncChartAggregationControls,
         syncChartTypeControls,
         buildChart,
+        createPresentationFromChart,
         renderChart,
         downloadChartPng,
         exportTableToCsv,

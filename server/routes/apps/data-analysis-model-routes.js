@@ -20,12 +20,15 @@ function registerDataAnalysisModelRoutes(router, { authMiddleware }) {
         res.json({ success: true, functions: flowPipeline.FLOW_BUILTIN_FUNCTIONS });
     }));
     router.post('/apps/data-analysis/models/:modelId/node-preview', authMiddleware, asyncHandler(async (req, res) => {
-        const preview = await flowPipeline.previewModelNode({ user: req.user, modelId: req.params.modelId, body: req.body || {} });
-        res.json({ success: true, preview });
+        const job = await flowPipeline.previewModelNode({ user: req.user, modelId: req.params.modelId, body: req.body || {} });
+        res.status(202).json({ success: true, job });
+    }));
+    router.get('/apps/data-analysis/models/:modelId/node-jobs', authMiddleware, asyncHandler(async (req, res) => {
+        res.json({ jobs: await flowPipeline.listNodeJobs(req.user, req.params.modelId) });
     }));
     router.post('/apps/data-analysis/models/:modelId/node-datasets', authMiddleware, asyncHandler(async (req, res) => {
-        const created = await flowPipeline.materializeModelNodeDataset({ user: req.user, modelId: req.params.modelId, body: req.body || {} });
-        res.status(201).json({ success: true, ...created });
+        const job = await flowPipeline.materializeModelNodeDataset({ user: req.user, modelId: req.params.modelId, body: req.body || {} });
+        res.status(202).json({ success: true, job });
     }));
     router.put('/apps/data-analysis/models/:modelId/draft', authMiddleware, asyncHandler(async (req, res) => {
         const model = await saveProductionDraft({ user: req.user, modelId: req.params.modelId, body: req.body || {} });

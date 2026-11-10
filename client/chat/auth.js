@@ -60,6 +60,7 @@ async function loadAuthConfig() {
 
 // 显式定义界面显示控制逻辑
 window.Pivot.legacy.showAuth = () => {
+    window.Pivot?.moduleApi?.('apps.policyReview')?.reset?.();
     const authContainer = document.getElementById('auth-container');
     authContainer?.classList.remove('hidden');
     syncAuthModeClass();
@@ -216,6 +217,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async (e) => {
 });
 
 window.Pivot.legacy.logout = async () => {
+    window.Pivot.moduleApi('agent.projects')?.reset?.();
     window.Pivot.moduleApi('chat.generations').clear?.();
     await window.Pivot?.moduleApi?.('apps.officialWriting')?.flush?.();
     window.Pivot?.moduleApi?.('apps.officialWriting')?.reset?.();

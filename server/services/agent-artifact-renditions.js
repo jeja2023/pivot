@@ -75,6 +75,7 @@ async function createRendition(params = {}) {
     const irDigest = computeIrDigest(canonicalIr);
     const { getRenderer } = require('./document-rendering');
     const renderer = getRenderer(format);
+    require('./artifact-source-access').assertRenditionSources(artifact, { format: renderer.format, ir_digest: irDigest });
 
     const existing = await queryOne(`
         SELECT * FROM agent_artifact_renditions
@@ -163,6 +164,7 @@ async function getRenditionForUser(renditionId, user, options = {}) {
         }
         return null;
     }
+    require('./artifact-source-access').assertRenditionSources(artifact, rendition);
     return rendition;
 }
 

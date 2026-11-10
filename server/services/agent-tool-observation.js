@@ -4,7 +4,9 @@ const { attachWorkingMemoryOutputReference, persistWorkingMemoryOutput, isWorkin
 const { recordWorkingObservation } = require('./agent-working-state');
 
 async function prepareToolObservation({ run, user, tool, output, modelCfg, compact }, deps = {}) {
+    output = await require('./agent-tool-vision').prepareToolVision(output, user, deps.vision);
     let preview = compact(output, modelCfg);
+    if (output?.toolVision) preview = { ...preview, toolVision: output.toolVision };
     if (isWorkingMemoryOutputPartial(preview)) {
         try {
             const reference = await (deps.persistOutput || persistWorkingMemoryOutput)(output, user, { tenantId: run.tenant_id || user.tenant_id || user.tenantId, force: true });
@@ -17,7 +19,9 @@ async function prepareToolObservation({ run, user, tool, output, modelCfg, compa
         for (const item of summaries) state = recordWorkingObservation(state, {
             tool: item.tool || tool, output: { ...item.output, rawOutputRef: preview?.rawOutputRef, rawOutputDigest: preview?.rawOutputDigest }, summary: item.summary
         }, current.taskContract, run.goal);
-        return { ...current, workingState: state };
+        const skillResourceEvidence=['skill.resources','skill.read_resource'].includes(tool)&&output?.reference&&output.packageDigest
+            ? {...output.reference,packageDigest:output.packageDigest}:null;
+        return { ...current, workingState: state, ...(skillResourceEvidence?{skillResourceEvidence}:{}) };
     }, { userId: user.id });
     if (metadata) {
         run.metadata = metadata;

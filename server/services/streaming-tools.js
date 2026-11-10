@@ -162,7 +162,7 @@ function buildAssistantToolMessage(result) {
     if (!result || !result.hasToolCalls) {
         return { role: 'assistant', content: result?.content || '' };
     }
-    return {
+    return require('./agent-responses-protocol').retainResponsesOutput(result, {
         role: 'assistant',
         content: result.content || '',
         tool_calls: result.toolCalls.map(call => ({
@@ -173,7 +173,7 @@ function buildAssistantToolMessage(result) {
                 arguments: call.argumentsRaw
             }
         }))
-    };
+    });
 }
 
 function buildToolResultMessage(callId, content) {

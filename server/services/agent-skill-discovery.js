@@ -24,7 +24,7 @@ function skillCandidate(release) {
         scope: String(release.rollout_scope || ''),
         inputs: contractObject(manifest.inputs),
         outputs: contractObject(manifest.outputs),
-        ...(manifest.importSource ? { compatibility: { scope: 'instructions_only', runtimeVerified: false, format: manifest.importSource.format } } : {})
+        ...(manifest.importSource ? { compatibility: { scope: manifest.resources?.length?'instructions_and_resources':'instructions_only', bundledResources:manifest.resources?.map(item=>({path:item.path,bytes:item.bytes,digest:item.digest}))||[], runtimeVerified: false, format: manifest.importSource.format } } : {})
     };
 }
 

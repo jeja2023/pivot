@@ -2,12 +2,24 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { fixture } = require('../scripts/test_support/bi_modeling');
 const { queryOne } = require('../server/db/client');
 const datasets = require('../server/services/data-analysis/datasets');
 const models = require('../server/services/data-analysis/bi/models');
 const repository = require('../server/repositories/analysis-production-models');
 const flowPipeline = require('../server/services/data-analysis/bi/flow-pipeline');
+const runner = require('../server/services/data-analysis/bi/runner');
+const jobs = require('../server/services/data-analysis/bi/jobs');
+
+async function executeNode(options, materialize = false) {
+    options = { ...options, body: { expectedVersion: Number((await repository.get(options.modelId)).version), requestKey: crypto.randomUUID(), ...options.body } };
+    const job = await flowPipeline[materialize ? 'materializeModelNodeDataset' : 'previewModelNode'](options);
+    await runner.processModelJobs();
+    const result = await jobs.getModelJob(options.user, job.id);
+    assert.equal(result.status, 'succeeded', result.lastError);
+    return materialize ? result.result : result.result.preview;
+}
 
 test('内置算子、函数计算、自定义 SQL 与节点到节点实时预览完整闭环，且保持模型语义哈希不变', { timeout: 90000 }, async () => fixture(async ({ user, model }) => {
     const regionDict = await datasets.createDatasetFromRows({
@@ -116,7 +128,7 @@ test('内置算子、函数计算、自定义 SQL 与节点到节点实时预览
     assert.equal(reopened.model.flowGraph.nodes.length, 6);
 
     // 预览筛选节点：上游 3 行 -> 过滤后 2 行
-    const filterPreview = await flowPipeline.previewModelNode({
+    const filterPreview = await executeNode({
         user,
         modelId: model.id,
         body: { targetNodeId: 'op_filter_north', definitionNodes: saved.definition.nodes, flowGraph: saved.flowGraph }
@@ -125,7 +137,7 @@ test('内置算子、函数计算、自定义 SQL 与节点到节点实时预览
     assert.equal(filterPreview.totalRows, 2);
 
     // 预览最终自定义 SQL 节点：验证内置函数、关联、聚合与 SQL 完整链路
-    const sqlPreview = await flowPipeline.previewModelNode({
+    const sqlPreview = await executeNode({
         user,
         modelId: model.id,
         body: { targetNodeId: 'op_custom_sql', definitionNodes: saved.definition.nodes, flowGraph: saved.flowGraph }
@@ -137,7 +149,7 @@ test('内置算子、函数计算、自定义 SQL 与节点到节点实时预览
     assert.ok(sqlPreview.steps.length >= 5);
 
     // 物化节点输出为标准受控数据集
-    const materialized = await flowPipeline.materializeModelNodeDataset({
+    const materialized = await executeNode({
         user,
         modelId: model.id,
         body: {
@@ -146,7 +158,7 @@ test('内置算子、函数计算、自定义 SQL 与节点到节点实时预览
             definitionNodes: saved.definition.nodes,
             flowGraph: saved.flowGraph
         }
-    });
+    }, true);
     assert.equal(materialized.dataset.name, '大区负责人达标汇总');
     assert.equal(materialized.dataset.rowCount, 1);
     assert.equal(materialized.dataset.columns.length, 3);

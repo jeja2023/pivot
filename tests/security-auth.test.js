@@ -255,6 +255,29 @@ test('apiFetch returns to login when refresh token is no longer valid', async ()
     assert.equal(sandbox.sessionStorage.getItem('pivot_csrf_token'), null);
 });
 
+test('认证刷新服务故障或断网保留当前会话，服务恢复后可再次刷新', async () => {
+    for (const failure of ['unavailable', 'network']) {
+        let recovered = false, logout = 0;
+        const sandbox = createConfigSandbox(async url => {
+            if (url === '/api/auth/refresh') {
+                if (!recovered) {
+                    if (failure === 'network') throw new Error('网络暂时不可用');
+                    return createJsonResponse(503, { code: 'AUTH_SERVICE_UNAVAILABLE' });
+                }
+                return createJsonResponse(200, { csrfToken: 'recovered-csrf' });
+            }
+            return createJsonResponse(401, { code: 'TOKEN_EXPIRED' });
+        });
+        sandbox.window.Pivot.legacy.showAuth = () => { logout++; };
+        sandbox.window.Pivot.legacy.currentUser = { id: 7 };
+        await assert.rejects(sandbox.apiFetch('/api/sessions'), /暂时不可用/);
+        assert.equal(logout, 0); assert.equal(sandbox.window.Pivot.legacy.currentUser.id, 7);
+        recovered = true;
+        await sandbox.refreshAccessToken();
+        assert.equal(sandbox.sessionStorage.getItem('pivot_csrf_token'), 'recovered-csrf');
+    }
+});
+
 test('apiFetch aborts a stalled request and exposes a retryable timeout', async () => {
     let requestSignal = null;
     const sandbox = createConfigSandbox((_url, options = {}) => new Promise((_resolve, reject) => {

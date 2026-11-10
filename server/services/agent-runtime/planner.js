@@ -24,6 +24,7 @@ function fitAgentMessages(messages, modelCfg, options = {}) {
         taskWorkingState: options.taskWorkingState || null
     });
     const fitted = fitMessagesToContextBudget(compacted.messages, modelCfg, effectiveOptions);
+    require('../agent-goal-context').assertGoalContextPreserved(messages, fitted.messages);
     Object.defineProperty(fitted.messages, 'contextCompaction', {
         value: {
             ...compacted.metadata,
@@ -48,10 +49,10 @@ const {
 } = require('../agent-prompt-registry');
 
 function observationMessages(observations = []) {
-    return observations.map((observation, index) => ({
+    return observations.flatMap((observation, index) => [{
         role: 'assistant',
         content: `PIVOT_MCP_TOOL_RESULT_BEGIN\n执行观察 ${index + 1}：\n${JSON.stringify(observation, null, 2)}\nPIVOT_MCP_TOOL_RESULT_END`
-    }));
+    }, ...require('../agent-tool-vision').toolVisionMessages(observation.output)]);
 }
 
 function chatHistoryMessages(contextConfig = {}) {
@@ -182,9 +183,11 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
         ...(contextConfig?.taskWorkingState && typeof contextConfig.taskWorkingState === 'object'
             ? [{ role: 'system', content: buildWorkingStatePrompt(contextConfig.taskWorkingState, { coveredGoal: goal }) }]
             : []),
+        ...require('../agent-projects').projectMessages(contextConfig.projectContextPack?.project),
         ...chatHistoryMessages(contextConfig),
         ...longTermMemoryContextMessages(contextConfig),
         ...chatAgentContextMessages(contextConfig),
+        ...require('../agent-goal-context').goalContextMessages(contextConfig.goalContext),
         ...observationMessages(observations),
         {
             role: 'user',
@@ -198,7 +201,9 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     const finalContext = {
         chatHistory: options.chatHistory,
         chatAgent: options.chatAgent,
-        longTermMemoryContext: options.longTermMemoryContext
+        longTermMemoryContext: options.longTermMemoryContext,
+        projectContextPack: options.projectContextPack,
+        goalContext: options.goalContext
     };
     const activeSummaryCore = user ? await resolveActivePromptSection('agent_summary_core', summaryCoreSection(), user) : summaryCoreSection();
     const sections = [
@@ -216,9 +221,11 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             role: 'system',
             content: renderPromptSections(sections)
         },
+        ...require('../agent-projects').projectMessages(finalContext.projectContextPack?.project),
         ...chatHistoryMessages(finalContext),
         ...longTermMemoryContextMessages(finalContext),
         ...chatAgentContextMessages(finalContext),
+        ...require('../agent-goal-context').goalContextMessages(finalContext.goalContext),
         ...observationMessages(observations),
         {
             role: 'user',

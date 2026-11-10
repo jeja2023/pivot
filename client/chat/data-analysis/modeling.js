@@ -7,6 +7,7 @@
     const path = suffix => `/models/${encodeURIComponent(state.selected.id)}${suffix}`;
     const visible = () => !document.hidden && !byId('data-analysis-modeling-panel')?.classList.contains('hidden');
     let editRevision = 0;
+    let listSearchTimer = null;
     const changed = m.changed;
     m.changed = () => { editRevision++; changed(); };
     function editable() { if (!state.selected?.isOwner || state.selected.lifecycle === 'archived') throw new Error('当前模型只读，请由所有者编辑未归档草稿。'); }
@@ -15,10 +16,23 @@
     async function loadList() {
         m.mount();
         const current = m.capture('list');
-        const data = await request('/models?limit=200');
-        if (!current()) return;
-        state.models = data.models || [];
+        state.listLoading = true;
+        state.listError = '';
         m.renderList();
+        try {
+            const params = new URLSearchParams({ page: String(state.listPage), limit: '10', search: state.search, ownership: state.ownership, lifecycle: state.lifecycle, availability: state.availability });
+            const data = await request(`/models?${params}`);
+            if (!current()) return;
+            state.models = data.models || [];
+            state.listTotal = data.total;
+            const lastPage = Math.max(1, Math.ceil(data.total / 10));
+            if (state.listPage > lastPage) { state.listPage = lastPage; return loadList(); }
+        } catch (error) {
+            if (current()) state.listError = error.message || '模型目录加载失败，请点击刷新重试。';
+            throw error;
+        } finally {
+            if (current()) { state.listLoading = false; m.renderList(); }
+        }
     }
 
     async function loadModel(id, { force = false } = {}) {
@@ -43,6 +57,7 @@
         state.queryMode = data.model.publishedVersion ? 'published' : 'trial';
         state.selectedNodeId = state.draft?.nodes.find(node => node.role === 'fact')?.id || '';
         m.render();
+        void m.loadNodeJobs().catch(error => app.toast(error.message, 'error'));
     }
 
     async function saveDraft() {
@@ -82,18 +97,18 @@
         await saveDraft();
     }
 
-    function createModel() {
+    function createModel(presetDatasetId = '') {
         const availableDatasets = app.state.datasets || [];
         if (!availableDatasets.length) {
             m.dialog('新建数据模型', `<div class="modeling-empty-inline"><p>当前尚未导入任何表格数据集。请先前往「数据分析」上传 CSV 或 Excel 文件，再返回此处建立模型。</p><button class="btn-primary" type="button" data-modeling-action="goto-analysis">前往上传数据集</button></div>`, null);
             return;
         }
-        m.dialog('新建数据模型', `${m.input('name', '模型名称', '', 'maxlength="120" required placeholder="例如：销售订单分析模型、学生成绩分析模型"')}${m.select('factDatasetId', '核心业务主表（事实表）', availableDatasets.map(dataset => [dataset.id, dataset.name]), availableDatasets[0]?.id || '')}${m.input('businessOwner', '业务负责人（发布前必填）', '', 'maxlength="120" placeholder="填写口径负责人姓名或部门"')}${m.input('maintenanceContact', '维护联系人（发布前必填）', '', 'maxlength="240" placeholder="填写日常维护人或联系方式"')}<label class="modeling-span-full"><span class="modeling-field-label">业务用途说明（可选）</span><input class="form-input" name="modeling_description" value="" maxlength="1000" placeholder="简要说明该模型面向的分析场景"></label><p class="modeling-dialog-note">提示：创建后可在一体化画布中点击节点打开右侧配置抽屉，拖入维度表、内置算子或自定义 SQL，并随时预览节点输出数据。</p>`, async form => {
+        m.dialog('新建数据模型', `${m.input('name', '模型名称', '', 'maxlength="120" required placeholder="例如：销售订单分析模型、学生成绩分析模型"')}${m.select('factDatasetId', '核心业务主表（事实表）', availableDatasets.map(dataset => [dataset.id, dataset.name]), presetDatasetId || availableDatasets[0]?.id || '')}${m.input('businessOwner', '业务负责人（发布前必填）', '', 'maxlength="120" placeholder="填写口径负责人姓名或部门"')}${m.input('maintenanceContact', '维护联系人（发布前必填）', '', 'maxlength="240" placeholder="填写日常维护人或联系方式"')}<label class="modeling-span-full"><span class="modeling-field-label">业务用途说明（可选）</span><input class="form-input" name="modeling_description" value="" maxlength="1000" placeholder="简要说明该模型面向的分析场景"></label><p class="modeling-dialog-note">提示：创建后可在一体化画布中点击节点打开右侧配置抽屉，拖入维度表、内置算子或自定义 SQL，并随时预览节点输出数据。</p>`, async form => {
             const current = m.capture('create-model');
             const data = await request('/models', json({ modelKind: 'production', name: m.value(form, 'name'), description: m.value(form, 'description'), businessOwner: m.value(form, 'businessOwner'), maintenanceContact: m.value(form, 'maintenanceContact'), factDatasetId: m.value(form, 'factDatasetId') }));
             if (!current()) return;
-            await loadList();
             await loadModel(data.model.id, { force: true });
+            void loadList().catch(error => app.toast(error.message, 'error'));
         });
     }
 
@@ -344,10 +359,16 @@
             state.search = ''; state.ownership = 'all'; state.lifecycle = 'all'; state.availability = 'all'; state.listPage = 1;
             if (byId('modeling-search')) byId('modeling-search').value = '';
             for (const selectId of ['modeling-ownership', 'modeling-lifecycle', 'modeling-availability']) if (byId(selectId)) byId(selectId).value = 'all';
-            m.renderList();
-            return;
+            return loadList();
         }
         if (actionName === 'create' || actionName === 'create-empty') return createModel();
+        if (actionName === 'create-from-output') {
+            if (!await m.canLeave()) return;
+            const current = m.capture('create-from-output');
+            await app.loadDatasets({ loadActiveDetail: false });
+            if (current()) return createModel(id);
+            return;
+        }
         if (actionName === 'select') return loadModel(id);
         if (actionName === 'legacy') return app.openLegacyDataModel?.(id);
         if (actionName === 'edit-model-list') {
@@ -393,7 +414,7 @@
         }
         if (actionName === 'close-dialog') return m.closeDialog();
         if (actionName === 'back') { if (!await m.canLeave()) return; m.reset(); m.render(); return loadList(); }
-        if (actionName === 'previous-page' || actionName === 'next-page') { state.listPage += actionName === 'next-page' ? 1 : -1; m.renderList(); return; }
+        if (actionName === 'previous-page' || actionName === 'next-page') { state.listPage = Math.max(1, state.listPage + (actionName === 'next-page' ? 1 : -1)); return loadList(); }
         if (actionName === 'toggle-palette') { state.paletteCollapsed = !state.paletteCollapsed; m.render(); return; }
         if (actionName === 'close-drawer') { state.drawerOpen = false; m.render(); return; }
         if (actionName === 'drawer-mode') { state.drawerMode = id || 'node'; state.drawerOpen = true; m.render(); return; }
@@ -406,7 +427,7 @@
             state.drawerMode = 'node';
             state.drawerOpen = true;
             m.render();
-            if (state.previewOpen) void m.runNodePreview?.(id).catch(() => { });
+            if (state.previewOpen) void m.runNodePreview?.(id).catch(error => app.toast(error.message, 'warning'));
             return;
         }
         if (actionName === 'toggle-preview') {
@@ -414,8 +435,11 @@
             return m.runNodePreview(state.selectedNodeId || state.draft?.nodes?.[0]?.id || '');
         }
         if (actionName === 'close-preview') { state.previewOpen = false; m.render(); return; }
+        if (actionName === 'show-node-jobs') { state.previewOpen = true; state.nodeHistoryOpen = true; m.render(); return; }
         if (actionName === 'preview-node') return m.runNodePreview(id || state.selectedNodeId);
         if (actionName === 'materialize-node') { editable(); return m.materializeNodeDataset(id || state.selectedNodeId); }
+        if (actionName === 'cancel-node-job') return m.cancelNodeJob();
+        if (actionName === 'retry-node-job') return m.resumeNodeJob();
         if (actionName === 'remove-flow-node') { editable(); m.removeFlowNode(id); return; }
         if (actionName === 'basic') return editBasic();
         if (actionName === 'save') return saveDraft();
@@ -479,15 +503,23 @@
             selectEl.dispatchEvent(new Event('change', { bubbles: true }));
         });
         root.addEventListener('submit', event => { void m.submit(event); });
+        root.addEventListener('toggle', event => { if (event.target.hasAttribute?.('data-modeling-node-history')) state.nodeHistoryOpen = event.target.open; }, true);
         root.addEventListener('change', event => {
             m.formChanged(event);
             m.handleOperatorInput?.(event);
+            if (event.target.id === 'modeling-node-job') void m.selectNodeJob(event.target.value).catch(error => app.toast(error.message, 'error'));
             const filters = { 'modeling-ownership': 'ownership', 'modeling-lifecycle': 'lifecycle', 'modeling-availability': 'availability' };
-            if (filters[event.target.id]) { state[filters[event.target.id]] = event.target.value; state.listPage = 1; m.renderList(); }
+            if (filters[event.target.id]) { state[filters[event.target.id]] = event.target.value; state.listPage = 1; void loadList().catch(error => app.toast(error.message, 'error')); }
             if (['modeling-query-mode', 'modeling-query-version'].includes(event.target.id)) void m.querySourceChanged?.(event).catch(error => app.toast(error.message, 'error'));
         });
         root.addEventListener('input', event => {
-            if (event.target.id === 'modeling-search') { state.search = event.target.value; state.listPage = 1; m.renderList(); return; }
+            if (event.target.id === 'modeling-search') {
+                state.search = event.target.value; state.listPage = 1;
+                state.requests.set('list', (state.requests.get('list') || 0) + 1);
+                clearTimeout(listSearchTimer);
+                listSearchTimer = setTimeout(() => { void loadList().catch(error => app.toast(error.message, 'error')); }, 250);
+                return;
+            }
             if (event.target.id === 'modeling-field-search') { state.fieldSearch = event.target.value; m.updateFieldSearchDom?.(); return; }
             if (event.target.id === 'modeling-dataset-search') {
                 const pos = event.target.selectionStart;
@@ -550,7 +582,7 @@
                     state.drawerMode = 'node';
                     state.drawerOpen = true;
                     m.render();
-                    if (state.previewOpen) void m.runNodePreview?.(state.selectedNodeId).catch(() => { });
+                    if (state.previewOpen) void m.runNodePreview?.(state.selectedNodeId).catch(error => app.toast(error.message, 'warning'));
                 }
             } catch (error) { app.toast(error.message || '模型操作失败，请重试。', 'error'); }
         });
@@ -579,6 +611,7 @@
             m.mount();
             m.render();
             void loadList().catch(error => app.toast(error.message, 'error'));
+            if (state.nodeJob && ['queued', 'running', 'retry_wait', 'cancelling'].includes(state.nodeJob.status)) void m.resumeNodeJob().catch(error => app.toast(error.message, 'error'));
             if (state.run && ['queued', 'running', 'retry_wait', 'cancelling'].includes(state.run.status)) void pollRun(state.run.id).catch(error => app.toast(error.message, 'error'));
             else if (state.check && ['queued', 'running'].includes(state.check.status)) void pollCheck(state.check.id).catch(error => app.toast(error.message, 'error'));
         } else {
@@ -588,6 +621,7 @@
     document.addEventListener('visibilitychange', () => {
         m.stopPolling();
         if (!visible()) return;
+        if (state.nodeJob && ['queued', 'running', 'retry_wait', 'cancelling'].includes(state.nodeJob.status)) void m.resumeNodeJob().catch(error => app.toast(error.message, 'error'));
         if (state.run && ['queued', 'running', 'retry_wait', 'cancelling'].includes(state.run.status)) void pollRun(state.run.id).catch(error => app.toast(error.message, 'error'));
         else if (state.check && ['queued', 'running'].includes(state.check.status)) void pollCheck(state.check.id).catch(error => app.toast(error.message, 'error'));
     });

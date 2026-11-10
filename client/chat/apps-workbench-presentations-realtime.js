@@ -41,11 +41,12 @@
         }, 5000);
     }
 
-    async function fetchCurrent({ active, getActive, request, onRevoked }) {
+    async function fetchCurrent({ active, getActive, request, onRevoked, onSourceUnavailable }) {
         let result;
         try { result = await request(active.id); }
         catch (error) {
-            if (getActive() === active && (error.status === 403 || error.status === 404)) onRevoked();
+            if (getActive() === active && (error.status === 403 || error.status === 404)) onRevoked(error);
+            if (getActive() === active && error.status === 409 && /^PRESENTATION_ANALYSIS_/.test(error.code || '')) onSourceUnavailable?.(error);
             throw error;
         }
         return getActive() === active ? result : null;

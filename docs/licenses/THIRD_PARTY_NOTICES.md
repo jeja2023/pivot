@@ -15,6 +15,8 @@
 | LibreOffice Impress（Debian发行包） | 离线原稿静态预览 | MPL-2.0 / LGPL及所含组件各自许可，详见镜像内copyright文件 |
 | Poppler（Debian poppler-utils） | 本地PDF页面栅格化 | GPL及所含组件各自许可，详见镜像内copyright文件 |
 | FFmpeg / libx264（Debian发行包） | 本地页面视频与音频编码 | 构建配置决定的GPL/LGPL及相关许可，详见镜像内copyright文件 |
+| Git（Debian发行包） | 主镜像内受控终端仓库状态、差异与历史查询 | GPL-2.0及所含组件各自许可，详见镜像内copyright文件 |
+| ripgrep（Debian发行包） | 主镜像内受控终端文件和代码检索 | MIT或Unlicense及所含组件各自许可，详见镜像内copyright文件 |
 | Matplotlib 3.11.2 及随包数学字体 | 离线预览副本中的独立公式排版 | Matplotlib许可及字体各自许可，完整声明保留在Python包与dist-info目录 |
 | Mermaid 11.17.2（离线静态构建） | 回复中的图形预览 | MIT；所含依赖许可见资源清单 |
 | SimpleMindMap 0.14.0-fix.3（裁剪构建） | 思维导图编辑、布局与导出 | MIT |
@@ -50,6 +52,6 @@ Ponytail 指引固定参考 [DietrichGebert/ponytail](https://github.com/Dietric
 
 ## DrawingML 预设形状
 
-原稿/视频执行镜像中的Debian组件通过发行包安装，未删除 `/usr/share/doc/<package>/copyright`，各包版本和对应源代码由Debian相同发行版及安全更新仓库提供。正式离线分发时须随镜像保留版权声明及适用许可，并提供与实际二进制对应的源代码获取或随附方式；不能以PPT Master的MIT许可覆盖LibreOffice、Poppler、FFmpeg或字体的独立许可。
+原稿/视频执行镜像及终端Runner中的Debian组件通过发行包安装，未删除 `/usr/share/doc/<package>/copyright`，各包版本和对应源代码由Debian相同发行版及安全更新仓库提供。正式离线分发时须随镜像保留版权声明及适用许可，并提供与实际二进制对应的源代码获取或随附方式；不能以PPT Master的MIT许可覆盖LibreOffice、Poppler、FFmpeg或字体的独立许可。
 
 固定来源与转换方式见 `client/vendor/presentation/NOTICE.md`。运行时目录由 Apache POI 5.4.1 的形状数据机械转换，随发行版保留 Apache-2.0 完整文本；PPT Master 的 MIT 声明同时保留。文件位于 `client/vendor/presentation/`，不依赖在线下载。

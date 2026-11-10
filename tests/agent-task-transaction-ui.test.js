@@ -78,3 +78,13 @@ test('任务验收状态面板清晰展示本地化中文条件与失败原因',
     assert.doesNotMatch(html, /evidence：evidence/);
 });
 
+test('核验暂不可用不显示关键条件已核验，具体业务缺口安全呈现', () => {
+    const escape = value => String(value).replace(/</g, '&lt;');
+    const context = { agentEscape: escape, agentEscapeAttr: escape };
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../client/chat/agent-run-status-views.js'), 'utf8'), context);
+    const html = context.renderAgentVerification({ outcomeStatus: 'needs_input', semanticVerification: { reason: 'verifier_timeout', missing: ['<script>补充统计期间'] } });
+    assert.match(html, /仍需核对交付结果/);
+    assert.match(html, /&lt;script>补充统计期间/);
+    assert.doesNotMatch(html, /关键条件已核验|<script>/);
+});
+

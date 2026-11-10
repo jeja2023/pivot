@@ -104,6 +104,7 @@ async function createModelQuery({ user, modelId, body, trial = false }) {
 async function getModelJob(user, jobId) {
     const row = await repository.get(user.id, jobId);
     if (!row) throw biError('ANALYSIS_MODEL_JOB_NOT_FOUND', '分析任务不存在或无权访问。', 404);
+    if (require('./flow-pipeline').isNodeJob(row)) return require('./flow-pipeline').getNodeJob(user, row);
     await modelForUser(user, row.model_id);
     let definition;
     if (row.check_id) definition = (await repository.check(user.id, row.model_id, row.check_id)).definition_json;
@@ -140,4 +141,4 @@ async function submitModelQuery(options) {
     return getModelJob(options.user, job.id);
 }
 
-module.exports = { createModelCheck, getModelCheck, publishModel, createModelRefresh, createModelQuery, submitModelQuery, getModelJob, cancelModelJob, authorize, checkRecord };
+module.exports = { createModelCheck, getModelCheck, publishModel, createModelRefresh, createModelQuery, submitModelQuery, getModelJob, cancelModelJob, authorize, jobRecord };

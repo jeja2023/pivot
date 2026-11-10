@@ -139,7 +139,7 @@ function taskVerificationFailureMessage(report = {}) {
         ,knowledge_sources_current: '资料来源已变化或不可访问'
     };
     const semanticReasons = { source_revoked: '原始资料已不可用', source_not_fully_read: '尚未读取完整资料',
-        artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试', user_input_required: '需要用户补充业务信息' };
+        artifact_not_materialized: '尚未生成要求的文件', artifact_integrity_failed: '生成文件未通过完整性检查', verifier_unavailable: '验收服务暂时不可用，可稍后重试', verification_evidence_incomplete: '完整核验证据不可用，请重新读取资料后再核验', verification_context_limit: '核验材料超过模型上下文容量，请分批处理或选择更大上下文的模型', user_input_required: '需要用户补充业务信息' };
     const semantic = report.semanticVerification;
     const details = [...new Set((report.hardFailures || []).map(key => labels[key] || '结果尚未通过验收'))];
     if (semantic?.reason) details.push(semanticReasons[semantic.reason] || require('./task-verification-details').verificationReasonLabel(semantic.reason));
@@ -162,6 +162,15 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         ...(ragEvidence ? [ragEvidence] : []),
         ...(attachmentEvidence ? [attachmentEvidence] : [])
     ];
+    let evidenceFailure = null;
+    if (runId && run?.user_id) {
+        try { observations = await require('./agent-verification-evidence').loadVerificationEvidence(runId, user || { id: run.user_id }, observations); }
+        catch (error) {
+            signal?.throwIfAborted();
+            evidenceFailure = { passed: false, reason: error.code === 'KNOWLEDGE_SOURCE_UNAVAILABLE' ? 'source_revoked'
+                : error.code === 'VERIFICATION_CONTEXT_LIMIT' ? 'verification_context_limit' : 'verification_evidence_incomplete' };
+        }
+    }
     let evidence = [];
     if (runId) {
         try {
@@ -172,8 +181,8 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         }
     }
     const contract = normalizeTaskContract(taskContract || metadata?.taskContract || metadata?.task_contract || run?.taskContract, run?.goal || '', { verifyByDefault: run?.run_mode !== 'dag' });
-    let semanticVerification = contract.acceptance.requireSemanticVerification && !partial
-        ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null;
+    let semanticVerification = evidenceFailure || (contract.acceptance.requireSemanticVerification && !partial
+        ? await require('./chat-task-verification').verifyAutomaticTask({ run, user: user || { id: run?.user_id }, contract, answer, observations, signal, budget }) : null);
     if (!semanticVerification && observations.some(item => item.knowledgeEvidence || item.output?.knowledgeEvidence || item.output?.knowledgeSourceVersion === 1)) {
         const current = await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user || { id: run?.user_id });
         if (!current) semanticVerification = { passed: false, reason: 'source_revoked' };
@@ -190,6 +199,7 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         semanticVerification
     });
     if (semanticVerification) report.semanticVerification = semanticVerification;
+    if (/^[a-f0-9]{64}$/.test(String(run?.executionModelIdentity || ''))) report.executionModelIdentity = run.executionModelIdentity;
     if (require('./agent-verification-repair').canAttemptVerificationRepair(report, { ...repairOptions, budget })) {
         report.taskContract.repairAttempts += 1;
         report.repair = { allowed: true, attempt: report.taskContract.repairAttempts, maxAttempts: 2 };

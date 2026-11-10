@@ -240,6 +240,9 @@ async function resolveAuthenticatedUserAsync(req) {
         if (e.name === 'TokenExpiredError' && !String(token).startsWith('sk-')) {
             return { user: null, token, code: 'TOKEN_EXPIRED' };
         }
+        if (!['JsonWebTokenError', 'NotBeforeError', 'TokenExpiredError'].includes(e.name)) {
+            throw Object.assign(new Error('认证服务暂时不可用，请稍后重试。'), { status: 503, code: 'AUTH_SERVICE_UNAVAILABLE' });
+        }
     }
 
     // 已签发的 API Key 采用 sk- 前缀；结构完整但验证失败的 JWT 不再查询密钥表。
@@ -406,7 +409,7 @@ async function refreshTokens(token, options = {}) {
         const newRefreshToken = await issueRefreshToken(trx, user.id, refreshTokenData.family_id || crypto.randomUUID(), requestedDeviceId || boundDeviceId, boundIp);
         return { accessToken, refreshToken: newRefreshToken };
     });
-    if (terminalError) throw terminalError;
+    if (terminalError) throw Object.assign(terminalError, { status: 401, code: 'REFRESH_TOKEN_INVALID' });
     return result;
 }
 
@@ -449,7 +452,7 @@ async function authMiddleware(req, res, next) {
         return res.status(401).json({ error: 'Token 无效或已过期', code: 'TOKEN_INVALID' });
     } catch (err) {
         logger.error({ err: err.message }, '认证中间件处理失败');
-        return res.status(500).json({ error: '认证服务异常', code: 'AUTH_ERROR' });
+        return res.status(503).json({ error: '认证服务暂时不可用，请稍后重试。', code: 'AUTH_SERVICE_UNAVAILABLE' });
     }
 }
 

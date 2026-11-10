@@ -230,6 +230,14 @@
                     }
                 });
                 root.addEventListener('click', event => {
+                    if (event.target.closest('#regulations-review-open-btn')) {
+                        void (async () => {
+                            await window.Pivot.loadScriptOnce('/chat/regulations/review-view.js');
+                            await window.Pivot.loadScriptOnce('/chat/regulations/review.js');
+                            await window.Pivot.moduleApi('apps.policyReview').open();
+                        })().catch(error => toast(error.message, 'error'));
+                        return;
+                    }
                     if (event.target.closest('#regulations-batch-mode-btn')) {
                         ns.toggleBatchMode?.();
                         return;

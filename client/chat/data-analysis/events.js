@@ -783,6 +783,10 @@
                 downloadChartPng();
                 return;
             }
+            if (event.target.closest('#data-analysis-chart-presentation')) {
+                await app.createPresentationFromChart();
+                return;
+            }
             if (event.target.closest('#data-analysis-chart-data-csv')) {
                 exportChartDataToCsv();
                 return;

@@ -74,6 +74,24 @@ test('Docker install uses only lockfile artifacts and carries no obsolete sharp 
     assert.doesNotMatch(dockerfile, /(?:python3\s+make\s+g\+\+|libvips-dev|librsvg2-dev)/);
 });
 
+test('SQLite 依赖使用 npm 发布包并保留离线源码编译与查询自检', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const lockfile = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package-lock.json'), 'utf8'));
+    const dependency = manifest.dependencies['better-sqlite3'];
+    const locked = lockfile.packages['node_modules/better-sqlite3'];
+    assert.match(dependency, /^\d+\.\d+\.\d+$/);
+    assert.equal(lockfile.packages[''].dependencies['better-sqlite3'], dependency);
+    assert.equal(locked.version, dependency);
+    assert.equal(locked.resolved, `https://registry.npmjs.org/better-sqlite3/-/better-sqlite3-${dependency}.tgz`);
+    assert.match(locked.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/);
+    assert.match(dockerfile, /npm_config_ignore_scripts=false npm_config_build_from_source=true npm_config_nodedir=\/usr\/local npm rebuild better-sqlite3/);
+    const installIndex = dockerfile.indexOf('npm ci --omit=dev --ignore-scripts');
+    const rebuildIndex = dockerfile.indexOf('npm rebuild better-sqlite3');
+    const queryIndex = dockerfile.indexOf("db.prepare('SELECT 1 AS n').get().n!==1");
+    assert.ok(rebuildIndex > installIndex);
+    assert.ok(queryIndex > rebuildIndex);
+});
+
 test('Docker image generates split chat CSS bundles before the non-root runtime starts', () => {
     assert.match(dockerfile, /COPY --chown=node:node scripts\/build_chat_css\.js \.\/scripts\/build_chat_css\.js/);
     assert.match(dockerfile, /RUN node scripts\/build_chat_css\.js/);
@@ -111,6 +129,14 @@ test('Docker image carries required LGPL notice material with runtime dependenci
 test('Docker image ships a Chromium runtime for agent.browser instead of silently hiding it', () => {
     assert.match(dockerfile, /chromium/);
     assert.match(dockerfile, /PIVOT_CHROMIUM_PATH=\/usr\/bin\/chromium/);
+});
+
+test('默认主镜像完整打包 Git、ripgrep 和终端协议入口，无需额外构建参数', () => {
+    const runtime = dockerfile.split('FROM python-base AS runtime-base')[1].replace(/\\\r?\n/g, ' ');
+    assert.match(runtime, /apt-get install -y --no-install-recommends[^\n]*\bgit ripgrep\b/);
+    assert.match(runtime, /COPY --chown=node:node docker\/capability-workers\/terminal-runner\/runner\.js \/runner\/runner\.js/);
+    assert.match(runtime, /USER node\s+RUN node --version && python3 --version && git --version && rg --version && node --check \/runner\/runner\.js/);
+    assert.match(runtime, /CMD \["node", "server\/index\.js"\]/);
 });
 
 test('Ubuntu production image packages qpdf and Compose resolves its in-image absolute path', () => {

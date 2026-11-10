@@ -35,6 +35,20 @@ test('进度参数拒绝非法游标、冲突方向和无界页大小', () => {
     assert.equal(normalizeFeedOptions({ after: '0', limit: '40' }).after, 0);
 });
 
+test('等待处理的快照区分业务输入缺失与核验服务故障，并对缺口脱敏', async () => {
+    for (const reason of ['user_input_required', 'verifier_timeout']) {
+        const value = await getChatTaskFeed('waiting-result', { id: 1 }, {}, {
+            inspectRunKnowledgeAccess: async () => ({ current: true }), resolveTenantContext: async () => ({ resolvable: false }),
+            repository: { getTaskSnapshot: async () => ({ id: 'waiting-result', status: 'needs_input', has_events: true,
+                legacy_verification: { outcomeStatus: 'needs_input', semanticVerification: { reason, missing: ['统计期间待确认，token=private-token-value'] } } }), listTaskEvents: async () => [] }
+        });
+        assert.equal(value.verification.needsBusinessInput, reason === 'user_input_required');
+        assert.doesNotMatch(JSON.stringify(value.verification), /private-token-value/);
+        assert.match(value.verification.label, reason === 'user_input_required' ? /补充业务信息/ : /核验等待超时/);
+        assert.equal(value.pollAfterMs, null);
+    }
+});
+
 test('历史 UUID 产物与缺少版本指针字段仍能读取执行结果，账号归属不放宽', async () => {
     await transaction(async client => {
         await client.execute(`CREATE TEMP TABLE agent_artifacts (

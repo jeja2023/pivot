@@ -126,6 +126,7 @@ function createAuthRouter({
             });
             res.json({ success: true, csrfToken });
         } catch (e) {
+            if (e.code !== 'REFRESH_TOKEN_INVALID') return res.status(503).json({ error: '认证服务暂时不可用，请稍后重试。', code: 'AUTH_SERVICE_UNAVAILABLE' });
             res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
             res.clearCookie(DEVICE_COOKIE_NAME, CLEAR_DEVICE_COOKIE_OPTIONS);

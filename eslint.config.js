@@ -743,6 +743,8 @@ module.exports = [
             'node_modules/**',
             '.codex-tmp/**',
             '.tmp/**',
+            'output/**',
+            'artifacts/**',
             'data/**',
             'logs/**',
             'uploads/**',

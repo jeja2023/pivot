@@ -18,6 +18,7 @@ function jsonSchema(properties = {}, required = []) {
 
 function getArtifactToolDefinitions() {
     return [
+        ...require('./agent-tools-policy-review').definitions(),
         ...require('./agent-tools-presentations').presentationToolDefinitions(),
         { name: 'diagram.render_svg', title: '生成 SVG 图形或页面图片', capabilities: ['viz.render'], idempotent: true, side_effect: true, concurrency: 'write',
             description: '将完整 SVG 源码安全保存为可下载 SVG/PNG 结果，内部完成受控图片登记，无需用户提供 CAS 图片。适合单张结构图、示意图；完整可编辑 PPT 应使用 presentation.create，已有 PPT 页面应使用 presentation.export。禁止脚本、外链、内联图片和动态内容。',
@@ -72,7 +73,8 @@ function resolveToolCallId(context = {}) {
 }
 
 async function executeArtifactTool(name, input = {}, user, context = {}) {
-    if (['presentation.create', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.master'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
+    if (name === 'policy.review_report') return require('./agent-tools-policy-review').execute(input, user, context);
+    if (['presentation.create', 'presentation.from_analysis', 'presentation.export', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.master'].includes(name)) return require('./agent-tools-presentations').executePresentationTool(name, input, user, context);
     if (name === 'diagram.render_svg') return require('./tool-result-artifacts').materializeToolArtifact({ structuredContent: { pivotArtifact: {
         kind: 'diagram', title: input.title, svg: input.svg, format: input.format || 'svg' } } }, user, context);
     if (name === 'presentation.create_from_artifact') {
@@ -141,7 +143,7 @@ async function executeArtifactTool(name, input = {}, user, context = {}) {
     };
 }
 
-const ARTIFACT_TOOL_NAMES = Object.freeze(['presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.create', 'presentation.export', 'presentation.create_from_artifact', 'diagram.render_svg', 'artifact.render', 'artifact.list_renditions']);
+const ARTIFACT_TOOL_NAMES = Object.freeze(['policy.review_report', 'presentation.design_info', 'presentation.review', 'presentation.relayout', 'presentation.review_deck', 'presentation.create', 'presentation.from_analysis', 'presentation.export', 'presentation.create_from_artifact', 'diagram.render_svg', 'artifact.render', 'artifact.list_renditions']);
 
 module.exports = {
     ARTIFACT_TOOL_NAMES,

@@ -11,7 +11,9 @@ const MAX_DISCOVERY_CACHE_ENTRIES = 100;
 const GENERIC_BUSINESS_TERMS = new Set(['业务', '外部', '工具', '帮我', '一个', '一下', '执行', '功能', '服务']);
 // 业务词只影响当前授权目录内的排序，不创建工具或扩大权限。
 const BUSINESS_ALIASES = Object.freeze({
+    'policy.review_report': '制度 材料 审查 审核 合规 依据 条款 符合 不符合 待核实 Word 可编辑 报告',
     'presentation.create': '生成 PPT PPTX PowerPoint 幻灯片 演示文稿 汇报 根据文档 制作PPT',
+    'presentation.from_analysis': '数据分析 图表 数据集 统计结果 经营分析 数据汇报 PPT PPTX 转换 汇报幻灯片',
     'presentation.design_info': 'PPT 设计 技能 模板 布局 风格 目录',
     'presentation.review': 'PPT 视觉 复核 版式 检查 截断 遮挡',
     'presentation.review_deck': 'PPT 整稿 全部页面 视觉 复核 优化排版 检查 进度 停止',

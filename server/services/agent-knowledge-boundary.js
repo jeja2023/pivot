@@ -15,6 +15,7 @@ async function prepareAgentKnowledgeBoundary(run, user, deps = {}) {
 
 /** 模型读取历史观察、执行后续工具及发布答案前，均重新确认资料仍可用。 */
 async function assertAgentKnowledgeCurrent({ run = {}, user, observations = [] }, deps = {}) {
+    await require('./agent-skill-resources').assertSkillResourceEvidence(run,user);
     const manifests = [run.knowledgeBoundaryEvidence];
     for (const item of observations) {
         if (item.output?.knowledgeContextVersion === 1) continue;
@@ -32,7 +33,7 @@ async function assertAgentKnowledgeCurrent({ run = {}, user, observations = [] }
         run.knowledgeBoundaryEvidence = merged;
     }
     const metadata = require('./agent-validators').parseJsonObject(run.metadata) || {};
-    if (metadata.chatBridge?.ragContext || observations.some(item => item.output?.knowledgeContextVersion === 1)) {
+    if (metadata.parentHistory?.sourceRunId || metadata.goalContinuation || metadata.resumeContext?.sourceRunId || metadata.chatBridge?.ragContext || observations.some(item => item.output?.knowledgeContextVersion === 1)) {
         const access = await (deps.inspectRunKnowledgeAccess || require('./knowledge-run-access').inspectRunKnowledgeAccess)(run.id, user, { knowledge: deps.knowledge || {} });
         if (!access.current) throw Object.assign(new Error('资料来源已变化或不可访问，请重新选择资料后继续。'), { code: 'KNOWLEDGE_SOURCE_UNAVAILABLE', status: 403, category: 'policy' });
     }

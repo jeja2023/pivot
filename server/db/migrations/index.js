@@ -192,7 +192,9 @@ const migrationModules = [
     require('./analysis-release-controls'),
     require('./analysis-model-result-cache'),
     require('./analysis-source-metadata'),
-    require('./presentation-native-offline')
+    require('./presentation-native-offline'),
+    require('./analysis-node-flow'),
+    require('./agent-projects')
 ];
 
 module.exports = migrationModules

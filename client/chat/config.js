@@ -105,7 +105,7 @@ async function refreshAccessToken() {
                 { method: 'POST', credentials: 'same-origin' },
                 AUTH_REFRESH_TIMEOUT_MS
             );
-            if (!refreshRes.ok) throw new Error('令牌刷新失败');
+            if (!refreshRes.ok) throw Object.assign(new Error(refreshRes.status === 401 ? '令牌刷新失败' : '认证服务暂时不可用，请稍后重试。'), { sessionInvalid: refreshRes.status === 401 });
             const refreshData = await refreshRes.json().catch(() => ({}));
             if (refreshData.csrfToken) {
                 setCsrfToken(refreshData.csrfToken);
@@ -200,7 +200,7 @@ async function apiFetch(url, options = {}) {
             }
             return retryRes;
         } catch (e) {
-            handleUnauthorized();
+            if (e.sessionInvalid) handleUnauthorized();
             throw e;
         }
     }
@@ -241,7 +241,7 @@ async function checkLogin(hasRetried = false) {
                         await refreshAccessToken();
                         return checkLogin(true);
                     } catch (e) {
-                        handleUnauthorized();
+                        if (e.sessionInvalid) handleUnauthorized();
                         return;
                     }
                 }
@@ -252,16 +252,17 @@ async function checkLogin(hasRetried = false) {
             currentUser = data.user;
             authFailureHandled = false;
             if (window.Pivot.legacy.showApp) window.Pivot.legacy.showApp();
-        } else {
+        } else if (res.status === 401) {
             handleUnauthorized();
         }
     } catch (e) {
         console.error('自动登录失败:', e);
-        handleUnauthorized();
+        if (e.sessionInvalid) handleUnauthorized();
     }
 }
 
 function handleUnauthorized() {
+    window.Pivot?.moduleApi?.('apps.policyReview')?.reset?.();
     window.Pivot?.moduleApi?.('apps.officialWriting')?.reset?.();
     currentUser = null;
     currentSessionId = null;

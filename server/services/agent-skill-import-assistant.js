@@ -39,10 +39,20 @@ function prepareSkillImport(input, catalog) {
     const capabilities = normalizeCapabilityList(selected.flatMap(item => item.capabilities));
     const converted = { schemaVersion: 1, id, name: id, version: '1.0.0', title, description, tools: names, capabilities, inputs: {}, outputs: {}, importSource: provenance };
     if (identity.license.trim()) converted.license = identity.license.trim().slice(0, 200);
+    const resourceHelper=require('./agent-skill-resource-import');
+    const resources=resourceHelper.normalizeResourceInputs(input.resources||[]);
+    if(resources.length){converted.files=resources.map(item=>item.name);converted.resources=resourceHelper.resourceManifestEntries(resources);}
     const markdown = buildSkillSourceMarkdown(converted, body);
     const preview = previewSkillSource(markdown);
+    if(resources.length){
+        const available=new Set(resources.map(item=>item.name));
+        report.requirements=report.requirements.filter(item=>item.kind!=='resource'||!available.has(item.name.replace(/^\.\//,'')));
+        report.readiness={...report.readiness,scope:'instructions_and_resources',bundledResources:'available'};
+        report.status=report.requirements.length?'adaptation_required':'compatible';
+        if(!names.includes('skill.resources')||!names.includes('skill.read_resource')){preview.valid=false;preview.errors.push('配套资料需要选择“查看当前技能资源”和“读取当前技能资源”两个只读工具。');}
+    }
     const ignored = report.fields.filter(item => !['mapped'].includes(item.handling)).map(item => item.field);
-    const warnings = ['仅转换此文件正文；原技能的脚本、附件、依赖与外部路径不会自动导入或执行，请检查工作指引。', '工具和权限仅采用本次所选项，原文件中声明的工具不会自动授予。'];
+    const warnings = [resources.length?'已绑定所选配套资料的摘要；脚本、宿主行为和依赖不会自动执行。':'仅转换此文件正文；原技能的脚本、附件、依赖与外部路径不会自动导入或执行，请检查工作指引。', '工具和权限仅采用本次所选项，原文件中声明的工具不会自动授予。'];
     if (provenance.originalFields?.metadata?.activation === 'explicit') warnings.push('此指引仅供显式选择，不参与个人经验的关键词自动匹配。');
     if (ignored.length) warnings.push(`原文件头部不作为运行配置的字段已保留来源记录：${ignored.slice(0, 30).join('、')}。`);
     warnings.push(...report.diagnostics);

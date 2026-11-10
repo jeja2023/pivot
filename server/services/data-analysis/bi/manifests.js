@@ -20,10 +20,10 @@ function allRequired(definition) {
     return result.fields;
 }
 
-async function captureManifest({ user, modelId, definition, fault, signal, comparison = null }) {
+async function captureManifest({ user, modelId, definition, fault, signal, comparison = null, write = true }) {
     const required = allRequired(definition);
     require('./migration').comparisonRequired(definition, comparison, required);
-    const authorize = trx => authorization.authorize(trx, { userId: user.id, modelId, definition, required, write: true });
+    const authorize = trx => authorization.authorize(trx, { userId: user.id, modelId, definition, required, write });
     const initial = await transaction(authorize), prepared = Object.create(null), leaseId = `capture_${crypto.randomUUID()}`;
     let capturedBytes = 0;
     try {

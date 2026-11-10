@@ -69,8 +69,8 @@ async function retention() {
             FROM analysis_object_references r JOIN analysis_query_jobs q ON q.id=r.reference_id JOIN analysis_data_objects o ON o.id=r.object_id
             WHERE r.reference_kind='run' AND r.expires_at IS NULL AND q.status IN ('succeeded','failed','cancelled') AND q.completed_at IS NOT NULL LIMIT 300)
             UPDATE analysis_object_references r SET expires_at=due.expires_at FROM due WHERE r.object_id=due.object_id AND r.reference_id=due.reference_id AND r.reference_kind='run'`);
-        const expired = await trx.query(`UPDATE analysis_query_jobs q SET result_metadata_json=(q.result_metadata_json-'rows'-'total')||'{"resultExpired":true}'::jsonb
-            WHERE q.execution_kind IN ('model_query','model_trial','model_export') AND q.status='succeeded' AND q.completed_at<NOW()-INTERVAL '7 days' AND NOT COALESCE((q.result_metadata_json->>'resultExpired')::boolean,FALSE)
+        const expired = await trx.query(`UPDATE analysis_query_jobs q SET result_metadata_json=(q.result_metadata_json-'rows'-'total'-'preview')||'{"resultExpired":true}'::jsonb
+            WHERE q.execution_kind IN ('model_query','model_trial','model_export','model_node_preview') AND q.status='succeeded' AND q.completed_at<NOW()-INTERVAL '7 days' AND NOT COALESCE((q.result_metadata_json->>'resultExpired')::boolean,FALSE)
             AND NOT EXISTS(SELECT 1 FROM analysis_saved_views v WHERE v.last_run_id=q.id AND v.deleted_at IS NULL)
             AND NOT EXISTS(SELECT 1 FROM analysis_dashboard_items i JOIN analysis_dashboards d ON d.id=i.dashboard_id WHERE (i.last_run_id=q.id OR i.last_successful_run_id=q.id) AND d.deleted_at IS NULL)
             AND NOT EXISTS(SELECT 1 FROM analysis_query_jobs child WHERE child.source_run_id=q.id AND child.status IN ('queued','running','retry_wait','cancelling')) RETURNING id,user_id,model_id,published_version`);

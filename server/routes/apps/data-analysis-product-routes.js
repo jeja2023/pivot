@@ -131,7 +131,10 @@ function registerDataAnalysisProductRoutes(router, { authMiddleware, logAction }
         res.json(result);
     }));
 
-    router.get('/apps/data-analysis/models', authMiddleware, asyncHandler(async (req, res) => res.json({ models: await listDataModels(req.user, { limit: req.query?.limit }) })));
+    router.get('/apps/data-analysis/models', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await listDataModels(req.user, req.query || {});
+        res.json(Array.isArray(result) ? { models: result } : result);
+    }));
     router.post('/apps/data-analysis/models', authMiddleware, asyncHandler(async (req, res) => {
         const model = await saveDataModel({ user: req.user, body: req.body || {} });
         logAction(req, '数据分析-创建数据模型', `模型: ${model.id}`);

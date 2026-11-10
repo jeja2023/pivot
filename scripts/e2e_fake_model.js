@@ -44,6 +44,7 @@ const server = http.createServer((req, res) => {
         const respond = () => {
         if (payload.stream === false) {
             let content = '真实 E2E 回答';
+            if (payload.model === 'policy-review-e2e') content = JSON.stringify(require('./test_support/policy_review_model').response(payload.messages || []));
             if (payload.model === 'ppt-master-e2e') content = JSON.stringify(require('./test_support/ppt_master_model').pptMasterModelTurn(payload.messages || []));
             if (payload.model === 'ppt-storyline-e2e-slow') content = JSON.stringify(require('./test_support/ppt_storyline_model').turn(payload.messages || []));
             if (payload.model === 'ppt-e2e-vision-slow') content = JSON.stringify({ issues: [] });

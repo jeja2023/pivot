@@ -259,6 +259,7 @@
             <span id="modeling-canvas-hint" class="modeling-canvas-hint" role="status" aria-live="polite">点击节点在右侧抽屉配置属性与函数；拖动节点右侧圆点到目标左侧圆点建立关联或算子流转。</span>
             <div class="modeling-canvas-zoom-group">
                 <button class="btn-secondary${state.previewOpen ? ' is-selected' : ''}" type="button" data-modeling-action="toggle-preview" title="打开或关闭底部节点实时数据运行预览">数据预览</button>
+                ${state.nodeJobs?.length ? '<button class="btn-secondary" type="button" data-modeling-action="show-node-jobs">节点任务</button>' : ''}
                 <button class="btn-secondary" type="button" data-canvas-action="zoom-out" aria-label="缩小关系图" title="缩小画布">缩小</button>
                 <span id="modeling-canvas-zoom" class="modeling-zoom-label">${Math.round(zoom * 100)}%</span>
                 <button class="btn-secondary" type="button" data-canvas-action="zoom-in" aria-label="放大关系图" title="放大画布">放大</button>

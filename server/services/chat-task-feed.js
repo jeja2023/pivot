@@ -32,9 +32,16 @@ function presentVerification(row) {
     const report = row.verification_status ? parseObject(row.verification_report) : parseObject(row.legacy_verification);
     if (!row.verification_status && !report.outcomeStatus) return { status: 'unknown', label: '暂无独立核验记录', missing: [] };
     const status = String(row.verification_status || report.outcomeStatus);
+    const reason = String(report.semanticVerification?.reason || '');
+    const reasons = { user_input_required: '需要补充业务信息', verifier_unavailable: '核验服务暂不可用，已有结果已保留',
+        verifier_timeout: '核验等待超时，已有结果已保留', verifier_invalid_response: '未获得有效核验结论，已有结果已保留', verification_evidence_incomplete: '完整核验证据不可用，请重新读取资料后再核验', verification_context_limit: '核验材料超过模型上下文容量，已有结果已保留，请分批处理或选择更大上下文的模型',
+        source_revoked: '资料来源已失效或无权访问', source_not_fully_read: '资料尚未读取完整',
+        artifact_not_materialized: '尚未生成要求的文件', artifact_format_missing: '尚未生成全部要求的文件格式',
+        artifact_integrity_failed: '文件未通过完整性检查', deliverables_missing: '交付内容仍有缺口', budget_exceeded: '已达到执行预算，请核对部分结果' };
     const missing = Array.isArray(report.semanticVerification?.missing) ? report.semanticVerification.missing : [];
-    return { status, label: status === 'verified' ? '结果已通过核验' : status === 'partial' ? '结果部分通过核验' : '结果尚未通过完整核验',
-        checkedAt: report.verifiedAt || null, missing: missing.slice(0, 8).map(value => safeTaskText(value, 200)) };
+    return { status, reason, label: status === 'verified' ? '结果已通过核验' : reasons[reason] || (status === 'partial' ? '结果部分通过核验' : '结果尚未通过完整核验'),
+        needsBusinessInput: reason === 'user_input_required', checkedAt: report.verifiedAt || null,
+        missing: missing.slice(0, 8).map(value => safeTaskText(value, 200)) };
 }
 
 function presentArtifact(row) {

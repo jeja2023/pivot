@@ -71,3 +71,18 @@ test('旧文稿迟到的撤权和更新响应不会改变当前文稿', async ()
     resolveOld({ presentation: { id: 'two' } });
     assert.equal(await oldData, null);
 });
+
+test('分析来源版本变化独立提示，迟到的来源错误不影响新文稿', async () => {
+    let api, active = { id: 'report' }, notice = '', revoked = 0;
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/apps-workbench-presentations-realtime.js'), 'utf8'), {
+        window: { Pivot: { exposeModule: (_name, value) => { api = value; } } }
+    });
+    const original = active;
+    const error = Object.assign(new Error('数据已变化，请重新生成汇报。'), { status: 409, code: 'PRESENTATION_ANALYSIS_STALE' });
+    const options = { active: original, getActive: () => active, onRevoked: () => { revoked++; }, onSourceUnavailable: value => { notice = value.message; } };
+    await assert.rejects(api.fetchCurrent({ ...options, request: async () => { throw error; } }), /数据已变化/);
+    assert.match(notice, /重新生成汇报/); assert.equal(revoked, 0);
+    active = { id: 'other' }; notice = '';
+    await assert.rejects(api.fetchCurrent({ ...options, request: async () => { throw error; } }), /数据已变化/);
+    assert.equal(notice, '');
+});

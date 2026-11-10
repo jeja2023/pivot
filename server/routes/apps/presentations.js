@@ -571,6 +571,12 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         return runAiRequest(req, res, body, buildValidationMessages(body), { source: 'presentation_validate', auditAction: 'PPT AI内容检查', maxTokens: 3000, retryMalformedJson: true, parse: async result => ({ validation: parseValidationProposal(result.content) }) });
     }));
 
+    router.post('/apps/presentations/from-analysis', authMiddleware, asyncHandler(async (req, res) => {
+        const result = await require('../../services/presentations/presentation-analysis-report').createAnalysisReport(req.user, req.body || {});
+        writeLog(req, '从分析图表生成汇报PPT', `文稿: ${result.presentation.id}`);
+        return res.status(result.reused ? 200 : 201).json(result);
+    }));
+
     router.post('/apps/presentations/data-chart', authMiddleware, asyncHandler(async (req, res) => {
         const body = req.body || {};
         const datasetId = String(body.datasetId || '').trim();

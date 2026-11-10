@@ -60,7 +60,7 @@
 
     async function requestJson(url, options = {}) {
         const response = await apiFetch(url, options);
-        const data = await response.clone().json().catch(() => ({}));
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) {
             const error = new Error(data?.error?.message || data?.error || data?.message || `请求失败（${response.status}）`);
             error.code = data?.code || data?.error?.code || '';
@@ -72,7 +72,7 @@
     function operations() {
         const remote = state.capabilities?.operations;
         if (!Array.isArray(remote) || !remote.length) return FALLBACK_OPERATIONS;
-        return remote.reduce((result, item) => ({ ...result, [item.id]: item }), {});
+        return Object.fromEntries(remote.map(item => [item.id, item]));
     }
 
     function operation(operation) { return operations()[operation] || FALLBACK_OPERATIONS.merge; }
@@ -632,7 +632,7 @@
     function render() { renderJobs(); renderDetail(); }
 
     async function loadCapabilities() {
-        state.capabilities = await requestJson(`${API}/capabilities`).catch(() => null);
+        state.capabilities = await requestJson(`${API}/capabilities`, { timeoutMs: 35000 }).catch(() => null);
         const select = document.getElementById('pdf-operation-select');
         if (select && state.capabilities?.operations) {
             const current = select.value;

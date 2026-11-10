@@ -643,7 +643,7 @@ async function listDatasetArtifacts(userId, datasetId, { limit = 30 } = {}) {
             metadata: jsonParse(row.metadata_json, {}),
             hasFile: !!row.file_path
         };
-        if (row.type === 'chart') item.chart = jsonParse(row.content, null);
+        if (row.type === 'chart') { const chart = jsonParse(row.content, null); item.chart = chart ? { ...chart, artifactId: row.id } : null; }
         if (row.type === 'ai_analysis') item.analysis = jsonParse(row.content, null) || (row.content ? { answer: row.content, prompt: row.title } : null);
         if (row.type === 'ai_full_text_analysis') item.semantic = jsonParse(row.content, null);
         if (row.type === 'cleaning') item.cleaning = jsonParse(row.content, null);

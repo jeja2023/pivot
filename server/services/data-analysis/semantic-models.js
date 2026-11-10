@@ -137,8 +137,8 @@ async function getDataModel(user, modelId, { write = false, includeRelations = t
     return { row, model };
 }
 
-async function listDataModels(user, { limit = 100 } = {}) {
-    return require('./bi/catalog').list(user, { limit });
+async function listDataModels(user, options = {}) {
+    return require('./bi/catalog')[options.page === undefined ? 'list' : 'page'](user, options);
 }
 
 async function saveDataModel({ user, body = {}, modelId = '' }) {

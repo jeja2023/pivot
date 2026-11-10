@@ -90,6 +90,7 @@
                             </select>
                         </label>
                     </div>
+                    <label class="modal-form-field"><span>所属项目（可选）</span><select id="agent-goal-project" class="form-input"><option value="">不关联项目</option></select><span class="agent-goal-hint">每次触发使用当时有效的项目规则和资料范围；归档后停止接纳新任务。</span></label>
                     <div class="modal-form-grid modal-form-grid--3">
                         <label class="modal-form-field"><span>时区</span><input id="agent-goal-timezone" class="form-input" value="Asia/Shanghai" maxlength="80"></label>
                         <label class="modal-form-field"><span>结果投递渠道（可选）</span><select id="agent-goal-delivery-channel" class="form-input"><option value="">仅在 Pivot 待办中心查看</option></select></label>
@@ -257,6 +258,7 @@
                                 </label>
                                 <p id="agent-token-budget-help" class="agent-token-budget-help hidden">累计计算输入和输出
                                     Token；达到上限后任务将停止，留空或填写 0 使用自动分配预算。</p>
+                                <label><span>所属项目</span><select id="agent-project-select" class="form-input"><option value="">不使用项目</option></select><button type="button" class="btn-secondary btn-xs" data-open-projects>管理项目</button></label>
                                 <label class="agent-context-notes-field">
                                     <span>补充说明</span>
                                     <textarea id="agent-context-notes" class="form-input" rows="2"
@@ -1146,6 +1148,7 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <label class="agent-harness-form-field agent-harness-form-field-wide"><span>或导入技能目录（包含根目录 SKILL.md）</span><input id="agent-skill-import-folder" type="file" class="form-input" webkitdirectory multiple><small>支持 references、assets、templates 中的文本和图片，最多32个配套文件、合计4 MiB；脚本和宿主行为需要另行适配。</small></label>
                                     <div class="agent-skill-form-row">
                                         <label class="agent-harness-form-field agent-harness-form-field-wide">
                                             <span class="agent-field-label">技能名称 <em class="required-star">*</em></span>

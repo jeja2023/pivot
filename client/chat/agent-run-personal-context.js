@@ -50,8 +50,9 @@
 
     function projectContextMarkup(run = {}, escape = value => String(value || '')) {
         const collections = Array.isArray(metadata(run).projectContextPack?.collections) ? metadata(run).projectContextPack.collections : [];
-        const names = collections.map(item => String(item?.name || item?.id || '').trim()).filter(Boolean).slice(0, 8);
-        return names.length ? `<div class="agent-context-card agent-context-project-card"><h5>项目资料包</h5><div class="agent-context-row"><span>检索范围</span><strong>${escape(names.join('、'))}</strong></div><div class="agent-context-row"><span>权限校验</span><strong>按当前授权实时校验</strong></div></div>` : '';
+        const names = collections.map(item => String(item?.name || item?.id || '').trim()).filter(Boolean).slice(0, 12);
+        const project = metadata(run).projectContextPack?.project;
+        return names.length || project ? `<div class="agent-context-card agent-context-project-card"><h5>${project?'所属项目':'项目资料包'}</h5>${project?`<div class="agent-context-row"><span>项目与规则版本</span><strong>${escape(project.title)} · v${escape(project.version)}</strong><button type="button" class="btn-secondary btn-xs" data-open-projects data-project-id="${escape(project.id)}">查看项目</button></div>`:''}<div class="agent-context-row"><span>检索范围</span><strong>${escape(names.join('、')||'未绑定资料集合')}</strong></div><div class="agent-context-row"><span>权限校验</span><strong>按当前授权实时校验</strong></div></div>` : '';
     }
 
     function memoryContextMarkup(run = {}, escape = value => String(value || '')) {
