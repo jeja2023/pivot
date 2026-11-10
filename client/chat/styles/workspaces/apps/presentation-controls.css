@@ -4142,24 +4142,6 @@ body.dark-mode .presentation-story-item-title,
     white-space: pre-wrap;
 }
 
-.presentation-master-dialog {
-    max-width: 880px;
-    max-height: 92vh;
-    margin: auto;
-}
-
-.presentation-master-dialog .workspace-modal-body {
-    overflow: auto;
-    padding: 18px;
-}
-
-.presentation-master-form {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    margin: 14px 0;
-}
-
 .presentation-master-field {
     display: grid;
     gap: 6px;
@@ -4170,27 +4152,6 @@ body.dark-mode .presentation-story-item-title,
 .presentation-master-field:has(textarea),
 .presentation-master-field:has(input[type="file"]) {
     grid-column: 1 / -1;
-}
-
-#presentation-master-status {
-    display: grid;
-    gap: 8px;
-    margin-top: 16px;
-}
-
-#presentation-master-status pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-@media (max-width: 600px) {
-    .presentation-master-form {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .presentation-master-dialog {
-        max-height: 100vh;
-    }
 }
 
 .presentation-native-dialog {

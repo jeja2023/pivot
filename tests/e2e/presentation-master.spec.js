@@ -22,6 +22,7 @@ test('完整制作通过真实上游容器执行，确认后交付PPTX和项目�
     await page.locator('#presentation-master-model').selectOption(String(model.id));
     await page.locator('#presentation-master-profile').selectOption('quick');
     await page.locator('#presentation-master-pages').fill('1');
+    await page.locator('.presentation-master-advanced summary').click();
     await page.locator('#presentation-master-budget').fill('10000');
     await page.locator('#presentation-master-instruction').fill('E2E_MASTER_CONFIRM 根据材料快速生成可编辑PPT，保留全部原始数字。');
     await page.locator('#presentation-master-material').fill('软件验收示例：收入120万元，成本80万元。');
@@ -41,8 +42,8 @@ test('完整制作通过真实上游容器执行，确认后交付PPTX和项目�
     await expect(panel).toContainText('是否保留材料中的原始金额', { timeout: 150000 });
     await panel.getByRole('textbox', { name: '对制作方案的实际答复' }).fill('确认保留全部原始金额。');
     await panel.getByRole('button', { name: '确认并继续' }).click();
-    await expect(panel.getByRole('button', { name: '下载原生PPTX' })).toBeVisible({ timeout: 100000 });
-    const download = page.waitForEvent('download'); await panel.getByRole('button', { name: '下载原生PPTX' }).click();
+    await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toBeVisible({ timeout: 100000 });
+    const download = page.waitForEvent('download'); await panel.getByRole('button', { name: '下载演示文件（.pptx）' }).click();
     const file = await download; const zip = await Zip.loadAsync(await fs.readFile(await file.path()));
     expect(await zip.file('ppt/slides/slide1.xml').async('string')).toContain('收入120万元');
     expect(Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))).toHaveLength(1);

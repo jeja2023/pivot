@@ -70,6 +70,11 @@
             }
         } else if (state.status === 'not-available' || state.status === 'idle') {
             brandTrigger.classList.remove('has-update', 'is-ready');
+        } else if (state.status === 'error') {
+            brandTrigger.classList.remove('has-update', 'is-ready');
+            if (state.error) {
+                toast('客户端更新失败：' + state.error, 'warning');
+            }
         }
     }
 

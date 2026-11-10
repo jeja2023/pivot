@@ -57,6 +57,11 @@ function showUpdateDialog(mainWindow, options) {
     const electron = getElectronModule();
     if (!electron?.dialog) return Promise.resolve({ response: 1 });
     if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        } catch (_) {}
         return electron.dialog.showMessageBox(mainWindow, options);
     }
     return electron.dialog.showMessageBox(options);
