@@ -363,8 +363,9 @@
     },
     {
       "file": "server/services/agent-releases.js",
-      "count": 64,
-      "rationale": "技能与工作流发布事务包含版本冻结、ACL、签名和熔断状态，已由发布集成回归覆盖。"
+      "count": 62,
+      "rationale": "目录查询已下沉到仓储并按当前权限和灰度分页；其余技能和工作流发布事务保持参数化与既有授权边界。",
+      "verification": "node scripts/run_node_tests.js tests/agent-skill-discovery-integration.test.js tests/project-audit-skills.test.js"
     },
     {
       "file": "server/services/agent-task-effect-executor.js",
@@ -829,6 +830,18 @@
       "rationale": "法规入库在同一版本事务内保存服务端验证的来源摘要、完整性与页跨度 JSON；输入缺页或失败时拒绝写入 ready 版本，更新仅绑定当前新版本 ID。",
       "verification": "batch-2：法规完整性与真实两页 PDF 定位回归通过；覆盖字段迁移后另行重跑法规安全专项。",
       "reviewedAt": "2026-11-10"
+    },
+    {
+      "file": "server/repositories/agent-skill-catalog.js",
+      "count": 1,
+      "rationale": "受控发布目录的参数化键集分页；SQL先排除他人个人发布，服务层继续当前ACL与灰度检查。",
+      "verification": "node scripts/run_node_tests.js tests/project-audit-runtime.test.js tests/project-audit-skills.test.js"
+    },
+    {
+      "file": "server/repositories/agent-run-leases.js",
+      "count": 1,
+      "rationale": "核验失去执行权后按任务、持锁者、状态及可选租约代次条件收敛，不修改已有结果。",
+      "verification": "node scripts/run_node_tests.js tests/project-audit-runtime.test.js tests/project-audit-skills.test.js"
     }
   ]
 }

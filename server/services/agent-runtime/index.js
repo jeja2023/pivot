@@ -115,7 +115,7 @@ const {
     withTimeout
 } = require('./runtime-env');
 const { getAgentRunTitle, getRunMetadata } = require('./metadata');
-const { assertAgentRunStatusTransition, canTransitionAgentRunStatus, TERMINAL_STATUSES } = require('./state-machine');
+const { assertAgentRunStatusTransition, canTransitionAgentRunStatus, TERMINAL_STATUSES, EXECUTION_LEASE_STATUSES } = require('./state-machine');
 const {
     ensureAgentTrace,
     finishAgentTraceSpan,
@@ -474,6 +474,11 @@ async function ensureTaskTransactionExecuting(run, user, taskContract = null) {
 }
 
 const { runAgent } = createAgentRunner({
+    startClaimedRun: runState.startClaimedRun,
+    finalizeTerminalRun: async (runId, status) => {
+        try { await publishAgentRunEvent(runId, 'updated'); }
+        finally { await runState.finalizeTerminalRun(runId, status); }
+    },
     activeRunControllers,
     taskBudgetsBySignal,
     assertRunNotCancelled: assertRunCanContinue,
@@ -584,11 +589,11 @@ async function recoverAgentRuns() {
     const now = getBeijingTimestamp();
     const cutoff = getBeijingTimestamp(new Date(Date.now() - (AGENT_STALE_RUNNING_MINUTES * 60 * 1000)));
     const staleRunning = await query(`
-        SELECT id FROM agent_runs
-        WHERE status IN ('running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming')
+        SELECT id, status FROM agent_runs
+        WHERE status IN (${EXECUTION_LEASE_STATUSES.map(() => '?').join(', ')})
           AND deleted_at IS NULL
           AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)
-    `, [cutoff]);
+    `, [...EXECUTION_LEASE_STATUSES, cutoff]);
     for (const run of staleRunning) {
         const pendingCheckpoints = await query(`
             SELECT tool_name, input_hash, idempotent, operation_key, state
@@ -601,7 +606,7 @@ async function recoverAgentRuns() {
         const pending = pendingCheckpoints.find(checkpoint => !Boolean(checkpoint.idempotent)) || pendingCheckpoints[0] || null;
         const runMetadataRow = await queryOne('SELECT metadata FROM agent_runs WHERE id = ?', [run.id]);
         const safeResume = pendingCheckpoints.length > 0 && !pendingCheckpoints.some(checkpoint => !Boolean(checkpoint.idempotent));
-        const targetStatus = pending && !safeResume ? 'approval_required' : safeResume ? 'queued' : 'error';
+        const targetStatus = run.status === 'verifying' ? 'error' : pending && !safeResume ? 'approval_required' : safeResume ? 'queued' : 'error';
         const recoveryFields = {
             status: targetStatus,
             error_message: targetStatus === 'error' ? '服务已重启或心跳超时，任务已标记为失败。' : targetStatus === 'approval_required' ? '检测到未完成的非幂等工具调用，需要重新审批。' : null,
@@ -616,7 +621,7 @@ async function recoverAgentRuns() {
             try { metadata = JSON.parse(runMetadataRow?.metadata || '{}'); } catch (_) {}
             recoveryFields.metadata = JSON.stringify({ ...metadata, pendingApproval: { tool: pending.tool_name, operationKey: pending.operation_key, recovery: true } });
         }
-        const changed = await updateRunCas(run.id, ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming'], recoveryFields);
+        const changed = await updateRunCas(run.id, [run.status], recoveryFields, { staleBefore: cutoff });
         if (!changed) continue;
         const abortError = new Error('停滞任务已恢复并标记终止。');
         abortError.code = 'AGENT_RUN_CANCELLED';

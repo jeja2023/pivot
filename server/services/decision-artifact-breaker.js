@@ -12,7 +12,8 @@ const ACTIVE_ARTIFACTS_SQL = [
 const POLICY_WINDOW_METRICS_SQL = [
     "SELECT COUNT(DISTINCT d.decision_id) AS samples,",
     "0 AS provider_errors,",
-    "COUNT(DISTINCT d.decision_id) FILTER (WHERE EXISTS (",
+    "COUNT(DISTINCT d.decision_id) FILTER (WHERE d.policy_outcome->>'applied' = 'true' AND EXISTS (SELECT 1 FROM decision_outcomes o WHERE o.decision_id = d.decision_id AND o.event_type = 'execution' AND o.status IN ('success', 'failure'))) AS execution_samples,",
+    "COUNT(DISTINCT d.decision_id) FILTER (WHERE d.policy_outcome->>'applied' = 'true' AND EXISTS (",
     "SELECT 1 FROM decision_outcomes o WHERE o.decision_id = d.decision_id",
     "AND o.event_type = 'execution' AND o.status = 'failure'",
     ")) AS execution_failures",
@@ -24,7 +25,8 @@ const POLICY_WINDOW_METRICS_SQL = [
 const PROVIDER_WINDOW_METRICS_SQL = [
     "SELECT COUNT(DISTINCT d.decision_id) AS samples,",
     "COUNT(DISTINCT d.decision_id) FILTER (WHERE COALESCE(provider.value->>'error', '') <> '') AS provider_errors,",
-    "COUNT(DISTINCT d.decision_id) FILTER (WHERE EXISTS (",
+    "COUNT(DISTINCT d.decision_id) FILTER (WHERE d.policy_outcome->>'applied' = 'true' AND EXISTS (SELECT 1 FROM decision_outcomes o WHERE o.decision_id = d.decision_id AND o.event_type = 'execution' AND o.status IN ('success', 'failure'))) AS execution_samples,",
+    "COUNT(DISTINCT d.decision_id) FILTER (WHERE d.policy_outcome->>'applied' = 'true' AND EXISTS (",
     "SELECT 1 FROM decision_outcomes o WHERE o.decision_id = d.decision_id",
     "AND o.event_type = 'execution' AND o.status = 'failure'",
     ")) AS execution_failures",
@@ -62,11 +64,12 @@ function evaluateDecisionArtifactBreaker(thresholds, metrics = {}) {
     const executionFailures = Math.max(0, Number(metrics.executionFailures ?? metrics.execution_failures) || 0);
     if (!thresholds || samples < thresholds.minSamples) return { tripped: false, reason: 'insufficient_samples', samples };
     const providerErrorRate = providerErrors / samples;
-    const executionFailureRate = executionFailures / samples;
+    const executionSamples = Math.max(0, Number(metrics.executionSamples ?? samples) || 0);
+    const executionFailureRate = executionSamples ? executionFailures / executionSamples : 0;
     if (providerErrorRate > thresholds.maxProviderErrorRate) {
         return { tripped: true, reason: 'provider_error_rate', samples, actual: providerErrorRate, limit: thresholds.maxProviderErrorRate, providerErrorRate, executionFailureRate };
     }
-    if (executionFailureRate > thresholds.maxExecutionFailureRate) {
+    if (executionSamples >= thresholds.minSamples && executionFailureRate > thresholds.maxExecutionFailureRate) {
         return { tripped: true, reason: 'execution_failure_rate', samples, actual: executionFailureRate, limit: thresholds.maxExecutionFailureRate, providerErrorRate, executionFailureRate };
     }
     return { tripped: false, reason: 'within_threshold', samples, providerErrorRate, executionFailureRate };
@@ -85,6 +88,7 @@ async function collectDecisionArtifactMetrics(artifact, windowMinutes, deps = {}
     const row = rows?.[0] || {};
     return {
         samples: Number(row.samples || 0),
+        executionSamples: Number(row.execution_samples ?? row.samples ?? 0),
         providerErrors: Number(row.provider_errors || 0),
         executionFailures: Number(row.execution_failures || 0)
     };
@@ -148,6 +152,7 @@ function createDecisionArtifactBreakerRunner(options = {}) {
 }
 
 module.exports = {
+    collectDecisionArtifactMetrics,
     createDecisionArtifactBreakerRunner,
     evaluateDecisionArtifactBreaker,
     sweepDecisionArtifactBreakers

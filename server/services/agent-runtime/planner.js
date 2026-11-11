@@ -149,7 +149,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
         if (unreliableTools.length) contextLines.push(`结果反馈提示：工具 ${unreliableTools.join('、')} 近期失败较多，调用前应验证输入、必要时说明限制并准备替代方案。`);
     }
     if (String(contextConfig?.skillInstructions || '').trim()) {
-        contextLines.push(`个人经验（已验证 Skill）：${String(contextConfig.skillTitle || '个人经验')}\n${String(contextConfig.skillInstructions).slice(0, 12000)}`);
+        contextLines.push(`个人经验（已验证 Skill）：${String(contextConfig.skillTitle || '个人经验')}\n${String(contextConfig.skillInstructions)}`);
     }
     const projectCollections = Array.isArray(contextConfig?.projectContextPack?.collections)
         ? contextConfig.projectContextPack.collections : [];
@@ -194,7 +194,11 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
             content: buildCurrentGoalContent(goal, observations, contextConfig)
         }
     ];
-    return attachPromptManifest(modelCfg ? fitAgentMessages(messages, modelCfg, { taskWorkingState: contextConfig.taskWorkingState }) : messages, manifestForSections(sections));
+    const fitted = modelCfg ? fitAgentMessages(messages, modelCfg, { taskWorkingState: contextConfig.taskWorkingState }) : messages;
+    if (contextConfig.skillInstructions && !fitted.some(message => String(message.content || '').includes(String(contextConfig.skillInstructions).trim()))) {
+        throw Object.assign(new Error('完整技能指引超过模型上下文容量，请选择更大上下文模型或精简技能后重试。'), { code: 'CONTEXT_LENGTH_EXCEEDED' });
+    }
+    return attachPromptManifest(fitted, manifestForSections(sections));
 }
 
 async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
@@ -212,7 +216,7 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             content: options.capabilityFallback.instruction, changeReason: '工具能力受限后的受控答复' })] : []),
         createPromptSection({
             key: 'agent_summary_runtime', version: 'summary-runtime-v1', owner: 'platform.runtime', stability: 'dynamic',
-            content: `任务目标：${goal}\n观察数量：${observations.length}`,
+            content: `任务目标：${goal}\n观察数量：${observations.length}${options.skillInstructions ? `\n当前技能工作要求：\n${String(options.skillInstructions)}` : ''}`,
             changeReason: 'task goal and observation count'
         })
     ];
@@ -237,6 +241,9 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         }
     ];
     const fitted = { messages: attachPromptManifest(fitAgentMessages(messages, modelCfg), manifestForSections(sections)) };
+    if (options.skillInstructions && !fitted.messages.some(message => String(message.content || '').includes(String(options.skillInstructions).trim()))) {
+        throw Object.assign(new Error('完整技能指引超过总结模型容量，请更换模型或精简技能后重试。'), { code: 'CONTEXT_LENGTH_EXCEEDED' });
+    }
     if (user && runId) {
         try { await recordPromptInvocation({ runId, user, source: 'agent_summary', manifest: fitted.messages.promptManifest }); } catch (_) {}
     }

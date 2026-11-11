@@ -142,6 +142,9 @@ async function createChatAgentHandoff({
                 continuation: automaticExecution.continuation === true,
                 source: 'chat_auto_execution',
                 decisionId: automaticExecution.decisionId || null,
+                intentDecisionId: automaticExecution.intentDecisionId || null,
+                learningDecisionId: automaticExecution.learningDecisionId || null,
+                learningApplied: automaticExecution.learningApplied === true,
                 intentDecision: {
                     version: Number(automaticExecution.version || 1),
                     intent: String(automaticExecution.intent || ''),

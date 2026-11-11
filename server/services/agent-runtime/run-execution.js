@@ -52,6 +52,8 @@ const {
     execute,
     queryOne,
     updateRun,
+    startClaimedRun = async () => {},
+    finalizeTerminalRun,
     getRunStatus,
     insertStep,
     listSteps,
@@ -107,7 +109,7 @@ const {
     const continueRunFromCheckpoint = options => continueRunFromCheckpointHelper(options, deps);
     const loadRetryRow = runId => queryOne('SELECT retry_limit, retry_count FROM agent_runs WHERE id = ?', [runId]);
     const { handle: handleAgentRunError } = createAgentRunErrorHandler({
-        requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, instanceId, logger,
+        requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, finalizeTerminalRun, instanceId, logger,
         updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
         getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
         setRunMetadata, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
@@ -132,6 +134,8 @@ const {
         runForSummary = run;
         if (!run) throw new Error('任务不存在。');
         if (run.deleted_at || TERMINAL_STATUSES.has(run.status)) return;
+        await startClaimedRun(run, user, execution);
+        await assertRunNotCancelled(runId);
         await require('../agent-knowledge-boundary').prepareAgentKnowledgeBoundary(run, user, deps);
         if (await require('../agent-child-wait').waitBeforePlanning({ run, user }, deps)) return;
         // 恢复路径先确认已持久化的控制应用；不会重放其指令。
@@ -216,6 +220,7 @@ const {
         }
 
         if (!dagRun && modelCfg) {
+            await updateRun(runId, { chosen_model_id: modelCfg.id });
             run.chosen_model_id = modelCfg.id;
             run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
         }
@@ -325,7 +330,7 @@ const {
         let stopReason = '';
         if (isStreamingToolsEnabled(modelCfg)) {
             const streamingDeps = getAgentRuntimeDeps(runController.signal, taskBudget);
-            if (chatBridge || longTermMemoryContext || plannerChatContext.goalContext || plannerChatContext.projectContextPack) {
+            if (chatBridge || longTermMemoryContext || plannerChatContext.goalContext || plannerChatContext.projectContextPack || plannerChatContext.skillInstructions) {
                 streamingDeps.synthesizeFinalAnswer = (streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, options = {}) => (
                     synthesizeFinalAnswer(streamModelCfg, streamGoal, streamObservations, streamUser, streamRunId, {
                         ...options,
@@ -579,6 +584,12 @@ const {
                     isRecoverableModelProviderFailure,
                     modelProviderFailureReason,
                     pickFailoverModel,
+                    onModelChosen: fallback => {
+                        modelCfg = fallback;
+                        modelCfgForSummary = fallback;
+                        run.chosen_model_id = fallback.id;
+                        run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(fallback);
+                    },
                     runId,
                     step,
                     turnId: stepContext.turnId,

@@ -30,7 +30,7 @@ function skillCandidate(release) {
 
 async function currentCandidates(user, deps = {}) {
     const list = deps.listSkillCatalogForUser || require('./agent-releases').listSkillCatalogForUser;
-    return (await list(user, { limit: 500, useOnly: true })).map(skillCandidate).filter(Boolean);
+    return (await list(user, { all: true, useOnly: true })).map(skillCandidate).filter(Boolean);
 }
 
 async function searchSkillsForUser(user, filters = {}, deps = {}) {
@@ -58,7 +58,8 @@ async function describeSkillForUser(user, reference = {}, deps = {}) {
     if (!name || !releaseId || !version || !digest) {
         const error = new Error('请提供搜索结果中的完整技能引用。'); error.status = 400; error.code = 'SKILL_REFERENCE_REQUIRED'; throw error;
     }
-    const candidate = (await currentCandidates(user, deps)).find(item => item.reference.name === name);
+    const list = deps.listSkillCatalogForUser || require('./agent-releases').listSkillCatalogForUser;
+    const candidate = (await list(user, { name, all: true, useOnly: true })).map(skillCandidate).filter(Boolean).find(item => item.reference.name === name);
     if (!candidate) {
         const error = new Error('技能不存在或当前用户无权访问。'); error.status = 404; error.code = 'SKILL_NOT_AVAILABLE'; throw error;
     }

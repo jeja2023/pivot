@@ -48,11 +48,13 @@ async function collectReleaseMetrics(releaseId, since) {
           AND c.created_at >= ?
     `, [String(releaseId), since]);
     const feedbackRows = await query(`
-        SELECT COALESCE(SUM(CASE WHEN f.outcome = 'rejected' OR COALESCE(f.rating, 3) <= 2 THEN 1 ELSE 0 END), 0) AS negative_feedback
+        SELECT COUNT(*) AS feedback_samples,
+            COALESCE(SUM(CASE WHEN f.outcome IN ('rejected', 'failure') OR COALESCE(f.rating, 3) <= 2 THEN 1 ELSE 0 END), 0) AS negative_feedback
         FROM agent_feedback f
         JOIN agent_runs r ON r.id = f.run_id
         WHERE r.metadata->>'skillReleaseId' = ?
-          AND f.created_at >= ?
+          AND f.updated_at >= ? AND f.source = 'user'
+          AND (f.rating IS NOT NULL OR f.outcome IN ('success', 'partial', 'failure', 'rejected'))
     `, [String(releaseId), since]);
     const metrics = toolRows?.[0] || {};
     return {
@@ -60,7 +62,8 @@ async function collectReleaseMetrics(releaseId, since) {
         policyDenied: Number(metrics.policy_denied || 0),
         toolErrors: Number(metrics.tool_errors || 0),
         timeouts: Number(metrics.timeouts || 0),
-        negativeFeedback: Number(feedbackRows?.[0]?.negative_feedback || 0)
+        negativeFeedback: Number(feedbackRows?.[0]?.negative_feedback || 0),
+        feedbackSamples: Number(feedbackRows?.[0]?.feedback_samples || 0)
     };
 }
 

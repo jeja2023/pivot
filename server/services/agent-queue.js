@@ -3,7 +3,8 @@ const { nowExpr } = require('../db/dialect');
 
 const DEFAULT_LOCK_MS = 24 * 60 * 60 * 1000;
 const USER_LOOKUP_RETRY_MS = 5000;
-const ACTIVE_RUN_STATUSES = ['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'approval_required'];
+const { EXECUTION_LEASE_STATUSES } = require('./agent-runtime/state-machine');
+const ACTIVE_RUN_STATUSES = [...EXECUTION_LEASE_STATUSES, 'approval_required'];
 
 function createAgentQueue({
     logger = { info() {}, warn() {}, error() {} },

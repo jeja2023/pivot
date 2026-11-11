@@ -143,9 +143,11 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 .map(message => ({ role: String(message.role).toLowerCase(), content: message.content }))
             : [];
         const chatAgent = chatContext.chatAgent && typeof chatContext.chatAgent === 'object' ? chatContext.chatAgent : null;
-        const effectiveSystemPrompt = chatAgent?.systemPrompt
+        const sessionSystemPrompt = chatAgent?.systemPrompt
             ? `${systemPrompt}\n\n当前会话系统提示词：${String(chatAgent.systemPrompt).slice(0, 12000)}`
             : systemPrompt;
+        const effectiveSystemPrompt = sessionSystemPrompt + (chatContext.skillInstructions
+            ? `\n\n当前技能工作要求：\n${String(chatContext.skillInstructions)}` : '');
         const contextMessages = [
             chatContext?.taskWorkingState ? { role: 'user', content: require('./agent-working-state').buildWorkingStatePrompt(chatContext.taskWorkingState, { coveredGoal: run.goal }) } : null,
             chatContext?.longTermMemoryContext ? { role: 'user', content: typeof chatContext.longTermMemoryContext === 'object' ? String(chatContext.longTermMemoryContext.content || '') : String(chatContext.longTermMemoryContext) } : null,
@@ -343,6 +345,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 conversationForModel = fitMessagesToContextBudget(conversation, modelCfg, { contextWindowTokens: fallbackContextWindow });
             }
             conversationForModel = conversationForModel.messages;
+            if (chatContext.skillInstructions && !conversationForModel.some(message => String(message.content || '').includes(String(chatContext.skillInstructions).trim()))) {
+                throw Object.assign(new Error('完整技能指引超过模型上下文容量，请更换模型或精简技能后重试。'), { code: 'CONTEXT_LENGTH_EXCEEDED' });
+            }
             require('./agent-goal-context').assertGoalContextPreserved(conversation, conversationForModel);
             const providerEvents = [];
             const remainingModelMs = Math.max(planningDeadline - Date.now(), 1_000);

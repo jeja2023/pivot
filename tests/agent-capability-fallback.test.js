@@ -44,10 +44,12 @@ function fixture(metadata = {}, overrides = {}) {
 }
 
 test('一般概念任务即使找不到工具，也提供标明边界的模型答复', async () => {
-    const current = fixture({ capabilityConstraints: { capabilities: ['agent.execute', 'conversation.read_source'] } });
+    const skillInstructions = '业务说明。'.repeat(4000) + '最后列出限制。';
+    const current = fixture({ skillInstructions, capabilityConstraints: { capabilities: ['agent.execute', 'conversation.read_source'] } });
     assert.equal(await current.start(), true);
     assert.equal(current.summaries.length, 1);
     assert.match(current.summaries[0].capabilityFallback.instruction, /停止搜索和工具调用/);
+    assert.equal(current.summaries[0].skillInstructions, skillInstructions);
     assert.match(current.updates[0].final_answer, /基于模型知识回答[\s\S]*整理目标与步骤/);
     assert.equal(current.updates[0].status, 'partial');
 });

@@ -3,8 +3,8 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-11-10
-- Release baseline: v0.7.150（源码；制品以各自构建版本为准）
+- Last refreshed: 2026-11-11
+- Release baseline: v0.7.151（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
   - `server/services/chat-agent-handoff.js`、`chat-auto-execution-handler.js`、`chat-task-knowledge-scope.js`、`chat-knowledge-revision.js`、`model-router.js` 及路由/聊天安全专项：长来源交接、来源撤销、资料修订、核验控制和端点可用性；范围与验证见[v0.7.149发布说明](../releases/v0.7.149-智能路由执行衔接与任务续接可靠性修复.md)。
@@ -414,6 +414,13 @@
 ## 项目审查修复与工程可靠性（v0.7.150）
 
 通用产物与业务工作台共用当前来源权限，受治理来源不能经匿名分享扩大读取权；产物编辑保持唯一版本链并在并发冲突时保留输入。法规导入必须保留完整性与真实页码，缺页或失败不能登记为完整制度材料。文本模型调用统一日额度接纳，长连接随会话撤销或到期失效。实现与验证范围见[项目审查问题修复记录](../reports/project-audit-fixes-20261110.md)。
+
+## 智能路由与执行契约修复（2026-11-11）
+
+- 决策上下文重复归一化保持同一白名单特征；实际生效的学习决策贯穿任务、反馈和纠正，影子建议不承担执行结果。
+- 核验属于持有执行租约的阶段；失去执行权或进程退出后保留结果并明确未完成，恢复不自动重放业务动作。启动 Hook 在队列接纳后的执行入口检查，拒绝先于模型与业务调用。
+- 技能正文、规划和验收保持完整；模型容量不足明确失败。匹配、权限和灰度使用当前版本，创建绑定不可变发布引用；目录历史和无权记录不占有效名额，用户反馈与工具调用使用各自统计分母。
+- 逐项实现、实际验证和限制见[十项审查问题修复记录](../reports/project-audit-remediation-20261111.md)。
 
 ## Open questions
 

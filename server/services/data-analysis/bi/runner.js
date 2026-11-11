@@ -21,6 +21,7 @@ const controllers = new Map();
 const dispatched = new Set();
 let processing = false;
 let stopping = false;
+let lastMaintenanceAt = 0;
 
 async function executeJob(job) {
     const preparationStarted = performance.now();
@@ -96,6 +97,7 @@ async function executeJob(job) {
         if (mayRelease) await jobs.releaseSlot(job);
         const target = path.resolve(outputRoot), parent = path.resolve(tempRoot, 'model-jobs');
         if (mayRelease && path.dirname(target) === parent && /^query_job_[a-zA-Z0-9-]+-\d+$/.test(path.basename(target))) await fs.rm(target, { recursive: true, force: true });
+        if (mayRelease && !stopping) setImmediate(() => dispatchModelJobs());
     }
 }
 
@@ -115,10 +117,14 @@ async function processModelJobs() {
     processing = true;
     const claimed = [];
     try {
-        await recoverExpired();
-        await require('./readiness').ensureReady();
-        await require('../../../repositories/analysis-operations').workerHeartbeat();
-        await require('../../../repositories/analysis-ingestions').expireAbandoned();
+        const now = Date.now();
+        if (now - lastMaintenanceAt >= 1000) {
+            lastMaintenanceAt = now;
+            await recoverExpired();
+            await require('./readiness').ensureReady();
+            await require('../../../repositories/analysis-operations').workerHeartbeat();
+            await require('../../../repositories/analysis-ingestions').expireAbandoned();
+        }
         for (let index = 0; index < readTypedEnv('DATA_ANALYSIS_MODEL_RUNNING_LIMIT'); index++) {
             const job = await jobs.claim({ owner, slots: readTypedEnv('DATA_ANALYSIS_MODEL_RUNNING_LIMIT') });
             if (!job) break;

@@ -46,6 +46,7 @@ const { getAgentLearningSettings } = require('../agent-learning');
  * 若允许请求体携带，等于把 PEP 的默认拒绝语义关掉。
  */
 const SKILL_METADATA_KEYS = Object.freeze([
+    'matchedSkillReference',
     'skillConstraints', 'skillPermissions', 'skillCapabilities', 'skillTools',
     'skillContextPresent', 'skillLegacyUnrestricted', 'skillLegacyUnrestrictedUntil',
     'skillResourceEvidence', 'skillReleaseId', 'skillVersionId', 'skillVersion', 'skillInstructions', 'skillTitle', 'learnedSkillAuto',
@@ -193,6 +194,7 @@ function createAgentRunFactory(deps = {}) {
             const learned = await findBestPersonalSkill(user, goal, { minScore: 2, exposureKey: normalizedDedupeKey || createRunId() });
             if (learned?.name) {
                 skillReference = learned.name;
+                runMetadata.matchedSkillReference = { releaseId: String(learned.id), version: learned.version, digest: learned.digest };
                 runMetadata.learnedSkillAuto = true;
                 runMetadata.skillMatchReason = learned.matchReason || { type: 'personal_skill_match', summary: '与当前任务的标题、说明或标签匹配。' };
                 runMetadata.skillMatchScore = Number(learned.matchReason?.score || 0);
@@ -200,7 +202,7 @@ function createAgentRunFactory(deps = {}) {
             }
         }
         if (skillReference) {
-            const skillContext = await getAgentSkillExecutionContext(user, skillReference);
+            const skillContext = await getAgentSkillExecutionContext(user, skillReference, runMetadata.matchedSkillReference || null);
             runMetadata.skillId = skillContext.skillId;
             runMetadata.skillName = skillContext.skillName;
             runMetadata.skillVersion = skillContext.skillVersion;
@@ -220,7 +222,7 @@ function createAgentRunFactory(deps = {}) {
             const version = await require('../agent-releases').getSkillVersion(evaluationSkillVersionId, user, { action: 'write' });
             if (!version || version.status !== 'validated') throw new Error('候选经验尚未通过隔离验证，不能开始评测。');
             const context = require('../agent-skills').buildSkillExecutionContext(version.manifest_yaml);
-            runMetadata.skillInstructions = skillInstructionsForRuntime(require('../agent-skills').parseSkillManifest(version.manifest_json || version.manifest_yaml), version.instructions_md).slice(0, 16000);
+            runMetadata.skillInstructions = skillInstructionsForRuntime(require('../agent-skills').parseSkillManifest(version.manifest_json || version.manifest_yaml), version.instructions_md);
             runMetadata.skillConstraints = { present: true, reference: context.skillId, capabilities: context.skillCapabilities, tools: context.skillTools };
             runMetadata.evaluationCandidate = { versionId: String(version.id), digest: version.content_digest };
         }

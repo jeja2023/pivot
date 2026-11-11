@@ -81,7 +81,8 @@ function highestScoringAction(scores, candidates = []) {
 
 function sanitizeDecisionContext(context = {}) {
     const candidates = normalizeCandidates(context.candidates || context.allowedActions);
-    const task = context.taskState && typeof context.taskState === 'object' ? context.taskState : {};
+    const task = context.taskState && typeof context.taskState === 'object' ? context.taskState
+        : context.requestState && typeof context.requestState === 'object' ? context.requestState : {};
     const toolIntent = task.toolIntent && typeof task.toolIntent === 'object' ? task.toolIntent : {};
     return {
         contractVersion: 1,
@@ -90,13 +91,13 @@ function sanitizeDecisionContext(context = {}) {
         language: ['zh', 'en', 'unknown'].includes(String(context.language || '').toLowerCase())
             ? String(context.language).toLowerCase()
             : 'unknown',
-        tenantId: Number.isSafeInteger(Number(context.tenantId)) ? Number(context.tenantId) : null,
+        tenantId: Number.isSafeInteger(Number(context.tenantId)) && Number(context.tenantId) > 0 ? Number(context.tenantId) : null,
         requestState: {
-            taskHash: safeText(task.hash || context.taskHash || '', 128),
+            taskHash: safeText(task.hash || task.taskHash || context.taskHash || '', 128),
             status: safeText(task.status || 'active', 32),
             evidenceNeeds: Array.isArray(task.evidenceNeeds) ? task.evidenceNeeds.map(item => safeText(item, 80)).filter(Boolean).slice(0, 8) : [],
-            requestedCapabilities: Array.isArray(toolIntent.requestedCapabilities)
-                ? toolIntent.requestedCapabilities.map(item => safeText(item, 80)).filter(Boolean).slice(0, 8)
+            requestedCapabilities: Array.isArray(toolIntent.requestedCapabilities || task.requestedCapabilities)
+                ? (toolIntent.requestedCapabilities || task.requestedCapabilities).map(item => safeText(item, 80)).filter(Boolean).slice(0, 8)
                 : [],
             constraintCount: Math.max(0, Math.min(Number(task.constraintCount ?? task.constraints?.length ?? 0) || 0, 32)),
             entityCount: Math.max(0, Math.min(Number(task.entityCount ?? task.entities?.length ?? 0) || 0, 32))

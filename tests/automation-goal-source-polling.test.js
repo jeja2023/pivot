@@ -13,6 +13,7 @@ test('持续目标真实轮询越过一百个保留文件且回绕去重，数�
     const originalRoots = process.env.AGENT_GOAL_FILE_ROOTS;
     const user = await queryOne("INSERT INTO users(username,password_hash,status,role,unit) VALUES (?,'hash','active','user','测试') RETURNING id,username,status,role,unit", [`poll_${crypto.randomUUID()}`]);
     let modelId;
+    let databaseRows = [{ id: 9 }, { id: 10 }];
     const goalIds = [];
     try {
         process.env.AGENT_GOAL_FILE_ROOTS = directory;
@@ -23,7 +24,7 @@ test('持续目标真实轮询越过一百个保留文件且回绕去重，数�
             await fs.writeFile(file, '待处理文件'); await fs.utimes(file, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'));
         }));
         goals.configureAgentGoals({ createAgentNotification: async () => null,
-            executeReadOnlyQuery: async () => ({ rows: [{ id: 9 }, { id: 10 }] }),
+            executeReadOnlyQuery: async () => ({ rows: databaseRows }),
             createAgentRun: async body => {
                 const id = `poll_run_${crypto.randomUUID()}`;
                 await execute("INSERT INTO agent_runs(id,user_id,title,goal,status,model_id,dedupe_key,metadata) VALUES (?,?,'轮询回归','处理来源','completed',?,?,?::jsonb)", [id, body.user.id, body.modelId, body.dedupeKey, JSON.stringify(body.metadata)]);
@@ -46,6 +47,17 @@ test('持续目标真实轮询越过一百个保留文件且回绕去重，数�
         await makeDue(databaseGoal); await goals.runDueAgentGoals(1);
         const database = await queryOne('SELECT trigger_spec,last_error FROM agent_goals WHERE id=?', [databaseGoal]);
         assert.equal(database.last_error, ''); assert.equal(database.trigger_spec.watermark, '10');
+        // 模拟任务已接纳但水位提交前退出；即使运行配额已满也必须接续已接纳批次。
+        await execute("UPDATE agent_goals SET trigger_spec=jsonb_set(trigger_spec,'{watermark}','\"8\"'::jsonb),budget_spec=jsonb_set(budget_spec,'{maxRunsPerWindow}','1'::jsonb) WHERE id=?", [databaseGoal]);
+        await makeDue(databaseGoal); await goals.runDueAgentGoals(1);
+        const recovered = await queryOne('SELECT trigger_spec,last_error FROM agent_goals WHERE id=?', [databaseGoal]);
+        assert.equal(recovered.last_error, ''); assert.equal(recovered.trigger_spec.watermark, '10');
+        assert.equal(Number((await queryOne("SELECT COUNT(*) AS count FROM agent_runs WHERE user_id=? AND metadata->>'goalId'=?", [user.id, databaseGoal])).count), 1);
+        await execute("UPDATE agent_goals SET trigger_spec=jsonb_set(trigger_spec,'{watermark}','\"8\"'::jsonb) WHERE id=?", [databaseGoal]);
+        databaseRows = [{ id: 9, note: '来源内容已变化' }, { id: 10 }];
+        await makeDue(databaseGoal); await goals.runDueAgentGoals(1);
+        const conflict = await queryOne('SELECT trigger_spec,last_error FROM agent_goals WHERE id=?', [databaseGoal]);
+        assert.equal(conflict.trigger_spec.watermark, '8'); assert.match(conflict.last_error, /来源内容不一致/);
     } finally {
         for (const id of goalIds) await execute('DELETE FROM agent_goals WHERE id=?', [id]);
         await execute('DELETE FROM agent_runs WHERE user_id=?', [user.id]);

@@ -53,6 +53,7 @@ async function executeAutomaticModelFailover(options = {}) {
     } = options;
     const fallback = failover.model;
     await updateRun(runId, { chosen_model_id: fallback.id, updated_at: getTimestamp() });
+    options.onModelChosen?.(fallback);
     await insertStep(runId, (await listSteps(runId)).length + 1, {
         type: 'control', title: '模型故障降级',
         output: {

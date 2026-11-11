@@ -84,14 +84,14 @@ async function recordAgentFeedback(user, runId, input = {}, options = {}) {
         INSERT INTO agent_feedback (user_id, tenant_id, run_id, outcome, rating, correction, modified_answer, tool_failures, metadata, source, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, run_id) DO UPDATE SET
-            outcome = excluded.outcome,
-            rating = COALESCE(excluded.rating, agent_feedback.rating),
+            outcome = CASE WHEN agent_feedback.source = 'user' AND excluded.source <> 'user' THEN agent_feedback.outcome ELSE excluded.outcome END,
+            rating = CASE WHEN agent_feedback.source = 'user' AND excluded.source <> 'user' THEN agent_feedback.rating ELSE COALESCE(excluded.rating, agent_feedback.rating) END,
             correction = CASE WHEN excluded.correction <> '' THEN excluded.correction ELSE agent_feedback.correction END,
             modified_answer = CASE WHEN excluded.modified_answer <> '' THEN excluded.modified_answer ELSE agent_feedback.modified_answer END,
             tool_failures = CASE WHEN excluded.tool_failures <> '[]' THEN excluded.tool_failures ELSE agent_feedback.tool_failures END,
-            metadata = excluded.metadata,
-            source = excluded.source,
-            updated_at = excluded.updated_at
+            metadata = CASE WHEN agent_feedback.source = 'user' AND excluded.source <> 'user' THEN agent_feedback.metadata ELSE excluded.metadata END,
+            source = CASE WHEN agent_feedback.source = 'user' AND excluded.source <> 'user' THEN agent_feedback.source ELSE excluded.source END,
+            updated_at = CASE WHEN agent_feedback.source = 'user' AND excluded.source <> 'user' THEN agent_feedback.updated_at ELSE excluded.updated_at END
         RETURNING *
     `, [userId, tenantId, normalizedRunId, feedback.outcome, feedback.rating, feedback.correction, feedback.modifiedAnswer, JSON.stringify(feedback.toolFailures), JSON.stringify(feedback.metadata), feedback.source, now, now]);
     const serialized = serializeFeedback(row);
@@ -136,8 +136,13 @@ async function recordAgentRunOutcome(runId, status, options = {}) {
     if (metadata.automaticExecution) {
         const { recordRunOutcome } = require('../repositories/chat-conversation-turns');
         await recordRunOutcome(run.id, { status, verified: verificationPassed, learnedSkillAuto: metadata.learnedSkillAuto === true, totalTokens: Number(run.total_tokens || 0), durationMs: Math.max(0, Date.parse(run.completed_at || new Date()) - Date.parse(run.created_at)) });
-        if (metadata.automaticExecution.decisionId) require('./decision-observability').recordDecisionOutcome({ decisionId: metadata.automaticExecution.decisionId, source: 'runtime', eventType: 'execution', status: verificationPassed ? 'success' : 'failure', reasonCode: verificationPassed ? 'delivery_verified' : 'delivery_not_verified', resultReference: run.id,
-            metadata: verificationPassed ? {} : { verification: require('./task-verification-details').verificationDetails(metadata.taskVerification) } });
+        const outcomeIds = new Set([metadata.automaticExecution.decisionId, metadata.automaticExecution.intentDecisionId].filter(Boolean));
+        for (const decisionId of outcomeIds) require('./decision-observability').recordDecisionOutcome({
+            id: `run_outcome_${require('node:crypto').createHash('sha256').update(`${run.id}:${status}:${decisionId}`).digest('hex')}`,
+            decisionId, source: 'runtime', eventType: 'execution', status: verificationPassed ? 'success' : 'failure',
+            reasonCode: verificationPassed ? 'delivery_verified' : 'delivery_not_verified', resultReference: run.id,
+            metadata: verificationPassed ? {} : { verification: require('./task-verification-details').verificationDetails(metadata.taskVerification) }
+        });
     }
     let failures = [];
     let successfulToolCalls = 0;

@@ -93,6 +93,7 @@ async function resolveChatIntent(input, deps = {}) {
             constraints: [...(selected.constraints || []), '当前任务自动执行未开放，本轮只提供说明，不执行操作。'],
             routing: { ...selected.routing, tools: 'none', allowAutomaticRead: false }, reasonCode: 'execution_not_enabled' };
         let learningDecisionId = null;
+        let learningApplied = false;
         if (applied && !failure && executionAllowed && (!deps.recordDecision || deps.resolveBusinessDecision)) {
             // 已发布的路由经验只能在语义允许的集合内调整处理方式，不能凭偏好创建
             // 一个语义判断未授权的运行；模型型决策提供器不参与此处的二次推理。
@@ -105,6 +106,8 @@ async function resolveChatIntent(input, deps = {}) {
                 selected = { ...selected, action: learned.selectedActionId, nextAction: learned.selectedActionId, delegated: false, continuation: false, continuationOf: null,
                     routing: { ...selected.routing, ...(learned.selectedActionId === 'plan_only' ? { knowledge: 'none', requireEvidence: false } : {}), tools: 'none', allowAutomaticRead: false } };
             }
+            learningApplied = Boolean(learned?.decisionId) && learned?.policy?.applied === true && learned.selectedActionId === selected.action
+                && candidates.some(candidate => candidate.id === selected.action && candidate.allowed);
         }
         if (signal?.aborted) throw signal.reason || new Error('意图判断已取消');
         if (budget.signal.aborted) { failure = 'intent_timeout'; selected = buildIntentFallback(baseline, failure); }
@@ -116,7 +119,7 @@ async function resolveChatIntent(input, deps = {}) {
             providerOutputs: [{ providerId: 'chat-intent', providerVersion: String(modelCfg?.id || ''), selectedActionId: resolved.action, durationMs: Date.now() - started, error: failure, scores: { [resolved.action]: resolved.confidence || 0 } }],
             policy: { mode: applied ? 'active' : 'shadow', policyVersion: INTENT_POLICY_VERSION, selectedActionId: selected.action, suggestedActionId: resolved.action, applied, reasonCode: resolved.reasonCode }
         });
-        return { ...constrainChatDecision(selected, requestScope), decisionId, learningDecisionId, modelCalls: stats.modelCalls, structuredOutput: stats.structuredOutput, contractFailureReason: stats.contractFailureReason || '', durationMs: Date.now() - started,
+        return { ...constrainChatDecision(selected, requestScope), decisionId: learningApplied && !failure ? learningDecisionId : decisionId, intentDecisionId: decisionId, learningDecisionId, learningApplied: learningApplied && !failure, modelCalls: stats.modelCalls, structuredOutput: stats.structuredOutput, contractFailureReason: stats.contractFailureReason || '', durationMs: Date.now() - started,
             providerAction: stats.providerAction || '', contractAdjustments: stats.contractAdjustments || [], providerRetries: stats.providerRetries || 0,
             usage: { inputTokens: stats.inputTokens ?? null, outputTokens: stats.outputTokens ?? null },
             timing: { modelMs: budget.timings.model || 0, queueMs: stats.queueMs ?? null, providerMs: stats.providerMs ?? null, usageMs: budget.timings.usage || 0, learningMs: budget.timings.learning || 0 }, modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };

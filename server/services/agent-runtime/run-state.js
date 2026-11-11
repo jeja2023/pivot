@@ -98,13 +98,27 @@ async function assertRunStartHookAllowsTransition(run, currentStatus, targetStat
     }
 }
 
+async function startClaimedRun(run, user, execution = {}) {
+    if (run.status !== 'running') return;
+    const eventKey = `lifecycle:run.started:${run.id}:attempt:${execution.leaseEpoch || run.realtime_lease_epoch || run.started_at || 'initial'}`;
+    const request = { eventType: 'run.started', user, run,
+        payload: { run: { id: run.id, run_mode: run.run_mode || '' }, from: 'running', to: 'planning' }, eventKey: `${eventKey}:pre` };
+    const outcome = await dispatchPreLifecycleHook(request);
+    if (outcome?.denied) {
+        throw Object.assign(new Error('生命周期启动检查拒绝了本次任务，请检查 Hook 策略后重试。'), { code: 'AGENT_HOOK_DENIED', category: 'policy', hook: outcome.blocking });
+    }
+    // 后置失败不能改变已通过的接纳决定，后续动作仍需各自的权限和审批。
+    try { await dispatchPostLifecycleHook({ ...request, payload: { runId: run.id, from: 'running', to: 'planning' }, eventKey: `${eventKey}:post` }); }
+    catch (error) { logger.warn({ runId: run.id, err: error.message }, 'Agent 开始后置 Hook 审计失败'); }
+}
+
 async function updateRun(runId, fields = {}, maxRetries = 3) {
     const allowed = [
         'status', 'final_answer', 'error_message', 'completed_at', 'updated_at', 'title',
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
         'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
         'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count', 'retry_after',
-        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
+        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config', 'chosen_model_id',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
         'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
     ];
@@ -216,7 +230,7 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}, options =
         'cancelled_at', 'deleted_at', 'deleted_by_user', 'delete_reason', 'started_at',
         'last_heartbeat_at', 'priority', 'run_mode', 'tool_policy', 'tool_allowlist',
         'approval_policy', 'timeout_ms', 'tool_timeout_ms', 'retry_limit', 'retry_count', 'retry_after',
-        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config',
+        'max_token_budget', 'export_count', 'template_id', 'schedule_id', 'context_config', 'chosen_model_id',
         'resume_from_step', 'metadata', 'locked_by', 'lock_expires_at',
         'input_tokens', 'output_tokens', 'total_tokens', 'budget_config', 'usage_stats', 'network_policy'
     ];
@@ -235,7 +249,9 @@ async function updateRunCas(runId, expectedStatuses = [], fields = {}, options =
     const lease = options.leaseBinding;
     const leaseWhere = lease ? ' AND locked_by = ? AND realtime_lease_epoch = ?' : '';
     if (lease) parameters.push(String(lease.owner || ''), String(lease.epoch || '0'));
-    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})${approvalWhere}${leaseWhere}`, parameters);
+    const staleWhere = options.staleBefore ? ' AND (last_heartbeat_at IS NULL OR last_heartbeat_at < ?)' : '';
+    if (options.staleBefore) parameters.push(options.staleBefore);
+    const changes = await execute(`UPDATE agent_runs SET ${set} WHERE id = ? AND status IN (${placeholders})${approvalWhere}${leaseWhere}${staleWhere}`, parameters);
     if (changes) {
         await publishAgentRunEvent(runId, 'updated');
         if (fields.status) {
@@ -374,6 +390,7 @@ async function markRunError(runId, message) {
         setRunMetadata,
         updateRunMetadataWithRetry,
         stableWorkflowDelayKey,
+        startClaimedRun,
         updateRun,
         updateRunCas
     };

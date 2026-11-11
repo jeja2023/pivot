@@ -2,7 +2,7 @@
 
 function createAgentRunErrorHandler(deps = {}) {
     const {
-        requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, instanceId, logger,
+        requeueAgentRunAfterLeaseLoss, execute, getBeijingTimestamp, enqueueAgentRun, finalizeTerminalRun, instanceId, logger,
         updateRun, getRunStatus, isRunCancelled, continueRunFromCheckpoint, withTimeout, synthesizeFinalAnswer,
         getRunMetadata, normalizePositiveInt, buildAgentResumeContext, calculateAgentRetryDelayMs,
         setRunMetadata = async () => {}, recordRunRetryReason, listSteps, insertStep, getRunUser, createAgentNotification,
@@ -16,7 +16,7 @@ function createAgentRunErrorHandler(deps = {}) {
             // 持久化取消状态和租约归属为准。旧实例失去执行权后不能提交结果；
             // 仍归属本实例的任务会安全回到队列。
             markExecutionLeaseLost?.();
-            await requeueAgentRunAfterLeaseLoss({ execute, getTimestamp: getBeijingTimestamp, enqueueAgentRun, instanceId, runId, error: e })
+            await requeueAgentRunAfterLeaseLoss({ execute, getTimestamp: getBeijingTimestamp, enqueueAgentRun, finalizeTerminalRun, instanceId, runId, epoch: runForSummary?.realtimeLeaseEpoch, error: e })
                 .catch(error => logger.warn({ runId, err: error.message }, '执行租约失效后的安全回队失败'));
             return;
         }
@@ -79,6 +79,7 @@ function createAgentRunErrorHandler(deps = {}) {
                         () => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {
                             budget: taskBudget,
                             allowBudgetExceeded: true,
+                            skillInstructions: getRunMetadata(runForSummary).skillInstructions || '',
                             chatAgent: runForSummary ? getRunMetadata(runForSummary).chatBridge : null
                         }),
                         30000,
@@ -116,7 +117,7 @@ function createAgentRunErrorHandler(deps = {}) {
         const retryRow = await loadRetryRow(runId);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
-        if (retryCount < retryLimit && e.code !== 'AGENT_BUDGET_EXCEEDED' && e.code !== 'AGENT_TIMEOUT' && e.code !== 'AGENT_INVALID_STATUS_TRANSITION') {
+        if (retryCount < retryLimit && !['AGENT_BUDGET_EXCEEDED', 'AGENT_TIMEOUT', 'AGENT_INVALID_STATUS_TRANSITION', 'AGENT_HOOK_DENIED', 'CONTEXT_LENGTH_EXCEEDED', 'SKILL_INSTRUCTIONS_LIMIT'].includes(e.code)) {
             const resumeContext = await buildAgentResumeContext(runId);
             const retryAttempt = retryCount + 1;
             const retryDelayMs = calculateAgentRetryDelayMs(retryAttempt);

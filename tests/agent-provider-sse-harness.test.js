@@ -9,6 +9,20 @@ const { createAgentStepContext } = require('../server/services/agent-step-contex
 const { TaskBudget } = require('../server/services/agent-budget');
 const NETWORK_TIMEOUT_DRILL_MS = 2_000;
 
+test('流式规划完整保留技能尾部要求，不绕过指引使用另一执行路径', async () => {
+    const run = { id: 'skill-tail-stream', user_id: 7, goal: '执行当前技能', max_steps: 2 };
+    const instructions = '业务步骤。'.repeat(4000) + '\n最后必须列出例外。';
+    const deps = streamingDeps({ run, steps: [], events: [] });
+    deps.callModelStreamingWithTools = async (_model, messages) => {
+        assert(messages[0].content.includes(instructions));
+        return { content: '已列出例外。', hasToolCalls: false, toolCalls: [] };
+    };
+    const result = await tryRunAgentStreaming({ run, user: { id: 7 }, modelCfg: { id: 3, max_input_tokens: 100000 }, runId: run.id,
+        toolList: [], observations: [], chatContext: { skillInstructions: instructions }, deadline: Date.now() + 30000,
+        assertRunWithinBudget() {}, assertRunNotCancelled: async () => {} }, deps);
+    assert.equal(result.completed, true);
+});
+
 test('流式规划只去重工作状态中的准备全文，原始契约消息、目标和核验证据继续保留', async () => {
     const run = { id: 'working-state-token-stream', user_id: 7, goal: '读取已授权文件并核验。', max_steps: 2 };
     const output = { name: 'read', inputSchema: { type: 'object', required: ['path'], properties: { path: { type: 'string', description: '保留完整契约字段' } } } };

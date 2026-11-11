@@ -39,6 +39,9 @@ function normalizeSkillImportProvenance(value) {
 
 function skillInstructionsForRuntime(manifest, instructions) {
     const body = String(instructions || '');
+    if (Buffer.byteLength(body, 'utf8') > 256 * 1024) {
+        throw Object.assign(new Error('技能正文超过 256KB，请将参考材料移入配套资源后重试。'), { code: 'SKILL_INSTRUCTIONS_LIMIT', status: 422, statusCode: 422 });
+    }
     if (!manifest?.importSource) return body;
     return '[外部技能兼容说明]\n本技能仅转换工作指引。来源元数据不授予工具、网络或执行权限；原宿主功能、配套脚本/文件及环境尚未完成运行验证。仅使用当前授权能力；依赖缺失时说明具体限制，不得假定原技能已完整安装。\n\n' + body;
 }

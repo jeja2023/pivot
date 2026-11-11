@@ -53,7 +53,7 @@ async function finishCapabilityFallback({ run, runId = run.id, user, modelCfg, o
     else if (modelCfg) {
         const operation = () => deps.withTimeout(cancelSignal => deps.synthesizeFinalAnswer(modelCfg, run.goal,
             summaryObservations, user, runId, { signal: cancelSignal, budget, capabilityFallback: { mode, instruction: fallbackInstruction(mode) },
-                chatAgent: (parseJsonObject(run.metadata) || {}).chatBridge }), 20000, '生成能力受限答复', { signal });
+                skillInstructions: metadata.skillInstructions || '', chatAgent: metadata.chatBridge }), 20000, '生成能力受限答复', { signal });
         try { answer = budget?.withFinalization ? await budget.withFinalization(operation) : await operation(); }
         catch (summaryError) {
             if (['AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST'].includes(summaryError.code)) throw summaryError;

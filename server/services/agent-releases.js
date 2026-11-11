@@ -1,5 +1,6 @@
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
+const { skillInstructionsForRuntime } = require('./agent-skill-import-provenance');
 const { validateSkillManifest, parseSkillManifest, projectSkillReadModel } = require('./agent-skills');
 const { buildWorkflowVersionDiff, publishAgentWorkflowVersion, resolveAgentWorkflowVersion } = require('./agent-workflows');
 const { buildAgentWorkflowDependencyManifest } = require('./agent-workflow-dependencies');
@@ -82,7 +83,7 @@ async function resolvePublishedSkillMemorySource(skillId, user) {
                 FROM agent_skill_releases r
                 JOIN agent_skill_versions v ON v.id = r.skill_version_id
                 WHERE v.skill_id = ? AND r.status = 'published' AND r.owner_key = ?
-                ORDER BY r.published_at DESC
+                ORDER BY r.published_at DESC, r.id DESC
             `, [normalizedSkillId, personalOwnerKey]);
         }
         return await query(`
@@ -91,7 +92,7 @@ async function resolvePublishedSkillMemorySource(skillId, user) {
             JOIN agent_skill_versions v ON v.id = r.skill_version_id
             WHERE v.skill_id = ? AND r.status = 'published'
               AND (r.owner_key = ? OR r.tenant_id = ?)
-            ORDER BY r.published_at DESC
+            ORDER BY r.published_at DESC, r.id DESC
         `, [normalizedSkillId, personalOwnerKey, tenant.tenantId]);
     }, []);
     const accessible = await filterAccessibleReleases(rows, user, 'use');
@@ -117,6 +118,7 @@ async function createSkillVersion(user, input = {}) {
         throw invalid('ownerKey 由服务端依据发布范围与发布者身份推导，不接受外部传入。', 403, 'SKILL_OWNER_KEY_FORBIDDEN');
     }
     const manifest = parseSkillManifest(input.manifest || input.manifestYaml || {});
+    skillInstructionsForRuntime(manifest, input.instructions);
     const checked = validateSkillManifest(manifest, {
         allowedPermissions: input.allowedPermissions,
         allowedTools: input.allowedTools,
@@ -184,6 +186,7 @@ async function validateSkillVersion(id, user, options = {}) {
     const version = await getSkillVersion(id, user, { action: 'write' });
     if (!version) return null;
     const manifest = parseJson(version.manifest_json || version.manifest_yaml, {});
+    skillInstructionsForRuntime(manifest, version.instructions_md);
     const checked = validateSkillManifest(manifest, {
         allowedPermissions: options.allowedPermissions,
         allowedTools: options.allowedTools,
@@ -278,6 +281,7 @@ async function resolveReleaseTeam(user, tenantId, teamId) {
 async function publishSkillVersion(id, user, input = {}) {
     let version = await getSkillVersion(id, user, { action: 'write' });
     if (!version) return null;
+    skillInstructionsForRuntime(parseJson(version.manifest_json || version.manifest_yaml, {}), version.instructions_md);
     const validation = await queryOne('SELECT status FROM agent_skill_validations WHERE skill_version_id = ? ORDER BY version DESC, created_at DESC LIMIT 1', [version.id]);
     // 同一版本可以先发布给个人、再由管理员共享；个人发布会将版本状态标为 published，
     // 但不能因此丢失已通过的验证资格。仍以最近一次验证通过作为硬门禁。
@@ -494,7 +498,7 @@ async function resolvePublishedSkill(name, user) {
                 FROM agent_skill_releases r
                 JOIN agent_skill_versions v ON v.id = r.skill_version_id
                 WHERE r.name = ? AND r.status = 'published' AND r.owner_key = ? AND r.rollout_scope = 'personal'
-                ORDER BY r.published_at DESC
+                ORDER BY r.published_at DESC, r.id DESC
             `, [String(name), personalOwnerKey]);
         }
         return await query(`
@@ -506,7 +510,7 @@ async function resolvePublishedSkill(name, user) {
                     (r.owner_key = ? AND r.rollout_scope = 'personal')
                  OR r.tenant_id = ?
               )
-            ORDER BY r.published_at DESC
+            ORDER BY r.published_at DESC, r.id DESC
         `, [String(name), personalOwnerKey, tenant.tenantId]);
     }, []);
     const accessibleRows = await filterAccessibleReleases(rows, user, 'use');
@@ -873,51 +877,25 @@ async function listSkillVersionsForUser(user, options = {}) {
  * 共享范围必须叠加租户条件，team 范围还要叠加团队成员校验。
  */
 async function listSkillReleasesForUser(user, options = {}) {
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 100, 200));
     const tenant = await resolveTenantContext(user);
-    const personalOwnerKey = `user:${Number.parseInt(user.id, 10) || 0}`;
-    if (!tenant.resolvable) {
-        return await withControlPlaneFallback(() => query(`
-            SELECT r.*, v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
-            FROM agent_skill_releases r
-            JOIN agent_skill_versions v ON v.id = r.skill_version_id
-            WHERE r.owner_key = ? AND r.rollout_scope = 'personal'
-            ORDER BY r.published_at DESC LIMIT ?
-        `, [personalOwnerKey, limit]), []);
-    }
-    const params = [personalOwnerKey, tenant.tenantId, limit];
-    const rows = await withControlPlaneFallback(() => query(`
-        SELECT r.*, v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
-        FROM agent_skill_releases r
-        JOIN agent_skill_versions v ON v.id = r.skill_version_id
-        WHERE (
-                (r.owner_key = ? AND r.rollout_scope = 'personal')
-             OR r.tenant_id = ?
-        )
-        ORDER BY r.published_at DESC LIMIT ?
-    `, params), []);
-    return filterAccessibleReleasesAny(rows, user, isTenantAdmin(user) ? ['use', 'manage'] : ['use']);
+    return withControlPlaneFallback(() => require('./agent-skill-catalog').scanSkillReleaseCatalog({
+        user, tenant, options,
+        readPage: require('../repositories/agent-skill-catalog').readSkillReleasePage,
+        filterPage: rows => filterAccessibleReleasesAny(rows, user, isTenantAdmin(user) ? ['use', 'manage'] : ['use'])
+    }), []);
 }
 
-/** 技能目录：只返回已发布且当前用户受众命中的条目，租户为首个访问条件。 */
+/** 技能目录按当前权限及灰度选择版本，历史和无权记录不占用目录名额。 */
 async function listSkillCatalogForUser(user, options = {}) {
-    const limit = Math.max(1, Math.min(Number.parseInt(options.limit, 10) || 200, 500));
-    const releases = await listSkillReleasesForUser(user, { limit });
-    const publishedRows = releases.filter(item => item.status === 'published');
-    const published = options.useOnly === true ? await filterAccessibleReleases(publishedRows, user, 'use') : publishedRows;
-    const context = await getUserEnterpriseContext(user.id);
+    const tenant = await resolveTenantContext(user);
+    const context = tenant.resolvable ? await getUserEnterpriseContext(user.id) : { teams: [] };
     const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
-    const byName = new Map();
-    published.forEach(item => {
-        if (!byName.has(item.name)) byName.set(item.name, []);
-        byName.get(item.name).push(item);
-    });
-    const rows = [];
-    for (const [, candidates] of byName) {
-        const hit = chooseRolloutRelease(candidates, user, { teamIds });
-        if (hit) rows.push(hit);
-    }
-    return rows;
+    return withControlPlaneFallback(() => require('./agent-skill-catalog').scanSkillReleaseCatalog({
+        user, tenant, options: { ...options, catalog: true }, teamIds, chooseRelease: chooseRolloutRelease,
+        readPage: require('../repositories/agent-skill-catalog').readSkillReleasePage,
+        filterPage: rows => options.useOnly === true ? filterAccessibleReleases(rows, user, 'use')
+            : filterAccessibleReleasesAny(rows, user, isTenantAdmin(user) ? ['use', 'manage'] : ['use'])
+    }), []);
 }
 
 /**

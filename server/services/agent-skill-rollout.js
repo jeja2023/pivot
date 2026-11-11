@@ -105,6 +105,7 @@ function normalizeBreakerThresholds(input = {}) {
     };
     return {
         minSamples: Math.max(Number.parseInt(source.minSamples ?? source.min_samples, 10) || DEFAULT_BREAKER_THRESHOLDS.minSamples, 1),
+        minFeedbackSamples: Math.max(Number.parseInt(source.minFeedbackSamples ?? source.min_feedback_samples ?? source.minSamples ?? source.min_samples, 10) || DEFAULT_BREAKER_THRESHOLDS.minSamples, 1),
         policyDenyRate: clampRate(source.policyDenyRate ?? source.policy_deny_rate, DEFAULT_BREAKER_THRESHOLDS.policyDenyRate),
         toolErrorRate: clampRate(source.toolErrorRate ?? source.tool_error_rate, DEFAULT_BREAKER_THRESHOLDS.toolErrorRate),
         timeoutRate: clampRate(source.timeoutRate ?? source.timeout_rate, DEFAULT_BREAKER_THRESHOLDS.timeoutRate),
@@ -119,17 +120,17 @@ function normalizeBreakerThresholds(input = {}) {
 function evaluateBreaker(thresholds, metrics = {}) {
     const limits = normalizeBreakerThresholds(thresholds);
     const samples = Math.max(Number.parseInt(metrics.samples, 10) || 0, 0);
-    if (samples < limits.minSamples) return { tripped: false, reason: '', samples, limits };
-    const rate = value => (Math.max(Number(value) || 0, 0) / samples);
+    const feedbackSamples = Math.max(Number.parseInt(metrics.feedbackSamples, 10) || 0, 0);
+    const rate = value => samples >= limits.minSamples ? (Math.max(Number(value) || 0, 0) / samples) : 0;
     const checks = [
         ['policy_deny_rate', rate(metrics.policyDenied), limits.policyDenyRate],
         ['tool_error_rate', rate(metrics.toolErrors), limits.toolErrorRate],
         ['timeout_rate', rate(metrics.timeouts), limits.timeoutRate],
-        ['negative_feedback_rate', rate(metrics.negativeFeedback), limits.negativeFeedbackRate]
+        ['negative_feedback_rate', feedbackSamples >= limits.minFeedbackSamples ? Math.max(Number(metrics.negativeFeedback) || 0, 0) / feedbackSamples : 0, limits.negativeFeedbackRate]
     ];
     const hit = checks.find(([, actual, limit]) => actual > limit);
     if (!hit) return { tripped: false, reason: '', samples, limits };
-    return { tripped: true, reason: hit[0], actual: hit[1], limit: hit[2], samples, limits };
+    return { tripped: true, reason: hit[0], actual: hit[1], limit: hit[2], samples: hit[0] === 'negative_feedback_rate' ? feedbackSamples : samples, limits };
 }
 
 module.exports = {

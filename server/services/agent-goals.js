@@ -367,6 +367,20 @@ async function runAgentGoalNow(goal, user, options = {}) {
     const auth = parseJson(goal.authorization_spec ?? goal.authorizationSpec, {});
     const budget = parseJson(goal.budget_spec ?? goal.budgetSpec, {});
     if (auth.expiresAt && new Date(auth.expiresAt).getTime() <= Date.now()) throw invalid('持续目标授权已过期。', 403);
+    const triggerKey = String(options.triggerKey || `goal:${goal.id}:${options.scheduledFor || Date.now()}`).slice(0, 256);
+    const existing = await queryOne('SELECT id, status, metadata FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, triggerKey]);
+    if (existing) {
+        const metadata = parseJson(existing.metadata, {});
+        if (options.triggerType === 'database') {
+            const canonicalJson = require('./canonical-json').canonicalJson;
+            const currentInputs = JSON.parse(JSON.stringify(options.metadata || {}));
+            if (String(metadata.goalId) !== String(goal.id) || Number(metadata.goalVersion) !== Number(goal.version)
+                || canonicalJson(metadata.triggerInputs || {}) !== canonicalJson(currentInputs)) {
+                throw invalid('已接纳批次与当前目标版本或来源内容不一致，请检查来源水位后重试。', 409);
+            }
+        }
+        return { id: existing.id, deduped: true, status: existing.status };
+    }
     const maxRuns = Number(budget.maxRunsPerWindow || budget.max_runs_per_window || 0);
     if (maxRuns > 0) {
         const windowSeconds = Number(budget.windowSeconds || budget.window_seconds || 86400);
@@ -379,9 +393,6 @@ async function runAgentGoalNow(goal, user, options = {}) {
         const recent = await queryOne('SELECT created_at FROM agent_runs WHERE id = ? AND created_at >= ?', [goal.last_run_id, new Date(Date.now() - Number(goal.cooldown_seconds) * 1000).toISOString()]);
         if (recent) throw invalid('持续目标仍在冷却时间内。', 429);
     }
-    const triggerKey = String(options.triggerKey || `goal:${goal.id}:${options.scheduledFor || Date.now()}`).slice(0, 256);
-    const existing = await queryOne('SELECT id, status FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, triggerKey]);
-    if (existing) return { id: existing.id, deduped: true, status: existing.status };
     await assertGoalModel(user, auth);
     const goalContinuation = await require('./agent-goal-context').selectGoalContinuation(goal, user);
     const created = await run({
@@ -552,12 +563,11 @@ async function pollDatabaseGoal(row, user) {
     const nextWatermark = selectNextWatermark(rows.map(item => item?.[trigger.watermarkField]), watermark);
     const key = `goal:${row.id}:database:${crypto.createHash('sha256').update(`${nextWatermark}:${rows.length}`).digest('hex').slice(0, 32)}`;
     const run = await runAgentGoalNow(row, user, { triggerType: 'database', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'rows']: rows, watermark: nextWatermark, rowCount: rows.length } });
-    if (!run?.deduped) {
-        trigger.watermark = nextWatermark;
-        await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ?', [JSON.stringify(trigger), getBeijingTimestamp(), row.id, row.claim_token || null]);
-        return [run];
-    }
-    return [];
+    if (!run?.id) throw invalid('来源批次尚未接纳，请稍后重试。', 409);
+    trigger.watermark = nextWatermark;
+    const changed = await execute('UPDATE agent_goals SET trigger_spec = ?, updated_at = ?::timestamptz WHERE id = ? AND claim_token = ? AND version = ? AND claim_expires_at > NOW()', [JSON.stringify(trigger), getBeijingTimestamp(), row.id, row.claim_token || null, row.version]);
+    if (changed !== 1) throw invalid('来源批次已接纳，但水位提交未确认，请稍后重试。', 409);
+    return run.deduped ? [] : [run];
 }
 
 async function runDueAgentGoals(limit = 20) {

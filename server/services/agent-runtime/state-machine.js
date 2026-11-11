@@ -23,6 +23,8 @@ const RUN_STATUSES = new Set([
 ]);
 
 const TERMINAL_STATUSES = new Set(['completed', 'completed_with_errors', 'partial', 'error', 'failed', 'cancelled', 'deleted']);
+// 核验同样持有执行权；异常恢复必须保留已执行结果并收敛到可见终态。
+const EXECUTION_LEASE_STATUSES = Object.freeze(['running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'verifying']);
 
 const TRANSITIONS = {
     queued: new Set(['planning', 'running', 'needs_input', 'cancelled', 'error', 'failed', 'deleted']),
@@ -89,6 +91,7 @@ function assertAgentRunStatusTransition(fromStatus, toStatus, details = {}) {
 module.exports = {
     RUN_STATUSES,
     TERMINAL_STATUSES,
+    EXECUTION_LEASE_STATUSES,
     TRANSITIONS,
     normalizeRunStatus,
     canTransitionAgentRunStatus,
