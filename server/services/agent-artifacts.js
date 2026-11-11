@@ -50,7 +50,7 @@ async function listAgentArtifacts(user, limit = 30) {
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.user_id = ? AND a.status <> 'deleted'
+        WHERE a.user_id = ? AND COALESCE(a.status, 'active') <> 'deleted'
         ORDER BY COALESCE(a.updated_at, a.created_at) DESC, a.id DESC
         LIMIT ?
     `, [user.id, normalizePositiveInt(limit, 30, 1, 100)]);
@@ -72,7 +72,7 @@ async function getAgentArtifactForUser(artifactId, user, options = {}) {
         FROM agent_artifacts a
         LEFT JOIN agent_runs r ON r.id = a.run_id
         LEFT JOIN agent_artifact_versions v ON v.id = a.current_version_id
-        WHERE a.id = ? AND a.user_id = ? ${includeDeleted ? '' : "AND a.status <> 'deleted'"}
+        WHERE a.id = ? AND a.user_id = ? ${includeDeleted ? '' : "AND COALESCE(a.status, 'active') <> 'deleted'"}
     `, [artifactId, user.id]);
     if (artifact && !(await require('./knowledge-run-access').inspectRunKnowledgeAccess(artifact.run_id, user)).current) return null;
     if (artifact) await require('./artifact-source-access').assertArtifactSources(artifact, user);
@@ -171,6 +171,7 @@ async function createStandaloneArtifact(user, body = {}, options = {}) {
     const now = getBeijingTimestamp();
     let createdId = 0;
     let createdRecord;
+    let createdVersionId;
     const persist = async trx => {
         const row = await trx.queryOne(`
             INSERT INTO agent_artifacts (run_id, user_id, type, title, content, note, created_at, updated_at)
@@ -184,17 +185,18 @@ async function createStandaloneArtifact(user, body = {}, options = {}) {
             VALUES (?, 1, ?, ?, ?, ?)
             RETURNING id
         `, [createdId, safeContent, safeNote, user.id, now]);
+        createdVersionId = versionRow?.id;
         await trx.execute('UPDATE agent_artifacts SET current_version_id = ? WHERE id = ?', [versionRow?.id, createdId]);
     };
     if (options.executor) await persist(options.executor); else await transaction(persist);
-    if (options.executor) return { ...createdRecord, id: createdId };
+    if (options.executor) return { ...createdRecord, id: createdId, current_version_id: createdVersionId };
     return await getAgentArtifactForUser(createdId, user);
 }
 
 async function createAgentArtifactVersion(artifactId, user, body = {}, options = {}) {
-    const artifact = options.executor ? await options.executor.queryOne("SELECT * FROM agent_artifacts WHERE id=? AND user_id=? AND run_id IS NULL AND status<>'deleted' FOR UPDATE", [artifactId, user.id]) : await getAgentArtifactForUser(artifactId, user);
+    const artifact = options.executor ? await options.executor.queryOne("SELECT * FROM agent_artifacts WHERE id=? AND user_id=? AND run_id IS NULL AND COALESCE(status,'active')<>'deleted' FOR UPDATE", [artifactId, user.id]) : await getAgentArtifactForUser(artifactId, user);
     if (!artifact) return null;
-    const content = await require('./artifact-source-access').protectVersion(artifact, String(body.content ?? artifact.content ?? '').trim(), user);
+    let content = await require('./artifact-source-access').protectVersion(artifact, String(body.content ?? artifact.content ?? '').trim(), user);
     if (artifact.type === 'mindmap') {
         if (options.executor) throw Object.assign(new Error('当前类型不支持嵌入已有交付事务。'), { status: 400 });
         const result = await require('./mindmaps/documents').save(user, { ...body, artifactId, document: content });
@@ -208,22 +210,38 @@ async function createAgentArtifactVersion(artifactId, user, body = {}, options =
     const note = String(body.note || '').trim().slice(0, 500);
     const now = getBeijingTimestamp();
     let versionId = 0;
+    let updated;
     const persist = async trx => {
-        const row = await trx.queryOne('SELECT COALESCE(MAX(version), 0) + 1 AS version FROM agent_artifact_versions WHERE artifact_id = ?', [artifact.id]);
-        const version = Number(row?.version || 1);
+        const current = await trx.queryOne("SELECT * FROM agent_artifacts WHERE id = ? AND user_id = ? AND COALESCE(status, 'active') <> 'deleted' FOR UPDATE", [artifact.id, user.id]);
+        if (!current) throw Object.assign(new Error('产物不存在或已删除。'), { status: 404 });
+        await require('./artifact-source-access').assertArtifactSources(current, user);
+        const latest = await trx.queryOne('SELECT * FROM agent_artifact_versions WHERE artifact_id = ? ORDER BY version DESC LIMIT 1', [artifact.id]);
+        const pointer = current.current_version_id ? await trx.queryOne('SELECT version FROM agent_artifact_versions WHERE id = ? AND artifact_id = ?', [current.current_version_id, artifact.id]) : null;
+        let currentVersion = Number(pointer?.version || current.version || 1);
+        if (body.expectedVersion !== undefined && Number(body.expectedVersion) !== currentVersion) throw Object.assign(new Error('产物已被其他窗口更新，请重新打开后合并修改。'), { status: 409, code: 'ARTIFACT_VERSION_CONFLICT' });
+        // 旧交互空间只归档已被替换的版本；首次进入统一版本链时补存当前快照。
+        if (!pointer && (!latest || Number(latest.version) < currentVersion || latest.content !== current.content)) {
+            currentVersion = Math.max(currentVersion, Number(latest?.version || 0) + 1);
+            await trx.execute(`INSERT INTO agent_artifact_versions (artifact_id, version, content, metadata, note, created_by, created_at)
+                VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)`, [artifact.id, currentVersion, current.content, JSON.stringify(current.metadata || {}), current.note || '', user.id, current.updated_at || now]);
+        }
+        const rawContent = String(body.content ?? current.content ?? '');
+        content = await require('./artifact-source-access').protectVersion(current, body.preserveWhitespace ? rawContent : rawContent.trim(), user);
+        const version = Math.max(currentVersion, Number(latest?.version || 0)) + 1;
+        const metadata = body.metadata === undefined ? current.metadata || {} : body.metadata;
         const versionRow = await trx.queryOne(`
-            INSERT INTO agent_artifact_versions (artifact_id, version, content, note, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO agent_artifact_versions (artifact_id, version, content, metadata, note, created_by, created_at)
+            VALUES (?, ?, ?, ?::jsonb, ?, ?, ?)
             RETURNING id
-        `, [artifact.id, version, content, note, user.id, now]);
+        `, [artifact.id, version, content, JSON.stringify(metadata), note, user.id, now]);
         versionId = versionRow?.id;
-        await trx.execute(`
+        updated = await trx.queryOne(`
             UPDATE agent_artifacts
-            SET content = ?, note = ?, current_version_id = ?, updated_at = ?
-            WHERE id = ? AND user_id = ?
-        `, [content, note, versionId, now, artifact.id, user.id]);
+            SET content = ?, note = ?, current_version_id = ?, version = ?, title = ?, description = ?, metadata = ?::jsonb, updated_at = ?
+            WHERE id = ? AND user_id = ? RETURNING *
+        `, [content, note, versionId, version, body.title ?? current.title, body.description ?? current.description, JSON.stringify(metadata), now, artifact.id, user.id]);
     };
-    if (options.executor) { await persist(options.executor); return { ...artifact, content, note, current_version_id: versionId }; }
+    if (options.executor) { await persist(options.executor); return updated; }
     await transaction(persist);
     return await getAgentArtifactForUser(artifact.id, user);
 }

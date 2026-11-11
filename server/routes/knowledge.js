@@ -278,6 +278,7 @@ function createKnowledgeRouter({ authMiddleware, logAction }) {
             messages: buildKnowledgeAnswerMessages(evidence.injectedContext || '', queryText, wiki.context || ''),
             source: 'knowledge_ask',
             maxTokens: Math.min(Math.max(Number.parseInt(req.body?.maxTokens, 10) || 1200, 256), 4000),
+            maxOutputTokensCap: Math.min(Math.max(Number.parseInt(req.body?.maxTokens, 10) || 1200, 256), 4000),
             temperature: 0.1
         });
         const grounded = await verifyKnowledgeAnswerWithRepair({

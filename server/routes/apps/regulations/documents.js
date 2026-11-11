@@ -497,7 +497,8 @@ function registerDocumentRoutes(router, deps) {
                         userId: req.user.id,
                         file,
                         metadata: prepared,
-                        preloadedText: prepared.extractedText
+                        preloadedText: prepared.extractedText,
+                        sourceExtraction: prepared.sourceExtraction
                     });
                     created.push({
                         document: result.document ? { id: result.document.id, title: result.document.title } : null,
@@ -602,7 +603,8 @@ function registerDocumentRoutes(router, deps) {
                     userId: req.user.id,
                     file: req.file,
                     metadata: prepared,
-                    preloadedText: prepared.extractedText
+                    preloadedText: prepared.extractedText,
+                        sourceExtraction: prepared.sourceExtraction
                 });
                 logAction(req, '法规查询导入文档', `文档：${result.document?.title || req.file.originalname}`);
                 res.json({
@@ -662,7 +664,8 @@ function registerDocumentRoutes(router, deps) {
                     file: req.file,
                     metadata: prepared,
                     providedTitle: req.body?.title || req.body?.name || prepared.title || '',
-                    preloadedText: prepared.extractedText
+                    preloadedText: prepared.extractedText,
+                        sourceExtraction: prepared.sourceExtraction
                 });
                 logAction(req, '法规查询追加版本', `文档：${result.document?.title || req.params.id}`);
                 res.json({

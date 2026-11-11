@@ -8,6 +8,7 @@ const { getDeploymentProfile } = require('../services/deployment-profile');
 const { realtimeWakeup } = require('../services/realtime-wakeup');
 const { startChannelFeed } = require('../services/realtime-channel-feed');
 const { readSnapshot } = require('../services/realtime-stream-snapshot');
+const { guardRealtimeSession } = require('../services/realtime-session');
 const MAX_REPLAY_PAGES = 25;
 const defaultDatabase = { query, cleanupEnabled: true };
 
@@ -23,12 +24,14 @@ function createEventsRouter({ authMiddleware, database = defaultDatabase, durabl
 
     router.get('/events/channels', authMiddleware, asyncHandler(async (req, res) => {
         if (!channelFeed) return res.status(404).end();
+        guardRealtimeSession(req, res);
         const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
         return await startChannelFeed({ userId: req.user.id, after: normalizeRealtimeCursor(suppliedCursor), suppliedCursor,
             database, response: res, wakeup });
     }));
 
     router.get('/events', authMiddleware, asyncHandler(async (req, res) => {
+        guardRealtimeSession(req, res);
         const suppliedCursor = req.get('Last-Event-ID') ?? req.query.after;
         const after = normalizeRealtimeCursor(suppliedCursor);
         if (durableEvents) {

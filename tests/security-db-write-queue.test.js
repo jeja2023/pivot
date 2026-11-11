@@ -21,7 +21,7 @@ function loadQueueModule({ failTimes = 1, failureMessage = 'temporary pg failure
     const fakePool = {
         async query(sql, params) {
             pgQueries.push({ sql, params });
-            onQuery?.({ sql, params });
+            await onQuery?.({ sql, params });
             if (hangWrites && sql.includes('INSERT INTO')) return new Promise(() => {});
             if (sql.includes('INSERT INTO "audit_logs"') && auditLogFailures > 0) {
                 auditLogFailures -= 1;
@@ -102,6 +102,47 @@ function loadQueueModule({ failTimes = 1, failureMessage = 'temporary pg failure
 async function settleAsyncWork() {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
+
+test('用量批次移出队列后，额度快照等待该批确认，不出现零用量空窗', async () => {
+    let entered, finish;
+    const started = new Promise(resolve => { entered = resolve; });
+    let committed = 0, reads = 0;
+    const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => {
+        if (sql.includes('model_usage_events')) { entered(); await new Promise(resolve => { finish = resolve; }); committed = 7; }
+    } });
+    fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 7, createdAt: '2026-11-10 12:00:00' });
+    const flush = fixture.queue.flushWriteQueue(); await started;
+    const snapshot = fixture.queue.readModelUsageSnapshot(async () => { reads++; return committed + fixture.queue.getPendingModelUsageTotal(1, 2); });
+    await settleAsyncWork(); assert.equal(reads, 0);
+    finish(); await flush;
+    assert.equal(await snapshot, 7); assert.equal(reads, 1);
+});
+
+test('用量查询期间发生入队或批次刷新，必须重新取得一致快照且不重复统计', async () => {
+    let committed = 0;
+    const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => { if (sql.includes('model_usage_events')) committed = 9; } });
+    fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 9 });
+    let resume, entered, reads = 0;
+    const started = new Promise(resolve => { entered = resolve; });
+    const snapshot = fixture.queue.readModelUsageSnapshot(async () => {
+        if (++reads === 1) { entered(); await new Promise(resolve => { resume = resolve; }); return 0; }
+        return committed + fixture.queue.getPendingModelUsageTotal(1, 2);
+    });
+    await started; await fixture.queue.flushWriteQueue(); resume();
+    assert.equal(await snapshot, 9); assert.equal(reads, 2);
+});
+
+test('用量快照不等待其他审计日志写入', async () => {
+    let finish, entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => {
+        if (sql.includes('audit_logs')) { entered(); await new Promise(resolve => { finish = resolve; }); }
+    } });
+    fixture.queue.enqueueAuditLog({ action: '合成审计' });
+    const flush = fixture.queue.flushWriteQueue(); await started;
+    assert.equal(await fixture.queue.readModelUsageSnapshot(async () => 3), 3);
+    finish(); await flush;
+});
 
 async function runNextTimer(timers) {
     const timer = timers.find(item => !item.executed && !item.cleared);

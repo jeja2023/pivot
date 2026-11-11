@@ -534,6 +534,7 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
         });
 
+        require('../services/realtime-session').revokeRealtimeSessions(req.user.id);
         logAction(req, '修改密码', '用户自主修改了登录密码');
         res.json({ success: true, message: '密码修改成功' });
     }));

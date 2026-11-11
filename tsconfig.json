@@ -19,7 +19,8 @@
     "desktop/stealth-policy.js",
     "server/services/agent-browser-profile-cleanup.js",
     "server/services/agent-event-batch-writer.js",
-    "server/services/host-classifier.js"
+    "server/services/host-classifier.js",
+    "server/services/automation-source-cursor.js"
   ],
   "exclude": [
     "node_modules",

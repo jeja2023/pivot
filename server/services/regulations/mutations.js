@@ -21,7 +21,6 @@ const {
     normalizeRegulationTags,
     normalizeRegulationText,
     normalizeUploadedOriginalName,
-    readRegulationTextFromPath,
     resolveRegulationStoredPath,
     saveRegulationAliases,
     saveRegulationUploadedFile
@@ -44,6 +43,7 @@ const { getSystemEmbeddingConfig, getEmbeddingProfile } = require('../rag-config
 const { getRagIndexEmbeddingTimeoutMs } = require('../rag-index/embedding-client');
 const { notifyRegulationSubscribers } = require('./governance');
 const { saveRegulationArticleLocations } = require('./locations');
+const { readRegulationSource, verifiedRegulationSource } = require('./extraction');
 const { logger: defaultLogger } = require('../../logger');
 
 function normalizeReviewedArticles(value) {
@@ -80,7 +80,7 @@ function normalizeReviewedArticles(value) {
     return articles;
 }
 
-async function saveRegulationDocumentVersion({ documentId, userId, file, metadata = {}, providedTitle = '', preloadedText = '' }) {
+async function saveRegulationDocumentVersion({ documentId, userId, file, metadata = {}, providedTitle = '', sourceExtraction = null }) {
     const normalizedDocId = normalizeRegulationId(documentId);
     if (!normalizedDocId) {
         const error = new Error('法规文档不存在');
@@ -107,7 +107,8 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
     const createdAt = getBeijingTimestamp();
 
     try {
-        const extractedText = normalizeRegulationText(preloadedText) || await readRegulationTextFromPath(sourceMeta.absolutePath, file.originalname);
+        const extraction = verifiedRegulationSource(sourceExtraction, sourceMeta.sourceHash) || await readRegulationSource(sourceMeta.absolutePath, file.originalname);
+        const extractedText = extraction.text;
         if (!extractedText) {
             const error = new Error('未能从文档中提取可用正文，请检查文件内容或先完成文字识别');
             error.statusCode = 422;
@@ -163,6 +164,8 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                 createdAt
             ]);
             const vId = versionInfo?.id;
+            await trx.execute('UPDATE regulation_versions SET extraction_coverage_json = ?::jsonb WHERE id = ?',
+                [JSON.stringify({ complete: true, sourceHash: extraction.sourceHash, sourcePageCount: extraction.sourcePageCount, pageSpans: extraction.pageSpans }), vId]);
             const orderToArticleId = new Map();
             for (const article of articles) {
                 const articleRow = await trx.queryOne(`
@@ -223,6 +226,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
                 articleIdsBySortOrder: orderToArticleId,
                 articles,
                 extractedText,
+                pageSpans: extraction.pageSpans,
                 executor: trx.execute.bind(trx)
             });
             await trx.execute(`
@@ -284,7 +288,7 @@ async function saveRegulationDocumentVersion({ documentId, userId, file, metadat
     }
 }
 
-async function createRegulationDocumentFromUpload({ userId, file, metadata = {}, preloadedText = '' }) {
+async function createRegulationDocumentFromUpload({ userId, file, metadata = {}, preloadedText = '', sourceExtraction = null }) {
     const now = getBeijingTimestamp();
     const title = normalizeRegulationField(
         metadata.title || deriveRegulationTitleFromText(preloadedText || '', file?.originalname || ''),
@@ -321,7 +325,7 @@ async function createRegulationDocumentFromUpload({ userId, file, metadata = {},
             file,
             metadata,
             providedTitle: title,
-            preloadedText
+            sourceExtraction
         });
     } catch (error) {
         await execute('DELETE FROM regulation_documents WHERE id = ?', [documentId]);
@@ -475,7 +479,7 @@ async function rebuildRegulationArticleLocations({ documentId, versionId }) {
     const document = await getRegulationDocumentById(normalizedDocumentId, { includeArchived: true });
     if (!document || document.deleted_at) return null;
     const version = await queryOne(
-        'SELECT id, extracted_text FROM regulation_versions WHERE id = ? AND document_id = ?',
+        'SELECT id, extracted_text, extraction_coverage_json FROM regulation_versions WHERE id = ? AND document_id = ?',
         [normalizedVersionId, normalizedDocumentId]
     );
     if (!version) return null;
@@ -508,6 +512,7 @@ async function rebuildRegulationArticleLocations({ documentId, versionId }) {
             articleIdsBySortOrder,
             articles,
             extractedText,
+            pageSpans: version.extraction_coverage_json?.pageSpans || [],
             executor: trx.execute.bind(trx)
         });
     });

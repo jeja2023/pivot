@@ -2,8 +2,8 @@ const cp = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
-const os = require('os');
 const path = require('path');
+const { resolveTestTempRoot, localTestEnvironment, assertTestStorage } = require('./test_support/test-environment');
 
 const root = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env') });
@@ -62,7 +62,9 @@ async function main() {
         throw new Error('Playwright E2E 测试需要配置 TEST_DATABASE_URL 或 DATABASE_URL 环境变量（CI 或本地测试库示例：postgres://postgres:password@localhost:5432/pivot_test）');
     }
 
-    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-e2e-tests-'));
+    const tempRoot = resolveTestTempRoot();
+    assertTestStorage(tempRoot);
+    const testRoot = fs.mkdtempSync(path.join(tempRoot, 'pivot-e2e-tests-'));
     const fakeModelLogPath = path.join(testRoot, 'fake-model.log');
     const testSchema = `pivot_e2e_${process.pid}_${Date.now().toString(36)}`;
     const securityKey = path.join(testRoot, 'security-journal.key');
@@ -73,7 +75,10 @@ async function main() {
     const playwrightCli = path.join(root, 'node_modules', '@playwright', 'test', 'cli.js');
     const setupScript = path.join(root, 'scripts', 'setup_pg_test_db.js');
     const env = {
-        ...process.env,
+        ...localTestEnvironment(),
+        TEMP: testRoot,
+        TMP: testRoot,
+        TMPDIR: testRoot,
         TZ: 'Asia/Shanghai',
         PG_TIMEZONE: 'Asia/Shanghai',
         DATA_DIR: path.join(testRoot, 'data'),

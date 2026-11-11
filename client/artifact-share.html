@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-app-version="__APP_VERSION__">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>共享产物 · Pivot</title>
+    <link rel="stylesheet" href="/common/styles/theme.css?v=__APP_VERSION__">
+    <link rel="stylesheet" href="/chat/styles/workspaces/shared.css?v=__APP_VERSION__">
+    <link rel="stylesheet" href="/chat/styles/artifact-renderer.css?v=__APP_VERSION__">
+    <link rel="stylesheet" href="/common/styles/artifact-share.css?v=__APP_VERSION__">
+    <script defer src="/common/vendor/purify.min.js?v=__APP_VERSION__"></script>
+    <script defer src="/common/vendor/marked.min.js?v=__APP_VERSION__"></script>
+    <script defer src="/chat/pivot-core.js?v=__APP_VERSION__"></script>
+    <script defer src="/chat/safe-html.js?v=__APP_VERSION__"></script>
+    <script defer src="/chat/artifact-renderer.js?v=__APP_VERSION__"></script>
+    <script defer src="/artifact-share.js?v=__APP_VERSION__"></script>
+</head>
+<body class="light-mode">
+    <main class="artifact-share-page">
+        <header class="workspace-modal-header">
+            <h1 id="artifact-share-title" class="workspace-modal-title">共享产物</h1>
+            <a class="btn-secondary" href="/chat">返回系统</a>
+        </header>
+        <p id="artifact-share-status" class="artifact-share-status" role="status">正在读取共享内容…</p>
+        <div id="artifact-share-content" class="artifact-share-content" aria-label="共享产物只读预览"></div>
+    </main>
+</body>
+</html>

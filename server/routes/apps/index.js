@@ -12,10 +12,6 @@ const { asyncHandler, normalizeLimit } = require('../../http');
 const { handler: analysisDeliveryHandler } = require('../../services/data-analysis/bi/delivery');
 const { logger } = require('../../logger');
 const { createSafeUpload, uploadSecurityMiddleware } = require('../../upload');
-const { estimateTokens } = require('../../llm');
-const {
-    getModelDailyUsageAsync
-} = require('../../services/models');
 
 
 
@@ -71,31 +67,6 @@ const ANALYSIS_AGENT_MAX_STEPS = Math.max(1, Math.min(5, Number.parseInt(process
 const ANALYSIS_AGENT_MAX_CALLS = Math.max(ANALYSIS_AGENT_MAX_STEPS, Math.min(6, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_MAX_CALLS || String(ANALYSIS_AGENT_MAX_STEPS + 1), 10) || ANALYSIS_AGENT_MAX_STEPS + 1));
 const ANALYSIS_AGENT_MAX_OUTPUT_TOKENS = Math.max(256, Math.min(2400, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_MAX_OUTPUT_TOKENS || '1200', 10) || 1200));
 const ANALYSIS_AGENT_CALL_TIMEOUT_MS = Math.max(5000, Number.parseInt(process.env.DATA_ANALYSIS_AGENT_CALL_TIMEOUT_MS || '60000', 10) || 60000);
-const analysisQuotaReservations = new Map();
-
-async function reserveAnalysisQuota(userId, modelCfg, estimatedTokens) {
-    const limit = Number(modelCfg.daily_token_limit) || 0;
-    if (limit <= 0) return () => {};
-    const key = `${userId}:${modelCfg.id}`;
-    const used = await getModelDailyUsageAsync(userId, modelCfg.id);
-    const reserved = Number(analysisQuotaReservations.get(key) || 0);
-    if (used + reserved + estimatedTokens > limit) {
-        const err = new Error('今日模型调用额度不足以完成本轮数据分析，请稍后再试或切换额度更充足的模型。');
-        err.status = 429;
-        err.code = 'INSUFFICIENT_QUOTA';
-        throw err;
-    }
-    analysisQuotaReservations.set(key, reserved + estimatedTokens);
-    let released = false;
-    return () => {
-        if (released) return;
-        released = true;
-        const current = Number(analysisQuotaReservations.get(key) || 0) - estimatedTokens;
-        if (current > 0) analysisQuotaReservations.set(key, current);
-        else analysisQuotaReservations.delete(key);
-    };
-}
-
 function buildAnalysisAgentSystemPrompt(context) {
     return [
         '你是数据分析工作台的智能分析师，可以调用工具查询真实数据、生成图表，再据此回答。',
@@ -156,7 +127,6 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
     let answer = '';
     let hasQueryEvidence = false;
     let modelCallCount = 0;
-    const quotaReleases = [];
     const abortController = new AbortController();
     let clientDisconnected = false;
     const abortForDisconnect = () => {
@@ -174,9 +144,6 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
             err.code = 'ANALYSIS_AGENT_CALL_LIMIT';
             throw err;
         }
-        const estimatedTokens = Math.max(256, estimateTokens(JSON.stringify(currentMessages)) + ANALYSIS_AGENT_MAX_OUTPUT_TOKENS);
-        const releaseQuota = await reserveAnalysisQuota(userId, modelCfg, estimatedTokens);
-        quotaReleases.push(releaseQuota);
         modelCallCount += 1;
         const result = await callModelTextWithBudget({
             modelCfg,
@@ -278,13 +245,11 @@ async function runDataAnalysisAgent({ req, res, logAction }) {
         } catch (artifactErr) {
             logger.warn({ err: artifactErr.message, datasetId }, '保存数据分析 AI 历史记录失败');
         }
-        quotaReleases.splice(0).forEach(release => release());
         if (clientDisconnected) return undefined;
         return res.json({ answer: finalAnswer, steps, charts, evidence, artifactId });
     } catch (e) {
         const errorMsg = e.response?.data?.error?.message || e.message;
         logger.error({ err: errorMsg, model: modelCfg.name }, '数据分析 AI 深度分析失败');
-        quotaReleases.splice(0).forEach(release => release());
         if (clientDisconnected || e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError') return undefined;
         if (!res.headersSent) {
             return res.status(e.response?.status || e.status || 500).json({ error: { message: errorMsg, type: 'api_error' } });

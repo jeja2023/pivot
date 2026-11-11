@@ -194,7 +194,9 @@ const migrationModules = [
     require('./analysis-source-metadata'),
     require('./presentation-native-offline'),
     require('./analysis-node-flow'),
-    require('./agent-projects')
+    require('./agent-projects'),
+    require('./regulation-extraction-coverage'),
+    require('./common-recovery-late-tables')
 ];
 
 module.exports = migrationModules

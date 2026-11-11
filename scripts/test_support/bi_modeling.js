@@ -70,6 +70,8 @@ async function cleanupUser(user) {
         await execute('DELETE FROM analysis_data_objects WHERE user_id=?', [user.id]);
         await execute('DELETE FROM analysis_audit_events WHERE user_id=?', [user.id]);
         await cleanupConfirmed('DELETE FROM analysis_data_models WHERE user_id=?', [user.id]);
+        await cleanupConfirmed('DELETE FROM analysis_field_governance WHERE dataset_id IN (SELECT id FROM analysis_datasets WHERE user_id=?)', [user.id]);
+        await cleanupConfirmed('DELETE FROM analysis_datasets WHERE user_id=?', [user.id]);
         await cleanupConfirmed('DELETE FROM users WHERE id=?', [user.id]);
 }
 

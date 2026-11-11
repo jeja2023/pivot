@@ -209,6 +209,7 @@ test('历史清单按持久游标分批回填，进程中断后续跑且并行�
         await pool.query(`INSERT INTO analysis_data_models(id,user_id,name,model_kind,definition_json)
             SELECT $1||lpad(n::text,4,'0'),$2,'历史模型','production',definition_json FROM analysis_data_models CROSS JOIN generate_series(1,250) n WHERE id=$3`, [prefix, user.id, model.id]);
     } finally { await pool.query('ALTER TABLE analysis_data_models ENABLE TRIGGER analysis_security_event'); }
+    const expectedRows = Number((await queryOne('SELECT COUNT(*) AS n FROM analysis_data_models')).n);
     await pool.query("UPDATE analysis_security_inventory SET cursor_value='',scanned=0,captured=0,complete=FALSE WHERE table_name='analysis_data_models'");
     await pool.query("UPDATE analysis_security_state SET mode='initializing' WHERE id='main'");
     const repository = require('../server/repositories/analysis-security-journal'), inventory = require('../server/repositories/analysis-security-inventory');
@@ -224,7 +225,7 @@ test('历史清单按持久游标分批回填，进程中断后续跑且并行�
     assert.notEqual((await queryOne("SELECT cursor_value FROM analysis_security_inventory WHERE table_name='analysis_data_models'")).cursor_value, cursor.cursor_value);
     const completed = await journal.flush({ force: true, full: true }); assert.equal(completed.mode, 'ready');
     const final = await queryOne("SELECT * FROM analysis_security_inventory WHERE table_name='analysis_data_models'");
-    assert.equal(Number(final.scanned), 251); assert.equal(final.complete, true);
+    assert.equal(Number(final.scanned), expectedRows); assert.equal(final.complete, true);
     assert.equal(Number((await queryOne('SELECT COUNT(*) AS n FROM analysis_security_outbox WHERE target_table=? AND target_id=?', ['analysis_data_models', changedId])).n), 1);
     assert.equal((await queryOne('SELECT scope FROM analysis_data_models WHERE id=?', [changedId])).scope, 'shared');
     assert.equal((await repository.withPump(client => inventory.backfill(client))).scanned, 0);

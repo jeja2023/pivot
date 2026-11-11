@@ -7,14 +7,20 @@ const { resolveKnowledgeToolScope } = require('../server/services/knowledge-tool
 const { currentKnowledgeControlMessage } = require('../server/services/chat-task-knowledge-scope');
 const user = { id: 9 };
 function fixture(initial = {}) {
-    let metadata = { chatBridge: { ragScope: { collectionIds: [11] }, ragEnabled: true, ragContext: '旧检索内容' },
-        capabilityConstraints: { present: true, capabilities: ['knowledge.search', 'conversation.read_source'] }, ...initial };
+    let metadata = {
+        chatBridge: { ragScope: { collectionIds: [11] }, ragEnabled: true, ragContext: '旧检索内容' },
+        capabilityConstraints: { present: true, capabilities: ['knowledge.search', 'conversation.read_source'] }, ...initial
+    };
     const messages = [];
     const run = { id: 'owned', status: 'running', tool_policy: 'builtin_only', tool_allowlist: [], network_policy: {}, context_config: {} };
-    const deps = { listSessionTasks: async () => [{ ...run, metadata }], getCollectionForUser: async id => [11, 22].includes(id) ? { id } : null,
-        updateMetadata: async (_id, transform) => { metadata = transform(metadata); return metadata; }, sendAgentControlMessage: async message => messages.push(message) };
-    const input = { user, sessionId: 'session', userMessageId: 100, instruction: '仅依据新专题继续总结', routeOverrides: { collections: [22] },
-        decision: { continuationOf: 'owned', objective: '依据新专题继续总结', requiredCapabilities: ['knowledge.search'], routing: { tools: 'task', knowledge: 'required' } } };
+    const deps = {
+        listSessionTasks: async () => [{ ...run, metadata }], getCollectionForUser: async id => [11, 22].includes(id) ? { id } : null,
+        updateMetadata: async (_id, transform) => { metadata = transform(metadata); return metadata; }, sendAgentControlMessage: async message => messages.push(message)
+    };
+    const input = {
+        user, sessionId: 'session', userMessageId: 100, instruction: '仅依据新专题继续总结', routeOverrides: { collections: [22] },
+        decision: { continuationOf: 'owned', objective: '依据新专题继续总结', requiredCapabilities: ['knowledge.search'], routing: { tools: 'task', knowledge: 'required' } }
+    };
     return { run, deps, input, messages, metadata: () => metadata };
 }
 

@@ -6,7 +6,7 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const path = require('path');
-const { logger } = require('./logger');
+const { logger, scrubUrl } = require('./logger');
 const { isAdmin } = require('./permissions');
 const { clearDirSizeCache } = require('./services/dir-size-cache');
 const dnsPromises = dns.promises;
@@ -642,30 +642,39 @@ function maskSecretString(text) {
             return SECRET_PLACEHOLDER;
         });
     }
-    output = output.replace(/([?&](?:token|access_token|api_key|apikey|key|signature|sig|secret|password)=)[^&\s]+/gi, '$1[REDACTED]');
+    output = output.replace(/([?&])([^=&\s]+)=([^&\s]*)/g,
+        (_match, separator, name, value) => separator + scrubUrl(`/?${name}=${value}`).slice(2));
     return output;
 }
 
 // 递归脱敏对象 / 数组中的密钥字段；不会修改原对象
-function redactSecrets(value, depth = 0) {
-    if (depth > 6) return value;
+function redactSecrets(value, depth = 0, state = { ancestors: new WeakSet(), nodes: 0 }) {
+    if (depth > 6 || ++state.nodes > 10000) return '[超限内容已省略]';
     if (value === null || value === undefined) return value;
     if (typeof value === 'string') return maskSecretString(value);
     if (typeof value !== 'object') return value;
+    if (state.ancestors.has(value)) return '[循环引用已省略]';
+    state.ancestors.add(value);
     if (Array.isArray(value)) {
-        return value.map(item => redactSecrets(item, depth + 1));
+        const result = value.slice(0, 1000).map(item => redactSecrets(item, depth + 1, state));
+        if (value.length > 1000) result.push('[超限内容已省略]');
+        state.ancestors.delete(value);
+        return result;
     }
     const result = {};
+    let fields = 0;
     for (const [key, val] of Object.entries(value)) {
+        if (++fields > 1000 || state.nodes >= 10000) { result['已省略内容'] = '[超限内容已省略]'; break; }
         const lowered = String(key).toLowerCase();
         if (lowered === 'stack' || lowered === 'stacktrace' || lowered === 'error_stack') {
             result[key] = val ? '[STACK_OMITTED]' : val;
         } else if (SECRET_FIELD_NAMES.has(lowered) || lowered.includes('secret') || lowered.includes('token') || lowered.endsWith('_key')) {
             result[key] = val ? SECRET_PLACEHOLDER : val;
         } else {
-            result[key] = redactSecrets(val, depth + 1);
+            Object.defineProperty(result, key, { value: redactSecrets(val, depth + 1, state), enumerable: true, configurable: true, writable: true });
         }
     }
+    state.ancestors.delete(value);
     return result;
 }
 

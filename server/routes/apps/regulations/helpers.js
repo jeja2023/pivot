@@ -1,8 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
-const { extractDocumentTextWithOcrFallback, truncateExtractedText } = require('../../../services/document-processing/text-extraction');
+const { readRegulationSource } = require('../../../services/regulations/extraction');
 const { isAdmin, isSuperAdmin } = require('../../../permissions');
-const { getKnowledgeLimits } = require('../../../services/resource-limits');
 const {
     analyzeRegulationChangeImpact,
     approveHighConfidenceRegulationCitationLinks,
@@ -222,18 +221,9 @@ function deriveUploadTitleFromText(extractedText, fallbackName = '') {
     return '\u6cd5\u89c4\u6587\u6863';
 }
 
-async function extractUploadText(file) {
-    if (!file?.path) return '';
-    try {
-        const text = await extractDocumentTextWithOcrFallback(file.path, '', file.originalname, { maxOcrPages: 10 });
-        return truncateExtractedText(normalizeUploadText(text), getKnowledgeLimits().extractMaxChars);
-    } catch (_err) {
-        return '';
-    }
-}
-
 async function prepareRegulationUploadMetadata(file, baseMetadata = {}) {
-    const extractedText = await extractUploadText(file);
+    const sourceExtraction = await readRegulationSource(file.path, file.originalname);
+    const extractedText = sourceExtraction.text;
     const title = normalizeUploadField(
         baseMetadata.title || deriveUploadTitleFromText(extractedText, file?.originalname || ''),
         120
@@ -247,7 +237,8 @@ async function prepareRegulationUploadMetadata(file, baseMetadata = {}) {
         ...baseMetadata,
         title,
         versionLabel,
-        extractedText
+        extractedText,
+        sourceExtraction
     };
 }
 

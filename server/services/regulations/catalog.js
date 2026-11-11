@@ -19,7 +19,7 @@ const REGULATION_VERSION_COLUMNS = `
     source_url, summary, article_count, published_at, effective_from, effective_to,
     effect_status, review_status, reviewed_by_user, reviewed_at, parse_status, index_status,
     index_error, index_attempts, index_max_attempts, index_next_retry_at, index_last_attempt_at,
-    embedding_profile, uploaded_by_user, created_at, updated_at
+    embedding_profile, extraction_coverage_json, uploaded_by_user, created_at, updated_at
 `;
 
 async function getRegulationDocumentById(docId, { includeArchived = false, includeDeleted = false } = {}) {

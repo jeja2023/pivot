@@ -121,6 +121,7 @@ const pgQueueLastSuccessAt = {
 let pgFlushTimer = null;
 let pgFlushTimerDelayMs = 0;
 let pgFlushing = null;
+let modelUsageRevision = 0, modelUsageWrite = null;
 const PG_BASE_RETRY_DELAY_MS = Math.max(FLUSH_INTERVAL_MS, 10);
 const PG_MAX_RETRY_DELAY_MS = Math.max(PG_BASE_RETRY_DELAY_MS * 16, 1000);
 let pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
@@ -165,6 +166,7 @@ function pgEnqueue(queueName, item) {
         logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, '[PG] 写入队列溢出，已丢弃最早任务');
     }
     queue.push(item);
+    if (queueName === 'modelUsageEvents') modelUsageRevision++;
     const occupancy = queue.length / Math.max(1, QUEUE_LIMITS[queueName]);
     if (occupancy >= QUEUE_HIGH_WATERMARK) {
         if (!pgQueueHighWaterAlerted.has(queueName)) {
@@ -281,6 +283,11 @@ async function pgFlushQueue(queueName) {
 
     const sql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES ${rowPlaceholders.join(', ')}`;
     let pool = null;
+    let finishUsageWrite;
+    if (queueName === 'modelUsageEvents') {
+        modelUsageRevision++;
+        modelUsageWrite = new Promise(resolve => { finishUsageWrite = resolve; });
+    }
 
     try {
         const { getPgPool } = require('../db/pg-connection');
@@ -330,6 +337,8 @@ async function pgFlushQueue(queueName) {
             logger.error({ err: err.message, queueName, batchSample: batch[0] }, '[PG] 写入队列发生不可恢复数据异常，已丢弃');
         }
         markQueueError(queueName, err);
+    } finally {
+        if (finishUsageWrite) { modelUsageRevision++; modelUsageWrite = null; finishUsageWrite(); }
     }
 }
 
@@ -467,6 +476,17 @@ function getPendingModelUsageTotal(userId, modelId, datePrefix) {
     return pgPendingModelUsageTotal(userId, modelId, datePrefix);
 }
 
+async function readModelUsageSnapshot(readUsage) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+        // 只等待正在写入的用量批次，不等待审计或 MCP 日志；避免批次已移出队列却尚未落库的空窗。
+        if (modelUsageWrite) await modelUsageWrite;
+        const revision = modelUsageRevision;
+        const usage = await readUsage();
+        if (revision === modelUsageRevision && !modelUsageWrite) return usage;
+    }
+    throw Object.assign(new Error('模型用量正在持续更新，请稍后重试。'), { code: 'MODEL_USAGE_SNAPSHOT_BUSY', status: 503 });
+}
+
 function getQueueStatus() {
     return pgQueueStatus();
 }
@@ -483,6 +503,7 @@ module.exports = {
     flushAllWrites,
     flushWriteQueue,
     getPendingModelUsageTotal,
+    readModelUsageSnapshot,
     getQueueStatus,
     getQueueDiagnostics,
 };

@@ -10,7 +10,7 @@
  * 这些指标不落库、无外部依赖，仅在进程内累计，供 /api/health/details 与监控面板读取。
  */
 const { monitorEventLoopDelay } = require('node:perf_hooks');
-const { logger } = require('../logger');
+const { logger, scrubUrl } = require('../logger');
 const { isApiRequestPath } = require('../http');
 
 const NS_PER_MS = 1e6;
@@ -234,7 +234,7 @@ function apiRequestWatchdog(req, res, next) {
         if (res.locals) res.locals.watchdogTripped = true;
         (req.log || logger).error({
             method: req.method,
-            url: req.originalUrl || req.url,
+            url: scrubUrl(req.originalUrl || req.url),
             waitedMs: watchdogMs,
             eventLoop: snapshot.eventLoop,
             pgPool: snapshot.pgPool,

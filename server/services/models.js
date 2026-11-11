@@ -7,7 +7,8 @@ const { getBeijingTimestamp } = require('../time');
 const { normalizeToolCallMode } = require('./model-tool-call-capabilities');
 const {
     enqueueModelUsageEvent,
-    getPendingModelUsageTotal
+    getPendingModelUsageTotal,
+    readModelUsageSnapshot
 } = require('./db-write-queue');
 
 const modelListFields = "id, user_id, name, url, model_name, is_default, status, daily_token_limit, allowed_units, monitor_url, max_input_tokens, max_tokens, max_concurrent, supports_vision, supports_reasoning, chat_thinking_enabled, supports_tool_calls, tool_call_mode, tool_call_probe_status, tool_call_probe_protocol, tool_call_probe_error, tool_call_probed_at, input_price_per_million, output_price_per_million, price_currency, created_at, (CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN '********' ELSE '' END) AS api_key";
@@ -226,22 +227,24 @@ const getRunnableModelForUser = getRunnableModelForUserAsync;
 // ──────────────────────────────────────────────────────────────────────────
 
 async function getModelDailyUsageAsync(userId, modelId) {
-    const todayPrefix = getBeijingTimestamp().slice(0, 10);
-    const msgRow = await queryOne(`
-        SELECT COALESCE(SUM(token_count), 0) AS tokens
-        FROM messages
-        WHERE user_id = ? AND model_id = ? AND deleted_at IS NULL
-          AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
-    `, [userId, modelId]);
-    const evtRow = await queryOne(`
-        SELECT COALESCE(SUM(token_count), 0) AS tokens
-        FROM model_usage_events
-        WHERE user_id = ? AND model_id = ?
-          AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
-    `, [userId, modelId]);
-    const messageTokens = Number(msgRow?.tokens || 0);
-    const eventTokens = Number(evtRow?.tokens || 0);
-    return messageTokens + eventTokens + getPendingModelUsageTotal(userId, modelId, todayPrefix);
+    return readModelUsageSnapshot(async () => {
+        const todayPrefix = getBeijingTimestamp().slice(0, 10);
+        const msgRow = await queryOne(`
+            SELECT COALESCE(SUM(token_count), 0) AS tokens
+            FROM messages
+            WHERE user_id = ? AND model_id = ? AND deleted_at IS NULL
+              AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
+        `, [userId, modelId]);
+        const evtRow = await queryOne(`
+            SELECT COALESCE(SUM(token_count), 0) AS tokens
+            FROM model_usage_events
+            WHERE user_id = ? AND model_id = ?
+              AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
+        `, [userId, modelId]);
+        const messageTokens = Number(msgRow?.tokens || 0);
+        const eventTokens = Number(evtRow?.tokens || 0);
+        return messageTokens + eventTokens + getPendingModelUsageTotal(userId, modelId, todayPrefix);
+    });
 }
 
 const getModelDailyUsage = getModelDailyUsageAsync;

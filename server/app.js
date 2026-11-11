@@ -17,7 +17,7 @@ const crypto = require('crypto');
 const cors = require('cors');
 const helmet = require('helmet');
 const { getWorkflowEmbedAllowedOrigins } = require('./services/workflow-embed-policy');
-const { logger, httpLogger } = require('./logger');
+const { logger, httpLogger, scrubUrl } = require('./logger');
 const {
     metricsMiddleware,
     metricsAuthMiddleware,
@@ -470,6 +470,7 @@ const sendChatPage = (req, res) => {
 };
 
 app.get('/chat', sendChatPage);
+require('./routes/artifact-share-page').registerArtifactSharePage(app, appVersion);
 app.get('/chat/', (req, res) => {
     noCacheHeaders(res);
     res.redirect(302, '/chat');
@@ -803,7 +804,7 @@ app.use((err, req, res, _next) => {
     (req.log || logger)[logMethod]({
         status,
         message: err.message,
-        url: req.originalUrl || req.url,
+        url: scrubUrl(req.originalUrl || req.url),
         method: req.method,
         user: req.user ? req.user.username : 'anonymous',
         stack: status >= 500 ? err.stack : undefined
@@ -816,7 +817,7 @@ app.use((err, req, res, _next) => {
                 errorId: req.id || req.headers?.['x-request-id'] || '',
                 code: err.code || `HTTP_${status}`,
                 message: err.message,
-                url: req.originalUrl || req.url,
+                url: scrubUrl(req.originalUrl || req.url),
                 method: req.method
             }));
         } catch (logErr) {

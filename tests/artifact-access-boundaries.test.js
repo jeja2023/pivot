@@ -13,8 +13,9 @@ test('评论和交互必须先检查访问权，非公开分享不能访问', as
     require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: {
         queryOne: async sql => {
             if (sql.includes('agent_artifact_shares')) return { id: 's', artifact_id: 'a', visibility };
+            if (sql.includes('FROM users')) return { id: 1, status: 'active' };
             if (sql.includes('SELECT id FROM agent_artifacts')) return allowed ? { id: 'a' } : null;
-            if (sql.includes('SELECT * FROM agent_artifacts')) return { id: 'a', user_id: '1', type: 'html', status: 'active' };
+            if (sql.includes('FROM agent_artifacts')) return { id: 'a', user_id: '1', type: 'html', status: 'active' };
             if (sql.includes('COUNT')) return { count: 0 };
             return null;
         },

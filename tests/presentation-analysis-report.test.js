@@ -78,10 +78,19 @@ test('共享来源撤回后，个人汇报、历史版本和已签发投屏会�
     const remote = await service.createPresentationRemoteSession(viewer, presentation.id);
     assert.ok(await service.getPresentationVersion(viewer, presentation.id, 1));
     assert.ok(await service.getPresentationRemoteState(remote.token));
+    const manager = new (require('../server/services/agent-runtime/artifact-manager').ArtifactManager)();
+    await assert.rejects(manager.share(presentation.artifactId, viewer), error => error.code === 'ARTIFACT_PUBLIC_SOURCE_DENIED');
+    const oldShare = await queryOne("INSERT INTO agent_artifact_shares(artifact_id,visibility) VALUES (?,'public') RETURNING id", [presentation.artifactId]);
+    await assert.rejects(manager.getShared(oldShare.id), error => error.code === 'ARTIFACT_PUBLIC_SOURCE_DENIED');
     await execute("UPDATE analysis_datasets SET scope='personal',allowed_user_ids='' WHERE id=?", [dataset.id]);
     await assert.rejects(service.getPresentation(viewer, presentation.id), error => error.status === 404);
     await assert.rejects(service.getPresentationVersion(viewer, presentation.id, 1), error => error.status === 404);
     await assert.rejects(service.getPresentationRemoteState(remote.token), error => error.status === 404);
+    for (const operation of [() => manager.get(presentation.artifactId, viewer), () => manager.getVersions(presentation.artifactId, viewer),
+        () => manager.getShared(oldShare.id), () => manager.update(presentation.artifactId, viewer, { content: '{}' })]) {
+        await assert.rejects(operation(), error => [403, 404].includes(error.status));
+    }
+    assert.equal((await manager.list(viewer)).artifacts.some(item => Number(item.id) === Number(presentation.artifactId)), false);
 });
 
 test('真实分析图表到PPT可重复接续、导出原生图表和明细，跨账号与来源变更均阻止读取', { timeout: 120000 }, async () => {

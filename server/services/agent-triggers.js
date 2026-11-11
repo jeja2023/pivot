@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { selectNextWatermark, scanFileBatch } = require('./automation-source-cursor');
 const { query, queryOne, execute } = require('../db/client');
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
@@ -506,27 +507,24 @@ async function pollFileTrigger(trigger) {
         await recordTriggerError(trigger.id, err.message);
         return [];
     }
-    if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    const directoryStat = await fs.promises.stat(directory).catch(() => null);
+    if (!directoryStat?.isDirectory()) {
         await recordTriggerError(trigger.id, '监听目录不存在或不是目录。');
         return [];
     }
 
     const extensions = Array.isArray(config.extensions) ? config.extensions : [];
-    const entries = fs.readdirSync(directory, { withFileTypes: true })
-        .filter(entry => entry.isFile())
-        .slice(0, MAX_FILE_SCAN)
-        .filter(entry => {
-            if (!extensions.length) return true;
-            return extensions.includes(path.extname(entry.name).replace(/^\./, '').toLowerCase());
-        });
+    const entries = await scanFileBatch(directory, { cursor: trigger.watermark, extensions, limit: MAX_FILE_SCAN });
 
     const created = [];
+    let cursor = '';
     for (const entry of entries) {
         if (created.length >= MAX_BATCH_PER_POLL) break;
+        cursor = entry.name;
         const filePath = path.join(directory, entry.name);
         let stat = null;
         try {
-            stat = fs.statSync(filePath);
+            stat = await fs.promises.stat(filePath);
         } catch (_err) {
             continue;
         }
@@ -554,6 +552,7 @@ async function pollFileTrigger(trigger) {
             continue;
         }
     }
+    if (cursor) await execute('UPDATE agent_workflow_triggers SET watermark = ?, updated_at = ? WHERE id = ? AND claim_token = ? AND status = ?', [cursor, getBeijingTimestamp(), trigger.id, trigger.claim_token, 'active']);
     return created;
 }
 
@@ -590,13 +589,7 @@ async function pollDatabaseTrigger(trigger, executeTool) {
     if (!rows.length) return [];
 
     const watermarkField = config.watermarkField || 'updated_at';
-    const watermarkValues = rows
-        .map(row => row?.[watermarkField])
-        .filter(value => value !== undefined && value !== null && String(value).trim() !== '');
-    const numericValues = watermarkValues.map(value => Number(value)).filter(Number.isFinite);
-    const nextWatermark = (numericValues.length === watermarkValues.length && numericValues.length)
-        ? String(Math.max(...numericValues))
-        : watermarkValues.map(value => String(value)).sort((a, b) => a.localeCompare(b)).pop() || watermark;
+    const nextWatermark = selectNextWatermark(rows.map(row => row?.[watermarkField]), watermark);
 
     const dedupeKey = `trigger:${trigger.id}:${crypto.createHash('sha256').update(`${nextWatermark}:${rows.length}`).digest('hex').slice(0, 32)}`;
     try {

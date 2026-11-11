@@ -11,8 +11,52 @@
             this.currentArtifact = null;
             this.activeTab = 'preview';
             this.isFullscreen = false;
+            this.epoch = 0;
+            this.sequences = Object.create(null);
+            this.openedId = '';
+            this.openedAccount = '';
+            this.returnFocus = null;
+            this.sourceReady = false;
             this.renderer = new window.Pivot.ArtifactRenderer();
             this.initDOM();
+            window.addEventListener('pagehide', () => this.close());
+            document.addEventListener('pivot:app-shown', () => { if (this.openedAccount && this.openedAccount !== this.account()) this.close(); });
+        }
+
+        account() { return String(window.Pivot?.legacy?.currentUser?.id || 'current-page'); }
+
+        capture(channel) {
+            const epoch = this.epoch, account = this.account(), id = this.openedId;
+            const sequence = (this.sequences[channel] || 0) + 1;
+            this.sequences[channel] = sequence;
+            return () => epoch === this.epoch && account === this.account() && account === this.openedAccount && id === this.openedId
+                && sequence === this.sequences[channel] && this.modalEl.classList.contains('active');
+        }
+
+        clearContent() {
+            this.epoch++;
+            this.currentArtifact = null;
+            this.sourceReady = false;
+            for (const id of ['preview', 'versions-container', 'comments-list']) {
+                const node = this.modalEl?.querySelector(`#pivot-artifact-${id === 'preview' ? 'pane-preview' : id}`);
+                node?.replaceChildren();
+            }
+            for (const id of ['source-editor', 'comment-input']) {
+                const node = this.modalEl?.querySelector(`#pivot-artifact-${id}`);
+                if (node) node.value = '';
+            }
+            this.renderer.currentArtifact = null;
+            this.renderer.container = null;
+        }
+
+        begin(id) {
+            this.initDOM();
+            if (!this.modalEl.contains(document.activeElement)) this.returnFocus = document.activeElement;
+            this.clearContent();
+            this.openedId = String(id || 'preview');
+            this.openedAccount = this.account();
+            this.modalEl.classList.add('active');
+            this.modalEl.querySelector('#pivot-artifact-action-close')?.focus();
         }
 
         /**
@@ -30,6 +74,7 @@
             overlay.className = 'pivot-artifact-modal-overlay';
             overlay.setAttribute('role', 'dialog');
             overlay.setAttribute('aria-modal', 'true');
+            overlay.setAttribute('aria-labelledby', 'pivot-artifact-header-title');
 
             PivotSafeHtml.setHtml(overlay, `
                 <div class="pivot-artifact-drawer">
@@ -137,6 +182,16 @@
          * 绑定各种视图交互事件
          */
         bindEvents() {
+            this.modalEl.addEventListener('keydown', event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.close(); return; }
+                if (event.key !== 'Tab') return;
+                const controls = Array.from(this.modalEl.querySelectorAll('button:not([disabled]), textarea, input, a[href], [tabindex="0"]'))
+                    .filter(node => node.offsetParent !== null);
+                if (!controls.length) return;
+                const first = controls[0], last = controls.at(-1);
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            });
             // 点击遮罩外部关闭
             this.modalEl.addEventListener('click', (e) => {
                 if (e.target === this.modalEl) {
@@ -218,8 +273,9 @@
             // 加载对应数据
             if (tabName === 'source') {
                 const editor = this.modalEl.querySelector('#pivot-artifact-source-editor');
-                if (editor && this.currentArtifact) {
+                if (editor && this.currentArtifact && !this.sourceReady) {
                     editor.value = this.currentArtifact.content || '';
+                    this.sourceReady = true;
                 }
             } else if (tabName === 'versions') {
                 this.loadVersions();
@@ -233,8 +289,8 @@
          * @param {string} artifactId 产物 UUID
          */
         async open(artifactId) {
-            this.initDOM();
-            this.modalEl.classList.add('active');
+            this.begin(artifactId);
+            const current = this.capture('open');
             this.switchTab('preview');
 
             const titleEl = this.modalEl.querySelector('#pivot-artifact-header-title');
@@ -246,12 +302,14 @@
                     : fetch(`/api/artifacts/${encodeURIComponent(artifactId)}`));
                 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) {
                     throw new Error(data.error || '获取产物失败');
                 }
 
                 this.setArtifact(data.data);
             } catch (err) {
+                if (!current()) return;
                 console.error('加载 Artifact 失败:', err);
                 const previewPane = this.modalEl.querySelector('#pivot-artifact-pane-preview');
                 PivotSafeHtml.setHtml(previewPane, `
@@ -267,8 +325,7 @@
          * 直接用数据对象打开预览（免接口先览）
          */
         openPreview(artifactData) {
-            this.initDOM();
-            this.modalEl.classList.add('active');
+            this.begin(artifactData.id);
             this.setArtifact(artifactData);
             this.switchTab('preview');
         }
@@ -277,7 +334,10 @@
          * 设置并渲染产物
          */
         setArtifact(artifact) {
+            const editor = this.modalEl.querySelector('#pivot-artifact-source-editor');
+            if (this.sourceReady && editor?.value === this.currentArtifact?.content) editor.value = artifact.content || '';
             this.currentArtifact = artifact;
+            if (this.openedAccount && this.openedAccount !== this.account()) { this.close(); return; }
 
             const titleEl = this.modalEl.querySelector('#pivot-artifact-header-title');
             const versionPill = this.modalEl.querySelector('#pivot-artifact-version-pill');
@@ -298,9 +358,11 @@
          * 关闭视图
          */
         close() {
-            if (this.modalEl) {
-                this.modalEl.classList.remove('active');
-            }
+            this.clearContent();
+            this.openedId = '';
+            this.modalEl?.classList.remove('active');
+            if (this.returnFocus?.isConnected) this.returnFocus.focus();
+            this.returnFocus = null;
         }
 
         /**
@@ -314,27 +376,31 @@
 
             const editor = this.modalEl.querySelector('#pivot-artifact-source-editor');
             const newContent = editor.value;
+            const artifact = this.currentArtifact;
+            const current = this.capture('write');
 
             try {
                 const res = await (typeof apiFetch === 'function'
                     ? apiFetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ content: newContent })
+                        body: JSON.stringify({ content: newContent, expectedVersion: artifact.version })
                     })
                     : fetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ content: newContent })
+                        body: JSON.stringify({ content: newContent, expectedVersion: artifact.version })
                     }));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '保存失败');
 
                 if (typeof showToast === 'function') showToast('已保存为新版本', 'success');
                 this.setArtifact(data.data);
-                this.switchTab('preview');
+                if (editor.value === newContent) this.switchTab('preview');
             } catch (err) {
+                if (!current()) return;
                 console.error('保存新版本失败:', err);
                 if (typeof showToast === 'function') showToast(err.message, 'error');
             }
@@ -345,6 +411,7 @@
          */
         async loadVersions() {
             if (!this.currentArtifact || !this.currentArtifact.id) return;
+            const current = this.capture('versions');
             const container = this.modalEl.querySelector('#pivot-artifact-versions-container');
             PivotSafeHtml.setHtml(container, '<div class="pivot-artifact-placeholder">正在获取版本列表...</div>');
 
@@ -354,6 +421,7 @@
                     : fetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}/versions`));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '加载版本失败');
 
                 const versions = data.data || [];
@@ -383,6 +451,7 @@
                     });
                 });
             } catch (err) {
+                if (!current()) return;
                 PivotSafeHtml.setHtml(container, `<div class="pivot-artifact-error">${this.escapeHtml(err.message)}</div>`);
             }
         }
@@ -391,6 +460,9 @@
          * 回滚到指定版本
          */
         async restoreVersion(verNum) {
+            if (!this.currentArtifact?.id) return;
+            const artifact = this.currentArtifact, current = this.capture('write');
+            const editor = this.modalEl.querySelector('#pivot-artifact-source-editor'), draft = editor?.value;
             if (!confirm(`确定要回滚到版本 v${verNum} 吗？当前最新内容将自动归档。`)) return;
 
             try {
@@ -398,21 +470,23 @@
                     ? apiFetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}/restore`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ version: verNum })
+                        body: JSON.stringify({ version: verNum, expectedVersion: artifact.version })
                     })
                     : fetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}/restore`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ version: verNum })
+                        body: JSON.stringify({ version: verNum, expectedVersion: artifact.version })
                     }));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '回滚失败');
 
                 if (typeof showToast === 'function') showToast(`已成功恢复至版本 v${verNum}`, 'success');
                 this.setArtifact(data.data);
-                this.switchTab('preview');
+                if (editor?.value === draft) this.switchTab('preview');
             } catch (err) {
+                if (!current()) return;
                 console.error('回滚版本失败:', err);
                 if (typeof showToast === 'function') showToast(err.message, 'error');
             }
@@ -423,6 +497,7 @@
          */
         async loadComments() {
             if (!this.currentArtifact || !this.currentArtifact.id) return;
+            const current = this.capture('comments');
             const list = this.modalEl.querySelector('#pivot-artifact-comments-list');
             PivotSafeHtml.setHtml(list, '<div class="pivot-artifact-placeholder">正在获取讨论记录...</div>');
 
@@ -432,6 +507,7 @@
                     : fetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}/comments`));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '加载评论失败');
 
                 const comments = data.data || [];
@@ -450,6 +526,7 @@
                     </div>
                 `).join(''));
             } catch (err) {
+                if (!current()) return;
                 PivotSafeHtml.setHtml(list, `<div class="pivot-artifact-error">${this.escapeHtml(err.message)}</div>`);
             }
         }
@@ -459,6 +536,7 @@
          */
         async handleAddComment() {
             if (!this.currentArtifact || !this.currentArtifact.id) return;
+            const current = this.capture('comment-write');
             const input = this.modalEl.querySelector('#pivot-artifact-comment-input');
             const content = input.value.trim();
             if (!content) return;
@@ -477,11 +555,13 @@
                     }));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '发送评论失败');
 
-                input.value = '';
+                if (input.value.trim() === content) input.value = '';
                 await this.loadComments();
             } catch (err) {
+                if (!current()) return;
                 console.error('发送评论失败:', err);
                 if (typeof showToast === 'function') showToast(err.message, 'error');
             }
@@ -496,6 +576,7 @@
                 return;
             }
 
+            const current = this.capture('share');
             try {
                 const res = await (typeof apiFetch === 'function'
                     ? apiFetch(`/api/artifacts/${encodeURIComponent(this.currentArtifact.id)}/share`, {
@@ -510,14 +591,17 @@
                     }));
 
                 const data = await res.json();
+                if (!current()) return;
                 if (!res.ok || !data.success) throw new Error(data.error || '创建分享链接失败');
 
                 const shareUrl = `${window.location.origin}${data.data.shareUrl}`;
                 await navigator.clipboard.writeText(shareUrl);
+                if (!current()) return;
                 if (typeof showToast === 'function') {
                     showToast('公开分享链接已生成并复制到剪贴板！', 'success');
                 }
             } catch (err) {
+                if (!current()) return;
                 console.error('分享失败:', err);
                 if (typeof showToast === 'function') showToast(err.message, 'error');
             }

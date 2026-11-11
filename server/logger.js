@@ -54,7 +54,7 @@ const redactFields = [
 ];
 
 // 敏感查询参数：附件访问令牌、api_key 等不应随 URL 落入访问日志
-const SENSITIVE_QUERY_KEYS = /^(token|access_token|api_key|apikey|key|signature|sig|secret)$/i;
+const SENSITIVE_QUERY_KEYS = /^(token|access_token|refresh_token|api_key|apikey|key|signature|sig|secret|password)$/i;
 
 function safeDecodeQueryKey(value) {
     try {
@@ -238,4 +238,4 @@ const httpLogger = pinoHttp({
 });
 
 // 导出
-module.exports = { BEIJING_TIMESTAMP_FORMATTER, formatBeijingLogTimestamp, logger, httpLogger };
+module.exports = { BEIJING_TIMESTAMP_FORMATTER, formatBeijingLogTimestamp, logger, httpLogger, scrubUrl };

@@ -18,7 +18,6 @@ const {
     buildSemanticSubBatch,
     mergeSemanticBatchResults
 } = require('./semantic-batching');
-const { ensureSemanticQuota } = require('./semantic-quota');
 const {
     analysisId,
     getDatasetForUser,
@@ -615,24 +614,17 @@ async function analyzeSemanticBatchSegments({ job, batch, segments, options, use
 
     const payload = buildSemanticSubBatch(batch, segments);
     const messages = buildBatchMessages(job, payload, { totalBatches: options.totalBatches });
-    const releaseQuota = await ensureSemanticQuota(user, model, messages, maxOutputTokens);
-    let response;
-    try {
-        response = await callModelTextWithBudget({
-            modelCfg: model,
-            user,
-            messages,
-            source: 'data_analysis_semantic_batch',
-            maxTokens: maxOutputTokens,
-            maxOutputTokensCap: maxOutputTokens,
-            temperature: 0.1,
-            signal: options.signal || null,
-            timeout: SEMANTIC_REQUEST_TIMEOUT_MS
-        });
-    } finally {
-        // 用量已在调用内同步入队，此刻释放预留不会留下额度空窗。
-        releaseQuota();
-    }
+    const response = await callModelTextWithBudget({
+        modelCfg: model,
+        user,
+        messages,
+        source: 'data_analysis_semantic_batch',
+        maxTokens: maxOutputTokens,
+        maxOutputTokensCap: maxOutputTokens,
+        temperature: 0.1,
+        signal: options.signal || null,
+        timeout: SEMANTIC_REQUEST_TIMEOUT_MS
+    });
     try {
         const normalized = normalizeBatchResult(response.content, segments);
         return {
@@ -667,23 +659,18 @@ async function synthesizeSemanticReport(job, batchRows, user, model, { signal = 
             content: `任务要求：${job.instruction}\n模型批次预算：${options.batchTokens || DEFAULT_BATCH_TOKEN_BUDGET}\n全部批次摘要：\n${summaries}\n\n请输出中文最终报告。`
         }
     ];
-    const releaseQuota = await ensureSemanticQuota(user, model, messages, options.maxOutputTokens || 1200);
-    try {
-        const output = await callModelTextWithBudget({
-            modelCfg: model,
-            user,
-            messages,
-            source: 'data_analysis_semantic_summary',
-            maxTokens: options.maxOutputTokens || 1200,
-            maxOutputTokensCap: options.maxOutputTokens || 1200,
-            temperature: 0.15,
-            signal,
-            timeout: SEMANTIC_REQUEST_TIMEOUT_MS
-        });
-        return output.content;
-    } finally {
-        releaseQuota();
-    }
+    const output = await callModelTextWithBudget({
+        modelCfg: model,
+        user,
+        messages,
+        source: 'data_analysis_semantic_summary',
+        maxTokens: options.maxOutputTokens || 1200,
+        maxOutputTokensCap: options.maxOutputTokens || 1200,
+        temperature: 0.15,
+        signal,
+        timeout: SEMANTIC_REQUEST_TIMEOUT_MS
+    });
+    return output.content;
 }
 
 async function processSemanticBatch({ job, user, model, batches, options, stopSignal, deferredBatchIds = new Set() }) {

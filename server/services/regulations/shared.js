@@ -14,6 +14,7 @@ const { getChunkSizeForDocType } = require('../rag-config');
 const { generateEmbeddings, cosineSimilarity, formatEmbeddingQuery } = require('../rag-index/embedding-client');
 const { toProjectRelativePath } = require('../../security');
 const { clearDirSizeCache } = require('../dir-size-cache');
+const { normalizeRegulationText } = require('./extraction');
 
 const projectRoot = path.resolve(__dirname, '../../..');
 const uploadRoot = process.env.PIVOT_UPLOAD_DIR || process.env.UPLOAD_DIR
@@ -37,16 +38,6 @@ const REGULATION_CN_SECTION_RE = /^((?:第[〇零一二三四五六七八九十�
 function normalizeRegulationId(value) {
     const id = Number.parseInt(value, 10);
     return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
-function normalizeRegulationText(value, fallback = '') {
-    return String(value || fallback || '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .replace(/\u0000/g, '')
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
 }
 
 function normalizeRegulationField(value, maxLength = 255) {
@@ -232,11 +223,6 @@ async function saveRegulationUploadedFile(file, documentId) {
     };
 }
 
-async function readRegulationTextFromPath(filePath, originalName = '') {
-    const text = await extractDocumentTextWithOcrFallback(filePath, '', originalName || filePath, { maxOcrPages: 10, maxChars: getKnowledgeLimits().extractMaxChars });
-    return truncateExtractedText(text, getKnowledgeLimits().extractMaxChars);
-}
-
 // \u6587\u4ef6\u540d\u5c3e\u90e8\u300c\u7248\u672c\u53f7\u300d\u8bc6\u522b\uff1a\u6cd5\u5f8b\u6587\u6863\u5e38\u4ee5\u300c\u6cd5\u5f8b\u540d\u79f0 + \u7248\u672c\u65e5\u671f\u300d\u547d\u540d\uff08\u5982 \u4e2d\u534e\u4eba\u6c11\u5171\u548c\u56fd\u516c\u53f8\u6cd5_20240101.doc\uff09\u3002
 // \u65e5\u671f\u4e3b\u4f53\u540c\u65f6\u652f\u6301\u7d27\u51d1(20240101)\u4e0e\u5206\u9694(2024-01-01 / 2024.01.01 / 2024/01/01 / 2024\u5e7401\u670801\u65e5)\u7b49\u5e38\u89c1\u5199\u6cd5\u3002
 const REG_FILENAME_DATE_BODY = '(?:19|20)\\d{2}[-.\\/\\u5e74]?(?:0[1-9]|1[0-2])[-.\\/\\u6708]?(?:0[1-9]|[12]\\d|3[01])\\u65e5?';
@@ -326,7 +312,6 @@ module.exports = {
     resolveRegulationStoredPath,
     buildRegulationSourcePath,
     saveRegulationUploadedFile,
-    readRegulationTextFromPath,
     deriveRegulationTitleFromFilename,
     deriveRegulationVersionLabelFromFilename
 };

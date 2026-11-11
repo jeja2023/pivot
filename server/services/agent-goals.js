@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { selectNextWatermark, scanFileBatch } = require('./automation-source-cursor');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { getPrimaryTenantId } = require('./enterprise-access');
@@ -516,17 +517,26 @@ function isGoalPathAllowed(directory) {
 
 async function pollFileGoal(row, user) {
     const trigger = parseJson(row.trigger_spec, {});
-    if (!isGoalPathAllowed(trigger.directory) || !fs.existsSync(trigger.directory)) return [];
-    const entries = fs.readdirSync(trigger.directory, { withFileTypes: true }).filter(entry => entry.isFile()).filter(entry => !trigger.extensions?.length || trigger.extensions.includes(path.extname(entry.name).replace(/^\./, '').toLowerCase())).slice(0, 100);
+    if (!isGoalPathAllowed(trigger.directory)) return [];
+    let entries;
+    try { entries = await scanFileBatch(trigger.directory, { cursor: trigger.watermark, extensions: trigger.extensions, limit: 100 }); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
     const created = [];
-    for (const entry of entries) {
-        const filePath = path.join(trigger.directory, entry.name);
-        const stat = fs.statSync(filePath);
-        if (Date.now() - stat.mtimeMs < Number(trigger.stableSeconds || 5) * 1000) continue;
-        const fingerprint = `${entry.name}:${stat.size}:${stat.mtimeMs}`;
-        const key = `goal:${row.id}:file:${crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 32)}`;
-        const run = await runAgentGoalNow(row, user, { triggerType: 'file', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'filePath']: filePath, fileName: entry.name, fileSize: stat.size, modifiedAt: getBeijingTimestamp(new Date(stat.mtimeMs)) } });
-        if (!run?.deduped) created.push(run);
+    let cursor = '';
+    try {
+        for (const entry of entries) {
+            cursor = entry.name;
+            const filePath = path.join(trigger.directory, entry.name);
+            let stat;
+            try { stat = await fs.promises.stat(filePath); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+            if (Date.now() - stat.mtimeMs < Number(trigger.stableSeconds || 5) * 1000) continue;
+            const fingerprint = `${entry.name}:${stat.size}:${stat.mtimeMs}`;
+            const key = `goal:${row.id}:file:${crypto.createHash('sha256').update(fingerprint).digest('hex').slice(0, 32)}`;
+            const run = await runAgentGoalNow(row, user, { triggerType: 'file', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'filePath']: filePath, fileName: entry.name, fileSize: stat.size, modifiedAt: getBeijingTimestamp(new Date(stat.mtimeMs)) } });
+            if (!run?.deduped) created.push(run);
+        }
+    } finally {
+        if (cursor) await execute("UPDATE agent_goals SET trigger_spec = jsonb_set(trigger_spec, '{watermark}', to_jsonb(?::text)), updated_at = ?::timestamptz WHERE id = ? AND claim_token = ? AND version = ? AND status = 'active'", [cursor, getBeijingTimestamp(), row.id, row.claim_token, row.version]);
     }
     return created;
 }
@@ -539,8 +549,7 @@ async function pollDatabaseGoal(row, user) {
     const result = await goalDataRunner(trigger.connectionId, sql, user);
     const rows = Array.isArray(result?.rows) ? result.rows : Array.isArray(result) ? result : Array.isArray(result?.structuredContent?.rows) ? result.structuredContent.rows : [];
     if (!rows.length) return [];
-    const values = rows.map(item => item?.[trigger.watermarkField]).filter(value => value !== undefined && value !== null).map(String).sort();
-    const nextWatermark = values[values.length - 1] || watermark;
+    const nextWatermark = selectNextWatermark(rows.map(item => item?.[trigger.watermarkField]), watermark);
     const key = `goal:${row.id}:database:${crypto.createHash('sha256').update(`${nextWatermark}:${rows.length}`).digest('hex').slice(0, 32)}`;
     const run = await runAgentGoalNow(row, user, { triggerType: 'database', claimToken: row.claim_token, triggerKey: key, metadata: { [trigger.inputName || 'rows']: rows, watermark: nextWatermark, rowCount: rows.length } });
     if (!run?.deduped) {

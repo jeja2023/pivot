@@ -43,9 +43,10 @@
     },
     {
       "file": "server/services/agent-artifacts.js",
-      "count": 26,
-      "rationale": "嵌入事务的版本更新只允许当前所有者、未删除且不关联运行的独立产物，行锁后读取版本序号并在同一executor写回；知识运行产物与思维导图不能借此路径扩权。所有ID参数绑定。",
-      "verification": "presentation-storyline-postgres验证冲突回滚，presentation-workbench-integration与artifact-access-boundaries验证产物归属及共享边界。"
+      "count": 29,
+      "rationale": "统一产物版本在所有者及未删除条件的行锁内分配递增版本，兼容旧当前快照并同步当前指针；版本元数据与内容参数化写入，保留业务来源保护和预期版本冲突检查。",
+      "verification": "batch-3：真实 PostgreSQL 初始版本、并发冲突、旧记录补齐、回滚及 PPT 来源撤回回归 14 项通过；迁移及完整测试另行验证。",
+      "reviewedAt": "2026-11-10"
     },
     {
       "file": "server/repositories/presentation-storyline.js",
@@ -217,9 +218,10 @@
     },
     {
       "file": "server/services/agent-runtime/artifact-manager.js",
-      "count": 30,
-      "rationale": "新增参数化查询验证产物所有者或公开状态，以及父评论属于同一产物，阻断跨用户评论和交互访问。",
-      "verification": "tests/artifact-access-boundaries.test.js 覆盖越权拒绝、公开分享校验及授权交互。"
+      "count": 24,
+      "rationale": "通用产物读写复用当前主体与来源访问策略，版本修改委托既有统一版本服务。创建校验任务归属、父产物访问，元数据与关联参数化更新；列表限量，公开读取复核所有者、来源和有效期。",
+      "verification": "batch-3：真实版本及 HTTP 分享、403/404/409、PPT 撤权回归通过。",
+      "reviewedAt": "2026-11-10"
     },
     {
       "file": "server/repositories/model-status.js",
@@ -790,9 +792,10 @@
     },
     {
       "file": "server/services/agent-goals.js",
-      "count": 35,
-      "rationale": "持续目标回执在同一事务锁定运行和目标，检查当前目标版本、活动状态、运行终态和真实验收记录；使用绑定参数更新失败计数及幂等回执标记，旧版本和重复回执不能改变当前目标。",
-      "verification": "tests/agent-goal-kinds.test.js 和 tests/agent-channel-delivery-reliability.test.js 验证旧版本、暂停、重复回执和失败熔断；tests/agent-goal-context.test.js 验证同版本接续。"
+      "count": 36,
+      "rationale": "文件扫描使用有界可回绕游标，游标只在目标仍活动、修订未变且 claim_token 相同条件下参数化推进；数据库水位线继续在创建幂等任务后提交。没有拼接请求输入为 SQL。",
+      "verification": "batch-2：游标、水位线、既有自动化与安全回归 178 项通过。",
+      "reviewedAt": "2026-11-10"
     },
     {
       "file": "server/repositories/agent-projects.js",
@@ -805,6 +808,27 @@
       "count": 1,
       "rationale": "调用方先以真实任务绑定的发布版本检查当前use权限、来源和签名，再按服务端版本标识读取不可变包路径；客户端路径不能进入该查询，内容读取后再次复核发布版本。",
       "verification": "tests/agent-skill-resources.test.js 和 tests/agent-skill-resource-import.test.js 覆盖版本变化、暂停、读取中撤权、路径越界、内容摘要和真实个人发布读取。"
+    },
+    {
+      "file": "server/services/agent-triggers.js",
+      "count": 29,
+      "rationale": "文件监听游标仅在相同触发器领取令牌和活动状态下提交，保持每轮扫描与派发预算；数据库触发查询共用精确水位线比较，已有任务去重和租约边界保留。",
+      "verification": "batch-2：自动化触发和文件游标回归通过；新增语句只更新固定字段并使用绑定参数。",
+      "reviewedAt": "2026-11-10"
+    },
+    {
+      "file": "server/services/artifact-source-access.js",
+      "count": 1,
+      "rationale": "通用产物访问按原产物所有者读取当前未删除账号，业务来源和任务知识权限继续复用现有校验，公开入口不能借所有权泄漏受治理内容。只有参数化主体 ID 的读取。",
+      "verification": "batch-3：来源撤权、匿名分享拒绝、旧链接读取、HTTP 权限状态回归通过。",
+      "reviewedAt": "2026-11-10"
+    },
+    {
+      "file": "server/services/regulations/mutations.js",
+      "count": 37,
+      "rationale": "法规入库在同一版本事务内保存服务端验证的来源摘要、完整性与页跨度 JSON；输入缺页或失败时拒绝写入 ready 版本，更新仅绑定当前新版本 ID。",
+      "verification": "batch-2：法规完整性与真实两页 PDF 定位回归通过；覆盖字段迁移后另行重跑法规安全专项。",
+      "reviewedAt": "2026-11-10"
     }
   ]
 }

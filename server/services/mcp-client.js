@@ -251,7 +251,7 @@ function recordMcpCallLog({ user, serverId, toolName, source = 'manual', status 
             durationMs: Math.max(Number(durationMs) || 0, 0),
             inputPreview: previewValue(auditInput),
             outputPreview: status === 'error' ? '' : previewValue(auditOutput),
-            errorMessage: status === 'error' ? String(error?.message || error || '').slice(0, 1000) : '',
+            errorMessage: status === 'error' ? previewValue(error?.message || error || '', 1000) : '',
             createdAt: getBeijingTimestamp()
         });
     } catch (e) {

@@ -9,7 +9,8 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 单库串行与故障组隔离保留全部门禁，给完整回归和覆盖率留出有界时间。
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

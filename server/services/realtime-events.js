@@ -45,6 +45,7 @@ function removeClient(userId, client) {
 }
 
 function subscribeUserEvents(user, res, options = {}) {
+    if (res.writableEnded || res.destroyed) return () => {};
     const userId = normalizeUserId(user);
     if (!userId) {
         res.status(401).end();

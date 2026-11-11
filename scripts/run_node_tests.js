@@ -1,8 +1,8 @@
 const cp = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('node:crypto');
+const { resolveTestTempRoot, localTestEnvironment, assertTestStorage } = require('./test_support/test-environment');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const root = path.resolve(__dirname, '..');
@@ -48,23 +48,27 @@ if (!databaseUrl) {
 }
 
 function normalizeWorkerCount() {
-    const configured = Number.parseInt(process.env.PIVOT_NODE_TEST_WORKERS || '2', 10);
-    const requested = Number.isFinite(configured) ? configured : 2;
+    const configured = Number.parseInt(process.env.PIVOT_NODE_TEST_WORKERS || '1', 10);
+    const requested = Number.isFinite(configured) ? configured : 1;
     // 覆盖率阈值需要在同一 Node 进程聚合，分组运行会把百分比分散为多个不等价的报告。
     if (nodeTestOptions.includes('--experimental-test-coverage')) return 1;
     if (requestedTestFiles.length) return 1;
+    if (requested > 1) throw new Error('当前测试共用一个 PostgreSQL 数据库，schema 不能隔离 advisory lock。请使用 PIVOT_NODE_TEST_WORKERS=1；并行验收应使用独立数据库。');
     return Math.min(Math.max(requested, 1), 4, testFiles.length || 1);
 }
 
 function createWorkerEnvironment(workerIndex) {
-    const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), `pivot-node-tests-${workerIndex}-`));
+    const testRoot = fs.mkdtempSync(path.join(resolveTestTempRoot(), `pivot-node-tests-${workerIndex}-`));
     const testSchema = `pivot_test_${process.pid}_${workerIndex}_${Date.now().toString(36)}`;
     const securityKey = path.join(testRoot, 'security-journal.key');
     fs.writeFileSync(securityKey, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
     return {
         testRoot,
         env: {
-            ...process.env,
+            ...localTestEnvironment(),
+            TEMP: testRoot,
+            TMP: testRoot,
+            TMPDIR: testRoot,
             TZ: 'Asia/Shanghai',
             PG_TIMEZONE: 'Asia/Shanghai',
             DATA_DIR: path.join(testRoot, 'data'),
@@ -151,6 +155,18 @@ function splitTestGroups(files, workerCount) {
 
 async function main() {
     const workerCount = normalizeWorkerCount();
+    const tempRoot = resolveTestTempRoot();
+    if (!requestedTestFiles.length || testFiles.some(file => /bi-modeling-|data-analysis/.test(file))) assertTestStorage(tempRoot);
+    console.log(`测试环境：Node ${process.version}，临时目录 ${tempRoot}，单库串行，分析执行器 ${localTestEnvironment().DATA_ANALYSIS_MODEL_RUNTIME}。`);
+    const isolated = testFiles.filter(file => /bi-modeling-(?:security-journal|physical-restore|faults|runtime-faults|readiness|capacity|catalog|load)\.test\.js$/.test(file));
+    const regular = testFiles.filter(file => !isolated.includes(file));
+    // 故障注入会改变谱系或捕获保护；容量目录还会积累大量安全记录，均以独立 schema 验收。
+    if (!nodeTestOptions.includes('--experimental-test-coverage') && isolated.length) {
+        const results = [];
+        if (regular.length) results.push(await runTestGroup(regular, 1));
+        for (let index = 0; index < isolated.length; index++) results.push(await runTestGroup([isolated[index]], index + 2));
+        return results.some(status => status !== 0) ? 1 : 0;
+    }
     const groups = splitTestGroups(testFiles, workerCount);
     if (groups.length > 1) console.log(`Node 测试将使用 ${groups.length} 个隔离 PostgreSQL schema 并行分组执行。`);
     const results = await Promise.all(groups.map((files, index) => runTestGroup(files, index + 1)));

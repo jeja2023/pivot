@@ -26,6 +26,7 @@ const {
 const { asyncHandler } = require('../http');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const crypto = require('crypto');
+const { revokeRealtimeSessions } = require('../services/realtime-session');
 const { hashApiKey, previewApiKey } = require('../auth');
 const { getApiAccessSetting } = require('../services/api-access-settings');
 const { getBeijingTimestamp } = require('../time');
@@ -155,6 +156,7 @@ function createAuthRouter({
             const auth = await resolveAuthenticatedUserAsync(req);
             if (auth?.user) {
                 req.user = auth.user;
+                revokeRealtimeSessions(auth.user.id, { token: auth.token });
                 logAction(req, '用户退出', '退出登录');
             }
         } catch (_) {}
@@ -181,6 +183,7 @@ function createAuthRouter({
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);
         });
         logAction(req, '退出所有设备', '已撤销当前账号的访问令牌和刷新令牌');
+        revokeRealtimeSessions(req.user.id);
         res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
         res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_REFRESH_COOKIE_OPTIONS);
         res.clearCookie(DEVICE_COOKIE_NAME, CLEAR_DEVICE_COOKIE_OPTIONS);

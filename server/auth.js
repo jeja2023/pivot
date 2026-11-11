@@ -350,6 +350,7 @@ async function login(username, password, options = {}) {
             sessionReplaced
         };
     });
+    if (result.sessionReplaced) require('./services/realtime-session').revokeRealtimeSessions(user.id);
     return {
         ...result,
         user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active', created_at: user.created_at })
@@ -360,6 +361,7 @@ async function login(username, password, options = {}) {
 async function refreshTokens(token, options = {}) {
     const tokenHash = hashRefreshToken(token);
     let terminalError = null;
+    let revokedUserId = null;
     const result = await transaction(async trx => {
         // Lock, consume and issue the replacement token in one transaction.
         const refreshTokenData = await trx.queryOne('SELECT * FROM refresh_tokens WHERE token = ? FOR UPDATE', [tokenHash]);
@@ -376,6 +378,7 @@ async function refreshTokens(token, options = {}) {
         if (refreshTokenData.consumed_at) {
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ? AND family_id = ?', [refreshTokenData.user_id, refreshTokenData.family_id || '']);
             await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            revokedUserId = refreshTokenData.user_id;
             terminalError = new Error('检测到刷新令牌重放，当前登录会话已全部撤销，请重新登录。');
             return null;
         }
@@ -385,6 +388,7 @@ async function refreshTokens(token, options = {}) {
         if (singleIpSessionModeEnabled() && (!boundIp || !requestedIp || boundIp !== requestedIp)) {
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [refreshTokenData.user_id]);
             await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            revokedUserId = refreshTokenData.user_id;
             terminalError = new Error('刷新令牌来源 IP 不匹配，当前账号会话已全部撤销，请重新登录。');
             return null;
         }
@@ -392,6 +396,7 @@ async function refreshTokens(token, options = {}) {
         if (boundDeviceId && boundDeviceId !== requestedDeviceId) {
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ? AND family_id = ?', [refreshTokenData.user_id, refreshTokenData.family_id || '']);
             await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [refreshTokenData.user_id]);
+            revokedUserId = refreshTokenData.user_id;
             terminalError = new Error('刷新令牌设备绑定不匹配，当前登录会话已全部撤销，请重新登录。');
             return null;
         }
@@ -409,6 +414,7 @@ async function refreshTokens(token, options = {}) {
         const newRefreshToken = await issueRefreshToken(trx, user.id, refreshTokenData.family_id || crypto.randomUUID(), requestedDeviceId || boundDeviceId, boundIp);
         return { accessToken, refreshToken: newRefreshToken };
     });
+    if (revokedUserId) require('./services/realtime-session').revokeRealtimeSessions(revokedUserId);
     if (terminalError) throw Object.assign(terminalError, { status: 401, code: 'REFRESH_TOKEN_INVALID' });
     return result;
 }

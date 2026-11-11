@@ -9,6 +9,14 @@ const { ArtifactManager } = require('../../services/agent-runtime/artifact-manag
 const { authMiddleware: requireAuth } = require('../../auth');
 
 const artifactManager = new ArtifactManager();
+const { logger } = require('../../logger');
+router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
+function sendArtifactError(res, error, fallback) {
+  const requested = Number(error.status || error.statusCode);
+  const status = [400, 401, 403, 404, 409, 413, 429].includes(requested) ? requested : 500;
+  if (status >= 500) logger.error({ code: error.code || 'ARTIFACT_REQUEST_FAILED' }, fallback);
+  return res.status(status).json({ success: false, error: status < 500 ? error.message : fallback, ...(status < 500 && error.code ? { code: error.code } : {}) });
+}
 
 /**
  * 创建 Artifact
@@ -25,7 +33,7 @@ router.post('/', requireAuth, async (req, res) => {
       });
     }
 
-    const artifact = await artifactManager.create(req.user.id, {
+    const artifact = await artifactManager.create(req.user, {
       title,
       description,
       type,
@@ -40,11 +48,7 @@ router.post('/', requireAuth, async (req, res) => {
       data: artifact
     });
   } catch (error) {
-    console.error('创建 Artifact 失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '创建 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '创建 Artifact 失败');
   }
 });
 
@@ -56,7 +60,7 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const { type, status, runId, limit, offset } = req.query;
 
-    const result = await artifactManager.list(req.user.id, {
+    const result = await artifactManager.list(req.user, {
       type,
       status,
       runId,
@@ -74,11 +78,7 @@ router.get('/', requireAuth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('获取 Artifacts 列表失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '获取 Artifacts 列表失败'
-    });
+    return sendArtifactError(res, error, '获取 Artifacts 列表失败');
   }
 });
 
@@ -103,13 +103,7 @@ router.get('/shared/:shareId', async (req, res) => {
       data: artifact
     });
   } catch (error) {
-    console.error('获取分享 Artifact 失败:', error);
-    const msg = error.message || '';
-    const status = (msg.includes('不存在') || msg.includes('过期')) ? 404 : 500;
-    res.status(status).json({
-      success: false,
-      error: status === 404 ? '分享链接不存在或已过期' : '获取分享 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '获取分享 Artifact 失败');
   }
 });
 
@@ -120,10 +114,10 @@ router.get('/shared/:shareId', async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const artifact = await artifactManager.get(id, req.user.id);
+    const artifact = await artifactManager.get(id, req.user);
 
     // 记录查看事件
-    await artifactManager.recordInteraction(id, req.user.id, {
+    await artifactManager.recordInteraction(id, req.user, {
       type: 'view',
       data: { timestamp: new Date() }
     }).catch(() => {});
@@ -133,12 +127,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       data: artifact
     });
   } catch (error) {
-    console.error('获取 Artifact 失败:', error);
-    const msg = error.message || '';
-    res.status(msg.includes('不存在') ? 404 : 500).json({
-      success: false,
-      error: msg.includes('不存在') ? 'Artifact 不存在或无权访问' : '获取 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '获取 Artifact 失败');
   }
 });
 
@@ -149,13 +138,14 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.put('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, content, metadata } = req.body;
+    const { title, description, content, metadata, expectedVersion } = req.body;
 
-    const artifact = await artifactManager.update(id, req.user.id, {
+    const artifact = await artifactManager.update(id, req.user, {
       title,
       description,
       content,
-      metadata
+      metadata,
+      expectedVersion
     });
 
     res.json({
@@ -163,11 +153,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       data: artifact
     });
   } catch (error) {
-    console.error('更新 Artifact 失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '更新 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '更新 Artifact 失败');
   }
 });
 
@@ -178,18 +164,14 @@ router.put('/:id', requireAuth, async (req, res) => {
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await artifactManager.delete(id, req.user.id);
+    await artifactManager.delete(id, req.user);
 
     res.json({
       success: true,
       message: 'Artifact 已删除'
     });
   } catch (error) {
-    console.error('删除 Artifact 失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '删除 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '删除 Artifact 失败');
   }
 });
 
@@ -200,18 +182,14 @@ router.delete('/:id', requireAuth, async (req, res) => {
 router.get('/:id/versions', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const versions = await artifactManager.getVersions(id, req.user.id);
+    const versions = await artifactManager.getVersions(id, req.user);
 
     res.json({
       success: true,
       data: versions
     });
   } catch (error) {
-    console.error('获取版本历史失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '获取版本历史失败'
-    });
+    return sendArtifactError(res, error, '获取版本历史失败');
   }
 });
 
@@ -231,18 +209,14 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
       });
     }
 
-    const artifact = await artifactManager.restoreVersion(id, req.user.id, version);
+    const artifact = await artifactManager.restoreVersion(id, req.user, version, req.body.expectedVersion);
 
     res.json({
       success: true,
       data: artifact
     });
   } catch (error) {
-    console.error('恢复版本失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '恢复版本失败'
-    });
+    return sendArtifactError(res, error, '恢复版本失败');
   }
 });
 
@@ -256,7 +230,7 @@ router.post('/:id/share', requireAuth, async (req, res) => {
     const { visibility = 'public', expiresIn } = req.body;
     if (visibility !== 'public') return res.status(400).json({ success: false, error: '不支持的分享范围' });
 
-    const share = await artifactManager.share(id, req.user.id, {
+    const share = await artifactManager.share(id, req.user, {
       visibility,
       expiresIn
     });
@@ -266,11 +240,7 @@ router.post('/:id/share', requireAuth, async (req, res) => {
       data: share
     });
   } catch (error) {
-    console.error('分享 Artifact 失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '分享 Artifact 失败'
-    });
+    return sendArtifactError(res, error, '分享 Artifact 失败');
   }
 });
 
@@ -290,18 +260,14 @@ router.post('/:id/interact', requireAuth, async (req, res) => {
       });
     }
 
-    await artifactManager.recordInteraction(id, req.user.id, { type, data });
+    await artifactManager.recordInteraction(id, req.user, { type, data });
 
     res.json({
       success: true,
       message: '交互已记录'
     });
   } catch (error) {
-    console.error('记录交互失败:', error);
-    res.status(error.status === 404 ? 404 : 500).json({
-      success: false,
-      error: error.status === 404 ? 'Artifact 不存在或无权访问' : '记录交互失败'
-    });
+    return sendArtifactError(res, error, '记录交互失败');
   }
 });
 
@@ -312,18 +278,14 @@ router.post('/:id/interact', requireAuth, async (req, res) => {
 router.get('/:id/stats', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const stats = await artifactManager.getInteractionStats(id, req.user.id);
+    const stats = await artifactManager.getInteractionStats(id, req.user);
 
     res.json({
       success: true,
       data: stats
     });
   } catch (error) {
-    console.error('获取交互统计失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '获取交互统计失败'
-    });
+    return sendArtifactError(res, error, '获取交互统计失败');
   }
 });
 
@@ -336,14 +298,14 @@ router.post('/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { content, parentId } = req.body;
 
-    if (!content || !content.trim()) {
+    if (typeof content !== 'string' || !content.trim() || content.length > 16000) {
       return res.status(400).json({
         success: false,
         error: '评论内容不能为空'
       });
     }
 
-    const comment = await artifactManager.addComment(id, req.user.id, {
+    const comment = await artifactManager.addComment(id, req.user, {
       content: content.trim(),
       parentId: parentId || null
     });
@@ -353,11 +315,7 @@ router.post('/:id/comments', requireAuth, async (req, res) => {
       data: comment
     });
   } catch (error) {
-    console.error('添加评论失败:', error);
-    res.status(error.status === 404 ? 404 : 500).json({
-      success: false,
-      error: error.status === 404 ? 'Artifact 或父评论不存在或无权访问' : '添加评论失败'
-    });
+    return sendArtifactError(res, error, '添加评论失败');
   }
 });
 
@@ -370,7 +328,7 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { limit = 50, offset = 0 } = req.query;
 
-    const result = await artifactManager.getComments(id, req.user.id, {
+    const result = await artifactManager.getComments(id, req.user, {
       limit: parseInt(limit, 10) || 50,
       offset: parseInt(offset, 10) || 0
     });
@@ -385,11 +343,7 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('获取评论列表失败:', error);
-    res.status(error.status === 404 ? 404 : 500).json({
-      success: false,
-      error: error.status === 404 ? 'Artifact 不存在或无权访问' : '获取评论列表失败'
-    });
+    return sendArtifactError(res, error, '获取评论列表失败');
   }
 });
 
@@ -400,18 +354,14 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
 router.delete('/:id/comments/:commentId', requireAuth, async (req, res) => {
   try {
     const { commentId } = req.params;
-    await artifactManager.deleteComment(commentId, req.user.id);
+    await artifactManager.deleteComment(commentId, req.user, req.params.id);
 
     res.json({
       success: true,
       message: '评论已删除'
     });
   } catch (error) {
-    console.error('删除评论失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '删除评论失败'
-    });
+    return sendArtifactError(res, error, '删除评论失败');
   }
 });
 

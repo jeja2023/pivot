@@ -244,6 +244,7 @@ function createAdminUsersRouter({
             'UPDATE users SET nickname = ?, unit = ?, role = ?, status = ? WHERE id = ?',
             [nickname, unit, safeRole, safeStatus, targetUserId]
         );
+        if (changed > 0) require('../services/realtime-session').revokeRealtimeSessions(targetUserId);
         if (safeStatus === 'disabled' && changed > 0) await revokeUserAutomation(targetUserId, now);
         if (changed === 0) return res.status(404).json({ error: '用户不存在' });
         logAction(req, '修改用户', `用户ID: ${targetUserId}，角色: ${safeRole}，状态: ${safeStatus}`);
@@ -269,6 +270,7 @@ function createAdminUsersRouter({
             await execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [hash, targetUserId]);
             await execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
         });
+        require('../services/realtime-session').revokeRealtimeSessions(targetUserId);
         logAction(req, '重置密码', `用户ID: ${targetUserId}`);
         res.json({ success: true });
     }));
@@ -638,6 +640,7 @@ function createAdminUsersRouter({
             await archiveDeletedUsernameAsync(targetUserId);
         });
 
+        require('../services/realtime-session').revokeRealtimeSessions(targetUserId);
         logAction(req, '删除用户', `删除账号: ${targetUser.username} (ID: ${targetUserId})`);
         res.json({ success: true });
     }));

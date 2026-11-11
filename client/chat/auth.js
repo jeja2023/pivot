@@ -217,6 +217,7 @@ document.getElementById('auth-submit')?.addEventListener('click', async (e) => {
 });
 
 window.Pivot.legacy.logout = async () => {
+    window.Pivot.ArtifactViewer?.close();
     window.Pivot.moduleApi('agent.projects')?.reset?.();
     window.Pivot.moduleApi('chat.generations').clear?.();
     await window.Pivot?.moduleApi?.('apps.officialWriting')?.flush?.();
