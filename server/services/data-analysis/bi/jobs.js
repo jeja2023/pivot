@@ -132,7 +132,7 @@ async function submitModelQuery(options) {
     const job = await createModelQuery(options);
     if (options.body.execution === 'async' || !['queued', 'running', 'retry_wait'].includes(job.status)) return job;
     const until = Date.now() + 2000;
-    void require('./runner').processModelJobs().catch(() => {});
+    void require('./runner').dispatchModelJobs();
     while (Date.now() < until) {
         await new Promise(resolve => setTimeout(resolve, Math.min(100, until - Date.now())));
         const current = await getModelJob(options.user, job.id);

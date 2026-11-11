@@ -59,7 +59,7 @@ test('browser context enforces isolated profile and DOM/visual interaction', { s
         const visual = await locateBrowserTarget(visionPage, { text: '按钮' }, { visionLocator: async ({ screenshot }) => ({ x: screenshot.length, y: 2 }) });
         assert.equal(visual.method, 'vision');
     } finally {
-        await closeAgentBrowserContext(context);
+        await Promise.all([closeAgentBrowserContext(context), context.close()]);
         if (previous === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
         else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previous;
         fs.rmSync(root, { recursive: true, force: true });

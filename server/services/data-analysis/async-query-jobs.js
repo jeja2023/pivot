@@ -85,7 +85,8 @@ async function executeClaimedJob(job) {
     try {
         const result = await withAnalysisSlot(async () => {
             if (!await repository.renew(job)) return null;
-            const { instance, connection } = await createDuckConnection();
+            const { instance, connection, spillDirectory, cleanupSpill } = await createDuckConnection({ privateSpill: true });
+            let cleanupSandbox;
             let lost = false; let heartbeat = null;
             const timer = setInterval(() => {
                 if (heartbeat) return;
@@ -97,7 +98,7 @@ async function executeClaimedJob(job) {
             try {
                 const run = sql => withDuckTimeout(connection, () => connection.run(sql), TIMEOUT_MS);
                 await run(`CREATE TABLE data AS SELECT ${require('./query-pivot').buildQuerySelectList(dataset, allowedColumns)} FROM read_parquet(${sqlLiteral(getDatasetPaths(dataset).parquetPath)})`);
-                await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { allowedPaths: [outputPath] });
+                cleanupSandbox = await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { allowedPaths: [outputPath], spillDirectory });
                 await run(`CREATE TABLE result AS SELECT * FROM (${job.sql_text}) AS _q LIMIT ${Number(job.requested_limit) + 1}`);
                 const reader = await withDuckTimeout(connection, () => connection.runAndReadAll('SELECT * FROM result LIMIT 0'), TIMEOUT_MS);
                 const size = (await withDuckTimeout(connection, () => connection.runAndReadAll('SELECT COUNT(*) AS n FROM result'), TIMEOUT_MS)).getRowObjectsJson()[0];
@@ -107,6 +108,8 @@ async function executeClaimedJob(job) {
             } finally {
                 clearInterval(timer); if (heartbeat) await heartbeat;
                 connection.closeSync(); instance.closeSync();
+                await cleanupSandbox?.();
+                await cleanupSpill();
             }
         }, { userId: job.user_id });
         if (!result) return;
@@ -143,7 +146,7 @@ async function processAsyncQueryJobs({ limit = 2 } = {}) {
             }
             processed += 1;
         }
-        const modelJobs = await require('./bi/runner').processModelJobs();
+        const modelJobs = await require('./bi/runner').dispatchModelJobs();
         return { skipped: false, processed: processed + modelJobs.processed };
     } finally { running = false; }
 }

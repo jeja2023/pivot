@@ -76,10 +76,15 @@ async function startBrowserNetworkProxy(rawPolicy) {
         upstream.once('close', () => { active.delete(upstream); socket.destroy(); });
         socket.once('close', () => { active.delete(socket); upstream.destroy(); });
     });
+    proxy.on('connection', socket => {
+        active.add(socket);
+        socket.once('close', () => active.delete(socket));
+    });
     await new Promise((resolve, reject) => { proxy.once('error', reject); proxy.listen(0, '127.0.0.1', resolve); });
+    let closed = false;
     return {
         server: `http://127.0.0.1:${proxy.address().port}`,
-        close() { active.forEach(socket => socket.destroy()); proxy.closeAllConnections(); proxy.close(); }
+        close() { if (closed) return; closed = true; active.forEach(socket => socket.destroy()); proxy.closeAllConnections(); proxy.close(); }
     };
 }
 module.exports = { startBrowserNetworkProxy };

@@ -29,7 +29,7 @@ async function executeFlow(connection, payload) {
         await connection.run(`CREATE TEMP TABLE ${ident(source.tableName)} AS SELECT ${columns.join(',')} FROM read_parquet(${sqlLiteral(source.file)})`);
         datasetTables.set(node.datasetId, source.tableName);
     }
-    await lockDuckExternalAccess(connection, { allowedPaths: payload.kind === 'node_dataset' ? [outputPath] : [] });
+    await lockDuckExternalAccess(connection, { allowedPaths: payload.kind === 'node_dataset' ? [outputPath] : [], spillDirectory: payload.spillRoot || path.join(payload.outputRoot, 'spill') });
     const { stepTables, stepSchemas } = await compileAndMaterializePlan(connection, plan, datasetTables);
     const target = stepTables.get(query.targetNodeId), columns = stepSchemas.get(query.targetNodeId);
     if (!columns?.length || columns.length > 120) invalidFlow('节点输出需包含一至一百二十列，请通过字段清洗或 SQL 精简输出。');

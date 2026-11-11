@@ -113,7 +113,7 @@ async function closeLiveContextWithDeadline(live) {
     live.closePromise = closing.catch(() => {});
     try {
         await Promise.race([closing, new Promise((_, reject) => {
-            timer = setTimeout(() => reject(browserError('浏览器关闭超时，需要人工核对。', 'AGENT_BROWSER_CLOSE_UNCERTAIN', 409)), 5000);
+            timer = setTimeout(() => reject(browserError('浏览器关闭超时，需要人工核对。', 'AGENT_BROWSER_CLOSE_UNCERTAIN', 409)), 15000);
         })]);
     } finally {
         clearTimeout(timer);
@@ -478,14 +478,13 @@ async function closeAgentBrowserSession(id, user, { reason = 'closed', fromActio
                 stopLeaseHeartbeat(live);
                 if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
                 return serializeSession(persisted);
-            } catch (_) {
+            } catch (error) {
                 live.closing = false;
                 stopLeaseHeartbeat(live);
-                if (live.page?.isClosed?.()) {
-                    if (liveSessions.get(String(id)) === live) liveSessions.delete(String(id));
-                    await browserLeases.finishBrowserSessionOwner(leaseInput(id, user, live.leaseToken)).catch(() => {});
-                }
-                throw browserError('浏览器未能确认关闭，需先核对旧执行器和外部状态。', 'AGENT_BROWSER_CLOSE_UNCERTAIN', 409);
+                // 页面已关闭不证明浏览器进程已退出；保留运行态供同一执行者重新确认。
+                const failure = browserError('浏览器未能确认关闭，需先核对旧执行器和外部状态。', 'AGENT_BROWSER_CLOSE_UNCERTAIN', 409);
+                failure.cause = error;
+                throw failure;
             }
         }
         stopLeaseHeartbeat(live);
@@ -525,11 +524,10 @@ async function recoverAgentBrowserSession(id, user, { confirmed = false, options
         const existing = liveSessions.get(String(session.id));
         if (existing) {
             stopLeaseHeartbeat(existing);
-            liveSessions.delete(String(session.id));
             if (existing.closePromise) await existing.closePromise;
-            else if (existing.context) {
-                try { await closeAgentBrowserContext(existing.context); } catch (_) {}
-            }
+            // 关闭失败的 Promise 不能当成退出证明；旧上下文仍存在时须再次确认。
+            if (existing.context) await closeLiveContextWithDeadline(existing);
+            liveSessions.delete(String(session.id));
             await browserLeases.releaseBrowserSessionLease(leaseInput(id, user, existing.leaseToken)).catch(() => {});
         }
         const lease = await browserLeases.acquireBrowserSessionLease({ ...leaseInput(id, user), recovery: true, confirmed: true });

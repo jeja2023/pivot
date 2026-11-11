@@ -9,7 +9,7 @@ async function removeClosedBrowserProfile(sessionId, root = '') {
     const base = path.resolve(root || path.join(os.tmpdir(), 'pivot-agent-browser'));
     const target = path.resolve(base, id);
     if (path.dirname(target) !== base) return false;
-    await fs.rm(target, { recursive: true, force: true });
+    await fs.rm(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     return true;
 }
 

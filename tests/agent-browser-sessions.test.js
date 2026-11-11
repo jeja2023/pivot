@@ -77,6 +77,9 @@ async function browserTestStep(label, operation, timeoutMs = 15000) {
             Promise.resolve().then(operation),
             new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`浏览器测试阶段超时：${label}`)), timeoutMs); })
         ]);
+    } catch (error) {
+        if (process.env.PIVOT_BROWSER_TEST_DEBUG === 'true') process.stderr.write(`浏览器测试失败阶段：${label}\n${error.stack || error.message}\n${error.cause?.stack || ''}\n`);
+        throw error;
     } finally {
         clearTimeout(timer);
     }
@@ -275,7 +278,7 @@ test('browser sessions preserve an authorized page across sequential Agent actio
         await new Promise(resolve => fixture.server.close(resolve));
         if (previousSensitiveOutbound === undefined) delete process.env.ALLOW_SENSITIVE_OUTBOUND_URLS;
         else process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previousSensitiveOutbound;
-        fs.rmSync(profileRoot, { recursive: true, force: true });
+        fs.rmSync(profileRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
 });
 
@@ -396,9 +399,14 @@ test('a browser close failure keeps the session available for manual recovery', 
             assert.equal(state.mutation_pending_recovery, true);
             assert.equal(state.last_action, 'close_pending');
         } finally {
-            created.live.context.close = originalClose;
+            created.live.context.close = async (...args) => {
+                // 关闭需等待磁盘和子进程收尾，超过旧的五秒预算仍须确认后才能释放。
+                await new Promise(resolve => setTimeout(resolve, 5100));
+                return originalClose.apply(created.live.context, args);
+            };
         }
-        const closed = await browserTestStep('再次确认关闭', () => closeAgentBrowserSession(created.session.id, user));
+        // 外层阶段覆盖内部十五秒关闭预算及数据库确认，仍要求返回真实 closed 状态。
+        const closed = await browserTestStep('再次确认关闭', () => closeAgentBrowserSession(created.session.id, user), 25000);
         assert.equal(closed.status, 'closed');
     } finally {
         if (created?.session?.id) {

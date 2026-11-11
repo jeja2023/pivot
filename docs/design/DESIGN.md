@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-11-11
-- Release baseline: v0.7.151（源码；制品以各自构建版本为准）
+- Release baseline: v0.7.152（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
   - `server/services/chat-agent-handoff.js`、`chat-auto-execution-handler.js`、`chat-task-knowledge-scope.js`、`chat-knowledge-revision.js`、`model-router.js` 及路由/聊天安全专项：长来源交接、来源撤销、资料修订、核验控制和端点可用性；范围与验证见[v0.7.149发布说明](../releases/v0.7.149-智能路由执行衔接与任务续接可靠性修复.md)。

@@ -283,7 +283,7 @@ function getDatasetPaths(row) {
     return { parquetPath, sourcePath };
 }
 
-async function createDuckConnection() {
+async function createDuckConnection({ privateSpill = false } = {}) {
     const instance = await DuckDBInstance.create(':memory:', {
         threads: String(Math.max(1, Math.min(os.cpus()?.length || 2, Number.parseInt(process.env.DATA_ANALYSIS_DUCKDB_THREADS || '4', 10) || 4)))
     });
@@ -291,9 +291,18 @@ async function createDuckConnection() {
     const signal = executionSignal();
     if (signal?.aborted) { connection.closeSync(); instance.closeSync(); throw Object.assign(new Error('分析执行已取消。'), { code: 'ANALYSIS_MODEL_LEASE_LOST', status: 409 }); }
     signal?.addEventListener('abort', () => { try { connection.interrupt?.(); } catch (_) { /* 已关闭的连接无需中断。 */ } }, { once: true });
-    await connection.run(`SET temp_directory=${sqlLiteral(tempRoot)}`);
-    await connection.run(`SET memory_limit=${sqlLiteral(DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT)}`);
-    return { instance, connection };
+    let spillDirectory;
+    try {
+        if (privateSpill) { await fs.promises.mkdir(tempRoot, { recursive: true }); spillDirectory = await fs.promises.mkdtemp(path.join(tempRoot, 'pivot-duck-spill-')); }
+        await connection.run(`SET temp_directory=${sqlLiteral(spillDirectory || tempRoot)}`);
+        await connection.run(`SET memory_limit=${sqlLiteral(DATA_ANALYSIS_DUCKDB_MEMORY_LIMIT)}`);
+        return { instance, connection, spillDirectory,
+            cleanupSpill: async () => { if (spillDirectory) await fs.promises.rm(spillDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } };
+    } catch (error) {
+        connection.closeSync(); instance.closeSync();
+        if (spillDirectory) await fs.promises.rm(spillDirectory, { recursive: true, force: true });
+        throw error;
+    }
 }
 
 async function withDuckTimeout(connection, operation, timeoutMs = DATA_ANALYSIS_QUERY_TIMEOUT_MS) {

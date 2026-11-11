@@ -124,7 +124,10 @@ async function withPostgresCluster(callback, options = {}) {
         const timer = setTimeout(() => { child.kill(); reject(new Error('隔离 PostgreSQL 控制器操作超时。')); }, timeout);
         child.once('error', error => { clearTimeout(timer); reject(error); });
         child.once('exit', code => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error(`隔离 PostgreSQL 控制器返回 ${code}。`)); });
-    }) : execute(executable(name), args, { windowsHide: true, timeout: name === 'pg_ctl' && args.includes('stop') ? 185000 : 60000, maxBuffer: 2 * 1024 * 1024 });
+    }) : execute(executable(name), args, { windowsHide: true,
+        // 持久初始化包含整库 fsync，与 --no-sync 的普通夹具使用不同的有限预算。
+        timeout: name === 'pg_ctl' && args.includes('stop') ? 185000 : name === 'initdb' && options.durable ? 180000 : 60000,
+        maxBuffer: 2 * 1024 * 1024 });
     function owned(directory) {
         const relative = path.relative(root, path.resolve(directory));
         if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('集群控制目标超出本次隔离目录。');

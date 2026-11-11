@@ -105,7 +105,7 @@ test('真实执行器在读取模型或业务来源前调用启动拒绝，拒�
 test('故障切换选用模型经过真实状态服务写回数据库', async () => {
     const user = await queryOne('SELECT id FROM users ORDER BY id LIMIT 1');
     const id = `audit-model-${crypto.randomUUID()}`;
-    const model = await queryOne("INSERT INTO models(user_id,name,url,status) VALUES (?,'降级模型','https://synthetic.invalid','active') RETURNING id", [user.id]);
+    const model = await queryOne("INSERT INTO models(user_id,name,model_name,url,status) VALUES (?,'降级模型','audit-fallback','https://synthetic.invalid','active') RETURNING id,url,model_name,name", [user.id]);
     await execute("INSERT INTO agent_runs(id,user_id,title,goal,status) VALUES (?,?,'降级','降级','planning')", [id, user.id]);
     try {
         const state = createRunState({ execute, queryOne });
@@ -113,9 +113,14 @@ test('故障切换选用模型经过真实状态服务写回数据库', async ()
         assert.equal(Number((await queryOne('SELECT chosen_model_id FROM agent_runs WHERE id=?', [id])).chosen_model_id), Number(model.id));
         await execute("UPDATE agent_runs SET status='completed' WHERE id=?", [id]);
         const quality = require('../server/services/agent-model-quality');
-        await execute("INSERT INTO agent_verifications(id,run_id,user_id,outcome_status,report) VALUES (?,?,?,'verified',?::jsonb)",
-            [id, id, user.id, JSON.stringify({ executionModelIdentity: quality.modelQualityIdentity({ url: 'https://synthetic.invalid', name: '降级模型' }) })]);
+        // PostgreSQL 保留微秒而 JS 时钟只保留毫秒，样本必须明确早于本次统计截止。
+        await execute("INSERT INTO agent_verifications(id,run_id,user_id,outcome_status,report,created_at,updated_at) VALUES (?,?,?,'verified',?::jsonb,NOW()-INTERVAL '1 second',NOW())",
+            [id, id, user.id, JSON.stringify({ executionModelIdentity: quality.modelQualityIdentity(model) })]);
         const profile = (await quality.getModelQualityProfiles(user)).find(item => item.modelId === Number(model.id));
+        assert.ok(profile, JSON.stringify(await queryOne(`SELECT r.status,r.chosen_model_id,m.model_name,m.url,v.created_at,
+            v.created_at <= ?::timestamptz AS in_window, v.report,
+            encode(sha256(convert_to(m.url || chr(10) || COALESCE(NULLIF(m.model_name,''),m.name,''),'UTF8')),'hex') AS expected_identity
+            FROM agent_runs r JOIN models m ON m.id=r.chosen_model_id JOIN agent_verifications v ON v.run_id=r.id WHERE r.id=?`, [new Date().toISOString(), id])));
         assert.equal(profile.samples, 1); assert.equal(profile.verified, 1);
     } finally { await execute('DELETE FROM agent_runs WHERE id=?', [id]); await execute('DELETE FROM models WHERE id=?', [model.id]); }
 });

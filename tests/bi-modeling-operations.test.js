@@ -181,7 +181,8 @@ test('长批次仍在执行时，快速查询释放的另一个持久槽位可�
         const fast = await query(readers[0]); first = runner.processModelJobs();
         await eventually(() => parked);
         await eventually(async () => (await jobs.getModelJob(readers[0], fast.id)).status === 'succeeded');
-        const next = await query(readers[1]); await runner.processModelJobs();
+        const next = await query(readers[1]); await runner.dispatchModelJobs();
+        await eventually(async () => (await jobs.getModelJob(readers[1], next.id)).status === 'succeeded');
         assert.equal((await jobs.getModelJob(readers[1], next.id)).status, 'succeeded'); assert.equal(parked, true);
         const active = await queryOne("SELECT COUNT(*) AS n FROM analysis_query_jobs WHERE user_id=? AND status='running'", [user.id]); assert.equal(Number(active.n), 1);
     } finally {

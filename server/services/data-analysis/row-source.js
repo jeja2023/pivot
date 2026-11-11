@@ -6,12 +6,13 @@ async function withDatasetColumns(user, datasetId, keys, operation) {
     const columns = [...new Set(keys)].map(key => shared.getColumn(dataset, key));
     await require('./governance').assertDatasetFieldsAccessible(user, dataset, columns.map(column => column.key));
     return shared.withAnalysisSlot(async () => {
-        const { instance, connection } = await shared.createDuckConnection();
+        const { instance, connection, spillDirectory, cleanupSpill } = await shared.createDuckConnection({ privateSpill: true });
+        let cleanupSandbox;
         try {
             await shared.withDuckTimeout(connection, () => connection.run(`CREATE TABLE source AS SELECT ${columns.map(column => shared.sqlIdent(column.key)).join(',')} FROM read_parquet(${shared.sqlLiteral(shared.getDatasetPaths(dataset).parquetPath)})`));
-            await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
+            cleanupSandbox = await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { spillDirectory });
             return await shared.withDuckTimeout(connection, () => operation({ dataset, columns, connection }));
-        } finally { connection.closeSync(); instance.closeSync(); }
+        } finally { connection.closeSync(); instance.closeSync(); await cleanupSandbox?.(); await cleanupSpill(); }
     }, { userId: user.id });
 }
 module.exports = { withDatasetColumns };

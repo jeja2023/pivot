@@ -174,6 +174,16 @@ async function createManagedBrowserContext(options = {}) {
             contextOptions.firefoxUserPrefs = { 'media.peerconnection.enabled': false, 'network.proxy.allow_hijacking_localhost': true };
         }
         context = await browser.launchPersistentContext(profile, contextOptions);
+        const closeContext = context.close.bind(context);
+        let closing;
+        context.close = options => {
+            if (!closing) {
+                // 先关闭代理的长连接，避免持久浏览器等待未结束下载或隧道再释放配置目录。
+                proxy.close();
+                closing = closeContext(options).catch(error => { closing = null; throw error; });
+            }
+            return closing;
+        };
         context.once('close', () => proxy.close());
         await attachBrowserNetworkGuards(context, policy, { isDownloadAllowed: options.isDownloadAllowed });
         return context;
@@ -393,8 +403,16 @@ async function evaluateSafe(page, expression, arg) {
     return page.evaluate(expression, arg);
 }
 
+const pendingContextClosures = new WeakMap();
+
 async function closeAgentBrowserContext(context) {
-    if (context?.close) await context.close();
+    if (!context?.close) return;
+    if (pendingContextClosures.has(context)) return pendingContextClosures.get(context);
+    // Playwright 的持久上下文关闭包含浏览器退出；复用完整确认，不能二次调用提前返回。
+    const closing = Promise.resolve().then(() => context.close());
+    pendingContextClosures.set(context, closing);
+    try { await closing; }
+    catch (error) { pendingContextClosures.delete(context); throw error; }
 }
 
 module.exports = {

@@ -293,11 +293,12 @@ async function runUserQuery(userId, datasetId, input = {}) {
     const { parquetPath } = getDatasetPaths(row);
     const selectList = buildQuerySelectList(row, columns);
     const result = await withAnalysisSlot(async () => {
-        const { instance, connection } = await createDuckConnection();
+        const { instance, connection, spillDirectory, cleanupSpill } = await createDuckConnection({ privateSpill: true });
+        let cleanupSandbox;
         try {
             await withDuckTimeout(connection, () => connection.run(`CREATE TABLE data AS SELECT ${selectList} FROM read_parquet(${sqlLiteral(parquetPath)})`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             // 物化完成后切断外部文件访问，使用户 SQL 无法读取数据集以外的任何文件。
-            await require('./duckdb-sandbox').lockDuckExternalAccess(connection);
+            cleanupSandbox = await require('./duckdb-sandbox').lockDuckExternalAccess(connection, { spillDirectory });
             const reader = await withDuckTimeout(connection, () => connection.runAndReadAll(`SELECT * FROM (${userSql}) AS _q LIMIT ${limit + 1}`), DATA_ANALYSIS_QUERY_TIMEOUT_MS);
             return { rows: reader.getRowObjectsJson(), columns: reader.columnNames() };
         } catch (err) {
@@ -308,6 +309,8 @@ async function runUserQuery(userId, datasetId, input = {}) {
         } finally {
             connection.closeSync();
             instance.closeSync();
+            await cleanupSandbox?.();
+            await cleanupSpill();
         }
     }, { userId: Number(userId?.id || userId) });
     const truncated = result.rows.length > limit;

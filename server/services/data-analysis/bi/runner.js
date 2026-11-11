@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { clearImmediate } = require('node:timers');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
@@ -19,7 +20,9 @@ const { biError } = require('./errors');
 const owner = `analysis_${process.pid}_${crypto.randomUUID()}`;
 const controllers = new Map();
 const dispatched = new Set();
-let processing = false;
+let scheduling = null;
+const executions = new Map();
+let draining = 0, wake = null;
 let stopping = false;
 let lastMaintenanceAt = 0;
 
@@ -97,7 +100,10 @@ async function executeJob(job) {
         if (mayRelease) await jobs.releaseSlot(job);
         const target = path.resolve(outputRoot), parent = path.resolve(tempRoot, 'model-jobs');
         if (mayRelease && path.dirname(target) === parent && /^query_job_[a-zA-Z0-9-]+-\d+$/.test(path.basename(target))) await fs.rm(target, { recursive: true, force: true });
-        if (mayRelease && !stopping) setImmediate(() => dispatchModelJobs());
+        if (mayRelease && !stopping && !draining && !wake) wake = setImmediate(() => {
+            wake = null;
+            if (!draining && !stopping) void dispatchModelJobs();
+        });
     }
 }
 
@@ -112,35 +118,65 @@ async function recoverExpired() {
     }
 }
 
-async function processModelJobs() {
-    if (processing || stopping || !readTypedEnv('DATA_ANALYSIS_MODEL_ENABLED')) return { processed: 0 };
-    processing = true;
-    const claimed = [];
-    try {
+async function scheduleModelJobs() {
+    if (scheduling) return scheduling;
+    if (stopping || !readTypedEnv('DATA_ANALYSIS_MODEL_ENABLED')) return { processed: 0 };
+    scheduling = (async () => {
         const now = Date.now();
         if (now - lastMaintenanceAt >= 1000) {
-            lastMaintenanceAt = now;
             await recoverExpired();
             await require('./readiness').ensureReady();
             await require('../../../repositories/analysis-operations').workerHeartbeat();
             await require('../../../repositories/analysis-ingestions').expireAbandoned();
+            lastMaintenanceAt = Date.now();
         }
-        for (let index = 0; index < readTypedEnv('DATA_ANALYSIS_MODEL_RUNNING_LIMIT'); index++) {
+        let processed = 0;
+        for (let index = 0; !stopping && index < readTypedEnv('DATA_ANALYSIS_MODEL_RUNNING_LIMIT'); index++) {
             const job = await jobs.claim({ owner, slots: readTypedEnv('DATA_ANALYSIS_MODEL_RUNNING_LIMIT') });
             if (!job) break;
-            claimed.push(job);
+            const task = executeJob(job).finally(() => executions.delete(job.id));
+            executions.set(job.id, task);
+            void task.catch(error => require('../../../logger').logger.warn({ err: error.message }, '数据建模持久任务执行失败'));
+            processed++;
         }
-    } finally { processing = false; }
-    await Promise.all(claimed.map(executeJob));
-    return { processed: claimed.length };
+        return { processed };
+    })();
+    try { return await scheduling; }
+    finally { scheduling = null; }
+}
+
+// 显式处理入口等待队列和本进程已认领任务收敛；后台轮询只接纳，不等待长任务。
+async function processModelJobs() {
+    let processed = 0;
+    draining++;
+    if (wake) { clearImmediate(wake); wake = null; }
+    try {
+        while (!stopping) {
+            processed += (await scheduleModelJobs()).processed;
+            const active = [...executions.values()];
+            if (!active.length) break;
+            await Promise.all(active);
+        }
+        return { processed };
+    } finally { draining--; }
 }
 
 async function cancelActiveModelJob(id) { controllers.get(id)?.abort(); }
 function dispatchModelJobs() {
-    const task = processModelJobs().catch(error => require('../../../logger').logger.warn({ err: error.message }, '数据建模持久任务调度失败')).finally(() => dispatched.delete(task));
+    const task = scheduleModelJobs().catch(error => {
+        require('../../../logger').logger.warn({ err: error.message }, '数据建模持久任务调度失败');
+        return { processed: 0 };
+    }).finally(() => dispatched.delete(task));
     dispatched.add(task);
+    return task;
 }
-async function stopModelJobs() { stopping = true; for (const controller of controllers.values()) controller.abort(); await Promise.all([...dispatched]); }
+async function stopModelJobs() {
+    stopping = true;
+    if (wake) { clearImmediate(wake); wake = null; }
+    for (const controller of controllers.values()) controller.abort();
+    await Promise.allSettled([...dispatched, ...(scheduling ? [scheduling] : [])]);
+    await Promise.allSettled([...executions.values()]);
+}
 function activeModelExecutions() { return [...controllers.keys()]; }
 
 module.exports = { processModelJobs, dispatchModelJobs, cancelActiveModelJob, stopModelJobs, executeJob, recoverExpired, activeModelExecutions };
