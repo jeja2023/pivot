@@ -43,7 +43,12 @@ async function fixture(run) {
     const browser = await chromium.launch({ headless: true });
     try {
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        await page.goto(`http://127.0.0.1:${service.address().port}/`); await page.waitForFunction(() => window.Pivot?.moduleApi('chat.codeFormats')?.extensionForLanguage);
+        await page.goto(`http://127.0.0.1:${service.address().port}/`);
+        await page.waitForFunction(() => (
+            window.Pivot?.moduleApi('chat.codeFormats')?.extensionForLanguage
+            && window.Pivot?.moduleApi('chat.codeDelivery')?.downloadCodeBlock
+            && window.pivotDesktop?.getDeliveryStatus
+        ));
         await run({ page, calls });
     } finally { await browser.close(); service.closeAllConnections(); await new Promise(resolve => service.close(resolve)); }
 }
@@ -75,8 +80,11 @@ test('HTML/HTM 静态预览隔离脚本、网络、表单和页面样式，保�
     assert.equal(await page.locator('.code-preview-source').isVisible(), true);
     assert.equal(await page.locator('code').textContent(), source);
     page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), '代码.html'); return dialog.accept('页面.htm'); });
-    const downloading = page.waitForEvent('download'); await page.locator('.code-download-btn').click();
-    const downloaded = await downloading; assert.equal(downloaded.suggestedFilename(), '页面.html');
+    const [downloaded] = await Promise.all([
+        page.waitForEvent('download', { timeout: 30000 }),
+        page.locator('.code-download-btn').click()
+    ]);
+    assert.equal(downloaded.suggestedFilename(), '页面.html');
     assert.equal(await fs.readFile(await downloaded.path(), 'utf8'), source);
     page.once('dialog', dialog => dialog.accept('页面.htm'));
     const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries')); await page.locator('.code-save-local-btn').click(); await saved;
@@ -101,9 +109,13 @@ test('CSV/TSV、配置和语言别名可原样下载，未知语言按 TXT 保�
     ]) {
         await show(page, language, source);
         assert.equal(await page.locator('.code-preview-frame').count(), 0);
+        await page.locator('.code-download-btn').waitFor({ state: 'visible' });
+        await page.waitForFunction(() => !document.querySelector('.code-download-btn')?.disabled);
         page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), `代码.${extension}`, language); return dialog.accept(`结果.${extension}`); });
-        const downloading = page.waitForEvent('download'); await page.locator('.code-download-btn').click();
-        const file = await downloading;
+        const [file] = await Promise.all([
+            page.waitForEvent('download', { timeout: 30000 }),
+            page.locator('.code-download-btn').click()
+        ]);
         assert.equal(file.suggestedFilename(), `结果.${extension}`);
         assert.equal(await fs.readFile(await file.path(), 'utf8'), source.replace(/\r\n/g, '\n'));
     }
