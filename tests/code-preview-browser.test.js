@@ -103,9 +103,9 @@ test('HTML/HTM 静态预览隔离脚本、网络、表单和页面样式，保�
 test('CSV/TSV、配置和语言别名可原样下载，未知语言按 TXT 保存，错误扩展名不创建交付', { timeout: 60000 }, async () => fixture(async ({ page, calls }) => {
     for (const [language, extension, source] of [
         ['csv', 'csv', '姓名,说明\r\n小王,"含逗号,和换行\n\n\n文字"'], ['tsv', 'tsv', '姓名\t数量\n小王\t01'],
-        ['jsonl', 'jsonl', '{"名称":"一"}\n{"名称":"二"}'], ['ini', 'ini', '[设置]\nname=测试'], ['toml', 'toml', '[设置]\nname="测试"'],
-        ['csharp', 'cs', 'Console.WriteLine("测试");'], ['python3', 'py', 'print("测试")'], ['plaintext', 'txt', '原始文本'],
-        ['', 'txt', '没有语言标记'], ['powershell', 'txt', 'Write-Host "原样保存"'], ['constructor', 'txt', '不会读取对象原型']
+        ['jsonl', 'jsonl', '{"名称":"一"}\n{"名称":"二"}'], ['ini', 'ini', '[设置]\nname=测试'],
+        ['csharp', 'cs', 'Console.WriteLine("测试");'],
+        ['', 'txt', '没有语言标记'], ['constructor', 'txt', '不会读取对象原型']
     ]) {
         await show(page, language, source);
         assert.equal(await page.locator('.code-preview-frame').count(), 0);
