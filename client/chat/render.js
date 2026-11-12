@@ -338,9 +338,11 @@ customRenderer.code = (code, infostring, _escaped) => {
     }
     const language = String(infostring || '').trim().split(/\s+/)[0];
     const normalizedLanguage = language.toLowerCase();
-    if (['mermaid', 'mmd'].includes(normalizedLanguage)) {
+    const extension = window.Pivot?.moduleApi?.('chat.codeFormats')?.extensionForLanguage?.(normalizedLanguage);
+    const pending = markdownIsStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(raw.trimEnd());
+    if (['mermaid', 'mmd', 'svg'].includes(normalizedLanguage) || extension === 'svg') {
         const diagram = window.Pivot?.moduleApi?.('chat.mermaid');
-        if (diagram?.markup) return diagram.markup(code, { resultFiles: markdownHasDiagramFiles, pending: markdownIsStreaming && !/(?:^|\n)\s*(?:`{3,}|~{3,})\s*$/.test(raw.trimEnd()) });
+        if (diagram?.markup) return diagram.markup(code, { language: extension === 'svg' ? 'svg' : normalizedLanguage, resultFiles: markdownHasDiagramFiles, pending });
     }
     const chartLanguages = new Set(['pivot-echart', 'pivot-chart', 'chart', 'charts']);
     const isRenderableChart = normalizedLanguage === 'pivot-echart' || (chartLanguages.has(normalizedLanguage) && normalizePivotChartSpec(code));
@@ -348,7 +350,8 @@ customRenderer.code = (code, infostring, _escaped) => {
         if (window.Pivot.legacy._deferPivotCharts) return '';
         return `<div class="pivot-echart-block" data-pivot-echart="${escapeAttrValue(code)}"><div class="pivot-echart-title">图表</div><div class="pivot-echart-canvas"></div><canvas height="300"></canvas><pre class="pivot-echart-error-text"></pre></div>`;
     }
-    const languageLabel = language || 'code';
+    const preview = extension === 'html' ? window.Pivot?.moduleApi?.('chat.codePreview') : null;
+    const languageLabel = language || '纯文本';
     let codeHtml;
     const wrapProseCode = PROSE_CODE_LANGUAGES.has(normalizedLanguage);
     if (wrapProseCode) {
@@ -358,20 +361,23 @@ customRenderer.code = (code, infostring, _escaped) => {
     } else { codeHtml = escapeCodeHtml(code); }
 
     return `
-        <div class="code-block${wrapProseCode ? ' code-block-wrap' : ''}" data-code-language="${escapeAttrValue(normalizedLanguage || 'code')}">
+        <div class="code-block${wrapProseCode ? ' code-block-wrap' : ''}${preview?.markup ? ' code-preview-block' : ''}" data-code-language="${escapeAttrValue(normalizedLanguage || 'code')}"${preview?.markup ? ` data-code-preview data-code-pending="${pending}"` : ''}>
             <div class="code-toolbar">
                 <span class="code-language">${escapeCodeHtml(languageLabel)}</span>
                 <div class="code-toolbar-actions">
+                    ${preview?.markup ? '<button type="button" class="btn-secondary" data-code-view="preview" aria-pressed="true">预览</button><button type="button" class="btn-secondary" data-code-view="source" aria-pressed="false">源码</button>' : ''}
                     <button type="button" class="btn-secondary code-copy-btn" title="复制代码">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                         <span>复制</span>
                     </button>
-                    <button type="button" class="btn-secondary code-save-local-btn" title="保存到本机">
+                    <button type="button" class="btn-secondary code-download-btn" title="下载源码文件"><span>下载文件</span></button>
+                    <button type="button" class="btn-secondary code-save-local-btn" title="保存到本机授权目录">
                         <span>保存到本机</span>
                     </button>
                 </div>
             </div>
-            <pre><code class="hljs ${language ? `language-${escapeAttrValue(language)}` : ''}">${codeHtml}</code></pre>
+            ${preview?.markup ? preview.markup(pending) : ''}
+            <pre${preview?.markup ? ' class="code-preview-source hidden"' : ''}><code class="hljs ${language ? `language-${escapeAttrValue(language)}` : ''}">${codeHtml}</code></pre>
         </div>
     `;
 };
@@ -609,8 +615,7 @@ function renderMarkdown(content, options = {}) {
     const safeContent = String(content || '')
         .replace(/PIVOT_(WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*?PIVOT_\1_END/gi, '\n')
         .replace(/PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_BEGIN[\s\S]*$/gi, '')
-        .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '')
-        .replace(/\n{3,}/g, '\n\n');
+        .replace(/^\s*PIVOT_(?:WORLD_STATE|MCP_TOOL_RESULT|AGENT_CONTROL)_(?:BEGIN|END)\s*$/gim, '');
     const normalizedContent = normalizeMarkdown(unwrapSingleMarkdownFence(safeContent));
     const previousStreaming = markdownIsStreaming;
     const previousDiagramFiles = markdownHasDiagramFiles;

@@ -10,12 +10,13 @@ async function getImageDataUrl(uploadUrl, userId, sessionId) {
         SELECT id FROM attachments
         WHERE user_id = ? AND session_id = ? AND file_path = ?
           AND deleted_at IS NULL
+          AND (expires_at IS NULL OR expires_at > NOW())
     `, [userId, sessionId, filePath]);
     if (!attachment) return null;
     return imageFileToDataUrl(target);
 }
 
-async function buildVisionHistory(history, origin, userId, sessionId) {
+async function buildVisionHistory(history, origin, userId, sessionId, { requireComplete = false } = {}) {
     if (!origin) return history;
     const maxImagesPerMessage = getMaxImagesPerMessage();
     const uploadUrlPattern = String.raw`\/uploads\/(?:[^()]|\([^)]*\))+`;
@@ -36,11 +37,13 @@ async function buildVisionHistory(history, origin, userId, sessionId) {
             text += message.content.slice(lastIndex, match.index);
             lastIndex = imageMarkdown.lastIndex;
             if (imageParts.length >= maxImagesPerMessage) {
+                if (requireComplete) throw Object.assign(new Error('待核验图片超过单次图像上限，请分批处理。'), { code: 'VERIFICATION_CONTEXT_LIMIT' });
                 text += alt ? `[图片已跳过: ${alt}]` : '[图片已跳过]';
                 continue;
             }
             const imageUrl = await getImageDataUrl(url, userId, sessionId);
             if (!imageUrl) {
+                if (requireComplete) throw Object.assign(new Error('待核验图片已失效或无法读取，请重新提供资料。'), { code: 'VERIFICATION_EVIDENCE_INCOMPLETE' });
                 text += alt ? `[图片不可用: ${alt}]` : '[图片不可用]';
                 continue;
             }

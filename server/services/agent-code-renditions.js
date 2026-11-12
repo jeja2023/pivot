@@ -12,44 +12,12 @@ const { getBeijingTimestamp } = require('../time');
 const { assertTenantContext } = require('./agent-tenant-context');
 const { getAgentArtifactForUser } = require('./agent-artifacts');
 const { buildDeliveryFilename, DELIVERY_EXTENSION_BY_FORMAT } = require('./agent-path-safety');
+const { CODE_FORMAT_ALIASES, CODE_MIME_TYPES, FILE_EXTENSION_ALIASES, extensionForLanguage } = require('../../client/common/code-formats');
 const {
     buildCasRef,
     incrementRefCount,
     putBuffer
 } = require('./agent-artifact-cas');
-
-const CODE_FORMAT_ALIASES = Object.freeze({
-    python: 'py', py: 'py',
-    javascript: 'js', js: 'js', node: 'js',
-    typescript: 'ts', ts: 'ts',
-    jsx: 'jsx', tsx: 'tsx',
-    java: 'java', c: 'c', h: 'h', cpp: 'cpp', 'c++': 'cpp', hpp: 'hpp',
-    csharp: 'cs', 'c#': 'cs', cs: 'cs',
-    go: 'go', rust: 'rs', rs: 'rs',
-    php: 'php', ruby: 'rb', rb: 'rb',
-    swift: 'swift', kotlin: 'kt', kt: 'kt', kts: 'kts',
-    shell: 'sh', bash: 'sh', sh: 'sh',
-    sql: 'sql', json: 'json', yaml: 'yaml', yml: 'yml',
-    xml: 'xml', css: 'css', scss: 'scss',
-    markdown: 'md', md: 'md', text: 'txt', txt: 'txt', mermaid: 'txt', mmd: 'txt'
-});
-
-const CODE_MIME_TYPES = Object.freeze({
-    py: 'text/x-python; charset=utf-8', js: 'text/javascript; charset=utf-8',
-    ts: 'text/typescript; charset=utf-8', jsx: 'text/javascript; charset=utf-8',
-    tsx: 'text/typescript; charset=utf-8', java: 'text/x-java-source; charset=utf-8',
-    c: 'text/x-c; charset=utf-8', h: 'text/x-c; charset=utf-8',
-    cpp: 'text/x-c++; charset=utf-8', hpp: 'text/x-c++; charset=utf-8',
-    cs: 'text/plain; charset=utf-8', go: 'text/x-go; charset=utf-8',
-    rs: 'text/plain; charset=utf-8', php: 'text/x-php; charset=utf-8',
-    rb: 'text/x-ruby; charset=utf-8', swift: 'text/x-swift; charset=utf-8',
-    kt: 'text/plain; charset=utf-8', kts: 'text/plain; charset=utf-8',
-    sh: 'text/x-shellscript; charset=utf-8', sql: 'application/sql; charset=utf-8',
-    json: 'application/json; charset=utf-8', yaml: 'text/yaml; charset=utf-8',
-    yml: 'text/yaml; charset=utf-8', xml: 'application/xml; charset=utf-8',
-    css: 'text/css; charset=utf-8', scss: 'text/x-scss; charset=utf-8',
-    md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8'
-});
 
 const MAX_CODE_BYTES = Math.max(1024, Number.parseInt(process.env.PIVOT_CODE_ARTIFACT_MAX_BYTES, 10) || 8 * 1024 * 1024);
 const CODE_RENDERER_VERSION = 'code-1.0.0';
@@ -66,27 +34,37 @@ function codeRenditionError(message, code = 'CODE_RENDITION_INVALID', status = 4
 function normalizeCodeFormat(value, filename = '') {
     const rawValue = String(value || '').trim().toLowerCase();
     const extension = path.extname(String(filename || '').split(/[\\/]/).pop() || '').slice(1).toLowerCase();
-    const format = CODE_FORMAT_ALIASES[rawValue] || CODE_FORMAT_ALIASES[extension] || extension;
+    const fileFormat = Object.prototype.hasOwnProperty.call(FILE_EXTENSION_ALIASES, extension) ? FILE_EXTENSION_ALIASES[extension] : extension;
+    const format = rawValue ? extensionForLanguage(rawValue) : (fileFormat || 'txt');
     if (!format || !Object.prototype.hasOwnProperty.call(DELIVERY_EXTENSION_BY_FORMAT, format)
         || !Object.prototype.hasOwnProperty.call(CODE_MIME_TYPES, format)) {
-        throw codeRenditionError('暂不支持该代码文件格式。请选择 Python、JavaScript、TypeScript、Java、C/C++、Go、Rust、SQL、JSON、YAML、Markdown 或纯文本。', 'CODE_FORMAT_UNSUPPORTED', 400);
+        throw codeRenditionError('暂不支持该代码文件格式。请选择 Python、JavaScript、TypeScript、Java、C/C++、Go、Rust、SQL、JSON、YAML、SVG、Markdown 或纯文本。', 'CODE_FORMAT_UNSUPPORTED', 400);
     }
-    if (extension && extension !== format) {
+    if (extension && fileFormat !== format) {
         throw codeRenditionError('文件扩展名与代码语言不一致，请重新选择文件名。', 'CODE_FORMAT_FILENAME_MISMATCH', 400);
     }
     return format;
 }
 
 function normalizeCodeFile({ filename = '', language = '', content = '' } = {}) {
-    const text = String(content ?? '');
-    if (!text) throw codeRenditionError('代码内容不能为空。', 'CODE_CONTENT_REQUIRED', 400);
+    if (![filename, language, content].every(value => typeof value === 'string')) throw codeRenditionError('文件名、代码语言和内容必须是文本，请检查后重试。', 'CODE_INPUT_INVALID', 400);
+    let text = String(content ?? '');
+    if (!text.trim()) throw codeRenditionError('代码内容不能为空。', 'CODE_CONTENT_REQUIRED', 400);
     if (text.includes('\0')) throw codeRenditionError('代码内容包含非法控制字符。', 'CODE_CONTENT_INVALID', 400);
     const bytes = Buffer.byteLength(text, 'utf8');
     if (bytes > MAX_CODE_BYTES) throw codeRenditionError('代码文件超过大小上限，请缩短内容后重试。', 'CODE_CONTENT_TOO_LARGE', 413);
     const format = normalizeCodeFormat(language, filename);
+    if (format === 'svg') {
+        try { text = require('./document-rendering/image-renderer').sanitizeSvg(text, { maxBytes: 2 * 1024 * 1024 }); }
+        catch (error) { throw codeRenditionError(`${error.message} 请移除不支持的内容后重试。`, 'CODE_SVG_INVALID', 400); }
+    }
     const fallback = `代码.${format}`;
-    const safeFilename = buildDeliveryFilename(String(filename || fallback), format);
-    return { content: text, bytes, format, filename: safeFilename, mimeType: CODE_MIME_TYPES[format] };
+    const requestedFilename = String(filename || fallback);
+    const extension = path.extname(requestedFilename).slice(1).toLowerCase();
+    const canonicalFilename = Object.prototype.hasOwnProperty.call(FILE_EXTENSION_ALIASES, extension)
+        ? requestedFilename.slice(0, -(extension.length + 1)) + `.${format}` : requestedFilename;
+    const safeFilename = buildDeliveryFilename(canonicalFilename, format);
+    return { content: text, bytes: Buffer.byteLength(text, 'utf8'), format, filename: safeFilename, mimeType: CODE_MIME_TYPES[format] };
 }
 
 function codeMetadataDigest(metadata) {

@@ -361,52 +361,195 @@ body.dark-mode .workspace-modal-close:hover,
     white-space: nowrap;
 }
 
-/* 项目管理复用全局表单、按钮和表格，优化弹窗层级、卡片与子模态对话框。 */
+/* 项目管理复用全局表单、按钮和表格，深度优化弹窗层级、卡片与子模态对话框，与全局统一弹窗样式一致。 */
 .agent-projects-dialog {
-    width: min(1100px, 96vw);
-    height: min(900px, 94vh);
+    width: min(1180px, calc(100vw - 32px));
+    max-width: 1180px;
+    height: min(840px, calc(100dvh - 40px));
+    max-height: calc(100dvh - 40px);
+    margin: auto;
     border-radius: var(--radius-lg, 12px);
-    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-xl, 0 20px 60px rgba(15, 23, 42, 0.22));
     display: flex;
     flex-direction: column;
+    background: var(--surface, #ffffff);
     overflow: hidden;
 }
 .agent-projects-dialog .workspace-modal-header {
-    padding: 14px 20px;
+    height: 58px;
+    min-height: 58px;
+    max-height: 58px;
+    padding: 12px 24px;
     border-bottom: 1px solid var(--border);
+    background: var(--surface, #ffffff);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 16px;
+    flex-shrink: 0;
+    box-sizing: border-box;
 }
 .agent-projects-dialog .workspace-modal-header h3 {
     min-width: 0;
     overflow-wrap: anywhere;
-    font-size: 1.15rem;
+    font-size: 1.08rem;
     font-weight: 700;
     margin: 0;
     color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+#agent-projects-modal .form-input,
+.agent-projects-dialog .form-input {
+    margin: 0;
+    margin-bottom: 0;
+    font-size: 0.85rem;
+    box-sizing: border-box;
 }
 .agent-projects-body {
-    overflow: auto;
-    padding: 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px 28px;
     min-height: 0;
     flex: 1;
+    background: var(--ui-page, #f8fafc);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.agent-projects-lead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+.agent-projects-lead-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary, #10a37f);
+    flex-shrink: 0;
+}
+.agent-projects-lead-icon svg {
+    display: block;
 }
 .agent-projects-toolbar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
     align-items: center;
-    margin-block: 10px;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--surface, #ffffff);
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.04));
 }
-.agent-projects-toolbar .form-input {
+.agent-projects-search-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex: 1;
-    min-width: 140px;
+    min-width: 280px;
+    margin: 0;
+}
+.agent-projects-search-group .form-input {
+    height: 34px;
+    line-height: 32px;
+    padding: 0 12px;
+    font-size: 0.85rem;
+    margin: 0;
+    margin-bottom: 0;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-main, #ffffff);
+    color: var(--text-main);
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+.agent-projects-search-group input.form-input {
+    width: auto;
+    flex: 1;
+    min-width: 180px;
+    max-width: 360px;
+}
+.agent-projects-search-group input.form-input::placeholder {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.agent-projects-search-group select.form-input {
+    width: auto;
+    min-width: 120px;
+    flex-shrink: 0;
+    padding-right: 28px;
+    line-height: normal;
+    cursor: pointer;
+}
+.agent-projects-search-group button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    height: 34px;
+    line-height: 32px;
+    margin: 0;
+    padding: 0 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 6px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+}
+.agent-projects-btn-new {
+    white-space: nowrap;
+    height: 34px;
+    line-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0 16px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    margin: 0;
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+.agent-projects-detail-left-actions,
+.agent-projects-detail-right-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.agent-projects-detail-left-actions button,
+.agent-projects-detail-right-actions button {
+    height: 34px;
+    line-height: 32px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0 14px;
+    border-radius: 6px;
+    margin: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 .agent-projects-message {
     margin: 0;
-    padding: 0 20px;
+    padding: 0 24px;
     color: var(--text-muted);
     font-size: 0.875rem;
 }
@@ -416,37 +559,76 @@ body.dark-mode .workspace-modal-close:hover,
     border-radius: var(--radius-sm, 6px);
     color: var(--danger, #ef4444);
     padding: 8px 14px;
-    margin: 10px 20px;
+    margin: 10px 24px;
 }
 .agent-projects-form {
-    display: grid;
-    gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 .agent-projects-field {
     display: grid;
     gap: 6px;
-    margin-block: 4px;
+    margin-block: 2px;
 }
 .agent-projects-field > span {
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
-.agent-projects-field textarea {
-    min-height: 90px;
+.agent-projects-field .required-mark {
+    color: var(--danger, #ef4444);
+    font-style: normal;
+}
+.agent-projects-field input.form-input {
+    height: 38px;
+    padding: 0 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    box-sizing: border-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.agent-projects-field input.form-input:focus,
+.agent-projects-field textarea.form-input:focus {
+    border-color: var(--primary, #10a37f);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary, #10a37f) 18%, transparent);
+    outline: none;
+}
+.agent-projects-field textarea.form-input {
+    min-height: 60px;
+    height: 60px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    line-height: 1.45;
     resize: vertical;
+    box-sizing: border-box;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.agent-projects-grid-2col {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
 }
 .agent-projects-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     line-height: 1.6;
+    color: var(--text-main);
 }
 .agent-projects-body td {
     overflow-wrap: anywhere;
 }
 .agent-projects-body h4 {
-    margin-block: 16px 8px;
-    font-size: 0.95rem;
+    margin: 0;
+    font-size: 0.96rem;
     font-weight: 700;
     color: var(--text-main);
 }
@@ -500,24 +682,37 @@ body.dark-mode .workspace-modal-close:hover,
 
 /* 卡片分组与分区 */
 .agent-projects-section {
-    background: var(--bg-side, #fafafa);
+    background: var(--surface, #ffffff);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
-    padding: 16px;
+    border-radius: 10px;
+    padding: 14px 20px;
     display: grid;
-    gap: 12px;
+    gap: 10px;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.04));
 }
 .agent-projects-section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
 }
 .agent-projects-section-header h4 {
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 1.02rem;
     font-weight: 700;
+}
+.agent-projects-section-subtitle {
+    margin: 3px 0 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+.agent-projects-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 .agent-projects-counter {
     font-size: 0.75rem;
@@ -526,23 +721,77 @@ body.dark-mode .workspace-modal-close:hover,
     background: var(--border);
     padding: 2px 8px;
     border-radius: 999px;
-    margin-left: 6px;
+}
+.agent-projects-btn-add-milestone {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    height: 32px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    border-radius: 6px;
 }
 .agent-projects-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     align-items: center;
 }
 .agent-projects-tag {
     display: inline-flex;
     align-items: center;
-    padding: 3px 10px;
-    font-size: 0.8rem;
-    background: var(--bg-main, #ffffff);
+    padding: 4px 12px;
+    font-size: 0.82rem;
+    background: var(--bg-side, #f8fafc);
     border: 1px solid var(--border);
     border-radius: 999px;
     color: var(--text-main);
+}
+.agent-projects-resources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+}
+.agent-projects-resource-column {
+    display: grid;
+    gap: 8px;
+}
+.agent-projects-resource-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.agent-projects-resource-header small {
+    font-size: 0.76rem;
+    font-weight: normal;
+    color: var(--text-muted);
+}
+.agent-projects-select-list {
+    width: 100%;
+    min-height: 96px;
+    height: 104px;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface, #ffffff);
+    color: var(--text-main);
+    box-sizing: border-box;
+}
+.agent-projects-select-list option {
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    font-size: 0.82rem;
+    color: var(--text-main);
+}
+.agent-projects-select-list option:checked {
+    background: color-mix(in srgb, var(--primary, #10a37f) 14%, transparent) !important;
+    color: var(--primary, #10a37f) !important;
+    font-weight: 600;
 }
 
 /* 里程碑卡片与列表 */
@@ -551,17 +800,17 @@ body.dark-mode .workspace-modal-close:hover,
     gap: 10px;
 }
 .agent-projects-milestone-card {
-    background: var(--bg-main, #ffffff);
+    background: var(--surface, #ffffff);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    padding: 12px 14px;
+    border-radius: var(--radius-sm, 8px);
+    padding: 12px 16px;
     display: grid;
     gap: 8px;
     transition: border-color 0.15s, box-shadow 0.15s;
 }
 .agent-projects-milestone-card:hover {
-    border-color: var(--primary);
-    box-shadow: var(--shadow-sm);
+    border-color: var(--primary, #10a37f);
+    box-shadow: var(--shadow-hover, 0 2px 8px rgba(16, 163, 127, 0.08));
 }
 .agent-projects-milestone-card-header {
     display: flex;
@@ -595,72 +844,193 @@ body.dark-mode .workspace-modal-close:hover,
     margin-top: 4px;
 }
 .agent-projects-empty-milestones {
-    padding: 24px 16px;
+    padding: 18px 16px;
     text-align: center;
     border: 1px dashed var(--border);
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm, 8px);
     color: var(--text-muted);
     font-size: 0.875rem;
-    background: var(--bg-main, #ffffff);
+    background: var(--surface, #ffffff);
 }
 .agent-projects-empty-milestones p {
     margin: 0;
+}
+.agent-projects-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 8px 0;
+    flex: 1;
+    min-height: 220px;
+}
+.agent-projects-body > .table-container {
+    flex: 1;
+    min-height: 0;
+}
+.agent-projects-empty-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    opacity: 0.65;
+    margin-bottom: 2px;
+}
+.agent-projects-empty-icon svg {
+    display: block;
+}
+.agent-projects-empty-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+/* 全局统一分页控件样式 */
+.agent-projects-dialog .workspace-pagination,
+.agent-projects-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.04));
+    margin-top: auto;
+    flex-shrink: 0;
+}
+.agent-projects-dialog .workspace-pagination button,
+.agent-projects-pagination button,
+.agent-projects-pagination .btn-secondary {
+    height: 30px;
+    line-height: 28px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg-main, #ffffff);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+    margin: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.agent-projects-dialog .workspace-pagination button:hover:not(:disabled),
+.agent-projects-pagination button:hover:not(:disabled) {
+    border-color: var(--primary, #10a37f);
+    color: var(--primary, #10a37f);
+    background: color-mix(in srgb, var(--primary, #10a37f) 6%, #ffffff);
+}
+.agent-projects-dialog .workspace-pagination button:disabled,
+.agent-projects-pagination button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: var(--bg-side, #f8fafc);
+}
+.agent-projects-dialog .workspace-pagination span,
+.agent-projects-pagination span {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0 8px;
+    user-select: none;
+}
+.agent-projects-dialog .workspace-pagination:empty,
+.agent-projects-pagination:empty {
+    display: none !important;
+}
+.agent-projects-form-footer {
+    position: sticky;
+    bottom: -20px;
+    margin: 12px -28px -20px -28px;
+    padding: 14px 28px;
+    background: var(--surface, #ffffff);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    box-shadow: var(--shadow-footer, 0 -4px 12px rgba(15, 23, 42, 0.05));
+    z-index: 10;
+}
+.agent-projects-form-tip {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.agent-projects-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.agent-projects-btn-save {
+    padding: 0 20px;
+    height: 36px;
+    font-weight: 600;
+    border-radius: 6px;
 }
 
 /* 里程碑子模态弹窗 */
 .agent-projects-milestone-overlay {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, var(--text-main, #000000) 50%, transparent);
+    background: var(--modal-backdrop, rgba(15, 23, 42, 0.45));
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1050;
     padding: 16px;
-    pointer-events: none; /* 保证不拦截外部自动提交点击 */
+    pointer-events: none;
 }
 .agent-projects-milestone-dialog {
-    pointer-events: auto; /* 保证内部控件可正常交互 */
-    width: min(540px, 94vw);
-    max-height: min(620px, 90vh);
-    background: var(--bg-main, #ffffff);
+    pointer-events: auto;
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(720px, calc(100dvh - 40px));
+    background: var(--surface, #ffffff);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
-    box-shadow: var(--shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
+    border-radius: 12px;
+    box-shadow: var(--shadow-modal, 0 24px 60px rgba(15, 23, 42, 0.28));
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
 .agent-projects-milestone-header {
-    padding: 14px 18px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    background: var(--bg-side, #fafafa);
+    gap: 12px;
+    background: var(--surface, #ffffff);
 }
 .agent-projects-milestone-header h4 {
     margin: 0;
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: var(--text-main);
 }
 .agent-projects-milestone-body {
-    padding: 16px 18px;
+    padding: 22px 24px;
     overflow-y: auto;
     display: grid;
-    gap: 12px;
+    gap: 16px;
+    background: var(--ui-page, #f8fafc);
 }
 .agent-projects-milestone-footer {
-    padding: 12px 18px;
+    padding: 14px 24px;
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 10px;
-    background: var(--bg-side, #fafafa);
+    gap: 12px;
+    background: var(--surface, #ffffff);
 }
 .agent-projects-close-btn {
     border: none;
@@ -677,6 +1047,75 @@ body.dark-mode .workspace-modal-close:hover,
     background: var(--border);
 }
 
+/* 深色模式适配 */
+body.dark-mode .agent-projects-dialog,
+.dark-mode .agent-projects-dialog,
+[data-theme="dark"] .agent-projects-dialog,
+body.dark-mode .agent-projects-milestone-dialog,
+.dark-mode .agent-projects-milestone-dialog,
+[data-theme="dark"] .agent-projects-milestone-dialog {
+    background: var(--bg-card, #1e293b);
+    border-color: var(--border, #334155);
+    box-shadow: var(--shadow-dark, 0 24px 60px rgba(0, 0, 0, 0.5));
+}
+body.dark-mode .agent-projects-dialog .workspace-modal-header,
+.dark-mode .agent-projects-dialog .workspace-modal-header,
+[data-theme="dark"] .agent-projects-dialog .workspace-modal-header,
+body.dark-mode .agent-projects-milestone-header,
+.dark-mode .agent-projects-milestone-header,
+[data-theme="dark"] .agent-projects-milestone-header,
+body.dark-mode .agent-projects-milestone-footer,
+.dark-mode .agent-projects-milestone-footer,
+[data-theme="dark"] .agent-projects-milestone-footer,
+body.dark-mode .agent-projects-form-footer,
+.dark-mode .agent-projects-form-footer,
+[data-theme="dark"] .agent-projects-form-footer {
+    background: var(--bg-card, #1e293b);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .agent-projects-body,
+.dark-mode .agent-projects-body,
+[data-theme="dark"] .agent-projects-body,
+body.dark-mode .agent-projects-milestone-body,
+.dark-mode .agent-projects-milestone-body,
+[data-theme="dark"] .agent-projects-milestone-body {
+    background: var(--bg-main, #0f172a);
+}
+body.dark-mode .agent-projects-section,
+.dark-mode .agent-projects-section,
+[data-theme="dark"] .agent-projects-section,
+body.dark-mode .agent-projects-toolbar,
+.dark-mode .agent-projects-toolbar,
+[data-theme="dark"] .agent-projects-toolbar,
+body.dark-mode .agent-projects-pagination,
+.dark-mode .agent-projects-pagination,
+[data-theme="dark"] .agent-projects-pagination,
+body.dark-mode .agent-projects-dialog .workspace-pagination,
+.dark-mode .agent-projects-dialog .workspace-pagination,
+[data-theme="dark"] .agent-projects-dialog .workspace-pagination,
+body.dark-mode .agent-projects-lead,
+.dark-mode .agent-projects-lead,
+[data-theme="dark"] .agent-projects-lead,
+body.dark-mode .agent-projects-milestone-card,
+.dark-mode .agent-projects-milestone-card,
+[data-theme="dark"] .agent-projects-milestone-card,
+body.dark-mode .agent-projects-empty-milestones,
+.dark-mode .agent-projects-empty-milestones,
+[data-theme="dark"] .agent-projects-empty-milestones {
+    background: var(--bg-card, #1e293b);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .agent-projects-pagination button,
+.dark-mode .agent-projects-pagination button,
+[data-theme="dark"] .agent-projects-pagination button,
+body.dark-mode .agent-projects-dialog .workspace-pagination button,
+.dark-mode .agent-projects-dialog .workspace-pagination button,
+[data-theme="dark"] .agent-projects-dialog .workspace-pagination button {
+    background: var(--bg-main, #0f172a);
+    border-color: var(--border, #334155);
+    color: var(--text-main);
+}
+
 @media (max-width: 640px) {
     .agent-projects-dialog {
         width: 100%;
@@ -689,5 +1128,15 @@ body.dark-mode .workspace-modal-close:hover,
     .agent-projects-milestone-dialog {
         width: 98vw;
         max-height: 94vh;
+    }
+    .agent-projects-form-footer {
+        flex-direction: column;
+        align-items: stretch;
+        bottom: -14px;
+        margin: 12px -14px -14px -14px;
+        padding: 12px 16px;
+    }
+    .agent-projects-footer-actions {
+        justify-content: flex-end;
     }
 }

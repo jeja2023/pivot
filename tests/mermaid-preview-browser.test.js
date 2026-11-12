@@ -8,6 +8,7 @@ const http = require('node:http');
 const express = require('express');
 const helmet = require('helmet');
 const { chromium } = require('playwright');
+const { normalizeCodeFile } = require('../server/services/agent-code-renditions');
 
 const source = 'flowchart TD\n    A([开始]) --> B[用户登录]\n    B --> C{验证账号}\n    C -->|成功| D([登录成功])';
 
@@ -29,15 +30,19 @@ async function fixture(run) {
         window.API_BASE = '/api';
         window.currentSessionId = 'mermaid-session';
         window.apiFetch = (url, options) => fetch(url, options);
-        const device = { available: true, registered: true, deviceId: 'test-device', grants: [{ grantId: 'text-grant', allowedFormats: ['txt'] }] };
+        const device = { available: true, registered: true, deviceId: 'test-device', grants: [{ grantId: 'text-grant', allowedFormats: ['txt', 'svg'] }] };
         window.pivotDesktop = { getDeliveryStatus: async () => device, prepareDelivery: async () => device, startDelivery: async () => {} };
     `));
-    app.post('/api/agents/code-renditions', (req, res) => { calls.push({ route: 'code', body: req.body }); res.json({ rendition: { id: 'source-file', format: 'txt' } }); });
+    app.post('/api/agents/code-renditions', (req, res) => {
+        const normalized = normalizeCodeFile(req.body);
+        calls.push({ route: 'code', body: req.body, normalized });
+        res.json({ rendition: { id: 'source-file', format: normalized.format } });
+    });
     app.post('/api/agents/deliveries', (req, res) => { calls.push({ route: 'delivery', body: req.body }); res.json({ intent: { id: 'delivery-one' } }); });
     app.get('/', (_req, res) => res.send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="/common/styles/theme.css"><link rel="stylesheet" href="/chat/chat.shell.css">
         <script defer src="/common/vendor/marked.min.js"></script><script defer src="/common/vendor/purify.min.js"></script><script defer src="/fixture.js"></script><script defer src="/chat/safe-html.js"></script>
-        <script defer src="/chat/mermaid-svg.js"></script><script defer src="/chat/mermaid-runtime.js"></script><script defer src="/chat/render-mermaid.js"></script><script defer src="/chat/render-markdown-emphasis.js"></script>
+        <script defer src="/common/code-formats.js"></script><script defer src="/chat/mermaid-svg.js"></script><script defer src="/chat/mermaid-runtime.js"></script><script defer src="/chat/render-mermaid.js"></script><script defer src="/chat/render-markdown-emphasis.js"></script>
         <script defer src="/chat/render.js"></script><script defer src="/chat/render-charts.js"></script><script defer src="/chat/render-messages.js"></script><script defer src="/chat/code-delivery.js"></script>
         <script defer src="/chat/chat-task-state.js"></script><script defer src="/chat/chat-task-render.js"></script><script defer src="/chat/chat-task-controller.js"></script>
         </head><body><main class="text-body" id="answer"></main></body></html>`));
@@ -260,4 +265,100 @@ test('时序、类、状态、实体关系、甘特、饼图和思维导图使�
         await page.waitForFunction(() => !document.querySelector('[data-mermaid-action="download-svg"]').disabled || !document.querySelector('.mermaid-retry').classList.contains('hidden'));
         assert.equal(await page.locator('[data-mermaid-action="download-svg"]').isDisabled(), false, definition + '\n' + await page.locator('.mermaid-status').textContent());
     }
+}));
+
+test('SVG 小白兔默认安全预览，支持源码、下载、本机保存和桌面窄屏放大', { timeout: 90000 }, async () => fixture(async ({ page, calls }) => {
+    const rabbit = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><title>小白兔</title><g fill="white" stroke="#999"><ellipse cx="170" cy="95" rx="25" ry="65"/><ellipse cx="230" cy="95" rx="25" ry="65"/><ellipse cx="200" cy="285" rx="90" ry="85"/><circle cx="200" cy="200" r="70"/></g><g fill="black"><circle cx="178" cy="190" r="6"/><circle cx="222" cy="190" r="6"/></g><ellipse cx="200" cy="218" rx="8" ry="6" fill="pink"/></svg>';
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await show(page, '```SVG\n' + rabbit + '\n```');
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor();
+    assert.equal(await page.locator('.mermaid-image').isVisible(), true);
+    assert.equal(await page.locator('#answer svg, iframe.mermaid-render-host').count(), 0);
+    await page.locator('[data-mermaid-action="source"]').click();
+    assert.equal(await page.locator('code').textContent(), rabbit);
+    await page.locator('[data-mermaid-action="copy-source"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-mermaid-action="copy-source"]').textContent.includes('已复制'));
+    await page.locator('[data-mermaid-action="preview"]').click();
+    const downloading = page.waitForEvent('download');
+    await page.locator('[data-mermaid-action="download-svg"]').click();
+    const downloaded = await downloading;
+    assert.equal(downloaded.suggestedFilename(), '图形.svg');
+    const svg = await fs.readFile(await downloaded.path(), 'utf8');
+    assert.match(svg, /小白兔/); assert.match(svg, /width="400"/);
+    page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), '图形.svg'); return dialog.accept('小白兔.svg'); });
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries'));
+    await page.locator('[data-mermaid-action="save-source"]').click();
+    await saved;
+    assert.equal(calls[0].body.language, 'svg'); assert.equal(calls[0].body.filename, '小白兔.svg');
+    assert.equal(calls[0].normalized.mimeType, 'image/svg+xml; charset=utf-8');
+    assert.match(calls[0].normalized.content, /小白兔/);
+    assert.equal(calls[1].body.targetDirGrant, 'text-grant'); assert.equal(calls[1].body.targetFilename, '小白兔.svg');
+    await fs.mkdir(path.resolve('output/svg-preview'), { recursive: true });
+    for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        const bounds = await page.locator('.mermaid-card').evaluate(element => ({ width: element.clientWidth, content: element.scrollWidth }));
+        assert.ok(bounds.content <= bounds.width + 2, JSON.stringify(bounds));
+        await page.screenshot({ path: path.resolve(`output/svg-preview/rabbit-${width}.png`), fullPage: true });
+        await page.locator('[data-mermaid-action="expand"]').click();
+        await page.locator('[data-mermaid-viewer="in"]').click();
+        assert.equal(await page.locator('.mermaid-viewer img').isVisible(), true);
+        assert.equal(await page.locator('.mermaid-viewer .workspace-modal-header').evaluate(header => [...header.querySelectorAll('button')].every(button => button.getBoundingClientRect().right <= header.getBoundingClientRect().right)), true);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('[data-mermaid-action="expand"]').evaluate(button => button === document.activeElement), true);
+    }
+    const lightUrl = await page.locator('.mermaid-image').getAttribute('src');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForFunction(previous => {
+        const image = document.querySelector('.mermaid-image');
+        return image.src !== previous && image.complete && image.naturalWidth > 0 && !image.classList.contains('hidden');
+    }, lightUrl);
+    await page.screenshot({ path: path.resolve('output/svg-preview/rabbit-dark-mobile.png'), fullPage: true });
+    await page.evaluate(() => { window.Pivot.legacy.currentUser = { id: 2 }; document.body.classList.add('changed-account'); });
+    await page.waitForFunction(() => document.querySelector('.mermaid-card').textContent.includes('账号已切换'));
+    assert.deepEqual(errors, []);
+}));
+
+test('SVG 支持固定宽高、流式等待、结果文件去重并释放旧图片', { timeout: 90000 }, async () => fixture(async ({ page }) => {
+    const svg = '<svg width="200px" height="100"><rect width="200" height="100" fill="pink"/></svg>';
+    await show(page, '```svg\n<svg width="200"', true);
+    assert.equal(await page.locator('[data-mermaid-card]').getAttribute('data-mermaid-pending'), 'true');
+    assert.equal(await page.locator('.mermaid-image').getAttribute('src'), null);
+    await show(page, '```svg\n' + svg + '\n```', true);
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor();
+    const downloading = page.waitForEvent('download');
+    await page.locator('[data-mermaid-action="download-svg"]').click();
+    const preview = await fs.readFile(await (await downloading).path(), 'utf8');
+    assert.match(preview, /viewBox="0 0 200 100"/); assert.match(preview, /xmlns="http:\/\/www.w3.org\/2000\/svg"/);
+    await page.evaluate(() => {
+        window.revoked = []; const original = URL.revokeObjectURL.bind(URL);
+        URL.revokeObjectURL = url => { window.revoked.push(url); original(url); };
+    });
+    await show(page, '```svg\n' + svg + '\n```', false, true);
+    await page.waitForFunction(() => window.revoked.length > 0);
+    assert.equal(await page.locator('.mermaid-supplement').count(), 1);
+    assert.deepEqual(await page.locator('[data-mermaid-action]').evaluateAll(buttons => buttons.map(button => button.dataset.mermaidAction)), ['copy-source']);
+    await show(page, '```xml\n' + svg + '\n```');
+    assert.equal(await page.locator('[data-mermaid-card]').count(), 0);
+    assert.equal(await page.locator('.code-save-local-btn').count(), 1);
+}));
+
+test('非法或动态 SVG 保留源码和错误反馈，不能预览、下载或进入本机交付', { timeout: 90000 }, async () => fixture(async ({ page, calls }) => {
+    const outbound = []; page.on('request', request => { if (!request.url().startsWith(new URL(page.url()).origin) && !request.url().startsWith('blob:')) outbound.push(request.url()); });
+    const base = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">';
+    for (const svg of [
+        base + '<script>alert(1)</script></svg>', base + '<rect onload="alert(1)"/></svg>',
+        base + '<image href="https://example.com/a.png"/></svg>', base + '<use href="https://example.com/a.svg#x"/></svg>',
+        base + '<style>@import "https://example.com/a.css";</style></svg>',
+        base + '<rect></svg>', '<svg viewBox="0 0 40000 10"/>', '<svg width="100%" height="100%"/>'
+    ]) {
+        await show(page, '```svg\n' + svg + '\n```');
+        await page.locator('.mermaid-retry:not(.hidden)').waitFor();
+        assert.equal(await page.locator('[data-mermaid-action="download-svg"]').isDisabled(), true);
+        assert.equal(await page.locator('code').textContent(), svg);
+        assert.equal(await page.locator('#answer svg').count(), 0);
+        page.once('dialog', dialog => dialog.accept('图形.svg'));
+        await page.locator('[data-mermaid-action="save-source"]').click();
+        await page.waitForFunction(() => !document.querySelector('[data-mermaid-action="save-source"]').disabled);
+    }
+    assert.deepEqual(calls, []); assert.deepEqual(outbound, []);
 }));

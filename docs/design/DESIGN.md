@@ -3,10 +3,13 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-11-11
-- Release baseline: v0.7.152（源码；制品以各自构建版本为准）
+- Last refreshed: 2026-11-12
+- Release baseline: v0.7.155（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `client/chat/agent-projects.js`、`client/chat/styles/workspaces/shared.css` 及对应项目/模态弹窗专项：项目空间列表弹窗与新建/编辑表单三卡片重构、里程碑子模态解耦、原生 SVG 矢量图标替换、34px 像素级水平对齐、字号规范重置与全局工作台分页集成；范围见[v0.7.155发布说明](../releases/v0.7.155-项目空间与模态弹窗深度优化与体验统一.md)。
+  - `client/common/code-formats.js`、`client/chat/render-code-preview.js`、`render-mermaid.js`、`mermaid-svg.js`、`code-delivery.js`、`server/services/agent-code-renditions.js` 及图形/文件专项：SVG 与 HTML 静态预览、共享格式映射、受控下载和本机保存；范围及桌面升级要求见[v0.7.154发布说明](../releases/v0.7.154-聊天图形预览与代码文件保存补齐.md)。
+  - `server/services/chat-verification-images.js`、`chat-task-verification.js`、`chat-vision.js`、`chat-intent-resolver.js`、`chat-intent-model.js`、`agent-verification-repair.js` 及对应图片/恢复专项：授权原图核验、来源复查、有界格式补判与超时恢复、缺失格式补全；范围见[v0.7.153发布说明](../releases/v0.7.153-图片核验证据与智能路由失败恢复优化.md)。
   - `server/services/chat-agent-handoff.js`、`chat-auto-execution-handler.js`、`chat-task-knowledge-scope.js`、`chat-knowledge-revision.js`、`model-router.js` 及路由/聊天安全专项：长来源交接、来源撤销、资料修订、核验控制和端点可用性；范围与验证见[v0.7.149发布说明](../releases/v0.7.149-智能路由执行衔接与任务续接可靠性修复.md)。
   - `server/services/agent-responses-protocol.js`、`agent-tool-vision.js`、`agent-verification-evidence.js`、`agent-model-quality.js`、`agent-goal-context.js`：原生协议、工具图像、完整持久证据、唯一任务质量窗口和目标接续；实际验证与限制见 `docs/reports/Pivot智能体执行底座改造-20261110.md`。
   - `client/chat/agent-projects.js`、`server/services/agent-projects.js`、`agent-skill-resource-import.js`、`agent-skill-resources.js` 及对应HTTP/浏览器专项：项目修订、里程碑依据和静态资源读取撤权；版本说明见 `docs/releases/v0.7.147-智能体协议视觉核验与项目技能资源升级.md`。
@@ -38,12 +41,19 @@
 - Every shared workflow response must redact direct HTTP credentials, and publishing or sharing a workflow containing sensitive HTTP literals is rejected.
 - Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
 
-## 个人项目空间与技能资料（v0.7.147）
+## 个人项目空间与模态弹窗规范（v0.7.155）
 
 - 项目是当前账号的任务与资料工作区，集中维护规则、资料范围、文件和里程碑；复用任务创建、结果查看及产物预览，不新增另一种执行状态。
 - 每次任务冻结项目规则版本，同时在规划和独立核验中使用；新任务与持续目标触发校验项目有效性，归档不改写旧任务。项目里程碑是进度记录，人工确认和已核验任务关联明确区分；关联依据失效应显示。
 - 资源技能以指引和摘要绑定的配套文本/图片形成声明式配方；配套读取仍需显式工具授权。脚本、钩子和依赖不自动迁移，资源中的指令不提升权限。发布撤回及内容变化阻断后续使用和交付。
-- 项目编辑使用修订冲突检查，异步结果绑定账号，退出清空界面；列表、表单、弹窗和移动布局沿用全局体系。具体限制和证据见[项目与技能资源升级](../reports/Pivot项目空间与技能资源升级-20261110.md)。
+- 项目编辑使用修订冲突检查，异步结果绑定账号，退出清空界面；列表、表单、弹窗和移动布局沿用全局体系。
+- 弹窗与表单布局规范（v0.7.155）：
+  - 项目主弹窗扩展至 `1180px × 840px`，新建/编辑表单重构为「基本信息」、「资料范围与交付物」、「项目里程碑」三大卡片自适应双列排版，标准视口下免滚动完整呈现并吸底常驻操作栏。
+  - 里程碑管理解耦为独立子模态对话框（`640px × 720px`），支持 Esc 键与遮罩退出、表单校验、卡片化管理与回填编辑，杜绝主弹窗垂直膨胀。
+  - 全量移除 Emoji 字符，采用原生安全轻量 SVG 矢量图标（文件夹、空状态、同心靶心），确保跨平台视觉一致。
+  - 搜索栏输入框、下拉框、查询与新建按钮统一重置外边距与全局字号（`0.85rem` / `0.82rem`），高度锁定 34px 实现像素级水平绝对对齐。
+  - 接入全局统一工作台居中分页控件（`.workspace-pagination.pagination`），当数据量 ≤ 20 时彻底隐藏底部分页条，空状态居中舒展。
+  - 具体限制、排查和验证见[v0.7.155发布说明](../releases/v0.7.155-项目空间与模态弹窗深度优化与体验统一.md)和[优化报告](../reports/project-dialog-optimization-20261112.md)。
 
 ## 智能体执行协议与持续目标（v0.7.147）
 
@@ -379,11 +389,15 @@
 ## 聊天图形展示要求（v0.7.95）
 
 - Mermaid 回复默认显示图形，源码置于同一区域的切换视图。流式未完成、加载中和失败状态在图形区域内显示，失败提供源码与重试入口。
+- 显式标记为 `svg` 的代码块复用图形预览与源码切换，支持放大、下载 SVG 和保存到本机授权目录；兼容 `viewBox` 或固定宽高。只接受无脚本、无外链的静态图形，非法或未完成内容保留源码及状态提示，保存继续经过服务端校验和受控产物交付。
+- HTML/HTM 代码块提供静态预览与源码切换，预览在无脚本、无网络、无同源权限的沙箱文档内展示；原始源码下载与本机保存保持原内容。普通代码块提供受控下载与本机保存，CSV/TSV、JSONL、INI/TOML 及源码语言别名使用前后端共享格式表；未知语言明确回退 TXT，不能通过自选扩展名变成另一种文件。代码块内空行不参与正文压缩。
 - 任务已有可下载 SVG 时，结果文件统一承担图形预览、下载和本机保存；正文源码收起为补充内容，展开后仅保留查看和复制，避免重新出现重复按钮。不能仅凭标题或文件类型宣称正文源码与生成文件一致。
 - 图形下载与源码保存使用明确的不同文案；SVG 来自实际渲染结果，本机源码保存沿用现有授权目录和交付流程。
 - 放大查看复用全局工作区弹窗与按钮，支持缩放、键盘关闭和焦点恢复；桌面与窄屏均可访问全部操作，图形沿用当前主题。
 - 图形组件按需加载本站离线资源，在隔离页完成布局后以静态图片展示。主页面不直接插入第三方 SVG，下载前也检查外部资源、动态内容与尺寸。
 - 重绘、节点移除、账号切换及页面离开后释放旧图片和渲染资源，迟到结果不能恢复旧内容。
+
+SVG 与 HTML 预览及文件格式补齐的升级范围见[v0.7.154发布说明](../releases/v0.7.154-聊天图形预览与代码文件保存补齐.md)，实际验证见[格式补充检查记录](../reports/chat-code-formats-20261112.md)。源码版本不代表已构建制品或生产验收通过。
 
 ## 上传资料与检索范围（v0.7.96）
 
@@ -421,6 +435,14 @@
 - 核验属于持有执行租约的阶段；失去执行权或进程退出后保留结果并明确未完成，恢复不自动重放业务动作。启动 Hook 在队列接纳后的执行入口检查，拒绝先于模型与业务调用。
 - 技能正文、规划和验收保持完整；模型容量不足明确失败。匹配、权限和灰度使用当前版本，创建绑定不可变发布引用；目录历史和无权记录不占有效名额，用户反馈与工具调用使用各自统计分母。
 - 逐项实现、实际验证和限制见[十项审查问题修复记录](../reports/project-audit-remediation-20261111.md)。
+
+## 图片核验与失败补全（v0.7.153）
+
+- 图片内容的独立核验复用当前账号仍有权读取的原始上传图片；原生视觉输入可以作为识读依据，文件产物清单与图片来源分开判断。核验前后复查来源和图像摘要，撤权、过期、变化、超限与不支持视觉不得记为通过。
+- 意图响应格式错误最多在原截止内补判一次，能力、来源和续接边界不因补判放宽；提前发生的上游超时可在剩余预算内有界恢复，总截止及取消继续生效。
+- 缺少文件格式时保留已经验过的文件，复用已有成果导出缺失格式；沿用补全轮次和预算限制，不重复已有业务操作。实际验证和生产验收边界见[生产报错对应修复记录](../reports/production-error-fixes-20261112.md)。
+
+升级与兼容见[v0.7.153发布说明](../releases/v0.7.153-图片核验证据与智能路由失败恢复优化.md)。功能阶段证据保持原 v0.7.152 身份，源码升版不代表生产验收通过。
 
 ## Open questions
 

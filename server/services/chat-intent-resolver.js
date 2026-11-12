@@ -15,7 +15,7 @@ const { buildIntentFallback } = require('./chat-intent-fallback');
 
 const { createChatIntentBudget } = require('./chat-intent-budget');
 const { buildChatIntentContext } = require('./chat-intent-context');
-const { callChatIntentModel } = require('./chat-intent-model');
+const { callChatIntentModel, isChatIntentTimeout } = require('./chat-intent-model');
 const { decodeChatIntentPayload } = require('./chat-intent-schema');
 const { explicitContinuationTarget, reconcileIntentAction, isStandaloneTextDraft } = require('./chat-intent-consistency');
 
@@ -56,20 +56,31 @@ async function resolveChatIntent(input, deps = {}) {
                 const context = buildChatIntentContext({ prompt, history, tasks, preferences, providedSources, availability });
                 if (!context.requestContext.constraintsComplete) throw Object.assign(new Error('长请求的限制信息尚不完整'), { code: 'CHAT_INTENT_CONTEXT_INCOMPLETE' });
                 const messages = buildChatIntentMessages({ preparedContext: context });
-                const usageRef = {};
-                const content = await budget.run('model', modelSignal => callChatIntentModel(deps.callModelJson || callModelJson, modelCfg, messages, { user, maxTokens: 2000, temperature: 0, enableThinking: false, usageRef, timeoutMs: budget.remainingMs(), deadlineAt: budget.deadlineAt, signal: modelSignal, source: 'chat_intent' }, stats));
-                stats.queueMs = Number(usageRef.queueMs) || 0;
-                stats.providerMs = Number(usageRef.providerMs) || 0;
-                if (signal?.aborted) throw signal.reason || new Error('意图判断已取消');
-                if (!deps.callModelJson) await budget.run('usage', () => recordAgentModelUsage(user, modelCfg, messages, content, 'chat_intent', '', { usageRef }));
-                if (usageRef.truncated) throw Object.assign(new Error('意图响应不完整'), { code: 'CHAT_INTENT_INVALID_CONTRACT' });
-                const parsed = decodeChatIntentPayload(typeof content === 'object' ? content : JSON.parse(String(content).trim().replace(/^```(?:json)?\s*|\s*```$/g, '')));
-                const { raw, adjustments } = reconcileIntentAction(parsed, prompt, { tasks, history });
-                stats.providerAction = parsed?.action || '';
-                stats.contractAdjustments = adjustments;
-                stats.outputTokens = Number(usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens) || null;
-                stats.inputTokens = Number(usageRef.usage?.prompt_tokens ?? usageRef.usage?.input_tokens) || null;
-                resolved = normalizeIntent(raw, { baseline, tasks: tasks.filter(task => context.tasks.some(item => item.id === task.id)), history, userMessageId, availability: context.availability, prompt, requestScope, requireRouting: true });
+                for (let attempt = 0; ; attempt++) {
+                    const usageRef = {};
+                    try {
+                        const attemptMessages = attempt ? [{ ...messages[0], content: messages[0].content + '\n上次响应未通过格式校验。请重新判断同一用户请求，严格返回完整的decision JSON，使用正确字段类型与动作分支；不要输出推理或扩大工具、来源及权限。' }, ...messages.slice(1)] : messages;
+                        const content = await budget.run('model', modelSignal => callChatIntentModel(deps.callModelJson || callModelJson, modelCfg, attemptMessages, { user, maxTokens: 2000, temperature: 0, enableThinking: false, usageRef, timeoutMs: budget.remainingMs(), deadlineAt: budget.deadlineAt, signal: modelSignal, source: 'chat_intent' }, stats));
+                        if (signal?.aborted) throw signal.reason || new Error('意图判断已取消');
+                        if (!deps.callModelJson) await budget.run('usage', () => recordAgentModelUsage(user, modelCfg, attemptMessages, content, 'chat_intent', '', { usageRef }));
+                        stats.outputTokens = (stats.outputTokens || 0) + (Number(usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens) || 0) || null;
+                        stats.inputTokens = (stats.inputTokens || 0) + (Number(usageRef.usage?.prompt_tokens ?? usageRef.usage?.input_tokens) || 0) || null;
+                        if (usageRef.truncated) throw Object.assign(new Error('意图响应不完整'), { code: 'CHAT_INTENT_INVALID_CONTRACT' });
+                        const parsed = decodeChatIntentPayload(typeof content === 'object' ? content : JSON.parse(String(content).trim().replace(/^```(?:json)?\s*|\s*```$/g, '')));
+                        const { raw, adjustments } = reconcileIntentAction(parsed, prompt, { tasks, history });
+                        resolved = normalizeIntent(raw, { baseline, tasks: tasks.filter(task => context.tasks.some(item => item.id === task.id)), history, userMessageId, availability: context.availability, prompt, requestScope, requireRouting: true });
+                        stats.providerAction = parsed?.action || '';
+                        stats.contractAdjustments = adjustments;
+                        break;
+                    } catch (error) {
+                        // 补判仍使用原始授权和相同校验，不把无效响应当作可执行决定。
+                        if (attempt || !(error instanceof SyntaxError || error.code === 'CHAT_INTENT_INVALID_CONTRACT') || budget.signal.aborted || budget.remainingMs() < 2000) throw error;
+                        stats.contractRetries = 1;
+                    } finally {
+                        if (Number.isFinite(usageRef.queueMs)) stats.queueMs = (stats.queueMs || 0) + usageRef.queueMs;
+                        if (Number.isFinite(usageRef.providerMs)) stats.providerMs = (stats.providerMs || 0) + usageRef.providerMs;
+                    }
+                }
                 if (!context.requestContext.complete) {
                     if (!resolved.delegated && (resolved.routing.tools === 'read_only' || resolved.routing.knowledge !== 'none')) throw Object.assign(new Error('长请求需要完整资料复核后才能查询'), { code: 'CHAT_INTENT_CONTEXT_INCOMPLETE' });
                     if (resolved.delegated) {
@@ -82,7 +93,7 @@ async function resolveChatIntent(input, deps = {}) {
             } catch (error) {
                 if (signal?.aborted) throw error;
                 if (error.code === 'CHAT_INTENT_INVALID_CONTRACT') stats.contractFailureReason = error.message;
-                failure = error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : error.code === 'CHAT_INTENT_CONTEXT_INCOMPLETE' ? 'intent_context_incomplete' : error.code === 'CHAT_INTENT_INVALID_CONTRACT' || error instanceof SyntaxError ? 'intent_invalid_contract' : 'intent_provider_unavailable';
+                failure = isChatIntentTimeout(error) ? 'intent_timeout' : error.code === 'CHAT_INTENT_CONTEXT_INCOMPLETE' ? 'intent_context_incomplete' : error.code === 'CHAT_INTENT_INVALID_CONTRACT' || error instanceof SyntaxError ? 'intent_invalid_contract' : 'intent_provider_unavailable';
                 resolved = buildIntentFallback(baseline, failure);
             }
         }
@@ -120,7 +131,7 @@ async function resolveChatIntent(input, deps = {}) {
             policy: { mode: applied ? 'active' : 'shadow', policyVersion: INTENT_POLICY_VERSION, selectedActionId: selected.action, suggestedActionId: resolved.action, applied, reasonCode: resolved.reasonCode }
         });
         return { ...constrainChatDecision(selected, requestScope), decisionId: learningApplied && !failure ? learningDecisionId : decisionId, intentDecisionId: decisionId, learningDecisionId, learningApplied: learningApplied && !failure, modelCalls: stats.modelCalls, structuredOutput: stats.structuredOutput, contractFailureReason: stats.contractFailureReason || '', durationMs: Date.now() - started,
-            providerAction: stats.providerAction || '', contractAdjustments: stats.contractAdjustments || [], providerRetries: stats.providerRetries || 0,
+            providerAction: stats.providerAction || '', contractAdjustments: stats.contractAdjustments || [], providerRetries: stats.providerRetries || 0, contractRetries: stats.contractRetries || 0,
             usage: { inputTokens: stats.inputTokens ?? null, outputTokens: stats.outputTokens ?? null },
             timing: { modelMs: budget.timings.model || 0, queueMs: stats.queueMs ?? null, providerMs: stats.providerMs ?? null, usageMs: budget.timings.usage || 0, learningMs: budget.timings.learning || 0 }, modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };
     } finally { budget.dispose(); }

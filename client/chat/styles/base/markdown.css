@@ -456,6 +456,8 @@
     box-shadow: 0 0 8px #10b981;
 }
 .code-copy-btn,
+.code-download-btn,
+.code-toolbar-actions [data-code-view],
 .code-save-local-btn {
     display: inline-flex;
     align-items: center;
@@ -474,10 +476,16 @@
     white-space: nowrap;
 }
 .code-copy-btn:hover,
+.code-download-btn:hover,
+.code-toolbar-actions [data-code-view]:hover,
 .code-save-local-btn:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: #10b981;
     color: #10b981;
+}
+.code-toolbar-actions [data-code-view][aria-pressed="true"] {
+    color: var(--primary);
+    border-color: var(--primary);
 }
 .code-copy-btn.copied {
     background: #10b981;
@@ -850,4 +858,23 @@
     .thought-block .thought-summary::after {
         transition: none;
     }
+}
+.code-preview-block .code-preview-panel {
+    background: var(--surface);
+    color: var(--text-main);
+    min-width: 0;
+}
+.code-preview-status {
+    margin: 0;
+    padding: 10px 12px;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+.code-preview-frame {
+    display: block;
+    width: 100%;
+    height: 400px;
+    max-height: 60vh;
+    border: 0;
+    background: var(--surface);
 }

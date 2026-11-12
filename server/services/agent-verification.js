@@ -111,7 +111,7 @@ function verifyTaskOutcome({ taskContract, goal = '', answer = '', observations 
     if (acceptance.artifactRequired) add('artifact_required', hasArtifact, hasArtifact ? (artifactNames.join('、') || '已生成受控文件') : '尚未生成要求的文件');
     if (acceptance.requireSemanticVerification) add('deliverables_verified', semanticVerification?.passed === true, semanticVerification?.reason || (semanticVerification?.missing || []).join('；'));
     acceptance.requiredArtifacts.forEach(required => add('required_artifact', artifactNames.includes(required), required));
-    const evidenceFound = semanticVerification?.reason !== 'source_revoked' && (hasEvidence(observations) || (Array.isArray(evidence) && evidence.length > 0));
+    const evidenceFound = semanticVerification?.reason !== 'source_revoked' && (hasEvidence(observations) || semanticVerification?.verifiedSourceImages?.length > 0 || (Array.isArray(evidence) && evidence.length > 0));
     if (semanticVerification?.reason === 'source_revoked') add('knowledge_sources_current', false, '资料来源已变化或不可访问');
     if (acceptance.requireEvidence) add('evidence', evidenceFound, evidenceFound ? '已提供可核验来源' : '缺少引用来源与佐证');
     const hardFailures = rules.filter(rule => rule.hard && !rule.passed);

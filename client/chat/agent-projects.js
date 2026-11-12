@@ -13,6 +13,25 @@
         return el;
     };
 
+    function svgIcon(paths, size = 18) {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        el.setAttribute('width', String(size));
+        el.setAttribute('height', String(size));
+        el.setAttribute('viewBox', '0 0 24 24');
+        el.setAttribute('fill', 'none');
+        el.setAttribute('stroke', 'currentColor');
+        el.setAttribute('stroke-width', '2');
+        el.setAttribute('stroke-linecap', 'round');
+        el.setAttribute('stroke-linejoin', 'round');
+        for (const [tag, attrs] of paths) {
+            const child = document.createElementNS('http://www.w3.org/2000/svg', tag);
+            for (const [k, v] of Object.entries(attrs))
+                child.setAttribute(k, v);
+            el.appendChild(child);
+        }
+        return el;
+    }
+
     const actor = () => window.Pivot.legacy.currentUser?.id;
 
     async function request(url, options) {
@@ -74,7 +93,9 @@
         const header = node('header', 'workspace-modal-header');
         heading = node('h3', '', '项目空间');
         heading.id = 'agent-projects-title';
-        header.append(heading, action('关闭', close));
+        const closeBtn = action('关闭', close);
+        closeBtn.className = 'btn-secondary workspace-modal-close';
+        header.append(heading, closeBtn);
 
         message = node('p', 'agent-projects-message');
         message.setAttribute('aria-live', 'polite');
@@ -157,17 +178,63 @@
         return wrapper;
     }
 
+    function renderPagination(container, { total = 0, limit = 20, page = 1, onPageChange } = {}) {
+        const render = window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination
+            || window.Pivot?.legacy?.renderWorkspacePagination;
+        if (typeof render === 'function') {
+            render(container, { total, limit, page, onPageChange });
+            return;
+        }
+        container.replaceChildren();
+        const totalItems = Math.max(Number(total) || 0, 0);
+        const pageSize = Math.max(Number(limit) || 20, 1);
+        const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+        const currentPage = Math.min(Math.max(Number(page) || 1, 1), totalPages);
+        if (totalPages <= 1)
+            return;
+
+        const createBtn = (label, target, disabled) => {
+            const btn = node('button', 'btn-secondary', label);
+            btn.type = 'button';
+            btn.disabled = Boolean(disabled);
+            btn.dataset.workspacePaginationPage = String(target);
+            btn.addEventListener('click', () => {
+                if (!btn.disabled && onPageChange)
+                    onPageChange(target);
+            });
+            return btn;
+        };
+
+        const summary = node('span', '', `第 ${currentPage} / ${totalPages} 页（共 ${totalItems} 条，每页 ${pageSize} 条）`);
+        container.append(
+            createBtn('首页', 1, currentPage <= 1),
+            createBtn('上一页', currentPage - 1, currentPage <= 1),
+            summary,
+            createBtn('下一页', currentPage + 1, currentPage >= totalPages),
+            createBtn('末页', totalPages, currentPage >= totalPages)
+        );
+    }
+
     async function list() {
         current = null;
         heading.textContent = '项目空间';
         await load(() => request(`?limit=20&offset=${offset}&status=${filter}&query=${encodeURIComponent(query)}`), data => {
+            const lead = node('div', 'agent-projects-lead');
+            const leadIcon = node('span', 'agent-projects-lead-icon');
+            leadIcon.append(svgIcon([['path', { d: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' }]], 16));
+            const leadText = node('span', '', '统一管理项目资料范围、工作规则与交付里程碑，跨会话协同驱动智能体精准对齐业务目标。');
+            lead.append(leadIcon, leadText);
+
             const toolbar = node('div', 'agent-projects-toolbar');
+            const searchGroup = node('div', 'agent-projects-search-group');
+
             const search = node('input', 'form-input');
             search.placeholder = '搜索项目名称';
             search.value = query;
             search.setAttribute('aria-label', '搜索项目名称');
 
             const status = node('select', 'form-input');
+            status.setAttribute('aria-label', '全部状态');
             [['', '全部状态'], ['active', '进行中'], ['archived', '已归档']].forEach(([value, label]) => {
                 const option = node('option', '', label);
                 option.value = value;
@@ -188,22 +255,11 @@
             });
             status.addEventListener('change', searchNow);
 
-            toolbar.append(search, status, action('查询', searchNow), action('新建项目', () => edit(null), true));
+            searchGroup.append(search, status, action('查询', searchNow));
 
-            const paging = node('div', 'agent-projects-toolbar');
-            paging.append(
-                node('span', '', `共 ${data.total} 个项目`),
-                action('上一页', () => {
-                    offset = Math.max(0, offset - 20);
-                    return list();
-                }),
-                action('下一页', () => {
-                    if (offset + 20 < data.total) {
-                        offset += 20;
-                        return list();
-                    }
-                })
-            );
+            const newBtn = action('新建项目', () => edit(null), true);
+            newBtn.classList.add('agent-projects-btn-new');
+            toolbar.append(searchGroup, newBtn);
 
             const content = data.data.length
                 ? table(['项目', '状态', '操作'], data.data.map(item => [
@@ -212,12 +268,34 @@
                     action('查看', () => detail(item.id))
                 ]))
                 : (() => {
-                    const empty = node('div', 'agent-projects-empty-milestones');
-                    empty.append(node('p', '', '暂无项目。创建项目后可统一维护资料、工作规则和里程碑。'));
+                    const empty = node('div', 'agent-projects-empty-milestones agent-projects-empty-state');
+                    const emptyIcon = node('div', 'agent-projects-empty-icon');
+                    emptyIcon.append(svgIcon([
+                        ['path', { d: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' }],
+                        ['line', { x1: '12', y1: '11', x2: '12', y2: '17' }],
+                        ['line', { x1: '9', y1: '14', x2: '15', y2: '14' }]
+                    ], 36));
+                    const emptyMsg = node('p', '', '暂无项目。创建项目后可统一维护资料、工作规则和里程碑。');
+                    empty.append(emptyIcon, emptyMsg);
                     return empty;
                 })();
 
-            setBody(toolbar, content, paging);
+            const elements = [lead, toolbar, content];
+            if (data.total > 20) {
+                const paging = node('div', 'workspace-pagination pagination agent-projects-pagination');
+                renderPagination(paging, {
+                    total: data.total,
+                    limit: 20,
+                    page: Math.floor(offset / 20) + 1,
+                    onPageChange: targetPage => {
+                        offset = (targetPage - 1) * 20;
+                        return list();
+                    }
+                });
+                if (paging.childElementCount > 0)
+                    elements.push(paging);
+            }
+            setBody(...elements);
         });
     }
 
@@ -227,15 +305,24 @@
             heading.textContent = current.title;
 
             const toolbar = node('div', 'agent-projects-toolbar');
-            toolbar.append(
-                action('返回项目列表', list),
+            const leftActions = node('div', 'agent-projects-detail-left-actions');
+            leftActions.append(action('返回项目列表', list));
+
+            const rightActions = node('div', 'agent-projects-detail-right-actions');
+            rightActions.append(
                 action('编辑项目', () => edit(current)),
                 action(current.status === 'archived' ? '恢复项目' : '归档项目', () => save(current, { status: current.status === 'archived' ? 'active' : 'archived' }))
             );
             if (current.status === 'active')
-                toolbar.append(action('创建项目任务', () => start(current), true));
+                rightActions.append(action('创建项目任务', () => start(current), true));
 
-            const descBox = current.description ? node('p', 'agent-projects-text', current.description) : null;
+            toolbar.append(leftActions, rightActions);
+
+            const descBox = current.description ? (() => {
+                const sec = node('div', 'agent-projects-section');
+                sec.append(node('h4', '', '项目说明'), node('p', 'agent-projects-text', current.description));
+                return sec;
+            })() : null;
 
             const rulesSection = node('div', 'agent-projects-section');
             rulesSection.append(node('h4', '', '工作规则'), node('p', 'agent-projects-text', current.instructions || '尚未设置项目规则。'));
@@ -249,7 +336,7 @@
             }
             collectionsSection.append(node('h4', '', '资料范围'), collTags);
 
-            const milestonesTable = table(
+            const milestonesTable = current.milestones.length ? table(
                 ['里程碑', '状态', '到期日期', '确认依据'],
                 current.milestones.map(item => [
                     item.title,
@@ -257,11 +344,15 @@
                     item.dueDate || '—',
                     item.runId ? `关联任务：${item.runId}` : item.note || '—'
                 ])
-            );
+            ) : (() => {
+                const empty = node('div', 'agent-projects-empty-milestones');
+                empty.append(node('p', '', '尚未创建项目里程碑。'));
+                return empty;
+            })();
             const milestonesSection = node('div', 'agent-projects-section');
             milestonesSection.append(node('h4', '', '里程碑'), milestonesTable);
 
-            const tasksTable = table(
+            const tasksTable = data.tasks.length ? table(
                 ['任务', '状态', '验收', '操作'],
                 data.tasks.map(item => [
                     item.title,
@@ -272,32 +363,46 @@
                         await window.Pivot.legacy.openAgentRun?.(item.id);
                     })
                 ])
-            );
+            ) : (() => {
+                const empty = node('div', 'agent-projects-empty-milestones');
+                empty.append(node('p', '', '暂无关联智能体任务。可在上方点击「创建项目任务」发起。'));
+                return empty;
+            })();
             const tasksSection = node('div', 'agent-projects-section');
             tasksSection.append(node('h4', '', '任务'), tasksTable);
 
-            const filesTable = table(
+            const filesTable = data.artifacts.length ? table(
                 ['文件', '版本', '操作'],
                 data.artifacts.map(item => [
                     item.title,
                     item.version || '—',
                     item.available ? action('查看', () => window.Pivot.openArtifact?.(item.id)) : '不可访问'
                 ])
-            );
+            ) : (() => {
+                const empty = node('div', 'agent-projects-empty-milestones');
+                empty.append(node('p', '', '暂无关联产物文件。'));
+                return empty;
+            })();
             const filesSection = node('div', 'agent-projects-section');
             filesSection.append(node('h4', '', '关联文件与交付物'), filesTable);
-
-            const paging = node('div', 'agent-projects-toolbar');
-            paging.append(
-                node('span', '', `任务 ${data.taskTotal} 项；项目产物 ${data.artifactTotal} 项`),
-                action('上一页', () => detail(id, Math.max(0, page - 20))),
-                action('下一页', () => detail(id, page + 20 < Math.max(data.taskTotal, data.artifactTotal) ? page + 20 : page))
-            );
 
             const elements = [toolbar];
             if (descBox)
                 elements.push(descBox);
-            elements.push(rulesSection, collectionsSection, milestonesSection, tasksSection, filesSection, paging);
+            elements.push(rulesSection, collectionsSection, milestonesSection, tasksSection, filesSection);
+
+            const maxItems = Math.max(data.taskTotal || 0, data.artifactTotal || 0);
+            if (maxItems > 20) {
+                const paging = node('div', 'workspace-pagination pagination agent-projects-pagination');
+                renderPagination(paging, {
+                    total: maxItems,
+                    limit: 20,
+                    page: Math.floor(page / 20) + 1,
+                    onPageChange: targetPage => detail(id, (targetPage - 1) * 20)
+                });
+                if (paging.childElementCount > 0)
+                    elements.push(paging);
+            }
             setBody(...elements);
         });
     }
@@ -309,6 +414,7 @@
         input.value = value || '';
         if (max)
             input.maxLength = max;
+        input.setAttribute('aria-label', label);
         wrapper.append(node('span', '', label), input);
         return { wrapper, input };
     }
@@ -324,12 +430,50 @@
         }, ({ collections, artifacts, tasks }) => {
             heading.textContent = project ? '编辑项目' : '新建项目';
             const form = node('form', 'agent-projects-form');
-            const title = field('项目名称', 'text', project?.title, 160);
-            const description = field('项目说明', 'textarea', project?.description, 2000);
-            const instructions = field('工作规则', 'textarea', project?.instructions, 8000);
-            title.input.required = true;
 
-            const sources = node('select', 'form-input');
+            // 1. 基本信息卡片
+            const basicSection = node('div', 'agent-projects-section');
+            const basicHeader = node('div', 'agent-projects-section-header');
+            const basicLeft = node('div', 'agent-projects-header-left');
+            basicLeft.append(node('h4', '', '基本信息'));
+            const basicSub = node('p', 'agent-projects-section-subtitle', '定义项目的核心标识与智能体全局执行约束');
+            basicHeader.append(basicLeft, basicSub);
+
+            const title = field('项目名称', 'text', project?.title, 160);
+            title.input.placeholder = '例如：2026年度经营分析与策略对齐';
+            title.input.required = true;
+            title.input.setAttribute('aria-label', '项目名称');
+
+            const description = field('项目说明', 'textarea', project?.description, 2000);
+            description.input.placeholder = '简述项目背景、核心目标与参与范围（可选）';
+            description.input.setAttribute('aria-label', '项目说明');
+            description.input.rows = 2;
+
+            const instructions = field('工作规则', 'textarea', project?.instructions, 8000);
+            instructions.input.placeholder = '指导智能体处理该项目任务的特定业务规则、输出格式与约束（例如：保留来源与两位小数）';
+            instructions.input.setAttribute('aria-label', '工作规则');
+            instructions.input.rows = 2;
+
+            const descRulesGrid = node('div', 'agent-projects-grid-2col');
+            descRulesGrid.append(description.wrapper, instructions.wrapper);
+
+            basicSection.append(basicHeader, title.wrapper, descRulesGrid);
+
+            // 2. 资料范围与交付物卡片
+            const resourcesSection = node('div', 'agent-projects-section');
+            const resHeader = node('div', 'agent-projects-section-header');
+            const resLeft = node('div', 'agent-projects-header-left');
+            resLeft.append(node('h4', '', '资料范围与交付物'));
+            const resSub = node('p', 'agent-projects-section-subtitle', '限定智能体检索知识库的范围及初始引用的产物交付物');
+            resHeader.append(resLeft, resSub);
+
+            const grid = node('div', 'agent-projects-resources-grid');
+
+            // 知识库集合
+            const sourcesCol = node('div', 'agent-projects-resource-column');
+            const sourcesHdr = node('div', 'agent-projects-resource-header');
+            sourcesHdr.append(node('span', '', '项目资料范围'), node('small', '', '最多12个集合，Ctrl/Cmd多选'));
+            const sources = node('select', 'form-input agent-projects-select-list');
             sources.multiple = true;
             sources.size = 5;
             sources.setAttribute('aria-label', '项目资料范围');
@@ -344,8 +488,13 @@
                 option.selected = project?.collectionIds.includes(Number(item.id)) || false;
                 sources.append(option);
             }
+            sourcesCol.append(sourcesHdr, sources);
 
-            const artifactIds = node('select', 'form-input');
+            // 产物文件
+            const artifactsCol = node('div', 'agent-projects-resource-column');
+            const artifactsHdr = node('div', 'agent-projects-resource-header');
+            artifactsHdr.append(node('span', '', '关联已有文件'), node('small', '', '最近100个产物，可选'));
+            const artifactIds = node('select', 'form-input agent-projects-select-list');
             artifactIds.multiple = true;
             artifactIds.size = 5;
             artifactIds.setAttribute('aria-label', '关联已有文件');
@@ -360,8 +509,12 @@
                 option.selected = project?.artifactIds.includes(Number(item.id)) || false;
                 artifactIds.append(option);
             }
+            artifactsCol.append(artifactsHdr, artifactIds);
 
-            // 里程碑数据状态
+            grid.append(sourcesCol, artifactsCol);
+            resourcesSection.append(resHeader, grid);
+
+            // 3. 里程碑专区与卡片列表
             const milestoneData = (project?.milestones || []).map(m => ({
                 id: m.id,
                 title: m.title || '',
@@ -371,12 +524,16 @@
                 status: m.status || 'pending'
             }));
 
-            // 里程碑专区与卡片列表
             const milestonesSection = node('div', 'agent-projects-section agent-projects-milestones-section');
             const milestonesHeader = node('div', 'agent-projects-section-header');
+            const milestonesLeft = node('div', 'agent-projects-header-left');
             const milestonesTitle = node('h4', '', '项目里程碑');
             const milestonesCount = node('span', 'agent-projects-counter', `${milestoneData.length} / 32`);
-            milestonesHeader.append(milestonesTitle, milestonesCount);
+            milestonesLeft.append(milestonesTitle, milestonesCount);
+
+            const addMilestoneBtn = action('添加里程碑', () => openMilestoneDialog(-1), true);
+            addMilestoneBtn.classList.add('agent-projects-btn-add-milestone');
+            milestonesHeader.append(milestonesLeft, addMilestoneBtn);
 
             const milestonesList = node('div', 'agent-projects-milestone-list');
 
@@ -384,7 +541,14 @@
                 milestonesCount.textContent = `${milestoneData.length} / 32`;
                 if (!milestoneData.length) {
                     const empty = node('div', 'agent-projects-empty-milestones');
-                    empty.append(node('p', '', '暂无里程碑。点击下方「添加里程碑」规划阶段目标与核验要求。'));
+                    const emptyIcon = node('div', 'agent-projects-empty-icon');
+                    emptyIcon.append(svgIcon([
+                        ['circle', { cx: '12', cy: '12', r: '10' }],
+                        ['circle', { cx: '12', cy: '12', r: '6' }],
+                        ['circle', { cx: '12', cy: '12', r: '2' }]
+                    ], 28));
+                    const emptyText = node('p', '', '暂无里程碑。点击右上角「添加里程碑」规划阶段目标与核验要求。');
+                    empty.append(emptyIcon, emptyText);
                     milestonesList.replaceChildren(empty);
                     return;
                 }
@@ -451,7 +615,7 @@
                 const dlgBody = node('div', 'agent-projects-milestone-body');
                 const nameField = field('名称', 'text', currentItem.title, 200);
                 nameField.input.setAttribute('aria-label', '名称');
-                nameField.input.placeholder = '输入里程碑名称';
+                nameField.input.placeholder = '输入里程碑名称（例如：输出竞争格局初稿）';
                 nameField.input.required = true;
 
                 const stateSelect = node('select', 'form-input');
@@ -481,6 +645,8 @@
 
                 const noteField = field('人工确认或阻塞说明', 'textarea', currentItem.note, 1000);
                 noteField.input.setAttribute('aria-label', '人工确认或阻塞说明');
+                noteField.input.placeholder = '补充验收依据、依赖条件或阻碍原因说明（可选）';
+                noteField.input.rows = 3;
 
                 dlgBody.append(nameField.wrapper, stateField, dueField.wrapper, runField, noteField.wrapper);
 
@@ -533,22 +699,21 @@
                 nameField.input.focus();
             }
 
-            const buttons = node('div', 'agent-projects-toolbar');
-            const submit = node('button', 'btn-primary', '保存项目');
-            submit.type = 'submit';
-            buttons.append(action('取消', () => project ? detail(project.id) : list()), submit);
+            // 4. 底部吸底操作栏
+            const formFooter = node('div', 'agent-projects-form-footer');
+            const tip = node('div', 'agent-projects-form-tip', '按 Esc 可退出；保存后项目可在智能体任务规划与执行中持续复用。');
+            const footerActions = node('div', 'agent-projects-footer-actions');
+            const cancelBtn = action('取消', () => project ? detail(project.id) : list());
+            const submitBtn = node('button', 'btn-primary agent-projects-btn-save', '保存项目');
+            submitBtn.type = 'submit';
+            footerActions.append(cancelBtn, submitBtn);
+            formFooter.append(tip, footerActions);
 
             form.append(
-                title.wrapper,
-                description.wrapper,
-                instructions.wrapper,
-                node('label', '', '资料范围（最多12个集合）'),
-                sources,
-                node('label', '', '关联已有文件（最近100个，可选）'),
-                artifactIds,
+                basicSection,
+                resourcesSection,
                 milestonesSection,
-                action('添加里程碑', () => openMilestoneDialog(-1)),
-                buttons
+                formFooter
             );
 
             form.addEventListener('submit', async event => {

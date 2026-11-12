@@ -577,6 +577,12 @@ function restoreThoughtStateAfterRender(root, state) {
 
 // --- 代码块复制功能实现 ---
 document.addEventListener('click', async (e) => {
+    const downloadCodeButton = e.target.closest('.code-download-btn');
+    if (downloadCodeButton) {
+        e.preventDefault();
+        await window.Pivot.moduleApi('chat.codeDelivery').downloadCodeBlock(downloadCodeButton);
+        return;
+    }
     const saveCodeButton = e.target.closest('.code-save-local-btn');
     if (saveCodeButton) {
         e.preventDefault();
@@ -587,7 +593,7 @@ document.addEventListener('click', async (e) => {
     if (!btn) return;
 
     const codeBlock = btn.closest('.code-block');
-    const code = codeBlock ? codeBlock.querySelector('code')?.innerText : '';
+    const code = codeBlock ? codeBlock.querySelector('code')?.textContent : '';
     if (!code) return;
 
     try {

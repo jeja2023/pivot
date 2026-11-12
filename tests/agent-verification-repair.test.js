@@ -12,7 +12,7 @@ test('only bounded internal verification gaps can request another planning attem
     const base = { outcomeStatus: 'needs_input', taskContract: { repairAttempts: 0 }, hardFailures: ['artifact_required'] };
     const options = { allowed: true, remainingSteps: 3, budget: new TaskBudget() };
     assert.equal(canAttemptVerificationRepair(base, options), true);
-    for (const reason of ['source_not_fully_read', 'artifact_not_materialized']) {
+    for (const reason of ['source_not_fully_read', 'artifact_not_materialized', 'artifact_format_missing']) {
         assert.equal(canAttemptVerificationRepair({ ...base, semanticVerification: { reason } }, options), true);
     }
     for (const reason of ['source_revoked', 'verifier_unavailable', 'budget_exceeded', 'user_input_required']) {
@@ -42,6 +42,21 @@ test('语义核验缺少交付项时把具体缺口交给受限修复轮次', ()
     const message = buildVerificationRepairMessage(report);
     assert.match(message, /总结缺少文档中的部署前检查项/);
     assert.equal(canAttemptVerificationRepair(report, { allowed: true, remainingSteps: 3 }), true);
+});
+
+test('已有文件缺少指定格式时保留已交付文件并请求有界导出，不伪装成文件全未生成', async () => {
+    const { verifyAutomaticTask } = require('../server/services/chat-task-verification');
+    const semanticVerification = await verifyAutomaticTask({ run: { id: 'missing-format' }, user: { id: 1 },
+        contract: { acceptance: { artifactRequired: true, requiredFormats: ['pptx', 'pdf'] } }, answer: '已生成演示文件' }, {
+        getModel: async () => null, readyRunArtifacts: async () => [{ id: 'pptx-file', title: '报告.pptx', format: 'pptx', content_digest: 'digest' }]
+    });
+    assert.equal(semanticVerification.reason, 'artifact_format_missing');
+    assert.equal(semanticVerification.verifiedArtifacts[0].id, 'pptx-file');
+    assert.deepEqual(semanticVerification.missing, ['尚未生成用户要求的 PDF 文件']);
+    const report = { outcomeStatus: 'needs_input', hardFailures: ['deliverables_verified'], semanticVerification };
+    assert.equal(canAttemptVerificationRepair(report, { allowed: true, remainingSteps: 3, budget: new TaskBudget() }), true);
+    assert.equal(canAttemptVerificationRepair({ ...report, taskContract: { repairAttempts: 2 } }, { allowed: true, remainingSteps: 3 }), false);
+    assert.match(buildVerificationRepairMessage(report), /复用已有成果导出缺失格式/);
 });
 
 test('repairable verification keeps the task transaction executable until final verification succeeds', async () => {

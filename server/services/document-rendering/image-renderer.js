@@ -34,6 +34,7 @@ function sanitizeSvg(source, limits = {}) {
         for (const child of node.childNodes || []) inspectSvgNode(child, depth + 1);
     }
     inspectSvgNode(roots[0], 0);
+    if (!roots[0].attrs.some(attribute => attribute.name === 'xmlns')) roots[0].attrs.push({ name: 'xmlns', value: 'http://www.w3.org/2000/svg' });
     return parse5.serialize(fragment).trim();
 }
 

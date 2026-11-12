@@ -8,22 +8,29 @@
     const user = () => String(window.Pivot?.legacy?.currentUser?.id || 'current-page');
     const escape = value => window.Pivot.legacy.PivotSafeHtml.escapeHtml(value);
 
-    function markup(source, { pending = false, resultFiles = false } = {}) {
-        if (resultFiles) return `<details class="mermaid-card code-block mermaid-supplement" data-mermaid-card data-mermaid-source-only="true" data-code-language="mermaid" aria-label="补充图形源码"><summary>补充图形源码</summary><div class="mermaid-toolbar"><span class="mermaid-label">图形预览、下载和保存请使用上方“结果文件”。</span><div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source">复制源码</button></div></div><div class="mermaid-source"><pre><code class="language-mermaid">${escape(source)}</code></pre></div></details>`;
-        return `<section class="mermaid-card code-block" data-mermaid-card data-code-language="mermaid" data-mermaid-pending="${pending ? 'true' : 'false'}" aria-label="Mermaid 图形">
-            <div class="mermaid-toolbar"><strong class="mermaid-label">流程图 · Mermaid</strong>
+    function markup(source, { pending = false, resultFiles = false, language = 'mermaid' } = {}) {
+        const svg = language === 'svg';
+        language = svg ? 'svg' : 'mermaid';
+        const label = svg ? 'SVG 图形' : '流程图 · Mermaid';
+        const saveTitle = svg ? '将静态矢量图形保存到本机授权目录' : '将 Mermaid 源码保存为 TXT 文件';
+        const saveLabel = svg ? '保存到本机' : '保存源码';
+        if (resultFiles) return `<details class="mermaid-card code-block mermaid-supplement" data-mermaid-card data-mermaid-source-only="true" data-code-language="${language}" aria-label="补充图形源码"><summary>补充图形源码</summary><div class="mermaid-toolbar"><span class="mermaid-label">图形预览、下载和保存请使用上方“结果文件”。</span><div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source">复制源码</button></div></div><div class="mermaid-source"><pre><code class="language-${language}">${escape(source)}</code></pre></div></details>`;
+        return `<section class="mermaid-card code-block" data-mermaid-card data-code-language="${language}" data-mermaid-pending="${pending ? 'true' : 'false'}" aria-label="${label}">
+            <div class="mermaid-toolbar"><strong class="mermaid-label">${label}</strong>
                 <div class="mermaid-tabs" role="tablist" aria-label="图形显示方式"><button type="button" class="btn-secondary btn-sm" role="tab" aria-selected="true" data-mermaid-action="preview">预览</button><button type="button" class="btn-secondary btn-sm" role="tab" aria-selected="false" data-mermaid-action="source">源码</button></div>
-                <div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="expand" disabled>放大查看</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="download-svg" disabled>下载 SVG</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source" title="复制 Mermaid 源码">复制源码</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="save-source" title="将 Mermaid 源码保存为 TXT 文件">保存源码</button></div>
+                <div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="expand" disabled>放大查看</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="download-svg" disabled>下载 SVG</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source" title="复制图形源码">复制源码</button><button type="button" class="btn-secondary btn-sm" data-mermaid-action="save-source" title="${saveTitle}">${saveLabel}</button></div>
             </div>
-            <div class="mermaid-preview" role="tabpanel" aria-label="图形预览"><p class="mermaid-status" role="status">${pending ? '正在接收图形源码，完整后显示预览。' : '正在准备图形预览…'}</p><img class="mermaid-image hidden" alt="Mermaid 图形预览"><button type="button" class="btn-secondary btn-sm mermaid-retry hidden" data-mermaid-action="retry">重新渲染</button></div>
-            <div class="mermaid-source hidden" role="tabpanel" aria-label="Mermaid 源码"><pre><code class="language-mermaid">${escape(source)}</code></pre></div>
+            <div class="mermaid-preview" role="tabpanel" aria-label="图形预览"><p class="mermaid-status" role="status">${pending ? '正在接收图形源码，完整后显示预览。' : '正在准备图形预览…'}</p><img class="mermaid-image hidden" alt="${label}预览"><button type="button" class="btn-secondary btn-sm mermaid-retry hidden" data-mermaid-action="retry">重新渲染</button></div>
+            <div class="mermaid-source hidden" role="tabpanel" aria-label="图形源码"><pre><code class="language-${language}">${escape(source)}</code></pre></div>
         </section>`;
     }
 
     function palette(card) {
         const style = getComputedStyle(card);
-        return { surface: style.getPropertyValue('--surface').trim() || style.backgroundColor, side: style.getPropertyValue('--bg-side').trim() || style.backgroundColor,
-            text: style.getPropertyValue('--text-main').trim() || style.color, border: style.getPropertyValue('--border').trim() || style.color };
+        return {
+            surface: style.getPropertyValue('--surface').trim() || style.backgroundColor, side: style.getPropertyValue('--bg-side').trim() || style.backgroundColor,
+            text: style.getPropertyValue('--text-main').trim() || style.color, border: style.getPropertyValue('--border').trim() || style.color
+        };
     }
 
     function current(card, state) {
@@ -61,7 +68,9 @@
         card.querySelector('.mermaid-retry').classList.add('hidden');
         card.querySelectorAll('[data-mermaid-action="expand"], [data-mermaid-action="download-svg"]').forEach(button => { button.disabled = true; });
         try {
-            const svg = await window.Pivot.moduleApi('chat.mermaidRuntime').render(source, colors, { retry });
+            const svg = card.dataset.codeLanguage === 'svg'
+                ? window.Pivot.moduleApi('chat.mermaidSvg').sanitize(source, { strict: true })
+                : await window.Pivot.moduleApi('chat.mermaidRuntime').render(source, colors, { retry });
             if (!current(card, state)) return;
             state.svg = svg;
             state.url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
@@ -115,8 +124,8 @@
         closeViewer();
         const element = document.createElement('div');
         element.className = 'modal-overlay mermaid-viewer';
-        element.setAttribute('role', 'dialog'); element.setAttribute('aria-modal', 'true'); element.setAttribute('aria-label', '放大查看流程图');
-        window.Pivot.legacy.PivotSafeHtml.setHtml(element, `<div class="workspace-modal mermaid-viewer-dialog"><div class="workspace-modal-header"><h3>流程图预览</h3><div class="mermaid-viewer-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="out" aria-label="缩小">缩小</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="reset">适应窗口</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="in" aria-label="放大">放大</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="download">下载 SVG</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="close">关闭</button></div></div><div class="workspace-modal-body mermaid-viewer-body"><img alt="放大的 Mermaid 图形"></div></div>`);
+        element.setAttribute('role', 'dialog'); element.setAttribute('aria-modal', 'true'); element.setAttribute('aria-label', '放大查看图形');
+        window.Pivot.legacy.PivotSafeHtml.setHtml(element, `<div class="workspace-modal mermaid-viewer-dialog"><div class="workspace-modal-header"><h3>图形预览</h3><div class="mermaid-viewer-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="out" aria-label="缩小">缩小</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="reset">适应窗口</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="in" aria-label="放大">放大</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="download">下载 SVG</button><button type="button" class="btn-secondary btn-sm" data-mermaid-viewer="close">关闭</button></div></div><div class="workspace-modal-body mermaid-viewer-body"><img alt="放大的图形"></div></div>`);
         const image = element.querySelector('img'); image.src = state.url;
         viewer = { element, card, trigger, image, zoom: 1 };
         element.addEventListener('click', event => {
@@ -136,7 +145,7 @@
         const state = states.get(card);
         if (!state?.svg || !current(card, state)) return;
         const url = URL.createObjectURL(new Blob([state.svg], { type: 'image/svg+xml;charset=utf-8' }));
-        const link = document.createElement('a'); link.href = url; link.download = '流程图.svg';
+        const link = document.createElement('a'); link.href = url; link.download = card.dataset.codeLanguage === 'svg' ? '图形.svg' : '流程图.svg';
         document.body.appendChild(link); link.click(); link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     }

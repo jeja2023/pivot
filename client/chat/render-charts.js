@@ -584,6 +584,7 @@ function drawPivotChart(canvas, spec) {
 
 function renderPivotCharts(root = document) {
     window.Pivot?.moduleApi?.('chat.mermaid')?.render?.(root);
+    window.Pivot?.moduleApi?.('chat.codePreview')?.render?.(root);
     root.querySelectorAll?.('.pivot-echart-block[data-pivot-echart]').forEach(block => {
         if (block.dataset.rendered === '1') return;
         const spec = normalizePivotChartSpec(block.dataset.pivotEchart || '');
