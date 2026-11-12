@@ -32,6 +32,31 @@ async function queueCheck(user) {
     return require('../server/repositories/analysis-model-jobs').admit({ userId: user.id, modelId: model.id, kind: 'model_check', expectedVersion: 1, definition: {}, semanticHash: '0'.repeat(64), rulesHash: '1'.repeat(64), requestKey: crypto.randomUUID(), requestHash: '2'.repeat(64), authorize: async () => ({ model, vector: [] }) });
 }
 
+test('接纳等待权限复核时不占用全局调度锁，其他账号仍可提交并领取任务', { timeout: 30000 }, async () => fixture(async users => {
+    const model = await queryOne("INSERT INTO analysis_data_models(id,user_id,name) VALUES (?,?,'慢速授权调度测试') RETURNING *", [`budget_model_${crypto.randomUUID()}`, users[0].id]);
+    let entered, resume;
+    const authorizing = new Promise(resolve => { entered = resolve; });
+    const released = new Promise(resolve => { resume = resolve; });
+    const pending = require('../server/repositories/analysis-model-jobs').admit({ userId: users[0].id, modelId: model.id, kind: 'model_check', expectedVersion: 1,
+        definition: {}, semanticHash: '0'.repeat(64), rulesHash: '1'.repeat(64), requestKey: crypto.randomUUID(), requestHash: '2'.repeat(64),
+        authorize: async () => { entered(); await released; return { model, vector: [] }; } });
+    let timer, other;
+    try {
+        await authorizing;
+        other = (async () => {
+            const queued = await budget.createLegacy(users[1].id);
+            const running = await claim();
+            assert.equal(running.id, queued.id);
+            await budget.settleLegacy(running, true);
+        })();
+        await Promise.race([other, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('权限复核阻塞了其他账号的任务接纳或领取。')), 2000); })]);
+    } finally {
+        clearTimeout(timer); resume();
+        await Promise.allSettled([pending, other]);
+    }
+    assert.equal((await pending).status, 'queued');
+}));
+
 test('跨连接共享两个槽位，单用户只运行一个，释放必须匹配代次并同步续租', async () => fixture(async users => {
     const first = await budget.createLegacy(users[0].id);
     const second = await budget.createLegacy(users[1].id);
@@ -62,6 +87,29 @@ test('全局排队十六、单用户三项，数据库内检查配额且过期�
     await transaction(trx => budget.expireQueued(trx));
     assert.equal((await queryOne('SELECT status FROM analysis_query_jobs WHERE id=?', [own[0].id])).status, 'failed');
     await budget.createLegacy(users[6].id);
+}));
+
+test('并发模型接纳仍原子限制十六项，队满后幂等重试复用原任务且冲突不被限流覆盖', async () => fixture(async users => {
+    const jobs = require('../server/repositories/analysis-model-jobs');
+    const inputs = [];
+    for (const user of users) {
+        const model = await queryOne("INSERT INTO analysis_data_models(id,user_id,name) VALUES (?,?,'并发接纳测试') RETURNING *", [`budget_model_${crypto.randomUUID()}`, user.id]);
+        for (let index = 0; index < 3; index++) inputs.push({ userId: user.id, modelId: model.id, kind: 'model_check', expectedVersion: 1,
+            definition: {}, semanticHash: '0'.repeat(64), rulesHash: '1'.repeat(64), requestKey: crypto.randomUUID(), requestHash: '2'.repeat(64),
+            authorize: async () => ({ model, vector: [] }) });
+    }
+    const attempts = await Promise.allSettled(inputs.map(input => jobs.admit(input)));
+    const accepted = attempts.filter(attempt => attempt.status === 'fulfilled');
+    assert.equal(accepted.length, 16);
+    for (const rejected of attempts.filter(attempt => attempt.status === 'rejected')) {
+        assert.equal(rejected.reason.status, 429);
+        assert.equal(rejected.reason.code, 'ANALYSIS_MODEL_QUEUE_FULL');
+    }
+    const first = attempts.findIndex(attempt => attempt.status === 'fulfilled');
+    assert.equal((await jobs.admit(inputs[first])).id, attempts[first].value.id);
+    await assert.rejects(jobs.admit({ ...inputs[first], requestHash: '3'.repeat(64) }), { code: 'ANALYSIS_MODEL_REQUEST_CONFLICT', status: 409 });
+    assert.equal(Number((await queryOne("SELECT COUNT(*) AS n FROM analysis_query_jobs WHERE status='queued'")).n), 16);
+    assert.equal(Number((await queryOne('SELECT COUNT(*) AS n FROM analysis_data_model_checks WHERE user_id=ANY(?::bigint[])', [users.map(user => user.id)])).n), 16);
 }));
 
 test('嵌套重型分析只登记一次，异常清理释放槽位且不会登记成功', async () => fixture(async users => {

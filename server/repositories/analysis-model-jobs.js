@@ -17,8 +17,7 @@ async function listNodeJobs(userId, modelId) { return query("SELECT id,execution
 
 async function admit({ userId, modelId, kind, expectedVersion, definition = null, semanticHash = null, rulesHash = null, publishedVersion = null, manifestId = null, checkId = null, requestKey, requestHash, query: ast = {}, authorize, resolveInput = null, bindingRevision = null, sourceRunId = null, resultFormat = 'ndjson', maxQueued = 16, maxUserQueued = 3 }) {
     return transaction(async trx => {
-        await budget.schedulingLock(trx);
-        const current = await authorize(trx);
+        const current = await budget.schedulingLock(trx, authorize);
         const duplicate = await trx.queryOne('SELECT * FROM analysis_query_jobs WHERE user_id=? AND model_id=? AND execution_kind=? AND request_key=?', [userId, modelId, kind, requestKey]);
         if (duplicate) { if (duplicate.request_hash !== requestHash) conflict(); return duplicate; }
         await budget.expireQueued(trx);

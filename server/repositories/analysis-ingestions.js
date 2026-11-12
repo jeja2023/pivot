@@ -14,6 +14,10 @@ const invalid = (message, status = 409) => biError('ANALYSIS_INGESTION_CONFLICT'
 
 async function sessionForUser(trx, userId, id, lock = false) {
     await authorize(trx, userId);
+    return readSession(trx, userId, id, lock);
+}
+
+async function readSession(trx, userId, id, lock = false) {
     const row = await trx.queryOne(`SELECT *,expires_at>NOW() AS active FROM analysis_ingestion_sessions WHERE id=? AND user_id=?${lock ? ' FOR UPDATE' : ''}`, [id, userId]);
     if (!row) throw invalid('分批导入任务不存在或无权访问。', 404);
     return row;
@@ -21,7 +25,7 @@ async function sessionForUser(trx, userId, id, lock = false) {
 
 async function createSession(userId, input) {
     return transaction(async trx => {
-        await budget.schedulingLock(trx); await authorize(trx, userId);
+        await budget.schedulingLock(trx, client => authorize(client, userId));
         const duplicate = await trx.queryOne('SELECT * FROM analysis_ingestion_sessions WHERE user_id=? AND request_key=?', [userId, input.requestKey]);
         if (duplicate) { if (duplicate.request_hash !== input.requestHash) throw invalid('同一导入标识已用于其他文件。'); return duplicate; }
         await require('./analysis-release-controls').assertAllowed(trx, 'admission', { locked: true });
@@ -63,8 +67,9 @@ async function addChunk(userId, id, index, object) {
 
 async function submit(userId, id) {
     return transaction(async trx => {
-        await budget.schedulingLock(trx);
-        const session = await sessionForUser(trx, userId, id, true);
+        await budget.schedulingLock(trx, client => authorize(client, userId));
+        // 接纳前已完成授权；当前事务继续持有主体与安全栅栏，只需锁定会话。
+        const session = await readSession(trx, userId, id, true);
         if (session.job_id) return session;
         if (session.status !== 'receiving' || !session.active) throw invalid('此导入已取消或过期，请新建导入任务。');
         const chunks = await trx.query('SELECT * FROM analysis_ingestion_chunks WHERE session_id=? ORDER BY part_index', [id]);

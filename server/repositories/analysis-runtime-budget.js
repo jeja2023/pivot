@@ -6,9 +6,13 @@ const { biError } = require('../services/data-analysis/bi/errors');
 const { readTypedEnv } = require('../config/env-registry');
 
 // 所有分析类型共用调度锁和槽位。调用者必须在执行单元停止后才释放槽位。
-async function schedulingLock(trx) {
+async function schedulingLock(trx, authorize = null) {
     await require('./analysis-release-controls').lock(trx);
+    // 权限复核可能等待撤权或独立安全记录；先完成复核，再占用全局调度锁，
+    // 避免一个慢请求阻塞全部账号的接纳和领取。恢复、发布屏障仍须最先取得。
+    const current = authorize ? await authorize(trx) : null;
     await trx.queryOne("SELECT pg_advisory_xact_lock(hashtext('pivot:analysis:scheduler'),0)");
+    return current;
 }
 
 async function assertQueue(trx, userId, { maxQueued = 16, maxUserQueued = 3 } = {}) {
