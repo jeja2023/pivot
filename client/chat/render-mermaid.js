@@ -12,7 +12,7 @@
         const svg = language === 'svg';
         language = svg ? 'svg' : 'mermaid';
         const label = svg ? 'SVG 图形' : '流程图 · Mermaid';
-        const saveTitle = svg ? '将静态矢量图形保存到本机授权目录' : '将 Mermaid 源码保存为 TXT 文件';
+        const saveTitle = svg ? '将矢量图形及受支持的动画保存到本机授权目录' : '将 Mermaid 源码保存为 TXT 文件';
         const saveLabel = svg ? '保存到本机' : '保存源码';
         if (resultFiles) return `<details class="mermaid-card code-block mermaid-supplement" data-mermaid-card data-mermaid-source-only="true" data-code-language="${language}" aria-label="补充图形源码"><summary>补充图形源码</summary><div class="mermaid-toolbar"><span class="mermaid-label">图形预览、下载和保存请使用上方“结果文件”。</span><div class="mermaid-actions"><button type="button" class="btn-secondary btn-sm" data-mermaid-action="copy-source">复制源码</button></div></div><div class="mermaid-source"><pre><code class="language-${language}">${escape(source)}</code></pre></div></details>`;
         return `<section class="mermaid-card code-block" data-mermaid-card data-code-language="${language}" data-mermaid-pending="${pending ? 'true' : 'false'}" aria-label="${label}">
@@ -69,7 +69,7 @@
         card.querySelectorAll('[data-mermaid-action="expand"], [data-mermaid-action="download-svg"]').forEach(button => { button.disabled = true; });
         try {
             const svg = card.dataset.codeLanguage === 'svg'
-                ? window.Pivot.moduleApi('chat.mermaidSvg').sanitize(source, { strict: true })
+                ? window.Pivot.moduleApi('chat.mermaidSvg').sanitize(source, { strict: true, allowAnimation: true })
                 : await window.Pivot.moduleApi('chat.mermaidRuntime').render(source, colors, { retry });
             if (!current(card, state)) return;
             state.svg = svg;

@@ -51,6 +51,7 @@ test('SVG 和常见源码格式经真实受控接口创建和下载，拒绝匿�
         assert.match(svg, /小白兔/); assert.match(svg, /xmlns="http:\/\/www.w3.org\/2000\/svg"/);
         assert.equal(Number(file.headers.get('content-length')), Buffer.byteLength(svg));
         for (const [language, filename, canonical, content, mime] of [
+            ['svg', '动画.svg', '动画.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle r="5"><animate attributeName="cx" from="0" to="100" dur="1s" repeatCount="indefinite"></animate></circle></svg>', 'image/svg+xml'],
             ['html', '页面.htm', '页面.html', '<h1>页面</h1><script>console.log("源码保留")</script>', 'text/html'],
             ['csv', '表格.csv', '表格.csv', '名称,说明\n测试,"包含,逗号"\n', 'text/csv'],
             ['tsv', '表格.tsv', '表格.tsv', '名称\t数量\n测试\t01\n', 'text/tab-separated-values'],

@@ -2,6 +2,7 @@
 
 const parse5 = require('parse5');
 const sharp = require('sharp');
+const { inspectAnimation } = require('../../../client/common/svg-animation-policy');
 const TAGS = new Set('svg g path rect text tspan circle ellipse line polyline polygon defs marker clipPath linearGradient radialGradient stop style title desc symbol use pattern'.toLowerCase().split(' '));
 
 function sanitizeSvg(source, limits = {}) {
@@ -14,22 +15,25 @@ function sanitizeSvg(source, limits = {}) {
     const roots = fragment.childNodes.filter(node => node.nodeName !== '#comment' && (node.nodeName !== '#text' || node.value.trim()));
     if (roots.length !== 1 || roots[0].tagName !== 'svg') throw new Error('图形必须是单个 SVG 元素。');
     let count = 0;
+    let animations = 0;
     function inspectSvgNode(node, depth) {
         if (++count > (limits.maxNodes || 20000) || depth > 100) throw new Error('SVG 结构超过限制。');
         if (node.nodeName === '#text' || node.nodeName === '#comment') return;
-        if (!TAGS.has(String(node.tagName).toLowerCase()) || node.namespaceURI !== 'http://www.w3.org/2000/svg') throw new Error('SVG 包含不允许的元素。');
+        const animated = inspectAnimation(node.tagName, (node.attrs || []).map(attr => [attr.prefix ? `${attr.prefix}:${attr.name}` : attr.name, attr.value]), limits.allowAnimation === true);
+        if (animated && ++animations > 256) throw new Error('SVG 动画超过限制。');
+        if ((!animated && !TAGS.has(String(node.tagName).toLowerCase())) || node.namespaceURI !== 'http://www.w3.org/2000/svg') throw new Error('SVG 包含不允许的元素。');
         for (const attribute of node.attrs || []) {
             const value = attribute.value;
             if ((attribute.name === 'xmlns' && value === 'http://www.w3.org/2000/svg')
                 || (attribute.prefix === 'xmlns' && attribute.name === 'xlink' && value === 'http://www.w3.org/1999/xlink')) continue;
-            if (/^on/i.test(attribute.name) || /\\|(?:javascript|data|https?|file):|@|expression\s*\(/i.test(value)
+            if (/^on/i.test(attribute.name) || attribute.name === 'base' || attribute.prefix === 'xmlns' || /\\|(?:javascript|vbscript|data|https?|file):|@|expression\s*\(/i.test(value)
                 || (/href$/i.test(attribute.name) && !/^#[\w.-]+$/.test(value))
-                || /url\s*\(\s*(?!#[\w.-]+\s*\))/i.test(value)) throw new Error('SVG 包含外部资源或动态内容。');
+                || /(?:image-set|image|src|paint)\s*\(|url\s*\(\s*(?!#[\w.-]+\s*\))/i.test(value)) throw new Error('SVG 包含外部资源或动态内容。');
         }
         if (node.tagName === 'style') {
             const css = (node.childNodes || []).map(child => child.value || '').join('');
             const checkedCss = css.replace(/@(?:-webkit-)?keyframes\s+[\w-]+/gi, '');
-            if (/\\|@|javascript:|expression\s*\(|url\s*\(\s*(?!#[\w.-]+\s*\))/i.test(checkedCss)) throw new Error('SVG 样式包含外部资源。');
+            if (/\\|@|(?:javascript|vbscript|https?|data|file):|expression\s*\(|(?:image-set|image|src|paint)\s*\(|url\s*\(\s*(?!#[\w.-]+\s*\))/i.test(checkedCss)) throw new Error('SVG 样式包含外部资源。');
         }
         for (const child of node.childNodes || []) inspectSvgNode(child, depth + 1);
     }

@@ -22,7 +22,7 @@ function loadCodeDelivery(statuses, { promptResponse = '' } = {}) {
             return { ok: true, json: async () => ({ reused: false, intent: { id: 'intent-1' } }) };
         },
         window: {
-            prompt() { return promptResponse; },
+            prompt() { throw new Error('当前环境不支持原生 prompt()'); },
             pivotDesktop: {
                 getDeliveryStatus: async () => statuses[Math.min(statusIndex++, statuses.length - 1)],
                 authorizeDeliveryDirectory: async () => {
@@ -36,6 +36,7 @@ function loadCodeDelivery(statuses, { promptResponse = '' } = {}) {
                 }
             },
             Pivot: {
+                legacy: { showInputPrompt: async () => promptResponse },
                 exposeModule(name, api) { modules.set(name, api); }
             }
         }
@@ -113,4 +114,13 @@ test('多个本机目录按用户选择的序号创建交付任务', async () =>
     assert.equal(delivery.getAuthorizeCalls(), 0);
     assert.equal(delivery.getPrepareCalls(), 1);
     assert.equal(JSON.parse(delivery.requests[0].options.body).targetDirGrant, 'grant-two');
+});
+
+test('取消目录选择或填写无效序号不会创建交付，且不调用原生 prompt', async () => {
+    const status = { available: true, deviceId: 'desktop-client-test-4', grants: [{ grantId: 'one', allowedFormats: ['svg'] }, { grantId: 'two', allowedFormats: ['svg'] }] };
+    for (const choice of [null, '2bad', '99']) {
+        const delivery = loadCodeDelivery([status], { promptResponse: choice });
+        assert.equal(await delivery.api.queueRenditionToDesktop({ id: 'svg', format: 'svg' }), null);
+        assert.equal(delivery.requests.length, 0);
+    }
 });

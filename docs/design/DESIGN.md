@@ -4,9 +4,10 @@
 
 - Status: Active
 - Last refreshed: 2026-11-13
-- Release baseline: v0.7.157（源码；制品以各自构建版本为准）
+- Release baseline: v0.7.158（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `client/common/svg-animation-policy.js`、`client/chat/mermaid-svg.js`、`render-mermaid.js`、`code-delivery.js`、`server/services/agent-code-renditions.js`、`document-rendering/image-renderer.js` 及动画/代码交付专项：声明式 SVG 动画在隔离图片中播放并保留下载与保存，前后端共用动画属性边界，页面输入弹窗替代原生 `prompt()`；范围见[v0.7.158发布说明](../releases/v0.7.158-SVG声明式动画与代码保存弹窗修复.md)，证据见[动画与保存检查记录](../reports/svg-animation-code-save-20261113.md)。
   - `client/chat/apps-workbench-mindmaps.js`、`client/common/desktop-update-errors.js`、`desktop/updater.js`、`desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应导图/更新专项：导图导出菜单防冒泡误关与进行中下载复用、更新错误中文短摘要与去重、100% 校验态、签名查询超时、原生安装详情与只读诊断；范围见[v0.7.157发布说明](../releases/v0.7.157-客户端更新链路可靠性与导图导出菜单竞态修复.md)。
   - `desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应安装器/更新专项：原生进程检查、自动更新退出交接、下载完成提示及初始状态竞争修复，发布端统一签名与内嵌指纹；范围见[v0.7.156发布说明](../releases/v0.7.156-Windows安装器进程检查与旧版自动升级修复.md)，实际验证见[安装器修复记录](../reports/windows-installer-074-148-fix-20261113.md)。
   - `client/chat/agent-projects.js`、`client/chat/styles/workspaces/shared.css` 及对应项目/模态弹窗专项：项目空间列表弹窗与新建/编辑表单三卡片重构、里程碑子模态解耦、原生 SVG 矢量图标替换、34px 像素级水平对齐、字号规范重置与全局工作台分页集成；范围见[v0.7.155发布说明](../releases/v0.7.155-项目空间与模态弹窗深度优化与体验统一.md)。
@@ -399,15 +400,17 @@
 ## 聊天图形展示要求（v0.7.95）
 
 - Mermaid 回复默认显示图形，源码置于同一区域的切换视图。流式未完成、加载中和失败状态在图形区域内显示，失败提供源码与重试入口。
-- 显式标记为 `svg` 的代码块复用图形预览与源码切换，支持放大、下载 SVG 和保存到本机授权目录；兼容 `viewBox` 或固定宽高。只接受无脚本、无外链的静态图形，非法或未完成内容保留源码及状态提示，保存继续经过服务端校验和受控产物交付。
+- 显式标记为 `svg` 的代码块复用图形预览与源码切换，支持放大、下载 SVG 和保存到本机授权目录；兼容 `viewBox` 或固定宽高。接受无脚本、无外链的静态图形，以及白名单图形属性的声明式动画（`animate`、`animateTransform`、`animateMotion`、内部路径和安全 `set`）；禁止通过动画改写链接、事件、样式或命名空间。非法或未完成内容保留源码及状态提示，保存继续经过服务端校验和受控产物交付。
 - HTML/HTM 代码块提供静态预览与源码切换，预览在无脚本、无网络、无同源权限的沙箱文档内展示；原始源码下载与本机保存保持原内容。普通代码块提供受控下载与本机保存，CSV/TSV、JSONL、INI/TOML 及源码语言别名使用前后端共享格式表；未知语言明确回退 TXT，不能通过自选扩展名变成另一种文件。代码块内空行不参与正文压缩。
 - 任务已有可下载 SVG 时，结果文件统一承担图形预览、下载和本机保存；正文源码收起为补充内容，展开后仅保留查看和复制，避免重新出现重复按钮。不能仅凭标题或文件类型宣称正文源码与生成文件一致。
 - 图形下载与源码保存使用明确的不同文案；SVG 来自实际渲染结果，本机源码保存沿用现有授权目录和交付流程。
 - 放大查看复用全局工作区弹窗与按钮，支持缩放、键盘关闭和焦点恢复；桌面与窄屏均可访问全部操作，图形沿用当前主题。
-- 图形组件按需加载本站离线资源，在隔离页完成布局后以静态图片展示。主页面不直接插入第三方 SVG，下载前也检查外部资源、动态内容与尺寸。
+- 图形组件按需加载本站离线资源，在隔离页完成布局后以图片展示；声明式 SVG 动画在隔离图片文档内播放。主页面不直接插入第三方 SVG，下载前检查外部资源、动画属性白名单与尺寸。代码文件的文件名及多目录选择复用项目输入弹窗，不依赖浏览器或 Electron 原生 `prompt()`。
 - 重绘、节点移除、账号切换及页面离开后释放旧图片和渲染资源，迟到结果不能恢复旧内容。
 
 SVG 与 HTML 预览及文件格式补齐的升级范围见[v0.7.154发布说明](../releases/v0.7.154-聊天图形预览与代码文件保存补齐.md)，实际验证见[格式补充检查记录](../reports/chat-code-formats-20261112.md)。源码版本不代表已构建制品或生产验收通过。
+
+SVG 声明式动画白名单和代码保存输入弹窗的后续修复归档于[v0.7.158发布说明](../releases/v0.7.158-SVG声明式动画与代码保存弹窗修复.md)，实际验证见[动画与保存检查记录](../reports/svg-animation-code-save-20261113.md)。此修复通过服务端页面及代码文件校验部署，沿用桌面授权交付能力，不依赖新增原生 IPC。
 
 ## 上传资料与检索范围（v0.7.96）
 

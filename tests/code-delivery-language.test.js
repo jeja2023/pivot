@@ -42,7 +42,7 @@ test('旧版默认文档授权升级后继续允许源码格式', () => {
     assert.ok(!parseAllowedFormats(['txt']).includes('svg'));
 });
 
-test('SVG 源码保存为静态图片并拒绝动态内容、外链和扩展名冒充', () => {
+test('SVG 源码保存为矢量图片并拒绝脚本、外链和扩展名冒充', () => {
     const result = normalizeCodeFile({ filename: '小白兔.svg', language: 'SVG', content: '<svg width="400" height="400"><title>小白兔</title><circle cx="200" cy="200" r="80" fill="white"/></svg>' });
     assert.equal(result.format, 'svg');
     assert.equal(result.filename, '小白兔.svg');

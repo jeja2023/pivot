@@ -55,7 +55,7 @@ function normalizeCodeFile({ filename = '', language = '', content = '' } = {}) 
     if (bytes > MAX_CODE_BYTES) throw codeRenditionError('代码文件超过大小上限，请缩短内容后重试。', 'CODE_CONTENT_TOO_LARGE', 413);
     const format = normalizeCodeFormat(language, filename);
     if (format === 'svg') {
-        try { text = require('./document-rendering/image-renderer').sanitizeSvg(text, { maxBytes: 2 * 1024 * 1024 }); }
+        try { text = require('./document-rendering/image-renderer').sanitizeSvg(text, { maxBytes: 2 * 1024 * 1024, allowAnimation: true }); }
         catch (error) { throw codeRenditionError(`${error.message} 请移除不支持的内容后重试。`, 'CODE_SVG_INVALID', 400); }
     }
     const fallback = `代码.${format}`;

@@ -9,6 +9,7 @@ const express = require('express');
 const helmet = require('helmet');
 const { chromium } = require('playwright');
 const { normalizeCodeFile } = require('../server/services/agent-code-renditions');
+const { inputPromptMarkup, answerInputPrompt } = require('./helpers/code-input-prompt');
 
 const source = 'flowchart TD\n    A([开始]) --> B[用户登录]\n    B --> C{验证账号}\n    C -->|成功| D([登录成功])';
 
@@ -27,6 +28,7 @@ async function fixture(run) {
         window.Pivot.legacy.showToast = () => {};
         window.addEventListener('message', event => { if (event.data?.type === 'pivot:mermaid-result') window.lastMermaidResult = event.data; });
         window.showToast = () => {};
+        window.prompt = () => { throw new Error('当前环境不支持原生 prompt()'); };
         window.API_BASE = '/api';
         window.currentSessionId = 'mermaid-session';
         window.apiFetch = (url, options) => fetch(url, options);
@@ -42,10 +44,10 @@ async function fixture(run) {
     app.get('/', (_req, res) => res.send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="/common/styles/theme.css"><link rel="stylesheet" href="/chat/chat.shell.css">
         <script defer src="/common/vendor/marked.min.js"></script><script defer src="/common/vendor/purify.min.js"></script><script defer src="/fixture.js"></script><script defer src="/chat/safe-html.js"></script>
-        <script defer src="/common/code-formats.js"></script><script defer src="/chat/mermaid-svg.js"></script><script defer src="/chat/mermaid-runtime.js"></script><script defer src="/chat/render-mermaid.js"></script><script defer src="/chat/render-markdown-emphasis.js"></script>
+        <script defer src="/common/code-formats.js"></script><script defer src="/common/svg-animation-policy.js"></script><script defer src="/chat/mermaid-svg.js"></script><script defer src="/chat/mermaid-runtime.js"></script><script defer src="/chat/render-mermaid.js"></script><script defer src="/chat/render-markdown-emphasis.js"></script>
         <script defer src="/chat/render.js"></script><script defer src="/chat/render-charts.js"></script><script defer src="/chat/render-messages.js"></script><script defer src="/chat/code-delivery.js"></script>
-        <script defer src="/chat/chat-task-state.js"></script><script defer src="/chat/chat-task-render.js"></script><script defer src="/chat/chat-task-controller.js"></script>
-        </head><body><main class="text-body" id="answer"></main></body></html>`));
+        <script defer src="/chat/chat-task-state.js"></script><script defer src="/chat/chat-task-render.js"></script><script defer src="/chat/chat-task-controller.js"></script><script defer src="/chat/app/dialogs.js"></script>
+        </head><body>${inputPromptMarkup}<main class="text-body" id="answer"></main></body></html>`));
     const service = http.createServer(app);
     await new Promise(resolve => service.listen(0, '127.0.0.1', resolve));
     let browser;
@@ -105,10 +107,11 @@ test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码
     const svg = await fs.readFile(await download.path(), 'utf8');
     assert.match(svg, /<svg/); assert.match(svg, /用户登录/); assert.match(svg, /验证账号/); assert.match(svg, /开始/);
     assert.doesNotMatch(svg, /foreignObject|<script|onload=|href="https?:/i);
-    page.once('dialog', dialog => dialog.accept('流程图源码.txt'));
+    const filenameInput = answerInputPrompt(page, '流程图源码.txt');
     const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries'));
     await page.locator('[data-mermaid-action="save-source"]').click();
     await saved;
+    await filenameInput;
     await page.waitForFunction(() => !document.querySelector('[data-mermaid-action="save-source"]').disabled);
     assert.equal(calls[0].body.content, source); assert.equal(calls[0].body.filename, '流程图源码.txt');
     assert.equal(calls[0].body.language, 'mermaid'); assert.equal(calls[1].body.renditionId, 'source-file');
@@ -285,10 +288,11 @@ test('SVG 小白兔默认安全预览，支持源码、下载、本机保存和�
     assert.equal(downloaded.suggestedFilename(), '图形.svg');
     const svg = await fs.readFile(await downloaded.path(), 'utf8');
     assert.match(svg, /小白兔/); assert.match(svg, /width="400"/);
-    page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), '图形.svg'); return dialog.accept('小白兔.svg'); });
+    const filenameInput = answerInputPrompt(page, '小白兔.svg', '图形.svg');
     const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries'));
     await page.locator('[data-mermaid-action="save-source"]').click();
     await saved;
+    await filenameInput;
     assert.equal(calls[0].body.language, 'svg'); assert.equal(calls[0].body.filename, '小白兔.svg');
     assert.equal(calls[0].normalized.mimeType, 'image/svg+xml; charset=utf-8');
     assert.match(calls[0].normalized.content, /小白兔/);
@@ -342,13 +346,15 @@ test('SVG 支持固定宽高、流式等待、结果文件去重并释放旧图�
     assert.equal(await page.locator('.code-save-local-btn').count(), 1);
 }));
 
-test('非法或动态 SVG 保留源码和错误反馈，不能预览、下载或进入本机交付', { timeout: 90000 }, async () => fixture(async ({ page, calls }) => {
+test('非法或含危险动态属性的 SVG 保留源码和错误反馈，不能预览、下载或进入本机交付', { timeout: 90000 }, async () => fixture(async ({ page, calls }) => {
     const outbound = []; page.on('request', request => { if (!request.url().startsWith(new URL(page.url()).origin) && !request.url().startsWith('blob:')) outbound.push(request.url()); });
     const base = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">';
     for (const svg of [
         base + '<script>alert(1)</script></svg>', base + '<rect onload="alert(1)"/></svg>',
         base + '<image href="https://example.com/a.png"/></svg>', base + '<use href="https://example.com/a.svg#x"/></svg>',
         base + '<style>@import "https://example.com/a.css";</style></svg>',
+        base + '<set attributeName="href" to="javascript:alert(1)"/></svg>',
+        base + '<animate attributeName="onload" to="alert(1)"/></svg>',
         base + '<rect></svg>', '<svg viewBox="0 0 40000 10"/>', '<svg width="100%" height="100%"/>'
     ]) {
         await show(page, '```svg\n' + svg + '\n```');
@@ -356,9 +362,50 @@ test('非法或动态 SVG 保留源码和错误反馈，不能预览、下载或
         assert.equal(await page.locator('[data-mermaid-action="download-svg"]').isDisabled(), true);
         assert.equal(await page.locator('code').textContent(), svg);
         assert.equal(await page.locator('#answer svg').count(), 0);
-        page.once('dialog', dialog => dialog.accept('图形.svg'));
+        const filenameInput = answerInputPrompt(page, '图形.svg');
         await page.locator('[data-mermaid-action="save-source"]').click();
+        await filenameInput;
         await page.waitForFunction(() => !document.querySelector('[data-mermaid-action="save-source"]').disabled);
     }
     assert.deepEqual(calls, []); assert.deepEqual(outbound, []);
+}));
+
+test('声明式 SVG 动画在隔离图片中持续播放，下载和受控保存保留动画且不调用 prompt', { timeout: 60000 }, async () => fixture(async ({ page, calls }) => {
+    const errors = []; const outbound = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('request', request => { if (!request.url().startsWith(new URL(page.url()).origin) && !request.url().startsWith('blob:')) outbound.push(request.url()); });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120"><defs><path id="track" d="M 30 100 L 210 100"/></defs><rect width="240" height="120" fill="white"/><style>@keyframes drift{from{transform:translateX(0px)}to{transform:translateX(30px)}}.cloud{animation:drift 1s linear infinite alternate}</style><circle class="cloud" cx="60" cy="20" r="8" fill="blue"/><g><animateTransform attributeName="transform" type="translate" values="0 0;0 8;0 0" dur="1s" repeatCount="indefinite"/><circle cx="20" cy="70" r="12" fill="red"><animate attributeName="cx" values="20;220;20" dur="1.4s" repeatCount="indefinite"/></circle></g><circle r="5"><set attributeName="fill" to="green" begin="0s"/><animateMotion dur="2s" repeatCount="indefinite"><mpath href="#track"/></animateMotion></circle></svg>';
+    await show(page, '```svg\n' + svg + '\n```');
+    await page.locator('[data-mermaid-action="download-svg"]:enabled').waitFor();
+    const image = page.locator('.mermaid-image');
+    assert.equal(await page.locator('#answer svg').count(), 0);
+    const first = await image.screenshot({ animations: 'allow' });
+    await page.waitForTimeout(260);
+    const second = await image.screenshot({ animations: 'allow' });
+    assert.equal(first.equals(second), false, '两个时刻应呈现不同的动画画面');
+    const downloading = page.waitForEvent('download');
+    await page.locator('[data-mermaid-action="download-svg"]').click();
+    const downloaded = await fs.readFile(await (await downloading).path(), 'utf8');
+    assert.match(downloaded, /<animateTransform/);
+    assert.match(downloaded, /attributeName="transform"/);
+    assert.match(downloaded, /@keyframes drift/);
+    assert.match(downloaded, /<animateMotion/);
+    assert.match(downloaded, /<mpath href="#track"/);
+    assert.match(downloaded, /<set\b[^>]*attributeName="fill"/);
+    const input = answerInputPrompt(page, '骑行动画.svg', '图形.svg');
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries'));
+    await page.locator('[data-mermaid-action="save-source"]').click();
+    await input; await saved;
+    assert.match(calls[0].normalized.content, /<animateTransform/);
+    assert.match(calls[0].normalized.content, /repeatCount="indefinite"/);
+    assert.equal(calls[1].body.targetFilename, '骑行动画.svg');
+    await fs.mkdir(path.resolve('output/svg-animation'), { recursive: true });
+    for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.locator('[data-mermaid-action="expand"]').click();
+        assert.equal(await page.locator('.mermaid-viewer img').isVisible(), true);
+        await page.screenshot({ path: path.resolve(`output/svg-animation/preview-${width}.png`), fullPage: true });
+        await page.keyboard.press('Escape');
+    }
+    assert.deepEqual(errors, []); assert.deepEqual(outbound, []);
 }));

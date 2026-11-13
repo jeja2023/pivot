@@ -30,9 +30,11 @@ async function getDesktopDeliveryGrant(format = '') {
     if (!grants.length) return codeDeliveryError('请先授权一个支持当前文件格式的本机交付目录。');
     let grant = grants[0];
     if (grants.length > 1) {
+        if (typeof window.Pivot.legacy.showInputPrompt !== 'function') throw new Error('输入组件尚未就绪，请刷新页面后重试。');
         const choices = grants.map((item, index) => `${index + 1}. ${item.pathHint || '已授权目录'}`).join('\n');
-        const selected = window.prompt(`请选择本次保存的授权目录：\n${choices}`, '1');
-        const index = Number.parseInt(String(selected || ''), 10) - 1;
+        const selected = await window.Pivot.legacy.showInputPrompt({ title: '选择保存目录', message: `请选择本次保存的授权目录序号：\n${choices}`, value: '1', maxLength: 8 });
+        if (selected === null) return null;
+        const index = /^\d+$/.test(String(selected)) ? Number(selected) - 1 : -1;
         grant = grants[index] || null;
     }
     if (!grant) return codeDeliveryError('未选择有效的目录授权。');
@@ -78,6 +80,7 @@ async function deliverCodeBlock(button, local) {
     let code = block?.querySelector('code')?.textContent || '';
     const language = String(block?.dataset?.codeLanguage || '').trim().toLowerCase();
     if (!code.trim()) return codeDeliveryError('代码内容为空，无法保存。');
+    if (local && !window.pivotDesktop?.getDeliveryStatus) return codeDeliveryError('保存到授权目录需要 Pivot 桌面客户端；手机或浏览器请使用“下载文件”或“下载 SVG”。');
     if (button.disabled) return null;
     const originalCode = code;
     const userId = window.Pivot.legacy?.currentUser?.id;
@@ -95,9 +98,10 @@ async function deliverCodeBlock(button, local) {
         const defaultFilename = extension === 'svg' ? '图形.svg' : (['mermaid', 'mmd'].includes(language) ? '流程图源码.txt' : `代码.${extension}`);
         const known = Object.prototype.hasOwnProperty.call(formats.CODE_FORMAT_ALIASES, language);
         const promptMessage = !known ? '当前语言按纯文本保存，请输入 TXT 文件名：' : `请输入保存文件名（.${extension}）：`;
-        const filename = window.prompt(promptMessage, defaultFilename);
+        if (typeof window.Pivot.legacy.showInputPrompt !== 'function') throw new Error('输入组件尚未就绪，请刷新页面后重试。');
+        const filename = await window.Pivot.legacy.showInputPrompt({ title: '保存代码文件', message: promptMessage, value: defaultFilename, maxLength: 255, okText: local ? '保存到本机' : '下载文件' });
         if (!filename || !current()) return null;
-        if (extension === 'svg') code = window.Pivot.moduleApi('chat.mermaidSvg').sanitize(code, { strict: true });
+        if (extension === 'svg') code = window.Pivot.moduleApi('chat.mermaidSvg').sanitize(code, { strict: true, allowAnimation: true });
         const response = await apiFetch(`${API_BASE}/agents/code-renditions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

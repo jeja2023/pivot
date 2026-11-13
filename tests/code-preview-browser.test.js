@@ -8,6 +8,7 @@ const express = require('express');
 const helmet = require('helmet');
 const { chromium } = require('playwright');
 const { normalizeCodeFile } = require('../server/services/agent-code-renditions');
+const { inputPromptMarkup, answerInputPrompt } = require('./helpers/code-input-prompt');
 
 async function fixture(run) {
     const app = express(); const calls = []; const files = new Map();
@@ -20,6 +21,7 @@ async function fixture(run) {
     app.get('/fixture.js', (_req, res) => res.type('js').send(`
         window.API_BASE = '/api'; window.apiFetch = (url, options) => fetch(url, options); window.showToast = message => { document.getElementById('notice').textContent = message; };
         window.Pivot.legacy.currentUser = { id: 1 };
+        window.prompt = () => { throw new Error('当前环境不支持原生 prompt()'); };
         const device = { available: true, registered: true, deviceId: 'code-device', grants: [{ grantId: 'code-dir', allowedFormats: [] }] };
         window.pivotDesktop = { getDeliveryStatus: async () => device, prepareDelivery: async () => device, startDelivery: async () => {} };
     `));
@@ -36,8 +38,8 @@ async function fixture(run) {
     app.get('/', (_req, res) => res.send(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" href="/common/styles/theme.css"><link rel="stylesheet" href="/chat/chat.shell.css">
         ${['/common/vendor/marked.min.js', '/common/vendor/purify.min.js', '/chat/pivot-core.js', '/chat/safe-html.js', '/common/code-formats.js',
-        '/chat/render-code-preview.js', '/chat/render-markdown-emphasis.js', '/chat/render.js', '/chat/render-charts.js', '/chat/render-messages.js', '/chat/code-delivery.js', '/fixture.js'].map(src => `<script defer src="${src}"></script>`).join('')}
-        </head><body><main class="text-body" id="answer"></main><p id="notice"></p></body></html>`));
+        '/chat/render-code-preview.js', '/chat/render-markdown-emphasis.js', '/chat/render.js', '/chat/render-charts.js', '/chat/render-messages.js', '/chat/code-delivery.js', '/fixture.js', '/chat/app/dialogs.js'].map(src => `<script defer src="${src}"></script>`).join('')}
+        </head><body>${inputPromptMarkup}<main class="text-body" id="answer"></main><p id="notice"></p></body></html>`));
     app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.message }));
     const service = app.listen(0, '127.0.0.1'); await new Promise(resolve => service.once('listening', resolve));
     const browser = await chromium.launch({ headless: true });
@@ -79,15 +81,17 @@ test('HTML/HTM 静态预览隔离脚本、网络、表单和页面样式，保�
     await page.locator('[data-code-view="source"]').click();
     assert.equal(await page.locator('.code-preview-source').isVisible(), true);
     assert.equal(await page.locator('code').textContent(), source);
-    page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), '代码.html'); return dialog.accept('页面.htm'); });
+    const filenameInput = answerInputPrompt(page, '页面.htm', '代码.html');
     const [downloaded] = await Promise.all([
         page.waitForEvent('download', { timeout: 30000 }),
         page.locator('.code-download-btn').click()
     ]);
     assert.equal(downloaded.suggestedFilename(), '页面.html');
+    await filenameInput;
     assert.equal(await fs.readFile(await downloaded.path(), 'utf8'), source);
-    page.once('dialog', dialog => dialog.accept('页面.htm'));
+    const saveInput = answerInputPrompt(page, '页面.htm');
     const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries')); await page.locator('.code-save-local-btn').click(); await saved;
+    await saveInput;
     assert.equal(calls.at(-1).body.targetFilename, '页面.html'); assert.equal(calls.at(-1).body.targetDirGrant, 'code-dir');
     await page.locator('[data-code-view="preview"]').click();
     await fs.mkdir(path.resolve('output/code-preview'), { recursive: true });
@@ -111,17 +115,18 @@ test('CSV/TSV、配置和语言别名可原样下载，未知语言按 TXT 保�
         assert.equal(await page.locator('.code-preview-frame').count(), 0);
         await page.locator('.code-download-btn').waitFor({ state: 'visible' });
         await page.waitForFunction(() => !document.querySelector('.code-download-btn')?.disabled);
-        page.once('dialog', dialog => { assert.equal(dialog.defaultValue(), `代码.${extension}`, language); return dialog.accept(`结果.${extension}`); });
+        const filenameInput = answerInputPrompt(page, `结果.${extension}`, `代码.${extension}`);
         const [file] = await Promise.all([
             page.waitForEvent('download', { timeout: 30000 }),
             page.locator('.code-download-btn').click()
         ]);
         assert.equal(file.suggestedFilename(), `结果.${extension}`);
+        await filenameInput;
         assert.equal(await fs.readFile(await file.path(), 'utf8'), source.replace(/\r\n/g, '\n'));
     }
     await show(page, 'unknown', '原始源码');
-    const before = calls.length; page.once('dialog', dialog => dialog.accept('危险.exe'));
-    await page.locator('.code-save-local-btn').click(); await page.waitForFunction(() => !document.querySelector('.code-save-local-btn').disabled);
+    const before = calls.length; const invalidInput = answerInputPrompt(page, '危险.exe');
+    await page.locator('.code-save-local-btn').click(); await invalidInput; await page.waitForFunction(() => !document.querySelector('.code-save-local-btn').disabled);
     assert.equal(calls.length, before); assert.match(await page.locator('#notice').textContent(), /扩展名/);
 }));
 
@@ -140,10 +145,46 @@ test('HTML 流式等待与超限反馈保留源码，移除节点、切换账号
     await page.frameLocator('.code-preview-frame').locator('h1').waitFor();
     let release; const held = new Promise(resolve => { release = resolve; });
     await page.route('**/api/agents/code-renditions', async route => { await held; await route.continue(); });
-    page.once('dialog', dialog => dialog.accept('页面.html')); await page.locator('.code-download-btn').click();
+    const filenameInput = answerInputPrompt(page, '页面.html'); await page.locator('.code-download-btn').click(); await filenameInput;
     await page.evaluate(() => { window.Pivot.legacy.currentUser = { id: 2 }; document.body.setAttribute('data-theme', 'dark'); });
     await page.waitForFunction(() => document.getElementById('answer').textContent.includes('账号已切换'));
     assert.equal(await page.locator('.code-preview-frame').count(), 0);
     release(); await page.unrouteAll({ behavior: 'wait' });
     assert.equal(calls.filter(call => call.route === 'delivery').length, 0);
+}));
+
+test('代码保存输入弹窗支持取消、多个授权目录和账号变化，不使用原生 prompt', { timeout: 60000 }, async () => fixture(async ({ page, calls }) => {
+    await show(page, 'txt', '需要保存的内容');
+    const canceled = answerInputPrompt(page, null);
+    await page.locator('.code-save-local-btn').click(); await canceled;
+    await page.waitForFunction(() => !document.querySelector('.code-save-local-btn').disabled);
+    assert.deepEqual(calls, []);
+    await page.evaluate(() => {
+        window.pivotDesktop.getDeliveryStatus = async () => ({ available: true, deviceId: 'code-device', grants: [{ grantId: 'first', pathHint: '第一个目录', allowedFormats: ['txt'] }, { grantId: 'second', pathHint: '第二个目录', allowedFormats: ['txt'] }] });
+    });
+    const selected = (async () => {
+        await answerInputPrompt(page, '资料.txt', '代码.txt');
+        await answerInputPrompt(page, '2', '1');
+    })();
+    const saved = page.waitForResponse(response => response.url().endsWith('/api/agents/deliveries'));
+    await page.locator('.code-save-local-btn').click(); await selected; await saved;
+    assert.equal(calls.at(-1).body.targetDirGrant, 'second');
+    await page.waitForFunction(() => !document.querySelector('.code-save-local-btn').disabled);
+    const before = calls.length;
+    await page.locator('.code-save-local-btn').click();
+    await page.locator('#input-prompt-field').waitFor({ state: 'visible' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const bounds = await page.locator('#input-prompt-container .modal').boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391);
+    await fs.mkdir(path.resolve('output/code-preview'), { recursive: true });
+    await page.screenshot({ path: path.resolve('output/code-preview/save-modal-390.png'), fullPage: true });
+    await page.evaluate(() => { window.Pivot.legacy.currentUser = { id: 2 }; });
+    await page.locator('#modal-input-prompt-ok').click();
+    await page.waitForFunction(() => !document.querySelector('.code-save-local-btn').disabled);
+    assert.equal(calls.length, before);
+    await show(page, 'txt', '浏览器中的内容');
+    await page.evaluate(() => { delete window.pivotDesktop; });
+    await page.locator('.code-save-local-btn').click();
+    assert.match(await page.locator('#notice').textContent(), /手机或浏览器.*下载/);
+    assert.equal(calls.length, before);
 }));
