@@ -43,7 +43,7 @@ def clean(value: str) -> str:
 
 def run(args: list[str], timeout: int = 100) -> dict:
     environment = {key: value for key, value in os.environ.items() if key in {"PATH", "LANG", "LC_ALL", "TMPDIR", "FONTCONFIG_PATH"}}
-    environment.update({"HOME": tempfile.gettempdir(), "USERPROFILE": tempfile.gettempdir(), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PPT_MASTER_PROJECT_PATH": str(WORKSPACE), "PPT_MASTER_DISABLE_AUTO_UPDATE": "1"})
+    environment.update({"HOME": tempfile.gettempdir(), "USERPROFILE": tempfile.gettempdir(), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PIVOT_MASTER_WORKSPACE": str(WORKSPACE), "PPT_MASTER_PROJECT_PATH": str(WORKSPACE), "PPT_MASTER_DISABLE_AUTO_UPDATE": "1"})
     result = subprocess.run([sys.executable, *args], cwd=WORKSPACE, env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if len(result.stdout) + len(result.stderr) > 300_000:
         raise ValueError("上游工具输出过大，已拒绝登记。")

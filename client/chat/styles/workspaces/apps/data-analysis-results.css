@@ -393,17 +393,17 @@
 }
 .data-analysis-chart-controls {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: end;
     gap: 8px;
 }
 
 .data-analysis-chart-controls label {
-    flex: 1 1 118px;
+    flex: 1 1 110px;
     min-width: 92px;
 }
 
-.data-analysis-chart-controls label:first-child {
+.data-analysis-chart-controls .data-analysis-source-dataset {
     flex-grow: 1.35;
     min-width: 150px;
 }
@@ -424,12 +424,98 @@
     }
 
     .data-analysis-chart-controls label,
-    .data-analysis-chart-controls label:first-child,
+    .data-analysis-chart-controls .data-analysis-source-dataset,
     .data-analysis-chart-controls .btn-primary {
         flex: 1 1 140px;
         min-width: 140px;
         width: auto;
     }
+}
+
+/* 来源字段参与各页现有表单排版，不单独占据靠右的工具栏。 */
+.data-analysis-source-controls {
+    display: contents;
+}
+
+.data-analysis-source-controls > label {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.data-analysis-source-controls .form-input {
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    margin: 0;
+    padding: 0 9px;
+    font-size: 0.78rem;
+}
+
+.data-analysis-chart-controls .data-analysis-source-type,
+.data-analysis-query-header .data-analysis-source-type {
+    flex: 0 1 132px;
+    min-width: 120px;
+}
+
+.data-analysis-source-controls .data-analysis-source-model {
+    flex: 1 1 220px;
+}
+
+.data-analysis-source-controls > .btn-secondary {
+    height: 32px;
+    white-space: nowrap;
+}
+
+.data-analysis-source-catalog {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+}
+
+.data-analysis-source-catalog .form-input {
+    flex: 1 1 180px;
+    width: 180px;
+    max-width: 100%;
+}
+
+.data-analysis-source-controls > [data-model-source-hint] {
+    flex: 1 0 100%;
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+}
+
+.data-analysis-query-header {
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: flex-start;
+}
+
+.data-analysis-query-header .data-analysis-dataset-selector-wrap {
+    flex: 0 1 334px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.data-analysis-query-header .data-analysis-dataset-selector-wrap select {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+}
+
+.data-analysis-query-header .data-analysis-query-mode-selector {
+    flex-wrap: wrap;
+    max-width: 100%;
+    margin-left: auto;
 }
 
 

@@ -1061,8 +1061,28 @@
 }
 
 .monitor-decision-details-table {
-    min-width: 820px;
+    min-width: 1020px;
     table-layout: fixed;
+}
+
+.monitor-decision-details-table--delivery {
+    min-width: 1190px;
+}
+
+.monitor-decision-details-table .col-time {
+    width: 170px;
+}
+
+.monitor-decision-details-table .col-user {
+    width: 140px;
+}
+
+.monitor-decision-details-table .col-reference {
+    width: 220px;
+}
+
+.monitor-decision-details-table .col-reason {
+    width: 190px;
 }
 
 .monitor-decision-details-table th.col-index,
@@ -1097,7 +1117,7 @@
 }
 
 .monitor-failure-modal {
-    width: min(1040px, calc(100vw - 32px));
+    width: min(1280px, calc(100vw - 32px));
     max-height: min(840px, calc(100dvh - 36px));
     height: auto;
     display: flex;

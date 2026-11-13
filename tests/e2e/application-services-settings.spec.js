@@ -33,6 +33,34 @@ test('模型与应用服务独立导航，直接展示全部服务，现有弹�
     await page.locator('#tab-models').click(); await expect(page.locator('#tab-content-models')).toBeVisible(); await expect(page.locator('#tab-content-app-services')).toBeHidden();
 });
 
+test('完整的全站PPT配置在系统admin和其他管理员中都显示绿色，只读账号不获得配置权限', async ({ page, browser }) => {
+    test.setTimeout(90000);
+    expect((await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } })).ok()).toBeTruthy();
+    const csrf = (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value;
+    const username = 'ppt_status_' + Date.now(), password = 'PptStatus123!';
+    const created = await page.request.post('/api/admin/users', { headers: { 'x-csrf-token': csrf }, data: { username, password, nickname: 'PPT状态验证', role: 'admin' } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const context = await browser.newContext(), member = await context.newPage();
+    try {
+        expect((await member.request.post('/api/auth/login', { data: { username, password } })).ok()).toBeTruthy();
+        for (const [target, canManage] of [[page, true], [member, false]]) {
+            await target.route('**/api/settings', async route => {
+                const response = await route.fetch(), settings = await response.json();
+                settings.pptMasterConfig = { ...settings.pptMasterConfig, enabled: true, configured: true, hasToken: true, endpoint: canManage ? 'http://ppt-status:8502' : '********' };
+                await route.fulfill({ response, json: settings });
+            });
+            await target.goto('/chat', { waitUntil: 'domcontentloaded' });
+            await target.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));
+            await target.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAdminPanel({ tab: 'app-services' }));
+            const card = target.locator('#ppt-master-service-card');
+            await expect(card).toHaveClass(/is-ready/); await expect(card).not.toHaveClass(/is-warning/);
+            await expect(card.locator('[data-ppt-service-config-open]')).toHaveCount(canManage ? 1 : 0);
+            await expect(card.locator('[data-ppt-service-test-card]')).toHaveCount(canManage ? 1 : 0);
+            if (!canManage) { await expect(card).not.toContainText('http://ppt-status'); expect((await target.request.get('/api/settings/ppt-master')).status()).toBe(403); }
+        }
+    } finally { await context.close(); }
+});
+
 test('刷新时先清空旧连接信息，切走后迟到的状态不会改写其他设置分区', async ({ page }) => {
     expect((await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } })).ok()).toBeTruthy();
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAdminPanel));

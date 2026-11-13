@@ -32,11 +32,18 @@ async function main() {
         }
         const unauthorized = await fetch(env.PIVOT_PPT_MASTER_SERVICE_URL + '/v1/info'); assert.equal(unauthorized.status, 401);
         const user = { id: 1 }, task = 'tooltask_' + crypto.randomBytes(24).toString('base64url');
-        const execute = async operation => {
-            const response = await client.execute(user, task, operation, { env }); assert.equal(response.ok, true, response.error);
+        const execute = async (operation, taskId = task) => {
+            const response = await client.execute(user, taskId, operation, { env }); assert.equal(response.ok, true, response.error);
             if (response.result.exitCode !== undefined) assert.equal(response.result.exitCode, 0, response.result.stderr); return response.result;
         };
         const result = await execute({ action: 'health' }); assert.equal(result.status, 'ready'); assert.equal(result.offlineNativeProtocol, 1);
+        const templateTask = 'tooltask_' + crypto.randomBytes(24).toString('base64url');
+        for (const template of require('../config/ppt-master-templates.json').templates) {
+            await execute({ action: 'copy_template', source: template.path, path: template.id }, templateTask);
+            const validation = await execute({ action: 'validate_template', path: template.id, kind: template.kind }, templateTask);
+            assert.equal(JSON.parse(validation.stdout).status, 'passed');
+        }
+        await client.cleanup(user, templateTask, env);
         await client.inputFile(user, task, 'evidence.txt', Buffer.from('经授权提供的真实材料'), env);
         assert.equal((await execute({ action: 'read', path: 'inputs/evidence.txt' })).text, '经授权提供的真实材料');
         const other = await client.execute({ id: 2 }, task, { action: 'read', path: 'inputs/evidence.txt' }, { env }); assert.equal(other.ok, false);

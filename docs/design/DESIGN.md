@@ -4,9 +4,10 @@
 
 - Status: Active
 - Last refreshed: 2026-11-13
-- Release baseline: v0.7.158（源码；制品以各自构建版本为准）
+- Release baseline: v0.7.159（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `docker/ppt-master/runner.py`、`template_adapter.py`、`client/chat/ppt-master-settings.js`、`monitor-dashboard.js`、`server/services/decision-failure-details.js`、`client/chat/data-analysis/modeling-sources.js` 及对应专项：模板适配沿用当前任务目录、全站服务配置状态一致、失败明细显示发起用户与两种任务时间、来源类型并入参数区及查询选择器宽度收敛；范围见[v0.7.159发布说明](../releases/v0.7.159-PPT模板校验监控明细与数据分析布局优化.md)，实际验证及限制见[专项修复记录](../reports/ppt-monitor-analysis-fixes-20261113.md)。
   - `client/common/svg-animation-policy.js`、`client/chat/mermaid-svg.js`、`render-mermaid.js`、`code-delivery.js`、`server/services/agent-code-renditions.js`、`document-rendering/image-renderer.js` 及动画/代码交付专项：声明式 SVG 动画在隔离图片中播放并保留下载与保存，前后端共用动画属性边界，页面输入弹窗替代原生 `prompt()`；范围见[v0.7.158发布说明](../releases/v0.7.158-SVG声明式动画与代码保存弹窗修复.md)，证据见[动画与保存检查记录](../reports/svg-animation-code-save-20261113.md)。
   - `client/chat/apps-workbench-mindmaps.js`、`client/common/desktop-update-errors.js`、`desktop/updater.js`、`desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应导图/更新专项：导图导出菜单防冒泡误关与进行中下载复用、更新错误中文短摘要与去重、100% 校验态、签名查询超时、原生安装详情与只读诊断；范围见[v0.7.157发布说明](../releases/v0.7.157-客户端更新链路可靠性与导图导出菜单竞态修复.md)。
   - `desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应安装器/更新专项：原生进程检查、自动更新退出交接、下载完成提示及初始状态竞争修复，发布端统一签名与内嵌指纹；范围见[v0.7.156发布说明](../releases/v0.7.156-Windows安装器进程检查与旧版自动升级修复.md)，实际验证见[安装器修复记录](../reports/windows-installer-074-148-fix-20261113.md)。
@@ -352,6 +353,7 @@
   - 普通聊天按需启用知识库，不默认把整库注入上下文。
 - 数据分析：
   - 以导入数据集、字段画像、查询、透视、图表、对比和导出为核心。
+  - 图表、查询与透视的来源类型放在分析数据集旁，复用各页参数区；模型选择、搜索与分页只在选择已发布模型时展开，并明确进入统一维度与指标分析的入口。
   - AI 结论必须保留数据集和查询来源，正式汇报前提示人工复核。
   - BI 数据建模生产建设基线：[Pivot BI 数据建模生产级建设方案 v2.0](Pivot_BI数据建模产品级建设方案-2026-11-06.md)；状态为方案设计，生产门禁尚未执行。
   - 正式模型以事实粒度、受控维度关联和统一指标为核心；生产必交包括版本/文件一致性、当前权限、隔离执行器、容量认证、备份恢复及 G0—G7 上线门禁。遵守当前单活部署与多节点预检边界，保留旧关联探索兼容行为。
@@ -381,6 +383,8 @@
   - 全局策略与个人资源管理边界必须清晰。
   - 系统监控分为运行概览、服务与资源、对话质量。概览提供运行异常摘要，资源详情与用量归入服务页，质量统计与异常复核归入质量页；评测案例与标准答案由独立“评测审核”菜单管理。
   - 任务理解故障不等于业务目标不明确；故障时允许受限文本回复并关闭未确认执行。监控区分24小时决策组件错误与30天任务交付失败事件，提供分页明细、缺项及历史报告来源。
+  - 决策错误与任务核验失败明细显示发起用户；核验失败分别显示任务创建的发起时间与结果登记的失败记录时间，均按北京时间展示。历史任务缺失时明确未记录，不能用失败记录时间替代发起时间。
+  - PPT Master服务卡片以全站配置的启用与完整状态显示颜色，不依赖当前账号是否测试过连接；绿色配置状态不代表持续健康探测。只有系统admin可测试与修改，其他账号的地址继续脱敏。
   - 监控使用自然高度及响应式列数，不通过固定面板数量和整体高度缩放隐藏内容；全部健康检查可访问。
   - 指标必须注明实例/全局范围和采样时段；无样本、探针不可用与平台不支持不得表达为健康零值。
 

@@ -1037,17 +1037,28 @@ test.describe('Pivot browser smoke', () => {
         await expect(failures).not.toContainText('feedback');
         await page.route('**/api/stats/observability/decision-failures?*', route => route.fulfill({
             status: 200, json: {
-                kind: 'delivery', total: 69, hasMore: true, items: [{ runId: 'test-run-details', decisionId: 'test-decision-details', reasonCode: 'artifact_format_missing', label: '缺少用户要求的文件格式', missing: ['尚未生成PPTX'], ruleFailures: [], detailSource: 'event_snapshot' }]
+                kind: 'delivery', total: 69, hasMore: true, items: [{ runId: 'test-run-details', decisionId: 'test-decision-details', username: 'task_initiator', nickname: '任务发起人', occurredAt: '2026-11-13T06:30:00Z', runCreatedAt: '2026-11-13T06:00:00Z', reasonCode: 'artifact_format_missing', label: '缺少用户要求的文件格式', missing: ['尚未生成PPTX'], ruleFailures: [], detailSource: 'event_snapshot' }]
             }
         }));
         await page.getByRole('button', { name: '查看任务核验失败明细' }).click();
         await expect(page.locator('#monitor-failure-details')).toContainText('尚未生成PPTX');
         await expect(page.locator('#monitor-failure-details')).toContainText('test-run-details');
         await expect(page.locator('#monitor-failure-details')).toContainText('69 条');
+        await expect(page.locator('#monitor-failure-details')).toContainText('任务发起人（task_initiator）');
+        for (const name of ['失败记录时间', '发起用户', '任务发起时间']) await expect(page.locator('#monitor-failure-details').getByRole('columnheader', { name, exact: true })).toBeVisible();
+        await expect(page.locator('#monitor-failure-details')).toContainText('14:30:00');
+        await expect(page.locator('#monitor-failure-details')).toContainText('14:00:00');
+        const desktopTable = await page.locator('.monitor-failure-table-wrap').evaluate(element => ({ content: element.scrollWidth, width: element.clientWidth }));
+        expect(desktopTable.content).toBeLessThanOrEqual(desktopTable.width + 1);
         await page.screenshot({ path: 'output/intent-diagnostics/monitor-desktop.png', fullPage: true });
         await page.setViewportSize({ width: 390, height: 844 });
         await page.locator('#monitor-failure-details').scrollIntoViewIfNeeded();
         await expect(page.locator('#monitor-failure-details').getByRole('button', { name: '下一页' })).toBeVisible();
+        const mobileBounds = await page.locator('#monitor-failure-modal').evaluate(element => ({ scrollWidth: document.documentElement.scrollWidth, viewport: window.innerWidth, modalWidth: element.getBoundingClientRect().width }));
+        expect(mobileBounds.scrollWidth).toBeLessThanOrEqual(mobileBounds.viewport + 1); expect(mobileBounds.modalWidth).toBeLessThanOrEqual(mobileBounds.viewport);
+        await page.locator('.monitor-failure-table-wrap').evaluate(element => { element.scrollLeft = element.scrollWidth; });
+        await expect(page.locator('#monitor-failure-details').getByRole('cell', { name: '尚未生成PPTX', exact: true })).toBeInViewport();
+        await page.locator('.monitor-failure-table-wrap').evaluate(element => { element.scrollLeft = 0; });
         await page.locator('#monitor-failure-details').screenshot({ path: 'output/intent-diagnostics/monitor-mobile.png' });
         await page.locator('#monitor-failure-modal [data-monitor-failure-close]').first().click();
         await expect(page.locator('#monitor-failure-modal')).toHaveClass(/hidden/);

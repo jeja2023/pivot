@@ -6,19 +6,19 @@
     let config = null, result = null, generation = 0, controller = null, saving = false, returnFocus = null;
     const owner = () => window.Pivot?.legacy?.currentUser?.id;
     const current = (sequence, account) => sequence === generation && owner() === account;
+    const ready = () => config?.enabled === true && config?.configured === true && !config?.error && result?.success !== false;
     function summary() { return config?.error || (!config?.enabled ? '完整制作服务已停用，标准PPT制作继续可用' : result?.message || (config?.configured ? '已配置，制作时通过内网服务连接' : '服务地址或访问密钥待配置')); }
     function body() {
         return `<strong>PPT Master制作服务</strong><span>${escapeHtml(config?.endpoint || '尚未配置独立服务')}</span><small>${escapeHtml(summary())}</small>
             <div class="retrieval-model-service-actions">${config?.canManage ? '<button class="btn-secondary" type="button" data-ppt-service-test-card>测试</button><button class="btn-secondary" type="button" data-ppt-service-config-open>配置</button>' : '<small>由系统admin账号统一维护</small>'}</div>`;
     }
     function renderCard(value) {
-        if (value && modal()?.classList.contains('hidden') && !saving) { config = value; result = null; }
-        else if (value && !modal()) config = value;
-        return `<article id="ppt-master-service-card" class="retrieval-model-service-card ${result?.success ? 'is-ready' : 'is-warning'}">${body()}</article>`;
+        if (value && (!modal() || modal().classList.contains('hidden')) && !saving) { config = value; result = null; }
+        return `<article id="ppt-master-service-card" class="retrieval-model-service-card ${ready() ? 'is-ready' : 'is-warning'}">${body()}</article>`;
     }
     function updateCard() {
         const card = byId('ppt-master-service-card'); if (!card) return;
-        card.classList.toggle('is-ready', result?.success === true); card.classList.toggle('is-warning', result?.success !== true);
+        card.classList.toggle('is-ready', ready()); card.classList.toggle('is-warning', !ready());
         PivotSafeHtml.setHtml(card, body());
     }
     function message(text, failed = false) { const target = byId('ppt-master-config-status'); if (target) { target.textContent = text; target.classList.toggle('is-error', failed); } }

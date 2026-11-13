@@ -25,13 +25,14 @@ async function getDecisionFailureDetails(options = {}, deps = {}) {
     try {
         const countPromise = queryFn('SELECT COUNT(*) AS count ' + from, [interval]);
         const sql = kind === 'provider'
-            ? "SELECT d.decision_id, d.scenario, d.created_at AS occurred_at, p.value AS provider " + from + ' ORDER BY d.created_at DESC, d.decision_id DESC LIMIT ? OFFSET ?'
-            : "SELECT f.*, r.metadata AS run_metadata, r.status AS run_status, v.report AS verification_report FROM (SELECT o.id, d.decision_id, o.result_reference AS run_id, o.metadata AS outcome_metadata, o.reason_code, o.occurred_at " + from + ' ORDER BY o.occurred_at DESC, o.id DESC LIMIT ? OFFSET ?) f LEFT JOIN agent_runs r ON r.id=f.run_id LEFT JOIN agent_verifications v ON v.run_id=r.id ORDER BY f.occurred_at DESC, f.id DESC';
+            ? "SELECT f.*, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname FROM (SELECT d.decision_id, d.scenario, d.user_id, d.created_at AS occurred_at, p.value AS provider " + from + ' ORDER BY d.created_at DESC, d.decision_id DESC LIMIT ? OFFSET ?) f LEFT JOIN users u ON u.id=f.user_id ORDER BY f.occurred_at DESC, f.decision_id DESC'
+            : "SELECT f.*, COALESCE(r.user_id, f.decision_user_id) AS user_id, COALESCE(NULLIF(u.deleted_username, ''), u.username) AS username, u.nickname, r.created_at AS run_created_at, r.metadata AS run_metadata, r.status AS run_status, v.report AS verification_report FROM (SELECT o.id, d.decision_id, d.user_id AS decision_user_id, o.result_reference AS run_id, o.metadata AS outcome_metadata, o.reason_code, o.occurred_at " + from + ' ORDER BY o.occurred_at DESC, o.id DESC LIMIT ? OFFSET ?) f LEFT JOIN agent_runs r ON r.id=f.run_id LEFT JOIN users u ON u.id=COALESCE(r.user_id, f.decision_user_id) LEFT JOIN agent_verifications v ON v.run_id=r.id ORDER BY f.occurred_at DESC, f.id DESC';
         const [countRows, records] = await Promise.all([countPromise, queryFn(sql, [interval, limit, offset])]);
         const items = records.map(row => {
+            const initiator = { userId: safeText(row.user_id, 80), username: safeText(row.username, 128), nickname: safeText(row.nickname, 128) };
             if (kind === 'provider') {
                 const provider = parse(row.provider), code = safeText(provider.error, 80);
-                return { decisionId: safeText(row.decision_id, 128), scenario: safeText(row.scenario, 80), occurredAt: row.occurred_at,
+                return { ...initiator, decisionId: safeText(row.decision_id, 128), scenario: safeText(row.scenario, 80), occurredAt: row.occurred_at,
                     providerId: safeText(provider.providerId, 80), providerVersion: safeText(provider.providerVersion, 128),
                     reasonCode: code, label: PROVIDER_REASONS[code] || '决策组件调用异常', detail: safe(provider.error, 240), durationMs: Math.max(0, Number(provider.durationMs) || 0) };
             }
@@ -40,7 +41,7 @@ async function getDecisionFailureDetails(options = {}, deps = {}) {
             const report = parse(row.verification_report || parse(row.run_metadata).taskVerification);
             const detail = snapshot ? { reasonCode: safeText(snapshot.reasonCode, 100), label: safe(snapshot.label), missing: Array.isArray(snapshot.missing) ? snapshot.missing.slice(0, 12).map(value => safe(value, 500)) : [],
                 ruleFailures: Array.isArray(snapshot.ruleFailures) ? snapshot.ruleFailures.slice(0, 12).map(rule => ({ key: safeText(rule.key, 100), label: safe(rule.label), detail: safe(rule.detail, 300) })) : [], executionReason: safe(snapshot.executionReason, 500) } : verificationDetails(Object.keys(report).length ? report : null, { historical });
-            return { outcomeId: safeText(row.id, 128), decisionId: safeText(row.decision_id, 128), runId: safeText(row.run_id, 160), occurredAt: row.occurred_at,
+            return { ...initiator, outcomeId: safeText(row.id, 128), decisionId: safeText(row.decision_id, 128), runId: safeText(row.run_id, 160), occurredAt: row.occurred_at, runCreatedAt: row.run_created_at ?? null,
                 status: safeText(row.run_status, 40), ...detail, detailSource: snapshot ? 'event_snapshot' : Object.keys(report).length ? 'current_report' : 'unavailable' };
         });
         const total = Number(countRows[0]?.count || 0);

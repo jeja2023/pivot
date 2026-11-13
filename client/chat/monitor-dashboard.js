@@ -165,7 +165,7 @@
 
         const provider = detailKind === 'provider';
         const titleText = provider ? '决策组件错误明细 · 最近24小时' : '任务核验失败明细 · 最近30天';
-        const descText = provider ? '调用与错误按组件调用记录计数，单次对话可能产生多个组件记录，不等于失败任务数。' : '按失败事件统计，重试可能产生多条记录；新事件保存失败时快照，历史事件尽量读取已有报告，未保存的细节不能还原。';
+        const descText = provider ? '调用与错误按组件调用记录计数，单次对话可能产生多个组件记录，不等于失败任务数。时间为决策记录时间（北京时间）。' : '按失败事件统计，重试可能产生多条记录。任务发起时间为任务创建时间，失败记录时间为任务结果登记失败事件的时间，均为北京时间。新事件保留失败快照，历史事件尽量读取已有报告，未保存的细节不能还原。';
 
         set('monitor-failure-details', `<div class="rag-detail-header monitor-failure-modal-header"><div class="monitor-failure-modal-title-wrap"><h3 id="monitor-failure-title">${escapeHtml(titleText)}</h3><p class="model-modal-desc">${escapeHtml(descText)}</p></div><button type="button" class="btn-danger-outline monitor-failure-close-btn" data-monitor-failure-close aria-label="关闭明细弹窗">关闭</button></div><div class="monitor-failure-modal-body"><p class="monitor-empty">正在读取失败明细…</p></div><div class="monitor-failure-modal-footer"></div>`);
 
@@ -176,15 +176,19 @@
             if (controller.signal.aborted) return;
             if (body.unavailable || !Array.isArray(body.items)) throw new Error('明细不可用');
 
+            const time = value => {
+                const date = value ? new Date(value) : null;
+                return date && Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未记录时间';
+            };
             const content = body.items.map((item, index) => {
-                const date = new Date(item.occurredAt);
-                const occurredAt = Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '未记录时间';
+                const username = item.nickname && item.nickname !== item.username ? item.nickname + (item.username ? `（${item.username}）` : '') : item.username;
+                const initiator = username || (item.userId ? `用户 ${item.userId}` : '未关联用户');
                 const refs = provider ? `${item.providerId || '未知组件'} / ${item.providerVersion || '未记录版本'} · ${item.decisionId || ''}` : `任务 ${item.runId || '未关联'} · 决策 ${item.decisionId || ''}`;
                 const details = provider ? `${item.reasonCode || ''} · ${ms(item.durationMs)}` : [...(item.missing || []), ...(item.ruleFailures || []).map(rule => rule.label + (rule.detail ? `：${rule.detail}` : '')), item.executionReason || ''].filter(Boolean).join('；') || '未记录缺失项';
                 const source = !provider && item.detailSource === 'current_report' ? '（历史事件无快照，以下来自当前核验报告）' : '';
                 const reasonCode = escapeHtml(item.reasonCode || '未记录代码');
                 const serial = detailOffset + index + 1;
-                return `<tr><td class="text-center col-index">${serial}</td><td>${escapeHtml(occurredAt)}</td><td>${escapeHtml(refs)}</td><td title="${reasonCode}">${escapeHtml((item.label || '未记录具体原因') + source)}</td><td>${escapeHtml(details)}</td></tr>`;
+                return `<tr><td class="text-center col-index">${serial}</td><td>${escapeHtml(time(item.occurredAt))}</td><td>${escapeHtml(initiator)}</td>${provider ? '' : `<td>${escapeHtml(time(item.runCreatedAt))}</td>`}<td>${escapeHtml(refs)}</td><td title="${reasonCode}">${escapeHtml((item.label || '未记录具体原因') + source)}</td><td>${escapeHtml(details)}</td></tr>`;
             }).join('');
 
             const total = Math.max(Number(body.total) || 0, 0);
@@ -201,7 +205,7 @@
                 createBtn('末页', totalPages, page >= totalPages)
             ].join('');
 
-            set('monitor-failure-details', `<div class="rag-detail-header monitor-failure-modal-header"><div class="monitor-failure-modal-title-wrap"><h3 id="monitor-failure-title">${escapeHtml(titleText)}</h3><p class="model-modal-desc">${escapeHtml(descText)} 共 ${escapeHtml(number(body.total))} 条。</p></div><button type="button" class="btn-danger-outline monitor-failure-close-btn" data-monitor-failure-close aria-label="关闭明细弹窗">关闭</button></div><div class="monitor-failure-modal-body"><div class="table-container monitor-failure-table-wrap"><table class="data-table compact-table monitor-decision-details-table" aria-label="${escapeHtml(titleText)}"><colgroup><col class="col-index"><col style="width: 170px;"><col style="width: 250px;"><col style="width: 220px;"><col></colgroup><thead><tr><th scope="col" class="text-center col-index">序号</th><th scope="col">发生时间</th><th scope="col">关联记录</th><th scope="col">具体原因</th><th scope="col">${provider ? '错误代码与耗时' : '缺失项与规则'}</th></tr></thead><tbody>${content || '<tr><td colspan="5" class="text-center">所选时间范围内没有对应记录。</td></tr>'}</tbody></table></div></div><div class="monitor-failure-modal-footer"><div id="monitor-failure-pagination" class="pagination workspace-pagination">${paginationHtml}</div></div>`);
+            set('monitor-failure-details', `<div class="rag-detail-header monitor-failure-modal-header"><div class="monitor-failure-modal-title-wrap"><h3 id="monitor-failure-title">${escapeHtml(titleText)}</h3><p class="model-modal-desc">${escapeHtml(descText)} 共 ${escapeHtml(number(body.total))} 条。</p></div><button type="button" class="btn-danger-outline monitor-failure-close-btn" data-monitor-failure-close aria-label="关闭明细弹窗">关闭</button></div><div class="monitor-failure-modal-body"><div class="table-container monitor-failure-table-wrap"><table class="data-table compact-table monitor-decision-details-table${provider ? '' : ' monitor-decision-details-table--delivery'}" aria-label="${escapeHtml(titleText)}"><colgroup><col class="col-index"><col class="col-time"><col class="col-user">${provider ? '' : '<col class="col-time">'}<col class="col-reference"><col class="col-reason"><col></colgroup><thead><tr><th scope="col" class="text-center col-index">序号</th><th scope="col">${provider ? '决策记录时间' : '失败记录时间'}</th><th scope="col">发起用户</th>${provider ? '' : '<th scope="col">任务发起时间</th>'}<th scope="col">关联记录</th><th scope="col">具体原因</th><th scope="col">${provider ? '错误代码与耗时' : '缺失项与规则'}</th></tr></thead><tbody>${content || `<tr><td colspan="${provider ? 6 : 7}" class="text-center">所选时间范围内没有对应记录。</td></tr>`}</tbody></table></div></div><div class="monitor-failure-modal-footer"><div id="monitor-failure-pagination" class="pagination workspace-pagination">${paginationHtml}</div></div>`);
 
             const pagerEl = document.getElementById('monitor-failure-pagination');
             const renderFn = typeof window !== 'undefined' && (window.Pivot?.legacy?.renderWorkspacePagination || window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination);

@@ -137,6 +137,36 @@ test('决策计数保留调用错误口径，明细显示组件、原因、耗�
     assert.match(html, /run-one/); assert.match(html, /当前核验报告/); assert.match(html, /&lt;script>/); assert.doesNotMatch(html, /<script>/);
 });
 
+test('失败明细显示发起用户并区分失败记录时间和任务发起时间，用户名称安全转义', async () => {
+    const { api, elements } = fixture(async () => ({ ok: true, json: async () => ({ items: [{
+        userId: '7', username: 'member12345678', nickname: '测试<script>', occurredAt: '2026-11-13T06:30:00Z', runCreatedAt: '2026-11-13T06:00:00Z'
+    }], total: 1 }) }));
+    await api.loadFailureDetails('delivery');
+    const delivery = elements.get('monitor-failure-details').html;
+    assert.match(delivery, /<th scope="col">发起用户<\/th>/);
+    assert.match(delivery, /<th scope="col">失败记录时间<\/th>/);
+    assert.match(delivery, /<th scope="col">任务发起时间<\/th>/);
+    assert.match(delivery, /14:30:00/); assert.match(delivery, /14:00:00/);
+    assert.match(delivery, /测试&lt;script>（member12345678）/); assert.doesNotMatch(delivery, /<script>/);
+    await api.loadFailureDetails('provider');
+    const provider = elements.get('monitor-failure-details').html;
+    assert.match(provider, /<th scope="col">决策记录时间<\/th>/);
+    assert.match(provider, /<th scope="col">发起用户<\/th>/);
+    assert.doesNotMatch(provider, /任务发起时间|14:00:00/);
+});
+
+test('缺失用户与任务时间明确提示，空表的列数与两种明细一致', async () => {
+    let items = [{ occurredAt: null, runCreatedAt: null }, { userId: '8' }];
+    const { api, elements } = fixture(async () => ({ ok: true, json: async () => ({ items, total: items.length }) }));
+    await api.loadFailureDetails('delivery');
+    const html = elements.get('monitor-failure-details').html;
+    assert.match(html, /未关联用户/); assert.match(html, /用户 8/); assert.match(html, /未记录时间/);
+    assert.doesNotMatch(html, /1970|Invalid Date/);
+    items = [];
+    await api.loadFailureDetails('delivery'); assert.match(elements.get('monitor-failure-details').html, /colspan="7"/);
+    await api.loadFailureDetails('provider'); assert.match(elements.get('monitor-failure-details').html, /colspan="6"/);
+});
+
 test('明细请求取消后迟到结果不能覆盖当前选择', async () => {
     const pending = [];
     const { api, elements } = fixture((_url, options) => new Promise(resolve => pending.push({ resolve, signal: options.signal })));
