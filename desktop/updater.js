@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const yaml = require('js-yaml');
+const { formatDesktopUpdateError } = require('../client/common/desktop-update-errors');
 
 let activeController = null;
 let activeAuthorizeIpc = null;
@@ -146,11 +147,13 @@ function runPowerShellSignatureQuery(filePath, { execFileFn = execFile } = {}) {
             encoding: 'utf8',
             windowsHide: true,
             maxBuffer: 64 * 1024,
+            timeout: 30000,
             // Electron / Node 进程可能继承 PowerShell 7 或其他工具注入的模块
             // 路径；Windows PowerShell 5.1 的 Security 模块会因此无法自动加载。
             env: { ...process.env, PSModulePath: windowsPowerShellModulePath() }
         }, (error, stdout, stderr) => {
             try {
+                if (error?.killed) throw new Error('Windows 更新签名校验超时，请联系维护者检查证书链或系统验证服务。');
                 if (error) throw error;
                 if (stderr && String(stderr).trim()) throw new Error(String(stderr).trim());
                 return resolve(JSON.parse(fs.readFileSync(outputPath, 'utf8').trim()));
@@ -278,6 +281,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
     let lastCheckTime = 0;
 
     function emitState(patch) {
+        if (patch.status === 'error' && state.status === 'error' && patch.error === state.error) return state;
         state = {
             ...state,
             ...patch,
@@ -310,7 +314,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
             if (manual) emitState({ status: 'checking', error: '', progress: null });
             if (autoUpdater?.checkForUpdates) await autoUpdater.checkForUpdates();
         } catch (error) {
-            emitState({ status: 'error', error: serializeError(error) });
+            emitState({ status: 'error', error: formatDesktopUpdateError(error) });
         }
         return getState();
     }
@@ -321,7 +325,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
             emitState({ status: 'downloading', error: '' });
             if (autoUpdater?.downloadUpdate) await autoUpdater.downloadUpdate();
         } catch (error) {
-            emitState({ status: 'error', error: serializeError(error) });
+            emitState({ status: 'error', error: formatDesktopUpdateError(error) });
         }
         return getState();
     }
@@ -409,7 +413,7 @@ function setupAutoUpdater({ app, mainWindow, config, authorizeIpc, autoUpdater: 
             if (result.response === 0 && autoUpdater.quitAndInstall) autoUpdater.quitAndInstall(false, true);
         });
         autoUpdater.on('error', (error) => {
-            emitState({ status: 'error', error: serializeError(error) });
+            emitState({ status: 'error', error: formatDesktopUpdateError(error) });
         });
     }
 

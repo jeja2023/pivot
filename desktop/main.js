@@ -25,7 +25,8 @@ app.commandLine.appendSwitch('disable-features', 'OverlayScrollbar,FluentOverlay
 const { loadDesktopConfig, normalizeRemoteUrl, normalizeTrustedExternalOrigins, saveUserDesktopConfig } = require('./config');
 const { resolveInitializedServer } = require('./local-server');
 const { isTrustedRendererUrl } = require('./navigation-policy');
-const { createStealthHeaders, isStealthTarget, publicDesktopConfig, stripStealthHeaders } = require('./stealth-policy');
+const { createStealthHeaders, installStealthHeaderInterceptor, publicDesktopConfig } = require('./stealth-policy');
+const { getNetSession: getUpdaterNetSession } = require('electron-updater/out/electronHttpExecutor');
 const { isTrustedExternalNavigation } = require('./external-navigation-policy');
 const { setupAutoUpdater } = require('./updater');
 const { isDesktopWorkerRuntimeAvailable, runDesktopWorker } = require('./agent-runtime/broker');
@@ -472,20 +473,12 @@ function resolveStealthSecret(currentConfig, targetUrl) {
 }
 
 function attachStealthHeaderInterceptor(targetSession) {
-    if (!targetSession || !targetSession.webRequest) return;
     try {
-        targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
-            try {
-                stripStealthHeaders(details.requestHeaders);
-                const sameOrigin = isStealthTarget(details.url, currentTargetUrl);
-                const secret = sameOrigin ? resolveStealthSecret(runtimeConfig, currentTargetUrl) : '';
-                if (secret && typeof secret === 'string') {
-                    Object.assign(details.requestHeaders, createStealthHeaders(secret, currentTargetUrl));
-                }
-            } catch (_) {}
-            callback({ requestHeaders: details.requestHeaders });
+        return installStealthHeaderInterceptor(targetSession, {
+            getTargetUrl: () => currentTargetUrl || runtimeConfig?.remoteUrl || '',
+            getSecret: targetUrl => resolveStealthSecret(runtimeConfig, targetUrl)
         });
-    } catch (_) {}
+    } catch (_) { return false; }
 }
 
 function createMainWindow(config) {
@@ -911,6 +904,7 @@ if (!gotLock) {
                 attachStealthHeaderInterceptor(session.fromPartition(runtimeConfig.partition));
             }
             attachStealthHeaderInterceptor(session.defaultSession);
+            attachStealthHeaderInterceptor(getUpdaterNetSession());
             createMainWindow(runtimeConfig);
             localAuthManager.ensureOcrWatchDirectory();
             updaterController = setupAutoUpdater({

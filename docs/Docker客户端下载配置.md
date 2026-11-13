@@ -156,6 +156,22 @@ fetch('/downloads/Pivot-Setup.exe', { method: 'HEAD' })
 
 桌面客户端现已全面放开私有局域网/专网 HTTP 自动更新，无公网 HTTPS 域名的内网服务器亦可直接作为更新源。更新源支持基于 `remoteUrl` 同源动态推导（`http://<ip>:<port>/downloads/`），当服务器 IP 或端口变更时，客户端跟随无缝适应。
 
+## 客户端已安装，但检查更新提示 latest.yml 404
+
+`Cannot find channel "latest.yml" update info: HttpError: 404 Not Found` 表示客户端在检查更新时没有取到版本描述，不能据此认定安装失败。错误库附带的 authentication token 提示是通用文案，不等于账号或证书已失效。URL 中的 `?noCache=...` 是缓存参数，文件名仍为 `latest.yml`。
+
+在生产服务器先确认实际挂载来源及容器内文件：
+
+```bash
+docker inspect pivot --format '{{range .Mounts}}{{if eq .Destination "/app/downloads"}}{{.Source}}{{end}}{{end}}'
+docker exec pivot ls -lh /app/downloads
+docker exec pivot test -r /app/downloads/latest.yml
+```
+
+只放 `Pivot-Setup.exe` 能提供首次安装下载，但不足以提供自动更新。将同一次构建生成的 `latest.yml`、其 `files[].url` 指向的版本安装器和对应 blockmap 放入实际挂载目录，核对大小及 SHA-512；先上传安装器和 blockmap，最后原子替换 `latest.yml`。不得用不同构建的同名文件混搭，也不应手写校验值。若文件存在且可读但仍为 404，再检查反向代理的 `/downloads/` 路由。
+
+补齐挂载目录文件不需要重建主镜像或重装已成功安装的客户端。更新错误的中文摘要与去重属于服务端页面修复，需要部署相应页面资源；新客户端也会在发送状态前归一化错误，不再向界面铺开请求头和堆栈。
+
 ## 多版本支持（可选）
 
 如果需要提供多个版本供用户选择，可以：
@@ -189,7 +205,7 @@ fetch('/downloads/Pivot-Setup.exe', { method: 'HEAD' })
 
 - 下载目录：`/app/downloads`（容器内路径）
 - 访问路径：`/downloads/Pivot-Setup.exe`
-- 服务端配置：`server/index.js` 已配置静态文件服务
+- 服务端配置：`server/app.js` 已配置静态文件服务
 - Docker 镜像默认不包含客户端文件
 - 推荐使用 **方案1（挂载外部目录）** 用于生产环境
 

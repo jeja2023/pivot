@@ -32,6 +32,22 @@ function createStealthHeaders(secret, targetUrl, now = Date.now()) {
     };
 }
 
-module.exports = { createStealthHeaders, isStealthTarget, publicDesktopConfig, stripStealthHeaders };
+function installStealthHeaderInterceptor(targetSession, { getTargetUrl, getSecret }) {
+    if (!targetSession?.webRequest) return false;
+    targetSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        try {
+            stripStealthHeaders(details.requestHeaders);
+            const targetUrl = getTargetUrl();
+            const secret = isStealthTarget(details.url, targetUrl) ? getSecret(targetUrl) : '';
+            if (secret && typeof secret === 'string') {
+                Object.assign(details.requestHeaders, createStealthHeaders(secret, targetUrl));
+            }
+        } catch (_) {}
+        callback({ requestHeaders: details.requestHeaders });
+    });
+    return true;
+}
+
+module.exports = { createStealthHeaders, installStealthHeaderInterceptor, isStealthTarget, publicDesktopConfig, stripStealthHeaders };
 const crypto = require('node:crypto');
 

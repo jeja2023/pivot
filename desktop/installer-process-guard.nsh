@@ -1,6 +1,38 @@
 ; 只核对安装目录内的进程；直接查询 Win32，不依赖 CIM/WMI 或 PowerShell 模块。
 !include FileFunc.nsh
+
+!macro PivotInstallerStage MESSAGE
+  System::Store "s F"
+  System::Call 'kernel32::GetCurrentProcessId() i.r7'
+  ClearErrors
+  FileOpen $8 "$TEMP\PivotInstaller-$7.log" a
+  IfErrors +4
+  FileSeek $8 0 END
+  FileWriteUTF16LE $8 "${MESSAGE}：$INSTDIR$\r$\n"
+  FileClose $8
+  System::Store "f l"
+  DetailPrint "${MESSAGE}"
+!macroend
+
+!macro customHeader
+  ShowInstDetails show
+  ShowUninstDetails show
+!macroend
+
+!macro customInit
+  !insertmacro PivotInstallerStage "开始安装"
+!macroend
+
+!macro customInstall
+  !insertmacro PivotInstallerStage "安装文件部署完成"
+!macroend
+
+!macro customUnInstall
+  !insertmacro PivotInstallerStage "开始卸载旧文件"
+!macroend
+
 !macro customCheckAppRunning
+  !insertmacro PivotInstallerStage "正在检查安装目录进程"
   System::Store "s"
   StrCpy $R0 -1
   StrCpy $R1 0
@@ -8,6 +40,7 @@
   StrCpy $R9 3
   StrCpy $4 0
   StrCpy $5 0
+  System::Call 'kernel32::GetCurrentProcessId() i.r7'
   ${GetParameters} $6
   ClearErrors
   ${GetOptions} $6 "--updated" $6
@@ -47,6 +80,8 @@
     System::Call '*$R1(i, i, i.R4, i, i, i, i, i, i, &w260.R5)'
     StrCmp $R4 0 bi_process_check_next
     StrCmp $R4 4 bi_process_check_next
+    ; 原位卸载时卸载器位于安装目录，不能把正在执行检查的自身当作客户端阻断。
+    StrCmp $R4 $7 bi_process_check_next
     System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i R4) p.R2 ?e'
     Pop $0
     StrCmp $R2 0 bi_process_check_unresolved
@@ -98,6 +133,7 @@
     Push $R9
     System::Store "l"
     Pop $0
+    ClearErrors
     StrCmp $0 0 bi_process_check_done
     StrCmp $0 2 bi_target_still_running bi_process_check_failed
   bi_target_still_running:
@@ -109,4 +145,5 @@
     SetErrorLevel 1
     Quit
   bi_process_check_done:
+    !insertmacro PivotInstallerStage "目录进程检查通过，正在处理旧版本或安装文件"
 !macroend

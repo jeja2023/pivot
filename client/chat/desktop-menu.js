@@ -1,6 +1,7 @@
 (function () {
     const desktopApi = window.pivotDesktop;
     if (!desktopApi) return;
+    const { formatDesktopUpdateError } = window.Pivot.module('chat.desktopUpdateErrors');
 
     document.documentElement?.classList.add('pivot-desktop-runtime');
     document.body?.classList.add('pivot-desktop-runtime');
@@ -40,6 +41,7 @@
     let updateStateRevision = 0;
     let lastNotifiedDownloadVersion = '';
     let lastNotifiedReadyVersion = '';
+    let lastNotifiedUpdateError = '';
     let isServerConfigLocked = false;
     const popover = document.createElement('div');
     popover.className = 'desktop-app-menu-popover hidden';
@@ -54,6 +56,7 @@
         if (!state) return;
         updateStateRevision += 1;
         activeUpdateState = state;
+        if (state.status !== 'error') lastNotifiedUpdateError = '';
         const brandTrigger = menuRoot.querySelector('[data-desktop-menu="pivot"]');
         if (!brandTrigger) return;
         if (state.status === 'available' || state.status === 'downloading') {
@@ -76,7 +79,12 @@
         } else if (state.status === 'error') {
             brandTrigger.classList.remove('has-update', 'is-ready');
             if (state.error) {
-                toast('客户端更新失败：' + state.error, 'warning');
+                const message = formatDesktopUpdateError(state.error);
+                const noticeKey = String(state.updateInfo?.version || '') + ':' + message;
+                if (noticeKey !== lastNotifiedUpdateError) {
+                    lastNotifiedUpdateError = noticeKey;
+                    toast('客户端更新失败：' + message, 'warning');
+                }
             }
         }
     }
@@ -151,6 +159,10 @@
                     itemLabel = '正在下载更新...';
                     const percent = Math.floor(activeUpdateState.progress?.percent || 0);
                     badgeText = percent > 0 ? percent + '%' : '下载中';
+                    if (percent >= 100) {
+                        itemLabel = '正在校验更新...';
+                        badgeText = '校验中';
+                    }
                 } else if (activeUpdateState?.status === 'available') {
                     badgeText = '新版本';
                 }
@@ -207,15 +219,16 @@
 
     function showUpdateState(state) {
         applyUpdateState(state, false);
+        if (state?.status === 'error') return;
         if (!state || state.enabled === false) {
-            toast(state?.error || '当前客户端未启用自动更新', 'info');
+            toast(state?.error ? formatDesktopUpdateError(state.error) : '当前客户端未启用自动更新', 'info');
             return;
         }
         if (state.status === 'checking') toast('正在检查客户端更新...', 'info');
         else if (state.status === 'available') toast('检测到客户端更新，可在更新提示中继续处理', 'success');
         else if (state.status === 'downloaded') toast('客户端更新已下载，重启后安装', 'success');
         else if (state.status === 'not-available') toast('当前已是最新客户端', 'success');
-        else if (state.error) toast(state.error, 'error');
+        else if (state.error) toast(formatDesktopUpdateError(state.error), 'error');
         else toast('已发起客户端更新检查', 'info');
     }
 

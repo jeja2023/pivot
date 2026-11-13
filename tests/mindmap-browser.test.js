@@ -109,17 +109,22 @@ test('独立导图应用可新建、编辑、保存、刷新恢复、冲突另�
         await page.waitForFunction(() => document.querySelector('#mindmap-save-status').textContent.includes('已保存'));
         assert.equal((await (await fetch(origin + '/api/apps/mindmaps/' + artifactId)).json()).document.presentation.layout, 'fishbone');
         const exportFile = async format => {
-            // 先确认本次任务已提交，避免旧导出的下载按钮被下一次格式测试误用。
+            // 先监听本次导出提交与自动下载事件，避免重复点击下载触发多次后台下载相互竞态并撞上 Chromium 下载限额。
             const submitted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/exports'));
+            const completed = page.waitForEvent('download', { predicate: file => file.suggestedFilename().endsWith('.' + format) });
             await page.locator('#xmind-export-btn').click();
             await page.locator('[data-mm-action="export-format"][data-format="' + format + '"]').click();
             const response = await submitted; assert.equal(response.status(), 202);
             assert.equal((await response.json()).job.format, format);
             const downloadButton = page.getByRole('button', { name: '下载文件', exact: true });
             await downloadButton.waitFor({ timeout: 25000 });
-            const completed = page.waitForEvent('download', { predicate: file => file.suggestedFilename().endsWith('.' + format) });
-            await downloadButton.click();
-            return completed;
+            const file = await completed;
+            if (format === 'json') {
+                const manual = page.waitForEvent('download', { predicate: item => item.suggestedFilename().endsWith('.json') });
+                await downloadButton.click();
+                await manual;
+            }
+            return file;
         };
         const download = await exportFile('json');
         const text = fs.readFileSync(await download.path(), 'utf8'); assert.equal(JSON.parse(text).presentation.layout, 'fishbone');

@@ -15,6 +15,7 @@ test('实际 NSIS 安装检查只阻断目标目录进程，保留同名外部�
     const root = await fs.mkdtemp(path.join(tempBase, 'pivot-nsis-guard-'));
     const target = path.join(root, "install'quoted"), sibling = `${target}-extra`;
     const children = [];
+    const logs = [];
     const escape = value => value.replaceAll('$', '$$').replaceAll('"', '$\\"');
     async function start(directory, exitAfterMs = 0) {
         const file = path.join(directory, 'guard-probe.exe');
@@ -32,7 +33,12 @@ test('实际 NSIS 安装检查只阻断目标目录进程，保留同名外部�
     }
     const installer = path.join(root, 'guard.exe'), source = path.join(root, 'guard.nsi');
     const invoke = async (environment = process.env, executable = installer, args = ['/S']) => {
-        try { await execute(executable, args, { env: environment, windowsHide: true, timeout: 45000 }); return 0; }
+        try {
+            const pending = execute(executable, args, { env: environment, windowsHide: true, timeout: 45000 });
+            logs.push(path.join(os.tmpdir(), `PivotInstaller-${pending.child.pid}.log`));
+            await pending;
+            return 0;
+        }
         catch (error) { if (typeof error.code === 'number') return error.code; throw error; }
     };
     try {
@@ -43,6 +49,13 @@ test('实际 NSIS 安装检查只阻断目标目录进程，保留同名外部�
         await execute(compiler, [source], { windowsHide: true, timeout: 45000 });
         const outside = await start(sibling);
         assert.equal(await invoke(), 0); assert.equal(outside.exitCode, null);
+        const stages = await fs.readFile(logs[0], 'utf16le');
+        assert.match(stages, /正在检查安装目录进程/);
+        assert.match(stages, /目录进程检查通过/);
+        const inPlaceProbe = path.join(target, 'guard-in-place.exe');
+        await fs.copyFile(installer, inPlaceProbe);
+        assert.equal(await invoke(process.env, inPlaceProbe), 0);
+        assert.equal(outside.exitCode, null);
         const marker = path.join(target, 'accepted.txt'); assert.equal(await fs.readFile(marker, 'utf8'), 'passed');
         await fs.writeFile(marker, 'retained');
         const inside = await start(target);
@@ -74,9 +87,10 @@ test('实际 NSIS 安装检查只阻断目标目录进程，保留同名外部�
         assert.equal(await invoke(process.env, failedQueryInstaller), 1);
         assert.equal(outside.exitCode, null); assert.equal(await fs.readFile(marker, 'utf8'), 'retained');
         assert.equal(await invoke(), 0); assert.equal(outside.exitCode, null);
-        t.diagnostic(JSON.stringify({ quotedPath: true, siblingPrefixAndSameNamePreserved: true, runningTargetRejectedWithoutTermination: true, updateWaitsForNaturalExit: true, missingCimModulesSupported: true, nonDirectoryTargetClosed: true, queryFailureClosed: true, retryAfterTargetExit: true }));
+        t.diagnostic(JSON.stringify({ quotedPath: true, siblingPrefixAndSameNamePreserved: true, runningTargetRejectedWithoutTermination: true, inPlaceCheckerExcludesSelf: true, updateWaitsForNaturalExit: true, missingCimModulesSupported: true, nonDirectoryTargetClosed: true, queryFailureClosed: true, retryAfterTargetExit: true }));
     } finally {
         for (const child of children) await stop(child);
+        for (const log of logs) await fs.rm(log, { force: true });
         assert.equal(path.dirname(root), tempBase); assert.match(path.basename(root), /^pivot-nsis-guard-[A-Za-z0-9]+$/);
         await fs.rm(root, { recursive: true, force: true });
     }

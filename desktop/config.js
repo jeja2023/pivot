@@ -169,10 +169,10 @@ function resolveUpdateUrlFromRemote(remoteUrl, updatePath) {
 function normalizeAutoUpdate(value, env = process.env, options = {}) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const merged = { ...DEFAULT_AUTO_UPDATE, ...source };
-    const enabled = merged.enabled === true;
     const allowedOrigins = normalizeOriginList(merged.allowedOrigins);
     const updatePath = normalizeUpdatePath(merged.path);
     const explicitUrl = String(merged.url || '').trim();
+    const enabled = merged.enabled === true && !(options.mode === 'local' && !explicitUrl);
     const derivedUrl = explicitUrl || (enabled ? resolveUpdateUrlFromRemote(options.remoteUrl, updatePath) : '');
     const checkIntervalMinutes = Number.isFinite(Number(merged.checkIntervalMinutes))
         ? Math.max(0, Math.floor(Number(merged.checkIntervalMinutes)))
@@ -245,7 +245,7 @@ function normalizeConfig(raw, meta = {}, env = process.env) {
         sandbox: merged.sandbox !== false,
         stealthSecret: typeof merged.stealthSecret === 'string' ? merged.stealthSecret.trim() : (env.PIVOT_STEALTH_SECRET || ''),
         lockServerConfig: merged.lockServerConfig === true,
-        autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl }),
+        autoUpdate: normalizeAutoUpdate(merged.autoUpdate, env, { remoteUrl, mode }),
         source: meta.source || 'default',
         path: meta.path || ''
     };

@@ -353,23 +353,33 @@
         if (state.createPending?.signature !== signature) state.createPending = { signature, requestKey: key() };
         const result = await request('', json({ document, requestKey: state.createPending.requestKey })); state.createPending = null; return result;
     }
-    async function download(job) {
-        const userId = state.userId; const title = state.document?.tree.text || '思维导图';
-        const fetch = window.Pivot.legacy.apiFetch;
-        const issued = await fetch(`/api/agents/renditions/${encodeURIComponent(job.renditionId)}/download-token`, json({}));
-        const token = await issued.json(); if (!issued.ok) throw new Error(token.error || '下载授权失败。');
-        if (state.userId !== userId) return;
-        const result = await fetch(`/api/agents/renditions/${encodeURIComponent(job.renditionId)}/download?token=${encodeURIComponent(token.token)}`);
-        if (!result.ok) throw new Error('下载失败，请重新导出。');
-        const blob = await result.blob(); if (state.userId !== userId) return;
-        const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${title}.${job.format}`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
-        const host = $('mindmap-export-status');
-        if (host && host.textContent.includes('导出完成')) {
-            host.textContent = '导出完成，已自动保存文件。';
-            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job).catch(fail); host.appendChild(button);
-            clearTimeout(state.exportToastTimer);
-            state.exportToastTimer = setTimeout(() => { if (host.textContent.includes('导出完成')) host.textContent = ''; }, 6000);
-        }
+    async function download(job, sequence = state.exportSequence) {
+        if (state.downloadInFlight?.jobId === job.id && state.downloadInFlight.sequence === sequence) return state.downloadInFlight.promise;
+        let current;
+        const run = async () => {
+            const userId = state.userId; const title = state.document?.tree.text || '思维导图';
+            const fetch = window.Pivot.legacy.apiFetch;
+            const issued = await fetch(`/api/agents/renditions/${encodeURIComponent(job.renditionId)}/download-token`, json({}));
+            const token = await issued.json(); if (!issued.ok) throw new Error(token.error || '下载授权失败。');
+            if (state.userId !== userId || state.exportSequence !== sequence) return;
+            const result = await fetch(`/api/agents/renditions/${encodeURIComponent(job.renditionId)}/download?token=${encodeURIComponent(token.token)}`);
+            if (!result.ok) throw new Error('下载失败，请重新导出。');
+            const blob = await result.blob(); if (state.userId !== userId || state.exportSequence !== sequence) return;
+            const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${title}.${job.format}`;
+            // 阻止编程触发的临时下载链接冒泡到 document，避免误关已打开的导出下拉菜单。
+            link.addEventListener('click', event => event.stopPropagation());
+            document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+            const host = $('mindmap-export-status');
+            if (host && state.exportSequence === sequence && host.textContent.includes('导出完成')) {
+                host.textContent = '导出完成，已自动保存文件。';
+                const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job, sequence).catch(fail); host.appendChild(button);
+                clearTimeout(state.exportToastTimer);
+                state.exportToastTimer = setTimeout(() => { if (host.textContent.includes('导出完成')) host.textContent = ''; }, 6000);
+            }
+        };
+        current = run().finally(() => { if (state.downloadInFlight?.promise === current) state.downloadInFlight = null; });
+        state.downloadInFlight = { jobId: job.id, sequence, promise: current };
+        return current;
     }
     async function poll(jobId, sequence = state.exportSequence, userId = state.userId) {
         clearTimeout(state.pollTimer);
@@ -378,14 +388,26 @@
         const host = $('mindmap-export-status'); host.replaceChildren();
         if (job.status === 'ready') {
             host.textContent = '导出完成，文件绑定所选历史版本。';
-            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job).catch(fail); host.appendChild(button);
-            void download(job).catch(fail);
+            const button = document.createElement('button'); button.className = 'btn-secondary'; button.type = 'button'; button.textContent = '下载文件'; button.title = '如未自动弹出保存窗口可点击重新下载'; button.onclick = () => download(job, sequence).catch(fail); host.appendChild(button);
+            void download(job, sequence).catch(fail);
         } else if (job.status === 'failed') { host.textContent = `导出失败：${job.error}。可点击导出重试。`; }
         else { host.textContent = job.status === 'pending' ? '导出已排队…' : '正在生成导出文件…'; state.pollTimer = setTimeout(() => { void poll(jobId, sequence, userId).catch(fail); }, 2000); }
     }
-    async function action(name) {
-        if (await advanced?.action(name, state.actionButton)) return;
-        if (await dialogs?.action(name, state.actionButton)) return;
+    async function action(name, actionButton = state.actionButton) {
+        if (name === 'export-menu') {
+            const exportMenu = $('xmind-export-menu');
+            const exportBtn = $('xmind-export-btn');
+            const exportDropdown = $('xmind-export-dropdown');
+            if (exportMenu && exportBtn) {
+                const willOpen = exportMenu.classList.contains('hidden');
+                exportMenu.classList.toggle('hidden', !willOpen);
+                exportBtn.setAttribute('aria-expanded', String(willOpen));
+                exportDropdown?.classList.toggle('is-open', willOpen);
+            }
+            return;
+        }
+        if (await advanced?.action(name, actionButton)) return;
+        if (await dialogs?.action(name, actionButton)) return;
         if (name === 'dialog-close') return closeDialog();
         if (name === 'dialog-confirm') return closeDialog(true);
         if (name === 'save') return save();
@@ -437,7 +459,7 @@
             });
         }
         if (name === 'export' || name === 'export-format') {
-            const format = (name === 'export-format' ? state.actionButton?.dataset.format : null) || $('mindmap-export-format')?.value || 'json';
+            const format = (name === 'export-format' ? actionButton?.dataset.format : null) || $('mindmap-export-format')?.value || 'json';
             if ($('mindmap-export-format')) $('mindmap-export-format').value = format;
             $('xmind-export-menu')?.classList.add('hidden');
             $('xmind-export-btn')?.setAttribute('aria-expanded', 'false');
@@ -445,18 +467,6 @@
             const sequence = state.exportSequence = (state.exportSequence || 0) + 1; const userId = state.userId;
             clearTimeout(state.pollTimer); $('mindmap-export-status').replaceChildren(); $('mindmap-export-status').textContent = '正在提交导出任务…';
             await save(); const result = await request(`/${state.active.id}/exports`, json({ format, versionId: state.active.versionId })); return poll(result.job.id, sequence, userId);
-        }
-        if (name === 'export-menu') {
-            const exportMenu = $('xmind-export-menu');
-            const exportBtn = $('xmind-export-btn');
-            const exportDropdown = $('xmind-export-dropdown');
-            if (exportMenu && exportBtn) {
-                const willOpen = exportMenu.classList.contains('hidden');
-                exportMenu.classList.toggle('hidden', !willOpen);
-                exportBtn.setAttribute('aria-expanded', String(willOpen));
-                exportDropdown?.classList.toggle('is-open', willOpen);
-            }
-            return;
         }
     }
     function bind() {
@@ -502,7 +512,7 @@
         $('mindmaps-view').addEventListener('click', event => {
             const button = event.target.closest('button'); if (!button) return;
             const run = async () => {
-                if (button.dataset.mmAction) { state.actionButton = button; return action(button.dataset.mmAction); }
+                if (button.dataset.mmAction) { state.actionButton = button; return action(button.dataset.mmAction, button); }
                 if (button.dataset.mmCommand) return state.editor.command(button.dataset.mmCommand);
                 if (button.dataset.mmOpen) return open(button.dataset.mmOpen);
                 if (button.dataset.mmRecover) { if (await confirm('恢复导图', '恢复会生成新版本并清除之前的共享授权；版本配额已满时恢复为个人副本。是否继续？')) { const result = await request(`/${button.dataset.mmRecover}/recover`, json({})); await loadList(); if (result.recoveredAsCopy) window.Pivot.legacy.showToast?.('已恢复为个人副本，原记录仍保留在回收站。', 'success'); } return; }
