@@ -3,10 +3,11 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-11-12
-- Release baseline: v0.7.155（源码；制品以各自构建版本为准）
+- Last refreshed: 2026-11-13
+- Release baseline: v0.7.156（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应安装器/更新专项：原生进程检查、自动更新退出交接、下载完成提示及初始状态竞争修复，发布端统一签名与内嵌指纹；范围见[v0.7.156发布说明](../releases/v0.7.156-Windows安装器进程检查与旧版自动升级修复.md)，实际验证见[安装器修复记录](../reports/windows-installer-074-148-fix-20261113.md)。
   - `client/chat/agent-projects.js`、`client/chat/styles/workspaces/shared.css` 及对应项目/模态弹窗专项：项目空间列表弹窗与新建/编辑表单三卡片重构、里程碑子模态解耦、原生 SVG 矢量图标替换、34px 像素级水平对齐、字号规范重置与全局工作台分页集成；范围见[v0.7.155发布说明](../releases/v0.7.155-项目空间与模态弹窗深度优化与体验统一.md)。
   - `client/common/code-formats.js`、`client/chat/render-code-preview.js`、`render-mermaid.js`、`mermaid-svg.js`、`code-delivery.js`、`server/services/agent-code-renditions.js` 及图形/文件专项：SVG 与 HTML 静态预览、共享格式映射、受控下载和本机保存；范围及桌面升级要求见[v0.7.154发布说明](../releases/v0.7.154-聊天图形预览与代码文件保存补齐.md)。
   - `server/services/chat-verification-images.js`、`chat-task-verification.js`、`chat-vision.js`、`chat-intent-resolver.js`、`chat-intent-model.js`、`agent-verification-repair.js` 及对应图片/恢复专项：授权原图核验、来源复查、有界格式补判与超时恢复、缺失格式补全；范围见[v0.7.153发布说明](../releases/v0.7.153-图片核验证据与智能路由失败恢复优化.md)。
@@ -40,6 +41,13 @@
 - Shared workflow execution resolves models, tools and credentials against the recipient account. Bindings are pinned to a published version, become stale after republishing, and must be reconfirmed before execution; credential secrets never enter the recipient payload.
 - Every shared workflow response must redact direct HTTP credentials, and publishing or sharing a workflow containing sensitive HTTP literals is rejected.
 - Every list, detail, retrieval, graph and cached result path must apply the same visibility predicate before returning data.
+
+## 内网客户端安装与升级（v0.7.156）
+
+- 普通用户仅负责首次安装及确认重启升级；签名证书、私钥、指纹注入和更新文件发布由发布端统一管理，不要求用户导入证书或填写指纹。客户端继续自动核对签名身份与文件完整性。
+- 发现更新、正在下载、已就绪和失败应分别呈现；下载完成提示不能被发现更新的通知去重。页面重载后恢复已就绪提示，迟到的初始状态不能覆盖新事件。
+- 安装器只检查目标安装目录的进程，不终止其它目录的同名客户端。自动更新交接给旧客户端有界的自然退出时间；进程查询失败应停止覆盖，兼容性不能依赖目标机的 CIM/WMI 服务或 PowerShell 模块。
+- 服务端页面更新不能替换已安装的更新器或修复缓存的故障安装器；安装器修复需重新构建并同步发布文件和更新元数据。源码、历史修复制品与生产验收保留各自版本和证据，不能用升版替代升级实测。
 
 ## 个人项目空间与模态弹窗规范（v0.7.155）
 

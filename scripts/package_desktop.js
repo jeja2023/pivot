@@ -116,7 +116,7 @@ function prepareBundledDesktopConfig(options = {}) {
             }
             const certificateSha256 = String(process.env.PIVOT_UPDATE_CERT_SHA256 || config.autoUpdate?.certificateSha256 || '').replace(/[:\s]/g, '').toLowerCase();
             if (options.allowIntranetSelfSigned && !/^[a-f0-9]{64}$/.test(certificateSha256)) {
-                throw new Error('自签名更新包必须提供 PIVOT_UPDATE_CERT_SHA256 证书指纹，并在客户端建立证书信任。');
+                throw new Error('自签名更新包缺少有效证书指纹；请由发布端配置 PIVOT_UPDATE_CERT_SHA256，构建时自动内嵌到客户端。');
             }
             config.autoUpdate = {
                 ...config.autoUpdate,

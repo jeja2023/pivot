@@ -217,6 +217,53 @@ test('Windows update signature verifier only accepts a valid signature with a ma
     }
 });
 
+test('内网更新使用内嵌指纹自动校验自签名包，无需用户配置证书信任', async () => {
+    const fs = require('node:fs');
+    const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pivot-intranet-update-'));
+    const artifact = path.join(root, 'Pivot Setup.exe');
+    const fingerprint = 'ab'.repeat(32);
+    let status = 1;
+    let actualFingerprint = fingerprint;
+    try {
+        fs.writeFileSync(artifact, 'installer');
+        fs.writeFileSync(path.join(root, 'app-update.yml'), 'publisherName: Pivot Local Dev\n');
+        const config = normalizeConfig({
+            mode: 'remote',
+            remoteUrl: 'http://pivot.lan:3000/',
+            autoUpdate: {
+                enabled: true,
+                publisherName: 'Pivot Local Dev',
+                allowUntrustedRoot: true,
+                certificateSha256: fingerprint,
+                allowInsecureHttp: true,
+                allowedOrigins: ['http://pivot.lan:3000']
+            }
+        }, {}, {});
+        const updater = { verifyUpdateCodeSignature() {} };
+        hardenWindowsAutoUpdater(updater, config.autoUpdate, {
+            platform: 'win32',
+            resourcesPath: root,
+            signatureQuery: async filePath => ({
+                Status: status,
+                Path: filePath,
+                Subject: 'CN=Pivot Local Dev',
+                CertificateSha256: actualFingerprint
+            })
+        });
+        for (const acceptedStatus of [1, 6]) {
+            status = acceptedStatus;
+            assert.equal(await updater.verifyUpdateCodeSignature(['Pivot Local Dev'], artifact), null);
+        }
+        actualFingerprint = 'cd'.repeat(32);
+        assert.match(await updater.verifyUpdateCodeSignature(['Pivot Local Dev'], artifact), /指纹不匹配/);
+        actualFingerprint = fingerprint;
+        status = 2;
+        assert.match(await updater.verifyUpdateCodeSignature(['Pivot Local Dev'], artifact), /Authenticode 签名无效/);
+    } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test('desktop config supports HTTP feeds when automatic updates are enabled', () => {
     const config = normalizeConfig({
         mode: 'remote', remoteUrl: 'http://192.168.10.20:3000/',

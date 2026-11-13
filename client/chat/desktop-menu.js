@@ -37,7 +37,9 @@
     let activeMenu = '';
     let activeButton = null;
     let activeUpdateState = null;
-    let lastNotifiedVersion = '';
+    let updateStateRevision = 0;
+    let lastNotifiedDownloadVersion = '';
+    let lastNotifiedReadyVersion = '';
     let isServerConfigLocked = false;
     const popover = document.createElement('div');
     popover.className = 'desktop-app-menu-popover hidden';
@@ -50,6 +52,7 @@
 
     function applyUpdateState(state, isBackground = false) {
         if (!state) return;
+        updateStateRevision += 1;
         activeUpdateState = state;
         const brandTrigger = menuRoot.querySelector('[data-desktop-menu="pivot"]');
         if (!brandTrigger) return;
@@ -57,15 +60,15 @@
             brandTrigger.classList.add('has-update');
             brandTrigger.classList.remove('is-ready');
             const version = state.updateInfo?.version ? 'v' + state.updateInfo.version : '';
-            if (isBackground && version && version !== lastNotifiedVersion) {
-                lastNotifiedVersion = version;
+            if (isBackground && version && version !== lastNotifiedDownloadVersion) {
+                lastNotifiedDownloadVersion = version;
                 toast('检测到客户端更新 ' + version + '，正在后台下载...', 'info');
             }
         } else if (state.status === 'downloaded') {
             brandTrigger.classList.add('has-update', 'is-ready');
             const version = state.updateInfo?.version ? 'v' + state.updateInfo.version : '';
-            if (isBackground && version && version !== lastNotifiedVersion) {
-                lastNotifiedVersion = version;
+            if (isBackground && version && version !== lastNotifiedReadyVersion) {
+                lastNotifiedReadyVersion = version;
                 toast('客户端更新 ' + version + ' 已下载完毕，点击 Pivot 菜单即可重启安装', 'success');
             }
         } else if (state.status === 'not-available' || state.status === 'idle') {
@@ -295,7 +298,11 @@
         }).catch(() => {});
     }
     if (typeof desktopApi.getUpdateStatus === 'function') {
-        desktopApi.getUpdateStatus().then(st => applyUpdateState(st, false)).catch(() => {});
+        const initialRevision = updateStateRevision;
+        desktopApi.getUpdateStatus().then(st => {
+            if (updateStateRevision !== initialRevision) return;
+            applyUpdateState(st, st?.status === 'downloaded');
+        }).catch(() => {});
     }
     if (typeof desktopApi.onUpdateEvent === 'function') {
         desktopApi.onUpdateEvent(st => applyUpdateState(st, true));
