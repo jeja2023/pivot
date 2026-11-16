@@ -5,16 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
-const updateErrors = require('../client/common/desktop-update-errors');
-
 const source = fs.readFileSync(path.join(__dirname, '../client/chat/desktop-menu.js'), 'utf8');
+const coreSource = fs.readFileSync(path.join(__dirname, '../client/chat/pivot-core.js'), 'utf8');
+const updateErrorsSource = fs.readFileSync(path.join(__dirname, '../client/common/desktop-update-errors.js'), 'utf8');
 
 function createMenuHarness({ initialState, checkResult } = {}) {
     function element() {
         const classes = new Set();
         const listeners = new Map();
         return {
-            children: [], dataset: {}, style: {},
+            children: [], dataset: {}, style: {}, attributes: {},
             classList: {
                 add: (...names) => names.forEach(name => classes.add(name)),
                 remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -24,7 +24,7 @@ function createMenuHarness({ initialState, checkResult } = {}) {
             dispatch: (name, event) => listeners.get(name)?.(event),
             appendChild(child) { this.children.push(child); },
             replaceChildren() { this.children = []; },
-            setAttribute() {},
+            setAttribute(name, value) { this.attributes[name] = value; },
             getBoundingClientRect: () => ({ left: 8, bottom: 40 })
         };
     }
@@ -42,15 +42,20 @@ function createMenuHarness({ initialState, checkResult } = {}) {
         async checkForUpdates() { return checkResult; }
     };
     if (initialState) desktopApi.getUpdateStatus = () => initialState;
-    vm.runInNewContext(source, {
-        window: { pivotDesktop: desktopApi, Pivot: { module: () => updateErrors }, innerWidth: 1280, innerHeight: 800, addEventListener() {} },
+    const context = vm.createContext({
+        window: { pivotDesktop: desktopApi, innerWidth: 1280, innerHeight: 800, addEventListener() {} },
         document: { documentElement: element(), body, getElementById: () => menu, createElement: element, addEventListener() {} },
         showToast: (message, type) => toasts.push({ message, type }),
         console
     });
+    vm.runInContext(coreSource, context);
+    context.Pivot = context.window.Pivot;
+    vm.runInContext(updateErrorsSource, context);
+    vm.runInContext(source, context);
     const click = target => ({ target: { closest: () => target }, preventDefault() {}, stopPropagation() {} });
     return {
-        toasts, brand,
+        toasts, brand, menu, body,
+        clickBrand() { menu.dispatch('click', click(brand)); },
         emit: state => updateListener({ enabled: true, updateInfo: { version: '0.7.148' }, ...state }),
         updateAction() {
             menu.dispatch('click', click(brand));
@@ -66,6 +71,19 @@ function createMenuHarness({ initialState, checkResult } = {}) {
         installed: () => installs
     };
 }
+
+test('桌面菜单使用真实模块注册表初始化，点击品牌按钮展开及关闭菜单', () => {
+    const menu = createMenuHarness();
+    const popover = menu.body.children[0];
+    assert.equal(menu.menu.hidden, false);
+    menu.clickBrand();
+    assert.equal(menu.brand.attributes['aria-expanded'], 'true');
+    assert.equal(popover.classList.contains('hidden'), false);
+    assert.ok(popover.children.some(item => item.dataset.desktopAction === 'server-config'));
+    menu.clickBrand();
+    assert.equal(menu.brand.attributes['aria-expanded'], 'false');
+    assert.equal(popover.classList.contains('hidden'), true);
+});
 
 test('桌面更新的下载完成通知不被同版本下载通知去重，且仍可从菜单安装', async () => {
     const menu = createMenuHarness();

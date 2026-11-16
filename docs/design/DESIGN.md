@@ -3,10 +3,12 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-11-13
-- Release baseline: v0.7.159（源码；制品以各自构建版本为准）
+- Last refreshed: 2026-11-16
+- Release baseline: v0.7.161（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - `client/chat/desktop-menu.js` 及菜单回归：桌面客户端菜单使用前端模块注册表提供的 `moduleApi` 初始化；菜单按钮保留展开状态和原有桌面能力边界，相关验证及未完成的实际窗口复验见[v0.7.161发布说明](../releases/v0.7.161-桌面菜单修复与本地PPT服务验证.md)。
+  - `client/chat/apps-workbench-presentation-master.js`、`apps-workbench-presentation-master-form.js`、`apps-workbench-presentation-catalog.js`、`apps-workbench-presentation-goals.js`、`client/chat/styles/workspaces/apps/presentation-master.css` 及对应专项：PPT Master 完整制作弹窗扩宽至 1260px 免滚动一屏呈现、Hero 模板卡片支持更换与回退自由设计、一体式拖拽上传去重与胶囊移除、受众快捷预设及模板目录分类切换竞态修复；范围见[v0.7.160发布说明](../releases/v0.7.160-PPTMaster制作弹窗与模板页深度优化.md)，实际验证见[专项优化记录](../reports/ppt-master-template-modal-optimization-20261116.md)。
   - `docker/ppt-master/runner.py`、`template_adapter.py`、`client/chat/ppt-master-settings.js`、`monitor-dashboard.js`、`server/services/decision-failure-details.js`、`client/chat/data-analysis/modeling-sources.js` 及对应专项：模板适配沿用当前任务目录、全站服务配置状态一致、失败明细显示发起用户与两种任务时间、来源类型并入参数区及查询选择器宽度收敛；范围见[v0.7.159发布说明](../releases/v0.7.159-PPT模板校验监控明细与数据分析布局优化.md)，实际验证及限制见[专项修复记录](../reports/ppt-monitor-analysis-fixes-20261113.md)。
   - `client/common/svg-animation-policy.js`、`client/chat/mermaid-svg.js`、`render-mermaid.js`、`code-delivery.js`、`server/services/agent-code-renditions.js`、`document-rendering/image-renderer.js` 及动画/代码交付专项：声明式 SVG 动画在隔离图片中播放并保留下载与保存，前后端共用动画属性边界，页面输入弹窗替代原生 `prompt()`；范围见[v0.7.158发布说明](../releases/v0.7.158-SVG声明式动画与代码保存弹窗修复.md)，证据见[动画与保存检查记录](../reports/svg-animation-code-save-20261113.md)。
   - `client/chat/apps-workbench-mindmaps.js`、`client/common/desktop-update-errors.js`、`desktop/updater.js`、`desktop/installer-process-guard.nsh`、`client/chat/desktop-menu.js` 及对应导图/更新专项：导图导出菜单防冒泡误关与进行中下载复用、更新错误中文短摘要与去重、100% 校验态、签名查询超时、原生安装详情与只读诊断；范围见[v0.7.157发布说明](../releases/v0.7.157-客户端更新链路可靠性与导图导出菜单竞态修复.md)。

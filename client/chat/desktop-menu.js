@@ -1,7 +1,7 @@
 (function () {
     const desktopApi = window.pivotDesktop;
     if (!desktopApi) return;
-    const { formatDesktopUpdateError } = window.Pivot.module('chat.desktopUpdateErrors');
+    const { formatDesktopUpdateError } = window.Pivot.moduleApi('chat.desktopUpdateErrors');
 
     document.documentElement?.classList.add('pivot-desktop-runtime');
     document.body?.classList.add('pivot-desktop-runtime');

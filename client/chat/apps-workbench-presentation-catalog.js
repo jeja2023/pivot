@@ -170,7 +170,7 @@
         byId('presentation-catalog-modal').classList.add('hidden');
         if (engine === 'master') {
             return window.Pivot.moduleApi('apps.presentations.master').open({ operation: template.ownerType === 'engine' ? 'generate' : 'edit_native', profile: 'default',
-                template: template.ownerType === 'engine' ? { type: 'runtime', id: template.id, name: template.name } : { type: 'organization', id: template.id, version: template.version, name: template.name } });
+                template: template.ownerType === 'engine' ? { type: 'runtime', id: template.id, name: template.name, description: template.description || '', version: template.version || '', kind: template.kind || 'style' } : { type: 'organization', id: template.id, version: template.version, name: template.name, description: template.description || '' } });
         }
         if (state.active) return helpers.applyTemplate(template.id);
         if (blank) return helpers.createBlank(template.id);
@@ -267,10 +267,12 @@
         ensureModal(); byId('presentation-catalog-modal').classList.remove('hidden');
         const status = byId('presentation-catalog-status');
         if (status) status.textContent = '正在加载当前账号可用模板。';
-        catalog = await helpers.requestJson('/api/apps/presentations/template-catalog');
         const filter = byId('presentation-catalog-filter');
         if (filter) filter.value = group;
         updateTabs(group);
+        catalog = await helpers.requestJson('/api/apps/presentations/template-catalog');
+        const activeGroup = filter?.value || group;
+        updateTabs(activeGroup);
         byId('presentation-catalog-import').classList.toggle('hidden', !catalog.canManageTemplates);
         render();
     }

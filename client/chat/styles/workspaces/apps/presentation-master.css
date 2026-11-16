@@ -1,14 +1,19 @@
 .presentation-master-dialog {
-    width: min(1040px, calc(100vw - 32px));
+    width: min(1260px, calc(100vw - 32px));
     height: auto;
-    max-width: 1040px;
-    max-height: calc(100dvh - 48px);
+    max-width: 1260px;
+    max-height: calc(100dvh - 36px);
     margin: auto;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md, 10px);
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .presentation-master-dialog .workspace-modal-header,
-.presentation-master-dialog .workspace-modal-body {
+.presentation-master-dialog .workspace-modal-body,
+.presentation-master-footer {
     background: var(--surface);
 }
 
@@ -17,43 +22,186 @@
     flex-shrink: 0;
 }
 
-.presentation-master-dialog .workspace-modal-body {
-    padding: 16px 20px;
-    overflow: auto;
+.presentation-master-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
 }
 
-.presentation-master-template-note {
-    margin: 0 0 16px;
-    padding: 10px 12px;
-    background: var(--bg-side);
-    color: var(--text-muted);
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-}
-
-.presentation-master-form {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: start;
-    gap: 24px;
-}
-
-.presentation-master-sidebar,
-.presentation-master-section {
-    display: grid;
-    gap: 12px;
+.presentation-master-header-info {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 14px;
     min-width: 0;
 }
 
-.presentation-master-sidebar {
-    padding-left: 24px;
-    border-left: 1px solid var(--border);
-    gap: 20px;
+.presentation-master-header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-.presentation-master-section h4 {
+.presentation-master-header-title-row svg {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.presentation-master-header-title-row h3 {
     margin: 0;
-    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.3;
+}
+
+.presentation-master-header-subtitle {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.presentation-master-dialog .workspace-modal-body {
+    padding: 14px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* 顶部 Hero 模板卡片 */
+.presentation-master-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.presentation-master-hero.is-template-active {
+    border-left: 4px solid var(--primary);
+    background: linear-gradient(135deg, rgba(16, 163, 127, 0.06), transparent 70%), var(--bg-side);
+    border-color: rgba(16, 163, 127, 0.25);
+}
+
+.presentation-master-hero-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-master-hero-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    background: rgba(16, 163, 127, 0.1);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.presentation-master-hero-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-master-hero-header-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.presentation-master-hero-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.3;
+}
+
+.presentation-version-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 4px;
+    background: var(--border);
+    color: var(--text-muted);
+}
+
+.presentation-master-hero-desc {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.presentation-master-hero-btn {
+    font-size: 0.76rem;
+    padding: 5px 10px;
+    white-space: nowrap;
+}
+
+/* 主表单布局：上方左右等高双栏 + 下方全宽四列配置栏 */
+.presentation-master-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.presentation-master-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+    gap: 14px;
+}
+
+.presentation-master-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.presentation-master-section-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    color: var(--primary);
+}
+
+.presentation-master-section-head h4 {
+    margin: 0;
+    font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-main);
 }
@@ -61,114 +209,499 @@
 .presentation-master-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+
+.presentation-master-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
+}
+
+.presentation-master-dialog .modal-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.presentation-master-dialog .modal-form-label {
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.presentation-master-badge-tip {
+    font-size: 0.68rem;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+    margin-left: 6px;
+    font-weight: normal;
 }
 
 .presentation-master-dialog .form-input {
     width: 100%;
     min-width: 0;
+    height: 34px;
+    font-size: 0.82rem;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0 10px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.presentation-master-dialog .form-input:focus {
+    border-color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
 }
 
 .presentation-master-dialog textarea.form-input {
+    height: auto;
     resize: vertical;
-    min-height: 76px;
+    min-height: 52px;
+    padding: 6px 10px;
+    line-height: 1.4;
 }
 
 #presentation-master-instruction {
-    min-height: 112px;
+    min-height: 58px;
 }
 
-.presentation-master-hint,
+#presentation-master-material {
+    min-height: 54px;
+}
+
+/* 受众快捷胶囊（单行紧凑排列） */
+.presentation-master-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.presentation-master-chip {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1.25;
+    transition: all 0.15s ease;
+}
+
+.presentation-master-chip:hover {
+    background: rgba(16, 163, 127, 0.08);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+/* 一体式拖拽上传区域（整合选择按钮与状态） */
+.presentation-master-dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    background: var(--bg-side);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.presentation-master-dropzone:hover,
+.presentation-master-dropzone.is-dragover {
+    border-color: var(--primary);
+    background: rgba(16, 163, 127, 0.04);
+}
+
+.presentation-master-dropzone.has-files {
+    border-style: solid;
+    border-color: rgba(16, 163, 127, 0.35);
+    background: rgba(16, 163, 127, 0.02);
+}
+
+.presentation-master-dropzone-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-master-dropzone-main svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+.presentation-master-dropzone:hover svg,
+.presentation-master-dropzone.is-dragover svg {
+    color: var(--primary);
+}
+
+.presentation-master-dropzone-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-master-dropzone-title {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-main);
+    line-height: 1.25;
+}
+
+.presentation-master-dropzone-subtitle {
+    margin: 0;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.25;
+}
+
 .presentation-master-file-selection {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.presentation-master-file-selection.is-selected {
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.presentation-master-dropzone-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.presentation-master-browse-btn,
+.presentation-master-clear-btn {
+    font-size: 0.74rem;
+    padding: 4px 10px;
+    height: 28px;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.presentation-master-hint {
     margin: 0;
     color: var(--text-muted);
-    line-height: 1.5;
+    font-size: 0.7rem;
+    line-height: 1.35;
     overflow-wrap: anywhere;
 }
 
-.presentation-master-file-picker {
+/* 已选文件卡片列表 */
+.presentation-master-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 110px;
+    overflow-y: auto;
+}
+
+.presentation-master-file-item {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    justify-content: space-between;
     gap: 8px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    font-size: 0.76rem;
+}
+
+.presentation-master-ext-badge {
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.presentation-master-file-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
     min-width: 0;
 }
 
-.presentation-master-file-selection {
-    flex: 1 1 140px;
-    min-width: 0;
+.presentation-master-file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--text-main);
 }
 
+.presentation-master-file-size {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    flex-shrink: 0;
+}
+
+.presentation-master-file-remove {
+    border: none;
+    background: transparent;
+    font-size: 1rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    border-radius: 4px;
+}
+
+.presentation-master-file-remove:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* 模板锁定提示 */
+.presentation-master-lock-notice {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #b45309;
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+
+.presentation-master-lock-notice svg {
+    color: #b45309;
+    flex-shrink: 0;
+}
+
+/* 高级设置 */
 .presentation-master-advanced {
-    padding-top: 12px;
+    padding-top: 6px;
     border-top: 1px solid var(--border);
 }
 
 .presentation-master-advanced summary {
     color: var(--text-muted);
+    font-size: 0.74rem;
     cursor: pointer;
+    font-weight: 500;
+}
+
+.presentation-master-advanced summary:hover {
+    color: var(--text-main);
 }
 
 .presentation-master-advanced[open] > .presentation-master-grid {
-    margin-top: 12px;
+    margin-top: 8px;
 }
 
+/* 状态展示卡片 */
+.presentation-master-status-card {
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.presentation-master-ready-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.presentation-master-ready-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10a37f;
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.25);
+    flex-shrink: 0;
+    animation: master-pulse 2s infinite ease-in-out;
+}
+
+@keyframes master-pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 163, 127, 0.4); }
+    70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(16, 163, 127, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 163, 127, 0); }
+}
+
+.presentation-master-ready-text {
+    font-size: 0.78rem;
+    color: var(--text-main);
+    flex: 1;
+}
+
+.presentation-master-ready-badge {
+    font-size: 0.7rem;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: rgba(16, 163, 127, 0.12);
+    color: #10a37f;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.presentation-master-task-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.presentation-master-task-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    background: rgba(16, 163, 127, 0.12);
+    color: #10a37f;
+}
+
+.presentation-master-task-badge.working {
+    background: rgba(59, 130, 246, 0.12);
+    color: #2563eb;
+}
+
+.presentation-master-task-badge.failed {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.presentation-master-task-message {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-main);
+    line-height: 1.4;
+}
+
+.presentation-master-task-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+/* 底部操作栏 */
 .presentation-master-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 12px 20px;
+    padding: 10px 20px;
     border-top: 1px solid var(--border);
-    background: var(--surface);
 }
 
-.presentation-master-footer .btn-primary {
+.presentation-master-footer-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+}
+
+.presentation-master-footer-hint svg {
+    color: var(--text-muted);
     flex-shrink: 0;
 }
 
-#presentation-master-status {
-    display: grid;
-    gap: 8px;
-    margin-top: 16px;
-    overflow-wrap: anywhere;
+.presentation-master-footer-hint .presentation-master-hint {
+    font-size: 0.74rem;
 }
 
-#presentation-master-status pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+.presentation-master-start-btn {
+    flex-shrink: 0;
+    padding: 7px 18px;
+    font-weight: 600;
+    font-size: 0.84rem;
 }
 
-@media (max-width: 760px) {
-    .presentation-master-form {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 20px;
-    }
-
-    .presentation-master-sidebar {
-        padding-left: 0;
-        border-left: 0;
-        border-top: 1px solid var(--border);
-        padding-top: 16px;
-    }
-}
-
-@media (max-width: 480px) {
+/* 响应式调整 */
+@media (max-width: 900px) {
     .presentation-master-dialog {
         width: calc(100vw - 16px);
-        max-height: calc(100dvh - 48px);
+        max-height: calc(100dvh - 24px);
+    }
+
+    .presentation-master-header {
+        padding: 10px 14px;
     }
 
     .presentation-master-dialog .workspace-modal-body {
-        padding: 12px;
+        padding: 12px 14px;
+    }
+
+    .presentation-master-columns {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .presentation-master-grid-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .presentation-master-hero {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .presentation-master-hero-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .presentation-master-dropzone {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .presentation-master-dropzone-actions {
+        justify-content: flex-end;
     }
 
     .presentation-master-footer {
-        padding: 12px;
-        align-items: flex-end;
+        padding: 10px 14px;
+        flex-direction: column;
+        align-items: stretch;
     }
 
-    .presentation-master-grid {
+    .presentation-master-start-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 520px) {
+    .presentation-master-grid,
+    .presentation-master-grid-4 {
         grid-template-columns: minmax(0, 1fr);
     }
 }
