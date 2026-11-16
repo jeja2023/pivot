@@ -413,7 +413,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
     let calibration = null;
     if (usage) {
         try {
-            const recording = recordProviderUsageCalibration({
+            const calibrationPayload = {
                 modelId: modelCfg.id,
                 protocol: usage.protocol || 'unknown',
                 source,
@@ -421,11 +421,11 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 output,
                 estimated,
                 usage
-            });
+            };
             // 对话路由的令牌记账已入队；非计费的校准审计不占用模型判断时限。
             // 有运行预算的 Agent 调用仍等待完整记账，不改变其额度核验顺序。
-            if (options.deferCalibration === true && !runId) recording.catch(() => {});
-            else calibration = await recording;
+            if (options.deferCalibration === true && !runId) recordProviderUsageCalibration(calibrationPayload).catch(() => {});
+            else calibration = await recordProviderUsageCalibration(calibrationPayload);
         } catch (_) {
             // Calibration is an audit metric and must not fail an otherwise valid model response.
         }
