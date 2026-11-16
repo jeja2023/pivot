@@ -279,6 +279,28 @@ function renderMcpLocalAuthGrant(type, status) {
     `;
 }
 
+async function mountMcpHelperDownload(root) {
+    root.classList.add('client-download-card');
+    const state = document.createElement('p'); state.setAttribute('role', 'status'); state.textContent = '正在读取助手下载信息…';
+    const retry = document.createElement('button'); retry.className = 'btn-secondary'; retry.type = 'button'; retry.textContent = '重试加载助手下载'; retry.hidden = true;
+    retry.onclick = () => { void mountMcpHelperDownload(root); };
+    root.replaceChildren(state, retry);
+    try {
+        let downloads = window.Pivot.moduleApi('client.downloads');
+        if (typeof downloads?.mountHelper !== 'function') {
+            await window.Pivot.loadScriptOnce('/chat/client-downloads.js');
+            downloads = window.Pivot.moduleApi('client.downloads');
+        }
+        if (!root.isConnected) return;
+        if (typeof downloads?.mountHelper !== 'function') throw new Error('助手下载入口尚未就绪。');
+        downloads.mountHelper(root);
+    } catch (_) {
+        if (!root.isConnected) return;
+        state.textContent = '助手下载信息暂时无法显示，请重试或刷新页面。';
+        retry.hidden = false;
+    }
+}
+
 function renderMcpLocalAuthorizationCenter(status) {
     const body = document.getElementById('mcp-local-auth-body');
     if (!body) return;
@@ -309,7 +331,6 @@ function renderMcpLocalAuthorizationCenter(status) {
     if (!window.pivotDesktop) {
         const section = document.createElement('div'); section.className = 'mcp-helper-connection';
         const download = document.createElement('section'); download.setAttribute('aria-label','下载 Windows 本机助手');
-        window.Pivot.moduleApi('client.downloads')?.mountHelper?.(download);
         const text = document.createElement('p'); text.textContent = '在当前 Windows 电脑安装并启动独立助手，生成配对码后复制到助手中。应用授权在助手中完成；重新生成配对码会断开当前浏览器的旧绑定。';
         const output = document.createElement('textarea'); output.className='form-input'; output.readOnly=true; output.rows=3; output.setAttribute('aria-label','助手配对码和状态');
         const pair = document.createElement('button'); pair.className='btn-primary'; pair.type='button'; pair.textContent='生成助手配对码';
@@ -318,6 +339,7 @@ function renderMcpLocalAuthorizationCenter(status) {
         revoke.onclick=async()=>{try{await window.Pivot.moduleApi('local.helper').revoke();output.value='助手连接已撤销。';}catch(error){output.value=error.message;}};
         const actions=document.createElement('div');actions.className='client-download-actions';actions.append(pair,revoke);
         section.append(download,text,actions,output);body.prepend(section);
+        void mountMcpHelperDownload(download);
     }
 }
 

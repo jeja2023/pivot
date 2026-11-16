@@ -9,8 +9,9 @@ const express = require('express');
 const { getClientDownloads } = require('../server/services/client-downloads');
 const { publishLocalHelper } = require('../scripts/publish_local_helper');
 const { createAuthRouter } = require('../server/routes/auth');
+const { loadChatWorkspaceTemplate } = require('../server/chat-template');
 
-async function fixture() {
+async function fixture({ preloadDownloads = true } = {}) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-download-browser-'));
     const downloads = path.join(root, 'downloads');
     const build = path.join(root, 'dist-local-helper', 'build-test');
@@ -18,16 +19,18 @@ async function fixture() {
     const filename = 'PivotLocalHelper-Dev-Setup-0.7.164.exe';
     await fs.writeFile(path.join(build, filename), 'MZ synthetic helper download');
     await fs.writeFile(path.join(root, 'dist-local-helper', 'latest-build.json'), JSON.stringify({ output: build, version: '0.7.164', unsigned: true }));
-    let fail = false;
+    let fail = false, scriptUnavailable = false;
+    const scriptRequests = [];
     const pass = (_req, _res, next) => next();
     const app = express();
     app.use('/api', createAuthRouter({ authMiddleware: pass, loginLimiter: pass, registerLimiter: pass, isPublicRegistrationEnabled: () => false, logAction() {},
         getClientDownloads: options => { if (fail) throw new Error('fixture unavailable'); return getClientDownloads({ ...options, root: downloads }); } }));
     app.use('/downloads', express.static(downloads));
+    app.get('/chat/client-downloads.js', (req, res, next) => { scriptRequests.push(req.originalUrl); if (scriptUnavailable) return res.status(503).end(); next(); });
     app.use('/chat', express.static(path.resolve('client/chat')));
     app.use('/common', express.static(path.resolve('client/common')));
     const template = await fs.readFile(path.resolve('client/chat/partials/pre-app-modals.html'), 'utf8');
-    app.get('/', (_req, res) => res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/common/styles/theme.css"><link rel="stylesheet" href="/chat/chat.css"><link rel="stylesheet" href="/chat/styles/workspaces/mcp/mcp-local-auth.css"></head><body class="auth-active">${template}<div id="mcp-local-auth-body"></div></body></html>`));
+    app.get('/', (_req, res) => res.send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/common/styles/theme.css"><link rel="stylesheet" href="/chat/chat.css"><link rel="stylesheet" href="/chat/chat.workspace.mcp.css"></head><body class="auth-active">${template}<div id="mcp-local-auth-body"></div></body></html>`));
     app.use((_error, _req, res, _next) => res.status(503).json({ error: 'unavailable' }));
     const server = await new Promise(resolve => { const current = app.listen(0, '127.0.0.1', () => resolve(current)); });
     const browser = await require('playwright').chromium.launch({ headless: true });
@@ -40,8 +43,9 @@ async function fixture() {
         window.mcpEscape = value => { const node = document.createElement('span'); node.textContent = String(value ?? ''); return node.innerHTML; };
         window.Pivot.exposeModule('local.helper', { create: async () => ({ code: 'synthetic-pairing' }), revoke: async () => {} });
     });
-    for (const script of ['client-downloads.js', 'mcp-workbench-local-auth.js']) await page.addScriptTag({ path: path.resolve('client/chat', script) });
+    for (const script of [...(preloadDownloads ? ['client-downloads.js'] : []), 'mcp-workbench-local-auth.js']) await page.addScriptTag({ path: path.resolve('client/chat', script) });
     return { page, downloads, publish: () => publishLocalHelper({ root }), fail: value => { fail = value; },
+        failScript: value => { scriptUnavailable = value; }, scriptRequests,
         close: async () => { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } };
 }
 
@@ -66,6 +70,59 @@ test('下载窗口区分助手与完整客户端，真实下载保留版本和�
         await value.page.keyboard.press('Escape');
         assert.equal(await value.page.locator('#client-downloads-modal').getAttribute('aria-hidden'), 'true');
         assert.equal(await value.page.evaluate(() => document.activeElement.id), 'desktop-download-link');
+    } finally { await value.close(); }
+});
+
+test('授权中心在页面未预载下载模块时补载并显示下载卡片', { timeout: 15000 }, async () => {
+    const value = await fixture({ preloadDownloads: false });
+    try {
+        await value.publish();
+        await value.page.evaluate(() => {
+            document.documentElement.dataset.appVersion = 'v0.7.165';
+            document.getElementById('auth-container').classList.add('hidden');
+            document.body.classList.remove('auth-active');
+            renderMcpLocalAuthorizationCenter({ available: false, grants: {} });
+        });
+        const body = value.page.locator('#mcp-local-auth-body');
+        await body.getByRole('link', { name: '下载 Windows 本机助手' }).waitFor({ timeout: 3000 });
+        assert.equal(value.scriptRequests.length, 1);
+        assert.match(value.scriptRequests[0], /client-downloads\.js\?v=v0\.7\.165/);
+        assert.match(await body.locator('.client-download-meta').textContent(), /v0\.7\.164.*开发验证版/);
+        await body.getByRole('button', { name: '生成助手配对码' }).click();
+        assert.equal(await body.getByRole('textbox', { name: '助手配对码和状态' }).inputValue(), 'synthetic-pairing');
+        await value.page.evaluate(markup => {
+            const modal = new window.DOMParser().parseFromString(markup, 'text/html').getElementById('mcp-local-auth-modal');
+            const content = document.getElementById('mcp-local-auth-body'), slot = modal.querySelector('#mcp-local-auth-body');
+            content.className = slot.className; slot.replaceWith(content);
+            modal.classList.remove('hidden'); modal.setAttribute('aria-hidden', 'false');
+            document.body.append(modal);
+        }, loadChatWorkspaceTemplate('mcp'));
+        await value.page.setViewportSize({ width: 850, height: 720 });
+        await body.getByRole('link', { name: '下载 Windows 本机助手' }).waitFor();
+        await fs.mkdir(path.resolve('output/local-helper'), { recursive: true });
+        await value.page.screenshot({ path: path.resolve('output/local-helper/authorization-download-recovered.png') });
+    } finally { await value.close(); }
+});
+
+test('授权中心下载模块加载失败显示重试入口，恢复后不重复插入卡片', { timeout: 15000 }, async () => {
+    const value = await fixture({ preloadDownloads: false });
+    try {
+        value.failScript(true);
+        await value.page.evaluate(() => {
+            document.getElementById('auth-container').classList.add('hidden');
+            document.body.classList.remove('auth-active');
+            renderMcpLocalAuthorizationCenter({ available: false, grants: {} });
+        });
+        const body = value.page.locator('#mcp-local-auth-body');
+        await body.getByText('助手下载信息暂时无法显示，请重试或刷新页面。', { exact: true }).waitFor({ timeout: 3000 });
+        await body.getByRole('button', { name: '生成助手配对码' }).click();
+        assert.equal(await body.getByRole('textbox', { name: '助手配对码和状态' }).inputValue(), 'synthetic-pairing');
+        value.failScript(false);
+        await body.getByRole('button', { name: '重试加载助手下载' }).click();
+        await body.getByText('暂未发布', { exact: true }).waitFor({ timeout: 3000 });
+        assert.equal(await body.locator('.client-download-card').count(), 1);
+        assert.equal(await body.locator('a[href]').count(), 0);
+        assert.equal(value.scriptRequests.length, 2);
     } finally { await value.close(); }
 });
 
