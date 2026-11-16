@@ -5,14 +5,94 @@
     const { state, request, json } = m;
     const { esc } = app;
 
+    function resolveNodeLocalDataset(targetId) {
+        if (!targetId) return null;
+        const defNode = state.draft?.nodes?.find(item => item.id === targetId);
+        const flowNode = m.getFlowNode?.(targetId);
+        const datasetId = defNode?.datasetId || (flowNode?.kind === 'source' ? flowNode.config?.datasetId : '');
+        if (!datasetId) return null;
+        const dataset = (app.state.datasets || []).find(item => item.id === datasetId);
+        if (!dataset) return null;
+        const sourceMeta = state.selected?.sources?.find(item => item.nodeId === targetId);
+        const columns = (sourceMeta?.columns?.length ? sourceMeta.columns : dataset.columns) || [];
+        const rows = Array.isArray(dataset.previewRows) ? dataset.previewRows : [];
+        return { dataset, columns, rows };
+    }
+
+    function formatPreviewType(rawType) {
+        if (typeof m.fieldTypeLabel === 'function') return m.fieldTypeLabel(rawType);
+        return rawType || '文本';
+    }
+
+    function renderPreviewTable(cols, rows, { byKey = false } = {}) {
+        const headerCells = cols.map(col => {
+            const typeLabel = formatPreviewType(col.type);
+            return `<th><div class="modeling-preview-th"><strong>${esc(col.name)}</strong><small>${esc(typeLabel)}</small></div></th>`;
+        }).join('');
+        const dataRows = (rows || []).map((row, rowIndex) => {
+            return `<tr><td class="text-center data-analysis-row-index">${rowIndex + 1}</td>${cols.map(col => {
+                const cellVal = byKey ? (row[col.key] ?? row[col.name]) : row[col.name];
+                const text = cellVal === null || cellVal === undefined ? '空值' : (typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal));
+                return `<td class="${cellVal === null || cellVal === undefined ? 'text-muted' : ''}" title="${esc(text)}">${esc(text.slice(0, 160))}</td>`;
+            }).join('')}</tr>`;
+        });
+        return `<div class="table-container modeling-preview-table-wrap">
+            <table class="data-table compact-table">
+                <thead><tr><th class="text-center col-index">#</th>${headerCells || '<th>无输出列</th>'}</tr></thead>
+                <tbody>${dataRows.length ? dataRows.join('') : `<tr><td colspan="${Math.max(1, cols.length + 1)}">当前节点输出 0 行数据</td></tr>`}</tbody>
+            </table>
+        </div>`;
+    }
+
+    function renderSchemaView(targetId, preview) {
+        const defNode = state.draft?.nodes?.find(item => item.id === targetId);
+        const rawCols = preview?.columns?.length
+            ? preview.columns.map(col => ({ key: col.name, name: col.name, type: col.type || '输出字段' }))
+            : defNode
+                ? (m.columns ? m.columns(targetId) : [])
+                : (m.inferNodeColumns ? m.inferNodeColumns(targetId) : []).map(name => ({ key: name, name, type: '推断字段' }));
+
+        if (!rawCols.length) {
+            return '<div class="modeling-empty-inline"><p>暂未获取到该节点的字段结构；请先连接上游节点或配置表来源。</p></div>';
+        }
+        const grainSet = new Set(defNode?.grainKeys || []);
+        const dimSet = new Set((state.draft?.dimensions || []).filter(d => d.nodeId === targetId).map(d => d.fieldKey));
+        const metricSet = new Set((state.draft?.metrics || []).filter(mt => mt.field?.nodeId === targetId).map(mt => mt.field.fieldKey));
+        const rows = rawCols.map((col, idx) => {
+            const roles = [];
+            if (grainSet.has(col.key)) roles.push('<span class="modeling-mini-tag is-key">主键</span>');
+            if (dimSet.has(col.key)) roles.push('<span class="modeling-mini-tag">维度</span>');
+            if (metricSet.has(col.key)) roles.push('<span class="modeling-mini-tag">指标</span>');
+            return `<tr>
+                <td class="text-center data-analysis-row-index">${idx + 1}</td>
+                <td><strong>${esc(col.name)}</strong></td>
+                <td><span class="modeling-field-type-pill">${esc(formatPreviewType(col.type))}</span></td>
+                <td>${roles.length ? `<div class="modeling-chip-wrap">${roles.join('')}</div>` : '<span class="text-muted">普通字段</span>'}</td>
+            </tr>`;
+        }).join('');
+        return `<div class="table-container modeling-preview-table-wrap">
+            <table class="data-table compact-table">
+                <thead><tr><th class="text-center col-index">#</th><th>字段名</th><th>类型</th><th>建模角色</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    }
+
     function renderPreviewDock() {
         if (!state.previewOpen) return '';
         const targetId = state.previewNodeId || state.selectedNodeId || state.draft?.nodes?.[0]?.id || '';
         const preview = state.previewData;
         const canEdit = state.selected?.isOwner && state.selected?.lifecycle !== 'archived';
-        const isFlowTarget = Boolean(m.getFlowNode?.(targetId));
+        const flowNode = m.getFlowNode?.(targetId);
+        const defNode = state.draft?.nodes?.find(item => item.id === targetId);
+        const isFlowTarget = Boolean(flowNode);
         const job = state.nodeJob;
         const nodeLabel = m.getAnyNodeName ? m.getAnyNodeName(targetId) : targetId;
+        const nodeKindBadge = flowNode
+            ? (m.OPERATOR_MAP?.get(flowNode.kind)?.badge || '算子')
+            : (defNode?.role === 'fact' ? '事实表' : defNode ? '维度表' : '节点');
+        const activeTab = state.previewTab === 'schema' ? 'schema' : 'output';
+        const localDataset = resolveNodeLocalDataset(targetId);
 
         const stepChain = preview?.steps?.length > 1
             ? `<div class="modeling-preview-steps" aria-label="节点流转链路">
@@ -29,50 +109,71 @@
                 ${preview.upstreamRows !== null && preview.upstreamRows !== undefined
                     ? `<span class="modeling-badge is-info">上游 ${esc(preview.upstreamRows)} 行 → 输出 ${esc(preview.totalRows)} 行</span>`
                     : `<span class="modeling-badge is-success">共 ${esc(preview.totalRows)} 行</span>`}
-                <span class="modeling-badge is-muted">${esc(preview.columns?.length || 0)} 列</span>
-                <span class="modeling-badge is-muted">${esc(preview.durationMs)} ms</span>
+                <span class="modeling-badge">${esc(preview.columns?.length || 0)} 列</span>
+                <span class="modeling-badge">${esc(preview.durationMs)} ms</span>
             </div>`
-            : '';
+            : localDataset
+                ? `<div class="modeling-preview-stats"><span class="modeling-badge">${esc(localDataset.columns.length)} 列</span>${localDataset.dataset.rowCount ? `<span class="modeling-badge">来源 ${esc(localDataset.dataset.rowCount)} 行</span>` : ''}</div>`
+                : '';
 
         let bodyMarkup = '';
-        if (state.previewLoading) {
+        if (activeTab === 'schema') {
+            bodyMarkup = renderSchemaView(targetId, preview);
+        } else if (state.previewLoading) {
             bodyMarkup = `<div class="modeling-notice is-info">节点任务${esc(statusLabel(job))}，正在固定来源并通过隔离执行器计算，请稍候…</div>`;
         } else if (state.previewError) {
-            bodyMarkup = `<div class="modeling-notice is-danger">${esc(state.previewError)}</div>`;
+            if (state.previewLocalSample && localDataset?.rows?.length) {
+                bodyMarkup = `<div class="modeling-notice is-warning modeling-preview-inline-bar">
+                    <span>当前展示来源数据集「${esc(localDataset.dataset.name)}」的本地入库样本（非隔离执行器计算结果），仅作字段形态参考。</span>
+                    <button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="preview-toggle-local-sample">返回状态说明</button>
+                </div>${renderPreviewTable(localDataset.columns, localDataset.rows, { byKey: true })}`;
+            } else {
+                const isExecutorDisabled = /尚未启用|隔离执行器/.test(state.previewError);
+                bodyMarkup = `<div class="modeling-preview-error-card" role="alert">
+                    <div class="modeling-preview-error-main">
+                        <strong>${isExecutorDisabled ? '实时计算执行器暂未启用' : '节点数据预览未完成'}</strong>
+                        <p>${esc(isExecutorDisabled ? '当前可正常画布建模、关联配置与保存草稿，或先查看字段结构/本地样本。' : state.previewError)}</p>
+                    </div>
+                    <div class="modeling-preview-error-actions">
+                        ${localDataset?.rows?.length ? `<button class="btn-secondary" type="button" data-modeling-action="preview-toggle-local-sample">本地样本（${localDataset.rows.length} 行）</button>` : ''}
+                        <button class="btn-secondary" type="button" data-modeling-action="preview-tab" data-modeling-id="schema">字段结构</button>
+                    </div>
+                </div>`;
+            }
         } else if (!preview) {
-            bodyMarkup = '<div class="modeling-empty-inline"><p>点击画布任意节点或右上角“刷新预览”即可查看该节点的实时输入输出数据。</p></div>';
+            if (state.previewLocalSample && localDataset?.rows?.length) {
+                bodyMarkup = `<div class="modeling-notice is-info modeling-preview-inline-bar">
+                    <span>来源数据集「${esc(localDataset.dataset.name)}」本地入库样本（前 ${localDataset.rows.length} 行），点击右上角“刷新预览”可由隔离执行器计算实时输出。</span>
+                    <button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="preview-toggle-local-sample">收起样本</button>
+                </div>${renderPreviewTable(localDataset.columns, localDataset.rows, { byKey: true })}`;
+            } else {
+                bodyMarkup = `<div class="modeling-empty-inline">
+                    <p>点击画布节点或“刷新预览”，即可通过隔离执行器查看该节点的实时输入与输出数据。</p>
+                    ${localDataset?.rows?.length ? `<button class="btn-secondary" type="button" data-modeling-action="preview-toggle-local-sample">先看来源本地样本（${localDataset.rows.length} 行）</button>` : ''}
+                </div>`;
+            }
         } else {
-            const cols = preview.columns || [];
-            const headerCells = cols.map(col => {
-                return `<th><div class="modeling-preview-th"><strong>${esc(col.name)}</strong><small>${esc(col.type)}</small></div></th>`;
-            }).join('');
-            const dataRows = (preview.rows || []).map(row => {
-                return `<tr>${cols.map(col => {
-                    const cellVal = row[col.name];
-                    const text = cellVal === null || cellVal === undefined ? '空值' : (typeof cellVal === 'object' ? JSON.stringify(cellVal) : String(cellVal));
-                    return `<td class="${cellVal === null || cellVal === undefined ? 'text-muted' : ''}" title="${esc(text)}">${esc(text.slice(0, 160))}</td>`;
-                }).join('')}</tr>`;
-            });
-            bodyMarkup = `<div class="table-container modeling-preview-table-wrap">
-                <table class="data-table compact-table">
-                    <thead><tr>${headerCells || '<th>无输出列</th>'}</tr></thead>
-                    <tbody>${dataRows.length ? dataRows.join('') : `<tr><td colspan="${Math.max(1, cols.length)}">当前节点输出 0 行数据</td></tr>`}</tbody>
-                </table>
-            </div>`;
+            bodyMarkup = renderPreviewTable(preview.columns || [], preview.rows || [], { byKey: false });
         }
 
-        return `<div id="modeling-preview-dock" class="modeling-preview-dock" role="region" aria-label="节点实时数据预览">
+        return `<div id="modeling-preview-dock" class="modeling-preview-dock${state.previewExpanded ? ' is-expanded' : ''}" role="region" aria-label="节点实时数据预览">
             <div class="modeling-preview-header">
                 <div class="modeling-preview-title-wrap">
+                    <span class="modeling-badge is-info">${esc(nodeKindBadge)}</span>
                     <strong>数据运行预览 · ${esc(preview?.nodeName || nodeLabel || '未选节点')}</strong>
                     ${statsBadges}
                 </div>
                 ${stepChain}
                 <div class="modeling-bar-actions">
+                    <div class="modeling-preview-tabs" role="tablist" aria-label="预览视图切换">
+                        <button class="btn-secondary modeling-preview-tab${activeTab === 'output' ? ' is-active' : ''}" type="button" role="tab" aria-selected="${activeTab === 'output'}" data-modeling-action="preview-tab" data-modeling-id="output">运行输出</button>
+                        <button class="btn-secondary modeling-preview-tab${activeTab === 'schema' ? ' is-active' : ''}" type="button" role="tab" aria-selected="${activeTab === 'schema'}" data-modeling-action="preview-tab" data-modeling-id="schema">字段结构</button>
+                    </div>
                     ${pending(job) ? '<button class="btn-secondary" type="button" data-modeling-action="cancel-node-job">取消节点任务</button>' : ''}
                     ${job && state.previewError ? '<button class="btn-secondary" type="button" data-modeling-action="retry-node-job">重新读取任务</button>' : ''}
                     ${targetId ? `<button class="btn-secondary" type="button" data-modeling-action="preview-node" data-modeling-id="${esc(targetId)}">刷新预览</button>` : ''}
                     ${targetId && canEdit && isFlowTarget ? `<button class="btn-secondary" type="button" data-modeling-action="materialize-node" data-modeling-id="${esc(targetId)}">保存输出为数据集</button>` : ''}
+                    <button class="btn-secondary" type="button" data-modeling-action="preview-toggle-expand" title="切换预览面板高度">${state.previewExpanded ? '标准高度' : '放大预览'}</button>
                     <button class="btn-secondary" type="button" data-modeling-action="close-preview">关闭预览</button>
                 </div>
             </div>
@@ -82,10 +183,12 @@
                 ${job?.result?.dataset && job.result.dataset.currentSourceVersion !== job.result.dataset.sourceVersion ? '<div class="modeling-notice is-warning">这里保留本次任务的固定输出预览；该数据集已有后续修订，新建模型将读取数据集当前版本，请重新检查口径。</div>' : ''}
                 ${bodyMarkup}
                 <details class="modeling-advanced-panel" data-modeling-node-history${state.nodeHistoryOpen ? ' open' : ''}><summary>节点任务与来源说明</summary>
-                    ${state.nodeJobs.length ? `<label>最近节点任务<select id="modeling-node-job" class="form-input" aria-label="查看最近节点任务"><option value="">请选择任务</option>${state.nodeJobs.map(item => `<option value="${esc(item.id)}"${item.id === job?.id ? ' selected' : ''}>${item.executionKind === 'model_node_dataset' ? '保存输出' : '节点预览'} · ${esc(statusLabel(item))} · ${esc(item.node?.targetNodeId || '')} · ${esc(item.createdAt)}</option>`).join('')}</select></label>` : ''}
-                    ${job?.result ? `<p class="text-muted">来源范围：${esc(({ full: '完整', partial: '部分', unknown: '未知' })[job.result.coverage] || '未知')}；来源截止：${esc((job.result.dataTimes || []).map(item => item.updatedAt).join('；') || '未记录')}</p>` : ''}
-                    ${(job?.result?.sources || []).map(source => `<p class="text-muted">${esc(job.result.sourceNames?.find(item => item.nodeId === source.nodeId)?.name || source.datasetId)} · 固定数据版本 ${esc(source.dataVersion)} · 来源修订 ${esc(source.sourceRevision)} · ${esc(({ full: '完整', partial: '部分', incremental: '增量', unknown: '未知' })[source.coverage] || '未知')} · 截止 ${esc(source.watermark.updatedAt || '未记录')}</p>`).join('')}
-                    <p class="text-muted">这里展示数据准备流；正式分析使用已发布模型绑定的数据集。数值统计按八位小数转换，金额汇总使用十进制计算。</p>
+                    <div class="modeling-preview-history-body">
+                        ${state.nodeJobs.length ? `<label class="modeling-preview-job-select"><span>最近节点任务</span><select id="modeling-node-job" class="form-input" aria-label="查看最近节点任务"><option value="">请选择任务</option>${state.nodeJobs.map(item => `<option value="${esc(item.id)}"${item.id === job?.id ? ' selected' : ''}>${item.executionKind === 'model_node_dataset' ? '保存输出' : '节点预览'} · ${esc(statusLabel(item))} · ${esc(item.node?.targetNodeId || '')} · ${esc(item.createdAt)}</option>`).join('')}</select></label>` : ''}
+                        ${job?.result ? `<p class="text-muted">来源范围：${esc(({ full: '完整', partial: '部分', unknown: '未知' })[job.result.coverage] || '未知')}；来源截止：${esc((job.result.dataTimes || []).map(item => item.updatedAt).join('；') || '未记录')}</p>` : ''}
+                        ${(job?.result?.sources || []).map(source => `<p class="text-muted">${esc(job.result.sourceNames?.find(item => item.nodeId === source.nodeId)?.name || source.datasetId)} · 固定数据版本 ${esc(source.dataVersion)} · 来源修订 ${esc(source.sourceRevision)} · ${esc(({ full: '完整', partial: '部分', incremental: '增量', unknown: '未知' })[source.coverage] || '未知')} · 截止 ${esc(source.watermark.updatedAt || '未记录')}</p>`).join('')}
+                        <p class="text-muted">这里展示数据准备流；正式分析使用已发布模型绑定的数据集。数值统计按八位小数转换，金额汇总使用十进制计算。</p>
+                    </div>
                 </details>
             </div>
         </div>`;
@@ -174,6 +277,8 @@
         state.previewNodeId = nodeId;
         state.previewError = '';
         state.previewStale = false;
+        state.previewLocalSample = false;
+        state.previewTab = 'output';
         state.nodeTaskRevision = revision;
         m.render();
         try {

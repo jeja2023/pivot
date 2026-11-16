@@ -61,6 +61,8 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
         document.getElementById('entry').addEventListener('click', () => window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', template }));
     }, template);
     await page.locator('#entry').click();
+    await expect(page.locator('#presentation-master-title')).toHaveValue('');
+    await page.locator('#presentation-master-title').fill('测试演示');
     await page.locator('#presentation-master-instruction').fill('按材料制作汇报，保留原始数字和来源。');
     return page;
 }
@@ -74,14 +76,102 @@ test('模板制作通过真实上传解析两份Word材料，合并补充文字�
         const page = await pageFor(context);
         const anonymous = await page.request.post(context.url + '/api/apps/presentations/materials/extract'); assert.equal(anonymous.status(), 401);
         await page.locator('#presentation-master-material').fill('补充说明：金额均为万元。');
+        await page.locator('.presentation-master-advanced summary').click();
+        await page.locator('#presentation-master-budget').fill('800000');
         await page.locator('#presentation-master-material-files').setInputFiles([await word('经营报告.docx', '本期收入120万元，成本80万元。'), await word('风险清单.docx', '风险核对码：END-739。')]);
         await page.locator('#presentation-master-start').click();
         await expect(page.locator('#presentation-master-status')).toContainText('测试制作已接收材料');
         assert.equal(context.requests.length, 1);
-        const request = context.requests[0]; assert.equal(request.materials.length, 3); assert.equal(request.template.id, template.id);
+        const request = context.requests[0]; assert.equal(request.materials.length, 3); assert.equal(request.template.id, template.id); assert.equal(request.tokenBudget, 800000);
         assert.equal(request.materials[1].title, '经营报告.docx'); assert.match(request.materials[1].text, /收入120万元，成本80万元/);
         assert.match(request.materials[2].text, /END-739/); assert.equal(new Set(request.materials.map(item => item.id)).size, 3);
         await expect.poll(async () => (await fs.readdir(context.directory)).length).toBe(0);
+    } finally { await context.close(); }
+});
+
+test('关闭后清空新建表单和附件，快捷输入追加内容且不覆盖用户文字', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), dialog = page.getByRole('dialog');
+        await page.locator('#presentation-master-purpose').fill('用户已有目的');
+        await dialog.getByRole('group', { name: '整稿目的快捷输入' }).getByRole('button', { name: '决策支持' }).click();
+        await expect(page.locator('#presentation-master-purpose')).toHaveValue('用户已有目的\n帮助受众了解备选方案、利弊和需要决策的事项。');
+        await dialog.getByRole('group', { name: '制作要求快捷输入' }).getByRole('button', { name: '依据材料' }).click();
+        await expect(page.locator('#presentation-master-instruction')).toHaveValue(/按材料制作汇报[\s\S]*不编造未提供的事实/);
+        await page.locator('#presentation-master-material').fill('之前的材料');
+        await page.locator('#presentation-master-material-files').setInputFiles(await word('之前的文件.docx', '内容'));
+        await page.locator('.presentation-master-advanced summary').click();
+        await page.locator('#presentation-master-budget').fill('500000');
+        await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await page.locator('#entry').click();
+        for (const id of ['title', 'purpose', 'instruction', 'material', 'audience']) await expect(page.locator('#presentation-master-' + id)).toHaveValue('');
+        await expect(page.locator('#presentation-master-material-files')).toHaveValue('');
+        await expect(page.locator('#presentation-master-budget')).toHaveValue('1000000');
+        await expect(page.locator('#presentation-master-budget')).toBeHidden();
+    } finally { await context.close(); }
+});
+
+test('切换模板保留正在编辑的内容，重新打开时只恢复可继续的任务状态', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => {} }));
+        await page.getByRole('button', { name: '更换模板' }).click();
+        await page.locator('#entry').click();
+        await expect(page.locator('#presentation-master-title')).toHaveValue('测试演示');
+        await expect(page.locator('#presentation-master-instruction')).toHaveValue('按材料制作汇报，保留原始数字和来源。');
+        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        let recent = { id: 'fixture-task', status: 'completed' };
+        await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task: recent } }));
+        await page.locator('#entry').click();
+        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(page.locator('#presentation-master-title')).toHaveValue('');
+        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        recent = { id: 'fixture-task', status: 'input_required', request: { presentationId: '', productionProfile: { purpose: '旧任务目的' } }, inputRequest: { question: '请确认方案' } };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: recent } }));
+        await page.locator('#entry').click();
+        await expect(panel).toContainText('请确认方案');
+        await expect(page.locator('#presentation-master-purpose')).toHaveValue('');
+    } finally { await context.close(); }
+});
+
+test('累计预算不足时展示原预算并引导增加，失败后仍可重试恢复', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), submitted = [];
+        const failed = { id: 'fixture-task', status: 'failed', recoverable: true, steps: 11, usedTokens: 299001,
+            request: { presentationId: '', tokenBudget: 400000, maxSteps: 80 }, error: { code: 'PPT_MASTER_BUDGET_EXHAUSTED', message: '剩余模型预算不足。' },
+            usageDiagnostics: [{ step: 11, inputTokens: 1200, outputTokens: 200, inputEstimated: false, outputEstimated: true, inputEstimate: 1300, originalEstimate: 2000, compactedWrites: 1, cumulativeTokens: 299001, breakdown: { initial: 500, history: 700, toolResults: 100, images: 0 } }] };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: failed } }));
+        await page.route('**/master/tasks/fixture-task/resume', async route => {
+            submitted.push(route.request().postDataJSON());
+            await route.fulfill({ status: 503, json: { error: '服务暂不可用，请重试。' } });
+        });
+        await page.locator('#presentation-master-start').click();
+        const panel = page.locator('#presentation-master-status'), budget = page.locator('#presentation-master-budget');
+        await expect(panel).toContainText('本任务累计预算为 400000 令牌');
+        await expect(budget).toHaveValue('400000');
+        await panel.getByText('查看每轮模型用量').click();
+        await expect(panel).toContainText('输入 1200，输出 200（估算）');
+        await expect(panel).toContainText('初始指引及任务 500，历史消息 700，工具结果 100，图片 0');
+        await expect(budget).toBeVisible();
+        const resume = panel.getByRole('button', { name: '从检查点继续' });
+        await resume.click();
+        await expect(panel).toContainText('请先在高级设置中增加累计模型预算');
+        assert.equal(submitted.length, 0);
+        await budget.fill('800000'); await resume.click();
+        await expect(panel).toContainText('服务暂不可用，请重试');
+        await expect(resume).toBeEnabled();
+        assert.equal(submitted[0].tokenBudget, 800000);
+        await resume.click();
+        await expect.poll(() => submitted.length).toBe(2);
+        failed.request.tokenBudget = 800000;
+        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await page.locator('#entry').click();
+        await expect(panel).toContainText('本任务累计预算为 800000 令牌');
+        await resume.click();
+        await expect(panel).toContainText('请先在高级设置中增加累计模型预算');
+        assert.equal(submitted.length, 2);
     } finally { await context.close(); }
 });
 
@@ -128,6 +218,9 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
         await expect(page.locator('#presentation-master-start')).toHaveText('开始制作'); assert.equal(context.requests.length, 0);
         await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-start')).toBeEnabled();
+        await page.locator('#presentation-master-title').fill('测试演示');
+        await page.locator('#presentation-master-instruction').fill('按材料制作汇报，保留原始数字和来源。');
+        await upload.setInputFiles(await word('等待解析.docx', '等待解析'));
         let releaseOwner, enteredOwner;
         const ownerGate = new Promise(resolve => releaseOwner = resolve), ownerStarted = new Promise(resolve => enteredOwner = resolve);
         await page.unroute('**/materials/extract');

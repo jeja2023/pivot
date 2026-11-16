@@ -66,6 +66,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PIVOT_CHAT_INTENT_MODE: { group: '对话自适应路由', type: 'enum', values: ['active', 'shadow', 'disabled'], defaultValue: 'active', description: '任务语义裁决模式。shadow 只记录建议；disabled 关闭语义调用和自动任务。' },
     PIVOT_CHAT_BACKGROUND_REVIEW_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否允许独立审查组件核对已知只读适配器的任务范围。不能放行策略拒绝、强制人工、写入、发送或权限变更；失败时回到原审批边界。' },
     PIVOT_CHAT_INTENT_TIMEOUT_MS: { group: '对话自适应路由', type: 'integer', min: 1000, max: 120000, defaultValue: 30000, description: '统一语义判断的总超时，包含排队；失败后仅提供文本回答，不创建任务、不调用工具或检索，不伪称实际操作或文件已完成。明确问候保留快速路径，其他请求使用同一次语义判断。' },
+    PIVOT_CHAT_INTENT_MODEL_ID: { group: '对话自适应路由', type: 'integer', min: 0, max: 2147483647, defaultValue: 0, description: '专用意图判断模型 ID；0 沿用用户当前模型。可指定低延迟模型降低路由等待；必须对当前账号可见且上下文可容纳完整路由输入，否则沿用当前模型。按实际调用模型计量并校验日额度，不改变回答或任务执行模型。' },
     PIVOT_CHAT_INTENT_ROLLOUT_PERCENT: { group: '对话自适应路由', type: 'integer', min: 0, max: 100, defaultValue: 100, description: '按用户和会话稳定分桶的任务自动处理比例。设为 0 立即回退影子模式。' },
     PIVOT_CHAT_DIRECT_PATH_ENABLED: { group: '对话自适应路由', type: 'boolean', defaultValue: true, description: '是否启用普通对话直答快路径。无资料、工具或显式范围信号时跳过决策器、偏好读取与逐条决策审计，仅保留异步聚合指标。' },
     PIVOT_CHAT_ROUTE_SHADOW_MODE: { group: '对话自适应路由', type: 'boolean', defaultValue: false, description: '是否仅记录路由建议而不改变 RAG 与 MCP 的实际候选范围。' },

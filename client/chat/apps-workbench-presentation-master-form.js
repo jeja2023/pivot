@@ -1,6 +1,7 @@
 (function () {
     'use strict';
     const byId = id => document.getElementById(id);
+    const DEFAULT_TOKEN_BUDGET = 1000000;
     function node(tag, className = '', text = '') {
         const element = document.createElement(tag); if (className) element.className = className; if (text) element.textContent = text; return element;
     }
@@ -139,6 +140,35 @@
             if (input) { input.value = ''; input.dispatchEvent(new Event('change')); }
         }
     }
+    function reset() {
+        for (const key of ['title', 'instruction', 'material', 'audience', 'purpose', 'duration']) byId('presentation-master-' + key).value = '';
+        for (const [key, value] of Object.entries({ pages: '8', budget: String(DEFAULT_TOKEN_BUDGET), steps: '80', operation: 'generate', profile: 'default', consumption: 'presentation' })) byId('presentation-master-' + key).value = value;
+        byId('presentation-master-operation').disabled = false;
+        byId('presentation-master-profile').disabled = false;
+        byId('presentation-master-budget').closest('details').open = false;
+        resetFiles();
+        updateTemplateLock(false);
+    }
+    function addSuggestions(input, suggestions, label) {
+        const chips = node('div', 'presentation-master-chips');
+        chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', label);
+        for (const [name, text] of suggestions) {
+            const chip = node('button', 'presentation-master-chip', name);
+            chip.type = 'button'; chip.title = '添加：' + text;
+            chip.addEventListener('click', () => {
+                const current = input.value.trim();
+                if (!current.includes(text)) {
+                    const next = current ? current + '\n' + text : text;
+                    if (next.length > input.maxLength) { input.focus(); return; }
+                    input.value = next;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                input.focus();
+            });
+            chips.appendChild(chip);
+        }
+        input.parentElement.appendChild(chips);
+    }
     function updateTemplateLock(locked) {
         const lockNotice = byId('presentation-master-lock-notice');
         if (lockNotice) lockNotice.classList.toggle('hidden', !locked);
@@ -187,6 +217,18 @@
 
         settings.insertBefore(pages, purpose.parentElement);
         settings.append(purpose.parentElement, field('制作要求', 'instruction', 'textarea'));
+        addSuggestions(purpose, [
+            ['工作汇报', '让受众了解工作进展、成果和下一步计划。'],
+            ['决策支持', '帮助受众了解备选方案、利弊和需要决策的事项。'],
+            ['项目评审', '说明项目目标、实施进展、风险及应对措施。'],
+            ['培训讲解', '帮助受众理解核心知识并掌握实际操作方法。']
+        ], '整稿目的快捷输入');
+        addSuggestions(settings.querySelector('#presentation-master-instruction'), [
+            ['提炼重点', '围绕主题提炼重点，按逻辑组织内容，每页突出一个核心观点。'],
+            ['依据材料', '以提供的材料为依据，保留关键数字和结论，不编造未提供的事实。'],
+            ['图表呈现', '适合比较的数据使用清晰图表，并标注指标和单位。'],
+            ['简洁风格', '采用简洁、专业的视觉风格，保持字体和版式一致。']
+        ], '制作要求快捷输入');
         requirements.append(settings);
 
         const sources = section('参考材料与多媒体素材', [['path', { d: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' }]]);
@@ -215,8 +257,8 @@
 
         form.append(columns, generation);
 
-        for (const [key, value, min, max] of [['pages', 8, 1, 40], ['budget', 400000, 10000, 500000], ['steps', 80, 5, 160]]) {
-            const input = form.querySelector('#presentation-master-' + key); input.value = value; input.min = min; input.max = max; input.step = 1;
+        for (const [key, value, min, max] of [['pages', 8, 1, 40], ['budget', DEFAULT_TOKEN_BUDGET, 10000], ['steps', 80, 5, 160]]) {
+            const input = form.querySelector('#presentation-master-' + key); input.value = value; input.min = min; if (max !== undefined) input.max = max; input.step = 1;
         }
         for (const [key, max] of [['title', 120], ['instruction', 16000], ['material', 120000]]) form.querySelector('#presentation-master-' + key).maxLength = max;
         form.querySelector('#presentation-master-title').placeholder = '演示文稿主题（如：2026年度业务规划与关键决策）';
@@ -247,5 +289,5 @@
         }
         return materials;
     }
-    window.Pivot.exposeModule('apps.presentations.masterForm', { mount, snapshot, extract, resetFiles, updateTemplateLock });
+    window.Pivot.exposeModule('apps.presentations.masterForm', { mount, snapshot, extract, reset, resetFiles, updateTemplateLock });
 })();

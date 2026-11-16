@@ -150,6 +150,7 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
     let endpointRelease = null;
     const startedAt = Date.now();
     let providerStartedAt = null;
+    if (options.usageRef) Object.assign(options.usageRef, { queueStartedAt: startedAt, providerStartedAt: null, inFlight: true });
     try {
         // 决策器等短时调用会用 signal 取消排队；必须把信号继续传给全局和
         // 端点两层信号量，否则超时请求仍可能在队列中占住后续模型吞吐。
@@ -157,6 +158,7 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         globalAcquired = true;
         endpointRelease = await acquireModelSlot(modelCfg, { signal: options.signal || null });
         providerStartedAt = Date.now();
+        if (options.usageRef) options.usageRef.providerStartedAt = providerStartedAt;
         const result = await operation();
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return result;
@@ -167,6 +169,7 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         if (options.usageRef && typeof options.usageRef === 'object') {
             options.usageRef.queueMs = (Number(options.usageRef.queueMs) || 0) + (providerStartedAt || Date.now()) - startedAt;
             options.usageRef.providerMs = (Number(options.usageRef.providerMs) || 0) + (providerStartedAt ? Date.now() - providerStartedAt : 0);
+            options.usageRef.inFlight = false;
         }
         if (endpointRelease) endpointRelease();
         if (globalAcquired) aiSemaphore.release();
@@ -410,7 +413,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
     let calibration = null;
     if (usage) {
         try {
-            calibration = await recordProviderUsageCalibration({
+            const recording = recordProviderUsageCalibration({
                 modelId: modelCfg.id,
                 protocol: usage.protocol || 'unknown',
                 source,
@@ -419,6 +422,10 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
                 estimated,
                 usage
             });
+            // 对话路由的令牌记账已入队；非计费的校准审计不占用模型判断时限。
+            // 有运行预算的 Agent 调用仍等待完整记账，不改变其额度核验顺序。
+            if (options.deferCalibration === true && !runId) recording.catch(() => {});
+            else calibration = await recording;
         } catch (_) {
             // Calibration is an audit metric and must not fail an otherwise valid model response.
         }

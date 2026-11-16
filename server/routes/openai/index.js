@@ -17,10 +17,7 @@ const {
     recordModelSuccess,
     recordModelFailure
 } = require('../../services/model-runtime');
-const {
-    detectUnsupportedCapability,
-    buildCapabilityFallbackMessage
-} = require('../../capabilities');
+const { buildCapabilityContext } = require('../../capabilities');
 const { createSseEventParser, createStreamAccumulator } = require('../../streaming');
 const { createSseResponseWriter } = require('../../services/sse-response');
 const { createStreamIdleWatchdog } = require('../../services/stream-idle-watchdog');
@@ -521,37 +518,6 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             });
         }
 
-        const lastUserContent = [...messages].reverse().find(m => m?.role === 'user')?.content;
-        const plainUserContent = Array.isArray(lastUserContent)
-            ? lastUserContent.map(part => typeof part === 'string' ? part : part?.text || '').join('\n')
-            : String(lastUserContent || '');
-        const unsupportedCapability = detectUnsupportedCapability(plainUserContent);
-        if (unsupportedCapability) {
-            const fallback = buildCapabilityFallbackMessage(unsupportedCapability);
-            const usage = normalizeTokenUsage({
-                inputTokens: estimateTokens(JSON.stringify(messages)),
-                outputTokens: estimateTokens(fallback)
-            });
-            if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
-                updateApiKeyUsage(req, usage);
-            }
-            recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
-            recordApiCallLog(req, modelCfg, messages, {
-                responseText: fallback,
-                ...usage,
-                stream: !!stream
-            });
-            logAction(req, 'OpenAI 能力不支持提示', `能力: ${unsupportedCapability.code}, 模型: ${model}`);
-            return res.json({
-                id: `chatcmpl-${Date.now().toString(36)}`,
-                object: 'chat.completion',
-                created: Math.floor(Date.now() / 1000),
-                model: String(model || modelCfg.id),
-                choices: [{ index: 0, message: { role: 'assistant', content: fallback }, finish_reason: 'stop' }],
-                usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens, total_tokens: usage.totalTokens }
-            });
-        }
-
         const hasPromptStyleInput = ['prompt', 'input', 'prefix', 'suffix']
             .some(field => req.body?.[field] !== undefined);
         const hasChatMessages = Array.isArray(req.body?.messages) && req.body.messages.length > 0;
@@ -566,7 +532,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
             : null;
         let upstreamMessages = isPromptStyleCompletion
             ? applyCompletionNoThinkSoftSwitch(messages, modelCfg)
-            : messages;
+            : [{ role: 'system', content: buildCapabilityContext() }, ...messages];
         try {
             const budgetResult = fitMessagesToContextBudget(upstreamMessages, modelCfg, {
                 maxOutputTokens: requestedMaxTokens ?? modelCfg.max_tokens ?? 2000

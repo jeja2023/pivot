@@ -749,6 +749,7 @@ module.exports = [
             'logs/**',
             'uploads/**',
             'dist-electron/**',
+            'dist-local-helper/**',
             'dist-electron-*/**',
             'client/common/vendor/**'
         ]

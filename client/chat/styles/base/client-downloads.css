@@ -1,0 +1,15 @@
+.client-downloads-overlay { z-index: 2000; }
+#client-downloads-modal .client-downloads-modal { width: min(720px, calc(100vw - 24px)); height: auto; max-height: calc(100vh - 32px); }
+.client-downloads-list { display: grid; gap: 12px; }
+.client-download-card { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); text-align: left; }
+.client-download-card h4 { margin: 0; color: var(--text-main); font-size: 0.9rem; }
+.client-download-card p { margin: 0; overflow-wrap: anywhere; font-size: 0.82rem; line-height: 1.5; }
+.client-download-meta { color: var(--text-muted); }
+.client-download-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.client-download-actions a { text-decoration: none; }
+.client-download-actions [hidden] { display: none; }
+.client-download-card summary { width: fit-content; color: var(--primary); font-size: 0.82rem; cursor: pointer; }
+.client-download-card ol { margin: 8px 0 0; padding-left: 20px; font-size: 0.82rem; line-height: 1.65; color: var(--text-muted); }
+.auth-download-row button.btn-link { display: inline-flex; align-items: center; gap: 5px; }
+.mcp-helper-connection { display: grid; gap: 10px; }
+.mcp-helper-connection > p { margin: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; }

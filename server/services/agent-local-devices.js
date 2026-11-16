@@ -258,7 +258,7 @@ async function assertDeviceSignature(user, { deviceId, purpose, nonce, signature
 
 function isDeviceOnline(device, now = Date.now()) {
     if (!device || device.status !== 'active' || device.revoked_at) return false;
-    const lastSeen = device.last_seen_at ? Date.parse(String(device.last_seen_at).replace(' ', 'T')) : NaN;
+    const lastSeen = device.last_seen_at instanceof Date ? device.last_seen_at.getTime() : device.last_seen_at ? Date.parse(String(device.last_seen_at).replace(' ', 'T')) : NaN;
     if (!Number.isFinite(lastSeen)) return false;
     return now - lastSeen <= DEVICE_ONLINE_WINDOW_MS;
 }

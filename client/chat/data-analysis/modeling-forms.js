@@ -15,7 +15,11 @@
         return state.selected?.sources?.find(source => source.nodeId === nodeId)?.columns || datasets().find(dataset => dataset.id === node?.datasetId)?.columns || [];
     }
     const fields = nodeId => columns(nodeId).map(column => [column.key, column.name]);
-    const many = (name, label, choices, values = []) => `<div class="modeling-multi-group" data-modeling-multi-group><div class="modeling-multi-head"><span class="modeling-field-label">${esc(label)}</span><div class="modeling-multi-actions"><button class="btn-secondary" type="button" data-modeling-multi-action="all">全选</button><button class="btn-secondary" type="button" data-modeling-multi-action="clear">清空</button></div></div><select class="form-input modeling-multi-select" name="modeling_${name}" multiple aria-label="${esc(label)}">${choices.map(([key, itemLabel]) => option(key, itemLabel, values.includes(key))).join('')}</select><span class="modeling-field-hint">点击选项即可直接勾选或取消，无需按住 Ctrl 键。</span></div>`;
+    const many = (name, label, choices, values = []) => {
+        const selectedSet = new Set(values || []);
+        const selectedCount = choices.filter(([key]) => selectedSet.has(key)).length;
+        return `<div class="modeling-multi-group" data-modeling-multi-group><div class="modeling-multi-head"><span class="modeling-field-label">${esc(label)}</span><div class="modeling-multi-actions"><span class="modeling-multi-count" data-modeling-multi-count>已选 ${selectedCount} 项</span><button class="btn-secondary" type="button" data-modeling-multi-action="all">全选</button><button class="btn-secondary" type="button" data-modeling-multi-action="clear">清空</button></div></div><select class="form-input modeling-multi-select" name="modeling_${name}" multiple aria-label="${esc(label)}">${choices.map(([key, itemLabel]) => option(key, itemLabel, selectedSet.has(key))).join('')}</select><span class="modeling-field-hint">点击即可多选或取消（无需按住 Ctrl）。</span></div>`;
+    };
 
     let submitHandler = null, restoreFocus = null, dialogCurrent = () => false;
     function closeDialog() {
@@ -26,17 +30,29 @@
         restoreFocus?.focus?.();
         restoreFocus = null;
     }
-    function dialog(title, markup, handler) {
+    function dialog(title, markup, handler, options = {}) {
         m.mount();
         const modal = byId('data-analysis-modeling-dialog');
         const view = byId('data-analysis-view');
         if (modal && view && modal.parentElement !== view) view.appendChild(modal);
         restoreFocus = document.activeElement;
         byId('modeling-dialog-title').textContent = title;
-        m.html(byId('modeling-dialog-body'), markup);
+        const body = byId('modeling-dialog-body');
+        m.html(body, markup);
         byId('modeling-dialog-error').textContent = '';
         submitHandler = handler;
         dialogCurrent = m.capture('dialog');
+        const dialogBox = modal?.querySelector('.modeling-dialog');
+        if (dialogBox) {
+            const hasWideContent = Boolean(body?.querySelector('table, .agent-workflow-share-tree, fieldset'));
+            const directLabels = body ? Array.from(body.children).filter(el => el.tagName === 'LABEL' && !el.classList.contains('modeling-checkbox')).length : 0;
+            const isCompact = Boolean(handler) && !hasWideContent && directLabels <= 2 && !body?.querySelector('.modeling-multi-group, .modeling-advanced-panel');
+            dialogBox.classList.toggle('is-readonly', !handler);
+            dialogBox.classList.toggle('is-compact', isCompact);
+            dialogBox.classList.toggle('is-wide', hasWideContent);
+        }
+        const cancelBtn = byId('modeling-dialog-form')?.querySelector('.modeling-dialog-footer [data-modeling-action="close-dialog"]');
+        if (cancelBtn) cancelBtn.classList.toggle('hidden', Boolean(options?.hideCancel));
         const submitBtn = byId('modeling-dialog-form').querySelector('[type="submit"]');
         submitBtn.disabled = false;
         submitBtn.classList.toggle('hidden', !handler);
@@ -93,7 +109,7 @@
         dialog(node ? (isFact ? '设置事实表与业务粒度' : '编辑维度表与主键') : '添加维度表', `${select('datasetId', '来源数据集', datasets().filter(item => item.id === datasetId || !state.draft.nodes.some(existing => existing.datasetId === item.id)).map(item => [item.id, item.name]), datasetId)}${input('name', '模型中的表名称', node?.name || dataset?.name || '', 'maxlength="120" required')}
             ${isFact ? `<label class="modeling-span-full"><span class="modeling-field-label">每一行代表什么业务记录（必填）</span><textarea name="modeling_grainDescription" class="form-input" maxlength="1000" rows="2" placeholder="例如：每一行代表一条订单商品明细，或一名学生的单次考试记录">${esc(state.draft.grainDescription || '')}</textarea></label>` : ''}
             ${many('grainKeys', isFact ? '唯一业务粒度键（勾选能唯一确定一行记录的字段组合）' : '维度表主键（用于被主表关联的唯一标识字段）', (dataset?.columns || []).map(column => [column.key, column.name]), node?.grainKeys || [])}
-            <p class="modeling-dialog-note">提示：编号类字段会自动保留前导零；提交检查时将自动核验您勾选的主键是否存在空值或重复行。</p>`, form => {
+            <p class="modeling-dialog-note">提示：编号类字段自动保留前导零；提交检查时自动核验空值与重复行。</p>`, form => {
             const next = { ...(node || { id: `node_${m.key().replaceAll('-', '')}`, role: 'dimension' }), datasetId: value(form, 'datasetId'), name: value(form, 'name'), grainKeys: selected(form, 'grainKeys'), grainNormalization: node?.grainNormalization || {} };
             if (node) state.draft.nodes[state.draft.nodes.indexOf(node)] = next;
             else { m.assertCanvasDataset(next.datasetId); if (preset.layout) state.canvasLayout[next.id] = { ...preset.layout }; state.draft.nodes.push(next); }
@@ -101,7 +117,7 @@
             state.selectedNodeId = next.id;
             m.changed();
             m.render();
-        });
+        }, { hideCancel: true });
         if (node) control(byId('modeling-dialog-form'), 'datasetId').disabled = true;
     }
 
@@ -248,10 +264,18 @@
             m.html(temporary, expressionMarkup(expression, value(form, 'metricId')));
             node.replaceWith(temporary.firstElementChild);
         }
+        if (event.target.matches?.('select[multiple]')) {
+            const countEl = event.target.closest('[data-modeling-multi-group]')?.querySelector('[data-modeling-multi-count]');
+            if (countEl) countEl.textContent = `已选 ${event.target.selectedOptions?.length || 0} 项`;
+        }
         if (name === 'datasetId') {
             const dataset = datasets().find(item => item.id === event.target.value);
             const grain = control(form, 'grainKeys');
-            if (grain) m.html(grain, (dataset?.columns || []).map(column => option(column.key, column.name)).join(''));
+            if (grain) {
+                m.html(grain, (dataset?.columns || []).map(column => option(column.key, column.name)).join(''));
+                const countEl = grain.closest('[data-modeling-multi-group]')?.querySelector('[data-modeling-multi-count]');
+                if (countEl) countEl.textContent = '已选 0 项';
+            }
             if (control(form, 'name')) control(form, 'name').value = dataset?.name || '';
         }
         if (name === 'nodeId') {

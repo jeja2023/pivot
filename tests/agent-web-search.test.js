@@ -3,7 +3,6 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const test = require('node:test');
 
-const { detectUnsupportedCapability } = require('../server/capabilities');
 const {
     executeAgentWebSearch,
     isAgentWebSearchAvailable,
@@ -20,7 +19,6 @@ test('web search provider normalizes evidence only and respects the bounded resu
     assert.equal(results[0].url, 'https://example.com/a');
     assert.equal(results[1].url, '');
     assert.equal(isAgentWebSearchAvailable({}), false);
-    assert.equal(detectUnsupportedCapability('请联网搜索今天的新闻')?.code, 'realtime_web');
 });
 
 test('web search calls only an explicitly allowlisted provider and never exposes provider credentials', async () => {

@@ -72,3 +72,116 @@ test('完整引擎模板合同固定目录与版本，拒绝模板和原稿来�
     assert.throws(() => normalize({ ...request, operation: 'edit_native', template: { type: 'organization', id: 'unit-template', version: 0 } }), /版本/);
     assert.throws(() => normalize({ ...request, sourceAssetId: '12', template: { type: 'runtime', id: 'master-style-consulting-decision' } }), /流程/);
 });
+
+test('PPT模板弹窗点击外部遮罩层不关闭，仅点击关闭按钮关闭（含数据分析已挂载场景）', async () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const vm = require('node:vm');
+
+    const byId = new Map();
+    const docListeners = {};
+    const makeClassList = (initial = []) => {
+        const set = new Set(initial);
+        return {
+            add: (...cls) => cls.forEach(c => set.add(c)),
+            remove: (...cls) => cls.forEach(c => set.delete(c)),
+            toggle: (c, force) => {
+                if (force === undefined) set.has(c) ? set.delete(c) : set.add(c);
+                else if (force) set.add(c);
+                else set.delete(c);
+            },
+            contains: c => set.has(c)
+        };
+    };
+    const makeNode = (tag, initialClasses = []) => {
+        const listeners = {};
+        let id = '';
+        const node = {
+            tagName: String(tag || 'div').toUpperCase(),
+            classList: makeClassList(initialClasses),
+            set className(val) { this.classList = makeClassList(String(val || '').split(/\s+/).filter(Boolean)); },
+            get className() { return ''; },
+            set id(val) { id = val; if (id) byId.set(id, this); },
+            get id() { return id; },
+            dataset: {},
+            children: [],
+            options: [],
+            textContent: '',
+            append(...items) { this.children.push(...items); },
+            appendChild(item) { this.children.push(item); return item; },
+            replaceChildren(...items) { this.children = [...items]; },
+            setAttribute() {},
+            toggleAttribute() {},
+            querySelectorAll() { return []; },
+            querySelector() { return null; },
+            closest() { return null; },
+            addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+            dispatchClick(target = this) {
+                let stopped = false;
+                const event = { target, preventDefault() {}, stopPropagation() { stopped = true; } };
+                for (const fn of listeners.click || []) fn(event);
+                if (!stopped) for (const fn of docListeners.click || []) fn(event);
+            }
+        };
+        return node;
+    };
+
+    const daPanel = makeNode('div');
+    daPanel.id = 'data-analysis-governance-panel';
+    const daCalcModal = makeNode('div', ['modal-overlay', 'data-analysis-modal-overlay']);
+    daCalcModal.id = 'data-analysis-calc-modal';
+
+    const modules = {};
+    const document = {
+        body: makeNode('body'),
+        getElementById: id => byId.get(id) || null,
+        querySelectorAll: () => [],
+        querySelector: () => null,
+        createElement: tag => makeNode(tag),
+        createElementNS: (_ns, tag) => makeNode(tag),
+        addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); }
+    };
+    const windowObj = {
+        Pivot: {
+            legacy: { PivotDataAnalysis: { state: {}, renderActiveTable() {} } },
+            moduleApi: name => modules[name],
+            exposeModule: (name, api) => { modules[name] = api; }
+        }
+    };
+    const context = {
+        window: windowObj,
+        document,
+        PivotSafeHtml: { setHtml(el, value) { el.innerHTML = value; } },
+        Option: function (text, value) { return { text, value }; },
+        Event: globalThis.Event,
+        setTimeout
+    };
+
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../client/chat/data-analysis/extra-panels.js'), 'utf8'), context);
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../client/chat/apps-workbench-presentation-catalog.js'), 'utf8'), context);
+
+    windowObj.Pivot.legacy.PivotDataAnalysis.mountDataAnalysisExtraPanels();
+    modules['apps.presentations.catalog'].bind({}, {
+        requestJson: async () => ({ templates: [], engine: { enabled: false }, canManageTemplates: false }),
+        openCreateModal() {},
+        toast() {}
+    });
+
+    await modules['apps.presentations.catalog'].open('all');
+    const catalogModal = byId.get('presentation-catalog-modal');
+    assert.equal(catalogModal.classList.contains('hidden'), false);
+
+    // 点击模板弹窗外部遮罩层不应关闭弹窗
+    catalogModal.dispatchClick(catalogModal);
+    assert.equal(catalogModal.classList.contains('hidden'), false);
+
+    // 点击数据分析自身遮罩层仍可正常关闭
+    daCalcModal.dispatchClick(daCalcModal);
+    assert.equal(daCalcModal.classList.contains('hidden'), true);
+
+    // 仅点击模板弹窗关闭按钮才能关闭
+    const closeBtn = catalogModal.children[0].children[0].children[0].children[1];
+    assert.equal(closeBtn.textContent, '关闭');
+    closeBtn.dispatchClick(closeBtn);
+    assert.equal(catalogModal.classList.contains('hidden'), true);
+});

@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.161",
+  "version": "0.7.165",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -13,6 +13,9 @@
     "node": ">=20.9.0"
   },
   "scripts": {
+    "build:local-helper": "node scripts/build_local_helper.js",
+    "publish:local-helper": "node scripts/publish_local_helper.js",
+    "start:local-helper": "electron desktop/helper/main.js",
     "compare:code-review": "node scripts/compare_code_review.js",
     "test:code-review": "node scripts/run_node_tests.js tests/agent-code-review-templates.test.js tests/code-review-comparison.test.js tests/agent-skill-import-assistant.test.js tests/agent-skill-import-client.test.js tests/agent-skill-format-adapters.test.js",
     "start": "node server/index.js",

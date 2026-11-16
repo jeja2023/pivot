@@ -45,7 +45,10 @@ function serializeProviderOutputs(outputs = []) {
         error: safeText(output?.error, 240),
         metadata: {
             model: safeText(output?.metadata?.model, 128),
-            configurationVersion: safeText(output?.metadata?.configurationVersion, 128)
+            configurationVersion: safeText(output?.metadata?.configurationVersion, 128),
+            failureStage: safeText(output?.metadata?.failureStage, 40),
+            timing: Object.fromEntries(['modelMs', 'queueMs', 'providerMs', 'usageMs', 'learningMs'].filter(key => Number.isFinite(output?.metadata?.timing?.[key]))
+                .map(key => [key, Math.max(0, Math.round(output.metadata.timing[key]))]))
         }
     }));
 }

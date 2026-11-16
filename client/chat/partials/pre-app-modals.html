@@ -130,18 +130,30 @@
                     <button id="auth-toggle" class="btn-link">没有账号？点击注册</button>
                 </p>
                 <p class="auth-download-row">
-                    <a href="/downloads/Pivot-Setup.exe" class="btn-link" id="desktop-download-link" download>
+                    <button class="btn-link" id="desktop-download-link" type="button" aria-haspopup="dialog">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                             <polyline points="7 10 12 15 17 10" />
                             <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>下载 Windows 客户端
-                    </a>
+                        </svg>下载客户端与本机助手
+                    </button>
                 </p>
 
             </div>
         </div>
         <p class="copyright-text auth-copyright"></p>
+    </div>
+    <div id="client-downloads-modal" class="modal-overlay client-downloads-overlay hidden" aria-hidden="true">
+        <div class="modal workspace-modal client-downloads-modal" role="dialog" aria-modal="true" aria-labelledby="client-downloads-title">
+            <header class="workspace-modal-header">
+                <div><h3 id="client-downloads-title">客户端下载</h3><p>选择完整桌面客户端或浏览器配套的本机助手。</p></div>
+                <button id="client-downloads-close" class="btn-secondary workspace-modal-close" type="button">关闭</button>
+            </header>
+            <div class="workspace-modal-body client-downloads-list">
+                <section id="client-downloads-helper" aria-label="Windows 本机助手"></section>
+                <section id="client-downloads-desktop" aria-label="完整桌面客户端"></section>
+            </div>
+        </div>
     </div>
     <!-- 自定义重命名弹窗 -->
     <div id="rename-container" class="modal-overlay hidden" style="z-index: 1100;">

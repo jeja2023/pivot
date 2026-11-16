@@ -50,7 +50,8 @@ const logFileMaxArchives = readTypedEnv('LOG_FILE_MAX_ARCHIVES');
 // 敏感字段脱敏配置
 const redactFields = [
     'password', 'password_hash', 'api_key', 'key', 'key_hash',
-    '*.password', '*.api_key', 'headers.authorization', 'headers.cookie'
+    '*.password', '*.api_key', 'headers.authorization', 'headers.cookie',
+    'body.code', 'body.binding', 'body.signature', 'body.token', 'body.privateKey'
 ];
 
 // 敏感查询参数：附件访问令牌、api_key 等不应随 URL 落入访问日志

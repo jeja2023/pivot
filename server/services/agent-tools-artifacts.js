@@ -21,7 +21,7 @@ function getArtifactToolDefinitions() {
         ...require('./agent-tools-policy-review').definitions(),
         ...require('./agent-tools-presentations').presentationToolDefinitions(),
         { name: 'diagram.render_svg', title: '生成 SVG 图形或页面图片', capabilities: ['viz.render'], idempotent: true, side_effect: true, concurrency: 'write',
-            description: '将完整 SVG 源码安全保存为可下载 SVG/PNG 结果，内部完成受控图片登记，无需用户提供 CAS 图片。适合单张结构图、示意图；完整可编辑 PPT 应使用 presentation.create，已有 PPT 页面应使用 presentation.export。禁止脚本、外链、内联图片和动态内容。',
+            description: '将模型编写的完整 SVG 矢量源码安全保存为可下载 SVG/PNG 结果，内置渲染无需生图模型或外部图片生成接口，也无需用户提供 CAS 图片。适合单张结构图、图标、示意图；完整可编辑 PPT 应使用 presentation.create，已有 PPT 页面应使用 presentation.export。禁止脚本、外链、内联图片和动态内容。',
             input_schema: jsonSchema({ svg: { type: 'string', maxLength: 1000000 }, title: { type: 'string', maxLength: 160 }, format: { type: 'string', enum: ['svg', 'png'], default: 'svg' } }, ['svg']) },
         {
             name: 'presentation.create_from_artifact',

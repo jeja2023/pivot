@@ -28,11 +28,20 @@ test('完整引擎合同保留原稿流程和明确预算，拒绝越界规模�
     const value = request({ operation: 'edit_native', profile: 'default', sourceAssetId: '12' });
     assert.equal(value.operation, 'edit_native'); assert.equal(value.sourceAssetId, '12');
     assert.equal(value.materials[0].excerpt, '收入120万元，成本80万元。');
+    assert.equal(request().tokenBudget, 1000000);
+    assert.equal(request({ tokenBudget: 400000 }).tokenBudget, 400000);
     assert.throws(() => request({ operation: 'edit_native', profile: 'default' }), /PPTX/);
     assert.throws(() => request({ operation: 'create_template', profile: 'quick' }), /流程/);
     assert.throws(() => request({ pageCount: 100 }), /四十页/);
-    assert.throws(() => request({ tokenBudget: 999999 }), /预算/);
+    assert.equal(request({ tokenBudget: 999999 }).tokenBudget, 999999);
+    for (const tokenBudget of [0, 9999, 10000.5, Number.MAX_SAFE_INTEGER + 1, Infinity, [10000], true, '']) assert.throws(() => request({ tokenBudget }), /预算/);
     await assert.rejects(() => runtime.workspace({ id: 1 }, '../../outside'), /任务标识/);
+});
+
+test('继续任务允许增加至五十万以上，拒绝降低或不安全的累计预算', () => {
+    const { normalizeTokenBudget } = require('../server/services/presentations/master/contract');
+    assert.equal(normalizeTokenBudget(800000, 500000), 800000);
+    for (const value of [499999, 0, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => normalizeTokenBudget(value, 500000), /预算/);
 });
 
 test('驱动完整上游流程，动作按顺序执行，仅真实导出交付收据结束任务', async () => {
@@ -43,6 +52,32 @@ test('驱动完整上游流程，动作按顺序执行，仅真实导出交付�
     assert.deepEqual(fixture.calls.slice(0, 4).map(item => item.action), ['health', 'read_runtime', 'read_runtime', 'read_runtime']);
     assert.equal(fixture.calls.at(-1).action, 'deliver');
     assert.ok(fixture.calls.findIndex(item => item.action === 'write') < fixture.calls.findIndex(item => item.action === 'run'));
+});
+
+test('多轮制作对旧写入收敛上下文，检查点保留原文且用实际用量累计', async () => {
+    const fixture = driverFixture([]), current = state(), sent = [];
+    const longText = '长页面正文'.repeat(3000);
+    fixture.deps.execute = async (_user, _id, action) => {
+        if (action.action === 'health') return { status: 'ready', contentDigest: runtime.lock.contentDigest };
+        if (action.action === 'read_runtime') return { text: '完整上游指引', nextOffset: null };
+        if (action.action === 'write') return { path: action.path, bytes: Buffer.byteLength(action.text), sha256: require('node:crypto').createHash('sha256').update(action.text).digest('hex') };
+        if (action.action === 'deliver') return { packageCheck: { status: 'passed' } };
+        return {};
+    };
+    fixture.deps.callModel = async (_model, messages, options) => {
+        sent.push(messages);
+        options.usageRef.usage = { prompt_tokens: 100, completion_tokens: 20 };
+        return sent.length <= 2 ? { actions: [{ action: 'write', path: `project/page${sent.length}.svg`, text: longText }] }
+            : { complete: { path: 'project/exports/final.pptx' } };
+    };
+    const result = await drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps);
+    assert.equal(result.receipt.packageCheck.status, 'passed');
+    assert.ok(JSON.stringify(current.messages).includes(longText));
+    assert.equal(JSON.stringify(sent[2]).split(longText).length - 1, 1);
+    assert.match(JSON.stringify(sent[2]), /已成功写入/);
+    assert.ok(current.usageDiagnostics[2].originalEstimate > current.usageDiagnostics[2].inputEstimate);
+    assert.equal(current.usageDiagnostics[2].compactedWrites, 1);
+    assert.equal(current.usedTokens, 360);
 });
 
 test('选择固定上游模板时复制和校验真实模板工作区，并将选择交给制作模型', async () => {
@@ -78,6 +113,18 @@ test('预算耗尽与取消在后续动作前生效，不执行伪造的完整�
     assert.ok(!fixture.calls.some(item => item.action === 'deliver'));
     fixture.controller.abort();
     await assert.rejects(() => drive({ id: 1 }, 'id', state(), fixture.hooks, fixture.deps), /abort/i);
+});
+
+test('累计用量未达上限但下一轮预留不足时拒绝调用并说明原因', async () => {
+    const fixture = driverFixture([]), current = state();
+    current.bootstrapped = true; current.steps = 11; current.usedTokens = 299001;
+    current.request.tokenBudget = 400000;
+    current.messages = [{ role: 'system', content: '预留测试' }];
+    fixture.deps.messagesForModel = async () => [{ role: 'system', content: '汉'.repeat(220000) }];
+    let calls = 0; fixture.deps.callModel = async () => { calls++; };
+    await assert.rejects(() => drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), error =>
+        error.code === 'PPT_MASTER_BUDGET_EXHAUSTED' && /预计输入及至少2000令牌输出/.test(error.message));
+    assert.equal(calls, 0); assert.equal(current.usedTokens, 299001);
 });
 
 test('供应商实际用量进入累计预算，超额返回不再执行本轮制作动作', async () => {

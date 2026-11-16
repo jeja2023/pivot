@@ -50,21 +50,19 @@
             <div id="modeling-editor" class="modeling-editor-view hidden">
                 <div class="modeling-surface-bar modeling-editor-header">
                     <div class="modeling-editor-identity">
-                        ${button('back', '← 模型列表')}
-                        <div class="modeling-editor-titles">
-                            <div class="modeling-editor-title-row">
-                                <strong id="modeling-title" class="modeling-editor-name"></strong>
-                                <span id="modeling-version" class="modeling-version-pill"></span>
-                                <span id="modeling-save-state" class="modeling-save-pill" role="status" aria-live="polite"></span>
-                            </div>
-                            <div id="modeling-status" class="modeling-status-line" role="status"></div>
+                        ${button('back', '← 返回列表')}
+                        <div class="modeling-editor-title-row">
+                            <strong id="modeling-title" class="modeling-editor-name"></strong>
+                            <span id="modeling-version" class="modeling-version-pill"></span>
+                            <span id="modeling-save-state" class="modeling-save-pill" role="status" aria-live="polite"></span>
+                            <span id="modeling-status" class="modeling-status-pill" role="status"></span>
                         </div>
                     </div>
                     <div class="modeling-bar-actions">
                         ${button('basic', '模型信息')}
-                        ${button('open-semantics', '维度与指标')}
+                        ${button('open-semantics', '维度指标')}
                         ${button('check', '检查')}
-                        ${button('analyze', '试算与分析')}
+                        ${button('analyze', '试算')}
                         ${button('save', '保存草稿', '', true)}
                         ${button('publish', '发布')}
                         <details class="modeling-more"><summary class="modeling-more-trigger">更多</summary><div class="modeling-more-menu">${button('refresh-data', '检查新数据')}${button('versions', '版本与差异')}${button('dependencies', '依赖与血缘')}${button('share', '共享与复核')}${button('transfer', '交接模型')}${button('archive', '归档或恢复')}${button('goto-analysis-editor', '前往数据分析')}</div></details>
@@ -72,7 +70,7 @@
                 </div>
                 <div id="modeling-content" class="modeling-studio-body"></div>
             </div>
-            <div id="data-analysis-modeling-dialog" class="modal-overlay data-analysis-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modeling-dialog-title"><div class="workspace-modal modeling-dialog"><div class="workspace-modal-header"><h3 id="modeling-dialog-title"></h3>${button('close-dialog', '关闭')}</div><form id="modeling-dialog-form"><div id="modeling-dialog-body" class="workspace-modal-body modeling-form"></div><div class="modeling-dialog-footer"><span id="modeling-dialog-error" role="alert"></span>${button('close-dialog', '取消')}<button class="btn-primary" type="submit">确认</button></div></form></div></div>
+            <div id="data-analysis-modeling-dialog" class="modal-overlay data-analysis-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modeling-dialog-title"><div class="workspace-modal modeling-dialog"><div class="workspace-modal-header"><h3 id="modeling-dialog-title"></h3><button class="btn-danger-outline modeling-dialog-close" type="button" data-modeling-action="close-dialog">关闭</button></div><form id="modeling-dialog-form"><div id="modeling-dialog-body" class="workspace-modal-body modeling-form"></div><div class="modeling-dialog-footer"><span id="modeling-dialog-error" role="alert"></span>${button('close-dialog', '取消')}<button class="btn-primary" type="submit">确认</button></div></form></div></div>
         </div>`);
     }
 
@@ -178,13 +176,26 @@
         return '模型整体';
     }
 
+    function fieldTypeLabel(rawType) {
+        const lower = String(rawType || '').toLowerCase();
+        if (/date|time/.test(lower)) return '日期';
+        if (/int|float|double|num|dec|real/.test(lower)) return '数值';
+        if (/bool/.test(lower)) return '布尔';
+        return '文本';
+    }
+
     function renderFieldListItems(selected, columns, keyword = '') {
         if (!selected) return '<li class="modeling-field-empty">未选择表节点</li>';
         const q = String(keyword || '').trim().toLocaleLowerCase();
-        const filtered = q ? columns.filter(field => String(field.name || field.key).toLocaleLowerCase().includes(q)) : columns;
+        const filtered = q ? columns.filter(field => {
+            const nameMatch = String(field.name || field.key).toLocaleLowerCase().includes(q);
+            const typeMatch = fieldTypeLabel(field.type).toLocaleLowerCase().includes(q);
+            return nameMatch || typeMatch;
+        }) : columns;
         const shown = filtered.slice(0, 80);
         const existingDimKeys = new Set(state.draft.dimensions.filter(dim => dim.nodeId === selected.id).map(dim => dim.fieldKey));
         const existingMetricKeys = new Set(state.draft.metrics.filter(met => met.field?.nodeId === selected.id).map(met => met.field.fieldKey));
+        const canEdit = Boolean(state.selected?.isOwner && state.selected?.lifecycle !== 'archived');
         if (!shown.length) {
             return `<li class="modeling-field-empty">${columns.length ? '没有匹配该搜索词的字段' : '暂无字段信息'}</li>`;
         }
@@ -192,15 +203,18 @@
             const isKey = selected.grainKeys.includes(field.key);
             const hasDim = existingDimKeys.has(field.key);
             const hasMetric = existingMetricKeys.has(field.key);
-            const fieldTitle = esc(`${field.name}（${field.type || '文本'}）`);
+            const typeText = fieldTypeLabel(field.type);
+            const fieldTitle = esc(`${field.name}（${field.type || typeText}）`);
+            const keyBtnTitle = isKey ? '点击取消该字段的主键标记' : '点击将该字段设为业务主键';
             return `<li class="modeling-field-item">
                 <div class="modeling-field-main" title="${fieldTitle}">
-                    ${isKey ? '<span class="modeling-mini-tag is-key">主键</span>' : ''}
                     <span class="modeling-field-name">${esc(field.name)}</span>
+                    <span class="modeling-field-type-pill">${esc(typeText)}</span>
                 </div>
                 <div class="modeling-field-quick">
-                    ${hasDim ? '<span class="modeling-mini-tag">维度</span>' : `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="field-dimension" data-modeling-id="${esc(`${selected.id}:${field.key}`)}" title="将该字段添加为分析维度">+维度</button>`}
-                    ${selected.role === 'fact' ? (hasMetric ? '<span class="modeling-mini-tag">指标</span>' : `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="field-metric" data-modeling-id="${esc(field.key)}" title="将该字段添加为统计指标">+指标</button>`) : ''}
+                    <button class="btn-secondary modeling-mini-btn${isKey ? ' is-selected' : ''}" type="button" data-modeling-action="toggle-grain-key" data-modeling-id="${esc(`${selected.id}:${field.key}`)}"${canEdit ? '' : ' disabled'} title="${keyBtnTitle}">${isKey ? '主键' : '+主键'}</button>
+                    ${hasDim ? '<span class="modeling-mini-tag">维度</span>' : `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="field-dimension" data-modeling-id="${esc(`${selected.id}:${field.key}`)}"${canEdit ? '' : ' disabled'} title="将该字段添加为分析维度">+维度</button>`}
+                    ${selected.role === 'fact' ? (hasMetric ? '<span class="modeling-mini-tag">指标</span>' : `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="field-metric" data-modeling-id="${esc(field.key)}"${canEdit ? '' : ' disabled'} title="将该字段添加为统计指标">+指标</button>`) : ''}
                 </div>
             </li>`;
         }).join('');
@@ -211,7 +225,7 @@
     }
 
     function renderNodeDrawerContent() {
-        const editable = state.selected?.isOwner && state.selected.lifecycle !== 'archived';
+        const editable = Boolean(state.selected?.isOwner && state.selected.lifecycle !== 'archived');
         const flowNode = m.getFlowNode?.(state.selectedNodeId);
         if (flowNode && m.renderOperatorInspector) {
             return m.renderOperatorInspector(flowNode, editable);
@@ -220,20 +234,32 @@
         const selected = state.draft.nodes.find(node => node.id === state.selectedNodeId) || fact || state.draft.nodes[0];
         if (!selected) return '<p class="text-muted">请点击画布中的节点查看属性配置。</p>';
         const source = state.selected.sources?.find(item => item.nodeId === selected.id) || app.state.datasets.find(item => item.id === selected.datasetId);
+        const datasetMeta = app.state.datasets.find(item => item.id === selected.datasetId);
         const columns = source?.columns || [];
         const nodeRelations = state.draft.relations.filter(rel => rel.leftNodeId === selected.id || rel.rightNodeId === selected.id);
+        const keyTags = selected.grainKeys.length
+            ? selected.grainKeys.map(key => `<span class="modeling-mini-tag is-key">${esc(fieldName(selected.id, key))}</span>`).join('')
+            : '<span class="modeling-badge is-warning">尚未勾选 · 可在下方点选「+主键」</span>';
+        const grainReady = selected.role === 'fact'
+            ? Boolean(state.draft.grainDescription && selected.grainKeys.length)
+            : Boolean(selected.grainKeys.length);
 
         return `<div class="modeling-drawer-section">
                 <div class="modeling-inspector-card">
                     <div class="modeling-drawer-subhead">
-                        <strong class="modeling-inspector-title" title="${esc(selected.name)}">${esc(selected.name)}</strong>
+                        <div class="modeling-inspector-heading">
+                            <strong class="modeling-inspector-title" title="${esc(selected.name)}">${esc(selected.name)}</strong>
+                            <span class="modeling-rail-count">${columns.length} 列${datasetMeta?.rowCount ? ` · ${esc(datasetMeta.rowCount)} 行` : ''}</span>
+                        </div>
                         ${badge(selected.role === 'fact' ? '事实主表' : '维度表', selected.role === 'fact' ? 'success' : 'info')}
                     </div>
-                    ${selected.role === 'fact' ? `<div class="modeling-inspector-meta"><span>单行含义：</span><strong>${esc(state.draft.grainDescription || '尚未设置事实粒度说明')}</strong></div>` : ''}
-                    <div class="modeling-inspector-meta"><span>唯一主键：</span><strong>${esc(selected.grainKeys.map(key => fieldName(selected.id, key)).join(' + ') || '尚未勾选')}</strong></div>
+                    <div class="modeling-inspector-kv">
+                        ${selected.role === 'fact' ? `<div class="modeling-inspector-row"><span class="modeling-inspector-label">单行含义</span><div class="modeling-inspector-val">${state.draft.grainDescription ? `<strong>${esc(state.draft.grainDescription)}</strong>` : '<span class="modeling-badge is-warning">未设置事实粒度说明</span>'}</div></div>` : ''}
+                        <div class="modeling-inspector-row"><span class="modeling-inspector-label">${selected.role === 'fact' ? '唯一主键' : '维度主键'}</span><div class="modeling-inspector-val modeling-chip-wrap">${keyTags}</div></div>
+                    </div>
                     <div class="modeling-drawer-actions">
                         ${button('preview-node', '运行数据预览', selected.id, true)}
-                        ${button('edit-node-modal', '编辑表与粒度', selected.id)}
+                        ${button('edit-node-modal', grainReady ? '编辑表与粒度' : '补全粒度与主键', selected.id)}
                         ${selected.role === 'dimension' ? button('remove-node', '移除维度表', selected.id) : ''}
                     </div>
                 </div>
@@ -241,12 +267,15 @@
             <div class="modeling-drawer-section">
                 <div class="modeling-drawer-subhead">
                     <span>已连接表关联</span>
-                    <span class="modeling-rail-count">${nodeRelations.length} 条</span>
+                    <div class="modeling-drawer-subactions">
+                        <span class="modeling-rail-count">${nodeRelations.length} 条</span>
+                        ${state.draft.nodes.length >= 2 && editable ? `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="relation">+ 添加关联</button>` : ''}
+                    </div>
                 </div>
                 ${nodeRelations.length ? `<div class="modeling-flow-list">${nodeRelations.map(rel => {
                     const keys = rel.keyPairs.map(pair => `${fieldName(rel.leftNodeId, pair.leftFieldKey)} = ${fieldName(rel.rightNodeId, pair.rightFieldKey)}`).join('；');
                     return `<div class="modeling-relation-mini">
-                        <div>
+                        <div class="modeling-relation-info">
                             <strong>${esc(nodeName(rel.leftNodeId))} → ${esc(nodeName(rel.rightNodeId))}</strong>
                             <small>${esc(rel.joinType === 'inner' ? '内关联' : '左关联')} · ${esc(keys)}</small>
                         </div>
@@ -255,14 +284,17 @@
                             ${button('remove-relation', '删除', rel.id)}
                         </div>
                     </div>`;
-                }).join('')}</div>` : '<p class="modeling-rail-tip">可直接从画布节点右侧圆点拖线至维度表左侧圆点建立关联。</p>'}
+                }).join('')}</div>` : `<p class="modeling-rail-tip">${state.draft.nodes.length >= 2 ? '可点击右上角「+ 添加关联」或从画布节点右侧圆点拖线至维度表建立关联。' : '从左侧拖入维度表后，可拖线建立多表关联。'}</p>`}
             </div>
             <div class="modeling-drawer-section modeling-fields-section">
                 <div class="modeling-drawer-subhead">
-                    <span>表内字段搜索与快捷建模</span>
-                    <span class="modeling-rail-count">共 ${columns.length} 列</span>
+                    <span>表内字段与快捷建模</span>
+                    <div class="modeling-drawer-subactions">
+                        <span class="modeling-rail-count">共 ${columns.length} 列</span>
+                        ${editable ? `<button class="btn-secondary modeling-mini-btn" type="button" data-modeling-action="quick-recommend" title="根据字段类型自动生成常用维度与指标">一键推荐</button>` : ''}
+                    </div>
                 </div>
-                <input id="modeling-field-search" class="form-input modeling-compact-search" type="search" value="${esc(state.fieldSearch || '')}" placeholder="输入字段名快速筛选（支持上百列宽表）…" aria-label="搜索表内字段">
+                <input id="modeling-field-search" class="form-input modeling-compact-search" type="search" value="${esc(state.fieldSearch || '')}" placeholder="输入字段名或类型（数值/日期/文本）快速筛选…" aria-label="搜索表内字段">
                 <ul id="modeling-drawer-field-list" class="modeling-field-list">${renderFieldListItems(selected, columns, state.fieldSearch)}</ul>
             </div>`;
     }
@@ -370,7 +402,6 @@
             quality: '质量检查与版本血缘',
             trial: '模型试算与正式分析'
         };
-        const isWide = ['semantics', 'quality', 'trial'].includes(mode);
         let bodyContent = '';
         if (mode === 'semantics') bodyContent = semantics();
         else if (mode === 'quality') bodyContent = quality();
@@ -378,44 +409,42 @@
         else bodyContent = renderNodeDrawerContent();
 
         const drawerAriaLabel = esc(titles[mode] || '建模配置抽屉');
-        return `<aside id="modeling-drawer" class="modeling-node-drawer${isWide ? ' is-wide' : ''}" aria-label="${drawerAriaLabel}">
+        return `<aside id="modeling-drawer" class="modeling-node-drawer" aria-label="${drawerAriaLabel}">
             <div class="modeling-drawer-header">
                 <div class="modeling-drawer-tabs" role="tablist">
                     ${[['node', '节点配置'], ['semantics', `维度指标 (${state.draft.dimensions.length}/${state.draft.metrics.length})`], ['quality', '检查血缘'], ['trial', '试算分析']].map(([key, label]) => {
                         return `<button class="btn-secondary modeling-drawer-tab${mode === key ? ' is-active' : ''}" type="button" role="tab" aria-selected="${mode === key}" data-modeling-action="drawer-mode" data-modeling-id="${key}">${esc(label)}</button>`;
                     }).join('')}
                 </div>
-                ${button('close-drawer', '关闭')}
+                <button class="btn-danger-outline modeling-drawer-close" type="button" data-modeling-action="close-drawer">关闭</button>
             </div>
             <div id="modeling-drawer-body" class="modeling-drawer-body">${bodyContent}</div>
         </aside>`;
     }
 
     function renderStudio() {
-        const fact = state.draft.nodes.find(node => node.role === 'fact');
         const allNodes = [
-            ...state.draft.nodes.map(n => ({ id: n.id, name: n.name, tag: n.role === 'fact' ? '事实' : '维度', isFact: n.role === 'fact' })),
-            ...(state.flowGraph?.nodes || []).map(n => ({ id: n.id, name: n.name, tag: m.OPERATOR_MAP?.get(n.kind)?.badge || '算子', isFact: false }))
+            ...state.draft.nodes.map(n => {
+                const colCount = m.columns(n.id).length;
+                const hint = n.grainKeys?.length ? `${colCount} 列` : '待设键';
+                return { id: n.id, name: n.name, tag: n.role === 'fact' ? '事实' : '维度', isFact: n.role === 'fact', meta: hint, needsAttention: !n.grainKeys?.length };
+            }),
+            ...(state.flowGraph?.nodes || []).map(n => ({ id: n.id, name: n.name, tag: m.OPERATOR_MAP?.get(n.kind)?.badge || '算子', isFact: false, meta: '算子', needsAttention: false }))
         ];
-        const grainSummary = state.draft.grainDescription
-            ? `<div class="modeling-canvas-grain-bar"><span><strong>事实表粒度：</strong>${esc(state.draft.grainDescription)}</span>${fact?.grainKeys?.length ? `<span class="text-muted">主键：${esc(fact.grainKeys.map(k => fieldName(fact.id, k)).join(' + '))}</span>` : ''}</div>`
-            : '';
 
-        const isWideDrawer = state.drawerOpen && ['semantics', 'quality', 'trial'].includes(state.drawerMode);
         const shellClass = [
             'modeling-studio-shell',
             state.paletteCollapsed ? 'is-palette-collapsed' : '',
-            state.drawerOpen ? 'has-drawer' : '',
-            isWideDrawer ? 'has-wide-drawer' : ''
+            state.drawerOpen ? 'has-drawer' : ''
         ].filter(Boolean).join(' ');
 
         return `<div class="${shellClass}">
             ${state.paletteCollapsed ? '' : `<aside class="modeling-rail modeling-studio-palette">
                 ${m.canvasPalette()}
-                <div class="modeling-rail-section">
-                    <div class="modeling-rail-head"><h5>画布节点</h5><span class="modeling-rail-count">${allNodes.length}</span></div>
+                <div class="modeling-rail-section modeling-palette-nodes">
+                    <div class="modeling-rail-head"><h5>画布节点</h5><span class="modeling-rail-count">${allNodes.length} 个</span></div>
                     <div class="modeling-node-list">${allNodes.map(item => {
-                        return `<button class="btn-secondary modeling-node-item${item.id === state.selectedNodeId ? ' is-selected' : ''}" type="button" data-modeling-action="node-select" data-modeling-id="${esc(item.id)}"><span class="modeling-node-role${item.isFact ? ' is-fact' : ''}">${esc(item.tag)}</span><span class="modeling-node-label" title="${esc(item.name)}">${esc(item.name)}</span></button>`;
+                        return `<button class="btn-secondary modeling-node-item${item.id === state.selectedNodeId ? ' is-selected' : ''}" type="button" data-modeling-action="node-select" data-modeling-id="${esc(item.id)}" title="${esc(`${item.name}（${item.meta}）`)}"><span class="modeling-node-role${item.isFact ? ' is-fact' : ''}">${esc(item.tag)}</span><span class="modeling-node-label">${esc(item.name)}</span><span class="modeling-node-meta${item.needsAttention ? ' is-warn' : ''}">${esc(item.meta)}</span></button>`;
                     }).join('')}</div>
                 </div>
             </aside>`}
@@ -423,7 +452,6 @@
                 <div class="modeling-canvas-toolbar-wrap">
                     ${m.canvasToolbar()}
                 </div>
-                ${grainSummary}
                 <div class="modeling-graph-container">${m.canvasGraph()}</div>
                 ${m.renderPreviewDock ? m.renderPreviewDock() : ''}
             </div>
@@ -494,12 +522,12 @@
         if (!state.selected) { renderList(); return; }
         byId('modeling-title').textContent = state.selected.name;
         byId('modeling-version').textContent = `草稿修订 ${state.selected.version} · ${state.selected.publishedVersion ? `发布 v${state.selected.publishedVersion}` : '尚未发布'}`;
-        byId('modeling-status').textContent = state.selected.message || `${lifecycle(state.selected)} · ${state.selected.isOwner ? '所有者可编辑' : '共享只读'} · 业务时区 ${state.draft?.timezone || '—'}`;
+        byId('modeling-status').textContent = state.selected.message || `${lifecycle(state.selected)} · ${state.selected.isOwner ? '所有者可编辑' : '共享只读'}`;
         renderSaveState();
 
         const semBtn = byId('modeling-editor')?.querySelector('[data-modeling-action="open-semantics"]');
         if (semBtn && state.draft) {
-            semBtn.textContent = `维度与指标 (${state.draft.dimensions.length}/${state.draft.metrics.length})`;
+            semBtn.textContent = `维度指标 (${state.draft.dimensions.length}/${state.draft.metrics.length})`;
             semBtn.classList.toggle('is-selected', state.drawerOpen && state.drawerMode === 'semantics');
         }
         const analyzeBtn = byId('modeling-editor')?.querySelector('[data-modeling-action="analyze"]');
@@ -525,7 +553,7 @@
             'save', 'check', 'run-check', 'publish', 'go-publish', 'basic', 'add-node', 'node', 'edit-node-modal',
             'edit-fact-grain', 'relation', 'edit-relation-modal', 'remove-node', 'remove-relation', 'remove-flow-node',
             'dimension', 'remove-dimension', 'metric', 'remove-metric', 'quick-recommend', 'field-dimension',
-            'field-metric', 'trial', 'share', 'refresh-data', 'transfer', 'materialize-node'
+            'field-metric', 'toggle-grain-key', 'trial', 'share', 'refresh-data', 'transfer', 'materialize-node'
         ]);
         byId('modeling-editor').querySelectorAll('[data-modeling-action]').forEach(btn => {
             if (editableActions.has(btn.dataset.modelingAction)) btn.disabled = disabled;
@@ -537,5 +565,5 @@
         m.renderMigrationReport?.();
     }
 
-    Object.assign(m, { mount, render, renderList, renderSaveState, renderRun, updateFieldSearchDom, fieldName, nodeName, button, badge, html, cacheNotice });
+    Object.assign(m, { mount, render, renderList, renderSaveState, renderRun, updateFieldSearchDom, fieldName, nodeName, fieldTypeLabel, button, badge, html, cacheNotice });
 })();

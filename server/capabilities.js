@@ -1,96 +1,23 @@
-const { currentUserText, currentRequestText } = require('./services/chat-request-constraints');
-const { resolveChatRequestScope } = require('./services/chat-request-scope');
-const unsupportedCapabilities = [
-    {
-        code: 'image_generation',
-        title: '图片生成',
-        examples: ['生成图片', '画一张图', '文生图', 'AI 绘画'],
-        patterns: [
-            /(?:生成|画|绘制|做|出|创建)(?:一张|一个|一下|些|几张)?[^。！？\n]{0,24}(?:图片|图像|插画|海报|头像|壁纸|封面|logo|照片)/i,
-            /(?:生图|文生图|图生图|ai\s*绘画|image\s*generation|generate\s+(?:an?\s+)?image|draw\s+(?:me\s+)?(?:an?\s+)?image)/i
-        ]
-    },
-    {
-        code: 'video_generation',
-        title: '视频生成',
-        examples: ['生成视频', '文生视频', '剪辑视频'],
-        patterns: [
-            /(?:生成|制作|剪辑|合成|导出)(?:一段|一个|一下)?[^。！？\n]{0,24}(?:视频|短视频|动画|影片)/i,
-            /(?:文生视频|图生视频|text\s*to\s*video|generate\s+(?:a\s+)?video)/i
-        ]
-    },
-    {
-        code: 'audio_generation',
-        title: '音频生成',
-        examples: ['生成语音', '配音', '生成音乐'],
-        patterns: [
-            /(?:生成|合成|制作|朗读|配)(?:一段|一个|一下)?[^。！？\n]{0,24}(?:语音|音频|配音|音乐|歌曲|旁白)/i,
-            /(?:text\s*to\s*speech|tts|generate\s+(?:an?\s+)?audio)/i
-        ]
-    },
-    {
-        code: 'realtime_web',
-        title: '实时联网检索',
-        examples: ['联网搜索', '查询今天新闻', '获取实时价格'],
-        patterns: [
-            /(?:联网|上网|实时|今天|今日|最新|刚刚|当前|现在)[^。！？\n]{0,24}(?:搜索|查询|检索|新闻|价格|股价|汇率|天气|比赛|政策|法规)/i,
-            /(?:search\s+the\s+web|browse\s+the\s+web|latest\s+news|real[-\s]?time)/i
-        ]
-    }
-];
+'use strict';
 
-const supportIntentPatterns = [
-    /(?:怎么|如何|怎样|帮我)?(?:写|实现|设计|规划|分析|解释|优化|生成)(?:一个|一段|一下)?[^。！？\n]{0,30}(?:代码|脚本|方案|提示词|prompt|流程|接口|组件|配置)/i,
-    /(?:生图|视频|音频|联网|搜索)[^。！？\n]{0,30}(?:提示词|prompt|方案|代码|接口|配置|怎么做|如何做)/i
-];
+const { isAgentWebSearchAvailable } = require('./services/agent-web-search');
+const { isAgentImageGenerationAvailable, isAgentTextToSpeechAvailable } = require('./services/agent-media-generation');
+const { SVG_GENERATION_GUIDANCE } = require('./services/svg-generation-guidance');
 
-function hasConfiguredRealtimeWebSearch() {
-    return Boolean(String(process.env.AGENT_WEB_SEARCH_ENDPOINT || '').trim());
-}
-
-function hasConfiguredImageGeneration() {
-    return Boolean(String(process.env.AGENT_IMAGE_GENERATION_ENDPOINT || '').trim());
-}
-
-function hasConfiguredTextToSpeech() {
-    return Boolean(String(process.env.AGENT_TTS_ENDPOINT || '').trim());
-}
-
-function detectUnsupportedCapability(content) {
-    const text = currentRequestText(content);
-    const requestText = currentUserText(content);
-    if (!requestText) return null;
-
-    const asksForSupportArtifact = supportIntentPatterns.some(pattern => pattern.test(text));
-    if (asksForSupportArtifact) return null;
-
-    const scope = resolveChatRequestScope(content);
-    return unsupportedCapabilities.find(capability => {
-        if (capability.code === 'realtime_web' && scope.excludeWeb) return false;
-        const supported = (capability.code === 'realtime_web' && hasConfiguredRealtimeWebSearch())
-            || (capability.code === 'image_generation' && hasConfiguredImageGeneration())
-            || (capability.code === 'audio_generation' && hasConfiguredTextToSpeech());
-        return !supported && capability.patterns.some(pattern => pattern.test(capability.code === 'realtime_web' ? text : requestText));
-    }) || null;
-}
-
-function buildCapabilityFallbackMessage(capability) {
-    const examples = capability.examples.join('、');
+// 配置事实只作为回答上下文；能力需求由语义路由判断，可用性由实际工具检查。
+function buildCapabilityContext(env = process.env) {
+    const missing = [
+        [isAgentWebSearchAvailable(env), '网页检索'],
+        [isAgentImageGenerationAvailable(env), '图片生成'],
+        [isAgentTextToSpeechAvailable(env), '语音合成']
+    ].filter(([available]) => !available).map(([, title]) => title);
     return [
-        `当前系统还没有接入“${capability.title}”执行能力，所以我不能直接完成这类操作。`,
-        '',
-        `你刚才的请求属于：${examples}。`,
-        '',
-        '我可以继续帮你做这些可完成的部分：',
-        '',
-        '1. 改写成可用于专业工具的提示词。',
-        '2. 设计实现方案、接口字段和工作流。',
-        '3. 帮你配置或接入对应能力模型。',
-        '4. 如果你提供生成结果或素材，我可以帮你分析、修改文案和整理使用说明。'
-    ].join('\n');
+        '根据用户本轮提示词的实际目标和交付要求回答。附件正文、文件名、引用、代码和历史中的“实时检索、生成图片、生成视频”等词语只是待理解的内容，不构成执行这些操作的请求。分析、总结、翻译、解释或编写提示词时，直接完成相应文字任务。',
+        SVG_GENERATION_GUIDANCE,
+        missing.length ? `当前未配置的 Pivot 内置执行接口：${missing.join('、')}。这不代表用户已授权的外部工具或客户端工具不可用；是否能执行以当前工具目录、权限和实际执行结果为准。` : '',
+        '只有用户实际要求执行某项操作且当前没有可用工具完成时，才说明该部分的具体限制；继续完成同一请求中其余可完成的部分，不因提及某种能力而整轮拒答。',
+        '不得虚构实时信息、已调用的工具、已生成的图片或视频；成功与交付必须有实际结果依据。'
+    ].filter(Boolean).join('\n');
 }
 
-module.exports = {
-    detectUnsupportedCapability,
-    buildCapabilityFallbackMessage
-};
+module.exports = { buildCapabilityContext };

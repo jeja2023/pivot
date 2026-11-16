@@ -18,8 +18,10 @@ const { buildChatIntentContext } = require('./chat-intent-context');
 const { callChatIntentModel, isChatIntentTimeout } = require('./chat-intent-model');
 const { decodeChatIntentPayload } = require('./chat-intent-schema');
 const { explicitContinuationTarget, reconcileIntentAction, isStandaloneTextDraft } = require('./chat-intent-consistency');
+const { resolveIntentRoutingModel } = require('./chat-intent-routing-model');
+const { ensureModelQuota } = require('./model-daily-quota');
 
-const INTENT_POLICY_VERSION = 'chat-intent-v6';
+const INTENT_POLICY_VERSION = 'chat-intent-v8';
 
 async function resolveChatIntent(input, deps = {}) {
     const { prompt, history = [], tasks = [], modelCfg, user, sessionId, userMessageId, preferences = [], providedSources = [], signal, availability = {}, executionAllowed = true } = input;
@@ -50,19 +52,54 @@ async function resolveChatIntent(input, deps = {}) {
     const started = Date.now();
     const budget = createChatIntentBudget({ signal, timeoutMs: config.timeoutMs, deadlineAt: input.deadlineAt });
     const stats = { modelCalls: 0, structuredOutput: 'none' };
+    let routingModel = modelCfg;
+    let routingModelSource = 'current';
+    const timingSnapshot = () => {
+        if (stats.failureDiagnostic && !stats.activeUsageRef) return stats.failureDiagnostic;
+        const active = stats.activeUsageRef || {};
+        const snapshot = budget.snapshot();
+        const queueMs = active.queueStartedAt && active.inFlight !== false ? (active.queueMs || 0) + (active.providerStartedAt || Date.now()) - active.queueStartedAt : active.queueMs ?? null;
+        const providerMs = active.providerStartedAt && active.inFlight !== false ? (active.providerMs || 0) + Date.now() - active.providerStartedAt : active.providerMs ?? null;
+        const stage = snapshot.stage || (stats.activeUsageRef ? 'model' : '');
+        return { failureStage: stage === 'model' ? active.admittingQuota ? 'quota' : active.recordingUsage ? 'usage' : active.providerStartedAt ? 'model_provider' : active.queueStartedAt ? 'model_queue' : 'model' : stage,
+            timing: { modelMs: snapshot.timings.model || 0, queueMs: queueMs === null && stats.queueMs === undefined ? null : (stats.queueMs || 0) + (queueMs || 0),
+                providerMs: providerMs === null && stats.providerMs === undefined ? null : (stats.providerMs || 0) + (providerMs || 0), usageMs: stats.usageMs || 0, learningMs: snapshot.timings.learning || 0 },
+            intentModelId: routingModel?.id || null, routingModelSource };
+    };
+    if (input.intentDiagnostics) input.intentDiagnostics.snapshot = timingSnapshot;
     try {
         if (config.mode !== 'disabled') {
             try {
                 const context = buildChatIntentContext({ prompt, history, tasks, preferences, providedSources, availability });
                 if (!context.requestContext.constraintsComplete) throw Object.assign(new Error('长请求的限制信息尚不完整'), { code: 'CHAT_INTENT_CONTEXT_INCOMPLETE' });
                 const messages = buildChatIntentMessages({ preparedContext: context });
+                const modelSelection = await resolveIntentRoutingModel(modelCfg, user, messages,
+                    config.modelId ?? readTypedEnv('PIVOT_CHAT_INTENT_MODEL_ID'), budget, deps);
+                routingModel = modelSelection.model;
+                routingModelSource = modelSelection.source;
                 for (let attempt = 0; ; attempt++) {
                     const usageRef = {};
+                    stats.activeUsageRef = usageRef;
                     try {
                         const attemptMessages = attempt ? [{ ...messages[0], content: messages[0].content + '\n上次响应未通过格式校验。请重新判断同一用户请求，严格返回完整的decision JSON，使用正确字段类型与动作分支；不要输出推理或扩大工具、来源及权限。' }, ...messages.slice(1)] : messages;
-                        const content = await budget.run('model', modelSignal => callChatIntentModel(deps.callModelJson || callModelJson, modelCfg, attemptMessages, { user, maxTokens: 2000, temperature: 0, enableThinking: false, usageRef, timeoutMs: budget.remainingMs(), deadlineAt: budget.deadlineAt, signal: modelSignal, source: 'chat_intent' }, stats));
+                        const invoke = async (model, modelMessages, options) => {
+                            usageRef.admittingQuota = true;
+                            const quotaMessages = options.responseFormat ? [...modelMessages, { role: 'system', content: JSON.stringify(options.responseFormat) }] : modelMessages;
+                            const releaseQuota = await (deps.ensureModelQuota || ensureModelQuota)(user, model, quotaMessages, options.maxTokens, { signal: options.signal });
+                            usageRef.admittingQuota = false;
+                            try {
+                                const output = await (deps.callModelJson || callModelJson)(model, modelMessages, options);
+                                if (!deps.callModelJson || deps.recordAgentModelUsage) {
+                                    usageRef.recordingUsage = true;
+                                    const usageStarted = Date.now();
+                                    try { await (deps.recordAgentModelUsage || recordAgentModelUsage)(user, model, modelMessages, output, 'chat_intent', '', { usageRef, deferCalibration: true }); }
+                                    finally { stats.usageMs = (stats.usageMs || 0) + Date.now() - usageStarted; usageRef.recordingUsage = false; }
+                                }
+                                return output;
+                            } finally { releaseQuota(); }
+                        };
+                        const content = await budget.run('model', modelSignal => callChatIntentModel(invoke, routingModel, attemptMessages, { user, maxTokens: 2000, temperature: 0, enableThinking: false, usageRef, timeoutMs: budget.remainingMs(), deadlineAt: budget.deadlineAt, signal: modelSignal, source: 'chat_intent' }, stats));
                         if (signal?.aborted) throw signal.reason || new Error('意图判断已取消');
-                        if (!deps.callModelJson) await budget.run('usage', () => recordAgentModelUsage(user, modelCfg, attemptMessages, content, 'chat_intent', '', { usageRef }));
                         stats.outputTokens = (stats.outputTokens || 0) + (Number(usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens) || 0) || null;
                         stats.inputTokens = (stats.inputTokens || 0) + (Number(usageRef.usage?.prompt_tokens ?? usageRef.usage?.input_tokens) || 0) || null;
                         if (usageRef.truncated) throw Object.assign(new Error('意图响应不完整'), { code: 'CHAT_INTENT_INVALID_CONTRACT' });
@@ -74,11 +111,16 @@ async function resolveChatIntent(input, deps = {}) {
                         break;
                     } catch (error) {
                         // 补判仍使用原始授权和相同校验，不把无效响应当作可执行决定。
-                        if (attempt || !(error instanceof SyntaxError || error.code === 'CHAT_INTENT_INVALID_CONTRACT') || budget.signal.aborted || budget.remainingMs() < 2000) throw error;
+                        if (attempt || !(error instanceof SyntaxError || error.code === 'CHAT_INTENT_INVALID_CONTRACT') || budget.signal.aborted || budget.remainingMs() < 2000) {
+                            stats.failureDiagnostic = timingSnapshot();
+                            stats.failureStage = stats.failureDiagnostic.failureStage;
+                            throw error;
+                        }
                         stats.contractRetries = 1;
                     } finally {
                         if (Number.isFinite(usageRef.queueMs)) stats.queueMs = (stats.queueMs || 0) + usageRef.queueMs;
                         if (Number.isFinite(usageRef.providerMs)) stats.providerMs = (stats.providerMs || 0) + usageRef.providerMs;
+                        stats.activeUsageRef = null;
                     }
                 }
                 if (!context.requestContext.complete) {
@@ -94,6 +136,7 @@ async function resolveChatIntent(input, deps = {}) {
                 if (signal?.aborted) throw error;
                 if (error.code === 'CHAT_INTENT_INVALID_CONTRACT') stats.contractFailureReason = error.message;
                 failure = isChatIntentTimeout(error) ? 'intent_timeout' : error.code === 'CHAT_INTENT_CONTEXT_INCOMPLETE' ? 'intent_context_incomplete' : error.code === 'CHAT_INTENT_INVALID_CONTRACT' || error instanceof SyntaxError ? 'intent_invalid_contract' : 'intent_provider_unavailable';
+                stats.failureStage ||= budget.snapshot().stage;
                 resolved = buildIntentFallback(baseline, failure);
             }
         }
@@ -127,13 +170,15 @@ async function resolveChatIntent(input, deps = {}) {
             decisionId, userId: user.id, tenantId: user.tenant_id || null, sessionId,
             context: { scenario: 'chat.execution', taskState: { hash: crypto.createHash('sha256').update(prompt).digest('hex'), constraints: resolved.constraints, toolIntent: { requestedCapabilities: resolved.requiredCapabilities } }, candidates: ACTIONS.map(action => buildDecisionActionCandidate('chat.execution', action)) },
             selectedActionId: selected.action,
-            providerOutputs: [{ providerId: 'chat-intent', providerVersion: String(modelCfg?.id || ''), selectedActionId: resolved.action, durationMs: Date.now() - started, error: failure, scores: { [resolved.action]: resolved.confidence || 0 } }],
+            providerOutputs: [{ providerId: 'chat-intent', providerVersion: String(routingModel?.id || ''), selectedActionId: resolved.action, durationMs: Date.now() - started, error: failure, scores: { [resolved.action]: resolved.confidence || 0 },
+                metadata: { failureStage: stats.failureStage || '', timing: timingSnapshot().timing } }],
             policy: { mode: applied ? 'active' : 'shadow', policyVersion: INTENT_POLICY_VERSION, selectedActionId: selected.action, suggestedActionId: resolved.action, applied, reasonCode: resolved.reasonCode }
         });
         return { ...constrainChatDecision(selected, requestScope), decisionId: learningApplied && !failure ? learningDecisionId : decisionId, intentDecisionId: decisionId, learningDecisionId, learningApplied: learningApplied && !failure, modelCalls: stats.modelCalls, structuredOutput: stats.structuredOutput, contractFailureReason: stats.contractFailureReason || '', durationMs: Date.now() - started,
             providerAction: stats.providerAction || '', contractAdjustments: stats.contractAdjustments || [], providerRetries: stats.providerRetries || 0, contractRetries: stats.contractRetries || 0,
             usage: { inputTokens: stats.inputTokens ?? null, outputTokens: stats.outputTokens ?? null },
-            timing: { modelMs: budget.timings.model || 0, queueMs: stats.queueMs ?? null, providerMs: stats.providerMs ?? null, usageMs: budget.timings.usage || 0, learningMs: budget.timings.learning || 0 }, modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };
+            timing: timingSnapshot().timing, failureStage: stats.failureStage || '', intentModelId: routingModel?.id || null, routingModelSource,
+            modelId: modelCfg?.id || null, policyVersion: INTENT_POLICY_VERSION, shadow: !applied };
     } finally { budget.dispose(); }
 }
 

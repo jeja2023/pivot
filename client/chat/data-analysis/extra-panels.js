@@ -739,7 +739,8 @@ ${app.dataModelPanelMarkup}
                 return;
             }
 
-            if (event.target.classList.contains('modal-overlay')) {
+            if (event.target.classList.contains('data-analysis-modal-overlay')
+                || (event.target.classList.contains('modal-overlay') && String(event.target.id || '').startsWith('data-analysis-'))) {
                 event.target.classList.add('hidden');
             }
         });

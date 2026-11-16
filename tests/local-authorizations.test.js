@@ -44,3 +44,20 @@ test('桌面截图请求进入桌面控制处理器，而非旧版 MCP 工具拒
         fs.rmSync(root, { recursive: true, force: true });
     }
 });
+
+test('本机桌面授权变更后，等待确认的旧操作不能通过授权复核', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pivot-local-auth-revoke-'));
+    let release, entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    const wait = new Promise(resolve => { release = resolve; });
+    const manager = createLocalAuthorizationManager({
+        app: { getPath: () => root }, dialog: {}, getMainWindow: () => null,
+        runLocalDesktopControlTask: async ({ assertAuthorization }) => { entered(); await wait; await assertAuthorization(); return {}; }
+    });
+    try {
+        await manager.grantLocalAuthorization('local_desktop_control', { windowTitle: '测试窗口', processName: 'fixture.exe' });
+        const task = manager.executeLocalMcpTool({ toolName: 'desktop.click', input: {} });
+        await started; manager.revokeLocalAuthorization('local_desktop_control'); release();
+        await assert.rejects(task, { code: 'LOCAL_DESKTOP_CONTROL_GRANT_CHANGED' });
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

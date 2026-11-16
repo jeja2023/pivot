@@ -4,8 +4,8 @@ const runtime = require('./runtime');
 const { callModelJson, recordAgentModelUsage } = require('../../agent-model');
 const { getRunnableModelForUserAsync, getModelDailyUsageAsync } = require('../../models');
 const { estimateTokens } = require('../../../llm');
-const { estimateMessagesTokens } = require('../../context-budget');
 const { messagesForModel } = require('./model-input');
+const { compactMessages, planRequest, usageRecord } = require('./context');
 
 const AUTHORITY = {
     generate: { default: 'workflows/generate-pptx.md', quick: 'workflows/profiles/quick-generate.md', beautify: 'workflows/profiles/beautify-pptx.md', image_to_pptx: 'workflows/profiles/image-to-pptx.md' },
@@ -77,18 +77,13 @@ async function drive(user, id, state, hooks, deps = {}) {
     while (state.steps < request.maxSteps) {
         await hooks.ensureCurrent();
         const model = await (deps.resolveModel || resolveModel)(user, request);
-        const messages = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
-        const inputEstimate = estimateMessagesTokens(messages);
-        const maxTokens = Math.min(18000, request.tokenBudget - state.usedTokens - inputEstimate);
-        if (maxTokens < 2000) throw runtime.error('本次制作模型预算已用完；源稿和检查点保留，可增加预算后继续。', 'PPT_MASTER_BUDGET_EXHAUSTED', 429);
+        const originalMessages = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
+        const { messages, compactedWrites } = compactMessages(originalMessages);
+        const plan = planRequest(messages, originalMessages, model, request.tokenBudget - state.usedTokens);
         const usageRef = {};
-        const output = await (deps.callModel || callModelJson)(model, messages, { user, signal: hooks.signal, maxTokens, temperature: 0.2, usageRef,
+        const output = await (deps.callModel || callModelJson)(model, messages, { user, signal: hooks.signal, maxTokens: plan.maxTokens, temperature: 0.2, usageRef,
             timeoutMs: 120000, enableThinking: false, budget: deps.budget, responseFormat: { type: 'json_object' } });
-        const usage = usageRef.usage || {};
-        const inputTokens = Number(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usageRef.inputTokens);
-        const outputTokens = Number(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usageRef.outputTokens);
-        state.usedTokens += (Number.isFinite(inputTokens) && inputTokens >= 0 ? inputTokens : inputEstimate)
-            + (Number.isFinite(outputTokens) && outputTokens >= 0 ? outputTokens : estimateTokens(typeof output === 'string' ? output : JSON.stringify(output)));
+        usageRecord(state, plan, usageRef, output, compactedWrites, estimateTokens);
         if (!deps.callModel) await recordAgentModelUsage(user, model, messages, output, 'ppt_master_engine', request.runId || '', { usageRef, budget: deps.budget });
         await hooks.ensureCurrent();
         if (state.usedTokens > request.tokenBudget) throw runtime.error('本次制作的实际模型用量已超过预算，本轮未继续执行制作动作。检查点已保留。', 'PPT_MASTER_BUDGET_EXHAUSTED', 429);

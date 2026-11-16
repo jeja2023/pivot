@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pivot 本机助手</title>
+    <link rel="stylesheet" href="../../client/common/styles/theme.css">
+    <link rel="stylesheet" href="helper.css">
+</head>
+<body>
+    <main>
+        <header class="helper-header">
+            <h1>Pivot 本机助手</h1>
+            <p id="status" role="status">正在启动</p>
+            <p id="account"></p>
+        </header>
+        <section aria-labelledby="connection-title">
+            <h2 id="connection-title">连接浏览器账号</h2>
+            <div class="helper-fields">
+                <label><span>服务地址</span><input id="server" class="form-input" type="url" maxlength="2048" placeholder="http://或https://服务地址" spellcheck="false"></label>
+                <label><span>浏览器配对码</span><input id="code" class="form-input" maxlength="100" placeholder="粘贴浏览器中生成的配对码" autocomplete="off" spellcheck="false"></label>
+            </div>
+            <div class="helper-actions">
+                <button id="pair" class="btn-primary" type="button">配对此账号</button>
+                <button id="disconnect" class="btn-secondary" type="button">断开并更换账号</button>
+            </div>
+        </section>
+        <section aria-labelledby="authorization-title">
+            <h2 id="authorization-title">授权桌面应用</h2>
+            <p class="helper-note">仅操作已授权的前台应用，每次执行前会在本机确认。</p>
+            <div class="helper-fields">
+                <label><span>窗口完整标题</span><input id="title" class="form-input" maxlength="240" placeholder="填写目标应用当前的完整窗口标题"></label>
+                <label><span>进程名</span><input id="process" class="form-input" list="process-options" maxlength="160" placeholder="选择或输入，例如 notepad.exe" spellcheck="false"></label>
+                <datalist id="process-options">
+                    <option value="notepad.exe">记事本</option>
+                    <option value="WINWORD.EXE">Word</option>
+                    <option value="EXCEL.EXE">Excel</option>
+                    <option value="POWERPNT.EXE">PowerPoint</option>
+                </datalist>
+            </div>
+            <div class="helper-actions">
+                <button id="authorize" class="btn-primary" type="button">授权应用</button>
+                <button id="revoke" class="btn-secondary" type="button">撤销应用授权</button>
+            </div>
+        </section>
+        <footer class="helper-note">关闭助手将停止执行并断开连接，下次使用需重新配对。</footer>
+    </main>
+    <script src="renderer.js"></script>
+</body>
+</html>

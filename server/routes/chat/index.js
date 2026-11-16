@@ -2,10 +2,6 @@
 const express = require('express');
 const { asyncHandler } = require('../../http');
 const {
-    detectUnsupportedCapability,
-    buildCapabilityFallbackMessage
-} = require('../../capabilities');
-const {
     createInternalAgentScaffoldStreamFilter,
     createVisibleReasoningStreamFilter,
     estimateTokens,
@@ -51,7 +47,6 @@ const {
 const {
     buildFallbackDataQueryInput,
     detectStrongDataQueryIntent,
-    shouldDeferRealtimeCapabilityGuard,
     filterMcpToolsForChatIntent,
     filterMcpToolsForPlanner
 } = require('../../services/chat-mcp-context');
@@ -412,38 +407,6 @@ function createChatRouter({
             }));
             writeSse('[DONE]');
             return res.end();
-        }
-
-        const unsupportedCapability = detectUnsupportedCapability(modelContent);
-        const deferRealtimeCapabilityGuard = shouldDeferRealtimeCapabilityGuard(unsupportedCapability, {
-            mcpEnabled,
-            userPrompt: modelContent
-        });
-        if (unsupportedCapability && !deferRealtimeCapabilityGuard) {
-            const assistantContent = buildCapabilityFallbackMessage(unsupportedCapability);
-            const assistantTokens = estimateTokens(assistantContent);
-            const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
-                sessionId,
-                userId,
-                userMessageId,
-                user: req.user,
-                modelCfg,
-                visibleContent,
-                assistantContent,
-                assistantTokens
-            });
-            logAction(req, '能力不支持提示', `能力: ${unsupportedCapability.code}, 会话: ${sessionId}`);
-            
-            writeSse(JSON.stringify({
-                unsupportedCapability: unsupportedCapability.code,
-                content: assistantContent,
-                messageId: assistantMessageId || assistantMessageResult?.lastInsertRowid
-            }));
-            writeSse('[DONE]');
-            return res.end();
-        }
-        if (deferRealtimeCapabilityGuard) {
-            req.log.info({ capability: unsupportedCapability.code }, '已将明确本机浏览器访问请求交由工具库处理');
         }
 
         // 显式 Agent 请求保持兼容。在普通对话中，

@@ -48,14 +48,22 @@ test('一体化画布、单圆点节点、右侧弹出抽屉、内置算子与�
     await expect(page.locator('[data-canvas-node="fact"][data-canvas-port]')).toHaveCount(1);
 
     await page.locator('[data-modeling-action="node"]').click();
-    await form.locator('[name="modeling_grainDescription"]').fill('每行一个订单'); await form.locator('[name="modeling_grainKeys"]').selectOption('c_1'); await form.locator('[type="submit"]').click();
+    await expect(page.locator('.modeling-dialog-footer [data-modeling-action="close-dialog"]')).toBeHidden();
+    const multiFontPx = await form.locator('[name="modeling_grainKeys"]').evaluate(el => Number.parseFloat(window.getComputedStyle(el).fontSize));
+    expect(multiFontPx).toBeLessThanOrEqual(14);
+    await form.locator('[name="modeling_grainDescription"]').fill('每行一个订单'); await form.locator('[name="modeling_grainKeys"]').selectOption('c_1');
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-fact-grain.png') });
+    await form.locator('[type="submit"]').click();
 
     // 拖入维度表，验证维度表仅有一个左侧输入点和一个右侧输出点
     const palette = page.locator('[data-canvas-dataset]').filter({ hasText: 'canvas-regions' });
     await expect(palette).toHaveAttribute('draggable', 'true');
     await palette.dragTo(page.locator('#modeling-graph'), { targetPosition: { x: 420, y: 80 } });
     await expect(page.locator('#modeling-dialog-title')).toHaveText('添加维度表');
-    await form.locator('[name="modeling_grainKeys"]').selectOption('c_1'); await form.locator('[type="submit"]').click();
+    await expect(page.locator('.modeling-dialog-footer [data-modeling-action="close-dialog"]')).toBeHidden();
+    await form.locator('[name="modeling_grainKeys"]').selectOption('c_1');
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-add-dim.png') });
+    await form.locator('[type="submit"]').click();
     await expect(page.locator('[data-modeling-graph-node]')).toHaveCount(2);
     const dimensionId = await page.evaluate(() => window.Pivot.legacy.PivotDataAnalysis.modeling.state.draft.nodes.find(node => node.role === 'dimension').id);
     const dimension = page.locator(`[data-modeling-graph-node="${dimensionId}"]`);
@@ -154,14 +162,106 @@ test('一体化画布、单圆点节点、右侧弹出抽屉、内置算子与�
     await expect(page.locator('[data-modeling-graph-relation]')).toHaveCount(1);
 
     await page.locator('[data-canvas-action="arrange"]').click();
+    await page.locator('[data-canvas-action="zoom-reset"]').click();
+    const baseNodeBox = await page.locator('[data-modeling-graph-node="fact"]').boundingBox();
+    await page.locator('[data-canvas-action="zoom-out"]').click();
+    const smallerNodeBox = await page.locator('[data-modeling-graph-node="fact"]').boundingBox();
+    expect(smallerNodeBox.width).toBeLessThan(baseNodeBox.width - 10);
+    await page.locator('[data-canvas-action="zoom-in"]').click();
+    await page.locator('[data-canvas-action="zoom-in"]').click();
+    const largerNodeBox = await page.locator('[data-modeling-graph-node="fact"]').boundingBox();
+    expect(largerNodeBox.width).toBeGreaterThan(baseNodeBox.width + 10);
+    await page.locator('[data-canvas-action="zoom-reset"]').click();
+    await page.locator('[data-modeling-graph-node="fact"]').hover();
+    await page.mouse.wheel(0, -120);
+    const wheelInBox = await page.locator('[data-modeling-graph-node="fact"]').boundingBox();
+    expect(wheelInBox.width).toBeGreaterThan(baseNodeBox.width + 5);
+    await page.mouse.wheel(0, 120);
+    await page.mouse.wheel(0, 120);
+    const wheelOutBox = await page.locator('[data-modeling-graph-node="fact"]').boundingBox();
+    expect(wheelOutBox.width).toBeLessThan(baseNodeBox.width - 5);
     await page.locator('[data-canvas-action="fit"]').click();
     await page.locator('[data-modeling-action="save"]').click(); await expect(page.locator('#modeling-save-state')).toHaveText('已保存');
     await page.screenshot({ path: path.join(artifactRoot, 'desktop.png'), fullPage: true });
 
-    // 打开右侧算子抽屉截取桌面端完整效果
+    // 打开右侧算子抽屉验证无外层垂直滚动条、各标签抽屉等宽、关闭按钮红字红框及完整视觉效果
     await page.locator('[data-modeling-graph-node^="flow_formula_"]').click();
+    const closeColors = await page.locator('#modeling-drawer [data-modeling-action="close-drawer"]').evaluate(el => {
+        const s = window.getComputedStyle(el);
+        return { color: s.color, borderColor: s.borderTopColor };
+    });
+    expect(closeColors.color).not.toBe('rgb(0, 0, 0)');
+    expect(closeColors.borderColor).toBe(closeColors.color);
+    const drawerWidths = [];
+    for (const tabKey of ['node', 'semantics', 'quality', 'trial']) {
+        await page.locator(`.modeling-drawer-tab[data-modeling-id="${tabKey}"]`).click();
+        const box = await page.locator('#modeling-drawer').boundingBox();
+        drawerWidths.push(Math.round(box.width));
+    }
+    expect(new Set(drawerWidths).size).toBe(1);
+    const scrollCheck = await page.evaluate(() => {
+        const els = ['.workspace-modal-body', '.data-analysis-main', '#data-analysis-modeling-panel'];
+        return els.every(sel => {
+            const node = document.querySelector(sel);
+            return !node || node.scrollHeight <= node.clientHeight + 1;
+        }) && document.documentElement.scrollHeight <= window.innerHeight + 1;
+    });
+    expect(scrollCheck).toBe(true);
+    await page.locator('.modeling-drawer-tab[data-modeling-id="node"]').click();
     await page.screenshot({ path: path.join(artifactRoot, 'desktop-drawer-preview.png'), fullPage: true });
     await page.locator('[data-modeling-action="close-drawer"]').click();
+
+    // 验证 5 类模型弹窗尺寸自适应、关闭按钮红字红框、字体与下拉框紧凑一致及复选树横向布局
+    await page.locator('[data-modeling-action="basic"]').click();
+    await expect(page.locator('.modeling-dialog-footer [data-modeling-action="close-dialog"]')).toBeHidden();
+    const basicBox = await page.locator('.modeling-dialog').boundingBox();
+    expect(basicBox.height).toBeLessThan(480);
+    expect(basicBox.width).toBeLessThanOrEqual(680);
+    const dialogCloseStyle = await page.locator('.modeling-dialog [data-modeling-action="close-dialog"]').first().evaluate(el => {
+        const s = window.getComputedStyle(el);
+        return { color: s.color, borderColor: s.borderTopColor };
+    });
+    expect(dialogCloseStyle.color).not.toBe('rgb(0, 0, 0)');
+    expect(dialogCloseStyle.borderColor).toBe(dialogCloseStyle.color);
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-basic.png') });
+    await page.locator('.modeling-dialog .modeling-dialog-close').click();
+
+    await page.locator('.modeling-more summary').click();
+    await page.locator('[data-modeling-action="versions"]').click();
+    await expect(page.locator('#data-analysis-modeling-dialog')).toBeVisible();
+    const versionsBox = await page.locator('.modeling-dialog').boundingBox();
+    expect(versionsBox.height).toBeLessThan(480);
+    await expect(page.locator('.modeling-dialog-footer')).toBeHidden();
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-versions.png') });
+    await page.locator('.modeling-dialog .modeling-dialog-close').click();
+
+    await page.locator('.modeling-more summary').click();
+    await page.locator('[data-modeling-action="dependencies"]').click();
+    await expect(page.locator('#data-analysis-modeling-dialog')).toBeVisible();
+    const depBox = await page.locator('.modeling-dialog').boundingBox();
+    expect(depBox.height).toBeLessThan(560);
+    await expect(page.locator('.modeling-dialog-footer')).toBeHidden();
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-dependencies.png') });
+    await page.locator('.modeling-dialog .modeling-dialog-close').click();
+
+    await page.locator('.modeling-more summary').click();
+    await page.locator('[data-modeling-action="share"]').click();
+    await expect(page.locator('#data-analysis-modeling-dialog')).toBeVisible();
+    await expect(page.locator('.modeling-dialog-footer [data-modeling-action="close-dialog"]')).toBeHidden();
+    const shareSelectBox = await page.locator('#modeling-dialog-body select.form-input').first().boundingBox();
+    expect(shareSelectBox.height).toBeLessThanOrEqual(38);
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-share.png') });
+    await page.locator('.modeling-dialog .modeling-dialog-close').click();
+
+    await page.locator('.modeling-more summary').click();
+    await page.locator('[data-modeling-action="transfer"]').click();
+    await expect(page.locator('#data-analysis-modeling-dialog')).toBeVisible();
+    await expect(page.locator('.modeling-dialog-footer [data-modeling-action="close-dialog"]')).toBeHidden();
+    const transferBox = await page.locator('.modeling-dialog').boundingBox();
+    expect(transferBox.width).toBeLessThanOrEqual(480);
+    expect(transferBox.height).toBeLessThan(300);
+    await page.screenshot({ path: path.join(artifactRoot, 'modal-transfer.png') });
+    await page.locator('.modeling-dialog .modeling-dialog-close').click();
 
     // 窄屏响应式与归档只读保护
     await page.setViewportSize({ width: 390, height: 844 });

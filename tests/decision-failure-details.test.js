@@ -23,12 +23,16 @@ test('分页明细只读取所需记录，故障类型、限额和原始正文�
     const query = async (sql, params) => {
         calls.push({ sql, params });
         if (sql.startsWith('SELECT COUNT')) return [{ count: 121 }];
-        return [{ decision_id: 'decision-one', user_id: 7, username: 'member12345678', nickname: '测试用户', scenario: 'chat.execution', provider: { providerId: 'chat-intent', providerVersion: '8', error: 'intent_timeout', durationMs: 30003 } }];
+        return [{ decision_id: 'decision-one', user_id: 7, username: 'member12345678', nickname: '测试用户', scenario: 'chat.execution', provider: { providerId: 'chat-intent', providerVersion: '8', error: 'intent_timeout', durationMs: 30003,
+            metadata: { failureStage: 'model_queue', timing: { queueMs: 29000, providerMs: 1000, prompt: 'secret' } } } }];
     };
     const data = await getDecisionFailureDetails({ kind: 'provider', limit: 2000, offset: -1 }, { query });
     assert.equal(data.limit, 100); assert.equal(data.offset, 0); assert.equal(data.hasMore, true);
     assert.equal(data.items[0].label, '任务意图判断超时');
     assert.equal(data.items[0].durationMs, 30003);
+    assert.equal(data.items[0].failureStage, 'model_queue');
+    assert.deepEqual(data.items[0].timing, { queueMs: 29000, providerMs: 1000 });
+    assert.doesNotMatch(JSON.stringify(data), /secret/);
     assert.equal(data.items[0].userId, '7'); assert.equal(data.items[0].username, 'member12345678'); assert.equal(data.items[0].nickname, '测试用户');
     assert.equal(calls.length, 2);
     assert.ok(calls.every(call => call.params[0] === 1440));

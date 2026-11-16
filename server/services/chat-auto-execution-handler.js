@@ -17,20 +17,28 @@ const { buildIntentFallback } = require('./chat-intent-fallback');
 const { readTypedEnv } = require('../config/env-registry');
 const { createChatIntentBudget } = require('./chat-intent-budget');
 const { ACTIVE_STATUSES } = require('./agent-validators');
+const { currentUserText } = require('./chat-request-constraints');
 
 async function decideAutomaticChatExecution(options = {}, deps = {}) {
     const startedAt = Date.now();
     const budget = createChatIntentBudget({ signal: options.signal, deadlineAt: options.deadlineAt,
         timeoutMs: deps.config?.timeoutMs ?? readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS') });
+    const intentDiagnostics = {};
     try {
-        const decision = await budget.run('total', () => decideWithinIntentBudget({ ...options, signal: budget.signal, deadlineAt: budget.deadlineAt }, { ...deps, budget }));
+        const decision = await budget.run('total', () => decideWithinIntentBudget({ ...options, intentDiagnostics, signal: budget.signal, deadlineAt: budget.deadlineAt }, { ...deps, budget }));
         return { ...decision, timing: { ...decision.timing, contextMs: Math.max(budget.timings.history || 0, 0) + Math.max(budget.timings.tasks || 0, budget.timings.memories || 0, budget.timings.availability || 0),
             semanticMs: budget.timings.semantic || 0, totalMs: Date.now() - startedAt, stages: { ...budget.timings } } };
     } catch (error) {
         if (options.signal?.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : error;
         const baseline = classifyChatAutoExecution({ prompt: options.modelContent });
+        const diagnostic = intentDiagnostics.snapshot?.() || {};
+        const snapshot = budget.snapshot();
+        const failureStage = diagnostic.failureStage || snapshot.stage;
+        const timing = { ...diagnostic.timing, totalMs: Date.now() - startedAt, stages: snapshot.timings };
+        options.log?.warn?.({ sessionId: options.sessionId, userId: options.userId, modelId: options.modelCfg?.id,
+            intentModelId: diagnostic.intentModelId, code: error.code, failureStage, timing }, '任务理解超过等待或上下文不可用，本轮仅提供文本回复');
         return constrainChatDecision({ ...buildIntentFallback(baseline, error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : 'intent_context_unavailable'),
-            durationMs: Date.now() - startedAt, timing: { totalMs: Date.now() - startedAt, stages: { ...budget.timings } } },
+            durationMs: Date.now() - startedAt, failureStage, timing, intentModelId: diagnostic.intentModelId, routingModelSource: diagnostic.routingModelSource },
         resolveChatRequestScope(options.modelContent, { ...(options.requestScope || {}), routeOverrides: options.routeOverrides }));
     } finally { budget.dispose(); }
 }
@@ -38,9 +46,9 @@ async function decideAutomaticChatExecution(options = {}, deps = {}) {
 async function decideWithinIntentBudget({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
     autoExecutionEnabled = false, modelContent = '', maxGoalLength = 12000,
-    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, deadlineAt, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
+    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, deadlineAt, intentDiagnostics, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
 } = {}, deps = {}) {
-    const intentPrompt = String(modelContent).split(/\n---\s*\n【参考文档/)[0];
+    const intentPrompt = currentUserText(modelContent);
     const providedSources = [...String(modelContent).matchAll(/【参考文档:\s*([^\n】]{1,240})】\s*\n/g)].slice(0, 20).map(match => ({ kind: 'inline_attachment', name: match[1], available: true, sourceMessageId: userMessageId }));
     let requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, sourceLength: modelContent.length });
     const initial = classifyChatAutoExecution({ prompt: intentPrompt });
@@ -72,13 +80,13 @@ async function decideWithinIntentBudget({
         ]);
         if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
         const resolved = await deps.budget.run('semantic', () => (deps.resolveChatIntent || resolveChatIntent)({
-            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, deadlineAt, providedSources,
+            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, deadlineAt, intentDiagnostics, providedSources,
             availability: { ...availability, tools: (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, requestScope)) }, requestScope, sourceLength: modelContent.length,
             executionAllowed: agentExecutionAllowed && autoExecutionEnabled,
             preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
         }));
         if (resolved.failureCode) log?.warn?.({ sessionId, userId, modelId: modelCfg?.id, code: resolved.failureCode,
-            durationMs: resolved.durationMs, policyVersion: resolved.policyVersion }, '任务意图判断未完成，本轮仅提供受限文本回复');
+            intentModelId: resolved.intentModelId, durationMs: resolved.durationMs, failureStage: resolved.failureStage, timing: resolved.timing, policyVersion: resolved.policyVersion }, '任务意图判断未完成，本轮仅提供受限文本回复');
         if (/^(?:不对|不是让你|不是这个意思)|(?:不要|不用).{0,8}(?:新建|另开|新开)任务/.test(intentPrompt)) {
             try {
                 resolved.correctionEvidence = await (deps.recordChatRouteCorrection || recordChatRouteCorrection)({

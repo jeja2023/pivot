@@ -125,13 +125,17 @@ test('切换页面时取消失败原因请求，迟到响应不能覆盖页面',
 
 test('决策计数保留调用错误口径，明细显示组件、原因、耗时及任务缺项', async () => {
     const { api, elements } = fixture(async url => ({ ok: true, json: async () => url.includes('kind=provider')
-        ? { items: [{ providerId: 'chat-intent', providerVersion: '8', decisionId: 'decision-one', reasonCode: 'intent_timeout', label: '任务意图判断超时', durationMs: 30000 }], total: 39, hasMore: true }
+        ? { items: [{ providerId: 'chat-intent', providerVersion: '8', decisionId: 'decision-one', reasonCode: 'intent_timeout', label: '任务意图判断超时', durationMs: 30000,
+            failureStage: 'model_queue', timing: { queueMs: 25000, providerMs: 4800 } }], total: 39, hasMore: true }
         : { items: [{ runId: 'run-one', decisionId: 'decision-one', label: '缺少文件格式', missing: ['尚未生成PPTX<script>'], ruleFailures: [], detailSource: 'current_report' }], total: 69, hasMore: true } }));
     api.render({ decisionRouting: { providers: [{ calls: 121, errors: 39, p95_duration_ms: 30000 }] } });
     assert.match(elements.get('monitor-routing-quality').html, /121 \/ 39/);
     assert.match(elements.get('monitor-routing-quality').html, /查看24小时决策错误明细/);
     await api.loadFailureDetails('provider');
     assert.match(elements.get('monitor-failure-details').html, /任务意图判断超时/); assert.match(elements.get('monitor-failure-details').html, /39 条|39<\/|39 /);
+    assert.match(elements.get('monitor-failure-details').html, /模型排队/);
+    assert.match(elements.get('monitor-failure-details').html, /25,000|25000/);
+    assert.match(elements.get('monitor-failure-details').html, /上游.*4,800|上游.*4800/);
     await api.loadFailureDetails('delivery');
     const html = elements.get('monitor-failure-details').html;
     assert.match(html, /run-one/); assert.match(html, /当前核验报告/); assert.match(html, /&lt;script>/); assert.doesNotMatch(html, /<script>/);

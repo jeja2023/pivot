@@ -140,6 +140,7 @@ function normalizeMcpListCursor(value, { max = 10_000 } = {}) {
 
 function createMcpRouter({ authMiddleware, adminMiddleware, logAction }) {
     const router = express.Router();
+    require('./web-local-helper').mountWebLocalHelperRoutes(router, authMiddleware);
     mountLocalConnectorRoutes(router, authMiddleware);
     router.post('/mcp/local-device/heartbeat', authMiddleware, asyncHandler(async (req, res) => {
         res.status(410).json({ error: '旧本机 MCP 内存桥接已下线，请升级至桌面连接器 v2。', code: 'LOCAL_CONNECTOR_V2_REQUIRED' });

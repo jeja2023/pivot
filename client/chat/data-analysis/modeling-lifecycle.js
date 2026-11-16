@@ -67,7 +67,7 @@
         const reviews = inbox.reviews.filter(item => item.model_id === modelId && item.status === 'approved');
         const targetMarkup = tree.render({ units: targets.units, users: targets.users, allowedUnits: csv(state.selected.allowedUnits), allowedUserIds: csv(state.selected.allowedUserIds), isShared: true, currentUnit: window.Pivot.legacy.currentUser?.unit,
             unitInputName: 'modeling_shareUnit', userInputName: 'modeling_shareUser', escapeText: esc, escapeAttr: esc });
-        m.dialog('共享与业务口径复核', `<p>共享只读，不会共享底层来源。另一位具备实际来源权限的业务人员复核通过后才能启用。</p>${m.select('sharingAction', '操作', [['request', '发起当前口径复核'], ['activate', '使用已通过证据启用共享'], ['personal', '立即取消共享']], 'request')}<div class="agent-workflow-share-tree">${targetMarkup}</div>${m.select('reviewerId', '业务复核者', (targets.users || []).filter(user => String(user.id) !== m.owner()).map(user => [String(user.id), user.nickname || user.username]), '')}${m.select('reviewId', '已通过的复核证据', reviews.map(review => [review.id, `${review.id} · ${review.reviewed_at || ''}`]), '')}<p>当前检查：${esc(state.check?.id || '请先完整检查当前草稿')}</p>`, async form => {
+        m.dialog('共享与业务口径复核', `<p>共享只读，不会共享底层来源。另一位具备实际来源权限的业务人员复核通过后才能启用。</p>${m.select('sharingAction', '操作', [['request', '发起当前口径复核'], ['activate', '使用已通过证据启用共享'], ['personal', '立即取消共享']], 'request')}${m.select('reviewerId', '业务复核者', (targets.users || []).filter(user => String(user.id) !== m.owner()).map(user => [String(user.id), user.nickname || user.username]), '')}<div class="agent-workflow-share-tree">${targetMarkup}</div>${m.select('reviewId', '已通过的复核证据', reviews.map(review => [review.id, `${review.id} · ${review.reviewed_at || ''}`]), '')}<p>当前检查：${esc(state.check?.id || '请先完整检查当前草稿')}</p>`, async form => {
             const action = m.value(form, 'sharingAction');
             const values = name => Array.from(form.querySelectorAll(`input[name="modeling_${name}"]:checked`), input => input.value).join(',');
             const body = { expectedVersion: state.selected.version, scope: action === 'personal' ? 'personal' : 'shared', allowedUnits: values('shareUnit'), allowedUserIds: values('shareUser') };
@@ -80,7 +80,7 @@
                 if (!current()) return;
                 state.selected = result.model; m.render(); await m.loadList();
             }
-        });
+        }, { hideCancel: true });
         tree.bind(document.getElementById('modeling-dialog-body'));
     }
 

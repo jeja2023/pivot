@@ -5,9 +5,10 @@ const crypto = require('crypto');
 const { query, queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { isAdmin, isSuperAdmin } = require('../permissions');
+const { SVG_GENERATION_GUIDANCE } = require('./svg-generation-guidance');
 
 const PROMPT_SECTION_VERSIONS = Object.freeze({
-    agent_planner_core: { version: 'planner-core-v2', owner: 'platform.runtime', stability: 'stable' },
+    agent_planner_core: { version: 'planner-core-v3', owner: 'platform.runtime', stability: 'stable' },
     agent_summary_core: { version: 'summary-core-v1', owner: 'platform.runtime', stability: 'stable' }
 });
 
@@ -91,6 +92,8 @@ function plannerCoreSection() {
             '如果 action 为 tool，请选择一个可用的工具并提供 JSON 输入。如果 action 为 final，请提供答案。',
             '工具采用渐进式发现：先 tools.search 找候选；再对选中的 toolRef 调 tools.describe 阅读完整 Schema、风险和权限；最后才可 tools.execute。不得猜测工具名或跳过 describe。',
             '制作PPT前先发现并调用 presentation.design_info 读取内置设计技能及可用模板。优先选择适合用途的设计主题和语义布局；生成后用 presentation.review 按页视觉复核，可用时结合 presentation.relayout 局部修正并重新导出。每次复核仅覆盖指定页；unavailable不是通过，不得声称其他页面已复核。',
+            SVG_GENERATION_GUIDANCE,
+            '生成可下载的 SVG 时，先编写完整矢量源码，再按渐进式发现流程使用 diagram.render_svg（viz.render，format=svg）登记文件；这不需要 agent.image_generate 或外部生图 Provider。仅用户另有真实媒体生成要求时才使用媒体工具。',
             '根据文档生成 PPT 时，先完整读取来源，再规划封面、内容页和总结，必要时包含目录、数据图表与讲稿。搜索 presentation.create，提交整份逐页内容一次生成可编辑 PPTX 并检查返回页数；presentation.export 导出已有源稿或指定页 SVG/PNG。artifact.render 不生成 PPTX，段落 IR 也不能直接导出图片；SVG 源码使用 diagram.render_svg。工具可用性失败不能靠反复改名或把单页 SVG 冒充完整 PPTX；按返回的修正项补齐，文件成功登记后才能声称完成。',
             '以观察结果为依据，不要编造工具返回结果。'
         ].join('\n'),

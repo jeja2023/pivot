@@ -6,6 +6,18 @@
   "verification": "npm run test:all",
   "entries": [
     {
+      "file": "server/repositories/web-local-helper.js",
+      "count": 16,
+      "rationale": "独立助手配对使用短期一次性摘要、行锁和设备公钥证明；受限凭据仅以摘要持久化。浏览器绑定、账号版本、租户、在线租约和撤销均在执行入口复核；撤销原子关闭设备、授权和未完成任务。全部查询参数化，不接受客户端表名或路径。",
+      "verification": "tests/web-local-helper.test.js 使用隔离 PostgreSQL 和真实 HTTP 验证配对、签名领取、回执、跨浏览器拒绝及撤销。"
+    },
+    {
+      "file": "server/services/agent-local-connector.js",
+      "count": 15,
+      "rationale": "连接器租约回收对已领取且超时的本机桌面控制任务执行参数化状态更新，标记结果不明并清除领取凭据，避免点击或输入自动重放；迟到回执继续校验设备、租户、用户、领取凭据与租约期限。未拼接外部输入或扩大任务范围。",
+      "verification": "tests/agent-delivery-control-plane.test.js 在隔离 PostgreSQL 验证桌面操作不重放、迟到回执拒绝，以及只读任务仍可恢复。"
+    },
+    {
       "file": "server/repositories/policy-reviews.js",
       "count": 17,
       "rationale": "制度材料审查复用tool_tasks，所有读取和修改绑定用户与固定工具名。创建使用用户及请求摘要保证幂等，租约/截止/取消通过条件更新约束；修订与导出登记在行锁及预期版本下串行。制度条文按固定文档/版本参数读取且限制161条以发现超限，材料和报告仍使用既有Artifact/CAS。没有信任客户端路径、动态SQL或外部写入。",

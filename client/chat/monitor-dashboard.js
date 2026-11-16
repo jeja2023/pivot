@@ -2,6 +2,8 @@
 (function installMonitorDashboard() {
     const api = window.Pivot;
     const unknown = '暂无数据';
+    const failureStages = { history: '读取历史', tasks: '读取任务', semantic: '语义判断', model: '模型调用', model_queue: '模型排队',
+        model_provider: '上游响应', quota: '额度接纳', usage: '记账', learning: '经验读取', routing_model: '选择路由模型' };
     const number = value => value == null || !Number.isFinite(Number(value)) ? unknown : formatMetricNumber(value);
     const ms = value => value == null || !Number.isFinite(Number(value)) ? unknown : `${formatMetricNumber(value, 1)} ms`;
     const rows = items => items.map(([label, value, warning = false]) => `<div class="monitor-row${warning ? ' is-warning' : ''}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`).join('');
@@ -184,7 +186,10 @@
                 const username = item.nickname && item.nickname !== item.username ? item.nickname + (item.username ? `（${item.username}）` : '') : item.username;
                 const initiator = username || (item.userId ? `用户 ${item.userId}` : '未关联用户');
                 const refs = provider ? `${item.providerId || '未知组件'} / ${item.providerVersion || '未记录版本'} · ${item.decisionId || ''}` : `任务 ${item.runId || '未关联'} · 决策 ${item.decisionId || ''}`;
-                const details = provider ? `${item.reasonCode || ''} · ${ms(item.durationMs)}` : [...(item.missing || []), ...(item.ruleFailures || []).map(rule => rule.label + (rule.detail ? `：${rule.detail}` : '')), item.executionReason || ''].filter(Boolean).join('；') || '未记录缺失项';
+                const details = provider ? [item.reasonCode || '', ms(item.durationMs), failureStages[item.failureStage],
+                    Number.isFinite(item.timing?.queueMs) ? `模型排队 ${ms(item.timing.queueMs)}` : '',
+                    Number.isFinite(item.timing?.providerMs) ? `上游 ${ms(item.timing.providerMs)}` : ''].filter(Boolean).join(' · ')
+                    : [...(item.missing || []), ...(item.ruleFailures || []).map(rule => rule.label + (rule.detail ? `：${rule.detail}` : '')), item.executionReason || ''].filter(Boolean).join('；') || '未记录缺失项';
                 const source = !provider && item.detailSource === 'current_report' ? '（历史事件无快照，以下来自当前核验报告）' : '';
                 const reasonCode = escapeHtml(item.reasonCode || '未记录代码');
                 const serial = detailOffset + index + 1;

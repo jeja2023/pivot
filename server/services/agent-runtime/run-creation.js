@@ -314,12 +314,12 @@ function createAgentRunFactory(deps = {}) {
                     id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
                     priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
                     retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
-                    metadata, model_router, budget_config, usage_stats, network_policy, tenant_id, created_at, updated_at
+                    metadata, model_router, budget_config, usage_stats, network_policy, tenant_id, created_at, updated_at, helper_browser_key
                 )
                 VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
             `, [
                 runId,
@@ -352,7 +352,8 @@ function createAgentRunFactory(deps = {}) {
                 JSON.stringify(networkPolicy || {}),
                 user.tenant_id || user.tenantId || null,
                 now,
-                now
+                now,
+                require('../request-context').getRequestContext().helperBrowserKey || null
             ]);
         } catch (err) {
             if (resourceReservation) {

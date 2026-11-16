@@ -27,6 +27,7 @@ function Find-Control($root, $target) {
   if ($target.automationId) { $conditions.Add((New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, [string]$target.automationId))) }
   if ($target.name) { $conditions.Add((New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, [string]$target.name))) }
   if ($conditions.Count -eq 0) { throw '缺少可访问性目标。' }
+  if ($request.action -eq 'desktop.type') { $conditions.Add((New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit))) }
   $condition = if ($conditions.Count -eq 1) { $conditions[0] } else { New-Object System.Windows.Automation.AndCondition($conditions.ToArray()) }
   return $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
@@ -119,9 +120,11 @@ function desktopControlEnvironment(request) {
     return environment;
 }
 
-function runPowerShell(script, request, { spawnProcess = spawn, timeoutMs = 30000 } = {}) {
+function runPowerShell(script, request, { spawnProcess = spawn, timeoutMs = 30000, signal } = {}) {
     return new Promise((resolve, reject) => {
-        const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+        if (signal?.aborted) return reject(desktopControlExecutionError('本机桌面操作已停止，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_STOPPED', 409));
+        const guardedScript = "$ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false); try {\n" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
+        const encodedScript = Buffer.from(guardedScript, 'utf16le').toString('base64');
         const child = spawnProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript], {
             windowsHide: true,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -130,47 +133,61 @@ function runPowerShell(script, request, { spawnProcess = spawn, timeoutMs = 3000
         const stdout = [], stderr = [];
         let outputBytes = 0;
         let settled = false;
+        let terminationError = null;
         const finish = (error, value) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
             error ? reject(error) : resolve(value);
         };
+        const terminate = error => {
+            if (terminationError) return;
+            terminationError = error;
+            try { child.kill('SIGKILL'); } catch (_) {}
+        };
+        const abort = () => terminate(desktopControlExecutionError('本机桌面操作已停止，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_STOPPED', 409));
         const append = (target, chunk) => {
             const buffer = Buffer.from(chunk);
             outputBytes += buffer.length;
             if (outputBytes > MAX_DESKTOP_CONTROL_OUTPUT_BYTES) {
-                try { child.kill('SIGKILL'); } catch (_) {}
-                finish(desktopControlExecutionError('Windows 可访问性驱动输出超过安全上限。', 'LOCAL_DESKTOP_CONTROL_OUTPUT_LIMIT', 413));
+                terminate(desktopControlExecutionError('Windows 可访问性驱动输出超过安全上限。', 'LOCAL_DESKTOP_CONTROL_OUTPUT_LIMIT', 413));
                 return;
             }
             target.push(buffer);
         };
         child.stdout.on('data', chunk => append(stdout, chunk));
         child.stderr.on('data', chunk => append(stderr, chunk));
-        child.on('error', error => finish(desktopControlExecutionError(`无法启动 Windows 可访问性驱动：${error.message}`, 'LOCAL_DESKTOP_CONTROL_DRIVER_UNAVAILABLE', 503)));
+        child.on('error', error => { if (!terminationError || !child.pid) finish(terminationError || desktopControlExecutionError(`无法启动 Windows 可访问性驱动：${error.message}`, 'LOCAL_DESKTOP_CONTROL_DRIVER_UNAVAILABLE', 503)); });
         child.on('close', code => {
-            const output = Buffer.concat(stdout).toString('utf8').trim();
+            if (terminationError) return finish(terminationError);
+            const output = Buffer.concat(stdout).toString('utf8').split(/\r?\n/).filter(line => !/^\[0x[0-9a-f]+\] ANOMALY: use of REX\.w is meaningless \(default operand size is 64\)\s*$/i.test(line.trim())).join('\n').trim();
             if (code !== 0) return finish(desktopControlExecutionError(Buffer.concat(stderr).toString('utf8').trim() || 'Windows 可访问性驱动执行失败。', 'LOCAL_DESKTOP_CONTROL_DRIVER_FAILED', 502));
             try { finish(null, JSON.parse(output.split(/\r?\n/).filter(Boolean).at(-1) || '{}')); }
             catch (_) { finish(desktopControlExecutionError('Windows 可访问性驱动返回格式无效。', 'LOCAL_DESKTOP_CONTROL_OUTPUT_INVALID', 502)); }
         });
         const timer = setTimeout(() => {
-            try { child.kill('SIGKILL'); } catch (_) {}
-            finish(desktopControlExecutionError('Windows 可访问性操作超时。', 'LOCAL_DESKTOP_CONTROL_TIMEOUT', 504));
+            terminate(desktopControlExecutionError('Windows 可访问性操作超时，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_TIMEOUT', 504));
         }, Math.min(Math.max(Number(timeoutMs) || 30000, 100), 30000));
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) abort();
     });
 }
 
-async function runLocalDesktopControlTask({ toolName, input, grant, confirmAction, platform = process.platform, runner = runPowerShell } = {}) {
+async function runLocalDesktopControlTask({ toolName, input, grant, confirmAction, assertAuthorization, signal, platform = process.platform, runner = runPowerShell } = {}) {
     if (!isLocalDesktopControlTool(toolName)) throw desktopControlExecutionError('不支持的原生桌面控制工具。', 'LOCAL_DESKTOP_CONTROL_TOOL_INVALID');
     if (!isNativeDesktopControlAvailable(platform)) throw desktopControlExecutionError('当前平台没有已认证的原生桌面可访问性驱动。', 'LOCAL_DESKTOP_CONTROL_UNAVAILABLE', 503);
     const task = normalizeDesktopControlTask(toolName, input, grant);
+    if (signal?.aborted) throw desktopControlExecutionError('本机桌面操作已停止，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_STOPPED', 409);
     if (typeof confirmAction !== 'function') throw desktopControlExecutionError('原生桌面控制缺少本机确认通道。', 'LOCAL_DESKTOP_CONTROL_CONFIRMATION_UNAVAILABLE', 409);
-    if (await confirmAction({ kind: task.action, title: '确认原生桌面应用操作', message: `将对当前前台授权应用执行 ${task.action}。`, application: task.grant.label, target: task.target || null }) !== true) {
+    const label = { 'desktop.inspect':'读取控件摘要', 'desktop.screenshot':'截取窗口并回传给当前服务', 'desktop.click':'点击控件', 'desktop.type':'填写字段', 'desktop.wait':'等待控件' }[task.action];
+    if (await confirmAction({ kind: task.action, title: '确认原生桌面应用操作', message: `将对当前前台授权应用${label}。`, application: task.grant.label, target: task.target || null, text: task.action === 'desktop.type' ? task.text : undefined }) !== true) {
         throw desktopControlExecutionError('用户取消了原生桌面应用操作。', 'LOCAL_DESKTOP_CONTROL_USER_CANCELLED', 409);
     }
-    const result = await runner(WINDOWS_ACCESSIBILITY_SCRIPT, task, { timeoutMs: task.timeoutMs });
+    if (signal?.aborted) throw desktopControlExecutionError('本机桌面操作已停止，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_STOPPED', 409);
+    if (typeof assertAuthorization === 'function') await assertAuthorization();
+    if (signal?.aborted) throw desktopControlExecutionError('本机桌面操作已停止，请核对目标应用状态。', 'LOCAL_DESKTOP_CONTROL_STOPPED', 409);
+    const result = await runner(WINDOWS_ACCESSIBILITY_SCRIPT, task, { timeoutMs: task.timeoutMs, signal });
     if (result?.ok !== true) throw desktopControlExecutionError(result?.error?.message || '原生桌面可访问性驱动失败。', result?.error?.code || 'LOCAL_DESKTOP_CONTROL_DRIVER_FAILED', 502);
     return result.result;
 }

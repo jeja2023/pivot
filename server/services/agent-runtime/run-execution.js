@@ -991,7 +991,7 @@ const {
     }
 }
 
-    return { runAgent };
+    return { runAgent: require('./helper-context').withHelperBrowserContext(runAgent,getRunForUser) };
 }
 
 module.exports = { createAgentRunner };

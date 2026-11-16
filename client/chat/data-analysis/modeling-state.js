@@ -17,6 +17,8 @@
         paletteCollapsed: Boolean(window.matchMedia?.('(max-width: 760px)')?.matches),
         paletteTab: 'datasets',
         datasetSearch: '',
+        datasetFilterMode: 'all',
+        datasetDisplayLimit: 30,
         fieldSearch: '',
         fnCategory: 'all',
         previewOpen: false,
@@ -24,6 +26,9 @@
         previewNodeId: '',
         previewData: null,
         previewError: '',
+        previewTab: 'output',
+        previewLocalSample: false,
+        previewExpanded: false,
         schemaCache: Object.create(null),
         epoch: 0,
         requests: new Map(),
@@ -74,6 +79,8 @@
         state.selectedRelationId = '';
         state.selectedFlowEdgeId = '';
         state.datasetSearch = '';
+        state.datasetFilterMode = 'all';
+        state.datasetDisplayLimit = 30;
         state.fieldSearch = '';
         state.fnCategory = 'all';
         state.previewOpen = false;
@@ -81,6 +88,9 @@
         state.previewNodeId = '';
         state.previewData = null;
         state.previewError = '';
+        state.previewTab = 'output';
+        state.previewLocalSample = false;
+        state.previewExpanded = false;
         state.dataRevision++;
         state.previewStale = false;
         state.nodeJob = null;

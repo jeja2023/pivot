@@ -150,3 +150,72 @@ test('本机连接器优先使用注入的 ensureRegistered 并支持并发防�
     // 确认未再发出 /api/agents/local-devices 请求（已委托给外部并完成）
     assert.equal(requests.some(r => r.path === '/api/agents/local-devices'), false);
 });
+
+test('停止期间迟到的领取不能执行，重新启动必须重新登记', async () => {
+    let resolveClaim, enteredClaim, registrations = 0, executions = 0;
+    const claimEntered = new Promise(resolve => { enteredClaim = resolve; });
+    const claimGate = new Promise(resolve => { resolveClaim = resolve; });
+    const connector = createLocalMcpConnector({
+        identity: mockIdentity,
+        ensureRegistered: async () => { registrations++; },
+        request: async ({ path }) => {
+            if (path === '/api/agents/local-devices/challenge') return { status: 200, data: { nonce: 'nonce' } };
+            if (path.endsWith('/heartbeat')) return { status: 200, data: {} };
+            if (path.endsWith('/tasks/claim')) { enteredClaim(); return claimGate; }
+            return { status: 200, data: {} };
+        },
+        getLocalAuthorizationStatus: () => ({ grants: { local_desktop_control: { authorized: true } } }),
+        executeLocalTool: async () => { executions++; }
+    });
+    const run = connector.runOnce(); await claimEntered;
+    const drained = connector.stopAndDrain();
+    resolveClaim({ status: 200, data: { status: 'claimed', claimToken: 'claim', task: { id: 'old', toolName: 'desktop.click', input: {} } } });
+    await assert.rejects(run, { code: 'LOCAL_CONNECTOR_STOPPED' });
+    await drained;
+    assert.equal(executions, 0);
+    await connector.sync();
+    assert.equal(registrations, 2);
+});
+
+test('停止后等待已开始的本机执行结束，不向新会话回传旧结果', async () => {
+    let release, started, completed = false;
+    const entered = new Promise(resolve => { started = resolve; });
+    const work = new Promise(resolve => { release = resolve; });
+    const connector = createLocalMcpConnector({
+        identity: mockIdentity,
+        ensureRegistered: async () => {},
+        request: async ({ path }) => {
+            if (path === '/api/agents/local-devices/challenge') return { status: 200, data: { nonce: 'nonce' } };
+            if (path.endsWith('/tasks/claim')) return { status: 200, data: { status: 'claimed', claimToken: 'claim', task: { id: 'old', toolName: 'desktop.click', input: {} } } };
+            if (path.endsWith('/result')) completed = true;
+            return { status: 200, data: {} };
+        },
+        getLocalAuthorizationStatus: () => ({ grants: { local_desktop_control: { authorized: true } } }),
+        executeLocalTool: async () => { started(); await work; return {}; }
+    });
+    const run = connector.runOnce(); await entered;
+    let finished = false;
+    const drained = connector.stopAndDrain().then(() => { finished = true; });
+    await Promise.resolve(); assert.equal(finished, false);
+    release(); await assert.rejects(run, { code: 'LOCAL_CONNECTOR_STOPPED' }); await drained;
+    assert.equal(completed, false);
+});
+
+test('停止并排空也等待手动授权同步结束，旧同步不能登记为新会话', async () => {
+    let release, entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const connector = createLocalMcpConnector({
+        identity: mockIdentity,
+        ensureRegistered: async () => { entered(); await gate; },
+        request: async () => ({ status: 200, data: { nonce: 'nonce' } }),
+        getLocalAuthorizationStatus: () => ({ grants: {} }),
+        executeLocalTool: async () => {}
+    });
+    const syncing = connector.sync(); await started;
+    let finished = false;
+    const drained = connector.stopAndDrain().then(() => { finished = true; });
+    await Promise.resolve(); assert.equal(finished, false);
+    release(); await assert.rejects(syncing, { code: 'LOCAL_CONNECTOR_STOPPED' }); await drained;
+    assert.equal(finished, true);
+});

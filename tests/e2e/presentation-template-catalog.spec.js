@@ -28,7 +28,11 @@ test('统一模板入口保留历史版本，深色封面在画布、缩略图�
     await expect(page.locator('#presentation-catalog-body')).not.toContainText('森林绿简报');
     await page.locator('#presentation-catalog-tabs [data-catalog-group="theme"]').click();
     await expect(page.locator('#presentation-catalog-body')).toContainText('森林绿简报');
+    // 点击模板弹窗外部遮罩层与按 Esc 键均不能关闭，必须点击关闭按钮。
+    await page.locator('#presentation-catalog-modal').click({ position: { x: 8, y: 8 } });
+    await expect(page.locator('#presentation-catalog-modal')).toBeVisible();
     await page.getByRole('dialog', { name: '演示模板库' }).getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(page.locator('#presentation-catalog-modal')).toBeHidden();
     const evidence = process.env.E2E_PPT_TEMPLATE_EVIDENCE_DIR || testInfo.outputPath('evidence'); await fs.mkdir(evidence, { recursive: true });
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     let darkDocument;

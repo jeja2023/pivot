@@ -10,7 +10,7 @@ const { listAgentSkillsForUser } = require('../server/services/agent-skills');
 const { createStandaloneArtifact } = require('../server/services/agent-artifacts');
 const { deleteSkillReleasePermission, listSkillReleasePermissions, upsertSkillReleasePermission } = require('../server/services/agent-skill-access');
 const { recordSigningEnvelope } = require('../server/services/agent-skill-signing');
-const { claimConnectorTask, completeConnectorTask, createConnectorTask, heartbeatConnector, waitForConnectorTask } = require('../server/services/agent-local-connector');
+const { claimConnectorTask, completeConnectorTask, createConnectorTask, heartbeatConnector, listConnectorDevices, reclaimConnectorTasks, waitForConnectorTask } = require('../server/services/agent-local-connector');
 const { handleWorkspaceMemorySourceEvent } = require('../server/services/workspace-memory-source-lifecycle');
 const { listCachedMcpTools } = require('../server/services/mcp-client');
 const { issueExecutionGrant } = require('../server/services/agent-execution-grant');
@@ -692,6 +692,57 @@ test('本机浏览器连接器要求设备、授权浏览器和精确站点白�
     } finally {
         if (taskId) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = $1', [taskId]);
         await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
+    }
+});
+
+test('离线设备不显示为在线且不能接收显式指定的桌面操作', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-desktop-online-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_desktop_online_${suffix}`)), tenant_id: tenantId };
+    const deviceId = `device-${suffix}-desktop-online`; let taskId;
+    try {
+        await registerTestDevice(user, deviceId);
+        await heartbeatConnector(user, { deviceId, grants: { local_desktop_control: { authorized: true, windowTitle: '测试应用', processName: 'fixture.exe' } } });
+        await pool().query("UPDATE agent_local_devices SET last_seen_at=NOW()-INTERVAL '5 minutes' WHERE device_id=$1", [deviceId]);
+        assert.ok(!(await listConnectorDevices(user)).some(device => device.deviceId === deviceId));
+        await assert.rejects(() => createConnectorTask('desktop.inspect', { deviceId }, user), { code: 'LOCAL_CONNECTOR_DEVICE_OFFLINE' });
+        await pool().query('UPDATE agent_local_devices SET last_seen_at=NOW() WHERE device_id=$1', [deviceId]);
+        assert.ok((await listConnectorDevices(user)).some(device => device.deviceId === deviceId));
+        taskId = (await createConnectorTask('desktop.inspect', { deviceId }, user)).id;
+    } finally {
+        if (taskId) await pool().query('DELETE FROM agent_local_connector_tasks WHERE id=$1', [taskId]);
+        await pool().query('DELETE FROM agent_local_connector_grants WHERE device_id=$1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id=$1', [deviceId]);
+        await pool().query('DELETE FROM agent_local_devices WHERE device_id=$1', [deviceId]);
+    }
+});
+
+test('原生桌面操作租约失效后不自动重放，普通只读任务仍可恢复', skipWithoutDatabase, async () => {
+    const tenantId = await ensureTenant(`pivot-tenant-desktop-lease-${suffix}`);
+    const user = { ...(await ensureUser(`pivot_desktop_lease_${suffix}`)), tenant_id: tenantId };
+    const deviceId = `device-${suffix}-desktop-lease`, ids = ['desktop', 'readonly'].map(name => `${name}-${suffix}`);
+    try {
+        await registerTestDevice(user, deviceId);
+        const oldToken = 'desktop-old-claim-token', tokenHash = crypto.createHash('sha256').update(oldToken).digest('hex');
+        for (const [index, grantType, toolName] of [[0, 'local_desktop_control', 'desktop.click'], [1, 'local_report_dir', 'reports.list_files']]) {
+            await pool().query(`INSERT INTO agent_local_connector_tasks
+                (id, tenant_id, user_id, device_id, grant_type, tool_name, input_digest, state, attempt_count, claim_token_hash, lease_expires_at, expires_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,'claimed',1,$7,NOW()-INTERVAL '1 minute',NOW()+INTERVAL '2 minutes')`,
+            [ids[index], tenantId, user.id, deviceId, grantType, toolName, tokenHash]);
+        }
+        await assert.rejects(() => completeConnectorTask(user, ids[0], { deviceId, claimToken: oldToken, success: true, result: {} }), { code: 'LOCAL_CONNECTOR_CLAIM_INVALID' });
+        await assert.rejects(() => completeConnectorTask(user, ids[0], { deviceId, claimToken: oldToken, success: false, error: { message: '迟到错误' } }), { code: 'LOCAL_CONNECTOR_CLAIM_INVALID' });
+        await reclaimConnectorTasks();
+        const rows = await pool().query('SELECT id, state, failure_code, claim_token_hash FROM agent_local_connector_tasks WHERE id = ANY($1)', [ids]);
+        const desktop = rows.rows.find(row => row.id === ids[0]), readonly = rows.rows.find(row => row.id === ids[1]);
+        assert.equal(desktop.state, 'failed');
+        assert.equal(desktop.failure_code, 'LOCAL_CONNECTOR_EXECUTION_UNCERTAIN');
+        assert.equal(desktop.claim_token_hash, null);
+        assert.equal(readonly.state, 'pending');
+        await assert.rejects(() => completeConnectorTask(user, ids[0], { deviceId, claimToken: oldToken, success: true, result: {} }), { code: 'LOCAL_CONNECTOR_CLAIM_INVALID' });
+    } finally {
+        await pool().query('DELETE FROM agent_local_connector_tasks WHERE id = ANY($1)', [ids]);
         await pool().query('DELETE FROM agent_local_device_nonces WHERE device_id = $1', [deviceId]);
         await pool().query('DELETE FROM agent_local_devices WHERE device_id = $1', [deviceId]);
     }

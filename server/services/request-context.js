@@ -5,7 +5,8 @@ const storage = new AsyncLocalStorage();
 function runWithRequestContext(context, callback) {
     return storage.run({
         requestId: String(context?.requestId || ''),
-        userId: context?.userId ?? null
+        userId: context?.userId ?? null,
+        helperBrowserKey: context?.helperBrowserKey || ''
     }, callback);
 }
 

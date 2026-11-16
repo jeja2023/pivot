@@ -18,7 +18,7 @@
             const modelId = rescue ? m.value(form, 'modelId') : state.selected.id, recipientId = Number(m.value(form, 'recipientId'));
             const preview = await request(`/models/${encodeURIComponent(modelId)}/transfer-preview`, json({ recipientId }));
             if (current()) setTimeout(() => { if (current()) confirmRequest(preview, recipientId); }, 0);
-        });
+        }, { hideCancel: !rescue });
     }
 
     function confirmRequest(preview, recipientId) {

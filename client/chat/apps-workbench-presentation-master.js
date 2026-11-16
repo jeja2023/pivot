@@ -17,9 +17,16 @@
         }
         return el;
     }
-    function closeModal() {
+    function closeModal({ preserveForm = false } = {}) {
         preparation?.abort(); ++epoch;
-        byId('presentation-master-modal').classList.add('hidden'); returnFocus?.focus();
+        const modal = byId('presentation-master-modal');
+        modal.classList.add('hidden');
+        if (!preserveForm) {
+            window.Pivot.moduleApi('apps.presentations.masterForm').reset();
+            selectedTemplate = null;
+            delete modal.dataset.goalTarget; delete modal.dataset.goalSource; delete modal.dataset.goalTask; delete modal.dataset.budgetTask;
+        }
+        returnFocus?.focus();
     }
     function post(body) { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }; }
 
@@ -50,7 +57,7 @@
             const changeBtn = node('button', 'btn-secondary presentation-master-hero-btn', '更换模板');
             changeBtn.type = 'button';
             changeBtn.addEventListener('click', () => {
-                closeModal();
+                closeModal({ preserveForm: true });
                 window.Pivot.moduleApi('apps.presentations.catalog')?.open('engine');
             });
 
@@ -80,7 +87,7 @@
             const pickBtn = node('button', 'btn-secondary presentation-master-hero-btn', '从模板库挑选模板');
             pickBtn.type = 'button';
             pickBtn.addEventListener('click', () => {
-                closeModal();
+                closeModal({ preserveForm: true });
                 window.Pivot.moduleApi('apps.presentations.catalog')?.open('engine');
             });
             actions.append(pickBtn);
@@ -105,7 +112,7 @@
         const headerSubtitle = node('p', 'presentation-master-header-subtitle', '基于多模态大模型的工业级高保真 PPT 制作引擎 · 交付原生矢量可编辑演示文稿');
         headerInfo.append(headerTitleRow, headerSubtitle);
 
-        const close = node('button', 'btn-secondary workspace-modal-close', '关闭'); close.type = 'button'; close.addEventListener('click', closeModal);
+        const close = node('button', 'btn-secondary workspace-modal-close', '关闭'); close.type = 'button'; close.addEventListener('click', () => closeModal());
         header.append(headerInfo, close);
 
         const body = node('div', 'workspace-modal-body');
@@ -160,7 +167,7 @@
     async function open(options = {}) {
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-goals.js');
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-form.js');
-        preparation?.abort(); ++epoch; returnFocus = document.activeElement;
+        preparation?.abort(); const sequence = ++epoch; returnFocus = document.activeElement;
         ensureModal(); byId('presentation-master-modal').classList.remove('hidden');
         const actor = String(window.Pivot.legacy?.currentUser?.id || ''), ownerModal = byId('presentation-master-modal');
         if (ownerModal.dataset.owner !== actor) {
@@ -193,19 +200,21 @@
         renderTemplateCard();
 
         await window.Pivot?.legacy?.PivotAppModels?.refresh?.('presentations', 'presentation-master-model');
-        if (!byId('presentation-master-title').value) byId('presentation-master-title').value = state.active?.title || '演示文稿';
+        if (sequence !== epoch) return;
         const { engine } = await helpers.requestJson(API + '/info');
+        if (sequence !== epoch) return;
         byId('presentation-master-start').disabled = !engine.enabled;
         if (!engine.enabled) {
             const fallback = node('button', 'btn-secondary', '使用标准演示制作'); fallback.type = 'button';
             fallback.addEventListener('click', () => { const profile = window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master'); closeModal(); helpers.openCreateModal(); window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-create', profile); });
             byId('presentation-master-status').replaceChildren(node('p', '', '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。'), fallback);
         }
-        else if (task && task.request?.presentationId === (state.active?.id || '')) await poll(task.id, ++epoch);
+        else if (task && (['working', 'input_required'].includes(task.status) || task.recoverable) && task.request?.presentationId === (state.active?.id || '')) await poll(task.id, ++epoch);
         else {
             task = null;
             const data = await helpers.requestJson(API + '/tasks/latest?presentationId=' + encodeURIComponent(state.active?.id || ''));
-            if (data.task) { task = data.task; await poll(task.id, ++epoch); }
+            if (sequence !== epoch) return;
+            if (data.task && (['working', 'input_required'].includes(data.task.status) || data.task.recoverable)) { task = data.task; await poll(task.id, ++epoch); }
             else renderEngineReady();
         }
     }
@@ -217,6 +226,8 @@
         try {
             const title = byId('presentation-master-title').value.trim(), instruction = byId('presentation-master-instruction').value.trim(), modelId = byId('presentation-master-model').value;
             if (!title || !instruction || !modelId) throw new Error('请填写名称和制作要求，并选择模型。');
+            const budget = byId('presentation-master-budget');
+            if (!budget.validity.valid || !Number.isSafeInteger(Number(budget.value)) || !budget.value) throw new Error('累计模型预算请填写不小于10000的有效整数。');
             const files = [...(byId('presentation-master-source').files || [])];
             if (files.length > 21) throw new Error('单次最多提供21个原稿和补充素材。');
             const form = window.Pivot.moduleApi('apps.presentations.masterForm'), snapshot = form.snapshot(), template = selectedTemplate;
@@ -253,10 +264,6 @@
         if (['working'].includes(task.status) && !byId('presentation-master-modal').classList.contains('hidden')) window.setTimeout(() => poll(id, sequence).catch(showError), 1500);
     }
     function renderTask(value) {
-        const modal = byId('presentation-master-modal');
-        if (!state.active?.content?.metadata?.productionProfile && value.request?.productionProfile && String(value.request.presentationId || '') === (state.active?.id || '') && modal.dataset.goalTask !== value.id) {
-            window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-master', value.request.productionProfile); modal.dataset.goalTask = value.id;
-        }
         const panel = byId('presentation-master-status'); panel.replaceChildren();
         const head = node('div', 'presentation-master-task-head');
         const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: '需要人工确认', completed: '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
@@ -264,6 +271,26 @@
         panel.appendChild(head);
         panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
         panel.appendChild(node('p', 'presentation-empty-note', `步骤 ${value.steps || 0}；累计模型用量约 ${value.usedTokens || 0} 令牌。`));
+        const modal = byId('presentation-master-modal');
+        if (value.recoverable && modal.dataset.budgetTask !== value.id && Number.isSafeInteger(value.request?.tokenBudget)) {
+            byId('presentation-master-budget').value = value.request.tokenBudget;
+            modal.dataset.budgetTask = value.id;
+        }
+        if (Array.isArray(value.usageDiagnostics) && value.usageDiagnostics.length) {
+            const details = node('details'), list = node('ol');
+            details.appendChild(node('summary', '', '查看每轮模型用量'));
+            for (const item of value.usageDiagnostics) {
+                const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
+                list.appendChild(node('li', '', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）：输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}；预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`));
+            }
+            details.appendChild(list); panel.appendChild(details);
+        }
+        if (value.recoverable && value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED') {
+            const budget = byId('presentation-master-budget');
+            const current = Number(value.request?.tokenBudget || 0);
+            budget.closest('details').open = true;
+            panel.appendChild(node('p', 'presentation-empty-note', `本任务累计预算为 ${current} 令牌；请在“高级设置”中提高累计预算，再点击“从检查点继续”。`));
+        }
         if (['working', 'input_required'].includes(value.status)) {
             const cancel = node('button', 'btn-secondary', '停止制作'); cancel.type = 'button';
             cancel.addEventListener('click', async () => { cancel.disabled = true; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); task = data.task; renderTask(task); } catch (error) { showError(error); } }); panel.appendChild(cancel);
@@ -278,12 +305,17 @@
         if (value.recoverable) {
             const resume = node('button', 'btn-secondary', '从检查点继续'); resume.type = 'button';
             resume.addEventListener('click', async () => { resume.disabled = true; try {
+                const budget = byId('presentation-master-budget');
+                if (!budget.value || !budget.validity.valid || !Number.isSafeInteger(Number(budget.value))) throw new Error('累计模型预算请填写不小于10000的有效整数。');
+                if (value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED' && Number(budget.value) <= Number(value.request?.tokenBudget || 0)) {
+                    throw new Error('请先在高级设置中增加累计模型预算。');
+                }
                 await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', post({
-                    tokenBudget: Math.max(Number(byId('presentation-master-budget').value), Number(value.request?.tokenBudget || 0)),
+                    tokenBudget: Math.max(Number(budget.value), Number(value.request?.tokenBudget || 0)),
                     maxSteps: Math.max(Number(byId('presentation-master-steps').value), Number(value.request?.maxSteps || 0))
                 }));
                 await poll(value.id, ++epoch);
-            } catch (error) { showError(error); } }); panel.appendChild(resume);
+            } catch (error) { resume.disabled = false; panel.appendChild(node('p', '', errorText(error))); } }); panel.appendChild(resume);
         }
         const actionRow = node('div', 'presentation-master-task-actions');
         for (const file of value.result?.files || []) {
@@ -297,7 +329,7 @@
             if (file.format === 'pptx') {
                 const edit = node('button', 'btn-secondary', '在浏览器编辑原生对象'); edit.type = 'button';
                 edit.addEventListener('click', () => {
-                    byId('presentation-master-modal').classList.add('hidden');
+                    closeModal();
                     window.Pivot.moduleApi('apps.presentations.native').open({ sourceRenditionId: String(file.renditionId), title: value.request?.title || '完整制作结果' }).catch(showError);
                 }); actionRow.appendChild(edit);
             }

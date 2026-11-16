@@ -6,7 +6,7 @@ const {
     localDesktopControlToolDefinitions,
     normalizeDesktopControlTask
 } = require('../server/services/local-desktop-control-tools');
-const { desktopControlEnvironment, runLocalDesktopControlTask } = require('../desktop/local-desktop-control');
+const { desktopControlEnvironment, runLocalDesktopControlTask, runPowerShell } = require('../desktop/local-desktop-control');
 const { WINDOWS_ACCESSIBILITY_SCRIPT } = require('../desktop/local-desktop-control');
 
 const grant = { windowTitle: 'Pivot Fixture', processName: 'pivot-fixture.exe', label: 'Fixture App' };
@@ -72,4 +72,37 @@ test('native desktop control requires confirmation and delegates only a typed ac
         () => runLocalDesktopControlTask({ toolName: 'desktop.inspect', input: {}, grant, platform: 'linux', confirmAction: async () => true }),
         error => error.code === 'LOCAL_DESKTOP_CONTROL_UNAVAILABLE'
     );
+});
+
+test('停止发生在本机确认期间时，确认返回后不能启动桌面动作', async () => {
+    const controller = new AbortController(); let answer, called = false;
+    const confirming = new Promise(resolve => { answer = resolve; });
+    const task = runLocalDesktopControlTask({ toolName: 'desktop.click', input: { target: { name: '保存' } }, grant, platform: 'win32', signal: controller.signal,
+        confirmAction: () => confirming, runner: async () => { called = true; return { ok: true }; } });
+    controller.abort(); answer(true);
+    await assert.rejects(task, { code: 'LOCAL_DESKTOP_CONTROL_STOPPED' });
+    assert.equal(called, false);
+});
+
+test('停止信号会终止在途的 Windows 驱动并返回结果不明提示', async () => {
+    const { EventEmitter } = require('node:events');
+    const controller = new AbortController(); let killed = false;
+    const child = new EventEmitter(); child.pid = 123; child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    child.kill = () => { killed = true; };
+    const task = runPowerShell('script', { action: 'desktop.click' }, { signal: controller.signal, spawnProcess: () => child });
+    controller.abort();
+    let settled = false; task.catch(() => { settled = true; });
+    await Promise.resolve(); assert.equal(settled, false);
+    child.emit('close', 1);
+    await assert.rejects(task, { code: 'LOCAL_DESKTOP_CONTROL_STOPPED' });
+    assert.equal(killed, true);
+});
+
+test('本机确认期间授权被撤销时不启动驱动', async () => {
+    let authorized = true, called = false;
+    await assert.rejects(() => runLocalDesktopControlTask({ toolName: 'desktop.click', input: { target: { name: '保存' } }, grant, platform: 'win32',
+        confirmAction: async () => { authorized = false; return true; },
+        assertAuthorization: () => { if (!authorized) throw Object.assign(new Error('授权已撤销'), { code: 'LOCAL_DESKTOP_CONTROL_GRANT_CHANGED' }); },
+        runner: async () => { called = true; return { ok: true }; } }), { code: 'LOCAL_DESKTOP_CONTROL_GRANT_CHANGED' });
+    assert.equal(called, false);
 });

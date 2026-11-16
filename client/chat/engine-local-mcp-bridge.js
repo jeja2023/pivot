@@ -126,6 +126,11 @@ async function syncChatLocalMcpBridgeBeforeSend() {
     // v2 桌面连接器在 Electron 主进程独立执行签名心跳与任务轮询；网页不再上报
     // 自报 deviceId 或授权快照，避免旧内存桥接成为身份旁路。
     const desktop = window.pivotDesktop;
+    if (!desktop) {
+        const helper = await window.Pivot?.moduleApi('local.helper')?.status?.().catch(() => null);
+        updateChatLocalMcpBridgeDebug({status:helper?.available?'persistent_connector_synced':'persistent_connector_unavailable',hasDesktopBridge:false,hasStatusBridge:Boolean(helper),hasExecuteBridge:helper?.available===true,statusAvailable:helper?.available===true,deviceName:helper?.deviceName||'',reason:helper?.message||'请在工具库本机授权中心配对 Windows 独立助手。'});
+        return null;
+    }
     const authorization = typeof desktop?.getLocalAuthorizationStatus === 'function'
         ? await desktop.getLocalAuthorizationStatus().catch(() => null)
         : null;

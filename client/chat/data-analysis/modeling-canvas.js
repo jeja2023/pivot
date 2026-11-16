@@ -46,6 +46,16 @@
         };
     };
 
+    function applyCanvasZoom(svg, nextZoom) {
+        if (!svg) return;
+        const size = bounds();
+        zoom = Math.max(0.4, Math.min(2, Number(nextZoom.toFixed(2))));
+        svg.setAttribute('width', Math.round(size.width * zoom));
+        svg.setAttribute('height', Math.round(size.height * zoom));
+        const labelEl = byId('modeling-canvas-zoom');
+        if (labelEl) labelEl.textContent = `${Math.round(zoom * 100)}%`;
+    }
+
     function assertDataset(datasetId) {
         editable();
         if (!app.state.datasets.some(dataset => dataset.id === datasetId)) throw new Error('该数据集已不可用，请刷新来源后重试。');
@@ -153,6 +163,9 @@
             const keyInfo = node.grainKeys?.length ? `已设 ${node.grainKeys.length} 个主键` : (node.role === 'fact' ? '待设粒度键' : '待设主键');
             subText = `${colCount} 列 · ${keyInfo}`;
         }
+        const grainNote = !isFlow && node.role === 'fact' && state.draft?.grainDescription
+            ? ` · 粒度：${state.draft.grainDescription}`
+            : '';
 
         const isActiveOut = connection && connection.nodeId === node.id;
         const inPort = nodeHasInputPort(node)
@@ -163,6 +176,7 @@
         const cls = [
             'modeling-graph-node',
             isFlow ? `is-operator is-op-${node.kind}` : (node.role === 'fact' ? 'is-fact' : 'is-dimension'),
+            !isFlow && !node.grainKeys?.length ? 'is-needs-grain' : '',
             node.id === state.selectedNodeId ? 'is-selected' : '',
             state.previewOpen && state.previewNodeId === node.id ? 'is-previewing' : ''
         ].filter(Boolean).join(' ');
@@ -172,7 +186,7 @@
             <rect class="modeling-node-accent" x="1" y="1" width="5" height="${CARD_HEIGHT - 2}" rx="3"/>
             <rect class="modeling-node-badge-bg" x="14" y="13" width="${badgeWidth}" height="20" rx="5"/>
             <text class="modeling-node-badge-text" x="${14 + Math.round(badgeWidth / 2)}" y="27" text-anchor="middle">${esc(badgeText)}</text>
-            <title>${esc(`${badgeText}：${node.name}（${subText}）`)}</title>
+            <title>${esc(`${badgeText}：${node.name}（${subText}${grainNote}）`)}</title>
             <text class="modeling-canvas-heading" x="${22 + badgeWidth}" y="27">${esc(displayTitle)}</text>
             <text class="modeling-canvas-subtext" x="14" y="56">${esc(subText.slice(0, 24))}</text>
             ${inPort}${outPort}
@@ -205,42 +219,85 @@
         return `<svg id="modeling-graph" class="modeling-graph" width="${Math.round(size.width * zoom)}" height="${Math.round(size.height * zoom)}" viewBox="0 0 ${size.width} ${size.height}" preserveAspectRatio="xMinYMin meet" role="group" aria-label="可视化数据建模画布；点击节点打开右侧配置抽屉，拖动端点建立连线"><defs><marker id="modeling-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z"/></marker></defs>${relationLinks}${operatorLinks}${defCards}${opCards}</svg>`;
     }
 
+    function getFilteredDatasets() {
+        const datasets = app.state.datasets || [];
+        const used = new Set((state.draft?.nodes || []).map(node => node.datasetId));
+        const keyword = String(state.datasetSearch || '').trim().toLocaleLowerCase();
+        const onlyUnused = state.datasetFilterMode === 'unused';
+        const filtered = datasets.filter(ds => {
+            if (onlyUnused && used.has(ds.id)) return false;
+            return !keyword || String(ds.name || '').toLocaleLowerCase().includes(keyword);
+        });
+        return { datasets, used, keyword, onlyUnused, filtered };
+    }
+
+    function renderDatasetPaletteItems() {
+        const editing = canEdit();
+        const { datasets, used, onlyUnused, filtered } = getFilteredDatasets();
+        const limit = Math.max(30, Number(state.datasetDisplayLimit || 30));
+        const visible = filtered.slice(0, limit);
+        const dsButtons = visible.map(dataset => {
+            const inModel = used.has(dataset.id);
+            const colCount = Array.isArray(dataset.columns) && dataset.columns.length ? `${dataset.columns.length} 列` : '';
+            const rowCount = dataset.rowCount ? ` · ${dataset.rowCount} 行` : '';
+            return `<button class="btn-secondary modeling-source-item${inModel ? ' is-used' : ''}" type="button" draggable="${editing && !inModel}" data-canvas-action="add-dataset" data-canvas-dataset="${esc(dataset.id)}"${!editing || inModel ? ' disabled' : ''} title="${esc(inModel ? `${dataset.name}${rowCount}（已加入画布）` : `拖拽到画布或点击添加「${dataset.name}」为维度表${rowCount}`)}">
+                <span class="modeling-source-dot" aria-hidden="true"></span>
+                <span class="modeling-source-name">${esc(dataset.name)}</span>
+                <span class="modeling-source-tag${inModel ? ' is-joined' : ''}">${esc(inModel ? '已加入' : colCount || '+ 维度')}</span>
+            </button>`;
+        }).join('');
+        const remaining = filtered.length - visible.length;
+        const moreBtn = remaining > 0
+            ? `<button class="btn-secondary modeling-source-more" type="button" data-modeling-action="dataset-show-more">展开更多（剩余 ${remaining} 个）</button>`
+            : '';
+        if (dsButtons) return dsButtons + moreBtn;
+        const emptyText = datasets.length
+            ? (onlyUnused ? '全部可用数据集已加入画布' : '未找到匹配的数据集')
+            : '暂无可用数据集';
+        return `<div class="modeling-empty-inline"><p>${emptyText}</p>${datasets.length ? '' : '<button class="btn-secondary" type="button" data-modeling-action="goto-analysis">去上传数据集</button>'}</div>`;
+    }
+
+    function updateDatasetPaletteDom() {
+        const listEl = byId('modeling-palette-datasets-list');
+        if (!listEl || !state.draft) return;
+        const { datasets, keyword, onlyUnused, filtered } = getFilteredDatasets();
+        const countEl = byId('modeling-dataset-count');
+        if (countEl) countEl.textContent = (keyword || onlyUnused) ? `${filtered.length} / ${datasets.length}` : `${datasets.length} 个`;
+        const filterBtn = document.querySelector('[data-modeling-action="dataset-filter-unused"]');
+        if (filterBtn) {
+            filterBtn.classList.toggle('is-selected', onlyUnused);
+            filterBtn.textContent = onlyUnused ? '全部' : '仅未加入';
+        }
+        if (typeof m.html === 'function') m.html(listEl, renderDatasetPaletteItems());
+    }
+
     function palette() {
         const editing = canEdit();
-        const used = new Set(state.draft.nodes.map(node => node.datasetId));
-        const keyword = String(state.datasetSearch || '').trim().toLocaleLowerCase();
-        const filteredDatasets = (app.state.datasets || []).filter(ds => !keyword || String(ds.name || '').toLocaleLowerCase().includes(keyword));
+        const { datasets, used, keyword, onlyUnused, filtered } = getFilteredDatasets();
 
         const opButtons = (m.OPERATOR_SPECS || []).map(spec => {
             return `<button class="btn-secondary modeling-op-item" type="button" draggable="${editing}" data-canvas-operator="${esc(spec.kind)}"${editing ? '' : ' disabled'} title="${esc(`${spec.label}：${spec.desc}（可拖入画布或点击直接添加）`)}">
-                <span class="modeling-op-badge">${esc(spec.badge)}</span>
+                <span class="modeling-op-badge is-kind-${esc(spec.kind)}">${esc(spec.badge)}</span>
                 <span class="modeling-op-label">${esc(spec.label)}</span>
             </button>`;
         }).join('');
 
-        const dsButtons = filteredDatasets.map(dataset => {
-            const inModel = used.has(dataset.id);
-            const colCount = Array.isArray(dataset.columns) && dataset.columns.length ? `${dataset.columns.length} 列` : '';
-            return `<button class="btn-secondary modeling-source-item${inModel ? ' is-used' : ''}" type="button" draggable="${editing && !inModel}" data-canvas-action="add-dataset" data-canvas-dataset="${esc(dataset.id)}"${!editing || inModel ? ' disabled' : ''} title="${esc(inModel ? `${dataset.name}（已在模型表中）` : `拖拽到画布或点击添加「${dataset.name}」为维度表`)}">
-                <span class="modeling-source-name">${esc(dataset.name)}</span>
-                <span class="modeling-source-tag">${esc(inModel ? '已加入' : colCount || '+ 维度')}</span>
-            </button>`;
-        }).join('');
-
-        return `<div class="modeling-rail-section">
+        return `<div class="modeling-rail-section modeling-palette-operators">
                 <div class="modeling-rail-head">
                     <h5>内置算子与 SQL</h5>
-                    <span class="modeling-rail-count">拖拽或点击</span>
                 </div>
                 <div class="modeling-op-grid">${opButtons}</div>
             </div>
             <div class="modeling-rail-section modeling-palette-datasets">
                 <div class="modeling-rail-head">
                     <h5>可用数据集</h5>
-                    <span class="modeling-rail-count">${(app.state.datasets || []).length} 个</span>
+                    <div class="modeling-drawer-subactions">
+                        <span id="modeling-dataset-count" class="modeling-rail-count">${(keyword || onlyUnused) ? `${filtered.length} / ${datasets.length}` : `${datasets.length} 个`}</span>
+                        ${used.size > 0 && datasets.length > 3 ? `<button class="btn-secondary modeling-mini-btn${onlyUnused ? ' is-selected' : ''}" type="button" data-modeling-action="dataset-filter-unused" title="切换仅显示未加入画布的数据集">${onlyUnused ? '全部' : '仅未加入'}</button>` : ''}
+                    </div>
                 </div>
-                ${(app.state.datasets || []).length > 4 ? `<input id="modeling-dataset-search" class="form-input modeling-compact-search" type="search" value="${esc(state.datasetSearch || '')}" placeholder="搜索数据集名称…" aria-label="搜索数据集名称">` : ''}
-                <div class="modeling-canvas-sources">${dsButtons || '<div class="modeling-empty-inline"><p>暂无匹配的数据集</p><button class="btn-secondary" type="button" data-modeling-action="goto-analysis">去上传数据集</button></div>'}</div>
+                ${datasets.length ? `<input id="modeling-dataset-search" class="form-input modeling-compact-search" type="search" value="${esc(state.datasetSearch || '')}" placeholder="筛选数据集名称…" aria-label="搜索数据集名称">` : ''}
+                <div id="modeling-palette-datasets-list" class="modeling-canvas-sources">${renderDatasetPaletteItems()}</div>
             </div>`;
     }
 
@@ -251,22 +308,22 @@
         const targetTableId = state.draft?.nodes?.some(n => n.id === state.selectedNodeId) ? state.selectedNodeId : (fact?.id || '');
         return `<div class="modeling-canvas-toolbar">
             <div class="modeling-canvas-actions">
-                <button class="btn-secondary" type="button" data-modeling-action="toggle-palette" title="展开或收起左侧算子与数据集面板">${state.paletteCollapsed ? '展开组件栏' : '收起组件栏'}</button>
-                <button class="btn-secondary${!grainReady && fact ? ' modeling-grain-pill' : ''}" type="button" data-modeling-action="node" data-modeling-id="${esc(targetTableId)}"${editing ? '' : ' disabled'}>${grainReady ? '表与粒度' : '待设主表粒度'}</button>
+                <button class="btn-secondary" type="button" data-modeling-action="toggle-palette" title="展开或收起左侧算子与数据集面板">${state.paletteCollapsed ? '组件栏' : '收起栏'}</button>
+                <button class="btn-secondary${!grainReady && fact ? ' modeling-grain-pill' : ''}" type="button" data-modeling-action="node" data-modeling-id="${esc(targetTableId)}"${editing ? '' : ' disabled'}>${grainReady ? '表与粒度' : '设主表粒度'}</button>
                 <button class="btn-secondary" type="button" data-modeling-action="add-node"${editing ? '' : ' disabled'}>+ 维度表</button>
                 <button class="btn-secondary" type="button" data-modeling-action="relation"${editing ? '' : ' disabled'}>+ 表关联</button>
             </div>
-            <span id="modeling-canvas-hint" class="modeling-canvas-hint" role="status" aria-live="polite">点击节点在右侧抽屉配置属性与函数；拖动节点右侧圆点到目标左侧圆点建立关联或算子流转。</span>
             <div class="modeling-canvas-zoom-group">
                 <button class="btn-secondary${state.previewOpen ? ' is-selected' : ''}" type="button" data-modeling-action="toggle-preview" title="打开或关闭底部节点实时数据运行预览">数据预览</button>
                 ${state.nodeJobs?.length ? '<button class="btn-secondary" type="button" data-modeling-action="show-node-jobs">节点任务</button>' : ''}
-                <button class="btn-secondary" type="button" data-canvas-action="zoom-out" aria-label="缩小关系图" title="缩小画布">缩小</button>
-                <span id="modeling-canvas-zoom" class="modeling-zoom-label">${Math.round(zoom * 100)}%</span>
-                <button class="btn-secondary" type="button" data-canvas-action="zoom-in" aria-label="放大关系图" title="放大画布">放大</button>
+                <button class="btn-secondary" type="button" data-canvas-action="zoom-out" aria-label="缩小画布" title="缩小画布">缩小</button>
+                <button id="modeling-canvas-zoom" class="btn-secondary modeling-zoom-btn" type="button" data-canvas-action="zoom-reset" title="点击重置为 100% 缩放">${Math.round(zoom * 100)}%</button>
+                <button class="btn-secondary" type="button" data-canvas-action="zoom-in" aria-label="放大画布" title="放大画布">放大</button>
                 <button class="btn-secondary" type="button" data-canvas-action="fit" title="缩放至适合当前视口">适合视口</button>
                 <button class="btn-secondary" type="button" data-canvas-action="arrange"${editing ? '' : ' disabled'} title="自动排列画布所有节点位置">自动整理</button>
             </div>
-        </div>`;
+        </div>
+        <span id="modeling-canvas-hint" class="modeling-canvas-hint" role="status" aria-live="polite"></span>`;
     }
 
     function hint(text) {
@@ -494,6 +551,7 @@
                     state.selectedRelationId = null;
                     state.selectedFlowEdgeId = null;
                     state.fieldSearch = '';
+                    state.previewLocalSample = false;
                     state.drawerMode = 'node';
                     state.drawerOpen = true;
                     m.render();
@@ -578,16 +636,40 @@
                     m.render();
                     hint('已按网格自动整理全部画布节点位置。');
                 } else {
-                    const svg = byId('modeling-graph'), size = bounds();
-                    zoom = action === 'fit'
-                        ? Math.max(0.25, Math.min(1.5, ((svg.parentElement?.clientWidth || size.width) - 24) / size.width))
-                        : Math.max(0.25, Math.min(2, zoom + (action === 'zoom-in' ? 0.25 : -0.25)));
-                    svg.setAttribute('width', Math.round(size.width * zoom));
-                    svg.setAttribute('height', Math.round(size.height * zoom));
-                    byId('modeling-canvas-zoom').textContent = `${Math.round(zoom * 100)}%`;
+                    const svg = byId('modeling-graph');
+                    if (!svg) return;
+                    const size = bounds(), wrap = svg.parentElement;
+                    const targetZoom = action === 'fit'
+                        ? Math.min(
+                            ((wrap?.clientWidth || size.width) - 24) / size.width,
+                            ((wrap?.clientHeight || size.height) - 24) / size.height
+                        )
+                        : action === 'zoom-reset'
+                            ? 1
+                            : zoom + (action === 'zoom-in' ? 0.2 : -0.2);
+                    applyCanvasZoom(svg, targetZoom);
                 }
             });
         }, true);
+
+        root.addEventListener('wheel', event => {
+            const wrap = event.target.closest?.('.modeling-graph-container');
+            const svg = byId('modeling-graph');
+            if (!wrap || !svg || !event.deltaY) return;
+            event.preventDefault();
+            const prevZoom = zoom;
+            const rect = wrap.getBoundingClientRect();
+            const pointerX = event.clientX - rect.left;
+            const pointerY = event.clientY - rect.top;
+            const ratioX = (wrap.scrollLeft + pointerX) / prevZoom;
+            const ratioY = (wrap.scrollTop + pointerY) / prevZoom;
+            const step = event.ctrlKey || event.metaKey ? 0.15 : 0.1;
+            applyCanvasZoom(svg, prevZoom + (event.deltaY < 0 ? step : -step));
+            if (zoom !== prevZoom) {
+                wrap.scrollLeft = Math.max(0, ratioX * zoom - pointerX);
+                wrap.scrollTop = Math.max(0, ratioY * zoom - pointerY);
+            }
+        }, { passive: false });
 
         root.addEventListener('keydown', event => {
             if (event.key === 'Escape') { cancelGesture(); hint('拖拽与待连接端点已取消。'); return; }
@@ -659,6 +741,7 @@
         canvasGraph: graph,
         canvasPalette: palette,
         canvasToolbar: toolbar,
+        updateDatasetPaletteDom,
         bindCanvas: bind,
         clearCanvas: () => { cancelGesture(); zoom = 1; },
         assertCanvasDataset: assertDataset,

@@ -11,6 +11,7 @@ const {
     renderPromptSections
 } = require('../server/services/agent-prompt-registry');
 const { approveStablePromptSectionDraft, resolveActivePromptSection, saveStablePromptSectionDraft } = require('../server/services/agent-prompt-registry');
+const { SVG_GENERATION_GUIDANCE } = require('../server/services/svg-generation-guidance');
 
 test('Prompt Section manifest separates stable policy from dynamic task data without retaining dynamic contents', () => {
     const stable = plannerCoreSection();
@@ -35,6 +36,9 @@ test('planner marks global policy as stable and chat/tool/world state as dynamic
     assert.equal(manifest.sections.find(item => item.key === 'agent_planner_tools').stability, 'dynamic');
     assert.equal(JSON.stringify(manifest).includes('只关注本周风险'), false);
     assert.match(messages[0].content, /PIVOT_PROMPT_SECTION_BEGIN key=agent_planner_tools/);
+    assert.ok(messages[0].content.includes(SVG_GENERATION_GUIDANCE));
+    assert.match(messages[0].content, /diagram\.render_svg（viz\.render，format=svg）/);
+    assert.match(messages[0].content, /不需要 agent\.image_generate 或外部生图 Provider/);
 });
 
 test('stable Prompt draft requires completed impact evaluation and independent admin approval before resolution', async () => {

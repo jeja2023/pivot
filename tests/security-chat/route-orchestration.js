@@ -861,8 +861,10 @@ test('聊天路由在上游流式中断时持久化助手错误消息', async ()
     }
 });
 
-test('聊天路由在用户触发不支持的能力时返回友好提示并持久化助手消息', async () => {
-    const fixture = createChatFixture({ prefix: 'chat_unsupported_cap' });
+test('聊天路由把能力请求交给模型处理并持久化回答，不再按关键词提前拒答', async () => {
+    const reply = '当前没有可调用的图片工具，我先提供猫咪的画面描述。';
+    const upstream = await startFakeUpstream({ replyChunks: [reply], intentDecision: { action: 'direct_answer', requiredCapabilities: [], routing: { knowledge: 'none', tools: 'none' } } });
+    const fixture = createChatFixture({ prefix: 'chat_unsupported_cap', upstreamUrl: upstream.url });
     const routeServer = await startChatRouteServer({ fixture });
 
     try {
@@ -872,19 +874,18 @@ test('聊天路由在用户触发不支持的能力时返回友好提示并持�
             modelId: fixture.modelId
         });
 
-        const unsupportedEvent = result.findEvent(e => e.unsupportedCapability === 'image_generation');
-        assert.ok(unsupportedEvent, '应下发能力不支持事件');
-        assert.ok(unsupportedEvent.messageId, '应包含持久化后的 messageId');
-        assert.match(unsupportedEvent.content, /图片生成/);
+        assert.equal(result.findEvent(e => e.unsupportedCapability === 'image_generation'), undefined);
+        assert.equal(result.streamedContent, reply);
         assert.ok(result.rawPayloads.includes('[DONE]'), '应正确下发 [DONE]');
 
         const messages = readSessionMessages(fixture);
         assert.equal(messages.filter(row => row.role === 'user').length, 1, '用户消息应保留');
         const assistant = messages.find(row => row.role === 'assistant');
         assert.ok(assistant, '助手消息应落库');
-        assert.match(assistant.content, /图片生成/);
+        assert.equal(assistant.content, reply);
     } finally {
         await routeServer.close();
+        await upstream.close();
         fixture.cleanup();
     }
 });

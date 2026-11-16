@@ -123,7 +123,7 @@
             for (const key of ['refreshCadence', 'maxStaleness']) state.draft[key] = m.number(form, key);
             m.changed();
             m.render();
-        });
+        }, { hideCancel: true });
     }
 
     async function pollCheck(id) {
@@ -424,6 +424,7 @@
         if (actionName === 'node-select') {
             state.selectedNodeId = id;
             state.fieldSearch = '';
+            state.previewLocalSample = false;
             state.drawerMode = 'node';
             state.drawerOpen = true;
             m.render();
@@ -435,6 +436,22 @@
             return m.runNodePreview(state.selectedNodeId || state.draft?.nodes?.[0]?.id || '');
         }
         if (actionName === 'close-preview') { state.previewOpen = false; m.render(); return; }
+        if (actionName === 'preview-tab') { state.previewTab = id === 'schema' ? 'schema' : 'output'; m.renderPreviewState?.(); return; }
+        if (actionName === 'preview-toggle-local-sample') { state.previewLocalSample = !state.previewLocalSample; m.renderPreviewState?.(); return; }
+        if (actionName === 'preview-toggle-expand') { state.previewExpanded = !state.previewExpanded; m.renderPreviewState?.(); return; }
+        if (actionName === 'dataset-filter-unused') {
+            state.datasetFilterMode = state.datasetFilterMode === 'unused' ? 'all' : 'unused';
+            state.datasetDisplayLimit = 30;
+            if (typeof m.updateDatasetPaletteDom === 'function') m.updateDatasetPaletteDom();
+            else m.render();
+            return;
+        }
+        if (actionName === 'dataset-show-more') {
+            state.datasetDisplayLimit = Number(state.datasetDisplayLimit || 30) + 30;
+            if (typeof m.updateDatasetPaletteDom === 'function') m.updateDatasetPaletteDom();
+            else m.render();
+            return;
+        }
         if (actionName === 'show-node-jobs') { state.previewOpen = true; state.nodeHistoryOpen = true; m.render(); return; }
         if (actionName === 'preview-node') return m.runNodePreview(id || state.selectedNodeId);
         if (actionName === 'materialize-node') { editable(); return m.materializeNodeDataset(id || state.selectedNodeId); }
@@ -466,6 +483,19 @@
             const fact = state.draft.nodes.find(node => node.role === 'fact');
             const column = fact ? m.columns(fact.id).find(col => col.key === id) : null;
             return m.editMetric('', { fieldKey: id, name: column ? `${column.name}合计` : '', type: 'sum', description: column ? `统计事实表「${column.name}」字段数值合计` : '' });
+        }
+        if (actionName === 'toggle-grain-key') {
+            editable();
+            const [nodeId, fieldKey] = String(id || '').split(':');
+            const node = state.draft?.nodes?.find(item => item.id === nodeId);
+            if (!node || !fieldKey) return;
+            const currentKeys = Array.isArray(node.grainKeys) ? node.grainKeys : [];
+            node.grainKeys = currentKeys.includes(fieldKey)
+                ? currentKeys.filter(item => item !== fieldKey)
+                : [...currentKeys, fieldKey];
+            m.changed();
+            m.render();
+            return;
         }
         if (actionName.startsWith('remove-')) return remove(actionName.slice(7), id);
         if (actionName === 'check' || actionName === 'run-check') return checkModel();
@@ -522,11 +552,16 @@
             }
             if (event.target.id === 'modeling-field-search') { state.fieldSearch = event.target.value; m.updateFieldSearchDom?.(); return; }
             if (event.target.id === 'modeling-dataset-search') {
-                const pos = event.target.selectionStart;
                 state.datasetSearch = event.target.value;
-                m.render();
-                const nextInput = byId('modeling-dataset-search');
-                if (nextInput) { nextInput.focus(); if (Number.isInteger(pos)) nextInput.setSelectionRange(pos, pos); }
+                state.datasetDisplayLimit = 30;
+                if (typeof m.updateDatasetPaletteDom === 'function') {
+                    m.updateDatasetPaletteDom();
+                } else {
+                    const pos = event.target.selectionStart;
+                    m.render();
+                    const nextInput = byId('modeling-dataset-search');
+                    if (nextInput) { nextInput.focus(); if (Number.isInteger(pos)) nextInput.setSelectionRange(pos, pos); }
+                }
                 return;
             }
             if (event.target.matches('[data-flow-node-name],[data-flow-cond-val],[data-flow-formula-name],[data-flow-formula-expr],[data-flow-agg-alias],[data-flow-sel-alias],#modeling-flow-sql-editor')) {
@@ -579,6 +614,7 @@
                 if (graphNode) {
                     state.selectedNodeId = graphNode.dataset.modelingGraphNode;
                     state.fieldSearch = '';
+                    state.previewLocalSample = false;
                     state.drawerMode = 'node';
                     state.drawerOpen = true;
                     m.render();

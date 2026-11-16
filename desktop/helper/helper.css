@@ -1,0 +1,25 @@
+html { height: 100%; font-size: 14px; color-scheme: light dark; }
+body { min-height: 100%; font-size: 13px; line-height: 1.5; }
+main { display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 760px; min-height: 100vh; margin: 0 auto; padding: 18px 20px; }
+.helper-header { display: grid; gap: 4px; min-width: 0; }
+h1 { font-size: 18px; font-weight: 650; line-height: 1.4; }
+h2 { margin-bottom: 10px; font-size: 14px; font-weight: 600; line-height: 1.5; }
+#status { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+#account { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+section { padding-top: 14px; border-top: 1px solid var(--border); }
+.helper-fields { display: grid; gap: 10px; }
+label { display: grid; grid-template-columns: 94px minmax(0, 1fr); align-items: center; gap: 10px; }
+label > span { color: var(--text-muted); }
+.form-input { min-width: 0; height: 34px; margin: 0; padding: 6px 10px; font-size: 13px; line-height: 20px; }
+.helper-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-left: 104px; }
+.helper-actions button { min-height: 32px; padding: 6px 12px; font-size: 12px; line-height: 20px; }
+button:disabled { cursor: default; opacity: .55; }
+.helper-note { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+section > .helper-note { margin: -4px 0 12px; }
+footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+@media (max-height: 580px) {
+    main { gap: 12px; padding: 14px 18px; }
+    section { padding-top: 12px; }
+    .helper-fields { gap: 8px; }
+    h2 { margin-bottom: 8px; }
+}

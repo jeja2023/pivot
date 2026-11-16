@@ -446,6 +446,7 @@ async function authMiddleware(req, res, next) {
 
         if (auth.user) {
             req.user = auth.user;
+            require('./services/request-context').getRequestContext().helperBrowserKey = require('./services/helper-browser-key').helperBrowserKey(req, auth.user);
             require('./services/request-context').getRequestContext().userId = auth.user.id;
             if (req.raw) req.raw.user = auth.user;
             if (auth.apiKeyData) {

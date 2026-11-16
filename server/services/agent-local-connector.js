@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { query, queryOne, execute, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { assertTenantContext } = require('./agent-tenant-context');
-const { loadActiveDevice, normalizeDeviceId } = require('./agent-local-devices');
+const { isDeviceOnline, loadActiveDevice, normalizeDeviceId } = require('./agent-local-devices');
 const { getLocalDeviceMcpServerTypeForTool } = require('./local-device-mcp');
 const { isLocalBrowserConnectorTool, normalizeLocalBrowserGrant, normalizeLocalBrowserTask } = require('./local-browser-connector-tools');
 const { isLocalWorkspaceConnectorTool, normalizeWorkspaceGrant, normalizeWorkspaceTask } = require('./local-workspace-connector-tools');
@@ -88,7 +88,7 @@ async function heartbeatConnector(user, input = {}) {
 async function listConnectorDevices(user) {
     const tenant = await assertTenantContext(user);
     const rows = await query(`
-        SELECT d.device_id, d.device_name, d.provider, d.last_seen_at, g.grant_type, g.path_hint, g.label, g.metadata_json
+        SELECT d.device_id, d.device_name, d.provider, d.status, d.revoked_at, d.last_seen_at, g.grant_type, g.path_hint, g.label, g.metadata_json
         FROM agent_local_devices d
         JOIN agent_local_connector_grants g ON g.device_id = d.device_id
         WHERE d.user_id = ? AND d.tenant_id = ? AND d.status = 'active' AND d.revoked_at IS NULL
@@ -96,7 +96,11 @@ async function listConnectorDevices(user) {
         ORDER BY d.last_seen_at DESC
     `, [user.id, tenant.tenantId, tenant.tenantId]);
     const grouped = new Map();
+    const browserKey = require('./request-context').getRequestContext().helperBrowserKey || '';
+    const helperDevices = new Set((await require('../repositories/web-local-helper').visible(user.id,browserKey)).map(pair => pair.device_id));
     rows.forEach(row => {
+        if (!isDeviceOnline(row)) return;
+        if (row.provider === 'web-helper' && !helperDevices.has(row.device_id)) return;
         if (!grouped.has(row.device_id)) grouped.set(row.device_id, { deviceId: row.device_id, deviceName: row.device_name, provider: row.provider, lastSeenAt: row.last_seen_at, grants: {} });
         const grant = { authorized: true, pathHint: row.path_hint, label: row.label };
         if (row.grant_type === 'local_browser') Object.assign(grant, normalizeLocalBrowserGrant(parseJson(row.metadata_json, {})));
@@ -177,7 +181,9 @@ async function createConnectorTask(toolName, input = {}, user, options = {}) {
     const grantType = grantTypeForTool(toolName);
     if (!grantType) throw connectorError('不支持的本机连接器工具。', 'LOCAL_CONNECTOR_TOOL_INVALID');
     const deviceId = await resolveConnectorDeviceForTool(user, toolName, input, grantType);
-    await loadActiveDevice(user.id, deviceId);
+    const device = await loadActiveDevice(user.id, deviceId);
+    if (device.provider === 'web-helper' && !await require('../repositories/web-local-helper').activeDevice(user.id,require('./request-context').getRequestContext().helperBrowserKey || '',deviceId)) throw connectorError('当前浏览器没有绑定此本机助手，请重新配对。','LOCAL_HELPER_BINDING_REQUIRED',403);
+    if (!isDeviceOnline(device)) throw connectorError('目标本机设备已离线，请在当前电脑启动助手后重试。', 'LOCAL_CONNECTOR_DEVICE_OFFLINE', 409);
     const grant = await getConnectorGrant(user, deviceId, grantType);
     if (!grant) throw connectorError('指定设备未授权该本机只读资源。', 'LOCAL_CONNECTOR_GRANT_REQUIRED', 403);
     const tenant = await assertTenantContext(user);
@@ -206,6 +212,8 @@ async function createConnectorTask(toolName, input = {}, user, options = {}) {
 
 async function reclaimConnectorTasks() {
     const now = getBeijingTimestamp();
+    // 前台操作已被领取后可能已经生效，租约或任务超时不能证明本机动作未执行。
+    await execute(`UPDATE agent_local_connector_tasks SET state = 'failed', failure_code = 'LOCAL_CONNECTOR_EXECUTION_UNCERTAIN', failure_reason = '本机桌面操作的执行结果无法确认，请先检查目标应用，再决定是否重新操作。', claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ? WHERE state = 'claimed' AND grant_type = 'local_desktop_control' AND (lease_expires_at <= ? OR expires_at <= ?)`, [now, now, now]);
     await execute(`UPDATE agent_local_connector_tasks SET state = 'expired', updated_at = ? WHERE state IN ('pending', 'claimed') AND expires_at <= ?`, [now, now]);
     await execute(`UPDATE agent_local_connector_tasks SET state = CASE WHEN attempt_count >= ? THEN 'failed' ELSE 'pending' END, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ? WHERE state = 'claimed' AND lease_expires_at <= ?`, [CONNECTOR_MAX_ATTEMPTS, now, now]);
 }
@@ -246,17 +254,18 @@ async function completeConnectorTask(user, taskId, input = {}) {
         const updated = await execute(`
             UPDATE agent_local_connector_tasks SET state = 'failed', failure_code = ?, failure_reason = ?, claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ?
             WHERE id = ? AND tenant_id = ? AND user_id = ? AND device_id = ? AND state = 'claimed' AND claim_token_hash = ?
-        `, [String(input.error?.code || 'device_failed').slice(0, 80), String(input.error?.message || '桌面端执行失败。').slice(0, 2000), now, taskId, tenant.tenantId, user.id, deviceId, hash(input.claimToken || '')]);
+              AND (grant_type <> 'local_desktop_control' OR (lease_expires_at > ? AND expires_at > ?))
+        `, [String(input.error?.code || 'device_failed').slice(0, 80), String(input.error?.message || '桌面端执行失败。').slice(0, 2000), now, taskId, tenant.tenantId, user.id, deviceId, hash(input.claimToken || ''), now, now]);
         if (updated !== 1) throw connectorError('连接器任务凭据无效或已被重新领取。', 'LOCAL_CONNECTOR_CLAIM_INVALID', 403);
         return { success: false };
     }
     await transaction(async trx => {
         const task = await trx.queryOne(`
-            SELECT * FROM agent_local_connector_tasks
+            SELECT *, lease_expires_at > ? AND expires_at > ? AS lease_is_current FROM agent_local_connector_tasks
             WHERE id = ? AND tenant_id = ? AND user_id = ? FOR UPDATE
-        `, [taskId, tenant.tenantId, user.id]);
+        `, [now, now, taskId, tenant.tenantId, user.id]);
         if (!task) throw connectorError('本机连接器任务不存在。', 'LOCAL_CONNECTOR_TASK_NOT_FOUND', 404);
-        if (task.device_id !== deviceId || task.state !== 'claimed' || task.claim_token_hash !== hash(input.claimToken || '')) {
+        if (task.device_id !== deviceId || task.state !== 'claimed' || task.claim_token_hash !== hash(input.claimToken || '') || (task.grant_type === 'local_desktop_control' && task.lease_is_current !== true)) {
             throw connectorError('连接器任务凭据无效或已被重新领取。', 'LOCAL_CONNECTOR_CLAIM_INVALID', 403);
         }
         const result = input.result ?? null;

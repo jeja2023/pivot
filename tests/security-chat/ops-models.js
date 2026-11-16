@@ -268,6 +268,7 @@ test('聊天语言指令要求可见推理保持中文', () => {
     assert.match(withoutSystem[0].content, /【重要语言规则】/);
     assert.match(withoutSystem[0].content, /必须全程使用中文/);
     assert.match(withoutSystem[0].content, /reasoning_content/);
+    assert.match(withoutSystem[0].content, /用户明确要求 SVG 矢量图或绘图源码时，按其指定格式直接编写/);
 
     const withSystem = applyChatLanguageInstruction([
         { role: 'system', content: '你是助手。' },

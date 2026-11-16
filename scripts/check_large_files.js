@@ -3,7 +3,7 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const maxBytes = 50 * 1024 * 1024;
-const ignoredDirs = new Set(['node_modules', '.git', 'data', 'uploads', 'logs', 'dist-electron-remote', 'downloads', 'artifacts']);
+const ignoredDirs = new Set(['node_modules', '.git', 'data', 'uploads', 'logs', 'dist-electron-remote', 'dist-local-helper', 'downloads', 'artifacts']);
 const failures = [];
 
 function walk(dir) {

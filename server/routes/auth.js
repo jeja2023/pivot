@@ -30,6 +30,7 @@ const { revokeRealtimeSessions } = require('../services/realtime-session');
 const { hashApiKey, previewApiKey } = require('../auth');
 const { getApiAccessSetting } = require('../services/api-access-settings');
 const { getBeijingTimestamp } = require('../time');
+const { getClientDownloads: readClientDownloads } = require('../services/client-downloads');
 
 function createAuthRouter({
     authMiddleware,
@@ -38,7 +39,8 @@ function createAuthRouter({
     registerLimiter,
     isPublicRegistrationEnabled,
     logAction,
-    publicUrl
+    publicUrl,
+    getClientDownloads = readClientDownloads
 }) {
     const router = express.Router();
     const effectiveRegisterLimiter = registerLimiter || ((_req, _res, next) => next());
@@ -62,22 +64,26 @@ function createAuthRouter({
         }
     }));
 
-    router.get('/auth/config', (req, res) => {
+    router.get('/auth/config', asyncHandler(async (req, res) => {
         // Docker 环境默认禁用客户端下载（因为镜像中不包含 .exe）
         const enableDesktopDownload = process.env.ENABLE_DESKTOP_DOWNLOAD === 'true';
+        res.set('Cache-Control', 'no-store');
         res.json({
             allowPublicRegistration: isPublicRegistrationEnabled(),
             publicUrl: publicUrl,
-            desktopDownloadEnabled: enableDesktopDownload
+            desktopDownloadEnabled: enableDesktopDownload,
+            clientDownloads: await getClientDownloads({ desktopEnabled: enableDesktopDownload })
         });
-    });
+    }));
 
     const effectiveLoginAccountLimiter = loginAccountLimiter || ((_req, _res, next) => next());
 
     router.post('/auth/login', loginLimiter, effectiveLoginAccountLimiter, asyncHandler(async (req, res) => {
         try {
+            const previousAuth = await resolveAuthenticatedUserAsync(req);
             const deviceId = getCookie(req, DEVICE_COOKIE_NAME) || generateDeviceId();
             const data = await login(req.body.username, req.body.password, { deviceId, clientIp: getSessionClientIp(req) });
+            if (previousAuth?.user) await require('../repositories/web-local-helper').revoke(previousAuth.user.id, { browserKey: require('../services/helper-browser-key').helperBrowserKey(req, previousAuth.user) });
             req.user = data.user;
             logAction(req, '用户登录', '登录成功');
             
@@ -156,6 +162,7 @@ function createAuthRouter({
             const auth = await resolveAuthenticatedUserAsync(req);
             if (auth?.user) {
                 req.user = auth.user;
+                await require('../repositories/web-local-helper').revoke(auth.user.id, { browserKey: require('../services/helper-browser-key').helperBrowserKey(req, auth.user) });
                 revokeRealtimeSessions(auth.user.id, { token: auth.token });
                 logAction(req, '用户退出', '退出登录');
             }
@@ -178,6 +185,7 @@ function createAuthRouter({
     }));
 
     router.post('/auth/logout-all', authMiddleware, asyncHandler(async (req, res) => {
+        await require('../repositories/web-local-helper').revoke(req.user.id);
         await transaction(async trx => {
             await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [req.user.id]);
             await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [req.user.id]);

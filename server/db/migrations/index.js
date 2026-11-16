@@ -196,7 +196,8 @@ const migrationModules = [
     require('./analysis-node-flow'),
     require('./agent-projects'),
     require('./regulation-extraction-coverage'),
-    require('./common-recovery-late-tables')
+    require('./common-recovery-late-tables'),
+    require('./web-local-helper')
 ];
 
 module.exports = migrationModules

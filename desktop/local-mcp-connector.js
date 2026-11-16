@@ -23,6 +23,13 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     let registeringPromise = null;
     let lastHeartbeatAt = 0;
     let consecutiveErrors = 0;
+    let generation = 0;
+    const inFlight = new Set();
+    const controllers = new Set();
+
+    function assertCurrent(expected) {
+        if (expected !== generation) throw Object.assign(new Error('本机连接器已停止，旧任务不能继续。'), { code: 'LOCAL_CONNECTOR_STOPPED' });
+    }
 
     async function call(method, path, body) {
         const response = await request({ method, path, body, timeoutMs: 30000 });
@@ -37,6 +44,7 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
     async function ensureRegistered(deviceId) {
         if (registered) return;
         if (registeringPromise) return registeringPromise;
+        const expected = generation;
         registeringPromise = (async () => {
             try {
                 if (typeof customEnsureRegistered === 'function') {
@@ -51,6 +59,7 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
                         signature: identity.signPayload(`register:${nonce.nonce}:${deviceId}`)
                     });
                 }
+                assertCurrent(expected);
                 registered = true;
             } finally {
                 registeringPromise = null;
@@ -59,14 +68,18 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
         return registeringPromise;
     }
     async function heartbeat() {
+        const expected = generation;
         const status = getLocalAuthorizationStatus();
         const deviceId = identity.getDeviceId();
         await ensureRegistered(deviceId);
+        assertCurrent(expected);
         const nonce = await challenge(deviceId);
+        assertCurrent(expected);
         await call('POST', '/api/mcp/local-device/connector/heartbeat', {
             deviceId, grants: status.grants || {}, nonce,
             signature: identity.signPayload(`connector:${nonce}:${deviceId}`)
         });
+        assertCurrent(expected);
         lastHeartbeatAt = Date.now();
         return { deviceId, active: Object.values(status.grants || {}).some(grant => grant?.authorized === true) };
     }
@@ -86,7 +99,7 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
             ...outcome
         });
     }
-    async function runOnce() {
+    async function runOnceInternal(expected) {
         const status = getLocalAuthorizationStatus();
         const active = Object.values(status.grants || {}).some(grant => grant?.authorized === true);
         const now = Date.now();
@@ -94,27 +107,44 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
         if (!registered || now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
             await heartbeat();
         }
+        assertCurrent(expected);
 
         if (!active) return { status: 'idle', active: false };
 
         const claimed = await claim();
+        assertCurrent(expected);
         if (claimed.status !== 'claimed' || !claimed.task) return { status: claimed.status || 'idle', active: true };
+        const controller = new AbortController();
+        controllers.add(controller);
         try {
-            const result = await executeLocalTool({ taskId: claimed.task.id, toolName: claimed.task.toolName, input: claimed.task.input || {} });
+            const result = await executeLocalTool({ taskId: claimed.task.id, toolName: claimed.task.toolName, input: claimed.task.input || {}, signal: controller.signal });
+            assertCurrent(expected);
             await complete(claimed.task, claimed.claimToken, { success: true, result });
+            assertCurrent(expected);
             return { status: 'completed', taskId: claimed.task.id, active: true };
         } catch (error) {
+            if (expected !== generation) throw error;
             await complete(claimed.task, claimed.claimToken, { success: false, error: { message: error?.message || '本机执行失败。', code: error?.code || '', status: Number(error?.status || 500) } });
+            assertCurrent(expected);
             return { status: 'failed', taskId: claimed.task.id, active: true };
+        } finally {
+            controllers.delete(controller);
         }
     }
+    function track(promise) {
+        inFlight.add(promise);
+        return promise.finally(() => inFlight.delete(promise));
+    }
+    function runOnce() { return track(runOnceInternal(generation)); }
     /** Immediately publish current grants after a user changes local authorization. */
-    async function sync() {
+    async function syncInternal() {
         const registration = await heartbeat();
         return { ...registration, status: 'synced' };
     }
+    function sync() { return track(syncInternal()); }
     async function tick() {
         if (!running) return;
+        const expected = generation;
         let nextDelay = ACTIVE_POLL_INTERVAL_MS;
         try {
             const outcome = await runOnce();
@@ -132,12 +162,13 @@ function createLocalMcpConnector({ request, getLocalAuthorizationStatus, execute
             nextDelay = withRetryJitter(exponentialDelay, random);
             logger.debug?.('[Pivot 本机连接器] 轮询等待（将在 ' + Math.round(nextDelay / 1000) + 's 后重试）：', error?.message || error);
         }
-        if (running) timer = setTimeout(tick, nextDelay);
+        if (running && expected === generation) timer = setTimeout(tick, nextDelay);
     }
     function start() { if (!running) { running = true; void tick(); } return status(); }
-    function stop() { running = false; if (timer) clearTimeout(timer); timer = null; return status(); }
+    function stop() { running = false; generation++; registered = false; lastHeartbeatAt = 0; for (const controller of controllers) controller.abort(); if (timer) clearTimeout(timer); timer = null; return status(); }
+    async function stopAndDrain() { stop(); await Promise.allSettled([...inFlight]); return status(); }
     function status() { return { running, deviceId: identity.getIdentityStatus().deviceId || '', identity: identity.getIdentityStatus() }; }
-    return { runOnce, start, status, stop, sync };
+    return { runOnce, start, status, stop, stopAndDrain, sync };
 }
 
 module.exports = { createLocalMcpConnector, withRetryJitter };

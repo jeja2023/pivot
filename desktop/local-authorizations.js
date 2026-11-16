@@ -335,18 +335,25 @@ function createLocalAuthorizationManager(options = {}) {
             });
         }
         if (/^desktop\./.test(toolName)) {
-            const { runLocalDesktopControlTask } = require('./local-desktop-control');
+            const runLocalDesktopControlTask = options.runLocalDesktopControlTask || require('./local-desktop-control').runLocalDesktopControlTask;
             const grant = readLocalAuthorizations().grants.local_desktop_control;
+            const grantSnapshot = JSON.stringify(grant || null);
             const mainWindow = getMainWindow();
             return await runLocalDesktopControlTask({
                 toolName,
                 input: payload.input && typeof payload.input === 'object' ? payload.input : {},
                 grant,
+                signal: payload.signal instanceof AbortSignal ? payload.signal : undefined,
+                assertAuthorization: () => {
+                    if (JSON.stringify(readLocalAuthorizations().grants.local_desktop_control || null) !== grantSnapshot) {
+                        throw Object.assign(new Error('本机桌面应用授权已变化，请重新授权后操作。'), { code: 'LOCAL_DESKTOP_CONTROL_GRANT_CHANGED', status: 403 });
+                    }
+                },
                 confirmAction: async details => {
                     const response = await dialog.showMessageBox(mainWindow || undefined, {
                         type: 'warning', title: String(details.title || '确认原生桌面应用操作'),
                         message: String(details.message || '确认继续？'),
-                        detail: `${details.application || ''}\n${details.target?.name || details.target?.automationId || ''}`.slice(0, 1000),
+                        detail: `${details.application || ''}\n${details.target?.name || details.target?.automationId || ''}${details.text ? '\n填写内容：'+details.text : ''}`.slice(0, 4600),
                         buttons: ['继续', '取消'], defaultId: 1, cancelId: 1, noLink: true
                     });
                     return response.response === 0;

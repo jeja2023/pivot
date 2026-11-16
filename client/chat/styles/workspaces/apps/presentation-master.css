@@ -517,7 +517,7 @@
     color: var(--text-main);
 }
 
-.presentation-master-advanced[open] > .presentation-master-grid {
+.presentation-master-advanced[open]>.presentation-master-grid {
     margin-top: 8px;
 }
 
@@ -549,9 +549,20 @@
 }
 
 @keyframes master-pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent); }
-    70% { transform: scale(1.05); box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 0%, transparent); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent); }
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent);
+    }
+
+    70% {
+        transform: scale(1.05);
+        box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 0%, transparent);
+    }
+
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent);
+    }
 }
 
 .presentation-master-ready-text {
@@ -700,6 +711,7 @@
 }
 
 @media (max-width: 520px) {
+
     .presentation-master-grid,
     .presentation-master-grid-4 {
         grid-template-columns: minmax(0, 1fr);

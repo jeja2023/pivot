@@ -4,6 +4,13 @@ const { error } = require('./runtime');
 const { normalizeMaterials, sha256 } = require('../presentation-evidence');
 const OPERATIONS = ['generate', 'create_template', 'edit_native'];
 const PROFILES = ['default', 'quick', 'beautify', 'image_to_pptx'];
+function normalizeTokenBudget(value, minimum = 10000) {
+    const source = value ?? 1000000;
+    if (typeof source !== 'number' && (typeof source !== 'string' || !/^\d+$/.test(source))) throw error(`累计模型预算必须是不小于${minimum}的有效整数。`);
+    const tokenBudget = Number(source);
+    if (!Number.isSafeInteger(tokenBudget) || tokenBudget < minimum) throw error(`累计模型预算必须是不小于${minimum}的有效整数。`);
+    return tokenBudget;
+}
 function text(value, max, label, required = false) {
     if (value !== undefined && typeof value !== 'string') throw error(label + '必须是文字。');
     const result = String(value || '').trim();
@@ -34,10 +41,10 @@ function normalize(input = {}) {
     if (input.assetIds !== undefined && (!Array.isArray(input.assetIds) || input.assetIds.length > 20 || input.assetIds.some(id => !/^[1-9]\d{0,14}$/.test(String(id))))) throw error('补充素材标识无效或超过二十个。');
     if (operation === 'edit_native' && !input.sourceAssetId && template?.type !== 'organization') throw error('编辑原稿需要提供已上传的PPTX文件。');
     if (['beautify', 'image_to_pptx'].includes(profile) && !input.sourceAssetId) throw error('美化或图片重建需要提供已上传的源文件。');
-    const maxSteps = Number(input.maxSteps || 80), tokenBudget = Number(input.tokenBudget || 400000);
-    if (!Number.isInteger(maxSteps) || maxSteps < 5 || maxSteps > 160 || !Number.isInteger(tokenBudget) || tokenBudget < 10000 || tokenBudget > 500000) throw error('执行步骤或模型用量预算无效。');
+    const maxSteps = Number(input.maxSteps || 80), tokenBudget = normalizeTokenBudget(input.tokenBudget);
+    if (!Number.isInteger(maxSteps) || maxSteps < 5 || maxSteps > 160) throw error('执行步骤或模型用量预算无效。');
     return { operation, profile, title, instruction, modelId, pageCount, materials, productionProfile, template, sourceAssetId: input.sourceAssetId ? String(input.sourceAssetId) : '',
         presentationId: text(input.presentationId, 96, '源稿标识'), assetIds: [...new Set((input.assetIds || []).map(String))], maxSteps, tokenBudget,
         sourceDigest: sha256(JSON.stringify({ instruction, materials, sourceAssetId: input.sourceAssetId || '', template, productionProfile })) };
 }
-module.exports = { normalize };
+module.exports = { normalize, normalizeTokenBudget };

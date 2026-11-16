@@ -16,6 +16,7 @@ const ignoredDirs = new Set([
     'uploads',
     'dist',
     'dist-electron',
+    'dist-local-helper',
     'dist-electron-remote',
     'dist-electron-0.0.138',
     'build',

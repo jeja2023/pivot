@@ -14,29 +14,48 @@
     border: 0;
     border-radius: 0;
     background: var(--bg-main);
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 #data-analysis-modeling-panel {
-    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     min-width: 0;
     min-height: 0;
     width: 100%;
-    padding: 10px 14px 18px;
+    height: 100%;
+    padding: 8px 12px 10px;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow: hidden;
     background: var(--bg-main);
 }
 
 .modeling-workspace,
-.modeling-list-view,
 .modeling-editor-view,
 .modeling-studio-body {
     display: flex;
     flex-direction: column;
+    flex: 1 1 0;
+    gap: 8px;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.modeling-list-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     gap: 10px;
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
+    overflow-y: auto;
+    padding-right: 2px;
     box-sizing: border-box;
 }
 
@@ -132,50 +151,73 @@
 }
 
 /* 编辑器标题头与保存徽标 */
+.modeling-editor-header {
+    padding: 7px 12px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.modeling-editor-header .btn-primary,
+.modeling-editor-header .btn-secondary {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    border-radius: 7px;
+}
+
+.modeling-editor-header .modeling-more-trigger {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    border-radius: 7px;
+}
+
 .modeling-editor-identity {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     min-width: 0;
     flex: 1 1 260px;
-}
-
-.modeling-editor-titles {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
 }
 
 .modeling-editor-title-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
 }
 
 .modeling-editor-name {
-    font-size: 0.96rem;
+    font-size: 0.92rem;
     font-weight: 700;
     color: var(--text-main);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 320px;
+    max-width: 240px;
 }
 
 .modeling-version-pill,
-.modeling-save-pill {
+.modeling-save-pill,
+.modeling-status-pill {
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
     border-radius: 999px;
-    font-size: 0.73rem;
+    font-size: 0.71rem;
     font-weight: 600;
     background: var(--bg-main);
     border: 1px solid var(--border);
     color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.modeling-status-pill {
+    border-color: transparent;
+    background: transparent;
+    padding: 0 4px;
+    font-weight: 500;
 }
 
 .modeling-save-pill[data-state="saved"] {
@@ -312,11 +354,14 @@
 .modeling-studio-shell {
     position: relative;
     display: grid;
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: 244px minmax(0, 1fr);
     gap: 10px;
     align-items: stretch;
+    flex: 1 1 0;
     min-width: 0;
-    min-height: calc(100vh - 186px);
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .modeling-studio-shell.is-palette-collapsed {
@@ -324,42 +369,52 @@
 }
 
 .modeling-studio-shell.has-drawer {
-    grid-template-columns: 248px minmax(0, 1fr) 416px;
-}
-
-.modeling-studio-shell.has-drawer.has-wide-drawer {
-    grid-template-columns: 248px minmax(0, 1fr) minmax(440px, 520px);
+    grid-template-columns: 244px minmax(0, 1fr) 432px;
 }
 
 .modeling-studio-shell.is-palette-collapsed.has-drawer {
-    grid-template-columns: minmax(0, 1fr) 416px;
-}
-
-.modeling-studio-shell.is-palette-collapsed.has-drawer.has-wide-drawer {
-    grid-template-columns: minmax(0, 1fr) minmax(440px, 540px);
+    grid-template-columns: minmax(0, 1fr) 432px;
 }
 
 .modeling-rail {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 10px;
+    gap: 8px;
+    padding: 9px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
     min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
     box-sizing: border-box;
 }
 
 .modeling-rail-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
 }
 
+.modeling-palette-operators {
+    flex: 0 0 auto;
+}
+
+.modeling-palette-datasets {
+    flex: 1 1 0;
+    min-height: 108px;
+}
+
+.modeling-palette-nodes {
+    flex: 0 1 auto;
+    max-height: 128px;
+    min-height: 54px;
+}
+
 .modeling-rail-section+.modeling-rail-section {
-    padding-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid var(--border);
 }
 
@@ -370,6 +425,12 @@
     justify-content: space-between;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.modeling-drawer-subactions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .modeling-rail-head h5 {
@@ -402,19 +463,25 @@
 .modeling-op-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
+    gap: 5px;
 }
 
 .modeling-op-item.btn-secondary {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 4px;
-    height: 32px;
+    gap: 5px;
+    height: 30px;
     padding: 0 6px;
     border-radius: 7px;
-    font-size: 0.74rem;
+    font-size: 0.73rem;
     min-width: 0;
+    background: var(--bg-main);
+}
+
+.modeling-op-item.btn-secondary:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 7%, var(--surface));
 }
 
 .modeling-op-item[draggable="true"] {
@@ -425,10 +492,23 @@
     flex-shrink: 0;
     padding: 1px 5px;
     border-radius: 4px;
-    font-size: 0.66rem;
+    font-size: 0.65rem;
     font-weight: 700;
     background: color-mix(in srgb, var(--primary) 14%, var(--surface));
     color: var(--primary);
+}
+
+.modeling-op-badge.is-kind-filter,
+.modeling-op-badge.is-kind-formula,
+.modeling-op-badge.is-kind-aggregate {
+    background: color-mix(in srgb, var(--warning) 15%, var(--surface));
+    color: var(--warning);
+}
+
+.modeling-op-badge.is-kind-select,
+.modeling-op-badge.is-kind-union {
+    background: color-mix(in srgb, var(--text-muted) 14%, var(--surface));
+    color: var(--text-main);
 }
 
 .modeling-op-label {
@@ -441,33 +521,94 @@
 .modeling-compact-search.form-input {
     height: 30px;
     padding: 0 10px;
-    font-size: 0.78rem;
+    font-size: 0.77rem;
     border-radius: 7px;
+    flex-shrink: 0;
 }
 
 .modeling-canvas-sources,
 .modeling-node-list {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    max-height: 210px;
+    gap: 3px;
+    min-height: 0;
     overflow-y: auto;
+    min-width: 0;
+    padding-right: 2px;
+}
+
+.modeling-source-item.btn-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 7px;
+    border-radius: 6px;
+    border-color: transparent;
+    background: transparent;
+    font-size: 0.76rem;
+    text-align: left;
     min-width: 0;
 }
 
-.modeling-source-item.btn-secondary,
+.modeling-source-more.btn-secondary {
+    width: 100%;
+    height: 28px;
+    min-height: 28px;
+    margin-top: 2px;
+    padding: 0 8px;
+    font-size: 0.73rem;
+    border-radius: 6px;
+    border-style: dashed;
+    color: var(--primary);
+    background: var(--bg-main);
+}
+
+.modeling-source-item.btn-secondary:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+    background: color-mix(in srgb, var(--primary) 7%, var(--surface));
+}
+
+.modeling-source-item.is-used.btn-secondary {
+    background: color-mix(in srgb, var(--bg-main) 70%, var(--surface));
+    opacity: 0.78;
+}
+
+.modeling-source-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: var(--primary);
+}
+
+.modeling-source-item.is-used .modeling-source-dot {
+    background: var(--success);
+}
+
 .modeling-node-item.btn-secondary {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 6px;
     width: 100%;
-    height: 32px;
-    padding: 0 9px;
-    border-radius: 7px;
-    font-size: 0.78rem;
+    height: 31px;
+    min-height: 31px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border-color: transparent;
+    background: var(--bg-main);
+    font-size: 0.77rem;
     text-align: left;
     min-width: 0;
+}
+
+.modeling-node-item.btn-secondary:hover {
+    border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
 }
 
 .modeling-source-item[draggable="true"] {
@@ -484,10 +625,28 @@
     font-weight: 600;
 }
 
-.modeling-source-tag {
+.modeling-source-tag,
+.modeling-node-meta {
     flex-shrink: 0;
-    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
     color: var(--text-muted);
+}
+
+.modeling-source-tag.is-joined {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+}
+
+.modeling-node-meta.is-warn {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
 }
 
 .modeling-node-item.btn-secondary.is-selected {
@@ -502,12 +661,14 @@
     border-radius: 4px;
     font-size: 0.67rem;
     font-weight: 700;
-    background: var(--bg-main);
+    background: var(--surface);
+    border: 1px solid var(--border);
     color: var(--text-muted);
 }
 
 .modeling-node-role.is-fact {
     background: color-mix(in srgb, var(--primary) 15%, var(--surface));
+    border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
     color: var(--primary);
 }
 
@@ -516,6 +677,8 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    height: 100%;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -531,6 +694,7 @@
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .modeling-canvas-toolbar {
@@ -553,10 +717,18 @@
 }
 
 .modeling-canvas-toolbar-wrap .btn-secondary {
-    height: 30px;
-    padding: 0 10px;
-    font-size: 0.77rem;
+    height: 28px;
+    padding: 0 9px;
+    font-size: 0.76rem;
     border-radius: 6px;
+}
+
+.modeling-zoom-btn.btn-secondary {
+    min-width: 48px;
+    padding: 0 6px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-main);
 }
 
 .modeling-grain-pill.btn-secondary {
@@ -565,42 +737,23 @@
     color: var(--warning);
 }
 
-.modeling-canvas-grain-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 5px 12px;
-    border-bottom: 1px solid var(--border);
-    background: color-mix(in srgb, var(--primary) 4%, var(--surface));
-    font-size: 0.75rem;
-    color: var(--text-main);
-}
-
-.modeling-zoom-label {
-    min-width: 42px;
-    text-align: center;
-    font-size: 0.76rem;
-    font-weight: 600;
-    color: var(--text-muted);
-}
-
 .modeling-canvas-hint {
-    flex: 1 1 180px;
-    font-size: 0.74rem;
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    width: 100%;
+    font-size: 0.72rem;
+    color: var(--primary);
+    line-height: 1.35;
+}
+
+.modeling-canvas-hint:empty {
+    display: none;
 }
 
 .modeling-graph-container {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     overflow: auto;
     min-width: 0;
     max-width: 100%;
-    min-height: 460px;
+    min-height: 120px;
     background-color: var(--bg-main);
     background-image: radial-gradient(color-mix(in srgb, var(--text-muted) 22%, transparent) 1px, transparent 1px);
     background-size: 18px 18px;
@@ -619,8 +772,7 @@
 
 .modeling-graph {
     display: block;
-    min-width: 100%;
-    min-height: 450px;
+    flex-shrink: 0;
 }
 
 /* 紧凑单圆点 SVG 节点卡片与双模连线 */
@@ -789,19 +941,20 @@
 
 /* 右侧弹出式配置抽屉（按需展开，不遮挡画布工具栏与底部数据预览） */
 .modeling-node-drawer {
-    position: sticky;
-    top: 0;
+    position: relative;
     width: 100%;
-    max-height: calc(100vh - 186px);
+    height: 100%;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
     overflow: hidden;
     box-sizing: border-box;
     min-width: 0;
+    min-height: 0;
 }
 
 .modeling-node-drawer.is-wide {
@@ -813,53 +966,122 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 0 12px;
+    min-height: 42px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
-    flex-wrap: wrap;
 }
 
 .modeling-drawer-tabs {
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
+    align-items: stretch;
+    gap: 2px;
+    min-width: 0;
+    overflow-x: auto;
 }
 
 .modeling-drawer-tab.btn-secondary {
-    height: 28px;
-    padding: 0 9px;
-    font-size: 0.75rem;
-    border-radius: 6px;
-    border-color: transparent;
-    background: var(--bg-main);
+    height: 41px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+    border-radius: 0;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
     color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.modeling-drawer-tab.btn-secondary:hover {
+    background: transparent;
+    color: var(--text-main);
 }
 
 .modeling-drawer-tab.btn-secondary.is-active {
-    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
-    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+    background: transparent;
+    border-bottom-color: var(--primary);
     color: var(--primary);
     font-weight: 700;
 }
 
-.modeling-drawer-header>.btn-secondary {
-    height: 28px;
+.modeling-drawer-header>.btn-secondary,
+.modeling-drawer-close.btn-danger-outline {
+    height: 26px;
     padding: 0 10px;
-    font-size: 0.75rem;
+    font-size: 0.74rem;
+    font-weight: 600;
     border-radius: 6px;
+    flex-shrink: 0;
 }
 
 .modeling-drawer-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 12px 14px 18px;
+    padding: 12px 14px 14px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 11px;
     min-width: 0;
+}
+
+/* 抽屉内统一表单控件、下拉框与文字排版 */
+.modeling-drawer-body .modeling-field-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.01em;
+}
+
+.modeling-drawer-body .form-input:not(textarea):not([multiple]) {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.79rem;
+    font-weight: 500;
+    line-height: 1.4;
+    border-radius: 7px;
+    background-color: var(--bg-main);
+    border-color: var(--border);
+    color: var(--text-main);
+}
+
+.modeling-drawer-body select.form-input:not([multiple]) {
+    padding-right: 26px;
+    cursor: pointer;
+    text-overflow: ellipsis;
+}
+
+.modeling-drawer-body .form-input:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+}
+
+.modeling-drawer-body textarea.form-input {
+    padding: 8px 10px;
+    font-size: 0.78rem;
+    line-height: 1.48;
+    border-radius: 7px;
+    background-color: var(--bg-main);
+}
+
+.modeling-drawer-body .data-table th,
+.modeling-drawer-body .data-table td {
+    padding: 6px 8px;
+    font-size: 0.74rem;
+}
+
+/* 抽屉内不重复卡片套卡片，采用扁平分区 */
+.modeling-drawer-body>.modeling-card {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.modeling-drawer-body>.modeling-card+.modeling-card {
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
 }
 
 .modeling-drawer-toolbar {
@@ -909,19 +1131,53 @@
 .modeling-inspector-card {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 9px;
     padding: 10px 12px;
     border-radius: 8px;
     background: var(--bg-main);
     border: 1px solid var(--border);
 }
 
+.modeling-inspector-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
 .modeling-inspector-title {
-    font-size: 0.88rem;
+    font-size: 0.9rem;
     color: var(--text-main);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.modeling-inspector-kv {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.modeling-inspector-row {
+    display: grid;
+    grid-template-columns: 60px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.modeling-inspector-label {
+    color: var(--text-muted);
+    padding-top: 1px;
+}
+
+.modeling-inspector-val {
+    min-width: 0;
+    color: var(--text-main);
+    word-break: break-word;
 }
 
 .modeling-inspector-meta {
@@ -946,6 +1202,10 @@
     font-size: 0.77rem;
 }
 
+.modeling-relation-info {
+    min-width: 0;
+}
+
 .modeling-relation-mini strong {
     display: block;
     color: var(--text-main);
@@ -958,7 +1218,7 @@
 
 .modeling-fields-section {
     flex: 1 1 auto;
-    min-height: 0;
+    min-height: 180px;
 }
 
 .modeling-field-list {
@@ -967,8 +1227,10 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    max-height: 310px;
+    gap: 4px;
+    flex: 1 1 auto;
+    min-height: 120px;
+    max-height: none;
     overflow-y: auto;
 }
 
@@ -989,6 +1251,11 @@
     border: 1px solid var(--border);
     background: var(--bg-main);
     min-width: 0;
+    transition: border-color 0.12s ease;
+}
+
+.modeling-field-item:hover {
+    border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 
 .modeling-field-main {
@@ -1001,10 +1268,24 @@
 
 .modeling-field-name {
     font-size: 0.78rem;
+    font-weight: 600;
     color: var(--text-main);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.modeling-field-type-pill {
+    flex-shrink: 0;
+    padding: 0 5px;
+    height: 17px;
+    line-height: 16px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
 }
 
 .modeling-field-quick {
@@ -1019,6 +1300,13 @@
     padding: 0 6px;
     font-size: 0.69rem;
     border-radius: 4px;
+}
+
+.modeling-mini-btn.btn-secondary.is-selected {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+    color: var(--primary);
+    font-weight: 700;
 }
 
 .modeling-mini-tag {
@@ -1067,14 +1355,33 @@
     flex: 1 1 0;
     min-width: 0;
     height: 30px;
+    min-height: 30px;
     padding: 0 8px;
     font-size: 0.77rem;
 }
 
+.modeling-flow-row-top>select.form-input {
+    padding-right: 22px;
+}
+
+.modeling-flow-row-top .btn-danger,
+.modeling-flow-row-top .btn-secondary {
+    height: 30px;
+    padding: 0 9px;
+    font-size: 0.74rem;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
 .modeling-flow-row-card>.form-input:not(textarea) {
     height: 30px;
+    min-height: 30px;
     padding: 0 8px;
     font-size: 0.77rem;
+}
+
+.modeling-flow-row-card>select.form-input {
+    padding-right: 24px;
 }
 
 .modeling-code-input.form-input {
@@ -1185,10 +1492,18 @@
 .modeling-preview-dock {
     display: flex;
     flex-direction: column;
-    max-height: 290px;
+    flex: 0 0 auto;
+    height: 220px;
+    max-height: 44%;
     border-top: 2px solid color-mix(in srgb, var(--primary) 32%, var(--border));
     background: var(--surface);
     min-width: 0;
+    min-height: 150px;
+}
+
+.modeling-preview-dock.is-expanded {
+    height: 340px;
+    max-height: 62%;
 }
 
 .modeling-preview-header {
@@ -1200,6 +1515,7 @@
     padding: 7px 12px;
     border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--primary) 4%, var(--surface));
+    flex-shrink: 0;
 }
 
 .modeling-preview-title-wrap,
@@ -1210,6 +1526,33 @@
     flex-wrap: wrap;
     gap: 6px;
     font-size: 0.8rem;
+}
+
+.modeling-preview-tabs {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border-radius: 7px;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+    gap: 2px;
+}
+
+.modeling-preview-tab.btn-secondary {
+    height: 24px;
+    padding: 0 9px;
+    font-size: 0.72rem;
+    border-radius: 5px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.modeling-preview-tab.btn-secondary.is-active {
+    background: var(--surface);
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+    font-weight: 700;
 }
 
 .modeling-preview-steps-label {
@@ -1230,7 +1573,7 @@
     color: var(--surface);
 }
 
-.modeling-preview-header .modeling-bar-actions .btn-secondary {
+.modeling-preview-header .modeling-bar-actions .btn-secondary:not(.modeling-preview-tab) {
     height: 28px;
     padding: 0 10px;
     font-size: 0.75rem;
@@ -1242,11 +1585,113 @@
     min-height: 0;
     overflow: auto;
     padding: 8px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .modeling-preview-table-wrap {
-    max-height: 215px;
+    flex: 1 1 auto;
+    min-height: 110px;
+    max-height: none;
     overflow: auto;
+}
+
+.modeling-preview-table-wrap .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface);
+}
+
+.modeling-preview-error-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+    border-left: 3px solid var(--danger);
+    background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.modeling-preview-error-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 240px;
+    flex: 1 1 320px;
+}
+
+.modeling-preview-error-main strong {
+    font-size: 0.82rem;
+    color: var(--danger);
+}
+
+.modeling-preview-error-main p {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-main);
+    line-height: 1.4;
+}
+
+.modeling-preview-error-main .text-muted {
+    font-size: 0.73rem;
+    line-height: 1.4;
+}
+
+.modeling-preview-error-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.modeling-preview-error-actions .btn-secondary {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+    border-radius: 6px;
+}
+
+.modeling-preview-inline-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.modeling-preview-history-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px 10px;
+}
+
+.modeling-preview-history-body p {
+    margin: 0;
+    font-size: 0.74rem;
+}
+
+.modeling-preview-job-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+}
+
+.modeling-preview-job-select .form-input {
+    width: auto;
+    min-width: 260px;
+    max-width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 0.75rem;
 }
 
 .modeling-preview-th {
@@ -1595,8 +2040,8 @@
 
 .modeling-trial-top-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
 }
 
 .modeling-trial-top-row>label {
@@ -1604,6 +2049,13 @@
     flex-direction: column;
     gap: 5px;
     min-width: 0;
+}
+
+.modeling-trial-top-row .form-input {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 0.79rem;
+    border-radius: 7px;
 }
 
 .modeling-trial-selectors {
@@ -1644,7 +2096,14 @@
 .modeling-multi-actions {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+}
+
+.modeling-multi-count {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--primary);
+    padding: 0 4px;
 }
 
 .modeling-multi-actions .btn-secondary {
@@ -1655,22 +2114,34 @@
 }
 
 .modeling-multi-select.form-input {
-    min-height: 112px;
-    padding: 4px;
+    height: 124px;
+    min-height: 96px;
+    max-height: 168px;
+    padding: 5px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.4;
     border-radius: 8px;
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+    color: var(--text-main);
 }
 
 .modeling-multi-select.form-input option {
-    padding: 6px 10px;
+    padding: 5px 10px;
     margin-bottom: 2px;
-    border-radius: 5px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-main);
     cursor: pointer;
 }
 
 .modeling-multi-select.form-input option:checked {
     background: color-mix(in srgb, var(--primary) 16%, var(--surface));
-    color: var(--text-main);
+    color: var(--primary);
     font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .modeling-field-label {
@@ -1697,9 +2168,12 @@
 }
 
 /* 建模统一弹窗与渐进披露折叠组 */
-.modeling-dialog {
-    width: min(820px, calc(100vw - 32px));
-    max-height: calc(100vh - 48px);
+.workspace-modal.modeling-dialog {
+    width: min(660px, calc(100vw - 32px));
+    height: auto;
+    min-height: 0;
+    max-height: min(760px, calc(100vh - 48px));
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     background: var(--surface);
@@ -1707,43 +2181,129 @@
     border-radius: 12px;
     box-shadow: var(--shadow-lg);
     box-sizing: border-box;
+    overflow: hidden;
+}
+
+.workspace-modal.modeling-dialog.is-compact {
+    width: min(460px, calc(100vw - 32px));
+}
+
+.workspace-modal.modeling-dialog.is-wide {
+    width: min(760px, calc(100vw - 32px));
 }
 
 .modeling-dialog .workspace-modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 18px;
+    gap: 12px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     border-radius: 12px 12px 0 0;
+    flex-shrink: 0;
 }
 
 .modeling-dialog h3 {
     margin: 0;
-    font-size: 1rem;
+    font-size: 0.96rem;
     font-weight: 700;
+    color: var(--text-main);
+}
+
+.modeling-dialog-close.btn-danger-outline {
+    height: 28px;
+    padding: 0 11px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border-radius: 6px;
+    flex-shrink: 0;
 }
 
 .modeling-dialog form {
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    flex: 0 1 auto;
     min-height: 0;
+    overflow: hidden;
 }
 
 .modeling-dialog .workspace-modal-body.modeling-form {
+    flex: 0 1 auto;
+    overflow-y: auto;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    padding: 16px 18px;
+    gap: 11px 14px;
+    padding: 14px 18px 16px;
     background: var(--surface);
     box-sizing: border-box;
 }
 
-.modeling-form label {
+.modeling-dialog.is-compact .workspace-modal-body.modeling-form {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.modeling-dialog .modeling-field-label {
+    font-size: 0.77rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.modeling-dialog .form-input:not(textarea):not([multiple]) {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.83rem;
+    font-weight: 500;
+    line-height: 1.4;
+    border-radius: 7px;
+    background-color: var(--bg-main);
+    border-color: var(--border);
+    color: var(--text-main);
+}
+
+.modeling-dialog select.form-input:not([multiple]) {
+    padding-right: 28px;
+    cursor: pointer;
+    text-overflow: ellipsis;
+}
+
+.modeling-dialog .form-input:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+}
+
+.modeling-dialog textarea.form-input {
+    padding: 8px 10px;
+    font-size: 0.83rem;
+    line-height: 1.48;
+    border-radius: 7px;
+    background-color: var(--bg-main);
+}
+
+.modeling-dialog .data-table th,
+.modeling-dialog .data-table td {
+    padding: 7px 10px;
+    font-size: 0.78rem;
+}
+
+.modeling-form>label,
+.modeling-form fieldset>label:not(.modeling-checkbox),
+.modeling-advanced-grid>label:not(.modeling-checkbox) {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     min-width: 0;
+}
+
+.modeling-form>label:has([name="modeling_reviewId"]) {
+    grid-column: 1 / -1;
+}
+
+.modeling-form>p {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-muted);
 }
 
 .modeling-form fieldset,
@@ -1754,6 +2314,91 @@
 .modeling-form>.modeling-checkbox,
 .modeling-form>.modeling-span-full {
     grid-column: 1 / -1;
+}
+
+/* 共享与业务口径复核弹窗内的单位/用户复选树 */
+.modeling-form .agent-workflow-share-tree {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-main);
+}
+
+.modeling-form .agent-workflow-share-tree-unit+.agent-workflow-share-tree-unit {
+    border-top: 1px solid var(--border);
+}
+
+.modeling-form .agent-workflow-share-tree-unit-head {
+    padding: 7px 10px;
+    background: color-mix(in srgb, var(--primary) 4%, var(--surface));
+}
+
+.modeling-form .agent-workflow-share-tree-unit-label,
+.modeling-form .agent-workflow-share-tree-user {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.modeling-form .agent-workflow-share-tree-unit-label input,
+.modeling-form .agent-workflow-share-tree-user input {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.modeling-form .agent-workflow-share-tree-unit-label span,
+.modeling-form .agent-workflow-share-tree-user span {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.modeling-form .agent-workflow-share-tree-unit-label strong,
+.modeling-form .agent-workflow-share-tree-user strong {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.modeling-form .agent-workflow-share-tree-unit-label small,
+.modeling-form .agent-workflow-share-tree-user small,
+.modeling-form .agent-workflow-share-tree-empty {
+    font-size: 0.71rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.modeling-form .agent-workflow-share-tree-users {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 8px;
+    padding: 6px 10px 8px 22px;
+    background: var(--surface);
+}
+
+.modeling-form .agent-workflow-share-tree-user {
+    padding: 4px 7px;
+    border-radius: 6px;
+}
+
+.modeling-form .agent-workflow-share-tree-user:has(input:checked) {
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+}
+
+.modeling-form .agent-workflow-share-tree-empty {
+    grid-column: 1 / -1;
+    padding: 2px 0;
 }
 
 .modeling-inline-pair {
@@ -1847,10 +2492,23 @@
     flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
-    gap: 10px;
-    padding: 12px 18px;
+    gap: 8px;
+    padding: 10px 16px;
     border-top: 1px solid var(--border);
     background: var(--surface);
+    flex-shrink: 0;
+}
+
+.modeling-dialog.is-readonly .modeling-dialog-footer {
+    display: none;
+}
+
+.modeling-dialog-footer .btn-primary,
+.modeling-dialog-footer .btn-secondary {
+    height: 32px;
+    padding: 0 14px;
+    font-size: 0.81rem;
+    border-radius: 7px;
 }
 
 #modeling-dialog-error {
@@ -1938,21 +2596,48 @@
 /* 平板与窄屏响应式适配 */
 @media (max-width: 1080px) {
 
-    .modeling-studio-shell,
-    .modeling-studio-shell.has-drawer,
-    .modeling-studio-shell.has-drawer.has-wide-drawer,
-    .modeling-studio-shell.is-palette-collapsed.has-drawer,
-    .modeling-studio-shell.is-palette-collapsed.has-drawer.has-wide-drawer {
-        grid-template-columns: minmax(0, 1fr);
-        min-height: auto;
+    .data-analysis-panel.is-modeling-immersive>.data-analysis-main,
+    #data-analysis-modeling-panel,
+    .modeling-workspace,
+    .modeling-editor-view,
+    .modeling-studio-body {
+        height: auto;
+        overflow-y: auto;
     }
 
-    .modeling-node-drawer,
-    .modeling-node-drawer.is-wide {
+    .modeling-studio-shell,
+    .modeling-studio-shell.has-drawer,
+    .modeling-studio-shell.is-palette-collapsed.has-drawer {
+        grid-template-columns: minmax(0, 1fr);
+        height: auto;
+        min-height: auto;
+        overflow: visible;
+    }
+
+    .modeling-rail,
+    .modeling-canvas-stage,
+    .modeling-node-drawer {
         position: relative;
         width: 100%;
+        height: auto;
         max-width: 100%;
         max-height: none;
+    }
+
+    .modeling-canvas-sources,
+    .modeling-node-list,
+    .modeling-field-list {
+        max-height: 280px;
+    }
+
+    .modeling-graph-container {
+        min-height: 340px;
+    }
+
+    .modeling-preview-dock,
+    .modeling-preview-dock.is-expanded {
+        height: auto;
+        max-height: 360px;
     }
 }
 
@@ -1968,7 +2653,8 @@
     .modeling-select-col-row,
     .modeling-dialog .workspace-modal-body.modeling-form,
     .modeling-form fieldset,
-    .modeling-advanced-grid {
+    .modeling-advanced-grid,
+    .modeling-form .agent-workflow-share-tree-users {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -1982,7 +2668,9 @@
         white-space: normal;
     }
 
-    .modeling-dialog {
+    .workspace-modal.modeling-dialog,
+    .workspace-modal.modeling-dialog.is-compact,
+    .workspace-modal.modeling-dialog.is-wide {
         width: calc(100vw - 16px);
         max-height: calc(100vh - 24px);
     }

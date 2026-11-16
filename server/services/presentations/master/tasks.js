@@ -26,6 +26,7 @@ function publicResult(row, task) {
         request: state ? { title: state.request.title, operation: state.request.operation, profile: state.request.profile, presentationId: state.request.presentationId,
             pageCount: state.request.pageCount, modelId: state.request.modelId, maxSteps: state.request.maxSteps, tokenBudget: state.request.tokenBudget, productionProfile: state.request.productionProfile, template: state.request.template || null } : undefined,
         usedTokens: state?.usedTokens ?? data.usedTokens ?? 0, steps: state?.steps ?? data.steps ?? 0,
+        usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
         recoverable: Boolean(state && (task.status === 'failed' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
         ...(task.status === 'input_required' ? { inputRequest: { question: row.input_request.question, context: row.input_request.context } } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
@@ -162,8 +163,8 @@ async function resume(user, id, input = {}) {
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
     deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
-    const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = Number(input.tokenBudget || state.request.tokenBudget);
-    if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160 || !Number.isInteger(tokenBudget) || tokenBudget < state.request.tokenBudget || tokenBudget > 500000) throw runtime.error('继续预算只能在上限内增加，不能重置累计消耗。');
+    const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = contract.normalizeTokenBudget(input.tokenBudget ?? state.request.tokenBudget, state.request.tokenBudget);
+    if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160) throw runtime.error('继续轮次只能在上限内增加，不能重置累计消耗。');
     state.request.maxSteps = maxSteps; state.request.tokenBudget = tokenBudget;
     if (state.messages) state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' });
     if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);

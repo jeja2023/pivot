@@ -67,6 +67,7 @@ docker-compose.yml
 # 桌面端完整排除（Docker 不需要）
 desktop/
 dist-electron-remote/
+dist-local-helper/
 dist-electron-*/
 dist/
 updater-state.json

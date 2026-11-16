@@ -51,6 +51,10 @@
     function ensureModal() {
         if (byId('presentation-catalog-modal')) return;
         const overlay = node('div', 'modal-overlay hidden'); overlay.id = 'presentation-catalog-modal';
+        // 模板弹窗仅允许通过关闭按钮或选用模板关闭，点击弹窗外遮罩层不关闭。
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) event.stopPropagation();
+        });
         const modal = node('section', 'workspace-modal presentation-catalog-dialog');
         modal.id = 'presentation-catalog-dialog';
         modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-label', '演示模板库');

@@ -162,6 +162,8 @@ async function getMcpLocalAuthorizationStatus(options = {}) {
     if (!options.refresh && mcpLocalAuthorizationStatusCache) return mcpLocalAuthorizationStatusCache;
     const bridge = mcpLocalAuthBridge();
     if (!bridge) {
+        const helper = await window.Pivot.moduleApi('local.helper')?.status?.().catch(() => null);
+        if (helper) { mcpLocalAuthorizationStatusCache = mcpLocalAuthNormalizeStatus(helper); return mcpLocalAuthorizationStatusCache; }
         mcpLocalAuthorizationStatusCache = mcpLocalAuthFallbackStatus();
         return mcpLocalAuthorizationStatusCache;
     }
@@ -229,6 +231,7 @@ function renderMcpLocalAuthGrant(type, status) {
     const config = mcpLocalAuthConfig(type);
     const grant = mcpLocalGrant(status, type);
     const available = Boolean(status?.available);
+    const canGrant = available && status.provider !== 'helper';
     const authorized = Boolean(grant.authorized);
     const stateClass = !available ? 'is-unavailable' : (authorized ? 'is-authorized' : 'is-pending');
     const stateText = !available ? '需要客户端' : (authorized ? '已授权' : '未授权');
@@ -269,8 +272,8 @@ function renderMcpLocalAuthGrant(type, status) {
             ${workspaceDetails}
             ${desktopDetails}
             <footer>
-                <button class="btn-primary" type="button" data-mcp-local-grant="${mcpEscape(type)}" ${available ? '' : 'disabled'}>${mcpEscape(authorized ? '重新授权' : config.grantLabel)}</button>
-                <button class="btn-secondary" type="button" data-mcp-local-revoke="${mcpEscape(type)}" ${available && authorized ? '' : 'disabled'}>撤销</button>
+                <button class="btn-primary" type="button" data-mcp-local-grant="${mcpEscape(type)}" ${canGrant ? '' : 'disabled'}>${mcpEscape(status.provider === 'helper' ? '请在独立助手中授权' : authorized ? '重新授权' : config.grantLabel)}</button>
+                <button class="btn-secondary" type="button" data-mcp-local-revoke="${mcpEscape(type)}" ${canGrant && authorized ? '' : 'disabled'}>撤销</button>
             </footer>
         </article>
     `;
@@ -279,7 +282,7 @@ function renderMcpLocalAuthGrant(type, status) {
 function renderMcpLocalAuthorizationCenter(status) {
     const body = document.getElementById('mcp-local-auth-body');
     if (!body) return;
-    const providerText = status.available ? '桌面客户端' : '网页端';
+    const providerText = status.provider === 'helper' ? '独立助手' : status.available ? '桌面客户端' : '网页端';
     const activeConfig = mcpLocalAuthConfig(mcpLocalAuthorizationActiveType);
     PivotSafeHtml.setHtml(body, `
         <div class="mcp-local-auth-summary ${status.available ? 'is-ready' : 'is-waiting'}">
@@ -303,6 +306,19 @@ function renderMcpLocalAuthorizationCenter(status) {
         </div>
     `);
     bindMcpLocalAuthorizationCenter(status);
+    if (!window.pivotDesktop) {
+        const section = document.createElement('div'); section.className = 'mcp-helper-connection';
+        const download = document.createElement('section'); download.setAttribute('aria-label','下载 Windows 本机助手');
+        window.Pivot.moduleApi('client.downloads')?.mountHelper?.(download);
+        const text = document.createElement('p'); text.textContent = '在当前 Windows 电脑安装并启动独立助手，生成配对码后复制到助手中。应用授权在助手中完成；重新生成配对码会断开当前浏览器的旧绑定。';
+        const output = document.createElement('textarea'); output.className='form-input'; output.readOnly=true; output.rows=3; output.setAttribute('aria-label','助手配对码和状态');
+        const pair = document.createElement('button'); pair.className='btn-primary'; pair.type='button'; pair.textContent='生成助手配对码';
+        const revoke = document.createElement('button'); revoke.className='btn-secondary'; revoke.type='button'; revoke.textContent='断开本浏览器助手';
+        pair.onclick=async()=>{pair.disabled=true;try{const value=await window.Pivot.moduleApi('local.helper').create();output.value=value.code;output.focus();output.select();}catch(error){output.value=error.message;}finally{pair.disabled=false;}};
+        revoke.onclick=async()=>{try{await window.Pivot.moduleApi('local.helper').revoke();output.value='助手连接已撤销。';}catch(error){output.value=error.message;}};
+        const actions=document.createElement('div');actions.className='client-download-actions';actions.append(pair,revoke);
+        section.append(download,text,actions,output);body.prepend(section);
+    }
 }
 
 function bindMcpLocalAuthorizationCenter(status) {

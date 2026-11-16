@@ -1,4 +1,5 @@
 node_modules/
+dist-local-helper/
 .env
 data/
 uploads/
@@ -31,6 +32,8 @@ downloads/*.zip
 downloads/*.tar.gz
 downloads/SHA256SUMS.txt
 downloads/SHA256SUMS-*.txt
+downloads/local-helper/*
+!downloads/local-helper/README.md
 
 .venv-paddleocr/
 .venv-speech/

@@ -1,7 +1,7 @@
 'use strict';
 
 const { listAgentCapabilities } = require('./agent-capability-registry');
-const { currentRequestText } = require('./chat-request-constraints');
+const { currentUserText, currentRequestText } = require('./chat-request-constraints');
 
 function compactText(value, limit) {
     const text = String(value || '');
@@ -40,7 +40,7 @@ function buildChatIntentContext(input = {}) {
     const ordered = [...tools.filter(tool => selectedNames.has(tool.name)), ...tools.filter(tool => !selectedNames.has(tool.name))];
     const visible = ordered.slice(0, Math.max(24, Math.min(selectedNames.size, 100)));
     const totalTools = Math.max(Number(input.availability?.totalTools) || 0, tools.length);
-    const request = describeTextContext(input.prompt, 12000);
+    const request = describeTextContext(currentUserText(input.prompt), 12000);
     const { text: prompt, ...requestContext } = request;
     return {
         prompt, requestContext,

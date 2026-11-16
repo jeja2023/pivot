@@ -9,7 +9,6 @@ const {
     isAgentImageGenerationAvailable,
     isAgentTextToSpeechAvailable
 } = require('../server/services/agent-media-generation');
-const { detectUnsupportedCapability } = require('../server/capabilities');
 
 function networkPolicy(port) {
     return {
@@ -64,8 +63,6 @@ test('controlled media providers return only allowlisted playable URLs and omit 
         assert.doesNotMatch(JSON.stringify({ image, speech }), /provider-secret/);
         assert.equal(isAgentImageGenerationAvailable(), true);
         assert.equal(isAgentTextToSpeechAvailable(), true);
-        assert.equal(detectUnsupportedCapability('生成一张绿色山谷插画'), null);
-        assert.equal(detectUnsupportedCapability('把这段文字朗读成语音'), null);
     } finally {
         process.env.ALLOW_SENSITIVE_OUTBOUND_URLS = previous.allow;
         process.env.AGENT_IMAGE_GENERATION_ENDPOINT = previous.imageEndpoint;
@@ -77,6 +74,10 @@ test('controlled media providers return only allowlisted playable URLs and omit 
 });
 
 test('media generation rejects absent task network policy and malformed provider output', async () => {
+    await assert.rejects(
+        () => executeAgentImageGeneration({ prompt: 'test' }, { id: 1 }, { run: {} }, { env: {} }),
+        error => error.code === 'AGENT_MEDIA_UNAVAILABLE'
+    );
     await assert.rejects(
         () => executeAgentImageGeneration({ prompt: 'test' }, { id: 1 }, { run: {} }, { env: { AGENT_IMAGE_GENERATION_ENDPOINT: 'https://media.example.test/image' } }),
         error => error.code === 'AGENT_MEDIA_NETWORK_POLICY_REQUIRED'
