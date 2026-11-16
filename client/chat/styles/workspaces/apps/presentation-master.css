@@ -5,7 +5,7 @@
     max-height: calc(100dvh - 36px);
     margin: auto;
     border-radius: var(--radius-md, 10px);
-    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+    box-shadow: var(--shadow-md);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -87,8 +87,8 @@
 
 .presentation-master-hero.is-template-active {
     border-left: 4px solid var(--primary);
-    background: linear-gradient(135deg, rgba(16, 163, 127, 0.06), transparent 70%), var(--bg-side);
-    border-color: rgba(16, 163, 127, 0.25);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, transparent), transparent 70%), var(--bg-side);
+    border-color: color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
 .presentation-master-hero-content {
@@ -103,7 +103,7 @@
     width: 34px;
     height: 34px;
     border-radius: var(--radius-sm);
-    background: rgba(16, 163, 127, 0.1);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
     color: var(--primary);
     display: flex;
     align-items: center;
@@ -238,8 +238,8 @@
     font-size: 0.68rem;
     padding: 0 5px;
     border-radius: 4px;
-    background: rgba(59, 130, 246, 0.1);
-    color: #2563eb;
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    color: var(--primary);
     margin-left: 6px;
     font-weight: normal;
 }
@@ -259,7 +259,7 @@
 .presentation-master-dialog .form-input:focus {
     border-color: var(--primary);
     outline: none;
-    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.15);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent);
 }
 
 .presentation-master-dialog textarea.form-input {
@@ -300,7 +300,7 @@
 }
 
 .presentation-master-chip:hover {
-    background: rgba(16, 163, 127, 0.08);
+    background: color-mix(in srgb, var(--primary) 8%, transparent);
     border-color: var(--primary);
     color: var(--primary);
 }
@@ -322,13 +322,13 @@
 .presentation-master-dropzone:hover,
 .presentation-master-dropzone.is-dragover {
     border-color: var(--primary);
-    background: rgba(16, 163, 127, 0.04);
+    background: color-mix(in srgb, var(--primary) 4%, transparent);
 }
 
 .presentation-master-dropzone.has-files {
     border-style: solid;
-    border-color: rgba(16, 163, 127, 0.35);
-    background: rgba(16, 163, 127, 0.02);
+    border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+    background: color-mix(in srgb, var(--primary) 2%, transparent);
 }
 
 .presentation-master-dropzone-main {
@@ -435,8 +435,8 @@
 .presentation-master-ext-badge {
     padding: 1px 4px;
     border-radius: 3px;
-    background: var(--primary);
-    color: #fff;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    color: var(--primary);
     font-size: 0.62rem;
     font-weight: 600;
     flex-shrink: 0;
@@ -476,8 +476,8 @@
 }
 
 .presentation-master-file-remove:hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* 模板锁定提示 */
@@ -488,15 +488,15 @@
     gap: 5px;
     padding: 2px 8px;
     border-radius: 10px;
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    color: #b45309;
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
+    color: color-mix(in srgb, var(--warning) 80%, var(--text-main));
     font-size: 0.72rem;
     font-weight: 500;
 }
 
 .presentation-master-lock-notice svg {
-    color: #b45309;
+    color: var(--warning);
     flex-shrink: 0;
 }
 
@@ -542,16 +542,16 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #10a37f;
-    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.25);
+    background: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
     flex-shrink: 0;
     animation: master-pulse 2s infinite ease-in-out;
 }
 
 @keyframes master-pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 163, 127, 0.4); }
-    70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(16, 163, 127, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 163, 127, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 40%, transparent); }
+    70% { transform: scale(1.05); box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 0%, transparent); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent); }
 }
 
 .presentation-master-ready-text {
@@ -564,8 +564,8 @@
     font-size: 0.7rem;
     padding: 1px 7px;
     border-radius: 10px;
-    background: rgba(16, 163, 127, 0.12);
-    color: #10a37f;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
     font-weight: 600;
     flex-shrink: 0;
 }
@@ -583,18 +583,18 @@
     border-radius: 10px;
     font-size: 0.74rem;
     font-weight: 600;
-    background: rgba(16, 163, 127, 0.12);
-    color: #10a37f;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
 }
 
 .presentation-master-task-badge.working {
-    background: rgba(59, 130, 246, 0.12);
-    color: #2563eb;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    color: var(--primary);
 }
 
 .presentation-master-task-badge.failed {
-    background: rgba(239, 68, 68, 0.12);
-    color: #ef4444;
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
 }
 
 .presentation-master-task-message {
