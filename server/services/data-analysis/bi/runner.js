@@ -118,12 +118,15 @@ async function recoverExpired() {
     }
 }
 
-async function scheduleModelJobs() {
-    if (scheduling) return scheduling;
+async function scheduleModelJobs({ forceMaintenance = false } = {}) {
+    if (scheduling) {
+        if (!forceMaintenance) return scheduling;
+        await scheduling;
+    }
     if (stopping || !readTypedEnv('DATA_ANALYSIS_MODEL_ENABLED')) return { processed: 0 };
     scheduling = (async () => {
         const now = Date.now();
-        if (now - lastMaintenanceAt >= 1000) {
+        if (forceMaintenance || now - lastMaintenanceAt >= 1000) {
             await recoverExpired();
             await require('./readiness').ensureReady();
             await require('../../../repositories/analysis-operations').workerHeartbeat();
@@ -148,11 +151,13 @@ async function scheduleModelJobs() {
 // 显式处理入口等待队列和本进程已认领任务收敛；后台轮询只接纳，不等待长任务。
 async function processModelJobs() {
     let processed = 0;
+    let firstPass = true;
     draining++;
     if (wake) { clearImmediate(wake); wake = null; }
     try {
         while (!stopping) {
-            processed += (await scheduleModelJobs()).processed;
+            processed += (await scheduleModelJobs({ forceMaintenance: firstPass })).processed;
+            firstPass = false;
             const active = [...executions.values()];
             if (!active.length) break;
             await Promise.all(active);
