@@ -74,7 +74,7 @@ test('整稿目标从创建带入结构，逐页叙事调整先预览再确认�
     expect(errors).toEqual([]);
 });
 
-test('完整制作窗口从保存的任务恢复整稿目标，重新打开保留当前输入', async ({ page }) => {
+test('完整制作窗口不回填历史已完成任务目标，关闭清理未提交输入且切换模板保留输入', async ({ page }) => {
     const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } }); expect(login.ok()).toBeTruthy();
     const task = { id: 'goal-restoration-fixture', status: 'completed', request: { presentationId: '', title: '目标恢复', productionProfile: { audience: '经营决策者', purpose: '明确下一步安排', consumptionMode: 'reading', targetDurationSeconds: 900 } }, result: { message: '已恢复本次制作目标', files: [] } };
     await page.route('**/api/apps/presentations/master/info', route => route.fulfill({ json: { engine: { enabled: true } } }));
@@ -82,9 +82,21 @@ test('完整制作窗口从保存的任务恢复整稿目标，重新打开保�
     await page.route('**/api/apps/presentations/master/tasks/' + task.id, route => route.fulfill({ json: { task } }));
     const open = async () => { await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation'))); await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' })); await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click(); };
     await page.goto('/chat', { waitUntil: 'domcontentloaded' }); await open();
-    await expect(page.locator('#presentation-master-audience')).toHaveValue('经营决策者'); await expect(page.locator('#presentation-master-purpose')).toHaveValue('明确下一步安排');
-    await expect(page.locator('#presentation-master-consumption')).toHaveValue('reading'); await expect(page.locator('#presentation-master-duration')).toHaveValue('15');
-    await page.locator('#presentation-master-purpose').fill('当前未提交的新目标'); await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
-    await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click(); await expect(page.locator('#presentation-master-purpose')).toHaveValue('当前未提交的新目标');
-    await page.reload({ waitUntil: 'domcontentloaded' }); await open(); await expect(page.locator('#presentation-master-purpose')).toHaveValue('明确下一步安排');
+    await expect(page.locator('#presentation-master-audience')).toHaveValue('');
+    await expect(page.locator('#presentation-master-purpose')).toHaveValue('');
+    await expect(page.locator('#presentation-master-consumption')).toHaveValue('presentation');
+    await expect(page.locator('#presentation-master-duration')).toHaveValue('');
+
+    // 关闭弹窗清空未提交输入，重新打开不再保留旧输入
+    await page.locator('#presentation-master-purpose').fill('当前未提交的新目标');
+    await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
+    await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
+    await expect(page.locator('#presentation-master-purpose')).toHaveValue('');
+
+    // 点击「从模板库挑选模板」触发 preserveForm，重新回到制作弹窗时保留当前输入
+    await page.locator('#presentation-master-purpose').fill('切换模板保留目标');
+    await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => {} }));
+    await page.getByRole('button', { name: '从模板库挑选模板', exact: true }).click();
+    await page.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
+    await expect(page.locator('#presentation-master-purpose')).toHaveValue('切换模板保留目标');
 });
