@@ -956,22 +956,14 @@
     async function deleteDocument(id) { const accepted = await window.Pivot.legacy.showConfirm?.('删除演示文稿', '删除后文稿将归档，不会影响已导出的历史文件。'); if (!accepted) return; await requestJson(`${API}/${encodeURIComponent(id)}`, { method: 'DELETE' }); await loadDocuments(); toast('演示文稿已归档。'); }
     async function showPresentationsApp(options = {}) {
         const showSequence = state.showSequence = (state.showSequence || 0) + 1;
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-goals.js');
-        await window.Pivot.loadScriptOnce('/chat/presentation-colors.js');
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-canvas.js');
-        await window.Pivot.loadScriptOnce('/chat/presentation-template-preview.js');
-        await window.Pivot?.loadScriptOnce?.('/chat/presentation-graphics.js');
-        await window.Pivot?.loadScriptOnce?.('/chat/presentation-geometry.js');
+        const load = async list => { for (const name of list) await window.Pivot.loadScriptOnce(`/chat/${name}.js`); };
+        await load(['apps-workbench-presentation-goals', 'presentation-colors', 'apps-workbench-presentation-canvas', 'presentation-template-preview', 'presentation-graphics', 'presentation-geometry']);
         await window.Pivot.presentationGeometry.loadDefaultCatalog();
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-storyline.js');
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-studio.js');
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-master.js');
+        await load(['apps-workbench-presentation-storyline', 'apps-workbench-presentation-studio', 'apps-workbench-presentation-master']);
         window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson, openCreateModal });
-        await window.Pivot.loadScriptOnce('/chat/presentation-native-geometry.js');
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-native-properties.js');
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-native.js');
+        await load(['presentation-native-geometry', 'apps-workbench-presentation-native-properties', 'apps-workbench-presentation-native']);
         window.Pivot.moduleApi('apps.presentations.native').bind(state, { requestJson });
-        await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-catalog.js');
+        await load(['apps-workbench-presentation-catalog']);
         window.Pivot.moduleApi('apps.presentations.catalog').bind(state, { requestJson, openCreateModal, createBlank, applyTemplate, importTemplate: importTemplatePackage, reloadTemplates: loadTemplates, flush: () => persistence.flush(), toast });
         if (showSequence !== state.showSequence) return;
         ensureView(); hideOtherAppViews();
@@ -981,10 +973,7 @@
         if (showSequence !== state.showSequence) return;
         await refreshPresentationAiModelSelectors();
         if (showSequence !== state.showSequence) return;
-        if (options?.presentationId) {
-            await openPresentation(options.presentationId);
-            return;
-        }
+        if (options?.presentationId) { await openPresentation(options.presentationId); return; }
         if (!state.active) { byId('presentation-library')?.classList.remove('hidden'); byId('presentation-editor')?.classList.add('hidden'); }
         else { await refreshRemotePresentation().catch(() => { }); collab()?.loadComments(state.active.id); collab()?.sendPresenceHeartbeat?.(); }
     }
