@@ -86,3 +86,73 @@ test('分析来源版本变化独立提示，迟到的来源错误不影响新�
     await assert.rejects(api.fetchCurrent({ ...options, request: async () => { throw error; } }), /数据已变化/);
     assert.equal(notice, '');
 });
+
+test('重载鉴权完成前发起应用直达时等待鉴权，且登录后恢复不再覆盖显式工作区切换', async () => {
+    const noop = () => {};
+    const modules = new Map();
+    let resolveAuth;
+    const authGate = new Promise(resolve => { resolveAuth = resolve; });
+    const openedCalls = [];
+    const sessionStore = new Map([['pivot_main_workspace_view', 'apps']]);
+    const body = { attributes: new Map(), setAttribute(k, v) { this.attributes.set(k, v); }, classList: { toggle: noop, add: noop, remove: noop }, dataset: {} };
+    const panel = () => ({ classList: { toggle: noop, add: noop, remove: noop }, setAttribute: noop, removeAttribute: noop, contains: () => false, parentElement: null });
+    const panels = new Map([['apps-workbench-modal', panel()], ['personal-workbench-modal', panel()]]);
+    const sandbox = {
+        API_BASE: '/api',
+        console,
+        Date,
+        setInterval: () => 1,
+        sessionStorage: { getItem: k => sessionStore.get(k) || '', setItem: (k, v) => sessionStore.set(k, v), removeItem: k => sessionStore.delete(k) },
+        document: {
+            hidden: false,
+            body,
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            getElementById: id => panels.get(id) || null,
+            addEventListener: noop,
+            dispatchEvent: noop
+        },
+        apiFetch: async url => {
+            assert.equal(url, '/api/apps/catalog');
+            return { ok: true, json: async () => ({ canManage: false, apps: [{ id: 'presentations', enabled: true }] }) };
+        },
+        renderAppsGrid: noop,
+        getStoredAppsActiveApp: () => 'presentations',
+        showAppsHome: noop,
+        showToast: noop,
+        escapeAppsHtml: String,
+        PivotSafeHtml: { setHtml: noop },
+        window: {
+            addEventListener: noop,
+            matchMedia: () => ({ matches: false }),
+            Pivot: {
+                legacy: { currentUser: null },
+                api: { waitForInitialAuth: () => authGate },
+                exposeModule: (name, value) => modules.set(name, value),
+                moduleApi: name => modules.get(name) || {},
+                loadScripts: async () => {
+                    modules.set('workspaces.implementations', {
+                        openAppsWorkbench: async (options = {}) => openedCalls.push(options),
+                        openPersonalWorkbench: async () => openedCalls.push({ personal: true })
+                    });
+                }
+            }
+        }
+    };
+    sandbox.window.Pivot.moduleApi('workspaces.templateLoader').ensureWorkspaceMarkup = noop;
+    modules.set('workspaces.templateLoader', { ensureWorkspaceMarkup: async () => {} });
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/apps-workbench-availability.js'), 'utf8'), sandbox);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client/chat/app-workspaces.js'), 'utf8'), sandbox);
+
+    const nav = modules.get('workspaces.navigation');
+    const availability = modules.get('apps.availability');
+    const explicitOpen = nav.openAppsWorkbench({ app: 'presentations', presentationId: 'pres-123' });
+    const refreshPromise = availability.refresh();
+    sandbox.window.Pivot.legacy.currentUser = { id: 7 };
+    resolveAuth();
+    assert.equal(await refreshPromise, true);
+    assert.equal(availability.isEnabled('presentations'), true);
+    await explicitOpen;
+    await sandbox.window.Pivot.legacy.restoreMainWorkspaceAfterLogin();
+    assert.deepEqual(openedCalls, [{ app: 'presentations', presentationId: 'pres-123' }]);
+});

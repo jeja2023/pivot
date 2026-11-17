@@ -781,7 +781,11 @@ window.Pivot.legacy.getStoredActiveChatSession = () => getStoredSessionValue(ACT
 window.Pivot.legacy.persistPrintWorkspaceSession = sessionId => { if (!sessionId) return removeStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY); setStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY, String(sessionId)); };
 window.Pivot.legacy.getStoredPrintWorkspaceSession = () => getStoredSessionValue(PRINT_WORKSPACE_SESSION_KEY);
 
+let workspaceRestoreDepth = 0;
+let hasExplicitWorkspaceNavigation = false;
+
 function showMainWorkspace(view = 'personal') {
+    if (!workspaceRestoreDepth) hasExplicitWorkspaceNavigation = true;
     if (view !== 'apps') window.Pivot.moduleApi('apps.mindmaps').suspend?.();
     const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
     const current = document.body?.dataset.activeWorkspace;
@@ -861,6 +865,7 @@ function showMainWorkspace(view = 'personal') {
 function createLazyWorkspaceEntrypoint(group, functionName) {
     const loadedImplementation = typeof window.Pivot.legacy[functionName] === 'function' ? window.Pivot.legacy[functionName] : null;
     const lazyEntrypoint = async (...args) => {
+        if (!workspaceRestoreDepth && !args[0]?.restore) hasExplicitWorkspaceNavigation = true;
         await ensureWorkspaceScripts(group);
         const entrypoint = window.Pivot.moduleApi?.('workspaces.implementations')?.[functionName]
             || window.Pivot.legacy[functionName];
@@ -918,21 +923,27 @@ window.Pivot.legacy.closeKnowledgeWorkbench = closeWs('knowledge');
 window.Pivot.legacy.closeMcpWorkbench = closeWs('mcp');
 window.Pivot.legacy.closePersonalWorkbench = () => showMainWorkspace('chat');
 window.Pivot.legacy.restoreMainWorkspaceAfterLogin = async function() {
+    if (hasExplicitWorkspaceNavigation) return;
     const view = window.Pivot.legacy.getStoredMainWorkspace?.() || 'personal';
-    const openers = { settings: () => openAdminPanelEntrypoint({ restore: true }), personal: () => openPersonalWorkbenchEntrypoint(), apps: () => openAppsWorkbenchEntrypoint(), knowledge: () => openKnowledgeWorkbenchEntrypoint(), mcp: () => openMcpWorkbenchEntrypoint(), 'agent-dag': () => openAgentDagWorkbenchEntrypoint(), agent: () => openAgentWorkbenchEntrypoint(), manual: () => showMainWorkspace('manual') };
-    if (openers[view]) return openers[view]();
-    if (view === 'print' && window.Pivot.legacy.openPrintWorkbench) {
-        const sessionId = window.Pivot.legacy.getStoredPrintWorkspaceSession?.() || window.Pivot.legacy.getStoredActiveChatSession?.();
-        if (sessionId) return window.Pivot.legacy.openPrintWorkbench(sessionId);
+    const openers = { settings: () => openAdminPanelEntrypoint({ restore: true }), personal: () => openPersonalWorkbenchEntrypoint(), apps: () => openAppsWorkbenchEntrypoint({ restore: true }), knowledge: () => openKnowledgeWorkbenchEntrypoint({ restore: true }), mcp: () => openMcpWorkbenchEntrypoint({ restore: true }), 'agent-dag': () => openAgentDagWorkbenchEntrypoint({ restore: true }), agent: () => openAgentWorkbenchEntrypoint({ restore: true }), manual: () => showMainWorkspace('manual') };
+    workspaceRestoreDepth += 1;
+    try {
+        if (openers[view]) return await openers[view]();
+        if (view === 'print' && window.Pivot.legacy.openPrintWorkbench) {
+            const sessionId = window.Pivot.legacy.getStoredPrintWorkspaceSession?.() || window.Pivot.legacy.getStoredActiveChatSession?.();
+            if (sessionId) return window.Pivot.legacy.openPrintWorkbench(sessionId);
+        }
+        if (view === 'chat') {
+            const sessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
+            if (sessionId && window.Pivot.legacy.selectSession) return await window.Pivot.legacy.selectSession(sessionId, undefined, { restore: true });
+            return showMainWorkspace('chat');
+        }
+        return window.Pivot.moduleApi?.('workspaces.implementations')?.openPersonalWorkbench
+            ? await openPersonalWorkbenchEntrypoint()
+            : showMainWorkspace('personal');
+    } finally {
+        workspaceRestoreDepth -= 1;
     }
-    if (view === 'chat') {
-        const sessionId = window.Pivot.legacy.getStoredActiveChatSession?.();
-        if (sessionId && window.Pivot.legacy.selectSession) return window.Pivot.legacy.selectSession(sessionId, undefined, { restore: true });
-        return showMainWorkspace('chat');
-    }
-    return window.Pivot.moduleApi?.('workspaces.implementations')?.openPersonalWorkbench
-        ? openPersonalWorkbenchEntrypoint()
-        : showMainWorkspace('personal');
 };
 
 window.Pivot.legacy.ensureManualFrameLoaded = () => {

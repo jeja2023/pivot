@@ -582,11 +582,11 @@ async function openAppsWorkbench(options = {}) {
     if (targetApp === 'mindmaps') {
         window.Pivot.moduleApi('workspaces.apps').showMindmapsAppFromRegistry(options).catch(error => { showToast(error.message, 'error'); showAppsHome(); });
     } else if (targetApp === 'presentations') {
-        showPresentationsAppFromRegistry(options).then(async () => {
-            if (options?.presentationId) {
-                await window.Pivot?.moduleApi?.('apps.presentations')?.openPresentation?.(options.presentationId);
-            }
-        }).catch(() => showAppsHome());
+        try {
+            await showPresentationsAppFromRegistry(options);
+        } catch (_) {
+            if (navigationSequence === appsWorkbenchNavigationSequence) showAppsHome();
+        }
     } else if (targetApp === 'official-writing') {
         showOfficialWritingApp().then(() => {
             if (options?.docId && typeof switchOfficialWritingDoc === 'function') {

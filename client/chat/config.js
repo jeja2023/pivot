@@ -208,11 +208,14 @@ async function apiFetch(url, options = {}) {
     return res;
 }
 
+let initialAuthPromise = null;
+
 window.Pivot.api = {
     fetch: apiFetch,
     authFetch,
     authHeaders,
-    refreshAccessToken
+    refreshAccessToken,
+    waitForInitialAuth: () => initialAuthPromise || Promise.resolve()
 };
 window.Pivot.permissions = {
     isAdminUser,
@@ -230,7 +233,7 @@ Object.defineProperties(window.Pivot.legacy, {
     currentSessionId: { get: () => currentSessionId, set: value => { currentSessionId = value; } }
 });
 
-async function checkLogin(hasRetried = false) {
+async function runCheckLogin(hasRetried = false) {
     try {
         const res = await apiFetch(`${API_BASE}/auth/me`);
         if (res.ok) {
@@ -239,7 +242,7 @@ async function checkLogin(hasRetried = false) {
                 if (!hasRetried && isRefreshableAuthCode(data.code)) {
                     try {
                         await refreshAccessToken();
-                        return checkLogin(true);
+                        return runCheckLogin(true);
                     } catch (e) {
                         if (e.sessionInvalid) handleUnauthorized();
                         return;
@@ -259,6 +262,18 @@ async function checkLogin(hasRetried = false) {
         console.error('自动登录失败:', e);
         if (e.sessionInvalid) handleUnauthorized();
     }
+}
+
+async function checkLogin(hasRetried = false) {
+    if (!hasRetried && initialAuthPromise) return initialAuthPromise;
+    const task = runCheckLogin(hasRetried);
+    if (!hasRetried) {
+        initialAuthPromise = task.finally(() => {
+            if (initialAuthPromise === task) initialAuthPromise = null;
+        });
+        return initialAuthPromise;
+    }
+    return task;
 }
 
 function handleUnauthorized() {

@@ -955,6 +955,7 @@
     async function duplicateDocument(id) { const data = await requestJson(`${API}/${encodeURIComponent(id)}/duplicate`, jsonOptions({})); await loadDocuments(); await openPresentation(data.presentation.id); toast('已创建演示文稿副本。'); }
     async function deleteDocument(id) { const accepted = await window.Pivot.legacy.showConfirm?.('删除演示文稿', '删除后文稿将归档，不会影响已导出的历史文件。'); if (!accepted) return; await requestJson(`${API}/${encodeURIComponent(id)}`, { method: 'DELETE' }); await loadDocuments(); toast('演示文稿已归档。'); }
     async function showPresentationsApp(options = {}) {
+        const showSequence = state.showSequence = (state.showSequence || 0) + 1;
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-goals.js');
         await window.Pivot.loadScriptOnce('/chat/presentation-colors.js');
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-canvas.js');
@@ -972,10 +973,14 @@
         window.Pivot.moduleApi('apps.presentations.native').bind(state, { requestJson });
         await window.Pivot.loadScriptOnce('/chat/apps-workbench-presentation-catalog.js');
         window.Pivot.moduleApi('apps.presentations.catalog').bind(state, { requestJson, openCreateModal, createBlank, applyTemplate, importTemplate: importTemplatePackage, reloadTemplates: loadTemplates, flush: () => persistence.flush(), toast });
+        if (showSequence !== state.showSequence) return;
         ensureView(); hideOtherAppViews();
         try { await loadTemplates(); } catch (error) { throw new Error('加载 PPT 模板失败：' + (error.message || '未知错误')); }
+        if (showSequence !== state.showSequence) return;
         try { await loadDocuments(); } catch (error) { throw new Error('加载 PPT 文稿库失败：' + (error.message || '未知错误')); }
+        if (showSequence !== state.showSequence) return;
         await refreshPresentationAiModelSelectors();
+        if (showSequence !== state.showSequence) return;
         if (options?.presentationId) {
             await openPresentation(options.presentationId);
             return;

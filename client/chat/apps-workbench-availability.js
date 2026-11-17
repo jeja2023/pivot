@@ -94,6 +94,9 @@
     }
 
     async function refresh() {
+        if (!identity() && typeof window.Pivot?.api?.waitForInitialAuth === 'function') {
+            await window.Pivot.api.waitForInitialAuth();
+        }
         const requestOwner = syncOwner();
         if (!requestOwner) return false;
         if (pending) return pending;
