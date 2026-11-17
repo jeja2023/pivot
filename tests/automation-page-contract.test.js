@@ -361,7 +361,9 @@ test('Agent统一收件箱和评测中心查看详情支持返回原页面原选
     assert.match(detailJs, /switchAgentCpSubview.*targetSubview/);
     assert.match(detailJs, /openWorkbench\(\{ tab: 'tasks', skipAutoOpen: true \}\)/);
     assert.match(agentsJs, /loadAgentRuns\(undefined, \{ skipAutoOpen: options\.skipAutoOpen === true \}\)/);
-    assert.match(detailJs, /bindAgentRunDetailDomEvents\(topActions, run, isPreview\)/);
+    assert.match(detailJs, /bindAgentRunDetailDomEvents\(workbenchDetailContainer, run, isPreview\)/);
+    assert.doesNotMatch(detailJs, /bindAgentRunDetailDomEvents\(topActions,\s*run,\s*isPreview\)/);
+    assert.match(html, /id="agent-tasks-detail-container"[\s\S]*id="agent-detail-header-actions"/);
     assert.match(detailJs, /data-agent-rerun/);
     assert.match(detailJs, /data-agent-resume/);
 
