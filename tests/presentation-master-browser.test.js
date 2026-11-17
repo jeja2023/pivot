@@ -179,11 +179,13 @@ test('英文浏览器下文件选择、数量、清除和系统错误均显示�
     const context = await fixture();
     try {
         const page = await pageFor(context), dialog = page.getByRole('dialog');
+        await expect(page.locator('#presentation-master-status')).toContainText('完整制作引擎已登记');
         await expect(dialog.getByText('未选择任何文件', { exact: true })).toHaveCount(2);
         await expect(dialog.locator('input[type="file"]:visible')).toHaveCount(0);
         const browse = dialog.getByRole('button', { name: '选择文件材料', exact: true });
         await browse.focus();
-        const choosing = page.waitForEvent('filechooser'); await page.keyboard.press('Enter');
+        await expect(browse).toBeFocused();
+        const choosing = page.waitForEvent('filechooser'); await browse.press('Enter');
         await (await choosing).setFiles([await word('经营报告.docx', '收入120万元。'), await word('风险清单.docx', '暂无新增风险。')]);
         await expect(dialog.locator('#presentation-master-material-files-selection')).toHaveText('已选择2个文件：经营报告.docx、风险清单.docx');
         await dialog.getByRole('button', { name: '清除文件材料', exact: true }).click();

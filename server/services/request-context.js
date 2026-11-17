@@ -3,11 +3,14 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const storage = new AsyncLocalStorage();
 
 function runWithRequestContext(context, callback) {
-    return storage.run({
+    const store = {
         requestId: String(context?.requestId || ''),
-        userId: context?.userId ?? null,
-        helperBrowserKey: context?.helperBrowserKey || ''
-    }, callback);
+        userId: context?.userId ?? null
+    };
+    if (context && Object.hasOwn(context, 'helperBrowserKey')) {
+        store.helperBrowserKey = String(context.helperBrowserKey || '');
+    }
+    return storage.run(store, callback);
 }
 
 function getRequestContext() {

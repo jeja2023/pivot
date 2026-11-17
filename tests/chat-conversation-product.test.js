@@ -183,7 +183,7 @@ test('首轮长附件按页读取真实消息，遗漏资料阻断完成，删�
         getConversationTasks: async () => [], retrieveLongTermMemories: async () => [], resolveChatIntent: async input => { captured = input; return { action: 'agent_run' }; }
     });
     assert.equal(decision.action, 'agent_run');
-    assert.equal(captured.prompt, '分析附件并生成报告\n');
+    assert.equal(captured.prompt, '分析附件并生成报告');
     assert.deepEqual(captured.providedSources, [{ kind: 'inline_attachment', name: '订单.txt', available: true, sourceMessageId: message.id }]);
     const runId = `run-${suffix}`;
     await execute("INSERT INTO agent_runs (id,user_id,session_id,title,goal,status,metadata,created_at,updated_at) VALUES (?,?,?,?,?,'planning',?,NOW(),NOW())", [runId, user.id, sessionId, '附件分析', '分析附件并生成报告', JSON.stringify({ chatBridge: { version: 1, sessionId, userMessageId: message.id }, conversationMessageIds: [followUp.id] })]);
