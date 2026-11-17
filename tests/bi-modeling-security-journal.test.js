@@ -291,3 +291,39 @@ test('捕获保护丢失时仍保留已提交收紧并持久关闭，修复触�
     assert.equal((await queryOne('SELECT status FROM users WHERE id=?', [user.id])).status, 'disabled');
     assert.equal((await queryOne("SELECT payload_json FROM analysis_security_outbox WHERE target_table='users' AND target_id=? ORDER BY sequence DESC LIMIT 1", [String(user.id)])).payload_json.status, 'disabled');
 }));
+
+test('并发读取共享单次链加载与尾部增量校验，缺口回退全量核验并拒绝读取', async () => fixture(async ({ user, fact }) => {
+    await journal.flush({ force: true, full: true });
+    const originalReadChain = files.readChain, originalReadTail = files.readChainTail;
+    let fullReads = 0, tailReads = 0;
+    files.readChain = async (...args) => { fullReads++; return originalReadChain(...args); };
+    files.readChainTail = async (...args) => { tailReads++; return originalReadTail(...args); };
+    try {
+        await Promise.all(Array.from({ length: 12 }, () => journal.assertAccess([{ kind: 'dataset', id: fact.id }])));
+        assert.equal(fullReads, 0);
+        assert.equal(tailReads, 0);
+
+        await getPgPool().query("UPDATE analysis_datasets SET allowed_units='tail_check' WHERE id=$1", [fact.id]);
+        const config = await files.configuration(), ledger = await chain();
+        fullReads = 0; tailReads = 0;
+        const pending = await require('../server/repositories/analysis-security-journal').withPump(client => require('../server/repositories/analysis-security-journal').pending(client));
+        assert.equal(pending.length, 1);
+        const entry = await files.append(config, ledger, pending[0]);
+        await require('../server/repositories/analysis-security-journal').withPump(client => require('../server/repositories/analysis-security-journal').acknowledge(client, entry));
+
+        await Promise.all(Array.from({ length: 12 }, () => transaction(trx => journal.assertResources(trx, [{ kind: 'dataset', id: fact.id }]))));
+        assert.equal(fullReads, 0);
+        assert.equal(tailReads, 1);
+
+        const first = path.join(ledger.directory, '0000000000000001.entry'), backup = `${first}.removed`;
+        await fs.rename(first, backup);
+        try {
+            await assert.rejects(transaction(trx => journal.assertResources(trx, [{ kind: 'dataset', id: fact.id }])), error => error.status === 503);
+        } finally { await fs.rename(backup, first); }
+        await journal.flush({ force: true });
+        assert.equal((await datasets.getDatasetForUser(user, fact.id)).allowed_units, 'tail_check');
+    } finally {
+        files.readChain = originalReadChain;
+        files.readChainTail = originalReadTail;
+    }
+}));

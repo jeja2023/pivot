@@ -7,7 +7,7 @@ const repository = require('../../../repositories/analysis-security-journal');
 const files = require('./security-journal-files');
 const { biError } = require('./errors');
 
-let cached = null, running = null;
+let cached = null, running = null, reading = null;
 let enforcedRuntime = false;
 
 function enabled() { return enforcedRuntime || process.env.DATA_ANALYSIS_MODEL_ENABLED === 'true' || Boolean(process.env.DATA_ANALYSIS_SECURITY_JOURNAL_DIR); }
@@ -18,17 +18,46 @@ async function pendingIn(client) {
     return repository.pendingIn(client);
 }
 
-async function chainState(config, originId, force) {
-    const key = `${config.root}:${originId}:${crypto.createHash('sha256').update(config.key).digest('hex')}`;
-    if (cached?.key === key && !force) {
+function chainCacheKey(config, originId) {
+    return `${config.root}:${originId}:${crypto.createHash('sha256').update(config.key).digest('hex')}`;
+}
+
+async function chainState(config, originId, force, minPosition = 0) {
+    const key = chainCacheKey(config, originId);
+    if (!force && cached?.key === key) {
         if (Date.now() - cached.verifiedAt > 90000) throw files.unavailable();
-        const names = await fs.readdir(cached.chain.directory);
-        const last = cached.chain.position ? await fs.stat(path.join(cached.chain.directory, `${String(cached.chain.position).padStart(16, '0')}.entry`)) : null;
-        if (names.length === cached.chain.position && (!last || last.size === cached.last?.size && last.mtimeMs === cached.last?.mtimeMs)) return cached.chain;
+        const names = (await fs.readdir(cached.chain.directory)).sort();
+        if (names.length === cached.chain.position && cached.chain.position >= minPosition
+            && names.every((name, index) => name === cached.chain.names?.[index])) {
+            if (cached.chain.position === 0) return cached.chain;
+            const last = await fs.stat(path.join(cached.chain.directory, `${String(cached.chain.position).padStart(16, '0')}.entry`));
+            if (cached.last && last.size === cached.last.size && last.mtimeMs === cached.last.mtimeMs) return cached.chain;
+        }
     }
-    const chain = await files.readChain(config, originId);
-    cached = { key, chain, verifiedAt: Date.now(), last: null };
-    return chain;
+    if (!force && reading?.key === key) {
+        const result = await reading.promise;
+        if (result.position >= minPosition) return result;
+    }
+    // 并发非强制校验共享同一链读取，并优先增量校验新增尾部条目，避免持事务锁重扫全量历史。
+    const loader = (async () => {
+        if (!force && cached?.key === key && Date.now() - cached.verifiedAt <= 90000) {
+            const extended = await files.readChainTail(config, originId, cached.chain, cached.last);
+            if (extended) {
+                cached = { key, chain: extended, verifiedAt: cached.verifiedAt, last: extended.last };
+                return extended;
+            }
+        }
+        const chain = await files.readChain(config, originId);
+        cached = { key, chain, verifiedAt: Date.now(), last: chain.last };
+        return chain;
+    })();
+    if (!force) {
+        const current = { key, promise: loader };
+        reading = current;
+        try { return await loader; }
+        finally { if (reading === current) reading = null; }
+    }
+    return loader;
 }
 
 async function flushSecurityJournal({ force = false, allowRecovery = false, transactionId = '', full = false } = {}) {
@@ -65,13 +94,14 @@ async function flushSecurityJournal({ force = false, allowRecovery = false, tran
             if (!pending.length) break;
             for (const record of pending) {
                 const entry = await files.append(config, chain, record);
+                cached = { key: chainCacheKey(config, state.origin_id), chain, verifiedAt: cached?.verifiedAt || Date.now(), last: entry.stat || chain.last };
                 await repository.acknowledge(client, entry); delivered++;
             }
             if (transactionId && !await repository.transactionPending(transactionId, client)) break;
         }
         const mode = await repository.ready(client, chain, inventory.complete);
         enforcedRuntime = true;
-        if (chain.position) cached.last = await fs.stat(path.join(chain.directory, `${String(chain.position).padStart(16, '0')}.entry`));
+        if (chain.position && cached?.chain === chain) cached.last = chain.last || await fs.stat(path.join(chain.directory, `${String(chain.position).padStart(16, '0')}.entry`));
         return { delivered, inventory, originId: state.origin_id, position: chain.position, hash: chain.hash, durability: config.durability, mode };
     }).catch(() => { cached = null; throw files.unavailable(); }).finally(() => { running = null; });
     return running;
@@ -100,7 +130,7 @@ async function assertResources(trx, resources) {
     }
     if (state?.mode === 'ready') {
         try {
-            const config = await files.configuration(), chain = await chainState(config, state.origin_id, false), checkpoint = Number(state.journal_position);
+            const config = await files.configuration(), checkpoint = Number(state.journal_position), chain = await chainState(config, state.origin_id, false, checkpoint);
             if (checkpoint > chain.position || checkpoint > 0 && chain.entries[checkpoint - 1]?.hash !== state.journal_hash) throw files.unavailable();
             for (let offset = checkpoint; offset < chain.entries.length; offset += 500) {
                 const ids = chain.entries.slice(offset, offset + 500).map(entry => entry.record.event_id);

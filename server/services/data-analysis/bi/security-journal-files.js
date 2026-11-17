@@ -38,7 +38,11 @@ async function syncDirectory(directory) {
     finally { await handle?.close(); }
 }
 
-async function readChain(config, originId) {
+function padPosition(position) {
+    return `${String(position).padStart(16, '0')}.entry`;
+}
+
+async function prepareChainDirectory(config, originId) {
     if (!/^[a-f0-9-]{36}$/i.test(originId)) throw unavailable();
     if ((await fs.readdir(config.root)).some(name => /^[a-f0-9-]{36}$/i.test(name) && name !== originId)) throw unavailable();
     const directory = path.join(config.root, originId);
@@ -47,11 +51,19 @@ async function readChain(config, originId) {
     if (!stat.isDirectory() || stat.isSymbolicLink() || process.platform !== 'win32' && (stat.mode & 0o077)) throw unavailable();
     await syncDirectory(config.root);
     const names = (await fs.readdir(directory)).sort();
-    const entries = [], byId = new Map(); let previous = EMPTY_HASH;
-    for (const name of names) {
+    return { directory, names };
+}
+
+async function readChainRange(config, originId, directory, names, startIndex, initial) {
+    const entries = initial ? initial.entries.slice() : [];
+    const byId = initial ? new Map(initial.byId) : new Map();
+    let previous = initial ? initial.hash : EMPTY_HASH;
+    let last = initial ? initial.last : null;
+    for (let index = startIndex; index < names.length; index++) {
+        const name = names[index];
         if (!/^\d{16}\.entry$/.test(name)) throw unavailable();
         const position = entries.length + 1;
-        if (name !== `${String(position).padStart(16, '0')}.entry`) throw unavailable();
+        if (name !== padPosition(position)) throw unavailable();
         const file = path.join(directory, name), info = await fs.lstat(file);
         if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_ENTRY_BYTES) throw unavailable();
         const envelope = JSON.parse(await fs.readFile(file, 'utf8'));
@@ -60,8 +72,30 @@ async function readChain(config, originId) {
         if (record.origin_id !== originId || !record.event_id || byId.has(record.event_id)) throw unavailable();
         const hash = canonicalHash(envelope);
         entries.push({ position, hash, record }); byId.set(record.event_id, { position, hash, record }); previous = hash;
+        last = info;
     }
-    return { directory, entries, byId, position: entries.length, hash: previous };
+    return { directory, entries, byId, names: names.slice(), position: entries.length, hash: previous, last };
+}
+
+async function readChain(config, originId) {
+    const { directory, names } = await prepareChainDirectory(config, originId);
+    return readChainRange(config, originId, directory, names, 0, null);
+}
+
+// 仅从已校验前缀尾部增量读取新追加条目；若前缀或排序连续性存疑则回退全量重检。
+async function readChainTail(config, originId, base, lastStat) {
+    const { directory, names } = await prepareChainDirectory(config, originId);
+    if (directory !== base.directory || names.length < base.position) return null;
+    for (let index = 0; index < base.position; index++) {
+        if (names[index] !== padPosition(index + 1)) return null;
+    }
+    let currentLast = null;
+    if (base.position > 0) {
+        if (!lastStat) return null;
+        currentLast = await fs.lstat(path.join(directory, padPosition(base.position)));
+        if (!currentLast.isFile() || currentLast.isSymbolicLink() || currentLast.size !== lastStat.size || currentLast.mtimeMs !== lastStat.mtimeMs) return null;
+    }
+    return readChainRange(config, originId, directory, names, base.position, { ...base, last: currentLast });
 }
 
 async function appendSecurityRecord(config, chain, record) {
@@ -75,7 +109,8 @@ async function appendSecurityRecord(config, chain, record) {
         sealed: encryptSecretWithKey(JSON.stringify(record), config.key, `pivot.bi.security:${record.origin_id}:${position}:${chain.hash}`) };
     const bytes = Buffer.from(JSON.stringify(envelope));
     if (bytes.length > MAX_ENTRY_BYTES) throw unavailable();
-    const file = path.join(chain.directory, `${String(position).padStart(16, '0')}.entry`);
+    const entryName = padPosition(position);
+    const file = path.join(chain.directory, entryName);
     const temporary = path.join(config.root, `pending-${crypto.randomUUID()}`);
     const handle = await fs.open(temporary, 'wx', 0o600);
     try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
@@ -85,9 +120,11 @@ async function appendSecurityRecord(config, chain, record) {
         await fs.link(temporary, file);
         await syncDirectory(chain.directory);
     } finally { await fs.unlink(temporary).catch(() => {}); await syncDirectory(config.root); }
-    const entry = { position, hash: canonicalHash(envelope), record };
-    chain.entries.push(entry); chain.byId.set(record.event_id, entry); chain.position = position; chain.hash = entry.hash;
+    const stat = await fs.stat(file);
+    const entry = { position, hash: canonicalHash(envelope), record, stat };
+    chain.entries.push(entry); chain.byId.set(record.event_id, entry); chain.position = position; chain.hash = entry.hash; chain.last = stat;
+    if (Array.isArray(chain.names)) chain.names.push(entryName);
     return entry;
 }
 
-module.exports = { configuration: journalConfiguration, readChain, append: appendSecurityRecord, unavailable, EMPTY_HASH };
+module.exports = { configuration: journalConfiguration, readChain, readChainTail, append: appendSecurityRecord, unavailable, EMPTY_HASH };
