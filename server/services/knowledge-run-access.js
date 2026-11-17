@@ -16,6 +16,7 @@ async function readRunKnowledgeAccess(runId, user, deps = {}) {
         if (!evidence) return { current: false, notFound: true, reasonCode: 'RUN_NOT_FOUND', message: '智能体任务不存在或无权访问。' };
         if (!evidence.actor || evidence.actor.status === 'disabled' || evidence.actor.deleted_at || evidence.incomplete) return blockedAccess();
         const metadata = parseJsonObject(evidence.run.metadata) || {};
+        if (metadata.skillReleaseId || metadata.skillVersionId) await require('./agent-skill-resources').assertSkillReleaseCurrent(evidence.run, evidence.actor);
         if(metadata.skillResourceEvidence)await require('./agent-skill-resources').assertSkillResourceEvidence(evidence.run,evidence.actor);
         const sourceRunIds = [...new Set([metadata.goalContinuation?.sourceRunId, metadata.resumeContext?.sourceRunId, metadata.parentHistory?.sourceRunId].filter(id => id && id !== runId))];
         if (metadata.goalContinuation?.sourceRunId === runId) return blockedAccess();

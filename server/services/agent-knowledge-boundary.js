@@ -16,6 +16,7 @@ async function prepareAgentKnowledgeBoundary(run, user, deps = {}) {
 
 /** 模型读取历史观察、执行后续工具及发布答案前，均重新确认资料仍可用。 */
 async function assertAgentKnowledgeCurrent({ run = {}, user, observations = [] }, deps = {}) {
+    await require('./agent-skill-resources').assertSkillReleaseCurrent(run, user);
     await require('./agent-skill-resources').assertSkillResourceEvidence(run,user);
     const oldRevision = knowledgeScopeRevision(run);
     let metadata = require('./agent-validators').parseJsonObject(run.metadata) || {};
@@ -24,6 +25,8 @@ async function assertAgentKnowledgeCurrent({ run = {}, user, observations = [] }
         if (!fresh || fresh.source_active === false) throw unavailable();
         metadata = require('./agent-validators').parseJsonObject(fresh.metadata) || {};
         run.metadata = metadata;
+        await require('./agent-skill-resources').assertSkillReleaseCurrent(run, user);
+        await require('./agent-skill-resources').assertSkillResourceEvidence(run, user);
     }
     const manifests = [run.knowledgeBoundaryEvidence];
     for (const item of observations) {

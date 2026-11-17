@@ -87,11 +87,9 @@ async function authorizedPackage(user, context = {}, deps = {}) {
     const metadata = parseJsonObject(context.run?.metadata) || {};
     if (!metadata.skillName || !metadata.skillVersionId || !metadata.skillReleaseId)
         throw error('请先为任务选择已发布技能。', 400);
-    const release = await (deps.resolve || require('./agent-releases').resolvePublishedSkill)(metadata.skillName, user);
+    const release = await assertSkillReleaseCurrent(context.run, user, deps);
     if (!release || String(release.id) !== String(metadata.skillReleaseId) || String(release.skill_version_id) !== String(metadata.skillVersionId))
         throw error('技能发布已变化或授权已撤回，请重新选择技能。', 403);
-    if (!await (deps.sourceActive || require('../repositories/agent-learning-evaluation').sourceIsActive)(release.skill_version_id))
-        throw error('技能来源已撤回。', 403);
     const version = await (deps.version || require('../repositories/agent-skill-resources').readVersion)(release.skill_version_id);
     if (!version?.package_path)
         return { entries: [], digest: null, reference: { releaseId: release.id, versionId: release.skill_version_id } };
@@ -109,6 +107,27 @@ async function authorizedPackage(user, context = {}, deps = {}) {
     if (!current || String(current.id) !== String(release.id) || String(current.skill_version_id) !== String(release.skill_version_id))
         throw error('读取期间技能授权或版本已变化。', 403);
     return { ...pack, reference: { releaseId: release.id, versionId: release.skill_version_id } };
+}
+async function assertSkillReleaseCurrent(run, user, deps = {}) {
+    const metadata = parseJsonObject(run?.metadata) || {};
+    if (!metadata.skillReleaseId && !metadata.skillVersionId) return null;
+    if (!metadata.skillName || !metadata.skillReleaseId || !metadata.skillVersionId)
+        throw error('任务技能引用不完整，请重新创建任务。', 403);
+    const release = await (deps.resolve || require('./agent-releases').resolvePublishedSkill)(metadata.skillName, user);
+    if (!release || String(release.id) !== String(metadata.skillReleaseId) || String(release.skill_version_id) !== String(metadata.skillVersionId))
+        throw error('技能发布已变化或授权已撤回，请重新选择技能。', 403);
+    if (!await (deps.sourceActive || require('../repositories/agent-learning-evaluation').sourceIsActive)(release.skill_version_id))
+        throw error('技能来源已撤回。', 403);
+    if (metadata.skillInstructions !== undefined && String(metadata.skillInstructions) !== require('./agent-skills').skillInstructionsFromRelease(release))
+        throw error('任务技能正文与当前版本不一致，请重新创建任务。', 403);
+    if (release.signing_envelope_id || release.rollout_scope === 'team' || release.rollout_scope === 'organization') {
+        const version = await (deps.version || require('../repositories/agent-skill-resources').readVersion)(release.skill_version_id);
+        const signature = await (deps.verify || require('./agent-skill-signing').verifyEnvelopeForVersion)(version || {}, {
+            requireFullContent: release.rollout_scope !== 'personal'
+        });
+        if (!signature.verified) throw error('技能签名已失效或未覆盖完整正文，请重新签发。', 403);
+    }
+    return release;
 }
 const metadataFiles = new Set(['SKILL.md', 'SKILL.json', 'SKILL.yaml', 'SKILL.yml', 'SKILL.sig', 'package.sig', 'INSTRUCTIONS.md', 'instructions.md']);
 function definitions() {
@@ -151,4 +170,4 @@ async function assertSkillResourceEvidence(run, user, deps = {}) {
     if (String(current.reference.releaseId) !== String(evidence.releaseId) || String(current.reference.versionId) !== String(evidence.versionId) || current.digest !== evidence.packageDigest)
         throw error('任务使用的技能配套资料已失效，请重新选择技能后运行。', 403);
 }
-module.exports = { readInstalledSkillResources, definitions, execute, assertSkillResourceEvidence };
+module.exports = { readInstalledSkillResources, definitions, execute, assertSkillReleaseCurrent, assertSkillResourceEvidence };

@@ -105,6 +105,7 @@ function getAgentRunPayload(goalOverride = '') {
         contextConfig: getAgentContextConfig(),
         networkPolicy: getAgentNetworkPolicy(),
         skillId: window.Pivot.legacy.getAgentHarnessSkillId?.() || '',
+        skillReference: window.Pivot.legacy.getAgentHarnessSkillReference?.() || null,
         sessionId: window.Pivot.legacy.currentSessionId || null
     };
     return payload;

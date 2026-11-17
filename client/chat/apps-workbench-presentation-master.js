@@ -265,19 +265,22 @@
     }
     function renderTask(value) {
         const panel = byId('presentation-master-status'); panel.replaceChildren();
+        const feedback = node('p', 'presentation-master-task-feedback'); feedback.setAttribute('role', 'alert');
         const head = node('div', 'presentation-master-task-head');
         const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: '需要人工确认', completed: '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
         head.appendChild(statusBadge);
         panel.appendChild(head);
-        panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
-        panel.appendChild(node('p', 'presentation-empty-note', `步骤 ${value.steps || 0}；累计模型用量约 ${value.usedTokens || 0} 令牌。`));
+        if (value.status !== 'input_required') panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
+        const currentBudget = Number(value.request?.tokenBudget);
+        const budgetText = Number.isSafeInteger(currentBudget) && currentBudget > 0 ? currentBudget.toLocaleString('zh-CN') : '未记录';
+        panel.appendChild(node('p', 'presentation-master-task-summary', `步骤 ${value.steps || 0}；已用约 ${Number(value.usedTokens || 0).toLocaleString('zh-CN')} 令牌；本任务累计预算 ${budgetText} 令牌。`));
         const modal = byId('presentation-master-modal');
         if (value.recoverable && modal.dataset.budgetTask !== value.id && Number.isSafeInteger(value.request?.tokenBudget)) {
             byId('presentation-master-budget').value = value.request.tokenBudget;
             modal.dataset.budgetTask = value.id;
         }
         if (Array.isArray(value.usageDiagnostics) && value.usageDiagnostics.length) {
-            const details = node('details'), list = node('ol');
+            const details = node('details', 'presentation-master-usage'), list = node('ol');
             details.appendChild(node('summary', '', '查看每轮模型用量'));
             for (const item of value.usageDiagnostics) {
                 const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
@@ -289,18 +292,32 @@
             const budget = byId('presentation-master-budget');
             const current = Number(value.request?.tokenBudget || 0);
             budget.closest('details').open = true;
-            panel.appendChild(node('p', 'presentation-empty-note', `本任务累计预算为 ${current} 令牌；请在“高级设置”中提高累计预算，再点击“从检查点继续”。`));
+            panel.appendChild(node('p', 'presentation-master-task-message', `本任务累计预算为 ${current} 令牌；请在“高级设置”中提高累计预算，再点击“从检查点继续”。`));
         }
         if (['working', 'input_required'].includes(value.status)) {
             const cancel = node('button', 'btn-secondary', '停止制作'); cancel.type = 'button';
-            cancel.addEventListener('click', async () => { cancel.disabled = true; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); task = data.task; renderTask(task); } catch (error) { showError(error); } }); panel.appendChild(cancel);
+            cancel.addEventListener('click', async () => { cancel.disabled = true; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); task = data.task; renderTask(task); } catch (error) { cancel.disabled = false; feedback.textContent = errorText(error); } });
+            head.appendChild(cancel);
         }
         if (value.status === 'input_required') {
-            panel.appendChild(node('p', '', value.inputRequest.question)); panel.appendChild(node('pre', 'presentation-empty-note', value.inputRequest.context || ''));
-            const answer = node('textarea', 'form-input'); answer.rows = 4; answer.maxLength = 12000; answer.setAttribute('aria-label', '对制作方案的实际答复');
-            const submit = node('button', 'btn-primary', '确认并继续'); submit.type = 'button';
-            submit.addEventListener('click', async () => { if (!answer.value.trim()) return; submit.disabled = true; try { await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/respond', post({ answer: answer.value })); await poll(value.id, ++epoch); } catch (error) { showError(error); } });
-            panel.append(answer, submit);
+            const request = value.inputRequest || {}, confirmation = request.kind === 'confirmation';
+            panel.appendChild(node('p', 'presentation-master-task-question', request.question || '请提供继续制作所需的答复。'));
+            if (request.context) panel.appendChild(node('div', 'presentation-master-task-context', request.context));
+            const answer = node('textarea', 'form-input presentation-master-task-answer'); answer.rows = 2; answer.maxLength = 12000; answer.setAttribute('aria-label', '对制作方案的实际答复');
+            answer.placeholder = confirmation ? '可填写修改意见；留空表示同意上述方案。' : '请填写具体答复后继续。';
+            const submit = node('button', 'btn-primary', confirmation ? '确认并继续' : '提交答复并继续'); submit.type = 'button';
+            const actions = node('div', 'presentation-master-task-actions'); actions.appendChild(submit);
+            submit.addEventListener('click', async () => {
+                const response = answer.value.trim() || (confirmation ? '确认，按上述方案继续制作。' : '');
+                if (!response) { feedback.textContent = '请先填写具体答复，再继续制作。'; answer.focus(); return; }
+                feedback.textContent = ''; submit.disabled = true;
+                const sequence = ++epoch, owner = window.Pivot.legacy?.currentUser?.id;
+                try {
+                    await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/respond', post({ answer: response }));
+                    if (sequence === epoch && owner === window.Pivot.legacy?.currentUser?.id && !modal.classList.contains('hidden')) await poll(value.id, sequence);
+                } catch (error) { if (sequence === epoch) { submit.disabled = false; feedback.textContent = errorText(error); } }
+            });
+            panel.append(answer, actions);
         }
         if (value.recoverable) {
             const resume = node('button', 'btn-secondary', '从检查点继续'); resume.type = 'button';
@@ -335,6 +352,7 @@
             }
         }
         if (actionRow.children.length) panel.appendChild(actionRow);
+        panel.appendChild(feedback);
     }
     function bind(currentState, currentHelpers) {
         state = currentState; helpers = currentHelpers;

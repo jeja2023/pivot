@@ -108,6 +108,7 @@ function createAgentRunFactory(deps = {}) {
         dedupeKey = null,
         skillId = null,
         skillName = null,
+        skillReference: selectedSkillReference = null,
         forkHistory = 'none',
         taskContract = null,
         chatAgent = false,
@@ -202,7 +203,7 @@ function createAgentRunFactory(deps = {}) {
             }
         }
         if (skillReference) {
-            const skillContext = await getAgentSkillExecutionContext(user, skillReference, runMetadata.matchedSkillReference || null);
+            const skillContext = await getAgentSkillExecutionContext(user, skillReference, runMetadata.matchedSkillReference || selectedSkillReference || null, { automatic: runMetadata.learnedSkillAuto === true });
             runMetadata.skillId = skillContext.skillId;
             runMetadata.skillName = skillContext.skillName;
             runMetadata.skillVersion = skillContext.skillVersion;

@@ -21,9 +21,13 @@ test('extracted Agent routes retain authentication, ownership and mutation guard
     const ownerSession = await login(ownerName, password, { clientIp: '127.0.0.1' });
     const otherSession = await login(otherName, password, { clientIp: '127.0.0.1' });
     const runId = `route-evidence-${suffix}`;
+    const workflowRunId = `route-export-${suffix}`;
     await execute("INSERT INTO agent_runs (id, user_id, title, goal, status, metadata, created_at, updated_at) VALUES (?, ?, '路由测试', '验证路由隔离', 'running', '{}', NOW(), NOW())", [runId, owner.id]);
     await execute("INSERT INTO agent_steps (run_id,step_index,type,title,tool_name,input,output,status) VALUES (?,1,'tool','契约读取','tools.describe',?,?,'error')",
         [runId, JSON.stringify({ toolRef: { toolName: 'mcp.89.render_diagram' }, token: 'private-test-secret' }), JSON.stringify({ code: 'TOOL_POLICY_DENIED', reasonCodes: ['task_tool_allowlist'] })]);
+    await execute("INSERT INTO agent_runs (id, user_id, title, goal, status, run_mode, metadata, created_at, updated_at) VALUES (?, ?, '结果下载', '检查下载权限', 'completed', 'dag', '{}', NOW(), NOW())", [workflowRunId, owner.id]);
+    await execute("INSERT INTO agent_dag_nodes(run_id,node_key,title,tool_name,status,input,output,created_at) VALUES (?,'result','结果','workflow.output','completed','{}',?,NOW())",
+        [workflowRunId, JSON.stringify({ name: 'result', format: 'json', value: [{ 数量: 12 }] })]);
     const transaction = await createTaskTransaction({ run: { id: runId, goal: '验证路由隔离' }, user: owner });
     const app = express();
     app.use(express.json());
@@ -37,6 +41,13 @@ test('extracted Agent routes retain authentication, ownership and mutation guard
     const request = (path, token, options = {}) => fetch(`${base}${path}`, { ...options, headers: { ...headers(token), ...options.headers } });
     try {
         assert.equal((await fetch(`${base}/agents/runs/${runId}/transactions`)).status, 401);
+        const exportPath = `/agents/runs/${workflowRunId}/dag/nodes/result/download?format=csv`;
+        assert.equal((await fetch(base + exportPath)).status, 401);
+        assert.equal((await request(exportPath, otherSession.accessToken)).status, 404);
+        const dataExport = await request(exportPath, ownerSession.accessToken);
+        assert.equal(dataExport.status, 200);
+        assert.match(await dataExport.text(), /"数量"\r\n"12"/);
+        assert.equal((await request(exportPath.replace('format=csv', 'format=pdf'), ownerSession.accessToken)).status, 400);
         const list = await request(`/agents/runs/${runId}/transactions`, ownerSession.accessToken);
         assert.equal(list.status, 200);
         assert.equal((await list.json()).transactions[0].id, transaction.id);
@@ -68,6 +79,7 @@ test('extracted Agent routes retain authentication, ownership and mutation guard
     } finally {
         await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
         await execute('DELETE FROM agent_runs WHERE id = ?', [runId]);
+        await execute('DELETE FROM agent_runs WHERE id = ?', [workflowRunId]);
         await execute('DELETE FROM agent_eval_suites WHERE user_id IN (?, ?)', [owner.id, other.id]);
         await execute('DELETE FROM refresh_tokens WHERE user_id IN (?, ?)', [owner.id, other.id]);
         await execute('DELETE FROM users WHERE id IN (?, ?)', [owner.id, other.id]);

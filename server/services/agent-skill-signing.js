@@ -9,6 +9,7 @@
  * 3. 信封记录 digest、keyId、算法、签名形态、签发与过期时间及吊销状态，支持密钥轮换。
  */
 const crypto = require('crypto');
+const yaml = require('js-yaml');
 const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { canonicalJson } = require('./canonical-json');
@@ -19,7 +20,7 @@ const {
     normalizePem: normalizeConfiguredPem
 } = require('./agent-skill-signing-configuration');
 
-const SIGNATURE_FORMS = Object.freeze(['detached', 'embedded']);
+const SIGNATURE_FORMS = Object.freeze(['detached', 'embedded', 'recipe']);
 const DEFAULT_ALGORITHM = 'RSA-SHA256';
 
 function signingError(message, code = 'SKILL_SIGNATURE_INVALID', status = 422) {
@@ -70,11 +71,16 @@ function isSignatureRequired(options = {}, env = process.env) {
 
 /**
  * 构造被签名的载荷。
- * 两种签名形态共用同一入口，避免导入期与验证期各写一套（B1 的根因）：
- * - embedded：签名对象是规范化后的 manifest（剥离 signature 与 digest 字段）；
- * - detached：签名对象是内容摘要字符串本身（SKILL.sig 的既有约定）。
+ * embedded 为历史清单签名，detached 覆盖包摘要；recipe 覆盖清单、正文和包摘要。
  */
-function buildSignaturePayload(form, { manifest = null, contentDigest = '' } = {}) {
+function buildSignaturePayload(form, { manifest = null, contentDigest = '', instructions = '', packageDigest = '' } = {}) {
+    if (normalizeSignatureForm(form) === 'recipe') {
+        if (!manifest || typeof manifest !== 'object') return null;
+        const unsigned = { ...manifest };
+        delete unsigned.signature;
+        delete unsigned.digest;
+        return canonicalJson({ manifest: unsigned, instructions: String(instructions || ''), packageDigest: normalizeDigest(packageDigest) });
+    }
     if (normalizeSignatureForm(form) === 'embedded') {
         if (!manifest || typeof manifest !== 'object') return null;
         const unsigned = { ...manifest };
@@ -107,8 +113,10 @@ function verifyEnvelopeSignature(envelope = {}, options = {}) {
     if (revokedAt) return { verified: false, reason: 'revoked' };
     const expiresAt = String(envelope.expiresAt ?? envelope.expires_at ?? '').trim();
     if (expiresAt && expiresAt <= getBeijingTimestamp()) return { verified: false, reason: 'expired' };
-    const payload = buildSignaturePayload(form, { manifest: options.manifest, contentDigest: digest });
+    const payload = buildSignaturePayload(form, { manifest: options.manifest, contentDigest: digest, instructions: options.instructions, packageDigest: options.packageDigest });
     if (payload === null) return { verified: false, reason: 'payload_unavailable' };
+    if (form === 'recipe' && crypto.createHash('sha256').update(payload).digest('hex') !== digest)
+        return { verified: false, reason: 'digest_mismatch', signatureForm: form };
     try {
         const verifier = crypto.createVerify(String(envelope.algorithm || options.algorithm || DEFAULT_ALGORITHM));
         verifier.update(payload);
@@ -121,10 +129,10 @@ function verifyEnvelopeSignature(envelope = {}, options = {}) {
 }
 
 /**
- * 管理员批准共享版本时调用：对规范化 Manifest 产生 embedded 签名并写入不可变信封。
+ * 管理员批准共享版本时调用：对完整配方产生 recipe 签名并写入不可变信封。
  * 私钥不落库、不写入 manifest，也不会传给浏览器；受信公钥未配置或与私钥不匹配时 fail-closed。
  */
-async function signOrganizationEnvelope({ manifest, contentDigest, expiresAt = null } = {}, options = {}) {
+async function signOrganizationEnvelope({ manifest, instructions = '', packageDigest = '', expiresAt = null } = {}, options = {}) {
     const privateKey = resolveOrganizationSigningPrivateKey(options);
     if (!privateKey) {
         throw signingError('组织共享发布尚未配置签名私钥，请联系系统管理员。', 'SKILL_ORGANIZATION_SIGNING_NOT_CONFIGURED', 409);
@@ -134,7 +142,7 @@ async function signOrganizationEnvelope({ manifest, contentDigest, expiresAt = n
     if (!trustedPublicKey) {
         throw signingError('组织共享发布尚未配置受信公钥，不能验证组织签名。', 'SKILL_ORGANIZATION_PUBLIC_KEY_NOT_CONFIGURED', 409);
     }
-    const payload = buildSignaturePayload('embedded', { manifest, contentDigest });
+    const payload = buildSignaturePayload('recipe', { manifest, instructions, packageDigest });
     if (!payload) throw signingError('组织签名缺少规范化 Skill Manifest。', 'SKILL_ORGANIZATION_SIGNING_PAYLOAD_INVALID');
     let signature;
     try {
@@ -146,14 +154,14 @@ async function signOrganizationEnvelope({ manifest, contentDigest, expiresAt = n
         throw signingError('组织签名私钥无效或算法不受支持。', 'SKILL_ORGANIZATION_PRIVATE_KEY_INVALID', 409);
     }
     const envelope = {
-        contentDigest: normalizeDigest(contentDigest),
+        contentDigest: crypto.createHash('sha256').update(payload).digest('hex'),
         keyId,
         algorithm: DEFAULT_ALGORITHM,
         signature,
-        signatureForm: 'embedded',
+        signatureForm: 'recipe',
         expiresAt
     };
-    const verified = verifyEnvelopeSignature(envelope, { ...options, publicKey: trustedPublicKey, manifest });
+    const verified = verifyEnvelopeSignature(envelope, { ...options, publicKey: trustedPublicKey, manifest, instructions, packageDigest });
     if (!verified.verified) {
         throw signingError('组织签名与受信公钥不匹配，请检查密钥配置。', 'SKILL_ORGANIZATION_SIGNING_KEY_MISMATCH', 409);
     }
@@ -236,13 +244,22 @@ async function verifyEnvelopeForVersion(version = {}, options = {}) {
     }
     const envelope = await getSigningEnvelopeById(envelopeId);
     if (!envelope) return { verified: false, reason: 'envelope_missing', envelope: null, required: isSignatureRequired(options) };
-    // 信封摘要必须与版本记录的摘要之一对齐：embedded 对应规范化 manifest 摘要，
-    // detached 对应包内容摘要。两者都不匹配即视为信封被替换。
-    const acceptable = [normalizeDigest(version.content_digest), normalizeDigest(version.digest)].filter(Boolean);
+    // 旧信封关联已有清单或包摘要；配方信封的摘要由正文、清单和包摘要重新计算。
+    const form = normalizeSignatureForm(envelope.signature_form);
+    if (options.requireFullContent && form === 'embedded') return { verified: false, reason: 'legacy_manifest_only', envelope, required: true };
+    const acceptable = form === 'recipe' ? [] : [normalizeDigest(version.content_digest), normalizeDigest(version.digest)].filter(Boolean);
     if (acceptable.length && !acceptable.includes(normalizeDigest(envelope.content_digest))) {
         return { verified: false, reason: 'digest_mismatch', envelope, required: isSignatureRequired(options) };
     }
-    const result = verifyEnvelopeSignature(envelope, options);
+    let manifest = options.manifest || version.manifest_json || version.manifest_yaml || {};
+    if (typeof manifest === 'string') {
+        try { manifest = yaml.load(manifest); } catch (_) { return { verified: false, reason: 'manifest_invalid', envelope, required: true }; }
+    }
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return { verified: false, reason: 'manifest_invalid', envelope, required: true };
+    const packageDigest = version.package_path ? require('node:path').basename(version.package_path) : '';
+    if (form === 'recipe' && version.package_path && !/^[a-f0-9]{64}$/.test(packageDigest))
+        return { verified: false, reason: 'package_digest_missing', envelope, required: true };
+    const result = verifyEnvelopeSignature(envelope, { ...options, manifest, instructions: version.instructions_md || '', packageDigest });
     return { ...result, envelope, required: isSignatureRequired(options) };
 }
 

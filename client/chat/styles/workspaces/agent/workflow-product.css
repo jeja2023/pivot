@@ -707,6 +707,26 @@ details.agent-workflow-management-menu:not([open]) > .agent-workflow-management-
     line-height: 1.6;
 }
 
+.workflow-product-result-exports {
+    display: grid;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+}
+
+.workflow-product-result-exports p {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.workflow-product-result-exports [role="alert"] {
+    color: var(--danger);
+}
+
+.workflow-product-result-exports [role="alert"]:empty {
+    display: none;
+}
+
 .workflow-product-output h1,
 .workflow-product-output h2,
 .workflow-product-output h3,

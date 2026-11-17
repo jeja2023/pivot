@@ -752,6 +752,7 @@ function createAgentsRouter({ authMiddleware, logAction, automationLimiter, devi
             ,forkHistory: req.body?.forkHistory || req.body?.fork_history || 'none'
             ,skillId: req.body?.skillId || req.body?.skill_id
             ,skillName: req.body?.skillName || req.body?.skill_name
+            ,skillReference: req.body?.skillReference || null
         });
         logAction(req, '创建智能体任务', `任务ID: ${run.id}，目标: ${String(req.body?.goal || '').slice(0, 120)}`);
         res.status(202).json({ success: true, run });

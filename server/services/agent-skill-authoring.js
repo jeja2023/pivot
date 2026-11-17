@@ -75,7 +75,7 @@ function previewSkillSource(markdown, options = {}) {
 async function createSkillVersionFromMarkdown(user, input = {}) {
     const markdown = String(input.markdown || input.source || '');
     if (!markdown.trim()) throw authoringError('请提供 SKILL.md 内容。');
-    const preview = previewSkillSource(markdown, input);
+    const preview = previewSkillSource(markdown);
     if (!preview.valid) throw authoringError(`SKILL.md 校验失败：${preview.errors.join('；')}`);
     const installed = await require('./agent-skill-resource-import').installImportedResources(markdown, preview.manifest, input.resources || []);
     const version = await createSkillVersion(user, {
@@ -85,12 +85,7 @@ async function createSkillVersionFromMarkdown(user, input = {}) {
         strictSpec: true,
         // 个人配方草稿可直接创建；组织签名只在管理员批准共享时生成。
         requireSignature: false,
-        allowedPermissions: input.allowedPermissions ?? allowedPermissionsFromEnv(),
-        allowedTools: input.allowedTools,
-        packageSignature: input.packageSignature,
-        packageDigest: input.packageDigest,
-        keyId: input.keyId,
-        algorithm: input.algorithm,
+        allowedPermissions: allowedPermissionsFromEnv(),
         sourceRunId: input.sourceRunId
     });
     return { version, preview };

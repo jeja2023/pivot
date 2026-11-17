@@ -14,7 +14,7 @@ async function readSkillReleasePage({ ownerKey, tenantId, cursor, name = '', pub
         params.push(cursor.publishedAt, cursor.id);
     }
     return query(`SELECT r.*, r.published_at::text AS catalog_cursor,
-        v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
+        v.version, v.skill_id, v.created_by, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest, v.content_digest
         FROM agent_skill_releases r JOIN agent_skill_versions v ON v.id = r.skill_version_id
         WHERE ${where.map(clause => `(${clause})`).join(' AND ')}
         ORDER BY r.published_at DESC, r.id DESC LIMIT 200`, params);

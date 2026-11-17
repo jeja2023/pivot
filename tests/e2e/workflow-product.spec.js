@@ -236,6 +236,21 @@ test('就地测试与发布运行保留各自结果，纯表格交付按表格�
     try { await expect(page.locator('#workflow-product-results .data-table')).toBeVisible({ timeout: 20000 }); }
     catch (_) { throw new Error(`表格运行未完成：${await page.locator('#workflow-product-status').innerText()}；${await page.locator('#workflow-product-results').innerText()}；页面错误：${errors.join('；')}`); }
     await expect(page.locator('#workflow-product-results .data-table')).toContainText('false');
+    const csvResponse = page.waitForResponse(response => response.url().includes('/dag/nodes/') && response.url().includes('/download?format=csv'));
+    const csvDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: '下载 CSV' }).click();
+    const csvUrl = (await csvResponse).url();
+    const csvFile = await csvDownload;
+    expect((await require('node:fs/promises').readFile(await csvFile.path(), 'utf8'))).toContain('"0","false"');
+    expect((await page.request.get(csvUrl.replace('format=csv', 'format=pdf'))).status()).toBe(400);
+    const anonymous = await page.context().browser().newContext();
+    try { expect((await anonymous.request.get(csvUrl)).status()).toBe(401); } finally { await anonymous.close(); }
+    const excelDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: '下载 Excel' }).click();
+    const excelFile = await excelDownload;
+    const workbook = require('@e965/xlsx').read(await require('node:fs/promises').readFile(await excelFile.path()), { type: 'buffer' });
+    expect(workbook.Sheets['工作流结果'].A2.v).toBe(0);
+    expect(workbook.Sheets['工作流结果'].B2.v).toBe(false);
     await expect(page.locator('[data-result-history] option')).toHaveCount(2);
     await page.locator('[data-result-history]').selectOption({ index: 0 });
     await expect(page.locator('#workflow-product-results')).toContainText('实际步骤结果');

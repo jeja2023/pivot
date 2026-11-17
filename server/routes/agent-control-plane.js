@@ -479,11 +479,13 @@ function createAgentControlPlaneRouter({ authMiddleware, logAction, automationLi
         res.json({ success: true, diff });
     }));
     router.post('/agents/skills/versions', authMiddleware, asyncHandler(async (req, res) => {
-        const version = await createSkillVersion(req.user, req.body || {});
+        const version = await createSkillVersion(req.user, { manifest: req.body?.manifest, instructions: req.body?.instructions,
+            strictSpec: true, allowedPermissions: allowedSkillPermissions() });
         res.status(201).json({ success: true, version });
     }));
     router.post('/agents/skills/versions/:id/validate', authMiddleware, asyncHandler(async (req, res) => {
-        const result = await validateSkillVersion(req.params.id, req.user, { ...(req.body || {}), requireSignature: false, publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || '', allowedPermissions: allowedSkillPermissions() });
+        const result = await validateSkillVersion(req.params.id, req.user, { evaluationRunId: req.body?.evaluationRunId,
+            requireSignature: false, publicKey: process.env.AGENT_SKILL_PUBLIC_KEY || '', allowedPermissions: allowedSkillPermissions() });
         if (!result) return res.status(404).json({ error: 'Skill 版本不存在或无权访问。' });
         res.status(result.passed ? 200 : 422).json({ success: result.passed, ...result });
     }));

@@ -15,7 +15,7 @@ const {
     normalizeResourceAction,
     normalizeSubjectType
 } = require('./enterprise-access');
-const { query, queryOne, execute } = require('../db/client');
+const { query, queryOne, transaction } = require('../db/client');
 const { normalizeTenantId } = require('./agent-tenant-context');
 const { normalizeReleaseScope, parseOwnerKey } = require('./agent-skill-scope');
 
@@ -256,26 +256,32 @@ async function upsertSkillReleasePermission(releaseId, user, input = {}) {
     if (!release) return null;
     const permission = normalizePermissionInput(input);
     await assertPermissionSubjectTenant(release, permission);
-    await execute(`
+    return transaction(async trx => {
+        await trx.queryOne('SELECT id FROM agent_skill_releases WHERE id = ? FOR UPDATE', [release.id]);
+        await trx.execute(`
         DELETE FROM resource_permissions
         WHERE resource_type = ? AND resource_id = ? AND subject_type = ? AND subject_id = ? AND action = ?
     `, [SKILL_RELEASE_RESOURCE_TYPE, String(release.id), permission.subjectType, permission.subjectId, permission.action]);
-    const inserted = await queryOne(`
+        const inserted = await trx.queryOne(`
         INSERT INTO resource_permissions (subject_type, subject_id, resource_type, resource_id, action, effect, conditions_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id, subject_type, subject_id, resource_type, resource_id, action, effect, conditions_json, created_at, updated_at
     `, [permission.subjectType, permission.subjectId, SKILL_RELEASE_RESOURCE_TYPE, String(release.id), permission.action, permission.effect, '{}']);
-    return inserted;
+        return inserted;
+    });
 }
 
 async function deleteSkillReleasePermission(releaseId, permissionId, user) {
     const release = await getManageableSkillRelease(releaseId, user);
     if (!release) return null;
-    const rows = await query(`
+    const rows = await transaction(async trx => {
+        await trx.queryOne('SELECT id FROM agent_skill_releases WHERE id = ? FOR UPDATE', [release.id]);
+        return trx.query(`
         DELETE FROM resource_permissions
         WHERE id = ? AND resource_type = ? AND resource_id = ?
         RETURNING id
     `, [permissionId, SKILL_RELEASE_RESOURCE_TYPE, String(release.id)]);
+    });
     return rows[0] || null;
 }
 

@@ -91,6 +91,15 @@ function registerAgentRunEvidenceRoutes(router, { authMiddleware, automationGuar
         if (!output) return res.status(404).json({ error: '工作流节点不存在或无权访问。' });
         res.json({ success: true, ...output });
     }));
+    router.get('/agents/runs/:id/dag/nodes/:nodeId/download', authMiddleware, asyncHandler(async (req, res) => {
+        const format = String(req.query.format || '').toLowerCase();
+        const file = await require('../services/workflow-result-export').exportResult(req.user, req.params.id, req.params.nodeId, format);
+        logAction(req, '下载工作流结果数据', `任务ID: ${req.params.id}，节点: ${req.params.nodeId}，格式: ${format}，行数: ${file.rowCount}`);
+        res.setHeader('Content-Type', file.type);
+        res.setHeader('Content-Disposition', `attachment; filename="workflow-result.${format}"`);
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(file.buffer);
+    }));
     router.get('/agents/runs/:id/invocations', authMiddleware, asyncHandler(async (req, res) => {
         const invocations = await listWorkflowInvocationsForUser(req.params.id, req.user);
         if (invocations === null) return res.status(404).json({ error: '工作流任务不存在或无权访问。' });

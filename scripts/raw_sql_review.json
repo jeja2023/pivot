@@ -375,9 +375,15 @@
     },
     {
       "file": "server/services/agent-releases.js",
-      "count": 62,
-      "rationale": "目录查询已下沉到仓储并按当前权限和灰度分页；其余技能和工作流发布事务保持参数化与既有授权边界。",
-      "verification": "node scripts/run_node_tests.js tests/agent-skill-discovery-integration.test.js tests/project-audit-skills.test.js"
+      "count": 47,
+      "rationale": "技能发布与投影按所有者和名称加事务锁，状态更新及投影刷新原子完成；查询参数化，调用方保留原有权限判定。工作流发布查询保持既有边界。",
+      "verification": "node scripts/run_node_tests.js tests/agent-skill-release-consistency.test.js tests/agent-skill-discovery-integration.test.js tests/project-audit-skills.test.js"
+    },
+    {
+      "file": "server/services/agent-skill-access.js",
+      "count": 8,
+      "rationale": "技能授权修改在参数化事务内锁定所属发布，替换和删除 ACL 不暴露中间状态；管理权限及主体租户先行校验。",
+      "verification": "node scripts/run_node_tests.js tests/agent-skill-release-consistency.test.js tests/agent-skill-discovery-integration.test.js"
     },
     {
       "file": "server/services/agent-task-effect-executor.js",

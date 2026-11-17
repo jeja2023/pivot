@@ -20,7 +20,7 @@ function presentationToolDefinitions() {
                 presentationId: { type: 'string' }, sourceAssetId: { type: 'string' }, assetIds: { type: 'array', maxItems: 20, items: { type: 'string' } }, answer: { type: 'string', maxLength: 12000 },
                 template: schema({ type: { type: 'string', enum: ['runtime', 'organization'] }, id: { type: 'string', maxLength: 96 }, version: { type: 'integer', minimum: 1 } }, ['type', 'id']),
                 materials: { type: 'array', maxItems: 20, items: schema({ title: { type: 'string' }, text: { type: 'string', maxLength: 120000 } }, ['text']) },
-                maxSteps: { type: 'integer', minimum: 5, maximum: 160 }, tokenBudget: { type: 'integer', minimum: 10000, maximum: 500000 } }) },
+                maxSteps: { type: 'integer', minimum: 5, maximum: 160 }, tokenBudget: { type: 'integer', minimum: 10000, maximum: Number.MAX_SAFE_INTEGER } }) },
         { name: 'presentation.review_deck', title: '整稿检查与排版优化任务', capabilities: ['document.render', 'model.invoke'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
             description: '启动整稿视觉复核、保留内容的排版优化或mode=production交付检查。production核对事实证据/计算、真实字体、素材和最终PPTX原生对象/嵌入工作簿，不调用模型。后台返回taskId后用operation=status查询，operation=cancel停止。layout只提出排版建议，visual_repair复核建议稿。原稿变化或所属Agent停止时终止。结构/原生检查不等于视觉或Office通过。',
             input_schema: schema({ presentationId: { type: 'string' }, operation: { type: 'string', enum: ['start', 'status', 'cancel'], default: 'start' },

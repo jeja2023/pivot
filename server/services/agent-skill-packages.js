@@ -121,6 +121,7 @@ async function verifySkillPackage(zipPath, options = {}) {
     const supplyChain = scanSkillPackageEntries(pack.entries, checked.manifest);
     const errors = [];
     if (signatureRequired && !signatureValid) errors.push('Skill 包缺少有效数字签名。');
+    if (signatureRequired && !pack.signature) errors.push('仅签署清单的旧技能包未覆盖正文，请使用覆盖完整包的分离签名重新签发。');
     if (checked.manifest.package_digest && String(checked.manifest.package_digest).replace(/^sha256:/i, '').toLowerCase() !== pack.digest) errors.push('Skill 包 package_digest 校验失败。');
     errors.push(...supplyChain.errors);
     return {

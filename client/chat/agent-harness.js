@@ -491,7 +491,7 @@
         const select = document.getElementById('agent-skill-select');
         if (!select) return;
         const previous = select.value;
-        const options = ['<option value="">不指定技能</option>'].concat(state.skills.filter(skill => String(skill.status || 'enabled') === 'enabled').map(skill => `<option value="${escapeAttr(skill.id || skill.name)}">${escape(skill.title || skill.name)} · v${escape(skill.version || '')}</option>`));
+        const options = ['<option value="">不指定技能</option>'].concat(state.skills.filter(skill => String(skill.status || 'enabled') === 'enabled' && skill.releaseId).map(skill => `<option value="${escapeAttr(skill.releaseId)}">${escape(skill.title || skill.name)} · v${escape(skill.version || '')}</option>`));
         setMarkup(select, options.join(''));
         if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
     }
@@ -507,11 +507,11 @@
             .filter(item => item.scope === 'organization_candidate' && item.artifactType === 'skill')
             .map(item => [String(item.artifactVersionId || ''), item]));
         const published = Array.isArray(data.data) ? data.data : [];
-        const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.name) === String(version.name) && String(skill.version) === String(version.version))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'enabled' : version.status === 'validated' ? 'validated' : 'draft', user_id: getCurrentUser()?.id }));
+        const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.versionId) === String(version.id))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'disabled' : version.status === 'validated' ? 'validated' : 'draft', user_id: version.created_by }));
         const releaseMap = new Map((Array.isArray(releases.data) ? releases.data : []).map(release => [`${release.name}@${release.version}`, release]));
         state.skills = [...published, ...drafts].map(skill => {
-            const release = releaseMap.get(`${skill.name}@${skill.version}`) || null;
-            return { ...skill, release, releaseId: release?.id || null, versionId: skill.id || release?.skill_version_id || null };
+            const release = (Array.isArray(releases.data) ? releases.data : []).find(item => String(item.id) === String(skill.releaseId)) || releaseMap.get(`${skill.name}@${skill.version}`) || null;
+            return { ...skill, release, releaseId: skill.releaseId || release?.id || null, versionId: skill.versionId || release?.skill_version_id || skill.id || null };
         });
         renderSkills();
         populateSkillSelect();
@@ -1091,10 +1091,14 @@
     window.Pivot?.exposeModule?.('agent.harness', {
         loadAgentHarnessManagement: loadHarnessManagement, loadAgentControlPlane: loadControlPlane,
         bindAgentRunHarnessDiagnostics: runDiagnostics.bindRunDiagnostics, renderAgentHarnessDiagnosticMarkup: runDiagnostics.diagnosticTabMarkup,
-        loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => document.getElementById('agent-skill-select')?.value || '',
+        loadAgentHarnessSkills: loadSkills, getAgentHarnessSkillId: () => state.skills.find(skill => String(skill.releaseId) === document.getElementById('agent-skill-select')?.value)?.name || '',
+        getAgentHarnessSkillReference: () => {
+            const skill = state.skills.find(item => String(item.releaseId) === document.getElementById('agent-skill-select')?.value);
+            return skill ? { releaseId: String(skill.releaseId), version: skill.version, digest: skill.digest } : null;
+        },
         switchAgentCpSubview,
         openGoalModal
-    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId', 'switchAgentCpSubview', 'openGoalModal']);
+    }, ['loadAgentHarnessManagement', 'loadAgentControlPlane', 'bindAgentRunHarnessDiagnostics', 'renderAgentHarnessDiagnosticMarkup', 'loadAgentHarnessSkills', 'getAgentHarnessSkillId', 'getAgentHarnessSkillReference', 'switchAgentCpSubview', 'openGoalModal']);
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindManagement, { once: true });
     else bindManagement();

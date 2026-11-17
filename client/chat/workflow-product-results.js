@@ -210,6 +210,30 @@
         if (value?.text || value?.content || value?.markdown) return valueHtml(value.text || value.content || value.markdown) + (value.artifact?.id ? `<button type="button" class="btn-secondary" data-result-artifact="${escape(value.artifact.id)}">打开完整报告</button>` : '');
         return `<pre>${escape(JSON.stringify(value, null, 2))}</pre>`;
     }
+    function exportableNode(node) {
+        if (node.tool_name !== 'workflow.output' || node.status !== 'completed') return false;
+        let value = node.output;
+        if (value?.presentation === 'file') return false;
+        if (value?.outputRef) return true;
+        if (value && Object.hasOwn(value, 'value') && value.name && value.format) value = value.value;
+        if (value?.structuredContent) value = value.structuredContent;
+        const rows = Array.isArray(value) ? value : value?.rows ?? value?.data ?? value?.items;
+        return Array.isArray(rows) && rows.length > 0 && rows.every(row => row && typeof row === 'object' && !Array.isArray(row));
+    }
+    async function downloadResult(run, node, format, button, feedback) {
+        const owner = bridge().userId?.(), currentSequence = sequence;
+        button.disabled = true; feedback.textContent = '';
+        try {
+            const response = await bridge().request(`/agents/runs/${encodeURIComponent(run.id)}/dag/nodes/${encodeURIComponent(node.node_key)}/download?format=${format}`);
+            if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || '下载失败，请重试。'); }
+            const blob = await response.blob();
+            if (currentSequence !== sequence || owner !== bridge().userId?.()) return;
+            const url = URL.createObjectURL(blob), link = document.createElement('a');
+            link.href = url; link.download = `工作流结果.${format}`; document.body.appendChild(link); link.click(); link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) { if (currentSequence === sequence && owner === bridge().userId?.()) feedback.textContent = error.message || '下载失败，请重试。'; }
+        finally { button.disabled = false; }
+    }
     function render({ title, source, output, input, nodes = [], run = null, error = '', openModal = true }) {
         const panel = document.getElementById('workflow-product-results');
         if (!panel) return;
@@ -233,10 +257,22 @@
             ? `<div class="workflow-product-trace-inputs"><span class="workflow-product-trace-label">运行输入参数：</span><div class="workflow-product-trace-params">${Object.entries(input).map(([k, v]) => `<span class="workflow-product-param-tag"><code>${escape(k)}</code>: ${escape(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`).join('')}</div></div>`
             : '';
         const traceTitle = hasInputs ? `输入与执行过程 (${nodes.length} 个步骤)` : `执行过程 (${nodes.length} 个步骤)`;
+        const exportNodes = run?.status === 'completed' ? nodes.filter(exportableNode) : [];
+        const exportsHtml = exportNodes.length ? `<div class="workflow-product-result-exports">${exportNodes.map((node, index) => `<div class="workflow-product-row"><span>${escape(node.title || node.node_key)}</span><button type="button" class="btn-secondary" data-result-download="${index}" data-format="xlsx">下载 Excel</button><button type="button" class="btn-secondary" data-result-download="${index}" data-format="csv">下载 CSV</button></div>`).join('')}<p>下载已保存的输出数据；上游查询若已限制或截断，无法补回未返回的数据。</p><p role="alert" data-result-download-error></p></div>` : '';
 
         const contentHtml = `<div class="workflow-product-results-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-results-title"><header class="workflow-product-results-header"><div class="workflow-product-results-title-group"><span class="workflow-product-results-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span><h3 id="workflow-results-title">${escape(title)}</h3><span class="workflow-product-results-source-pill status-${escape(statusClass)}"><span class="workflow-product-pill-icon" aria-hidden="true">${getStatusSvg(statusClass, 12)}</span>${escape(pillSource)} · ${escape(statusText)}</span>${formattedTime ? `<span class="workflow-product-results-time">${escape(formattedTime)}</span>` : ''}</div><div class="workflow-product-results-header-actions"><div class="workflow-product-history-wrap"><label class="workflow-product-history-label" for="workflow-results-history-select"><span class="workflow-product-history-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span><span class="workflow-product-history-text">历史运行</span></label><div class="workflow-product-history-select-box"><select id="workflow-results-history-select" class="form-input workflow-product-history-select" data-result-history title="切换历史运行记录">${historyOptionsHtml}</select></div></div><button type="button" class="btn-secondary workspace-modal-close workflow-product-results-close" aria-label="关闭结果面板" title="关闭 (Esc)">关闭</button></div></header><div class="workflow-product-results-body">${error ? `<p role="alert" class="workflow-product-results-error">${escape(error)}</p>` : ''}<div class="text-body message-content workflow-product-output">${output !== undefined ? valueHtml(output) : '<p>正在等待结果，已完成的步骤会保留。</p>'}</div><details class="workflow-product-results-trace"><summary>${traceTitle}</summary>${inputsHtml}<ol class="workflow-product-steps-list">${nodes.map(node => `<li class="workflow-product-step-item"><button type="button" class="btn-secondary btn-xs workflow-product-step-node-btn" data-result-node="${escape(node.node_key || node.id)}" title="点击在画布中定位此节点">${escape(node.title || node.node_key || node.id)}</button> <span class="workflow-product-node-status status-${escape(node.status || '')}"><span class="workflow-product-node-status-icon" aria-hidden="true">${getStatusSvg(node.status || 'default', 11)}</span>${escape(statusNames[node.status] || node.status || '')}</span>${node.error_message ? `<span class="workflow-product-step-error">：${escape(node.error_message)}</span>` : ''}</li>`).join('')}</ol></details></div><footer class="workflow-product-results-footer workflow-product-row"><div class="workflow-product-results-footer-actions">${run ? '<button type="button" class="btn-secondary" data-result-details>完整记录 / 审批 / 产物</button><button type="button" class="btn-secondary" data-result-refresh>刷新运行状态</button>' + (!bridge().readOnly?.() ? '<button type="button" class="btn-secondary" data-result-reuse>将已完成节点结果用于调试</button>' : '') + (['error', 'partial', 'completed_with_errors'].includes(run.status) ? '<button type="button" class="btn-secondary" data-result-retry>从失败处继续</button>' : '') : ''}</div></footer></div>`;
 
         PivotSafeHtml.setHtml(panel, contentHtml);
+        if (exportsHtml) {
+            const container = document.createElement('div');
+            PivotSafeHtml.setHtml(container, exportsHtml);
+            panel.querySelector('.workflow-product-output')?.after(container);
+            const feedback = container.querySelector('[data-result-download-error]');
+            container.querySelectorAll('[data-result-download]').forEach(button => button.addEventListener('click', () => {
+                const node = exportNodes[Number(button.dataset.resultDownload)];
+                if (node) void downloadResult(run, node, button.dataset.format, button, feedback);
+            }));
+        }
 
         [...panel.querySelectorAll('details')].forEach((item, index) => { item.open = disclosure[index] || false; });
         panel.querySelector('[data-result-history]')?.addEventListener('change', async event => {

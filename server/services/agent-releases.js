@@ -192,7 +192,7 @@ async function validateSkillVersion(id, user, options = {}) {
         allowedTools: options.allowedTools,
         strictSpec: options.strictSpec === true
     });
-    const signature = await verifyEnvelopeForVersion(version, { ...options, manifest: checked.manifest });
+    const signature = await verifyEnvelopeForVersion(version, { ...options, manifest: checked.manifest, requireFullContent: options.requireSignature === true });
     const supplyChain = scanInstalledPackage(version.package_path, manifest);
     const dependencies = {
         passed: supplyChain.passed,
@@ -303,7 +303,7 @@ async function publishSkillVersion(id, user, input = {}) {
         // 管理员可在共享发布操作中一并完成批准和组织签名；个人发布不需要组织签名。
         // 普通用户仍不能借此路径自签名，必须使用已获管理员批准的版本。
         const manifest = parseJson(version.manifest_json || version.manifest_yaml, {});
-        const signature = await verifyEnvelopeForVersion(version, { manifest, requireSignature: true });
+        const signature = await verifyEnvelopeForVersion(version, { manifest, requireSignature: true, requireFullContent: true });
         if (!signature.verified) {
             if (!isTenantAdmin(user)) {
                 throw invalid('团队或组织共享前必须由管理员批准并完成组织签名。', 409, 'SKILL_SHARED_SIGNATURE_REQUIRED');
@@ -320,9 +320,11 @@ async function publishSkillVersion(id, user, input = {}) {
         });
         if (!decision.allowed) throw invalid(decision.reason || '团队或组织 Skill 发布需要相应发布权限。', 403, 'SKILL_ROLLOUT_SCOPE_FORBIDDEN');
     }
-    const previous = await queryOne("SELECT * FROM agent_skill_releases WHERE owner_key = ? AND name = ? AND status = 'published' ORDER BY published_at DESC LIMIT 1", [ownerKey, version.name]);
     const now = getBeijingTimestamp();
-    const release = await queryOne(`
+    const release = await transaction(async db => {
+        await lockSkillProjection(db, ownerKey, version.name);
+        const previous = await db.queryOne("SELECT * FROM agent_skill_releases WHERE owner_key = ? AND name = ? AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1", [ownerKey, version.name]);
+        const created = await db.queryOne(`
         INSERT INTO agent_skill_releases
             (skill_version_id, owner_key, name, tenant_id, team_id, rollout_scope, rollout_percent, rollout_secret_version,
              target_user_ids, target_units, breaker_thresholds, status, previous_release_id, published_by, published_at)
@@ -334,8 +336,10 @@ async function publishSkillVersion(id, user, input = {}) {
         JSON.stringify(rollout.targetUserIds), JSON.stringify(rollout.targetUnits), JSON.stringify(rollout.breakerThresholds),
         previous?.id || null, user.id, now
     ]);
-    await projectSkillReadModel({ version, release, ownerKey, tenantId: tenant.tenantId, actorUserId: user.id });
-    await execute("UPDATE agent_skill_versions SET status = 'published', updated_at = ? WHERE id = ?", [now, version.id]);
+        await refreshSkillProjection(db, ownerKey, version.name, now);
+        await db.execute("UPDATE agent_skill_versions SET status = 'published', updated_at = ? WHERE id = ?", [now, version.id]);
+        return created;
+    });
     try {
         await createAgentInboxEvent(user, {
             eventKey: `skill.release:${release.id}`,
@@ -375,9 +379,10 @@ async function approveSkillVersionForSharing(id, user, _input = {}) {
     const manifest = parseJson(version.manifest_json || version.manifest_yaml, {});
     const checked = validateSkillManifest(manifest, { strictSpec: true });
     if (!checked.valid) throw invalid(`Skill Manifest 校验失败：${checked.errors.join('；')}`, 422, 'SKILL_MANIFEST_INVALID');
+    const packageDigest = version.package_path ? (await require('./agent-skill-resources').readInstalledSkillResources(version.package_path)).digest : '';
     const envelope = await signOrganizationEnvelope({
         manifest: checked.manifest,
-        contentDigest: version.content_digest || checked.computedDigest
+        instructions: version.instructions_md || '', packageDigest
     });
     const now = getBeijingTimestamp();
     await execute('UPDATE agent_skill_versions SET signing_envelope_id = ?, updated_at = ? WHERE id = ?', [envelope.id, now, version.id]);
@@ -410,42 +415,49 @@ async function getSkillReleaseForUser(id, user, action = 'manage') {
  * 落地方案 v1.2 §2.4：agent_skills 是只读投影，回滚必须同步重建投影，
  * 否则目录仍显示已回滚版本的 manifest 与 version（双表状态分叉）。
  */
+async function lockSkillProjection(db, ownerKey, name) {
+    await db.queryOne('SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))', [ownerKey, name]);
+}
+
+async function refreshSkillProjection(db, ownerKey, name, now) {
+    const current = await db.queryOne("SELECT * FROM agent_skill_releases WHERE owner_key = ? AND name = ? AND status = 'published' ORDER BY published_at DESC, id DESC LIMIT 1", [ownerKey, name]);
+    if (!current) {
+        await db.execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, ownerKey, name]);
+        return null;
+    }
+    const version = await db.queryOne('SELECT * FROM agent_skill_versions WHERE id = ?', [current.skill_version_id]);
+    if (!version) throw invalid('技能发布引用的版本不存在。', 409, 'SKILL_VERSION_MISSING');
+    await projectSkillReadModel({ version, release: current, ownerKey, tenantId: current.tenant_id, actorUserId: current.published_by, db });
+    return current;
+}
+
+async function transitionSkillRelease(release, from, to) {
+    const now = getBeijingTimestamp();
+    return transaction(async db => {
+        await lockSkillProjection(db, release.owner_key, release.name);
+        const changed = await db.queryOne('UPDATE agent_skill_releases SET status = ?, rolled_back_at = ? WHERE id = ? AND status = ? RETURNING *',
+            [to, to === 'published' ? null : now, release.id, from]);
+        if (!changed) return null;
+        const current = await refreshSkillProjection(db, release.owner_key, release.name, now);
+        return { changed, current };
+    });
+}
+
 async function rollbackSkillRelease(id, user) {
     const release = await getSkillReleaseForUser(id, user, 'manage');
     if (!release || release.status !== 'published') return null;
-    const now = getBeijingTimestamp();
-    await execute("UPDATE agent_skill_releases SET status = 'rolled_back', rolled_back_at = ? WHERE id = ?", [now, id]);
-    let restored = null;
-    if (release.previous_release_id) {
-        await execute("UPDATE agent_skill_releases SET status = 'published' WHERE id = ?", [release.previous_release_id]);
-        restored = await queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [release.previous_release_id]);
-    }
-    if (restored) {
-        const restoredVersion = await queryOne('SELECT * FROM agent_skill_versions WHERE id = ?', [restored.skill_version_id]);
-        if (restoredVersion) {
-            await projectSkillReadModel({
-                version: restoredVersion,
-                release: restored,
-                ownerKey: restored.owner_key,
-                tenantId: restored.tenant_id,
-                actorUserId: user.id
-            });
-        }
-    } else {
-        // 没有可恢复的上一版：投影置为 disabled，避免目录继续展示已回滚内容。
-        await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
-    }
+    const transition = await transitionSkillRelease(release, 'published', 'rolled_back');
+    if (!transition) return null;
     try { await markSkillReleaseMemoriesForReview(release, 'skill_release_rolled_back'); } catch (_) {}
-    return queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [id]);
+    return transition.changed;
 }
 
 /** 熔断暂停：Published → Paused。阈值由发布时冻结的 breaker_thresholds 决定。 */
 async function pauseSkillRelease(id, user, reason = '') {
     const release = await getSkillReleaseForUser(id, user, 'manage');
     if (!release || release.status !== 'published') return null;
-    const now = getBeijingTimestamp();
-    await execute("UPDATE agent_skill_releases SET status = 'paused', rolled_back_at = ? WHERE id = ?", [now, id]);
-    await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
+    const transition = await transitionSkillRelease(release, 'published', 'paused');
+    if (!transition) return null;
     try { await markSkillReleaseMemoriesForReview(release, 'skill_release_paused'); } catch (_) {}
     try {
         await createAgentInboxEvent(user, {
@@ -460,21 +472,15 @@ async function pauseSkillRelease(id, user, reason = '') {
     } catch (_) {
         // 通知失败不影响暂停结果。
     }
-    return queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [id]);
+    return transition.changed;
 }
 
 /** 恢复暂停的发布：Paused → Published，并重建目录投影。 */
 async function resumeSkillRelease(id, user) {
     const release = await getSkillReleaseForUser(id, user, 'manage');
     if (!release || release.status !== 'paused') return null;
-    const now = getBeijingTimestamp();
-    await execute("UPDATE agent_skill_releases SET status = 'published', rolled_back_at = NULL WHERE id = ?", [id]);
-    const version = await queryOne('SELECT * FROM agent_skill_versions WHERE id = ?', [release.skill_version_id]);
-    if (version) {
-        await projectSkillReadModel({ version, release, ownerKey: release.owner_key, tenantId: release.tenant_id, actorUserId: user.id });
-    }
-    await execute('UPDATE agent_skills SET updated_at = ? WHERE owner_key = ? AND name = ?', [now, release.owner_key, release.name]);
-    return queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [id]);
+    const transition = await transitionSkillRelease(release, 'paused', 'published');
+    return transition?.changed || null;
 }
 
 /**
@@ -489,7 +495,7 @@ async function resolvePublishedSkill(name, user) {
     const context = tenant.resolvable ? await getUserEnterpriseContext(user.id) : { teams: [] };
     const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
     const columns = `r.*, v.version, v.manifest_yaml, v.manifest_json, v.instructions_md, v.digest,
-        v.content_digest, v.legacy_unrestricted, v.legacy_unrestricted_until`;
+        v.content_digest, v.signing_envelope_id, v.legacy_unrestricted, v.legacy_unrestricted_until`;
     const personalOwnerKey = `user:${Number.parseInt(user.id, 10) || 0}`;
     const rows = await withControlPlaneFallback(async () => {
         if (!tenant.resolvable) {
@@ -905,10 +911,8 @@ async function listSkillCatalogForUser(user, options = {}) {
  */
 async function pauseSkillReleaseBySystem(release, reason = '') {
     if (!release?.id) return { action: 'skipped' };
-    const now = getBeijingTimestamp();
-    const updated = await query("UPDATE agent_skill_releases SET status = 'paused', rolled_back_at = ? WHERE id = ? AND status = 'published' RETURNING id", [now, release.id]);
-    if (!updated.length) return { action: 'skipped' };
-    await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
+    const transition = await transitionSkillRelease(release, 'published', 'paused');
+    if (!transition) return { action: 'skipped' };
     try { await markSkillReleaseMemoriesForReview(release, 'skill_release_paused_by_system'); } catch (_) {}
     await notifyBreakerAction(release, 'release.paused', 'Skill 发布已自动暂停', reason);
     return { action: 'paused' };
@@ -917,31 +921,11 @@ async function pauseSkillReleaseBySystem(release, reason = '') {
 /** 系统级熔断动作：回滚到上一版本并重建目录投影。 */
 async function rollbackSkillReleaseBySystem(release, reason = '') {
     if (!release?.id) return { action: 'skipped' };
-    const now = getBeijingTimestamp();
-    const updated = await query("UPDATE agent_skill_releases SET status = 'rolled_back', rolled_back_at = ? WHERE id = ? AND status = 'published' RETURNING id", [now, release.id]);
-    if (!updated.length) return { action: 'skipped' };
-    let restored = null;
-    if (release.previous_release_id) {
-        await execute("UPDATE agent_skill_releases SET status = 'published' WHERE id = ?", [release.previous_release_id]);
-        restored = await queryOne('SELECT * FROM agent_skill_releases WHERE id = ?', [release.previous_release_id]);
-    }
-    if (restored) {
-        const restoredVersion = await queryOne('SELECT * FROM agent_skill_versions WHERE id = ?', [restored.skill_version_id]);
-        if (restoredVersion) {
-            await projectSkillReadModel({
-                version: restoredVersion,
-                release: restored,
-                ownerKey: restored.owner_key,
-                tenantId: restored.tenant_id,
-                actorUserId: restored.published_by
-            });
-        }
-    } else {
-        await execute("UPDATE agent_skills SET status = 'disabled', updated_at = ? WHERE owner_key = ? AND name = ?", [now, release.owner_key, release.name]);
-    }
+    const transition = await transitionSkillRelease(release, 'published', 'rolled_back');
+    if (!transition) return { action: 'skipped' };
     try { await markSkillReleaseMemoriesForReview(release, 'skill_release_rolled_back_by_system'); } catch (_) {}
     await notifyBreakerAction(release, 'release.rolled_back', 'Skill 发布已自动回滚', reason);
-    return { action: 'rolled_back', restoredReleaseId: restored?.id || null };
+    return { action: 'rolled_back', restoredReleaseId: transition.current?.id || null };
 }
 
 module.exports = {

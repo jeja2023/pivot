@@ -111,6 +111,16 @@ test('关闭后清空新建表单和附件，快捷输入追加内容且不覆�
     } finally { await context.close(); }
 });
 
+test('新建模板制作任务默认提交一百万累计预算', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context);
+        await page.locator('#presentation-master-start').click();
+        await expect(page.locator('#presentation-master-status')).toContainText('测试制作已接收材料');
+        assert.equal(context.requests[0].tokenBudget, 1000000);
+    } finally { await context.close(); }
+});
+
 test('切换模板保留正在编辑的内容，重新打开时只恢复可继续的任务状态', async () => {
     const context = await fixture();
     try {
@@ -172,6 +182,59 @@ test('累计预算不足时展示原预算并引导增加，失败后仍可重�
         await resume.click();
         await expect(panel).toContainText('请先在高级设置中增加累计模型预算');
         assert.equal(submitted.length, 2);
+    } finally { await context.close(); }
+});
+
+test('方案确认可直接继续，补充问题要求实际答复，失败保留输入并显示真实预算', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), submitted = [];
+        let task = { id: 'fixture-task', status: 'input_required', steps: 3, usedTokens: 59211,
+            request: { presentationId: '', tokenBudget: 400000, maxSteps: 80 },
+            progress: { message: '是否按方案制作？' }, inputRequest: { kind: 'confirmation', question: '是否按方案制作？', context: '八页汇报方案。' } };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
+        let fail = true;
+        await page.route('**/master/tasks/fixture-task/respond', async route => {
+            submitted.push(route.request().postDataJSON());
+            if (fail) return route.fulfill({ status: 503, json: { error: '确认服务暂不可用，请重试。' } });
+            task = { ...task, status: 'working' };
+            return route.fulfill({ json: { task } });
+        });
+        await page.locator('#presentation-master-start').click();
+        const panel = page.locator('#presentation-master-status');
+        await expect(panel).toContainText('已用约 59,211 令牌；本任务累计预算 400,000 令牌');
+        await expect(panel.getByText('是否按方案制作？', { exact: true })).toHaveCount(1);
+        for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+            await page.setViewportSize(viewport);
+            assert.equal(await panel.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+            const contextBounds = await panel.locator('.presentation-master-task-context').boundingBox();
+            assert(contextBounds.height < 100, '短方案说明不应撑开大块空白');
+            await expect(panel.getByRole('button', { name: '确认并继续' })).toBeVisible();
+        }
+        await panel.getByRole('button', { name: '确认并继续' }).click();
+        await expect(panel.getByRole('alert')).toHaveText('确认服务暂不可用，请重试。');
+        await expect(panel.getByRole('button', { name: '确认并继续' })).toBeEnabled();
+        assert.equal(submitted[0].answer, '确认，按上述方案继续制作。');
+        await panel.getByRole('textbox', { name: '对制作方案的实际答复' }).fill('请保留原始金额');
+        await panel.getByRole('button', { name: '确认并继续' }).click();
+        await expect(panel.getByRole('alert')).toHaveText('确认服务暂不可用，请重试。');
+        await expect(panel.getByRole('textbox', { name: '对制作方案的实际答复' })).toHaveValue('请保留原始金额');
+        fail = false;
+        await panel.getByRole('button', { name: '确认并继续' }).click();
+        await expect(panel).toContainText('正在制作中');
+        assert.equal(submitted[2].answer, '请保留原始金额');
+        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        task = { ...task, status: 'input_required', inputRequest: { kind: 'clarification', question: '请提供目标受众。', context: '制作需要受众信息。' } };
+        await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task } }));
+        await page.locator('#entry').click();
+        const answer = panel.getByRole('textbox', { name: '对制作方案的实际答复' });
+        await panel.getByRole('button', { name: '提交答复并继续' }).click();
+        await expect(panel.getByRole('alert')).toHaveText('请先填写具体答复，再继续制作。');
+        assert.equal(submitted.length, 3);
+        await answer.fill('公司管理层');
+        await panel.getByRole('button', { name: '提交答复并继续' }).click();
+        await expect(panel).toContainText('正在制作中');
+        assert.equal(submitted[3].answer, '公司管理层');
     } finally { await context.close(); }
 });
 

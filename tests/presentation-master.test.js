@@ -44,6 +44,15 @@ test('继续任务允许增加至五十万以上，拒绝降低或不安全的�
     for (const value of [499999, 0, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => normalizeTokenBudget(value, 500000), /预算/);
 });
 
+test('智能体工具的预算上限与完整制作合同一致，允许显式指定一百万', () => {
+    const definition = require('../server/services/agent-tools-presentations').presentationToolDefinitions().find(item => item.name === 'presentation.master');
+    const { normalizeToolContract, validateToolInput } = require('../server/services/agent-contracts');
+    const tool = normalizeToolContract(definition);
+    assert.deepEqual(validateToolInput(tool, { action: 'start', tokenBudget: 1000000 }), []);
+    assert.deepEqual(validateToolInput(tool, { action: 'resume', taskId: 'example', tokenBudget: 1200000 }), []);
+    assert.ok(validateToolInput(tool, { tokenBudget: Number.MAX_SAFE_INTEGER + 1 }).length);
+});
+
 test('驱动完整上游流程，动作按顺序执行，仅真实导出交付收据结束任务', async () => {
     const fixture = driverFixture([{ message: '生成页面', actions: [{ action: 'write', path: 'project/svg_output/slide_01.svg', text: '<svg/>' }, { action: 'run', tool: 'check_svg', args: ['project', '--quick-generate', '--json'] }] }, { message: '结束', complete: { path: 'project/exports/final.pptx' } }]);
     const current = state();
@@ -177,4 +186,28 @@ test('任务保存持久检查点和等待问题，取消或权限撤回不会�
     await tasks.run('test-id', { id: 1 }, deps); assert.equal(status, 'cancelled'); assert.equal(delivered, 0);
     status = 'working'; deps.ensureAccess = async () => { throw new Error('权限已撤回'); };
     await tasks.run('test-id', { id: 1 }, deps); assert.equal(status, 'failed'); assert.equal(delivered, 0);
+});
+
+test('确认在前一执行器退出期间到达时，退出后启动续接并保留真实答复', async () => {
+    let status = 'working', leaseId, releaseExit, enteredWaiting, continued = 0;
+    const exiting = new Promise(resolve => { releaseExit = resolve; });
+    const waiting = new Promise(resolve => { enteredWaiting = resolve; });
+    const current = { ...state(), prepared: true };
+    const store = { beginExecution: () => new AbortController(), endExecution() {}, getForUser: async () => ({ status }),
+        requestInput: async () => { status = 'input_required'; enteredWaiting(); await exiting; }, complete: async () => {} };
+    const repository = { claim: async (_user, _id, lease) => { leaseId = lease; return true; }, save: async () => true,
+        renew: async () => true, release: async () => {}, read: async () => ({ result_json: { _lease: leaseId, _leaseUntil: Date.now() / 1000 + 180, state: current } }),
+        acceptResponse: async (_user, _id, saved) => { assert.equal(saved.response, '确认保留金额'); status = 'working'; return true; } };
+    const user = { id: 1 }, id = 'confirmation-race';
+    const running = tasks.run(id, user, { store, repository, ensureAccess: async () => {}, parentActive: async () => true,
+        drive: async () => ({ pending: { question: '确认方案？' } }) });
+    await waiting;
+    try {
+        await tasks.respond(user, id, '确认保留金额', { store, repository, identity: async () => '', ensureAccess: async () => {},
+            get: async () => ({ status }), run: async () => { continued++; } });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(continued, 0);
+    } finally { releaseExit(); await running; }
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(continued, 1);
 });

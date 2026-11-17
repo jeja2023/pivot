@@ -118,6 +118,20 @@ test('技能文件可预览并经原有验证和个人发布流程添加', async
     const createdId = (await (await createdRequest).json()).version.id;
     const created = (await versions.json()).data.find(item => String(item.id) === String(createdId));
     expect(created.status).toBe('published');
+    const releaseResult = await page.request.get('/api/agents/skills/releases?limit=100');
+    const release = (await releaseResult.json()).data.find(item => String(item.skill_version_id) === String(createdId) && item.status === 'published');
+    expect(release).toBeTruthy();
+    await expect(page.locator(`#agent-skill-select option[value="${release.id}"]`)).toHaveCount(1);
+    const selected = await page.evaluate(releaseId => {
+        document.querySelector('#agent-skill-select').value = String(releaseId);
+        return { name: window.Pivot.legacy.getAgentHarnessSkillId(), reference: window.Pivot.legacy.getAgentHarnessSkillReference() };
+    }, release.id);
+    expect(selected.name).toBe(created.name);
+    expect(selected.reference.releaseId).toBe(String(release.id));
+    await page.locator(`[data-agent-skill-manage="${createdId}"]`).click();
+    await expect(page.locator('#agent-skill-management-modal')).toBeVisible();
+    await expect(page.locator('#agent-skill-management-source')).toHaveValue(/根据授权资料提供摘要/);
+    await page.locator('[data-skill-management-close]').click();
     const exported = await page.request.get(`/api/agents/skills/versions/${created.id}/source`);
     const markdown = (await exported.json()).markdown;
     expect(markdown).toContain('根据授权资料提供摘要');

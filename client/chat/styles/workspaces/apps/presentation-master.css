@@ -584,6 +584,8 @@
 .presentation-master-task-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
     gap: 10px;
 }
 
@@ -613,6 +615,59 @@
     font-size: 0.8rem;
     color: var(--text-main);
     line-height: 1.4;
+}
+
+.presentation-master-task-summary,
+.presentation-master-task-feedback {
+    margin: 0;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.presentation-master-task-feedback {
+    color: var(--danger);
+}
+
+.presentation-master-task-feedback:empty {
+    display: none;
+}
+
+.presentation-master-task-question {
+    margin: 0;
+    font-weight: 600;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-status-card .presentation-master-task-question,
+.presentation-master-status-card .presentation-master-task-message,
+.presentation-master-status-card .presentation-master-task-summary,
+.presentation-master-status-card .presentation-master-task-feedback {
+    display: block;
+    overflow: visible;
+    line-clamp: unset;
+    -webkit-line-clamp: unset;
+}
+
+.presentation-master-task-context {
+    max-height: 180px;
+    overflow: auto;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-dialog textarea.presentation-master-task-answer {
+    min-height: 52px;
+}
+
+.presentation-master-usage ol {
+    margin: 6px 0 0;
+    padding-left: 24px;
+    overflow-wrap: anywhere;
 }
 
 .presentation-master-task-actions {

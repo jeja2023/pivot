@@ -9,7 +9,7 @@ const contract = require('./contract');
 const { drive } = require('./driver');
 const { deliver } = require('./delivery');
 const deployment = require('./deployment');
-const active = new Set();
+const active = require('./continuation').createContinuationCoordinator();
 
 async function ensureAccess(user, request) {
     if (request.template?.type === 'organization') {
@@ -28,7 +28,8 @@ function publicResult(row, task) {
         usedTokens: state?.usedTokens ?? data.usedTokens ?? 0, steps: state?.steps ?? data.steps ?? 0,
         usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
         recoverable: Boolean(state && (task.status === 'failed' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
-        ...(task.status === 'input_required' ? { inputRequest: { question: row.input_request.question, context: row.input_request.context } } : {}),
+        ...(task.status === 'input_required' ? { inputRequest: { question: row.input_request.question, context: row.input_request.context,
+            kind: state?.pendingKind === 'confirmation' ? 'confirmation' : 'clarification' } } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
 }
 async function get(user, id) {
@@ -82,10 +83,11 @@ async function prepareInputs(user, id, request, deps = {}) {
     return { ...request, inputFiles, inputDigests, materials: request.materials.map(({ text: _text, ...material }) => material) };
 }
 async function run(id, user, deps = {}) {
-    if (active.has(id)) return;
+    if (!active.begin(id)) return;
     const lease = crypto.randomUUID(), store = deps.store || taskStore, repo = deps.repository || repository;
-    if (!await repo.claim(user, id, lease)) return;
-    active.add(id);
+    let claimed;
+    try { claimed = await repo.claim(user, id, lease); } catch (error) { active.finish(id); throw error; }
+    if (!claimed) { active.finish(id); return; }
     const controller = store.beginExecution(id), signal = controller.signal;
     let state, progress = { phase: 'preparing', message: '正在准备完整制作引擎。' }, renewing = false;
     const ensureCurrent = async () => {
@@ -134,7 +136,7 @@ async function run(id, user, deps = {}) {
         const latestTask = await store.getForUser(id, user).catch(() => null);
         if (latestTask?.status === 'working') await store.complete(id, user, { state, progress: { ...progress, phase: 'interrupted' }, publicResult: { message: String(error.message).slice(0, 1200) } },
             { expectedLease: lease, failed: true, errorCode: error.code || 'PPT_MASTER_FAILED', errorMessage: String(error.message).slice(0, 1200) });
-    } finally { clearInterval(heartbeat); await repo.release(user, id, lease).catch(() => {}); store.endExecution(id, controller); active.delete(id); }
+    } finally { clearInterval(heartbeat); await repo.release(user, id, lease).catch(() => {}); store.endExecution(id, controller); active.finish(id); }
 }
 async function start(user, input, context = {}) {
     const available = await runtime.availability();
@@ -145,16 +147,17 @@ async function start(user, input, context = {}) {
     setImmediate(() => run(task.id, user, { driverDeps: { budget: context.budget } }).catch(error => require('../../../logger').logger.warn({ taskId: task.id, code: error.code }, '完整PPT制作任务无法登记状态')));
     return { ...task, progress: { phase: 'preparing', message: '制作任务已创建。' } };
 }
-async function respond(user, id, answer) {
-    const row = await repository.read(user, id), task = await taskStore.getForUser(id, user);
+async function respond(user, id, answer, deps = {}) {
+    const repo = deps.repository || repository, store = deps.store || taskStore;
+    const row = await repo.read(user, id), task = await store.getForUser(id, user);
     if (!row || !task) throw runtime.error('制作任务不存在或无权访问。', 'PPT_MASTER_NOT_FOUND', 404);
     if (task.status !== 'input_required') throw runtime.error('当前任务没有待确认问题。', 'PPT_MASTER_NOT_WAITING', 409);
     if (typeof answer !== 'string' || !answer.trim() || answer.length > 12000) throw runtime.error('请提供不超过12000字的明确答复。');
     const state = row.result_json.state;
-    deployment.assertCheckpoint(state, await runtime.identity());
-    await ensureAccess(user, state.request); state.response = answer.trim();
-    if (!await repository.acceptResponse(user, id, state)) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
-    setImmediate(() => run(id, user).catch(() => {})); return get(user, id);
+    deployment.assertCheckpoint(state, await (deps.identity || runtime.identity)());
+    await (deps.ensureAccess || ensureAccess)(user, state.request); state.response = answer.trim();
+    if (!await repo.acceptResponse(user, id, state)) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
+    active.continue(id, () => (deps.run || run)(id, user).catch(() => {})); return (deps.get || get)(user, id);
 }
 async function cancel(user, id) { if (!await get(user, id)) return null; await taskStore.requestCancel(id, user); return get(user, id); }
 async function latest(user, presentationId) { const row = await repository.latest(user, presentationId); return row ? get(user, row.id) : null; }
