@@ -5,10 +5,17 @@
     let preferences = [];
     let recentRuns = [];
     let draftId = '';
+    let startSequence = 0;
+    let startReturnFocus = null;
     const bridge = () => window.Pivot.moduleApi('agent.workflowBridge');
     const drafts = () => window.Pivot.moduleApi('agent.workflowDrafts');
     const escape = text => window.Pivot.legacy.PivotSafeHtml.escapeHtml(String(text ?? ''));
     const el = id => document.getElementById(id);
+    function startTemplateIcon(id) {
+        if (id === 'knowledge') return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>';
+        if (id === 'table') return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>';
+        return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>';
+    }
     function status(message, tone = '') {
         const target = el('workflow-product-status');
         if (!target) return;
@@ -168,7 +175,10 @@
         }
         for (const id of ['workflow-product-results', 'workflow-product-run-form', 'workflow-product-start', 'workflow-product-release']) {
             const panel = document.createElement('section'); panel.id = id; panel.className = 'workflow-product-panel'; panel.hidden = true;
-            if (id === 'workflow-product-start') el('automation-assets-view').prepend(panel);
+            if (id === 'workflow-product-start') {
+                panel.className = 'modal-overlay workflow-product-start-overlay';
+                document.body.appendChild(panel);
+            }
             else if (id === 'workflow-product-results') document.body.appendChild(panel);
             else editor.appendChild(panel);
         }
@@ -227,36 +237,80 @@
         if (name && owner === bridge().userId() && el('automation-editor-view')?.getClientRects().length && !bridge().readOnly() && !bridge().current()?.id && before === drafts().current()?.key) bridge().setName(name);
     }
     async function release() { await window.Pivot.moduleApi('agent.workflowRelease').open(); }
+    function closeStart({ restoreFocus = true } = {}) {
+        startSequence++;
+        const panel = el('workflow-product-start');
+        if (!panel || panel.hidden) return;
+        panel.hidden = true;
+        if (restoreFocus && startReturnFocus?.isConnected) startReturnFocus.focus();
+        startReturnFocus = null;
+    }
     async function start() {
-        mount(); const panel = el('workflow-product-start'); panel.hidden = false;
+        mount(); const panel = el('workflow-product-start');
+        const sequence = ++startSequence, owner = bridge().userId();
+        if (panel.hidden) startReturnFocus = document.activeElement;
+        panel.hidden = false;
+        PivotSafeHtml.setHtml(panel, '<section class="modal workspace-modal workflow-product-start-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-product-start-title"><header class="workspace-modal-header workflow-product-start-header"><div class="workflow-product-start-title-wrap"><span class="workflow-product-start-title-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect><path d="M10 6.5h4"></path><path d="M17.5 10v4"></path></svg></span><div class="workflow-product-start-title-copy"><h3 id="workflow-product-start-title">新建工作流</h3><p class="workflow-product-start-subtitle">选择场景模板快速起步，或使用空白画布、自然语言草稿与已保存进度</p></div></div><button type="button" class="btn-secondary workspace-modal-close" data-start-close aria-label="关闭新建工作流">关闭</button></header><div class="workspace-modal-body workflow-product-start-body" id="workflow-product-start-content"><p class="workflow-product-start-loading" role="status">正在加载工作流模板和草稿…</p></div></section>');
+        panel.onclick = event => { if (event.target === panel || event.target.closest('[data-start-close]')) closeStart(); };
+        panel.onkeydown = event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeStart(); return; }
+            if (event.key !== 'Tab') return;
+            const controls = [...panel.querySelectorAll('button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), summary, a[href]')].filter(item => item.getClientRects().length);
+            if (!controls.length) return;
+            if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
+            else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
+        };
+        panel.querySelector('[data-start-close]').focus();
         const templates = window.Pivot.moduleApi('agent.workflowTemplates').templates;
-        const response = await bridge().request('/agents/workflow-editor/drafts').catch(() => null);
-        const remote = response?.ok ? (await response.json()).data : [];
+        let remote = [], listUnavailable = false;
+        try {
+            const response = await bridge().request('/agents/workflow-editor/drafts');
+            if (!response.ok) throw new Error('读取失败');
+            const data = await response.json();
+            if (!Array.isArray(data.data)) throw new Error('返回格式无效');
+            remote = data.data;
+        } catch (_) { listUnavailable = true; }
+        if (sequence !== startSequence || owner !== bridge().userId() || panel.hidden) return;
         const local = drafts().listLocal();
         const draftMap = new Map(remote.map(item => [item.draft_key, item]));
         local.forEach(item => { if (item.pending || !draftMap.has(item.key)) draftMap.set(item.key, { ...draftMap.get(item.key), draft_key: item.key, name: item.name, workflow_id: item.workflowId, updated_at: '本机副本，待同步', local: item }); });
         const saved = [...draftMap.values()];
-        PivotSafeHtml.setHtml(panel, `<h3>从要完成的工作开始</h3><div class="workflow-product-templates">${templates.map(item => `<section><h3>${escape(item.name)}</h3><p>${escape(item.description)}</p><small>需要：${escape(item.needs)}</small><details><summary>查看示例结果（非实际运行）</summary><p>${escape(item.example)}</p></details><button type="button" class="btn-primary" data-template="${item.id}">使用模板</button></section>`).join('')}</div><div class="workflow-product-row"><button type="button" class="btn-secondary" data-start-blank>从空白开始</button><button type="button" class="btn-secondary" data-start-ai>用自然语言生成 / 修改草稿</button></div>${saved.length ? `<details open><summary>继续已保存的草稿</summary>${saved.map(item => `<button class="btn-secondary" type="button" data-open-draft="${escape(item.draft_key)}">${escape(item.name)} · ${escape(item.updated_at)}</button>`).join('')}</details>` : ''}<div id="workflow-product-start-detail"></div>`);
-        const models = bridge().models(); const chooser = document.createElement('label'); chooser.className = 'workflow-product-field';
-        PivotSafeHtml.setHtml(chooser, `<span>模板使用的文本模型</span><select class="form-input" data-template-model>${models.map(model => `<option value="${escape(model.id)}">${escape(model.name)}</option>`).join('')}<option value="">稍后配置，先查看示例与画布</option></select>${!models.length ? '<small>当前没有可用文本模型。示例结果可以直接查看，正式试运行前请在模型设置中配置授权模型。</small>' : ''}`);
-        panel.querySelector('h3').after(chooser);
+        const content = el('workflow-product-start-content');
+        PivotSafeHtml.setHtml(content, `<div class="workflow-product-start-toolbar"><div class="workflow-product-start-section-head"><h3>从要完成的工作开始</h3><p>挑选预设场景查看示例结果，生成后可在画布中自由编排</p></div></div><div class="workflow-product-templates">${templates.map(item => `<section class="workflow-product-template-card"><div class="workflow-product-template-head"><span class="workflow-product-template-icon workflow-product-template-icon--${escape(item.id)}" aria-hidden="true">${startTemplateIcon(item.id)}</span><h3>${escape(item.name)}</h3></div><p class="workflow-product-template-desc">${escape(item.description)}</p><small class="workflow-product-template-needs">需要：${escape(item.needs)}</small><details class="workflow-product-template-example"><summary>查看示例结果（非实际运行）</summary><p>${escape(item.example)}</p></details><div class="workflow-product-template-actions"><button type="button" class="btn-primary workflow-product-template-btn" data-template="${item.id}">使用模板</button></div></section>`).join('')}</div><div class="workflow-product-start-alt"><div class="workflow-product-start-alt-copy"><strong>其他构建方式</strong><span>从空画布手动编排节点，或通过一句话描述生成初始草稿</span></div><div class="workflow-product-row workflow-product-start-alt-actions"><button type="button" class="btn-secondary workflow-product-start-alt-btn" data-start-blank><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg><span>从空白开始</span></button><button type="button" class="btn-secondary workflow-product-start-alt-btn" data-start-ai aria-expanded="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.5L18.5 9.4l-4.6 1.9L12 16l-1.9-4.7-4.6-1.9 4.6-1.9L12 3z"></path><path d="M5 18l.8 1.8L7.5 20.5l-1.7.7L5 23l-.8-1.8-1.7-.7 1.7-.7L5 18z"></path></svg><span>用自然语言生成 / 修改草稿</span></button></div></div>${saved.length ? `<details class="workflow-product-start-drafts" open><summary><span class="workflow-product-start-drafts-title">继续已保存的草稿</span><span class="workflow-product-start-draft-count">${saved.length}</span></summary><div class="workflow-product-start-draft-list">${saved.map(item => `<button class="btn-secondary workflow-product-draft-item" type="button" data-open-draft="${escape(item.draft_key)}" title="${escape(item.name)} · ${escape(item.updated_at)}"><span class="workflow-product-draft-name">${escape(item.name)}</span><span class="workflow-product-draft-time"><span aria-hidden="true">· </span>${escape(item.updated_at)}</span></button>`).join('')}</div></details>` : ''}<div id="workflow-product-start-detail"></div>`);
+        const models = bridge().models(); const chooser = document.createElement('label'); chooser.className = 'workflow-product-field workflow-product-start-model-field';
+        PivotSafeHtml.setHtml(chooser, `<span>模板使用的文本模型</span><select class="form-input workflow-authoring-select" data-template-model>${models.map(model => `<option value="${escape(model.id)}">${escape(model.name)}</option>`).join('')}<option value="">稍后配置，先查看示例与画布</option></select>${!models.length ? '<small class="workflow-product-start-model-hint">当前没有可用文本模型。示例结果可以直接查看，正式试运行前请在模型设置中配置授权模型。</small>' : ''}`);
+        content.querySelector('.workflow-product-start-toolbar').appendChild(chooser);
+        if (listUnavailable) {
+            const notice = document.createElement('div'); notice.className = 'workflow-product-notice workflow-product-start-notice';
+            PivotSafeHtml.setHtml(notice, '<span role="status">服务器草稿暂时无法读取，仍可使用模板或本机草稿。</span> <button type="button" class="btn-secondary btn-xs" data-start-retry>重试读取</button>');
+            content.appendChild(notice);
+            notice.querySelector('[data-start-retry]').addEventListener('click', () => void start());
+        }
         panel.querySelectorAll('[data-template]').forEach(button => button.addEventListener('click', async () => {
             const value = window.Pivot.moduleApi('agent.workflowTemplates').instantiate(button.dataset.template, chooser.querySelector('select').value);
             const owner = bridge().userId();
             const name = await chooseDraftName(value.name);
-            if (!name || owner !== bridge().userId() || panel.hidden || !panel.getClientRects().length) return;
-            bridge().newWorkflow({ name, description: value.description }); bridge().write(value.spec); drafts().changed(); panel.hidden = true;
+            if (!name || owner !== bridge().userId() || sequence !== startSequence || panel.hidden || !panel.getClientRects().length) return;
+            closeStart({ restoreFocus: false }); bridge().newWorkflow({ name, description: value.description }); bridge().write(value.spec); drafts().changed();
         }));
-        panel.querySelector('[data-start-blank]').addEventListener('click', async () => { const owner = bridge().userId(), name = await chooseDraftName(); if (!name || owner !== bridge().userId() || panel.hidden || !panel.getClientRects().length) return; panel.hidden = true; bridge().newWorkflow({ name }); });
-        panel.querySelector('[data-start-ai]').addEventListener('click', () => window.Pivot.moduleApi('agent.workflowAuthoring').describe(el('workflow-product-start-detail')));
+        panel.querySelector('[data-start-blank]').addEventListener('click', async () => { const owner = bridge().userId(), name = await chooseDraftName(); if (!name || owner !== bridge().userId() || sequence !== startSequence || panel.hidden || !panel.getClientRects().length) return; closeStart({ restoreFocus: false }); bridge().newWorkflow({ name }); });
+        const startAiBtn = panel.querySelector('[data-start-ai]');
+        startAiBtn.addEventListener('click', () => {
+            const detailEl = el('workflow-product-start-detail');
+            startAiBtn.setAttribute('aria-expanded', 'true');
+            startAiBtn.classList.add('is-active');
+            window.Pivot.moduleApi('agent.workflowAuthoring').describe(detailEl);
+            detailEl?.scrollIntoView?.({ block: 'nearest' });
+        });
         panel.querySelectorAll('[data-open-draft]').forEach(button => button.addEventListener('click', async () => {
             const entry = draftMap.get(button.dataset.openDraft);
             const draftResponse = await bridge().request(`/agents/workflow-editor/drafts/${encodeURIComponent(button.dataset.openDraft)}`).catch(() => null);
             const data = draftResponse ? await draftResponse.json() : {};
+            if (sequence !== startSequence || owner !== bridge().userId() || panel.hidden) return;
             if (draftResponse && !draftResponse.ok && draftResponse.status !== 404) { el('workflow-product-start-detail').textContent = data.error || '无法读取原草稿，请重试。'; return; }
             const draft = data.draft || (entry?.local ? { draft_key: entry.draft_key, workflow_id: entry.local.workflowId, name: entry.local.name, description: entry.local.description, spec_text: entry.local.specText } : null);
             if (!draft) return;
-            drafts().detach();
+            closeStart({ restoreFocus: false }); drafts().detach();
             draftId = draft.draft_key;
             suppress = true;
             if (draft.workflow_id) bridge().openEditor(draft.workflow_id, { readOnly: false });
@@ -265,7 +319,6 @@
             suppress = false;
             await drafts().load(draftId, draftBridge());
             if (!data.draft && entry?.local?.pending) drafts().changed();
-            panel.hidden = true;
             void window.Pivot.moduleApi('agent.workflowResults').restore(draftId);
         }));
     }
@@ -288,8 +341,8 @@
         await bridge().request(`/agents/workflows/${id}/preference`, { method: 'PATCH', body: JSON.stringify({ favorite }) });
         await refreshPreferences(); window.Pivot.moduleApi('agent.automation').renderAssetCenter();
     }
-    function closed() { draftId = null; drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowResults').close({ restoreFocus: false }); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
-    window.Pivot.registerModule('agent.workflowExperience', { mount, opened, changed, status, saveStatus, offerRecovery, compareDraft, start, release, closed, updateRenameDraft,
+    function closed() { closeStart({ restoreFocus: false }); draftId = null; drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowResults').close({ restoreFocus: false }); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
+    window.Pivot.registerModule('agent.workflowExperience', { mount, opened, changed, status, saveStatus, offerRecovery, compareDraft, start, closeStart, release, closed, updateRenameDraft,
         showNodeResult: (...args) => window.Pivot.moduleApi('agent.workflowResults').nodeResult(...args),
         refreshPreferences, toggleFavorite, recent, openRecent, preferences: () => preferences });
 })();

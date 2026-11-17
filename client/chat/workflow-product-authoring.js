@@ -79,6 +79,7 @@
     async function describe(target = ensurePanel()) {
         const models = bridge().models();
         const isNew = Boolean(target.closest('#workflow-product-start'));
+        const owner = bridge().userId();
         const isModal = target.classList.contains('workflow-authoring-modal');
         if (isModal) {
             PivotSafeHtml.setHtml(target, `
@@ -108,7 +109,13 @@
             `);
             target.querySelectorAll('[data-author-close]').forEach(btn => btn.addEventListener('click', () => { target.hidden = true; }));
         } else {
-            PivotSafeHtml.setHtml(target, `<h3>用自然语言生成或修改草稿</h3><p>将调用所选模型并消耗用量。结果先展示变更计划，应用后可以撤销，不会运行或发布。</p><label class="workflow-product-field">文本模型<select class="form-input" data-author-model>${models.map(model => `<option value="${escape(model.id)}">${escape(model.name)}</option>`).join('')}</select></label><label class="workflow-product-field">目标或修改要求<textarea class="form-input" rows="4" data-author-prompt placeholder="例如：根据订单记录生成异常分析报告"></textarea></label><button type="button" class="btn-primary" data-author-propose ${models.length ? '' : 'disabled'}>生成变更计划</button><div data-author-plan role="status"></div>`);
+            PivotSafeHtml.setHtml(target, `<div class="workflow-product-start-ai-head"><div><h3>用自然语言生成或修改草稿</h3><p class="workflow-authoring-subtitle">将调用所选模型并消耗用量。结果先展示变更计划，应用后可以撤销，不会运行或发布。</p></div><button type="button" class="btn-secondary btn-xs" data-author-inline-close>收起</button></div><div class="workflow-product-start-ai-fields"><label class="workflow-product-field"><span>文本模型</span><select class="form-input workflow-authoring-select" data-author-model>${models.map(model => `<option value="${escape(model.id)}">${escape(model.name)}</option>`).join('')}</select></label><label class="workflow-product-field"><span>目标或修改要求</span><textarea class="form-input workflow-product-start-ai-prompt" rows="3" data-author-prompt placeholder="例如：根据订单记录生成异常分析报告"></textarea></label></div><div class="workflow-product-row"><button type="button" class="btn-primary" data-author-propose ${models.length ? '' : 'disabled'}>生成变更计划</button></div><div data-author-plan role="status"></div>`);
+            target.querySelector('[data-author-inline-close]')?.addEventListener('click', () => {
+                target.replaceChildren();
+                const toggle = target.closest('#workflow-product-start')?.querySelector('[data-start-ai]');
+                toggle?.setAttribute('aria-expanded', 'false');
+                toggle?.classList.remove('is-active');
+            });
         }
         target.querySelector('[data-author-propose]').addEventListener('click', async event => {
             event.target.disabled = true;
@@ -118,10 +125,13 @@
                 const editorIdentity = bridge().editor();
                 const response = await bridge().request('/agents/workflow-editor/propose', { method: 'POST', body: JSON.stringify({ prompt: target.querySelector('[data-author-prompt]').value, modelId: target.querySelector('[data-author-model]').value, spec: current }) });
                 const proposal = await response.json();
+                if (isNew && (!target.isConnected || target.closest('#workflow-product-start')?.hidden || owner !== bridge().userId())) return;
                 if (!response.ok) throw new Error(proposal.error || '无法生成，请使用模板或手工编排。');
                 PivotSafeHtml.setHtml(output, `<p>${escape(proposal.plan)}</p>${(proposal.issues || []).map(issue => `<p>${escape(issue)}</p>`).join('')}<details><summary>查看变更范围</summary><pre>${escape(JSON.stringify({ before: current, proposed: proposal.spec }, null, 2))}</pre></details><button type="button" class="btn-secondary" data-author-apply>应用为可撤销草稿</button>`);
                 output.querySelector('[data-author-apply]').addEventListener('click', () => {
+                    if (isNew && (!target.isConnected || target.closest('#workflow-product-start')?.hidden || owner !== bridge().userId())) return;
                     if (!isNew && editorIdentity !== bridge().editor()) { output.textContent = '当前编辑流程已切换，请在目标流程重新生成方案。'; return; }
+                    if (isNew) window.Pivot.moduleApi('agent.workflowExperience').closeStart({ restoreFocus: false });
                     if (isNew || !bridge().editor()) bridge().newWorkflow({ name: proposal.name, description: proposal.description });
                     bridge().editor().applySpec(proposal.spec);
                     window.Pivot.moduleApi('agent.workflowDrafts').changed(); target.hidden = true;

@@ -719,3 +719,27 @@ test('已下线会话、法规与数据分析布局不保留无引用样式选�
         assert.doesNotMatch(styles, new RegExp(`\\.${selector}(?:[\\s.:#,{]|$)`), `已下线选择器不得回流：${selector}`);
     });
 });
+
+test('新建工作流弹窗具备顶部工具条紧凑模型选择、等高模板卡片、其他构建方式条与草稿网格契约', () => {
+    const workspaceJs = read('client/chat/workflow-product-workspace.js');
+    const authoringJs = read('client/chat/workflow-product-authoring.js');
+    const productCss = read('client/chat/styles/workspaces/agent/workflow-product.css');
+
+    // 1. 头部标题区与主体分层、紧凑模型选择器复用统一 select 控件
+    assert.match(workspaceJs, /class="modal workspace-modal workflow-product-start-dialog"/);
+    assert.match(workspaceJs, /class="workspace-modal-header workflow-product-start-header"/);
+    assert.match(workspaceJs, /class="workflow-product-start-toolbar"/);
+    assert.match(workspaceJs, /chooser\.className = 'workflow-product-field workflow-product-start-model-field'/);
+    assert.match(workspaceJs, /class="form-input workflow-authoring-select" data-template-model/);
+    assert.match(authoringJs, /class="form-input workflow-authoring-select" data-author-model/);
+    assert.match(productCss, /\.workflow-product-start-model-field\s*\{[\s\S]*?flex:\s*0 1 320px;/);
+
+    // 2. 模板卡片等高对齐底部的操作按钮，替代创建方式与已保存草稿结构化排版
+    assert.match(workspaceJs, /class="workflow-product-template-card"/);
+    assert.match(workspaceJs, /class="workflow-product-template-actions"/);
+    assert.match(workspaceJs, /class="workflow-product-start-alt"/);
+    assert.match(workspaceJs, /class="workflow-product-start-drafts"/);
+    assert.match(workspaceJs, /class="workflow-product-start-draft-list"/);
+    assert.match(productCss, /\.workflow-product-templates > section\s*\{[\s\S]*?display:\s*flex;\s*flex-direction:\s*column;/);
+    assert.match(productCss, /\.workflow-product-template-actions\s*\{[\s\S]*?margin-top:\s*auto;/);
+});

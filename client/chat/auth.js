@@ -60,6 +60,7 @@ async function loadAuthConfig() {
 
 // 显式定义界面显示控制逻辑
 window.Pivot.legacy.showAuth = () => {
+    window.Pivot.moduleApi('agent.workflowExperience')?.closeStart?.({ restoreFocus: false });
     window.Pivot?.moduleApi?.('apps.policyReview')?.reset?.();
     const authContainer = document.getElementById('auth-container');
     authContainer?.classList.remove('hidden');

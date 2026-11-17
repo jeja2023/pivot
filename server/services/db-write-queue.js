@@ -217,6 +217,7 @@ async function recoverCriticalWrites() {
     if (criticalRecovery) return criticalRecovery;
     criticalRecoveryRequired = true;
     const revision = criticalRecoveryRevision;
+    let recovered = 0;
     criticalRecovery = journal().recover(async (name, item) => {
         if (pgQueues[name].some(queued => queued.deliveryId === item.deliveryId) || criticalPending.has(item.deliveryId) || criticalInFlight.has(item.deliveryId)) return true;
         if (await require('../repositories/critical-writes').exists(name, item.deliveryId)) {
@@ -225,8 +226,12 @@ async function recoverCriticalWrites() {
         }
         if (pgQueues[name].length >= QUEUE_LIMITS[name]) return false;
         pgEnqueue(name, item);
+        recovered += 1;
         return true;
-    }).then(complete => { criticalRecoveryRequired = !complete || revision !== criticalRecoveryRevision; }).finally(() => { criticalRecovery = null; });
+    }).then(complete => {
+        criticalRecoveryRequired = !complete || revision !== criticalRecoveryRevision;
+        return recovered;
+    }).finally(() => { criticalRecovery = null; });
     return criticalRecovery;
 }
 
@@ -253,7 +258,7 @@ async function runPgWriteQuery(pool, sql, params) {
     const releaseClient = (err) => {
         if (released) return;
         released = true;
-        try { client.release(err); } catch (_) {}
+        try { client.release(err); } catch (_) { }
     };
 
     const queryPromise = Promise.resolve().then(() => client.query(sql, params));
@@ -263,7 +268,7 @@ async function runPgWriteQuery(pool, sql, params) {
             const error = new Error(`数据库写入超时（已等待 ${WRITE_QUERY_TIMEOUT_MS} 毫秒）`);
             error.code = 'PG_WRITE_QUEUE_QUERY_TIMEOUT';
             // releaseClient(error) 会让 pg-pool 移除连接；主动断开 socket 可避免半开连接继续占池。
-            try { client.connection?.stream?.destroy(); } catch (_) {}
+            try { client.connection?.stream?.destroy(); } catch (_) { }
             releaseClient(error);
             reject(error);
         }, WRITE_QUERY_TIMEOUT_MS);
@@ -320,7 +325,7 @@ async function pgFlushQueue(queueName) {
 
     // 只取刷新开始时的一批。若生产者持续入队，新记录留给下一轮，保证 flush 本身会返回。
     const batch = queue.splice(0, Math.min(queue.length, batchRows));
-    if (batch.length === 0) return;
+    if (batch.length === 0) return 0;
     if (criticalKinds.has(queueName)) batch.forEach(item => criticalInFlight.add(item.deliveryId));
     const params = [];
     const rowPlaceholders = [];
@@ -355,6 +360,7 @@ async function pgFlushQueue(queueName) {
             });
         }
         markQueueSuccess(queueName);
+        return batch.length;
     } catch (err) {
         const isUnrecoverable = isUnrecoverableDbError(err);
         if (criticalKinds.has(queueName)) {
@@ -394,7 +400,7 @@ async function pgFlushQueue(queueName) {
                 }
             }
             markQueueSuccess(queueName);
-            return;
+            return batch.length;
         }
 
         if (isForeignKeyViolation(err)) {
@@ -415,11 +421,13 @@ async function pgFlush() {
     pgFlushing = (async () => {
         try {
             let hasError = false;
+            let madeProgress = false;
             // 每个队列本轮最多一批，且并行隔离：审计写入异常不能阻塞 API/MCP/用量队列。
             await Promise.all(Object.keys(pgQueues).map(async queueName => {
                 if (pgQueues[queueName].length === 0) return;
                 try {
-                    await pgFlushQueue(queueName);
+                    const flushed = await pgFlushQueue(queueName);
+                    if (flushed > 0) madeProgress = true;
                 } catch (err) {
                     hasError = true;
                     logger.warn(
@@ -428,13 +436,17 @@ async function pgFlush() {
                     );
                 }
             }));
-            if (criticalRecoveryRequired) await recoverCriticalWrites();
+            if (criticalRecoveryRequired) {
+                const recovered = await recoverCriticalWrites();
+                if (recovered > 0) madeProgress = true;
+            }
             if (hasError) {
                 pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
                 pgSchedule(pgRetryDelayMs);
             } else {
                 pgRetryDelayMs = PG_BASE_RETRY_DELAY_MS;
             }
+            return { hasError, madeProgress };
         } finally {
             pgFlushing = null;
             const stillPending = Object.values(pgQueues).some(q => q.length > 0);
@@ -448,25 +460,28 @@ async function pgFlush() {
 }
 
 async function pgFlushAll() {
-    await Promise.all([...criticalPending.values()].map(entry => entry.pending));
-    if (pgFlushTimer) {
-        clearTimeout(pgFlushTimer);
-        pgFlushTimer = null;
-        pgFlushTimerDelayMs = 0;
-    }
-    while (pgFlushing) {
-        await pgFlushing;
-    }
-    for (let i = 0; i < 50; i += 1) {
+    for (let i = 0; i < 10000; i += 1) {
+        if (criticalPending.size > 0) {
+            await Promise.all([...criticalPending.values()].map(entry => entry.pending.catch(() => { })));
+        }
+        if (pgFlushTimer) {
+            clearTimeout(pgFlushTimer);
+            pgFlushTimer = null;
+            pgFlushTimerDelayMs = 0;
+        }
+        while (pgFlushing) {
+            await pgFlushing;
+        }
         const remaining = Object.values(pgQueues).reduce((sum, q) => sum + q.length, 0);
-        if (remaining === 0) return;
-        await pgFlush();
+        if (remaining === 0 && !criticalRecoveryRequired && criticalPending.size === 0) return;
+        const result = await pgFlush();
         while (pgFlushing) {
             await pgFlushing;
         }
         const after = Object.values(pgQueues).reduce((sum, q) => sum + q.length, 0);
-        if (after === 0) return;
-        if (after >= remaining) return;
+        if (after === 0 && !criticalRecoveryRequired && criticalPending.size === 0) return;
+        // 若本轮既没有批次成功落库或恢复回补、待写总数又未下降（如数据库不可用），停止自旋防止死循环。
+        if (!result?.madeProgress && after >= remaining) return;
     }
 }
 

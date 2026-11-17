@@ -38,6 +38,99 @@ async function headers(page) {
     return { 'x-csrf-token': (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value };
 }
 
+test('新建工作流使用弹窗，支持键盘关闭、焦点恢复及窄屏完整操作', async ({ page }) => {
+    await openWorkspace(page);
+    const trigger = page.locator('#automation-new-workflow-btn');
+    const overlay = page.locator('#workflow-product-start');
+    await expect(overlay).toBeHidden();
+    for (const width of [1366, 390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        await trigger.click();
+        const dialog = overlay.getByRole('dialog', { name: '新建工作流' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByText('从要完成的工作开始')).toBeVisible();
+        await expect(dialog.getByRole('button', { name: '关闭新建工作流' })).toBeFocused();
+        const bounds = await dialog.evaluate(element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, overflow: element.scrollWidth - element.clientWidth }; });
+        expect(bounds.left).toBeGreaterThanOrEqual(0); expect(bounds.right).toBeLessThanOrEqual(width + 1);
+        expect(bounds.top).toBeGreaterThanOrEqual(0); expect(bounds.bottom).toBeLessThanOrEqual(845); expect(bounds.overflow).toBe(0);
+        await page.keyboard.press('Shift+Tab');
+        expect(await overlay.evaluate(element => element.contains(document.activeElement))).toBe(true);
+        await page.keyboard.press('Escape');
+        await expect(overlay).toBeHidden(); await expect(trigger).toBeFocused();
+    }
+    await trigger.click(); await overlay.locator('[data-start-blank]').click();
+    await expect(page.locator('#input-prompt-container')).toBeVisible();
+    await page.locator('#modal-input-prompt-cancel').click();
+    await expect(overlay.getByRole('dialog', { name: '新建工作流' })).toBeVisible();
+    await overlay.getByRole('button', { name: '关闭新建工作流' }).click();
+    await expect(overlay).toBeHidden(); await expect(trigger).toBeFocused();
+});
+
+test('关闭新建弹窗后迟到草稿列表不能重开弹窗或覆盖下一次打开', async ({ page }) => {
+    await openWorkspace(page);
+    let release, arrived;
+    const held = new Promise(resolve => { release = resolve; });
+    const requested = new Promise(resolve => { arrived = resolve; });
+    let count = 0;
+    await page.route('**/api/agents/workflow-editor/drafts', async route => {
+        if (++count === 1) { arrived(); await held; await route.fulfill({ json: { data: [{ draft_key: 'stale', name: '迟到旧草稿', updated_at: '旧时间' }] } }); }
+        else await route.continue();
+    });
+    await page.locator('#automation-new-workflow-btn').click(); await requested;
+    const overlay = page.locator('#workflow-product-start');
+    await overlay.getByRole('button', { name: '关闭新建工作流' }).click();
+    await page.locator('#automation-new-workflow-btn').click();
+    await expect(overlay.getByText('从要完成的工作开始')).toBeVisible();
+    release();
+    await expect(overlay.getByText('迟到旧草稿')).toHaveCount(0);
+    await overlay.getByRole('button', { name: '关闭新建工作流' }).click();
+    await expect(overlay).toBeHidden();
+});
+
+test('新建弹窗草稿列表失败可重试，自然语言方案仅在当前弹窗中应用', async ({ page }) => {
+    await openWorkspace(page);
+    await page.evaluate(() => { window.Pivot.legacy._cachedAgentModels = [{ id: 1, name: '受控测试模型' }]; });
+    let failures = 0;
+    await page.route('**/api/agents/workflow-editor/drafts', route => ++failures === 1
+        ? route.fulfill({ status: 503, json: { error: '受控故障' } }) : route.continue());
+    const overlay = page.locator('#workflow-product-start');
+    await page.locator('#automation-new-workflow-btn').click();
+    await expect(overlay.getByText('服务器草稿暂时无法读取')).toBeVisible();
+    await overlay.getByRole('button', { name: '重试读取' }).click();
+    await expect(overlay.getByText('服务器草稿暂时无法读取')).toHaveCount(0);
+    await page.route('**/agents/workflow-editor/propose', route => route.fulfill({ json: { name: 'AI 草稿', plan: '建议创建结果', spec: { nodes: [{ id: 'ai', tool: 'workflow.output', title: 'AI 结果', input: { name: 'result', value: '建议内容' } }] } } }));
+    await overlay.locator('[data-start-ai]').click();
+    await overlay.locator('[data-author-prompt]').fill('生成一个结果输出');
+    await overlay.locator('[data-author-propose]').click();
+    await expect(overlay.locator('[data-author-plan]')).toContainText('建议创建结果');
+    await overlay.locator('[data-author-apply]').click();
+    await expect(overlay).toBeHidden(); await expect(page.locator('#agent-dag-editor-canvas')).toBeVisible();
+    expect(await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').spec().nodes[0].id)).toBe('ai');
+});
+
+test('关闭新建弹窗或切走工作区后迟到的生成结果不会污染下次打开', async ({ page }) => {
+    await openWorkspace(page);
+    await page.evaluate(() => { window.Pivot.legacy._cachedAgentModels = [{ id: 1, name: '受控测试模型' }]; });
+    let release, arrived;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const sent = new Promise(resolve => { arrived = resolve; });
+    await page.route('**/agents/workflow-editor/propose', async route => {
+        arrived(); await waiting;
+        await route.fulfill({ json: { name: '旧方案', plan: '不应显示的迟到方案', spec: { nodes: [] } } });
+    });
+    const overlay = page.locator('#workflow-product-start');
+    await page.locator('#automation-new-workflow-btn').click();
+    await overlay.locator('[data-start-ai]').click();
+    await overlay.locator('[data-author-prompt]').fill('生成工作流');
+    await overlay.locator('[data-author-propose]').click(); await sent;
+    await overlay.getByRole('button', { name: '关闭新建工作流' }).click();
+    await page.locator('#automation-new-workflow-btn').click();
+    await expect(overlay.getByText('从要完成的工作开始')).toBeVisible();
+    release(); await expect(overlay.getByText('不应显示的迟到方案')).toHaveCount(0);
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').showMainWorkspace('chat'));
+    await expect(overlay).toBeHidden();
+});
+
 test('草稿名称使用弹窗且只显示一次，结果弹窗完整覆盖工具栏', async ({ page }) => {
     test.setTimeout(90000);
     await openWorkspace(page);

@@ -789,6 +789,7 @@ function showMainWorkspace(view = 'personal') {
     if (!workspaceRestoreDepth) hasExplicitWorkspaceNavigation = true;
     if (view !== 'apps') window.Pivot.moduleApi('apps.mindmaps').suspend?.();
     const target = ['personal', 'chat', 'apps', 'agent', 'agent-dag', 'knowledge', 'mcp', 'manual', 'print', 'settings'].includes(view) ? view : 'personal';
+    if (target !== 'agent-dag') window.Pivot.moduleApi('agent.workflowExperience')?.closeStart?.({ restoreFocus: false });
     const current = document.body?.dataset.activeWorkspace;
     if (['personal', 'chat'].includes(target)) {
         setStoredSessionValue(RETURN_WORKSPACE_STORAGE_KEY, target);

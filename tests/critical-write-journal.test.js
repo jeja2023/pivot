@@ -27,13 +27,16 @@ test('进程退出后的加密消费记录可恢复，重复恢复不重复计�
         for(let index=0;index<5;index++)await queue.enqueueAuditLog({action:'恢复回归_'+id,details:String(index)});
         await queue.flushAllWrites();
         assert.equal((await queryOne('SELECT COUNT(*) AS n FROM audit_logs WHERE action=?',['恢复回归_'+id])).n,5);
+        await Promise.all(Array.from({length:5},(_,index)=>queue.enqueueAuditLog({action:'并发满载_'+id,details:String(index)})));
+        await queue.flushAllWrites();
+        assert.equal((await queryOne('SELECT COUNT(*) AS n FROM audit_logs WHERE action=?',['并发满载_'+id])).n,5);
         assert.equal(queue.getQueueDiagnostics().auditLogs.dropped,0);
         await assert.rejects(fs.access(file));
     }finally{
         await queue.flushAllWrites();
         await execute('DELETE FROM model_usage_events WHERE delivery_id=?',[id]);
         await execute('DELETE FROM model_daily_consumption WHERE user_id=?',[record.userId]);
-        await execute('DELETE FROM audit_logs WHERE action=?',['恢复回归_'+id]);
+        await execute('DELETE FROM audit_logs WHERE action IN (?,?)',['恢复回归_'+id,'并发满载_'+id]);
     }
 });
 

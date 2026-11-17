@@ -59,6 +59,7 @@ function selectAutomationWorkflow(workflowId) {
 
 function setAutomationTab(tab = 'workflows') {
     activeAutomationTab = tab === 'schedules' ? 'schedules' : 'workflows';
+    if (activeAutomationTab !== 'workflows') window.Pivot.moduleApi('agent.workflowExperience')?.closeStart?.({ restoreFocus: false });
     window.Pivot.legacy.syncAutomationPrimaryTabs?.(activeAutomationTab);
     const workflowsPanel = document.getElementById('automation-workflows-panel');
     const schedulesPanel = document.getElementById('automation-schedules-panel');
@@ -331,6 +332,7 @@ function showAutomationAssetCenter(options = {}) {
 }
 
 function showAutomationWorkflowEditor(workflowId = '', options = {}) {
+    window.Pivot.moduleApi('agent.workflowExperience')?.closeStart?.({ restoreFocus: false });
     window.Pivot.moduleApi('agent.workflowResults')?.stop?.();
     agentWorkflowReadOnly = Boolean(options.readOnly && workflowId);
     window.Pivot.legacy.syncAutomationPrimaryTabs?.('workflows');
