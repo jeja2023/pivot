@@ -7,6 +7,15 @@
  */
 const { logger } = require('../logger');
 const { getBeijingTimestamp } = require('../time');
+const crypto = require('node:crypto');
+const criticalKinds = new Set(['auditLogs', 'modelUsageEvents']);
+const criticalPending = new Map();
+let criticalRecoveryRequired = false;
+let criticalRecovery = null;
+let usagePersistenceFailure = false;
+let criticalRecoveryRevision = 0;
+const criticalInFlight = new Set();
+const journal = () => require('./critical-write-journal');
 
 // ──────────────────────────────────────────────────────────────────────────
 // 队列定义
@@ -15,8 +24,8 @@ const { getBeijingTimestamp } = require('../time');
 const QUEUE_SPECS = {
     auditLogs: {
         table: 'audit_logs',
-        columns: ['user_id', 'action', 'details', 'ip_address', 'timestamp'],
-        fields: ['userId', 'action', 'details', 'ipAddress', 'timestamp'],
+        columns: ['user_id', 'action', 'details', 'ip_address', 'timestamp', 'delivery_id'],
+        fields: ['userId', 'action', 'details', 'ipAddress', 'timestamp', 'deliveryId'],
     },
     apiCallLogs: {
         table: 'api_call_logs',
@@ -44,8 +53,8 @@ const QUEUE_SPECS = {
     },
     modelUsageEvents: {
         table: 'model_usage_events',
-        columns: ['user_id', 'model_id', 'source', 'token_count', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cache_observed', 'created_at'],
-        fields: ['userId', 'modelId', 'source', 'tokenCount', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'cacheObserved', 'createdAt'],
+        columns: ['user_id', 'model_id', 'source', 'token_count', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cache_observed', 'created_at', 'delivery_id'],
+        fields: ['userId', 'modelId', 'source', 'tokenCount', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'cacheObserved', 'createdAt', 'deliveryId'],
     },
 };
 
@@ -62,6 +71,7 @@ const QUEUE_LIMITS = {
     mcpCallLogs: Number.parseInt(process.env.PIVOT_DB_MCP_LOG_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
     modelUsageEvents: Number.parseInt(process.env.PIVOT_DB_USAGE_QUEUE_MAX, 10) || DEFAULT_MAX_QUEUE_SIZE,
 };
+for (const name of Object.keys(QUEUE_LIMITS)) QUEUE_LIMITS[name] = Math.max(1, Math.min(100000, QUEUE_LIMITS[name]));
 
 const FLUSH_INTERVAL_MS = Number.parseInt(process.env.PIVOT_DB_WRITE_FLUSH_MS, 10) || DEFAULT_FLUSH_INTERVAL_MS;
 const MAX_BATCH_SIZE = Number.parseInt(process.env.PIVOT_DB_WRITE_BATCH_SIZE, 10) || DEFAULT_MAX_BATCH_SIZE;
@@ -141,7 +151,6 @@ function markQueueError(queueName, err) {
 }
 
 function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
-    if (QUEUE_DISABLED) return;
     const nextDelay = Math.max(10, Number(delayMs) || FLUSH_INTERVAL_MS);
     if (pgFlushTimer && pgFlushTimerDelayMs <= nextDelay) return;
     if (pgFlushTimer) clearTimeout(pgFlushTimer);
@@ -157,10 +166,16 @@ function pgSchedule(delayMs = FLUSH_INTERVAL_MS) {
 }
 
 function pgEnqueue(queueName, item) {
-    if (QUEUE_DISABLED) return;
+    if (QUEUE_DISABLED && !criticalKinds.has(queueName)) return;
     const queue = pgQueues[queueName];
     if (!queue) throw new Error(`未知数据库写入队列： ${queueName}`);
     if (queue.length >= QUEUE_LIMITS[queueName]) {
+        if (criticalKinds.has(queueName)) {
+            criticalRecoveryRequired = true;
+            criticalRecoveryRevision++;
+            pgSchedule();
+            return;
+        }
         queue.shift();
         pgQueueDropped[queueName] += 1;
         logger.warn({ queueName, max: QUEUE_LIMITS[queueName] }, '[PG] 写入队列溢出，已丢弃最早任务');
@@ -178,6 +193,41 @@ function pgEnqueue(queueName, item) {
         pgQueueHighWaterAlerted.delete(queueName);
         pgSchedule();
     }
+}
+
+function enqueueCritical(queueName, item) {
+    const deliveryId = crypto.randomUUID();
+    const record = { ...item, deliveryId };
+    // 先登记在途记录，额度读取不得落在磁盘写入与内存入队之间。
+    const pending = journal().save(queueName, record).catch(cause => {
+        throw Object.assign(new Error('关键记录持久保存失败，请检查存储后重试。'), { code: 'CRITICAL_WRITE_UNAVAILABLE', cause });
+    }).then(saved => {
+        criticalPending.delete(deliveryId);
+        pgEnqueue(queueName, saved);
+    });
+    criticalPending.set(deliveryId, { queueName, pending });
+    pending.catch(error => {
+        if (queueName === 'modelUsageEvents') usagePersistenceFailure = true;
+        criticalPending.delete(deliveryId); markQueueError(queueName, error);
+    });
+    return pending;
+}
+
+async function recoverCriticalWrites() {
+    if (criticalRecovery) return criticalRecovery;
+    criticalRecoveryRequired = true;
+    const revision = criticalRecoveryRevision;
+    criticalRecovery = journal().recover(async (name, item) => {
+        if (pgQueues[name].some(queued => queued.deliveryId === item.deliveryId) || criticalPending.has(item.deliveryId) || criticalInFlight.has(item.deliveryId)) return true;
+        if (await require('../repositories/critical-writes').exists(name, item.deliveryId)) {
+            await journal().remove(name, item.deliveryId);
+            return true;
+        }
+        if (pgQueues[name].length >= QUEUE_LIMITS[name]) return false;
+        pgEnqueue(name, item);
+        return true;
+    }).then(complete => { criticalRecoveryRequired = !complete || revision !== criticalRecoveryRevision; }).finally(() => { criticalRecovery = null; });
+    return criticalRecovery;
 }
 
 const UNRECOVERABLE_DB_ERRORS = /invalid input syntax|invalid byte sequence|character not in repertoire|violates foreign key constraint|violates not-null constraint|violates check constraint|value too long|cannot cast|integer out of range|numeric field overflow/i;
@@ -232,6 +282,9 @@ async function runPgWriteQuery(pool, sql, params) {
 }
 
 function sanitizeQueueValue(field, val) {
+    if (field === 'deliveryId') return val || null;
+    if (field === 'cacheReadTokens' || field === 'cacheCreationTokens') return Math.max(0, Math.floor(Number(val) || 0));
+    if (field === 'cacheObserved') return val === true || val === 1 || val === '1' ? true : false;
     if ((field === 'timestamp' || field === 'createdAt') && (val === undefined || val === null || val === '')) {
         return getBeijingTimestamp();
     }
@@ -254,7 +307,6 @@ function sanitizeQueueValue(field, val) {
     if (field === 'stream') {
         return val === true || val === 1 || val === '1' ? 1 : 0;
     }
-    if (field === 'cacheObserved') return val === true || val === 1 || val === '1' ? true : false;
     if (typeof val === 'object' && !(val instanceof Date)) {
         try { return JSON.stringify(val); } catch (_) { return String(val); }
     }
@@ -269,6 +321,7 @@ async function pgFlushQueue(queueName) {
     // 只取刷新开始时的一批。若生产者持续入队，新记录留给下一轮，保证 flush 本身会返回。
     const batch = queue.splice(0, Math.min(queue.length, batchRows));
     if (batch.length === 0) return;
+    if (criticalKinds.has(queueName)) batch.forEach(item => criticalInFlight.add(item.deliveryId));
     const params = [];
     const rowPlaceholders = [];
     let paramIndex = 1;
@@ -281,7 +334,8 @@ async function pgFlushQueue(queueName) {
         }
     }
 
-    const sql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES ${rowPlaceholders.join(', ')}`;
+    const conflict = criticalKinds.has(queueName) ? ' ON CONFLICT (delivery_id) DO NOTHING' : '';
+    const sql = `INSERT INTO "${spec.table}" (${spec.columns.map(c => `"${c}"`).join(', ')}) VALUES ${rowPlaceholders.join(', ')}${conflict}`;
     let pool = null;
     let finishUsageWrite;
     if (queueName === 'modelUsageEvents') {
@@ -293,9 +347,21 @@ async function pgFlushQueue(queueName) {
         const { getPgPool } = require('../db/pg-connection');
         pool = getPgPool();
         await runPgWriteQuery(pool, sql, params);
+        if (criticalKinds.has(queueName)) {
+            for (const item of batch) await journal().remove(queueName, item.deliveryId).catch(error => {
+                criticalRecoveryRequired = true;
+                criticalRecoveryRevision++;
+                logger.warn({ code: error.code, queueName }, '关键写入已提交，磁盘回执等待幂等恢复');
+            });
+        }
         markQueueSuccess(queueName);
     } catch (err) {
         const isUnrecoverable = isUnrecoverableDbError(err);
+        if (criticalKinds.has(queueName)) {
+            queue.unshift(...batch);
+            markQueueError(queueName, err);
+            throw err;
+        }
         // 网络/连接/超时错误不做逐条降级：逐条尝试只会把一次故障放大成
         // batch.length 次超时。整批回队首并走指数退避，保持故障恢复边界明确。
         if (!isUnrecoverable) {
@@ -338,12 +404,12 @@ async function pgFlushQueue(queueName) {
         }
         markQueueError(queueName, err);
     } finally {
+        if (criticalKinds.has(queueName)) batch.forEach(item => criticalInFlight.delete(item.deliveryId));
         if (finishUsageWrite) { modelUsageRevision++; modelUsageWrite = null; finishUsageWrite(); }
     }
 }
 
 async function pgFlush() {
-    if (QUEUE_DISABLED) return;
     if (pgFlushing) return pgFlushing;
 
     pgFlushing = (async () => {
@@ -362,6 +428,7 @@ async function pgFlush() {
                     );
                 }
             }));
+            if (criticalRecoveryRequired) await recoverCriticalWrites();
             if (hasError) {
                 pgRetryDelayMs = Math.min(PG_MAX_RETRY_DELAY_MS, Math.max(PG_BASE_RETRY_DELAY_MS, pgRetryDelayMs * 2));
                 pgSchedule(pgRetryDelayMs);
@@ -371,7 +438,7 @@ async function pgFlush() {
         } finally {
             pgFlushing = null;
             const stillPending = Object.values(pgQueues).some(q => q.length > 0);
-            if (stillPending && !pgFlushTimer) {
+            if ((stillPending || criticalRecoveryRequired) && !pgFlushTimer) {
                 pgSchedule();
             }
         }
@@ -381,7 +448,7 @@ async function pgFlush() {
 }
 
 async function pgFlushAll() {
-    if (QUEUE_DISABLED) return;
+    await Promise.all([...criticalPending.values()].map(entry => entry.pending));
     if (pgFlushTimer) {
         clearTimeout(pgFlushTimer);
         pgFlushTimer = null;
@@ -424,7 +491,9 @@ function pgQueueDiagnostics() {
         dropped: pgQueueDropped[name] || 0,
         max: QUEUE_LIMITS[name],
         lastError: pgQueueLastError[name],
-        lastSuccessAt: pgQueueLastSuccessAt[name]
+        lastSuccessAt: pgQueueLastSuccessAt[name],
+        durable: criticalKinds.has(name), recoveryPending: criticalKinds.has(name) && criticalRecoveryRequired,
+        persistenceFailed: name === 'modelUsageEvents' && usagePersistenceFailure
     }]));
 }
 
@@ -436,7 +505,7 @@ function enqueueAuditLog(item) {
         ipAddress: item.ipAddress || item.ip || item.clientIp || null,
         timestamp: item.timestamp || item.createdAt || getBeijingTimestamp()
     };
-    return pgEnqueue('auditLogs', normalized);
+    return enqueueCritical('auditLogs', normalized);
 }
 
 function enqueueApiCallLog(item) {
@@ -454,7 +523,7 @@ function enqueueMcpCallLog(item) {
 }
 
 function enqueueModelUsageEvent(item) {
-    return pgEnqueue('modelUsageEvents', item);
+    return enqueueCritical('modelUsageEvents', item);
 }
 
 /**
@@ -478,6 +547,8 @@ function getPendingModelUsageTotal(userId, modelId, datePrefix) {
 
 async function readModelUsageSnapshot(readUsage) {
     for (let attempt = 0; attempt < 8; attempt++) {
+        await Promise.all([...criticalPending.values()].filter(entry => entry.queueName === 'modelUsageEvents').map(entry => entry.pending));
+        if (criticalRecoveryRequired || usagePersistenceFailure) throw Object.assign(new Error('消费记录尚未确认，请联系管理员检查存储并恢复记录。'), { code: 'MODEL_USAGE_RECOVERING', status: 503 });
         // 只等待正在写入的用量批次，不等待审计或 MCP 日志；避免批次已移出队列却尚未落库的空窗。
         if (modelUsageWrite) await modelUsageWrite;
         const revision = modelUsageRevision;
@@ -496,6 +567,7 @@ function getQueueDiagnostics() {
 }
 
 module.exports = {
+    recoverCriticalWrites,
     enqueueAuditLog,
     enqueueApiCallLog,
     enqueueMcpCallLog,

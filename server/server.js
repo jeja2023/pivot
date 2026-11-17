@@ -15,7 +15,9 @@ function startHttpServer({
     terminateSandboxProcesses,
     terminateCapabilityWorkers,
     stopSpeechService,
-    processRef = process
+    processRef = process,
+    shutdownTimeoutMs = 15000,
+    getPendingWrites = () => require('./services/db-write-queue').getQueueStatus()
 }) {
     let shuttingDown = false;
     let exitStarted = false;
@@ -28,11 +30,31 @@ function startHttpServer({
         if (shuttingDown) return;
         shuttingDown = true;
         logger.info({ signal }, '进程退出，正在关闭 HTTP 服务');
+        let finished = false;
+        let shutdownFailed = false;
+        let stage = '关闭连接';
+        let forceCloseTimer;
+        let backgroundTimeout;
+        const finish = code => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(deadlineTimer);
+            clearTimeout(forceCloseTimer);
+            clearTimeout(backgroundTimeout);
+            processRef.exit(code || (shutdownFailed ? 1 : 0));
+        };
+        // 总截止覆盖连接、后台任务、语音、写队列和连接池，不能在进入清理时撤销。
+        const deadlineTimer = setTimeout(() => {
+            let pendingWrites;
+            try { pendingWrites = getPendingWrites(); } catch (_) { pendingWrites = null; }
+            logger.warn({ stage, pendingWrites }, '服务停止超过总时限，未完成工作将由持久恢复处理');
+            try { server.closeAllConnections?.(); } finally { finish(1); }
+        }, Math.max(1, shutdownTimeoutMs));
         // 两类停止动作独立执行并立即处理异常，避免一项失败阻断另一项。
         const backgroundStopped = Promise.all([
             Promise.resolve().then(() => scheduleMaintenanceTasks?.cancel?.()),
             Promise.resolve().then(() => stopBackgroundServices?.())
-        ].map(task => task.catch(err => logger.warn({ err }, '停止后台服务失败'))));
+        ].map(task => task.catch(err => { shutdownFailed = true; logger.warn({ err }, '停止后台服务失败'); })));
         try { closeRealtimeClients?.({ reason: signal.toLowerCase(), retryAfterMs: 0 }); } catch (err) {
             logger.warn({ err }, '关闭服务时通知 SSE 客户端失败');
         }
@@ -42,42 +64,51 @@ function startHttpServer({
         try { terminateCapabilityWorkers?.(); } catch (err) {
             logger.warn({ err }, '关闭服务时终止能力工作进程失败');
         }
-        let forceCloseTimer = null;
         const exitWithCode = async (code) => {
             if (exitStarted) return;
             exitStarted = true;
             if (forceCloseTimer) clearTimeout(forceCloseTimer);
-            let backgroundTimeout;
+            stage = '停止后台任务';
             await Promise.race([
                 backgroundStopped,
                 new Promise(resolve => { backgroundTimeout = setTimeout(() => {
                     logger.warn('后台服务停止超时，继续关闭');
+                    shutdownFailed = true;
                     resolve();
                 }, 5000); })
             ]);
             clearTimeout(backgroundTimeout);
+            if (finished) return;
+            stage = '停止语音服务';
             try {
                 if (typeof stopSpeechService === 'function') await stopSpeechService();
             } catch (err) {
                 logger.warn({ err }, '关闭内置语音进程失败');
+                code = 1;
             }
+            if (finished) return;
+            stage = '持久化待写记录';
             try {
                 if (typeof flushAllWrites === 'function') await flushAllWrites();
             } catch (err) {
                 logger.warn({ err }, '关闭服务时数据库写入队列刷新失败');
+                code = 1;
             }
+            if (finished) return;
+            stage = '关闭数据库连接池';
             try {
                 if (typeof closePgPool === 'function') await closePgPool();
             } catch (err) {
                 logger.warn({ err }, '关闭服务时 PostgreSQL 连接池关闭失败');
+                code = 1;
             }
-            processRef.exit(code);
+            finish(code);
         };
         server.closeIdleConnections?.();
         server.close(() => {
             exitWithCode(0).catch(err => {
                 logger.warn({ err }, '关闭服务时数据库写入队列刷新失败');
-                processRef.exit(1);
+                finish(1);
             });
         });
         forceCloseTimer = setTimeout(() => {
@@ -85,7 +116,7 @@ function startHttpServer({
             // 信号触发的连接收口仍属于有序关闭，而不是服务故障。
             exitWithCode(0).catch(err => {
                 logger.warn({ err }, '强制关闭服务时数据库写入队列刷新失败');
-                processRef.exit(1);
+                finish(1);
             });
         }, 5000).unref();
     };

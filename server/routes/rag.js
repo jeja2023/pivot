@@ -86,13 +86,13 @@ function auditRagAction(req, action, details) {
     const userId = req.user?.id || null;
     const ip = getClientIp(req);
     const serializedDetails = redactAuditDetails(details);
-    enqueueAuditLog({
+    require('../services/critical-write-response').trackCriticalWrite(req, enqueueAuditLog({
         userId,
         action: normalizeAuditAction(action),
         details: serializedDetails,
         ipAddress: ip,
         timestamp: getBeijingTimestamp()
-    });
+    }));
 }
 
 ragRouter.get('/docs', authMiddleware, asyncHandler(async (req, res) => {

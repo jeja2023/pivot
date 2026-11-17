@@ -410,7 +410,7 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
     const inputTokens = valid(usageInput) ? Number(usageInput) : estimated.inputTokens;
     const outputTokens = valid(usageOutput) ? Number(usageOutput) : estimated.outputTokens;
     const promptCache = options.promptCache || options.usageRef?.promptCache || extractPromptCacheUsage(usage);
-    recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
+    await recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
     let calibration = null;
     if (usage) {
         try {

@@ -59,6 +59,8 @@ services:
 
     # 重启策略：容器异常退出或系统重启后自动拉起
     restart: always
+    # 为主服务十五秒的总停止预算留出进程退出余量。
+    stop_grace_period: 20s
 
     # 安全加固：开启只读根文件系统，临时写操作与缓存通过 tmpfs 显式内存挂载提供
     read_only: true

@@ -81,8 +81,8 @@
         state.deferredRemote = null;
     }
     function updatePermissions() {
-        const viewer = state.active?.role === 'viewer' || state.accessRevoked || state.sessionInvalid;
-        $('mindmap-access-status').textContent = state.active?.collaboration ? viewer ? '共享查看 · 内容自动同步' : '协作编辑 · 独立修改自动合并' : '个人文档';
+        const viewer = state.openingCollaboration || state.active?.role === 'viewer' || state.accessRevoked || state.sessionInvalid;
+        $('mindmap-access-status').textContent = state.openingCollaboration ? '正在加载协作状态…' : state.active?.collaboration ? viewer ? '共享查看 · 内容自动同步' : '协作编辑 · 独立修改自动合并' : '个人文档';
         state.editor?.readOnly(viewer);
         for (const button of $('mindmap-editor').querySelectorAll('[data-mm-command],[data-mm-action="save"],[data-mm-action="apply-node"],[data-mm-action="ai-expand"],[data-mm-action="ai-summarize"],[data-mm-action="relations"],[data-mm-action="summaries"],[data-mm-action="theme-pack"],[data-mm-action="theme-library"],[data-mm-action="fold"],[data-mm-action="unfold"]')) button.disabled = viewer;
         $('mindmap-layout').disabled = viewer; $('mindmap-theme').disabled = viewer;
@@ -260,13 +260,17 @@
         state.editor?.destroy(); state.active = result; state.document = result.document; state.dirty = false; state.pending = null; state.conflict = false; state.accessRevoked = false; state.sessionInvalid = false;
         $('mindmap-conflict').classList.add('hidden'); $('mindmap-library').classList.add('hidden'); $('mindmap-editor').classList.remove('hidden');
         $('mindmap-layout').value = result.document.presentation.layout; $('mindmap-theme').value = result.document.presentation.themeId;
+        state.openingCollaboration = Boolean(result.collaborationState);
         state.editor = editorModule.mount($('mindmap-canvas'), result.document, { change: changed, select: selected, failure: fail });
+        // 画布已可见时立即应用当前权限，不能等待协作模块下载后才禁用编辑。
+        updatePermissions();
         if (result.collaborationState) {
             collaborationModule ||= await import('/chat/mindmaps/collaboration.mjs');
             if (sequence !== state.loadSequence || state.active?.id !== result.id) return;
             state.collaboration = collaborationModule.create(result);
             state.editor.historyActions({ undo: () => { const document = state.collaboration.undo(); state.editor.receive(document); changed(document); }, redo: () => { const document = state.collaboration.redo(); state.editor.receive(document); changed(document); } });
         }
+        state.openingCollaboration = false;
         updatePermissions(); startSync(); startSourceRefresh();
         renderOutline(); selected(null); status(`已保存 · 版本 ${result.version}`);
         syncDocumentMeta();

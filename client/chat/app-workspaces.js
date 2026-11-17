@@ -658,6 +658,7 @@ const WORKSPACE_SCRIPT_GROUPS = {
         '/chat/workflow-product-release.js', '/chat/workflow-product-workspace.js', '/chat/workflow-product-authoring.js'
     ],
     knowledge: [
+        '/chat/knowledge-product.js', '/chat/knowledge-wiki.js',
         '/chat/rag-graph-layout.js', '/chat/rag-graph-render.js', '/chat/rag-graph-ui.js',
         '/chat/rag.js', '/chat/rag-graph-controller.js'
     ],

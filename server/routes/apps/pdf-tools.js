@@ -159,6 +159,7 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
         const archive = await getJobOutputsArchiveStream({ userId: req.user.id, jobId: req.params.id, sourceModule: 'pdf_tools' });
         if (!archive) return res.status(404).json({ error: 'PDF 工具输出不存在或已过期' });
         res.setHeader('Content-Type', archive.mimeType);
+        res.setHeader('Cache-Control', 'private, no-store');
         res.attachment(archive.fileName);
         archive.stream.once('error', error => {
             if (!res.headersSent) res.status(500).json({ error: '归档流生成失败' });
@@ -171,13 +172,13 @@ function createPdfToolsRouter({ authMiddleware, uploadLimiter, upload, logAction
         const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id, sourceModule: 'pdf_tools' });
         if (!output) return res.status(404).json({ error: '输出文件不存在或已过期' });
         res.setHeader('Content-Type', output.mimeType);
-        return res.download(output.filePath, output.fileName);
+        return res.download(output.filePath, output.fileName, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     router.get('/pages/:id/image', authMiddleware, asyncHandler(async (req, res) => {
         const image = await getPageImage({ userId: req.user.id, pageId: req.params.id, sourceModule: 'pdf_tools' });
         if (!image) return res.status(404).json({ error: 'PDF 页面预览不存在或已过期' });
-        return res.sendFile(image.filePath);
+        return res.sendFile(image.filePath, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     return router;

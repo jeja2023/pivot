@@ -67,14 +67,27 @@ function buildAllChatCss() {
     return Object.fromEntries(Object.keys(BUNDLES).map(name => [name, buildChatCss(name)]));
 }
 
+function writeBundleIfChanged(target, output) {
+    let previous;
+    try { previous = fs.readFileSync(target, 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (previous === output) return false;
+    const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+        fs.writeFileSync(temporary, output, { encoding: 'utf8', flag: 'wx' });
+        fs.renameSync(temporary, target);
+        return true;
+    } finally { fs.rmSync(temporary, { force: true }); }
+}
+
 function main() {
     Object.entries(buildAllChatCss()).forEach(([name, output]) => {
         const bundle = resolveBundle(name);
-        fs.writeFileSync(bundle.outputPath, output, 'utf8');
+        writeBundleIfChanged(bundle.outputPath, output);
         console.log(`聊天样式已合并并压缩：${path.relative(root, bundle.outputPath)}（${Buffer.byteLength(output)} bytes）`);
     });
 }
 
 if (require.main === module) main();
 
-module.exports = { BUNDLES, buildAllChatCss, buildChatCss, collectCss, entryPath, minifyCss, outputPath, resolveBundle };
+module.exports = { BUNDLES, buildAllChatCss, buildChatCss, collectCss, entryPath, minifyCss, outputPath, resolveBundle, writeBundleIfChanged };

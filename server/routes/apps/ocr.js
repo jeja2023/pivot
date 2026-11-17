@@ -259,13 +259,13 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
         const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id, sourceModule: 'ocr_app' });
         if (!output) return res.status(404).json({ error: '识别结果文件不存在或已过期' });
         res.setHeader('Content-Type', output.mimeType);
-        return res.download(output.filePath, output.fileName);
+        return res.download(output.filePath, output.fileName, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     router.get('/pages/:id/image', authMiddleware, asyncHandler(async (req, res) => {
         const image = await getPageImage({ userId: req.user.id, pageId: req.params.id, sourceModule: 'ocr_app' });
         if (!image) return res.status(404).json({ error: '页面预览不存在' });
-        return res.sendFile(image.filePath);
+        return res.sendFile(image.filePath, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     router.get('/pages/:id/revisions', authMiddleware, asyncHandler(async (req, res) => {

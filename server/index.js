@@ -24,6 +24,7 @@ registerProcessErrorHandlers({ logger, flushAllWrites });
 async function init() {
     await initPostgresDatabase();
     await refreshAppSettingsCache();
+    await require('./services/db-write-queue').recoverCriticalWrites();
     // A cluster rollout can opt into a hard startup gate. Without it, the
     // profile remains observable and degrades safely to single-node mode for
     // staged infrastructure migrations.

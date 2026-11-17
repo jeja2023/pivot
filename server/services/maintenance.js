@@ -612,7 +612,9 @@ function startMaintenanceTasks() {
         () => reconcileUploadStorageJob(storageGcRetentionDays), runAnalysisWorkspaceCleanup, runDocumentProcessingCleanup, runPresentationNativeCleanup,
         () => backupDatabase({ backupDir, retentionDays: backupRetentionDays, maxVersions: backupMaxVersions }), optimizeDatabase
     ];
-    const runDaily = () => Promise.all(dailyJobs.map(job => tasks.run(job)));
+    // 重型清理、备份与统计维护顺序执行，避免同时争抢磁盘和数据库连接。
+    const runDaily = () => tasks.series(dailyJobs,
+        err => logger.warn({ err: err.message }, '每日维护步骤失败，将继续下一步骤'));
     tasks.every(SEMANTIC_WORKER_INTERVAL_MS, () => processSemanticAnalysisJobs({ limit: 1 }),
         err => logger.warn({ err: err.message }, '全量语义分析任务轮询失败'),
         { immediate: true, initialOnError: err => logger.warn({ err: err.message }, '全量语义分析任务恢复失败') });

@@ -3,6 +3,7 @@ const path = require('path');
 
 const rootDir = path.resolve(__dirname, '..');
 const failures = [];
+const { findMissingTransactionExecutors } = require('./transaction-executor-check');
 
 function walkJavaScript(dir, files = []) {
     if (!fs.existsSync(dir)) return files;
@@ -48,6 +49,10 @@ for (const file of walkJavaScript(path.join(rootDir, 'server'))) {
     const relative = path.relative(path.join(rootDir, 'server'), file).replace(/\\/g, '/');
     if (!relative.startsWith('routes/') && /express\.Router\s*\(/.test(fs.readFileSync(file, 'utf8'))) {
         failures.push(`server/${relative} 在 routes 目录外创建 Express Router`);
+    }
+    const source = fs.readFileSync(file, 'utf8');
+    if (/require\(['"][^'"]*db\/client['"]\)/.test(source)) {
+        for (const line of findMissingTransactionExecutors(source)) failures.push(`server/${relative}:${line} 事务回调必须接收并使用 executor`);
     }
 }
 const ragCompatibilityFacade = path.join(rootDir, 'server', 'rag.js');

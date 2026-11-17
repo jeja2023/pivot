@@ -4,6 +4,25 @@ const { assert, test } = require('./security-helpers');
 const { queryOne } = require('../server/db/client');
 const { createChatFixture, postChat, readSessionMessages, startChatRouteServer, startFakeUpstream } = require('./security-chat/chat-route-harness');
 
+test('普通流式聊天在剩余额度不足时拒绝上游请求且保留明确额度错误', async () => {
+    let streamed=0;
+    const upstream=await startFakeUpstream({handler:(req,res)=>{
+        let body='';req.on('data',chunk=>{body+=chunk;});req.on('end',()=>{
+            const input=JSON.parse(body);if(input.stream)streamed++;
+            res.writeHead(200,{'Content-Type':'application/json'});
+            res.end(JSON.stringify({choices:[{message:{content:'普通对话'}}]}));
+        });
+    }});
+    const fixture=createChatFixture({prefix:'quota_stream',upstreamUrl:upstream.url,modelColumns:{daily_token_limit:500,max_tokens:1000}});
+    const server=await startChatRouteServer({fixture});
+    try{
+        const result=await postChat(server.port,{sessionId:fixture.sessionId,modelId:fixture.modelId,content:'你好',chatMode:'normal',mcpEnabled:false,ragEnabled:false,ragPreference:'disabled'});
+        assert.equal(streamed,0);
+        assert.equal(result.errorEvent?.code,'INSUFFICIENT_QUOTA');
+        assert.equal(require('../server/services/model-daily-quota').getInflightQuota(fixture.userId,fixture.modelId),0);
+    }finally{await server.close();await upstream.close();fixture.cleanup();}
+});
+
 test('上游空回复显示可重试错误并保留用户消息，不保存空的成功回复', async () => {
     let requests = 0;
     const upstream = await startFakeUpstream({ handler: (req, res) => {

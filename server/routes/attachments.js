@@ -131,7 +131,7 @@ function createAttachmentsRouter({
             return res.status(404).json({ error: '附件文件不存在' });
         }
 
-        res.setHeader('Cache-Control', 'private, max-age=604800');
+        res.setHeader('Cache-Control', 'private, no-store');
         res.setHeader('X-Content-Type-Options', 'nosniff');
         if (['.html', '.htm'].includes(path.extname(target).toLowerCase())) {
             res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
@@ -140,7 +140,7 @@ function createAttachmentsRouter({
             res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
         }
-        res.sendFile(target);
+        res.sendFile(target, { dotfiles: 'allow' });
     }));
 
     router.post('/api/upload', authMiddleware, uploadLimiter, upload.single('file'), asyncHandler(async (req, res) => {

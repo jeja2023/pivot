@@ -65,7 +65,7 @@ async function callModelTextWithBudget({ modelCfg, user, messages, source = 'ai'
             outputTokens: outputUsed,
             totalTokens: response.data?.usage?.total_tokens || inputTokens + outputUsed
         };
-        recordModelTokenUsage(user.id, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+        await recordModelTokenUsage(user.id, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return { content, usage, contextBudget: fitted.metadata };
     } catch (err) {

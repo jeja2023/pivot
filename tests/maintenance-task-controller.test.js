@@ -4,6 +4,24 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createMaintenanceTaskController } = require('../server/services/maintenance-task-controller');
 
+test('重型维护串行执行、失败继续，停止后不启动剩余步骤', async () => {
+    const controller=createMaintenanceTaskController(),events=[];
+    let release;
+    const first=new Promise(resolve=>{release=resolve;});
+    const running=controller.series([
+        async()=>{events.push('第一步');await first;throw new Error('模拟失败');},
+        async()=>{events.push('第二步');}
+    ],()=>events.push('已记录失败'));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.deepEqual(events,['第一步']);release();await running;
+    assert.deepEqual(events,['第一步','已记录失败','第二步']);
+    let finish;
+    const pending=controller.series([()=>new Promise(resolve=>{finish=resolve;}),()=>events.push('不应运行')]);
+    await new Promise(resolve=>setImmediate(resolve));
+    const stopped=controller.stop();finish();await stopped;await pending;
+    assert.equal(events.includes('不应运行'),false);
+});
+
 test('维护任务关闭时清理定时器并等待已开始的任务', async () => {
     let callback;
     let cancelled = false;

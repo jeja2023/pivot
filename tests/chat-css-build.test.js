@@ -2,6 +2,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { minifyCss, buildAllChatCss } = require('../scripts/build_chat_css');
 
+test('重复构建不改写相同样式，变化以完整文件替换', () => {
+    const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+    const {writeBundleIfChanged}=require('../scripts/build_chat_css');
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'pivot-css-build-')),target=path.join(root,'bundle.css');
+    try{
+        assert.equal(writeBundleIfChanged(target,'body{color:red}'),true);
+        const old=new Date(Date.now()-86400000);fs.utimesSync(target,old,old);
+        const stamp=fs.statSync(target).mtimeMs;
+        assert.equal(writeBundleIfChanged(target,'body{color:red}'),false);
+        assert.equal(fs.statSync(target).mtimeMs,stamp);
+        assert.equal(writeBundleIfChanged(target,'body{color:blue}'),true);
+        assert.equal(fs.readFileSync(target,'utf8'),'body{color:blue}');
+        assert.deepEqual(fs.readdirSync(root),['bundle.css']);
+    }finally{assert.equal(path.dirname(path.resolve(root)),fs.realpathSync(os.tmpdir()));fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('样式压缩保留 calc 中的变量名、负号和运算符间距', () => {
     const output = minifyCss('.sidebar.collapsed { margin-left: calc(var(--sidebar-width) * -1); width: calc(100% - 32px); }');
     assert.match(output, /calc\(var\(--sidebar-width\) \* -1\)/);

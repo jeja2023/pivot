@@ -39,7 +39,14 @@ function createMaintenanceTaskController({ setIntervalFn = setInterval, clearInt
         await Promise.all([...pending]);
     }
 
-    return { run, every, stop };
+    async function series(operations, onError) {
+        for (const operation of operations) {
+            if (stopped) return;
+            await run(operation, onError);
+        }
+    }
+
+    return { run, every, series, stop };
 }
 
 module.exports = { createMaintenanceTaskController };

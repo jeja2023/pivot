@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const { StringDecoder } = require('string_decoder');
-const { query, queryOne, execute, transaction } = require('../db/client');
+const { query, queryOne, transaction } = require('../db/client');
 const { asyncHandler, normalizeLimit, normalizePage } = require('../http');
 const { register, validatePassword } = require('../auth');
 const {
@@ -96,19 +96,19 @@ async function* iterateUserImportCsv(filePath, maxRows = MAX_USER_IMPORT_ROWS) {
     }
 }
 
-async function revokeUserAutomation(userId, now, reason = '账号已被禁用或删除') {
-    await execute(`
+async function revokeUserAutomation(userId, now, executor, reason = '账号已被禁用或删除') {
+    await executor.execute(`
         UPDATE agent_schedules
         SET status = 'paused', next_run_at = NULL, dispatch_retry_at = NULL,
             claim_token = NULL, claim_expires_at = NULL, last_error = ?, updated_at = ?
         WHERE user_id = ? AND deleted_at IS NULL
     `, [reason, now, userId]);
-    await execute(`
+    await executor.execute(`
         UPDATE agent_runs
         SET status = 'cancelled', error_message = ?, cancelled_at = ?, completed_at = ?,
             locked_by = NULL, lock_expires_at = NULL, updated_at = ?
         WHERE user_id = ? AND deleted_at IS NULL
-          AND status IN ('queued', 'running', 'approval_required', 'awaiting_approval')
+          AND status IN ('queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'verifying', 'resuming', 'needs_input', 'approval_required', 'awaiting_approval', 'waiting_approval')
     `, [reason, now, now, now, userId]);
 }
 
@@ -240,12 +240,15 @@ function createAdminUsersRouter({
             return res.status(400).json({ error: '不能降低或禁用自己的管理员权限' });
         }
         const now = getBeijingTimestamp();
-        const changed = await execute(
+        const changed = await transaction(async trx => {
+            const count = await trx.execute(
             'UPDATE users SET nickname = ?, unit = ?, role = ?, status = ? WHERE id = ?',
             [nickname, unit, safeRole, safeStatus, targetUserId]
-        );
+            );
+            if (safeStatus === 'disabled' && count > 0) await revokeUserAutomation(targetUserId, now, trx);
+            return count;
+        });
         if (changed > 0) require('../services/realtime-session').revokeRealtimeSessions(targetUserId);
-        if (safeStatus === 'disabled' && changed > 0) await revokeUserAutomation(targetUserId, now);
         if (changed === 0) return res.status(404).json({ error: '用户不存在' });
         logAction(req, '修改用户', `用户ID: ${targetUserId}，角色: ${safeRole}，状态: ${safeStatus}`);
         res.json({ success: true });
@@ -266,9 +269,9 @@ function createAdminUsersRouter({
             throw e;
         }
         const hash = await hashPasswordOffThread(password, Math.max(12, Number.parseInt(process.env.BCRYPT_ROUNDS || '12', 10) || 12));
-        await transaction(async () => {
-            await execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [hash, targetUserId]);
-            await execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
+        await transaction(async trx => {
+            await trx.execute('UPDATE users SET password_hash = ?, token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [hash, targetUserId]);
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
         });
         require('../services/realtime-session').revokeRealtimeSessions(targetUserId);
         logAction(req, '重置密码', `用户ID: ${targetUserId}`);
@@ -628,16 +631,16 @@ function createAdminUsersRouter({
         }
 
         const now = getBeijingTimestamp();
-        await transaction(async () => {
-            await revokeUserAutomation(targetUserId, now);
-            await execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
-            await execute("UPDATE api_keys SET status = 'disabled' WHERE user_id = ?", [targetUserId]);
-            await execute('UPDATE sessions SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
-            await execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
-            await execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
-            await execute('UPDATE knowledge_docs SET deleted_at = ?, deleted_by_user = 0, is_enabled = 0, updated_at = ? WHERE user_id = ? AND deleted_at IS NULL', [now, now, targetUserId]);
-            await execute("UPDATE users SET status = 'disabled', token_version = COALESCE(token_version, 0) + 1, deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL", [now, req.user.id, targetUserId]);
-            await archiveDeletedUsernameAsync(targetUserId);
+        await transaction(async trx => {
+            await revokeUserAutomation(targetUserId, now, trx);
+            await trx.execute('DELETE FROM refresh_tokens WHERE user_id = ?', [targetUserId]);
+            await trx.execute("UPDATE api_keys SET status = 'disabled' WHERE user_id = ?", [targetUserId]);
+            await trx.execute('UPDATE sessions SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
+            await trx.execute('UPDATE messages SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
+            await trx.execute('UPDATE attachments SET deleted_at = ?, deleted_by_user = 0 WHERE user_id = ? AND deleted_at IS NULL', [now, targetUserId]);
+            await trx.execute('UPDATE knowledge_docs SET deleted_at = ?, deleted_by_user = 0, is_enabled = 0, updated_at = ? WHERE user_id = ? AND deleted_at IS NULL', [now, now, targetUserId]);
+            await trx.execute("UPDATE users SET status = 'disabled', token_version = COALESCE(token_version, 0) + 1, deleted_at = ?, deleted_by_admin = ? WHERE id = ? AND deleted_at IS NULL", [now, req.user.id, targetUserId]);
+            await archiveDeletedUsernameAsync(targetUserId, trx);
         });
 
         require('../services/realtime-session').revokeRealtimeSessions(targetUserId);

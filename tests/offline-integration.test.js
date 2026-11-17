@@ -93,10 +93,10 @@ test('备份解析真实配置并校验完整包，拒绝未确认维护与篡�
         await assert.rejects(createBackupBundle({ ...options, maintenanceConfirmed: false }), /维护窗口/);
         await createBackupBundle(options);
         const manifest = await verifyBackupBundle(options.output);
-        assert.equal(manifest.version, 2);
-        assert.equal(manifest.files.length, 8);
+        assert.equal(manifest.version, 3);
+        assert.equal(manifest.files.length, Object.keys(sources).length + 1);
         assert.equal(manifest.files.some(item => item.path === 'cas/example.txt'), true);
-        for (const name of ['document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills']) {
+        for (const name of ['document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills', 'critical-writes']) {
             assert.equal(manifest.files.some(item => item.path === `${name}/example.txt`), true);
         }
         await fs.writeFile(path.join(options.output, 'uploads/example.txt'), '已篡改');

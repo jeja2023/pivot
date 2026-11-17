@@ -2,7 +2,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('node:crypto');
-const { resolveTestTempRoot, localTestEnvironment, assertTestStorage } = require('./test_support/test-environment');
+const { resolveTestTempRoot, localTestEnvironment, isolatedStorageEnvironment, assertTestStorage } = require('./test_support/test-environment');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const root = path.resolve(__dirname, '..');
@@ -85,7 +85,8 @@ function createWorkerEnvironment(workerIndex) {
             PG_TEST_SCHEMA: testSchema,
             PG_IDLE_TIMEOUT_MS: '100',
             PIVOT_TEST_PG_SYNC: 'true',
-            PIVOT_DB_WRITE_QUEUE_DISABLED: 'false'
+            PIVOT_DB_WRITE_QUEUE_DISABLED: 'false',
+            ...isolatedStorageEnvironment(testRoot, testSchema)
         }
     };
 }

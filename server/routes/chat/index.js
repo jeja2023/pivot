@@ -631,8 +631,14 @@ function createChatRouter({
         }
 
         try {
+            const streamModel = modelCfg.daily_token_limit > 0 && !(Number(modelCfg.max_tokens) > 0) ? { ...modelCfg, max_tokens: 1200 } : modelCfg;
+            const releaseQuota = await require('../../services/model-daily-quota').ensureModelQuota(req.user, streamModel, visionHistory, streamModel.max_tokens || 1200, { signal: abortController.signal });
+            const settleQuota = () => { void persistAssistantResponse.settled().then(releaseQuota, releaseQuota); };
+            res.once('finish', settleQuota);
+            res.once('close', settleQuota);
+            if (res.destroyed || res.writableEnded) { settleQuota(); releaseSemaphore(); return; }
             const { response } = await withObservabilitySpan(chatTrace, 'model_stream_open', () => openChatModelStream({
-                modelCfg,
+                modelCfg: streamModel,
                 user: req.user,
                 visionHistory,
                 log: req.log,
@@ -880,6 +886,13 @@ function createChatRouter({
                 releaseSemaphore(); // 客户端主动断开释放
             });
         } catch (e) {
+            if (['INSUFFICIENT_QUOTA', 'MODEL_USAGE_RECOVERING', 'MODEL_USAGE_SNAPSHOT_BUSY'].includes(e.code)) {
+                finishChatTrace('error', { phase: 'quota', code: e.code });
+                await writeChatErrorSse({ writeSse, sessionId, userId, modelId: modelCfg.id,
+                    error: e.message, code: e.code, statusCode: e.statusCode || e.status, persist: false, log: req.log });
+                releaseSemaphore();
+                return res.end();
+            }
             if (abortController.signal.aborted || e.name === 'AbortError' || e.name === 'CanceledError' || e.code === 'ERR_CANCELED') {
                 req.log.warn({ sessionId }, '客户端主动断开连接，已中止上游模型生成');
                 finishChatTrace('closed', { aborted: true });

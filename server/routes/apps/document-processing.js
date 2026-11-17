@@ -140,13 +140,13 @@ function createDocumentProcessingRouter({ authMiddleware, uploadLimiter, upload,
         const output = await getOutputDownload({ userId: req.user.id, outputId: req.params.id });
         if (!output) return res.status(404).json({ error: '输出文件不存在或已过期' });
         res.setHeader('Content-Type', output.mimeType);
-        return res.download(output.filePath, output.fileName);
+        return res.download(output.filePath, output.fileName, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     router.get('/pages/:id/image', authMiddleware, asyncHandler(async (req, res) => {
         const image = await getPageImage({ userId: req.user.id, pageId: req.params.id });
         if (!image) return res.status(404).json({ error: '页面预览不存在' });
-        return res.sendFile(image.filePath);
+        return res.sendFile(image.filePath, { dotfiles: 'allow', headers: { 'Cache-Control': 'private, no-store' } });
     }));
 
     router.put('/pages/:id/review', authMiddleware, asyncHandler(async (req, res) => {

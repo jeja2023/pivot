@@ -35,6 +35,7 @@ function createRetainedChatResponse({ res, enabled = true, options, persist, log
     res.once('close', close);
     res.once('finish', finish);
     write.capture = capture;
+    write.settled = () => persistence || Promise.resolve();
     return write;
 }
 

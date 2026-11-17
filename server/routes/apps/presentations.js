@@ -250,7 +250,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (!asset) return res.status(404).json({ error: '远程演示素材不存在、无权访问或链接已过期。' });
         res.setHeader('Content-Type', asset.mimeType);
         res.setHeader('Content-Disposition', contentDisposition(asset.filename));
-        res.setHeader('Cache-Control', 'private, max-age=60');
+        res.setHeader('Cache-Control', 'private, no-store');
         res.send(asset.buffer);
     }));
     router.get('/apps/presentations/templates', authMiddleware, asyncHandler(async (req, res) => {
@@ -400,7 +400,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (!result) return res.status(404).json({ error: '素材不存在或无权访问。' });
         res.setHeader('Content-Type', result.asset.mimeType);
         res.setHeader('Content-Disposition', contentDisposition(result.asset.filename));
-        res.setHeader('Cache-Control', 'private, max-age=300');
+        res.setHeader('Cache-Control', 'private, no-store');
         return res.send(result.buffer);
     }));
     router.get('/apps/presentations/assets/content/by-ref', authMiddleware, asyncHandler(async (req, res) => {
@@ -408,7 +408,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (!result) return res.status(404).json({ error: '素材不存在或无权访问。' });
         res.setHeader('Content-Type', result.asset.mimeType);
         res.setHeader('Content-Disposition', contentDisposition(result.asset.filename));
-        res.setHeader('Cache-Control', 'private, max-age=300');
+        res.setHeader('Cache-Control', 'private, no-store');
         return res.send(result.buffer);
     }));
 

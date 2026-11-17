@@ -73,7 +73,7 @@ function filterRowsWithRemovedFiles(rows, cleanupResults) {
 
 function isInside(parent, target) {
     const relative = path.relative(path.resolve(parent), path.resolve(target));
-    return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+    return relative === '' || (!!relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function storagePathKey(filePath) {
@@ -87,7 +87,7 @@ function resolveStoredUploadPath(value, root = uploadRoot) {
     const candidate = path.isAbsolute(raw)
         ? path.resolve(raw)
         : raw.replace(/\\/g, '/').startsWith('uploads/')
-            ? path.resolve(path.dirname(root), raw)
+            ? path.resolve(root, raw.replace(/\\/g, '/').slice('uploads/'.length))
             : path.resolve(root, raw);
     return isInside(root, candidate) ? candidate : '';
 }

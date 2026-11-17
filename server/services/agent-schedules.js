@@ -392,7 +392,7 @@ async function runDueAgentSchedules(limit = 20) {
             const isSkippedMissed = cfg.missedRunPolicy === 'skip_missed' && isSeverelyOverdue;
             let run = null;
             if (isSkippedMissed) {
-                enqueueAuditLog({
+                await enqueueAuditLog({
                     userId: user.id,
                     action: '计划任务错失跳过',
                     details: `计划ID: ${schedule.id}，名称: ${schedule.name}，原计划时间: ${schedule.next_run_at}，已按策略跳过并对齐未来周期`,
@@ -439,7 +439,7 @@ async function runDueAgentSchedules(limit = 20) {
             try {
                 const cfg = parseJsonObject(schedule.run_config) || {};
                 const isWorkflow = cfg.runMode === 'dag' || Boolean(cfg.workflowId);
-                enqueueAuditLog({
+                await enqueueAuditLog({
                     userId: user.id,
                     action: isWorkflow ? '工作流计划执行' : '计划任务执行',
                     details: `任务ID: ${run.id}，计划ID: ${schedule.id}，名称: ${schedule.name}${cfg.workflowId ? `，工作流ID: ${cfg.workflowId}` : ''}`,

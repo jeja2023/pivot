@@ -100,9 +100,22 @@ async function refreshAccessToken() {
     if (!isRefreshing) {
         isRefreshing = true;
         try {
+            const refresh = async signal => {
+            // 拿到跨标签页执行权后先检查共享 Cookie，复用另一页面已完成的刷新。
+            if (window.Pivot.authSession) {
+                const current = await fetchWithTimeout(`${API_BASE}/auth/me`, { credentials: 'same-origin', cache: 'no-store', ...(signal ? { signal } : {}) }, AUTH_REFRESH_TIMEOUT_MS);
+                if (!current.ok && current.status !== 401) throw new Error('认证服务暂时不可用，请稍后重试。');
+                const state = await current.json().catch(() => ({}));
+                if (state.authenticated) {
+                    if (currentUser && state.user && String(currentUser.id) !== String(state.user.id)) {
+                        throw Object.assign(new Error('登录账号已在另一页面变更，请重新进入当前页面。'), { sessionInvalid: true });
+                    }
+                    setCsrfToken(state.csrfToken || ''); return;
+                }
+            }
             const refreshRes = await fetchWithTimeout(
                 `${API_BASE}/auth/refresh`,
-                { method: 'POST', credentials: 'same-origin' },
+                { method: 'POST', credentials: 'same-origin', ...(signal ? { signal } : {}) },
                 AUTH_REFRESH_TIMEOUT_MS
             );
             if (!refreshRes.ok) throw Object.assign(new Error(refreshRes.status === 401 ? '令牌刷新失败' : '认证服务暂时不可用，请稍后重试。'), { sessionInvalid: refreshRes.status === 401 });
@@ -110,6 +123,9 @@ async function refreshAccessToken() {
             if (refreshData.csrfToken) {
                 setCsrfToken(refreshData.csrfToken);
             }
+            };
+            if (window.Pivot.authSession) await window.Pivot.authSession.run(refresh);
+            else await refresh();
             isRefreshing = false;
             flushRefreshQueue();
             return true;
@@ -135,6 +151,11 @@ function flushRefreshQueue(error) {
 }
 
 function authHeaders(extra = {}) {
+    // Cookie 由同源页面共享；sessionStorage 仅保留兼容副本，不能作为跨页权威。
+    if (typeof document.cookie === 'string') {
+        const cookie = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith('pivot_csrf_token='));
+        setCsrfToken(cookie ? cookie.slice('pivot_csrf_token='.length) : '');
+    }
     const headers = { ...extra };
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
     return headers;
@@ -187,7 +208,10 @@ async function apiFetch(url, options = {}) {
         return fetchWithTimeout(url, { credentials: 'same-origin', ...requestOptions, headers }, timeoutMs);
     };
 
-    const res = await originalRequest();
+    const lifecycleWrite = String(requestOptions.method || 'GET').toUpperCase() === 'POST'
+        && ['/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/auth/logout-all'].includes(resolveApiPath(url));
+    const res = lifecycleWrite && window.Pivot.authSession
+        ? await window.Pivot.authSession.run(originalRequest) : await originalRequest();
     const data = (res.status === 401 || res.status === 403) ? await res.clone().json().catch(() => ({})) : {};
 
     if (shouldRefreshAfterAuthFailure(res, data, url)) {
@@ -268,9 +292,10 @@ async function checkLogin(hasRetried = false) {
     if (!hasRetried && initialAuthPromise) return initialAuthPromise;
     const task = runCheckLogin(hasRetried);
     if (!hasRetried) {
-        initialAuthPromise = task.finally(() => {
-            if (initialAuthPromise === task) initialAuthPromise = null;
+        const pending = task.finally(() => {
+            if (initialAuthPromise === pending) initialAuthPromise = null;
         });
+        initialAuthPromise = pending;
         return initialAuthPromise;
     }
     return task;

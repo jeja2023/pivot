@@ -20,7 +20,10 @@
     "server/services/agent-browser-profile-cleanup.js",
     "server/services/agent-event-batch-writer.js",
     "server/services/host-classifier.js",
-    "server/services/automation-source-cursor.js"
+    "server/services/automation-source-cursor.js",
+    "server/services/auth-request-origin.js",
+    "server/repositories/model-consumption.js",
+    "server/services/critical-write-response.js"
   ],
   "exclude": [
     "node_modules",

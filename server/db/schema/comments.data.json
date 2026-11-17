@@ -106,7 +106,8 @@
     "analysis_artifacts": "数据分析生成的图表视图与统计分析结果表",
     "analysis_cleaning_runs": "数据清洗规则、影响统计和派生数据集的可追溯记录表",
     "workflow_editor_drafts": "与发布版本隔离的工作流编辑草稿",
-    "workflow_user_preferences": "个人工作流收藏与最近使用记录"
+    "workflow_user_preferences": "个人工作流收藏与最近使用记录",
+    "model_daily_consumption": "按账号模型及北京时间日期累计的持久消费账本，历史删除不冲减"
   },
   "COLUMN_COMMENTS": {
     "app_meta": {
@@ -247,7 +248,8 @@
       "action": "操作动作权限",
       "details": "详细信息明细",
       "ip_address": "客户端 IP 地址",
-      "timestamp": "事件发生时间戳"
+      "timestamp": "事件发生时间戳",
+      "delivery_id": "关键写入持久重放幂等标识"
     },
     "knowledge_collections": {
       "id": "主键自增 ID / 唯一主键",
@@ -704,7 +706,8 @@
       "token_count": "Token 数量统计",
       "input_tokens": "model_usage_events 表的 input_tokens 字段",
       "output_tokens": "model_usage_events 表的 output_tokens 字段",
-      "created_at": "记录创建时间（东八区）"
+      "created_at": "记录创建时间（东八区）",
+      "delivery_id": "关键写入持久重放幂等标识"
     },
     "api_call_logs": {
       "id": "主键自增 ID / 唯一主键",
@@ -1414,6 +1417,12 @@
       "workflow_id": "收藏或使用的工作流",
       "favorite": "是否收藏",
       "last_used_at": "最近一次本人使用时间"
+    },
+    "model_daily_consumption": {
+      "user_id": "消费账号",
+      "model_id": "消费模型",
+      "usage_day": "北京时间消费日期",
+      "token_count": "累计已登记消费数量"
     }
   }
 }

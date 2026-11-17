@@ -3,8 +3,9 @@
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
-const BACKUP_SOURCES = Object.freeze(['cas', 'uploads', 'document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills']);
-const OPTIONAL_SOURCES = new Set(['document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills']);
+const LEGACY_BACKUP_SOURCES = ['cas', 'uploads', 'document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills'];
+const BACKUP_SOURCES = Object.freeze([...LEGACY_BACKUP_SOURCES, 'critical-writes']);
+const OPTIONAL_SOURCES = new Set(['document-processing', 'analysis', 'agent-blobs', 'agent-runtime-packs', 'agent-skills', 'critical-writes']);
 const TEMPORARY_ROOTS = new Set(['document-processing', 'analysis']);
 
 function backupPaths(env = process.env, root = path.resolve(__dirname, '../..')) {
@@ -16,7 +17,8 @@ function backupPaths(env = process.env, root = path.resolve(__dirname, '../..'))
         analysis: path.resolve(env.PIVOT_ANALYSIS_DIR || path.join(data, 'analysis')),
         'agent-blobs': path.resolve(env.AGENT_BLOB_DIR || path.join(data, 'agent-blobs')),
         'agent-runtime-packs': path.resolve(env.PIVOT_RUNTIME_PACK_ROOT || path.join(data, 'agent-runtime-packs')),
-        'agent-skills': require('./agent-skill-storage').resolveSkillStorageRoot(env, root)
+        'agent-skills': require('./agent-skill-storage').resolveSkillStorageRoot(env, root),
+        'critical-writes': path.join(data, 'critical-write-journal')
     };
 }
 
@@ -42,10 +44,10 @@ async function collectFiles(root, relative = '', { excludeTemporary = false } = 
 async function verifyBackupBundle(root) {
     const actual = (await collectFiles(root)).map(name => name.split(path.sep).join('/'));
     const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
-    if (![1, 2].includes(manifest.version) || !Array.isArray(manifest.files) || !manifest.files.length
+    if (![1, 2, 3].includes(manifest.version) || !Array.isArray(manifest.files) || !manifest.files.length
         || !manifest.files.some(item => item.path === 'database.dump')) throw new Error('备份清单格式或数据库备份缺失。');
-    const names = manifest.version === 1 ? ['cas', 'uploads'] : BACKUP_SOURCES;
-    if (manifest.version === 2) {
+    const names = manifest.version === 1 ? ['cas', 'uploads'] : manifest.version === 2 ? LEGACY_BACKUP_SOURCES : BACKUP_SOURCES;
+    if (manifest.version >= 2) {
         if (!manifest.sources || Object.keys(manifest.sources).length !== names.length || names.some(name => !['included', 'absent'].includes(manifest.sources[name]))) throw new Error('备份来源清单不完整。');
         for (const name of names) {
             if (!(await fs.lstat(path.join(root, name))).isDirectory()) throw new Error('备份来源目录缺失。');
@@ -57,7 +59,7 @@ async function verifyBackupBundle(root) {
         const parts = String(item.path || '').split('/');
         if (!(item.path === 'database.dump' || names.includes(parts[0]) && parts.length > 1 && !String(item.path).includes('\\'))
             || item.path.split('/').some(part => part === '..' || part === '.' || !part)
-            || manifest.version === 2 && item.path !== 'database.dump' && (manifest.sources[parts[0]] !== 'included' || TEMPORARY_ROOTS.has(parts[0]) && parts[1].toLowerCase() === 'tmp')
+            || manifest.version >= 2 && item.path !== 'database.dump' && (manifest.sources[parts[0]] !== 'included' || TEMPORARY_ROOTS.has(parts[0]) && parts[1].toLowerCase() === 'tmp')
             || expected.has(item.path)) throw new Error('备份清单含非法或重复路径。');
         expected.add(item.path);
         const file = path.join(root, item.path);
@@ -115,7 +117,7 @@ async function createBackupBundle({ output, maintenanceConfirmed, env = process.
         const file = path.join(target, relative);
         files.push({ path: relative.split(path.sep).join('/'), bytes: (await fs.stat(file)).size, sha256: await digestFile(file) });
     }
-    const manifest = { version: 2, createdAt: new Date().toISOString(), maintenanceConfirmed: true, sources: sourceStates, files };
+    const manifest = { version: 3, createdAt: new Date().toISOString(), maintenanceConfirmed: true, sources: sourceStates, files };
     await fs.writeFile(path.join(target, 'manifest.json'), JSON.stringify(manifest, null, 2), { mode: 0o600 });
     await fs.unlink(path.join(target, 'incomplete'));
     await verifyBackupBundle(target);

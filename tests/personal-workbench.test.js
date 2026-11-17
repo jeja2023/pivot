@@ -162,7 +162,7 @@ test('用户个人信息弹窗支持展示真实注册时间，并在缺少时�
     const personalClient = read('client/chat/personal-workbench.js');
 
     assert.match(authServer, /SELECT id, username, nickname, unit, role, status, created_at, default_model_id/);
-    assert.match(authServer, /created_at:\s*user\.created_at/);
+    assert.match(authServer, /created_at:\s*lockedUser\.created_at/);
     assert.match(personalClient, /personal-user-created-at/);
     assert.match(personalClient, /系统初始用户/);
 });

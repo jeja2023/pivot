@@ -27,7 +27,7 @@ function loadQueueModule({ failTimes = 1, failureMessage = 'temporary pg failure
                 auditLogFailures -= 1;
                 throw new Error(failureMessage);
             }
-            if (sql.includes('INSERT INTO "audit_logs"') && params.length === 5) {
+            if (sql.includes('INSERT INTO "audit_logs"') && params.length === 6) {
                 auditSingleAttempts += 1;
                 if (singleFailureAt > 0 && auditSingleAttempts === singleFailureAt) {
                     throw new Error('temporary single-row pg failure');
@@ -77,6 +77,8 @@ function loadQueueModule({ failTimes = 1, failureMessage = 'temporary pg failure
 
     const requireWithMock = (request) => {
         if (request === '../db/pg-connection') return { getPgPool: () => fakePool };
+        if (request === './critical-write-journal') return { save: async (_name, item) => item, remove: async () => {}, recover: async () => true };
+        if (request === '../repositories/critical-writes') return { exists: async () => false };
         if (request === '../logger') return { logger: { warn: (...args) => loggerWarnings.push(args) } };
         return localRequire(request);
     };
@@ -110,7 +112,7 @@ test('用量批次移出队列后，额度快照等待该批确认，不出现�
     const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => {
         if (sql.includes('model_usage_events')) { entered(); await new Promise(resolve => { finish = resolve; }); committed = 7; }
     } });
-    fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 7, createdAt: '2026-11-10 12:00:00' });
+    await fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 7, createdAt: '2026-11-10 12:00:00' });
     const flush = fixture.queue.flushWriteQueue(); await started;
     const snapshot = fixture.queue.readModelUsageSnapshot(async () => { reads++; return committed + fixture.queue.getPendingModelUsageTotal(1, 2); });
     await settleAsyncWork(); assert.equal(reads, 0);
@@ -121,7 +123,7 @@ test('用量批次移出队列后，额度快照等待该批确认，不出现�
 test('用量查询期间发生入队或批次刷新，必须重新取得一致快照且不重复统计', async () => {
     let committed = 0;
     const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => { if (sql.includes('model_usage_events')) committed = 9; } });
-    fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 9 });
+    await fixture.queue.enqueueModelUsageEvent({ userId: 1, modelId: 2, tokenCount: 9 });
     let resume, entered, reads = 0;
     const started = new Promise(resolve => { entered = resolve; });
     const snapshot = fixture.queue.readModelUsageSnapshot(async () => {
@@ -138,7 +140,7 @@ test('用量快照不等待其他审计日志写入', async () => {
     const fixture = loadQueueModule({ failTimes: 0, onQuery: async ({ sql }) => {
         if (sql.includes('audit_logs')) { entered(); await new Promise(resolve => { finish = resolve; }); }
     } });
-    fixture.queue.enqueueAuditLog({ action: '合成审计' });
+    await fixture.queue.enqueueAuditLog({ action: '合成审计' });
     const flush = fixture.queue.flushWriteQueue(); await started;
     assert.equal(await fixture.queue.readModelUsageSnapshot(async () => 3), 3);
     finish(); await flush;
@@ -156,7 +158,7 @@ async function runNextTimer(timers) {
 test('postgres write queue retries a failed batch without a new enqueue', async () => {
     const { queue, scheduledDelays, timers, loggerWarnings, pgQueries } = loadQueueModule({ failTimes: 1, flushMs: 5 });
 
-    queue.enqueueAuditLog({
+    await queue.enqueueAuditLog({
         userId: 1,
         action: 'login',
         details: '{}',
@@ -179,7 +181,7 @@ test('postgres write queue retries a failed batch without a new enqueue', async 
 test('postgres write queue enters fast flush mode at the high-water mark', async () => {
     const { queue, scheduledDelays, loggerWarnings } = loadQueueModule({ failTimes: 0, flushMs: 250, queueMax: 5 });
     for (let index = 0; index < 4; index += 1) {
-        queue.enqueueAuditLog({ userId: 1, action: `audit-${index}`, details: '{}', timestamp: '2026-06-26 10:00:00' });
+        await queue.enqueueAuditLog({ userId: 1, action: `audit-${index}`, details: '{}', timestamp: '2026-06-26 10:00:00' });
     }
     assert.ok(scheduledDelays.includes(50));
     assert.ok(loggerWarnings.some(args => String(args[1] || '').includes('高水位')));
@@ -188,14 +190,14 @@ test('postgres write queue enters fast flush mode at the high-water mark', async
 test('one flush cycle does not chase records continuously added by producers', async () => {
     let queue;
     let injected = false;
-    const loaded = loadQueueModule({ failTimes: 0, flushMs: 5, onQuery: ({ sql }) => {
+    const loaded = loadQueueModule({ failTimes: 0, flushMs: 5, onQuery: async ({ sql }) => {
         if (!injected && sql.includes('INSERT INTO "audit_logs"')) {
             injected = true;
-            queue.enqueueAuditLog({ userId: 1, action: 'arrived-during-flush', details: '{}', timestamp: '2026-06-26 10:00:00' });
+            await queue.enqueueAuditLog({ userId: 1, action: 'arrived-during-flush', details: '{}', timestamp: '2026-06-26 10:00:00' });
         }
     } });
     queue = loaded.queue;
-    queue.enqueueAuditLog({ userId: 1, action: 'initial', details: '{}', timestamp: '2026-06-26 10:00:00' });
+    await queue.enqueueAuditLog({ userId: 1, action: 'initial', details: '{}', timestamp: '2026-06-26 10:00:00' });
 
     await queue.flushWriteQueue();
     assert.equal(queue.getQueueStatus().auditLogs, 1);
@@ -203,14 +205,14 @@ test('one flush cycle does not chase records continuously added by producers', a
     assert.equal(queue.getQueueStatus().auditLogs, 0);
 });
 
-test('batch fallback requeues the failed row and all unattempted tail rows', async () => {
+test('关键审计批次发生数据错误也保留全部记录，修复后完整重放', async () => {
     const { queue } = loadQueueModule({ failTimes: 1, failureMessage: 'violates check constraint', flushMs: 5, batchSize: 3, singleFailureAt: 2 });
     for (let index = 0; index < 3; index += 1) {
-        queue.enqueueAuditLog({ userId: 1, action: `audit-${index}`, details: '{}', timestamp: '2026-06-26 10:00:00' });
+        await queue.enqueueAuditLog({ userId: 1, action: `audit-${index}`, details: '{}', timestamp: '2026-06-26 10:00:00' });
     }
 
     await queue.flushWriteQueue();
-    assert.equal(queue.getQueueStatus().auditLogs, 2);
+    assert.equal(queue.getQueueStatus().auditLogs, 3);
 
     await queue.flushWriteQueue();
     assert.equal(queue.getQueueStatus().auditLogs, 0);
@@ -218,7 +220,7 @@ test('batch fallback requeues the failed row and all unattempted tail rows', asy
 
 test('hung PostgreSQL write times out and removes the stuck client', async () => {
     const loaded = loadQueueModule({ failTimes: 0, flushMs: 5, connectMode: true, hangWrites: true, queryTimeoutMs: 20 });
-    loaded.queue.enqueueAuditLog({ userId: 1, action: 'timeout', details: '{}', timestamp: '2026-06-26 10:00:00' });
+    await loaded.queue.enqueueAuditLog({ userId: 1, action: 'timeout', details: '{}', timestamp: '2026-06-26 10:00:00' });
 
     await runNextTimer(loaded.timers);
     await runNextTimer(loaded.timers);
@@ -233,7 +235,7 @@ test('hung PostgreSQL write times out and removes the stuck client', async () =>
 test('enqueueAuditLog normalizes ip and defaults missing timestamp', async () => {
     const queries = [];
     const { queue } = loadQueueModule({ failTimes: 0, flushMs: 5, onQuery: (q) => queries.push(q) });
-    queue.enqueueAuditLog({ userId: 1, action: '向量模型连接测试', details: '{}', ip: '192.168.1.123' });
+    await queue.enqueueAuditLog({ userId: 1, action: '向量模型连接测试', details: '{}', ip: '192.168.1.123' });
     await queue.flushWriteQueue();
 
     const insert = queries.find(q => q.sql.includes('INSERT INTO "audit_logs"'));

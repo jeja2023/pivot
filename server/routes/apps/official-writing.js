@@ -260,7 +260,8 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                     streamIdleWatchdog.touch();
                     parser.write(chunk);
                 });
-                response.data.on('end', () => {
+                response.data.on('end', async () => {
+                    try {
                     streamIdleWatchdog.stop();
                     parser.end();
                     sendVisible(textFilter.finish());
@@ -272,10 +273,14 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                         outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
                         totalTokens: apiUsage?.total_tokens
                     });
-                    recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, 'official_writing', usage.inputTokens, usage.outputTokens);
+                    await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, 'official_writing', usage.inputTokens, usage.outputTokens);
                     if (!upstreamError && !abortController.signal.aborted) recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
                     releaseSemaphore();
+                    } catch (error) {
+                        logger.error({ code: error.code }, '公文消费记录未确认，请刷新结果后重试');
+                        if (!res.writableEnded) { sse.writeData({ error: { message: '消费记录未确认，请刷新结果后重试。', code: 'MODEL_USAGE_UNCONFIRMED' } }); res.end(); }
+                    } finally { releaseSemaphore(); }
                 });
                 response.data.on('error', err => {
                     streamIdleWatchdog.stop();
@@ -308,7 +313,7 @@ function registerOfficialWritingRoutes({ router, authMiddleware, logAction }) {
                     outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
                     totalTokens: response.data?.usage?.total_tokens
                 });
-                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, 'official_writing', usage.inputTokens, usage.outputTokens);
+                await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, 'official_writing', usage.inputTokens, usage.outputTokens);
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 releaseSemaphore();
 

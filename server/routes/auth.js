@@ -88,6 +88,7 @@ function createAuthRouter({
             logAction(req, '用户登录', '登录成功');
             
             // 设置两个 Cookie
+            res.setHeader('Clear-Site-Data', '"cache"');
             res.cookie(AUTH_COOKIE_NAME, data.accessToken, ACCESS_COOKIE_OPTIONS);
             res.clearCookie(REFRESH_COOKIE_NAME, CLEAR_LEGACY_REFRESH_COOKIE_OPTIONS);
             res.cookie(REFRESH_COOKIE_NAME, data.refreshToken, REFRESH_COOKIE_OPTIONS);
@@ -142,12 +143,14 @@ function createAuthRouter({
     }));
 
     router.get('/auth/me', asyncHandler(async (req, res) => {
+        res.setHeader('Cache-Control', 'private, no-store');
         const auth = await resolveAuthenticatedUserAsync(req);
         if (!auth.user) {
             return res.json({ authenticated: false, code: auth.code });
         }
 
-        const csrfToken = generateCsrfToken();
+        const existingCsrf = getCookie(req, CSRF_COOKIE_NAME);
+        const csrfToken = /^[A-Za-z0-9_-]{32}$/.test(existingCsrf || '') ? existingCsrf : generateCsrfToken();
         res.cookie(CSRF_COOKIE_NAME, csrfToken, {
             sameSite: 'lax',
             path: '/',
@@ -158,6 +161,7 @@ function createAuthRouter({
     }));
 
     router.post('/auth/logout', asyncHandler(async (req, res) => {
+        res.setHeader('Clear-Site-Data', '"cache"');
         try {
             const auth = await resolveAuthenticatedUserAsync(req);
             if (auth?.user) {
@@ -185,6 +189,7 @@ function createAuthRouter({
     }));
 
     router.post('/auth/logout-all', authMiddleware, asyncHandler(async (req, res) => {
+        res.setHeader('Clear-Site-Data', '"cache"');
         await require('../repositories/web-local-helper').revoke(req.user.id);
         await transaction(async trx => {
             await trx.execute('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?', [req.user.id]);

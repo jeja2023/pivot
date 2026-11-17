@@ -227,7 +227,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
                     outputTokens: apiUsage?.completion_tokens || estimateTokens(totalContent),
                     totalTokens: apiUsage?.total_tokens
                 });
-                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+                await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
                 recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                 let completion;
                 try {
@@ -279,7 +279,7 @@ async function runAppsAiCompletion({ req, res, logAction, source, auditAction, m
             outputTokens: response.data?.usage?.completion_tokens || estimateTokens(content),
             totalTokens: response.data?.usage?.total_tokens
         });
-        recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
+        await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, source, usage.inputTokens, usage.outputTokens);
         recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
         const completion = await applyCompletionTransform(transformCompletion, content, { model: modelCfg.model_name, usage });
         releaseSlots();

@@ -316,7 +316,7 @@ test('取消、短时限和本地排队拒绝不累计为端点失败', async ()
         Object.assign(new Error('canceled'), { code: 'ERR_CANCELED', name: 'CanceledError' }),
         Object.assign(new Error('操作已中止'), { name: 'AbortError' }),
         new Error('canceled'), new Error('cancelled'), new Error('aborted'),
-        ...['REQUEST_ABORTED', 'AI_ENDPOINT_CIRCUIT_OPEN', 'AI_QUEUE_FULL', 'AI_QUEUE_TIMEOUT', 'AI_OVERLOADED',
+        ...['REQUEST_ABORTED', 'AI_ENDPOINT_CIRCUIT_OPEN', 'AI_QUEUE_FULL', 'AI_QUEUE_TIMEOUT', 'AI_OVERLOADED', 'INSUFFICIENT_QUOTA', 'QUOTA_EXCEEDED', 'MODEL_USAGE_RECOVERING', 'MODEL_USAGE_SNAPSHOT_BUSY', 'CRITICAL_WRITE_UNAVAILABLE',
             'CHAT_INTENT_TIMEOUT', 'CONTEXT_LENGTH_EXCEEDED', 'AGENT_BUDGET_EXCEEDED'].map(code => Object.assign(new Error('本地请求结束'), { code }))
     ]) runtime.recordModelFailure(model, error);
     const controller = new AbortController(); controller.abort(new Error('调用方限制已到期'));

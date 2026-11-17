@@ -24,11 +24,18 @@ test('两个真实浏览器会话断网编辑后收敛，只读与撤权生效�
     const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
     const { chromium } = require('playwright'); const browser = await chromium.launch({ headless: true, executablePath: require('../server/services/agent-browser').resolveChromiumExecutable(chromium) });
     const origin = `http://127.0.0.1:${server.address().port}`; const errors = [];
+    let releaseViewerModule = () => {};
     try {
         const contexts = await Promise.all([owner, editor, viewer].map(user => browser.newContext({ viewport: { width: 1440, height: 1000 }, extraHTTPHeaders: { 'x-test-user': String(user.id) } })));
+        const viewerModuleGate = new Promise(resolve => { releaseViewerModule = resolve; });
+        await contexts[0].route('**/chat/mindmaps/collaboration.mjs', async route => { await viewerModuleGate; await route.continue(); });
+        await contexts[2].route('**/chat/mindmaps/collaboration.mjs', async route => { await viewerModuleGate; await route.continue(); });
         const pages = await Promise.all(contexts.map(async context => { const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); await page.goto(origin); await page.locator('#mindmap-canvas .smm-node').first().waitFor(); return page; }));
         const [a, b, reader] = pages;
         assert.ok(await reader.getByRole('button', { name: '保存', exact: true }).isDisabled()); assert.ok(await reader.getByRole('button', { name: '子节点', exact: true }).isDisabled());
+        assert.ok(await a.getByRole('button', { name: '保存', exact: true }).isDisabled(), '协作状态未就绪时所有者也不能产生无法合并的编辑');
+        releaseViewerModule();
+        await a.waitForFunction(() => !document.querySelector('[data-mm-action="save"]').disabled);
         async function edit(page, nodeId, text) {
             await page.locator(`[data-mm-node="${nodeId}"]`).click(); await page.waitForFunction(id => document.querySelector('#mindmap-selection').textContent.includes(id), nodeId === 'a' ? '甲' : '乙');
             await page.locator('#mindmap-node-text').fill(text); await page.getByRole('button', { name: '应用到节点', exact: true }).click(); await page.waitForFunction(text => document.querySelector('#mindmap-outline').textContent.includes(text), text);
@@ -57,5 +64,5 @@ test('两个真实浏览器会话断网编辑后收敛，只读与撤权生效�
         await b.evaluate(() => window.Pivot.moduleApi('apps.mindmaps').logout());
         assert.equal(await b.locator('#mindmap-outline').textContent(), ''); assert.equal(await b.locator('#mindmap-node-text').inputValue(), ''); assert.equal(await b.locator('#mindmap-dialog-body').textContent(), '');
         for (const page of pages) await page.evaluate(() => window.Pivot.moduleApi('apps.mindmaps').suspend());
-    } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); await execute('DELETE FROM agent_artifacts WHERE id=?', [created.id]); for (const user of [owner, editor, viewer]) await execute('DELETE FROM users WHERE id=?', [user.id]); }
+    } finally { releaseViewerModule(); await browser.close(); await new Promise(resolve => server.close(resolve)); await execute('DELETE FROM agent_artifacts WHERE id=?', [created.id]); for (const user of [owner, editor, viewer]) await execute('DELETE FROM users WHERE id=?', [user.id]); }
 });

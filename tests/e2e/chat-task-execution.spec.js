@@ -226,6 +226,7 @@ test('认证刷新暂不可用保留当前任务界面，恢复后继续使用�
     await openSession(page, session.id);
     let unavailable = true;
     await page.route('**/api/sessions?auth-recovery-test=1', route => route.fulfill({ status: 401, json: { code: 'TOKEN_EXPIRED' } }));
+    await page.route('**/api/auth/me', route => unavailable ? route.fulfill({ json: { authenticated: false, code: 'TOKEN_EXPIRED' } }) : route.continue());
     await page.route('**/api/auth/refresh', route => unavailable ? route.fulfill({ status: 503, json: { code: 'AUTH_SERVICE_UNAVAILABLE' } }) : route.continue());
     const message = await page.evaluate(async () => {
         try { await window.Pivot.api.fetch('/api/sessions?auth-recovery-test=1'); } catch (error) { return error.message; }

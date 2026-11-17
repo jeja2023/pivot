@@ -198,7 +198,8 @@ const migrationModules = [
     require('./regulation-extraction-coverage'),
     require('./common-recovery-late-tables'),
     require('./web-local-helper'),
-    require('./common-recovery-web-local-helper')
+    require('./common-recovery-web-local-helper'),
+    require('./model-consumption-ledger')
 ];
 
 module.exports = migrationModules

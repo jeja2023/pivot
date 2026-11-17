@@ -268,7 +268,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 url: config.http.url,
                 model: configuredModel
             });
-            recordModelTokenUsage(req.user.id, usageModelId, payload.usage.total_tokens, req.isApiKey ? 'embedding_api_key' : 'embedding_cookie', payload.usage.prompt_tokens, 0);
+            await recordModelTokenUsage(req.user.id, usageModelId, payload.usage.total_tokens, req.isApiKey ? 'embedding_api_key' : 'embedding_cookie', payload.usage.prompt_tokens, 0);
             updateApiKeyUsage(req, {
                 inputTokens: payload.usage.prompt_tokens,
                 totalTokens: payload.usage.total_tokens
@@ -715,7 +715,8 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     parser.write(chunk);
                 });
 
-                response.data.on('end', () => {
+                response.data.on('end', async () => {
+                    try {
                     streamIdleWatchdog.stop();
                     if (streamFailed) return;
                     parser.end();
@@ -747,7 +748,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
                         updateApiKeyUsage(req, usage);
                     }
-                    recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
+                    await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
                     recordApiCallLog(req, modelCfg, upstreamMessages, {
                         responseText: totalContent,
                         ...usage,
@@ -757,6 +758,10 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                     recordModelSuccess(modelCfg, Date.now() - requestStartedAt);
                     res.end();
                     releaseSemaphore();
+                    } catch (error) {
+                        logger.error({ code: error.code }, '接口消费记录未确认，流式交付失败');
+                        endStreamWithError(res, error);
+                    } finally { releaseSemaphore(); }
                 });
                 response.data.on('error', err => {
                     streamIdleWatchdog.stop();
@@ -793,7 +798,7 @@ function createOpenAIRouter({ authMiddleware, logAction, embeddingLimiter = (_re
                 if (req.isApiKey && req.apiKeyId && usage.totalTokens > 0) {
                     updateApiKeyUsage(req, usage);
                 }
-                recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
+                await recordModelTokenUsage(userId, modelCfg.id, usage.totalTokens, req.isApiKey ? 'openai_api_key' : 'openai_cookie', usage.inputTokens, usage.outputTokens);
                 recordApiCallLog(req, modelCfg, upstreamMessages, {
                     responseText: JSON.stringify(response.data?.choices || []),
                     ...usage,

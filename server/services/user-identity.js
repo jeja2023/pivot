@@ -6,8 +6,8 @@ function allocateDeletedUsername(userId) {
     return `${DELETED_USERNAME_PREFIX}${userId}`;
 }
 
-async function archiveDeletedUsernameAsync(userId, _db = null) {
-    const user = await queryOne(
+async function archiveDeletedUsernameAsync(userId, executor = { queryOne, execute }) {
+    const user = await executor.queryOne(
         'SELECT id, username, deleted_username, deleted_at FROM users WHERE id = ?',
         [userId]
     );
@@ -20,7 +20,7 @@ async function archiveDeletedUsernameAsync(userId, _db = null) {
 
     // 分配无冲突的归档用户名
     while (true) {
-        const collision = await queryOne(
+        const collision = await executor.queryOne(
             'SELECT id FROM users WHERE username = ? AND id != ?',
             [candidate, userId]
         );
@@ -29,7 +29,7 @@ async function archiveDeletedUsernameAsync(userId, _db = null) {
         candidate = `${base}:${suffix}`;
     }
 
-    const changed = await execute(
+    const changed = await executor.execute(
         'UPDATE users SET username = ?, deleted_username = ? WHERE id = ? AND deleted_at IS NOT NULL',
         [candidate, deletedUsername, userId]
     );

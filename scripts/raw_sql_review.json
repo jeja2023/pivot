@@ -412,8 +412,9 @@
     },
     {
       "file": "server/services/models.js",
-      "count": 10,
-      "rationale": "模型配置和租户可见性查询使用参数化条件，受模型路由和配置注册门禁覆盖。"
+      "count": 8,
+      "rationale": "模型配置和租户可见性查询使用参数化条件，受模型路由和配置注册门禁覆盖。 日额度改由持久日账本查询，移除历史消息扫描。",
+      "reviewedAt": "2026-11-17"
     },
     {
       "file": "server/services/workspace-memory-source-lifecycle.js",
@@ -860,6 +861,20 @@
       "count": 1,
       "rationale": "核验失去执行权后按任务、持锁者、状态及可选租约代次条件收敛，不修改已有结果。",
       "verification": "node scripts/run_node_tests.js tests/project-audit-runtime.test.js tests/project-audit-skills.test.js"
+    },
+    {
+      "file": "server/repositories/model-consumption.js",
+      "count": 1,
+      "rationale": "日消费账本定点读取及关键写入幂等恢复，仅使用参数化查询。",
+      "verification": "tests/model-consumption-ledger.test.js、tests/critical-write-journal.test.js",
+      "reviewedAt": "2026-11-17"
+    },
+    {
+      "file": "server/repositories/critical-writes.js",
+      "count": 2,
+      "rationale": "日消费账本定点读取及关键写入幂等恢复，仅使用参数化查询。",
+      "verification": "tests/model-consumption-ledger.test.js、tests/critical-write-journal.test.js",
+      "reviewedAt": "2026-11-17"
     }
   ]
 }

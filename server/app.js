@@ -106,13 +106,13 @@ const logAction = (req, action, details) => {
     const userId = req.user ? req.user.id : null;
     const ip = getClientIp(req);
     const serializedDetails = redactAuditDetails(details);
-    enqueueAuditLog({
+    require('./services/critical-write-response').trackCriticalWrite(req, enqueueAuditLog({
         userId,
         action: normalizeAuditAction(action),
         details: serializedDetails,
         ipAddress: ip,
         timestamp: getBeijingTimestamp()
-    });
+    }));
 };
 
 // 移除冗余的分页格式化函数，已由 http.js 提供
@@ -297,6 +297,7 @@ if (appConfig.compressionEnabled) {
 
 app.use('/api', csrfMiddleware);
 app.use('/v1', csrfMiddleware);
+app.use(require('./services/critical-write-response').criticalWriteResponse);
 
 app.get('/api/health', healthProbeLimiter, asyncHandler(async (req, res) => {
     const health = await getSystemHealthSnapshot({ public: true });

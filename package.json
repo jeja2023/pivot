@@ -1,6 +1,6 @@
 {
   "name": "pivot",
-  "version": "0.7.169",
+  "version": "0.7.170",
   "description": "智枢 Pivot - AI 智能中枢管理系统",
   "author": {
     "name": "jeja2023",
@@ -10,7 +10,7 @@
   "license": "UNLICENSED",
   "main": "desktop/main.js",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=20.19.0 <21 || >=22.23.4 <23 || >=24.0.0 <25"
   },
   "scripts": {
     "build:local-helper": "node scripts/build_local_helper.js",

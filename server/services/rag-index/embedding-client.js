@@ -426,9 +426,10 @@ async function recordEmbeddingUsage({ userId, config, httpConfig, inputs, source
             model
         });
         const inputTokens = estimateEmbeddingTokens(inputs, estimateTokens);
-        recordModelTokenUsage(userId, usageModelId, inputTokens, source, inputTokens, 0);
+        await recordModelTokenUsage(userId, usageModelId, inputTokens, source, inputTokens, 0);
     } catch (e) {
         logger.warn({ err: e.message }, '向量模型用量统计写入失败');
+        throw e;
     }
 }
 

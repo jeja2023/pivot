@@ -227,7 +227,8 @@ function recordModelFailure(modelCfg, err, { signal = null } = {}) {
     const code = String(err?.code || '');
     if (['ERR_CANCELED', 'ABORT_ERR', 'REQUEST_ABORTED', 'AI_ENDPOINT_CIRCUIT_OPEN', 'AI_QUEUE_FULL', 'AI_QUEUE_TIMEOUT',
         'AI_OVERLOADED', 'CHAT_INTENT_TIMEOUT', 'CONTEXT_LENGTH_EXCEEDED', 'AGENT_BUDGET_EXCEEDED',
-        'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED'].includes(code)) return;
+        'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'INSUFFICIENT_QUOTA', 'QUOTA_EXCEEDED',
+        'MODEL_USAGE_RECOVERING', 'MODEL_USAGE_SNAPSHOT_BUSY', 'CRITICAL_WRITE_UNAVAILABLE'].includes(code)) return;
     if (['AbortError', 'CanceledError', 'CancellationError', 'ConcurrencyLimitError'].includes(err?.name) || err?.__CANCEL__ === true) return;
     if (!code && !err?.response && /^(?:cancell?ed|aborted|the operation was aborted\.?|this operation was aborted\.?)$/i.test(String(err?.message || '').trim())) return;
     const runtime = ensureRuntime(modelCfg);

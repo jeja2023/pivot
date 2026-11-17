@@ -3,7 +3,6 @@
 
 // 只针对随机生成的测试 schema、测试服务和临时目录；不接受外部恢复目标。
 const fs = require('node:fs/promises');
-const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const crypto = require('node:crypto');
@@ -13,6 +12,7 @@ const { Client } = require('pg');
 const { PDFDocument } = require('pdf-lib');
 const { createBackupBundle, verifyBackupBundle } = require('../server/services/offline-backup-bundle');
 const { postgresCommandEnv } = require('../server/services/postgres-command-env');
+const { resolveTestTempRoot, localTestEnvironment, isolatedStorageEnvironment } = require('./test_support/test-environment');
 const run = promisify(execFile);
 
 async function reservePort() {
@@ -29,7 +29,7 @@ async function main() {
     if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(parsed.hostname)) throw new Error('演练只接受本机 TEST_DATABASE_URL。');
     const schema = `pivot_restore_${crypto.randomBytes(8).toString('hex')}`;
     if (!/^pivot_restore_[a-f0-9]{16}$/.test(schema)) throw new Error('隔离 schema 校验失败。');
-    const tempBase = await fs.realpath(os.tmpdir());
+    const tempBase = resolveTestTempRoot();
     const root = await fs.mkdtemp(path.join(tempBase, 'pivot-application-restore-'));
     const data = path.join(root, 'data');
     const uploads = path.join(root, 'uploads');
@@ -43,12 +43,13 @@ async function main() {
     const base = `http://127.0.0.1:${port}`;
     const bin = process.env.PIVOT_RESTORE_PG_BIN || '';
     const executable = name => bin ? path.join(bin, process.platform === 'win32' ? `${name}.exe` : name) : name;
-    const env = { ...process.env, DATABASE_URL: url, PG_TEST_SCHEMA: schema, PG_IDLE_TIMEOUT_MS: '100', PIVOT_TEST_PG_SYNC: 'true',
+    const env = { ...localTestEnvironment(), ...isolatedStorageEnvironment(root, schema), DATABASE_URL: url, PG_TEST_SCHEMA: schema, PG_IDLE_TIMEOUT_MS: '100', PIVOT_TEST_PG_SYNC: 'true',
         DATA_DIR: data, PIVOT_ARTIFACT_CAS_DIR: cas, PIVOT_UPLOAD_DIR: uploads, UPLOAD_DIR: uploads,
         PIVOT_DOCUMENT_PROCESSING_DIR: documents, PIVOT_ANALYSIS_DIR: analysis, AGENT_BLOB_DIR: blobs, PIVOT_RUNTIME_PACK_ROOT: packs, AGENT_SKILL_ROOT: skills,
         LOG_DIR: path.join(root, 'logs'),
         PORT: String(port), DEFAULT_ADMIN_PASSWORD: 'RestoreTest123!', JWT_SECRET: 'restore-test-jwt-secret-012345678901234567890123',
         DATA_ENCRYPTION_KEY: 'restore-test-data-secret-012345678901234567890123', TZ: 'Asia/Shanghai', PG_TIMEZONE: 'Asia/Shanghai' };
+    await fs.writeFile(env.DATA_ANALYSIS_SECURITY_KEY_FILE, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
     const client = new Client({ connectionString: url });
     let child;
     let connected = false;
@@ -124,6 +125,7 @@ async function main() {
         if (pdfDetail?.job?.status !== 'succeeded' || !pdfDetail.outputs?.length) throw new Error('PDF 测试任务未完成。');
         const outputId = pdfDetail.outputs[0].id;
         await stop();
+        await runScript(['-e', "require('./server/services/critical-write-journal').save('auditLogs', {action:'隔离恢复审计',details:'待重放记录'}).then(()=>process.exit(0)).catch(()=>process.exit(1))"]);
         const backup = path.join(root, 'backup');
         await createBackupBundle({ output: backup, maintenanceConfirmed: true, env, dumpDatabase: destination => run(executable('pg_dump'),
             ['--no-password', '--format=custom', '--schema', schema, '--file', destination], { env: postgresCommandEnv(url), windowsHide: true, timeout: 120000 }) });
@@ -131,12 +133,19 @@ async function main() {
         await client.query(`DROP SCHEMA "${schema}" CASCADE`);
         await run(executable('pg_restore'), ['--dbname', decodeURIComponent(parsed.pathname.slice(1)), '--no-password', '--no-owner', '--no-privileges', '--exit-on-error', path.join(backup, 'database.dump')],
             { env: postgresCommandEnv(url), windowsHide: true, timeout: 120000 });
-        for (const [name, directory] of Object.entries({ uploads, cas, 'document-processing': documents, analysis, 'agent-blobs': blobs, 'agent-runtime-packs': packs, 'agent-skills': skills })) {
+        for (const [name, directory] of Object.entries({ uploads, cas, 'document-processing': documents, analysis, 'agent-blobs': blobs, 'agent-runtime-packs': packs, 'agent-skills': skills, 'critical-writes': path.join(data,'critical-write-journal') })) {
             if (!directory.startsWith(root + path.sep)) throw new Error('恢复目录越过隔离边界。');
             await fs.rm(directory, { recursive: true, force: true });
             await fs.cp(path.join(backup, name), directory, { recursive: true });
         }
         cookie = ''; await start();
+        let restoredAudit = 0;
+        for (let attempt=0; attempt<20; attempt++) {
+            restoredAudit=Number((await client.query(`SELECT COUNT(*) AS count FROM "${schema}".audit_logs WHERE action=$1`,['隔离恢复审计'])).rows[0].count);
+            if(restoredAudit===1)break;
+            await new Promise(resolve=>setTimeout(resolve,250));
+        }
+        if(restoredAudit!==1)throw new Error('恢复后的关键审计没有准确重放一次。');
         await request('/api/auth/login', json({ username: 'admin', password: env.DEFAULT_ADMIN_PASSWORD }));
         const restored = await (await request(`/api/sessions/${encodeURIComponent(session.id)}`)).json();
         if (restored.session?.title !== '恢复演练会话' && restored.title !== '恢复演练会话') throw new Error('恢复后的会话不一致。');

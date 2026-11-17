@@ -2,6 +2,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startHttpServer } = require('../server/server');
 
+test('清理阶段卡住时总截止仍生效，重复信号不会重复退出', async () => {
+    for (const stage of ['stopSpeechService', 'flushAllWrites', 'closePgPool']) {
+        const calls = [], exits = [];
+        const lifecycle = startHttpServer({ app: { listen: () => ({ close(callback) { callback(); }, closeAllConnections() { calls.push('close'); } }) },
+            logger: { info() {}, warn(payload) { calls.push(payload); } }, processRef: { on() {}, exit(code) { exits.push(code); } },
+            shutdownTimeoutMs: 25, getPendingWrites: () => ({ auditLogs: 1 }), [stage]: () => new Promise(() => {}) });
+        lifecycle.gracefulShutdown('SIGTERM');
+        lifecycle.gracefulShutdown('SIGINT');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        assert.deepEqual(exits, [1]);
+        assert.ok(calls.some(call => call?.pendingWrites?.auditLogs === 1));
+    }
+});
+
 test('HTTP lifecycle starts the app and flushes writes on shutdown', async () => {
     const events = new Map();
     const processRef = {

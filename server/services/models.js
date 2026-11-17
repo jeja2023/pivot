@@ -229,21 +229,8 @@ const getRunnableModelForUser = getRunnableModelForUserAsync;
 async function getModelDailyUsageAsync(userId, modelId) {
     return readModelUsageSnapshot(async () => {
         const todayPrefix = getBeijingTimestamp().slice(0, 10);
-        const msgRow = await queryOne(`
-            SELECT COALESCE(SUM(token_count), 0) AS tokens
-            FROM messages
-            WHERE user_id = ? AND model_id = ? AND deleted_at IS NULL
-              AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
-        `, [userId, modelId]);
-        const evtRow = await queryOne(`
-            SELECT COALESCE(SUM(token_count), 0) AS tokens
-            FROM model_usage_events
-            WHERE user_id = ? AND model_id = ?
-              AND (created_at AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
-        `, [userId, modelId]);
-        const messageTokens = Number(msgRow?.tokens || 0);
-        const eventTokens = Number(evtRow?.tokens || 0);
-        return messageTokens + eventTokens + getPendingModelUsageTotal(userId, modelId, todayPrefix);
+        const consumed = await require('../repositories/model-consumption').dailyUsage(userId, modelId, todayPrefix);
+        return consumed + getPendingModelUsageTotal(userId, modelId, todayPrefix);
     });
 }
 
@@ -260,7 +247,7 @@ function recordModelTokenUsage(userId, modelId, tokenCount, source = 'api', inpu
 
     const usage = normalizeTokenUsage({ inputTokens, outputTokens, totalTokens: tokenCount });
     if (usage.totalTokens <= 0) return;
-    enqueueModelUsageEvent({
+    return enqueueModelUsageEvent({
         userId: uid,
         modelId: mid,
         source: String(source || 'api').slice(0, 40),

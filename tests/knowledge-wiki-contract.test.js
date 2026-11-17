@@ -9,6 +9,7 @@ test('知识 Wiki 路由、问答融合和工作台入口保持来源优先契�
     const service = fs.readFileSync(path.join(root, 'server/services/knowledge-wiki.js'), 'utf8');
     const shell = fs.readFileSync(path.join(root, 'client/chat/partials/workspaces/knowledge.html'), 'utf8');
     const scripts = fs.readFileSync(path.join(root, 'client/chat/partials/scripts.html'), 'utf8');
+    const workspaces = fs.readFileSync(path.join(root, 'client/chat/app-workspaces.js'), 'utf8');
     assert.match(route, /\/knowledge\/wiki\/spaces/);
     assert.match(route, /\/knowledge\/wiki\/runs\/:id\/cancel/);
     assert.match(route, /compile-readiness/);
@@ -23,7 +24,8 @@ test('知识 Wiki 路由、问答融合和工作台入口保持来源优先契�
     assert.match(service, /SELECT id, username, role, unit FROM users/);
     assert.match(service, /document\.current_version_id <> source\.version_id/);
     assert.match(shell, /id="knowledge-wiki-open"/);
-    assert.match(scripts, /knowledge-wiki\.js/);
+    assert.doesNotMatch(scripts, /knowledge-wiki\.js/);
+    assert.match(workspaces, /knowledge:\s*\[[\s\S]*?'\/chat\/knowledge-wiki\.js'/);
     const wikiClient = fs.readFileSync(path.join(root, 'client/chat/knowledge-wiki.js'), 'utf8');
     assert.match(wikiClient, /openWikiSetupForm/);
     assert.match(wikiClient, /knowledge-wiki-setup-form/);

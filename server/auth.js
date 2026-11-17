@@ -313,17 +313,15 @@ async function login(username, password, options = {}) {
     if (user.status === 'disabled') {
         throw new Error('账号已被禁用，请联系管理员');
     }
-    // 旧账号在一次成功登录后以异步方式升级哈希成本，不阻塞登录响应。
-    if ((bcrypt.getRounds(user.password_hash) || 0) < BCRYPT_ROUNDS) {
-        hashPasswordOffThread(password, BCRYPT_ROUNDS)
-            .then(hash => execute('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [hash, user.id, user.password_hash]))
-            .catch(error => logger.warn({ err: error.message, userId: user.id }, '登录后密码哈希升级失败'));
-    }
     const sessionIp = normalizeIpAddress(options.clientIp || '');
     if (singleIpSessionModeEnabled() && !sessionIp) throw new Error('无法确定登录来源 IP，已拒绝建立会话。请检查反向代理 TRUSTED_PROXY_IPS 配置。');
     const result = await transaction(async trx => {
         const lockedUser = await trx.queryOne('SELECT * FROM users WHERE id = ? FOR UPDATE', [user.id]);
-        if (!lockedUser || lockedUser.status === 'disabled') throw new Error('用户状态异常');
+        if (!lockedUser || lockedUser.status === 'disabled' || lockedUser.deleted_at) throw new Error('用户状态异常');
+        // 锁外校验的凭据必须仍是当前版本，重置密码或撤销会话后不能签发新版本令牌。
+        if (lockedUser.password_hash !== user.password_hash || Number(lockedUser.token_version || 0) !== Number(user.token_version || 0)) {
+            throw new Error('登录凭据已变化，请使用当前密码重新登录。');
+        }
         let sessionReplaced = false;
         if (singleIpSessionModeEnabled()) {
             const existingIps = await trx.query(`
@@ -347,14 +345,18 @@ async function login(username, password, options = {}) {
         return {
             accessToken: generateAccessToken(lockedUser, { sessionIp }),
             refreshToken,
-            sessionReplaced
+            sessionReplaced,
+            user: withPermissionFlags({ id: lockedUser.id, username: lockedUser.username, nickname: lockedUser.nickname, role: lockedUser.role, unit: lockedUser.unit, status: lockedUser.status || 'active', created_at: lockedUser.created_at })
         };
     });
     if (result.sessionReplaced) require('./services/realtime-session').revokeRealtimeSessions(user.id);
-    return {
-        ...result,
-        user: withPermissionFlags({ id: user.id, username: user.username, nickname: user.nickname, role: user.role, unit: user.unit, status: user.status || 'active', created_at: user.created_at })
-    };
+    // 成功签发后再升级成本，避免本次哈希升级与锁内凭据复核竞争。
+    if ((bcrypt.getRounds(user.password_hash) || 0) < BCRYPT_ROUNDS) {
+        hashPasswordOffThread(password, BCRYPT_ROUNDS)
+            .then(hash => execute('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?', [hash, user.id, user.password_hash]))
+            .catch(error => logger.warn({ err: error.message, userId: user.id }, '登录后密码哈希升级失败'));
+    }
+    return result;
 }
 
 // 刷新 Token
@@ -465,8 +467,13 @@ async function authMiddleware(req, res, next) {
 
 function csrfMiddleware(req, res, next) {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    if (['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/auth/logout-all'].includes(req.path)) {
+        if (!require('./services/auth-request-origin').allowsAuthRequestOrigin(req)) {
+            return res.status(403).json({ error: '认证请求来源不匹配，请从本站页面重新操作。', code: 'AUTH_ORIGIN_DENIED' });
+        }
+        if (req.path !== '/auth/logout-all') return next();
+    }
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) return next();
-    if (['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'].includes(req.path)) return next();
     const cookieToken = getCookie(req, CSRF_COOKIE_NAME);
     const headerToken = req.headers['x-csrf-token'];
     if (!cookieToken || !headerToken || cookieToken !== headerToken) {

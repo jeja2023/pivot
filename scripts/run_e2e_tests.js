@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { resolveTestTempRoot, localTestEnvironment, assertTestStorage } = require('./test_support/test-environment');
+const { resolveTestTempRoot, localTestEnvironment, isolatedStorageEnvironment, assertTestStorage } = require('./test_support/test-environment');
 
 const root = path.resolve(__dirname, '..');
 require('dotenv').config({ path: path.join(root, '.env') });
@@ -106,7 +106,8 @@ async function main() {
         PIVOT_MEMORY_SOURCE_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex'),
         PIVOT_HOOK_AUDIT_FINGERPRINT_SECRET: crypto.randomBytes(32).toString('hex'),
         E2E_MODEL_URL: fakeModel.url,
-        MAX_CONCURRENT_AI_REQUESTS: String(Math.max(Number(process.env.MAX_CONCURRENT_AI_REQUESTS) || 0, 4))
+        MAX_CONCURRENT_AI_REQUESTS: String(Math.max(Number(process.env.MAX_CONCURRENT_AI_REQUESTS) || 0, 4)),
+        ...isolatedStorageEnvironment(testRoot, testSchema)
     };
 
     let status = 1;

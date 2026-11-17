@@ -158,7 +158,7 @@ function reportedTokenCount(usage, keys = []) {
     return null;
 }
 
-function recordMemoryExtractionUsage(userId, modelCfg, messages, responseData) {
+async function recordMemoryExtractionUsage(userId, modelCfg, messages, responseData) {
     if (!Number.isSafeInteger(Number(userId)) || !Number.isSafeInteger(Number(modelCfg?.id))) return;
     const usage = responseData?.usage || {};
     const inputTokens = reportedTokenCount(usage, ['input_tokens', 'prompt_tokens', 'inputTokens'])
@@ -167,7 +167,7 @@ function recordMemoryExtractionUsage(userId, modelCfg, messages, responseData) {
     const outputTokens = reportedTokenCount(usage, ['output_tokens', 'completion_tokens', 'outputTokens'])
         ?? estimateTokens(outputText);
     const totalTokens = reportedTokenCount(usage, ['total_tokens', 'totalTokens']) ?? inputTokens + outputTokens;
-    recordModelTokenUsage(userId, modelCfg.id, totalTokens, 'memory_extraction', inputTokens, outputTokens);
+    await recordModelTokenUsage(userId, modelCfg.id, totalTokens, 'memory_extraction', inputTokens, outputTokens);
 }
 
 function isModelExtractionTimeoutError(error) {
@@ -231,7 +231,7 @@ async function extractMemoryCandidatesWithModel(messages = [], context = {}) {
         }
     });
     const parsed = parseExtractorJsonResult(extractModelMessageText(res.data));
-    recordMemoryExtractionUsage(context.user?.id, modelCfg, messages, res.data);
+    await recordMemoryExtractionUsage(context.user?.id, modelCfg, messages, res.data);
     return {
         candidates: normalizeExtractorCandidates(parsed.candidates, {
             sessionId: context.sessionId,
