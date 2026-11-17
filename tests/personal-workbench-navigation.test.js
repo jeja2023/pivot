@@ -68,10 +68,9 @@ test('应用中心及 PPT 工作台完整透传并响应 presentationId 唤起',
     const coreCode = read('client/chat/apps-workbench-core.js');
     const pptCode = read('client/chat/apps-workbench-presentations.js');
 
-    // apps-workbench-rag 透传 presentationId 与 docId
+    // apps-workbench-rag 透传 options（含 presentationId）与 docId，并等待 PPT 挂载与打开完成
     assert.match(ragCode, /targetApp === 'presentations'/);
-    assert.match(ragCode, /showPresentationsAppFromRegistry\(options\)/);
-    assert.match(ragCode, /openPresentation\?\.\(options\.presentationId\)/);
+    assert.match(ragCode, /await showPresentationsAppFromRegistry\(options\)/);
     assert.match(ragCode, /switchOfficialWritingDoc\(options\.docId/);
 
     // apps-workbench-core 透传 options 到模块
