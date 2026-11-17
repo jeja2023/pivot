@@ -10,7 +10,7 @@ function error(message, status = 409) {
 }
 const same = (left, right) => process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 async function readInstalledSkillResourcesChecked(directory, options = {}) {
-    const root = path.resolve(options.root || process.env.AGENT_SKILL_ROOT || path.join(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'agent-skills'));
+    const root = path.resolve(options.root || require('./agent-skill-storage').resolveSkillStorageRoot());
     const resolved = path.resolve(directory), digest = path.basename(resolved);
     if (!/^[a-f0-9]{64}$/.test(digest) || !same(path.dirname(resolved), path.join(root, 'sha256')))
         throw error('技能资源不在已登记的内容目录中。');
@@ -170,4 +170,4 @@ async function assertSkillResourceEvidence(run, user, deps = {}) {
     if (String(current.reference.releaseId) !== String(evidence.releaseId) || String(current.reference.versionId) !== String(evidence.versionId) || current.digest !== evidence.packageDigest)
         throw error('任务使用的技能配套资料已失效，请重新选择技能后运行。', 403);
 }
-module.exports = { readInstalledSkillResources, definitions, execute, assertSkillReleaseCurrent, assertSkillResourceEvidence };
+module.exports = { readInstalledSkillResources, definitions, execute, assertSkillReleaseCurrent, assertSkillResourceEvidence, metadataFiles };

@@ -157,6 +157,7 @@ function renderAgentWorkflowPicker() {
         })
         : agentWorkflowsCache;
     const currentTitle = String(agentWorkflowDraftName || '').trim() || selected?.name || '新建工作流';
+    window.Pivot.moduleApi('agent.workflowExperience')?.updateRenameDraft?.();
     picker.classList.toggle('is-empty', !agentWorkflowsCache.length);
     title.textContent = currentTitle;
     trigger.title = selected

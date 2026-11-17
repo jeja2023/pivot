@@ -624,7 +624,7 @@
     line-height: 1.4;
 }
 
-.presentation-master-task-feedback {
+.presentation-master-status-card .presentation-master-task-feedback {
     color: var(--danger);
 }
 

@@ -22,13 +22,17 @@ async function ensureAccess(user, request) {
 }
 function publicResult(row, task) {
     const data = row.result_json || {}, state = data.state;
+    let pending = row.input_request || {};
+    if (state?.pendingKind && !pending.question) {
+        try { pending = JSON.parse(state.messages?.findLast(message => message.role === 'assistant')?.content || '{}').requestInput || {}; } catch (_) {}
+    }
     return { ...task, toolName: repository.TOOL, progress: data.progress || { phase: 'preparing', message: '正在准备完整制作引擎。' },
         request: state ? { title: state.request.title, operation: state.request.operation, profile: state.request.profile, presentationId: state.request.presentationId,
             pageCount: state.request.pageCount, modelId: state.request.modelId, maxSteps: state.request.maxSteps, tokenBudget: state.request.tokenBudget, productionProfile: state.request.productionProfile, template: state.request.template || null } : undefined,
         usedTokens: state?.usedTokens ?? data.usedTokens ?? 0, steps: state?.steps ?? data.steps ?? 0,
         usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
-        recoverable: Boolean(state && (task.status === 'failed' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
-        ...(task.status === 'input_required' ? { inputRequest: { question: row.input_request.question, context: row.input_request.context,
+        recoverable: Boolean(state && (!state.pendingKind || state.response) && (task.status === 'failed' || task.status === 'expired' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
+        ...((task.status === 'input_required' || ['expired', 'failed'].includes(task.status) && state?.pendingKind) && !state?.response && pending.question ? { inputRequest: { question: pending.question, context: pending.context,
             kind: state?.pendingKind === 'confirmation' ? 'confirmation' : 'clarification' } } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
 }
@@ -151,12 +155,14 @@ async function respond(user, id, answer, deps = {}) {
     const repo = deps.repository || repository, store = deps.store || taskStore;
     const row = await repo.read(user, id), task = await store.getForUser(id, user);
     if (!row || !task) throw runtime.error('制作任务不存在或无权访问。', 'PPT_MASTER_NOT_FOUND', 404);
-    if (task.status !== 'input_required') throw runtime.error('当前任务没有待确认问题。', 'PPT_MASTER_NOT_WAITING', 409);
+    if (task.status !== 'input_required' && !(['expired', 'failed'].includes(task.status) && row.result_json.state?.pendingKind)) throw runtime.error('当前任务没有待确认问题。', 'PPT_MASTER_NOT_WAITING', 409);
     if (typeof answer !== 'string' || !answer.trim() || answer.length > 12000) throw runtime.error('请提供不超过12000字的明确答复。');
     const state = row.result_json.state;
     deployment.assertCheckpoint(state, await (deps.identity || runtime.identity)());
     await (deps.ensureAccess || ensureAccess)(user, state.request); state.response = answer.trim();
-    if (!await repo.acceptResponse(user, id, state)) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
+    const accept = () => repo.acceptResponse(user, id, state);
+    const accepted = task.status === 'input_required' ? await accept() : await repo.admit(user, () => { deployment.assertAccepting(); return accept(); }, id);
+    if (!accepted) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
     active.continue(id, () => (deps.run || run)(id, user).catch(() => {})); return (deps.get || get)(user, id);
 }
 async function cancel(user, id) { if (!await get(user, id)) return null; await taskStore.requestCancel(id, user); return get(user, id); }
@@ -166,9 +172,16 @@ async function resume(user, id, input = {}) {
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
     deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
+    const modelId = input.modelId === undefined ? state.request.modelId : String(input.modelId || '').trim();
+    if (!modelId || modelId.length > 160) throw runtime.error('请选择可用的制作模型。');
+    if (modelId !== state.request.modelId) {
+        const model = await require('../../models').getRunnableModelForUserAsync(modelId, user);
+        if (!model || model.secret_error) throw runtime.error('所选制作模型不可用，请检查当前账号授权。', 'PPT_MASTER_MODEL_UNAVAILABLE', 403);
+        if (state.request.profile === 'image_to_pptx' && !require('../../models').modelSupportsVision(model)) throw runtime.error('图片重建需要支持图片输入的模型。', 'PPT_MASTER_VISION_REQUIRED', 422);
+    }
     const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = contract.normalizeTokenBudget(input.tokenBudget ?? state.request.tokenBudget, state.request.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160) throw runtime.error('继续轮次只能在上限内增加，不能重置累计消耗。');
-    state.request.maxSteps = maxSteps; state.request.tokenBudget = tokenBudget;
+    state.request.maxSteps = maxSteps; state.request.tokenBudget = tokenBudget; state.request.modelId = modelId;
     if (state.messages) state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' });
     if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);
     setImmediate(() => run(id, user).catch(() => {})); return get(user, id);

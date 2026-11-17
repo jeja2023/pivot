@@ -16,12 +16,88 @@ async function openWorkspace(page) {
 async function createTemplate(page, id = 'table') {
     await page.locator('#automation-new-workflow-btn').click();
     await page.locator(`[data-template="${id}"]`).click();
+    await confirmDraftName(page);
     await expect(page.locator('#workflow-product-save')).toHaveText('草稿已保存', { timeout: 15000 });
+}
+
+async function confirmDraftName(page, name) {
+    const dialog = page.locator('#input-prompt-container');
+    await expect(dialog).toBeVisible();
+    if (name !== undefined) await dialog.locator('#input-prompt-field').fill(name);
+    await dialog.locator('#modal-input-prompt-ok').click();
+    await expect(dialog).toBeHidden();
+}
+
+async function renameDraft(page, name) {
+    await page.locator('#agent-workflow-management-menu > summary').click();
+    await page.locator('#workflow-product-rename-draft').click();
+    await confirmDraftName(page, name);
 }
 
 async function headers(page) {
     return { 'x-csrf-token': (await page.context().cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value };
 }
+
+test('草稿名称使用弹窗且只显示一次，结果弹窗完整覆盖工具栏', async ({ page }) => {
+    test.setTimeout(90000);
+    await openWorkspace(page);
+    await page.locator('#automation-new-workflow-btn').click();
+    await page.locator('[data-start-blank]').click();
+    await expect(page.locator('#input-prompt-container')).toBeVisible();
+    await page.locator('#modal-input-prompt-ok').click();
+    await expect(page.locator('#input-prompt-error')).toContainText('请填写工作流名称');
+    await page.locator('#modal-input-prompt-cancel').click();
+    await expect(page.locator('#workflow-product-start')).toBeVisible();
+    await page.locator('[data-start-blank]').click();
+    await confirmDraftName(page, '测试工作流名称');
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('测试工作流名称');
+    await expect(page.locator('#workflow-product-name')).toHaveCount(0);
+    await renameDraft(page, '修改后的草稿');
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('修改后的草稿');
+    const longName = '工作流名称很长时仍然需要能够查看完整内容'.repeat(3);
+    await renameDraft(page, longName);
+    await expect(page.locator('#agent-workflow-picker-trigger')).toHaveAttribute('title', new RegExp(longName));
+    for (const width of [1366, 390, 320]) {
+        await page.setViewportSize({ width, height: 844 });
+        const picker = page.locator('#agent-workflow-picker');
+        expect((await picker.boundingBox()).width).toBeLessThanOrEqual(321);
+        await page.locator('#agent-workflow-management-menu > summary').click();
+        const menu = page.locator('.agent-workflow-management-popover');
+        await expect(menu).toBeVisible();
+        const layout = await menu.evaluate(element => {
+            const rows = [...element.querySelectorAll('button')].filter(item => item.getClientRects().length);
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, icons: rows.map(item => item.querySelector('svg')?.getBoundingClientRect().left), labels: rows.map(item => item.querySelector('span')?.getBoundingClientRect().left) };
+        });
+        expect(layout.left).toBeGreaterThanOrEqual(0);
+        expect(layout.right).toBeLessThanOrEqual(width + 1);
+        expect(layout.icons.every(value => Number.isFinite(value) && Math.abs(value - layout.icons[0]) < 1)).toBe(true);
+        expect(layout.labels.every(value => Number.isFinite(value) && Math.abs(value - layout.labels[0]) < 1)).toBe(true);
+        await page.locator('#agent-workflow-management-menu > summary').click();
+    }
+    await page.setViewportSize({ width: 1366, height: 844 });
+    const saved = await page.request.post('/api/agents/workflows', { headers: await headers(page), data: { name: '已保存的工作流', description: '验证结果面板', dagSpec: { nodes: [{ id: 'out', title: '输出', tool: 'workflow.output', input: { name: 'result', value: '结果' } }] } } });
+    expect(saved.ok()).toBeTruthy();
+    const workflow = (await saved.json()).workflow;
+    await page.evaluate(async id => { await window.Pivot.moduleApi('agent.workflowBridge').reload(); window.Pivot.moduleApi('agent.workflowBridge').openEditor(id); }, workflow.id);
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('已保存的工作流');
+    await expect(page.locator('#workflow-product-name')).toHaveCount(0);
+    await page.locator('#agent-workflow-picker-trigger').focus();
+    await page.evaluate(() => window.Pivot.moduleApi('agent.workflowResults').render({ title: '运行结果', source: '验证', output: '实际结果内容', run: { id: 'fixture-run', status: 'completed', metadata: {} } }));
+    const overlay = page.locator('#workflow-product-results'), dialog = overlay.getByRole('dialog'), close = dialog.getByRole('button', { name: '关闭结果面板' });
+    await expect(close).toBeFocused();
+    for (const width of [1366, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await expect(dialog.getByRole('heading', { name: '运行结果' })).toBeVisible();
+        await expect(close).toBeVisible();
+        expect(await close.evaluate(element => { const rect = element.getBoundingClientRect(), top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2); return top === element || element.contains(top); })).toBe(true);
+        expect(await overlay.evaluate(element => { const rect = element.getBoundingClientRect(); return rect.top === 0 && rect.height === window.innerHeight; })).toBe(true);
+    }
+    await close.click();
+    await expect(overlay).toBeHidden();
+    await expect(page.locator('#agent-workflow-picker-trigger')).toBeFocused();
+    await expect(page.locator('#agent-dag-editor-canvas')).toBeVisible();
+});
 
 test('真实工作流页面提供模板、画布节点配置、草稿修订和恢复', async ({ page }) => {
     test.setTimeout(90000);
@@ -30,6 +106,7 @@ test('真实工作流页面提供模板、画布节点配置、草稿修订和�
     await page.locator('#automation-new-workflow-btn').click();
     await expect(page.locator('#workflow-product-start')).toContainText('从要完成的工作开始');
     await page.locator('[data-template="table"]').click();
+    await confirmDraftName(page);
     await expect(page.locator('#agent-dag-editor-canvas')).toBeVisible();
     await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').editor().selectNode('analysis'));
     expect(errors, '选择节点时不应出现脚本错误').toEqual([]);
@@ -124,7 +201,7 @@ test('保存失败的本机副本可恢复，真实双窗口修订冲突不会�
     const draft = await page.evaluate(() => window.Pivot.moduleApi('agent.workflowDrafts').current());
     const route = `**/agents/workflow-editor/drafts/${draft.key}`;
     await page.route(route, async handler => { if (handler.request().method() === 'PUT') await handler.fulfill({ status: 503, json: { error: '受控模拟：保存暂不可用' } }); else await handler.continue(); });
-    await page.locator('#workflow-product-name').fill('离线保留的业务流程');
+    await renameDraft(page, '离线保留的业务流程');
     await expect(page.locator('#workflow-product-save')).toHaveText('保存失败，修改仍保留', { timeout: 15000 });
     expect(await page.evaluate(key => JSON.parse(window.localStorage.getItem(`pivot.workflow.draft.${window.Pivot.moduleApi('agent.workflowBridge').userId()}.${key}`)).name, draft.key)).toBe('离线保留的业务流程');
     await page.reload();
@@ -135,24 +212,24 @@ test('保存失败的本机副本可恢复，真实双窗口修订冲突不会�
     await expect(page.locator('#workflow-product-recovery')).toBeVisible();
     await page.locator('[data-restore]').click();
     await page.unroute(route);
-    await expect(page.locator('#workflow-product-name')).toHaveValue('离线保留的业务流程');
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('离线保留的业务流程');
     await expect(page.locator('#workflow-product-save')).toHaveText('草稿已保存', { timeout: 15000 });
     const current = await page.evaluate(() => window.Pivot.moduleApi('agent.workflowDrafts').current());
     const response = await page.request.put(`/api/agents/workflow-editor/drafts/${draft.key}`, { headers: await headers(page), data: { expectedRevision: current.revision, specText: '{"nodes":[]}', name: '另一窗口的草稿' } });
     expect(response.ok()).toBeTruthy();
-    await page.locator('#workflow-product-name').fill('本地尚未解决的冲突');
+    await renameDraft(page, '本地尚未解决的冲突');
     await expect(page.locator('#workflow-product-save')).toHaveText('存在冲突', { timeout: 15000 });
     await page.locator('[data-draft-compare]').click();
     await expect(page.locator('#workflow-product-recovery')).toContainText('本地尚未解决的冲突');
     await page.locator('[data-remote]').click();
-    await expect(page.locator('#workflow-product-name')).toHaveValue('另一窗口的草稿');
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('另一窗口的草稿');
 });
 
 test('发布确认固定已审阅版本，并展示真实影响与启动状态', async ({ page }) => {
     test.setTimeout(90000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await openWorkspace(page);
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
     await page.evaluate(() => {
         const bridge = window.Pivot.moduleApi('agent.workflowBridge');
         bridge.setName('固定版本发布验收'); bridge.editor().applySpec({ nodes: [{ id: 'output', title: '交付结果', tool: 'workflow.output', input: { name: 'result', value: '已审阅的内容' } }] });
@@ -173,7 +250,7 @@ test('发布确认固定已审阅版本，并展示真实影响与启动状态',
 test('迟到测试结果被隔离，步骤与画布共用复制撤销且隐藏画布不消费快捷键', async ({ page }) => {
     test.setTimeout(90000);
     await openWorkspace(page);
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
     await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').editor().applySpec({ nodes: [{ id: 'source', title: '准备文本', tool: 'workflow.template', input: { template: '原文' } }, { id: 'result', title: '输出', tool: 'workflow.output', input: { name: 'result', value: '{{nodes.source.output.text}}' }, dependsOn: ['source'] }] }));
     await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').editor().selectNode('source'));
     let complete;
@@ -195,7 +272,7 @@ test('迟到测试结果被隔离，步骤与画布共用复制撤销且隐藏�
 test('字段选择显示类型与样例并无损插入来源，双节点对齐不会清空测试', async ({ page }) => {
     test.setTimeout(90000);
     await openWorkspace(page);
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
     await page.evaluate(() => {
         const bridge = window.Pivot.moduleApi('agent.workflowBridge');
         bridge.editor().applySpec({ nodes: [
@@ -222,7 +299,7 @@ test('就地测试与发布运行保留各自结果，纯表格交付按表格�
     test.setTimeout(90000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await openWorkspace(page);
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
     await page.evaluate(() => {
         const bridge = window.Pivot.moduleApi('agent.workflowBridge'); bridge.setName('表格交付验收');
         bridge.editor().applySpec({ nodes: [
@@ -232,6 +309,7 @@ test('就地测试与发布运行保留各自结果，纯表格交付按表格�
     });
     await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').editor().selectNode('source')); await page.locator('[data-pivot-dag-test-node]').click();
     await expect(page.locator('#workflow-product-results')).toContainText('实际步骤结果', { timeout: 15000 });
+    await page.locator('#workflow-product-results .workflow-product-results-close').click();
     await page.locator('#workflow-product-run').click();
     try { await expect(page.locator('#workflow-product-results .data-table')).toBeVisible({ timeout: 20000 }); }
     catch (_) { throw new Error(`表格运行未完成：${await page.locator('#workflow-product-status').innerText()}；${await page.locator('#workflow-product-results').innerText()}；页面错误：${errors.join('；')}`); }
@@ -261,8 +339,8 @@ test('从未同步的新草稿也能从本机找回，未完成 JSON 原文可�
     test.setTimeout(90000);
     await openWorkspace(page);
     await page.route('**/agents/workflow-editor/drafts/*', async handler => { if (handler.request().method() === 'PUT') await handler.fulfill({ status: 503, json: { error: '离线保存测试' } }); else await handler.continue(); });
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
-    await page.locator('#workflow-product-name').fill('尚未同步的原始草稿');
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
+    await renameDraft(page, '尚未同步的原始草稿');
     await page.evaluate(() => {
         const specEl = document.getElementById('agent-dag-spec');
         specEl.value = '{"nodes":[';
@@ -274,7 +352,7 @@ test('从未同步的新草稿也能从本机找回，未完成 JSON 原文可�
     await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')?.openAgentDagWorkbench));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAgentDagWorkbench());
     await page.locator('#automation-new-workflow-btn').click(); await page.locator(`[data-open-draft="${draft.key}"]`).click();
-    await expect(page.locator('#workflow-product-name')).toHaveValue('尚未同步的原始草稿');
+    await expect(page.locator('#agent-workflow-picker-title')).toHaveText('尚未同步的原始草稿');
     await expect.poll(() => page.evaluate(() => window.Pivot.moduleApi('agent.workflowDrafts').current()?.key)).toBe(draft.key);
     expect(await page.evaluate(() => document.getElementById('agent-dag-spec').value)).toBe('{"nodes":[');
     await expect(page.locator('#workflow-product-run')).toBeDisabled();
@@ -288,7 +366,7 @@ test('复杂分支大纲与 AI 变更可撤销', async ({ page }) => {
     test.setTimeout(90000);
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await openWorkspace(page);
-    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click();
+    await page.locator('#automation-new-workflow-btn').click(); await page.locator('[data-start-blank]').click(); await confirmDraftName(page, '测试工作流');
     await page.evaluate(() => window.Pivot.moduleApi('agent.workflowBridge').editor().applySpec({ nodes: [
         { id: 'condition', title: '检查条件', tool: 'workflow.condition', input: { value: true, operator: 'is_true' } },
         { id: 'yes', title: '满足条件处理', tool: 'workflow.template', input: { template: '是' }, dependsOn: ['condition'] },

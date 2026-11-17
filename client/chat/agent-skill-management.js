@@ -73,11 +73,17 @@
             } catch (error) { modal.querySelector('#agent-skill-management-preview').textContent = error.message; }
         };
         modal.querySelector('[data-skill-management-save]').onclick = async () => {
+            const button = modal.querySelector('[data-skill-management-save]');
+            if (button.disabled) return;
+            button.disabled = true;
             try {
-                await readJson(`${API_BASE}/agents/skills/source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: modal.querySelector('#agent-skill-management-source').value }) });
-                showToast('已创建新的 Skill 草稿版本。', 'success');
+                await readJson(`${API_BASE}/agents/skills/source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: modal.querySelector('#agent-skill-management-source').value, sourceVersionId: versionId, sourceDigest: source.version.digest }) });
+                showToast('已创建新的技能草稿版本，请在列表中验证并发布。', 'success');
+                modal.classList.add('hidden');
+                document.getElementById('agent-harness-skills-refresh')?.focus();
                 window.Pivot?.moduleApi?.('agent.harness')?.loadAgentHarnessSkills?.();
             } catch (error) { showToast(error.message, 'error'); }
+            finally { button.disabled = false; }
         };
         modal.querySelector('[data-skill-management-publish-shared]').onclick = async () => {
             try {

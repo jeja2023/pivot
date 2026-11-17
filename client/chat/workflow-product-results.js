@@ -3,6 +3,7 @@
     let activeRun = null;
     let timer = null;
     let sequence = 0;
+    let resultReturnFocus = null;
     const sessions = new Map();
     const bridge = () => window.Pivot?.moduleApi?.('agent.workflowBridge') || {};
     const escape = text => window.Pivot?.legacy?.PivotSafeHtml?.escapeHtml?.(String(text ?? '')) ?? String(text ?? '');
@@ -237,6 +238,8 @@
     function render({ title, source, output, input, nodes = [], run = null, error = '', openModal = true }) {
         const panel = document.getElementById('workflow-product-results');
         if (!panel) return;
+        const opening = openModal && panel.hidden;
+        if (opening) resultReturnFocus = document.activeElement;
         if (openModal) panel.hidden = false;
         const canvasViewBtn = document.getElementById('agent-dag-canvas-view-results');
         if (canvasViewBtn) canvasViewBtn.hidden = false;
@@ -263,6 +266,7 @@
         const contentHtml = `<div class="workflow-product-results-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-results-title"><header class="workflow-product-results-header"><div class="workflow-product-results-title-group"><span class="workflow-product-results-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></span><h3 id="workflow-results-title">${escape(title)}</h3><span class="workflow-product-results-source-pill status-${escape(statusClass)}"><span class="workflow-product-pill-icon" aria-hidden="true">${getStatusSvg(statusClass, 12)}</span>${escape(pillSource)} · ${escape(statusText)}</span>${formattedTime ? `<span class="workflow-product-results-time">${escape(formattedTime)}</span>` : ''}</div><div class="workflow-product-results-header-actions"><div class="workflow-product-history-wrap"><label class="workflow-product-history-label" for="workflow-results-history-select"><span class="workflow-product-history-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span><span class="workflow-product-history-text">历史运行</span></label><div class="workflow-product-history-select-box"><select id="workflow-results-history-select" class="form-input workflow-product-history-select" data-result-history title="切换历史运行记录">${historyOptionsHtml}</select></div></div><button type="button" class="btn-secondary workspace-modal-close workflow-product-results-close" aria-label="关闭结果面板" title="关闭 (Esc)">关闭</button></div></header><div class="workflow-product-results-body">${error ? `<p role="alert" class="workflow-product-results-error">${escape(error)}</p>` : ''}<div class="text-body message-content workflow-product-output">${output !== undefined ? valueHtml(output) : '<p>正在等待结果，已完成的步骤会保留。</p>'}</div><details class="workflow-product-results-trace"><summary>${traceTitle}</summary>${inputsHtml}<ol class="workflow-product-steps-list">${nodes.map(node => `<li class="workflow-product-step-item"><button type="button" class="btn-secondary btn-xs workflow-product-step-node-btn" data-result-node="${escape(node.node_key || node.id)}" title="点击在画布中定位此节点">${escape(node.title || node.node_key || node.id)}</button> <span class="workflow-product-node-status status-${escape(node.status || '')}"><span class="workflow-product-node-status-icon" aria-hidden="true">${getStatusSvg(node.status || 'default', 11)}</span>${escape(statusNames[node.status] || node.status || '')}</span>${node.error_message ? `<span class="workflow-product-step-error">：${escape(node.error_message)}</span>` : ''}</li>`).join('')}</ol></details></div><footer class="workflow-product-results-footer workflow-product-row"><div class="workflow-product-results-footer-actions">${run ? '<button type="button" class="btn-secondary" data-result-details>完整记录 / 审批 / 产物</button><button type="button" class="btn-secondary" data-result-refresh>刷新运行状态</button>' + (!bridge().readOnly?.() ? '<button type="button" class="btn-secondary" data-result-reuse>将已完成节点结果用于调试</button>' : '') + (['error', 'partial', 'completed_with_errors'].includes(run.status) ? '<button type="button" class="btn-secondary" data-result-retry>从失败处继续</button>' : '') : ''}</div></footer></div>`;
 
         PivotSafeHtml.setHtml(panel, contentHtml);
+        if (opening) panel.querySelector('.workflow-product-results-close')?.focus();
         if (exportsHtml) {
             const container = document.createElement('div');
             PivotSafeHtml.setHtml(container, exportsHtml);
@@ -284,8 +288,8 @@
         });
         panel.querySelectorAll('[data-result-artifact]').forEach(button => button.addEventListener('click', () => window.Pivot?.moduleApi?.('agent.artifacts')?.openVersions?.(button.dataset.resultArtifact)));
         panel.querySelector('[data-result-refresh]')?.addEventListener('click', () => void watch(run, source));
-        panel.querySelectorAll('[data-result-node]').forEach(button => button.addEventListener('click', () => { panel.hidden = true; bridge().focus?.(button.dataset.resultNode); }));
-        panel.querySelector('[data-result-details]')?.addEventListener('click', () => window.Pivot?.legacy?.openAgentRun?.(run?.id));
+        panel.querySelectorAll('[data-result-node]').forEach(button => button.addEventListener('click', () => { close({ restoreFocus: false }); bridge().focus?.(button.dataset.resultNode); }));
+        panel.querySelector('[data-result-details]')?.addEventListener('click', () => { close({ restoreFocus: false }); window.Pivot?.legacy?.openAgentRun?.(run?.id); });
         panel.querySelector('[data-result-reuse]')?.addEventListener('click', () => {
             const core = window.Pivot?.moduleApi?.('agent.dagCore');
             if (!core) return;
@@ -344,11 +348,17 @@
             } catch (failure) { window.Pivot?.moduleApi?.('agent.workflowExperience')?.status?.(failure.message, 'error'); }
             finally { event.target.disabled = false; }
         });
-        panel.querySelector('.workflow-product-results-close')?.addEventListener('click', () => { panel.hidden = true; });
+        panel.querySelector('.workflow-product-results-close')?.addEventListener('click', () => close());
         if (!panel.dataset.dismissBound) {
             panel.dataset.dismissBound = 'true';
-            panel.addEventListener('click', event => { if (event.target === panel) panel.hidden = true; });
-            document.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+            panel.addEventListener('click', event => { if (event.target === panel) close(); });
+            panel.addEventListener('keydown', event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+                if (event.key !== 'Tab') return;
+                const controls = [...panel.querySelectorAll('button, select, input, textarea, summary, a[href]')].filter(item => !item.disabled && item.getClientRects().length);
+                if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
+                else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus(); }
+            });
         }
 
         const meta = parse(run?.metadata);
@@ -387,8 +397,7 @@
     function nodeResult(node, data) { stop(); render({ title: `${node.title || node.id} · 测试结果`, source: '实际节点测试 · 当前草稿', output: data.output, input: data.resolvedInput }); }
     function reset() {
         stop(); sessions.clear();
-        const panel = document.getElementById('workflow-product-results');
-        if (panel) panel.hidden = true;
+        close({ restoreFocus: false });
         const canvasViewBtn = document.getElementById('agent-dag-canvas-view-results');
         if (canvasViewBtn) canvasViewBtn.hidden = true;
     }
@@ -406,7 +415,9 @@
             }
         }
         if (sessions.size > 0 || panel.innerHTML.trim()) {
+            if (panel.hidden) resultReturnFocus = document.activeElement;
             panel.hidden = false;
+            panel.querySelector('.workflow-product-results-close')?.focus();
             const curWf = bridge()?.current?.();
             const curDraft = window.Pivot?.moduleApi?.('agent.workflowDrafts')?.current?.();
             const wfId = curWf?.id || curDraft?.workflow_id;
@@ -414,9 +425,11 @@
             if (wfId || wfName) void loadHistory(wfId, wfName, activeRun);
         }
     }
-    function close() {
+    function close({ restoreFocus = true } = {}) {
         const panel = document.getElementById('workflow-product-results');
         if (panel) panel.hidden = true;
+        if (restoreFocus && resultReturnFocus?.isConnected) resultReturnFocus.focus();
+        resultReturnFocus = null;
     }
     async function restore(key) {
         try {

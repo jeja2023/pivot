@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const yaml = require('js-yaml');
-const { query, queryOne, execute } = require('../db/client');
+const { queryOne, execute } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { assertRegisteredCapabilities, normalizeCapabilityList } = require('./agent-capability-registry');
 const { toLegacyScope } = require('./agent-skill-scope');
@@ -47,6 +47,10 @@ function validateSkillManifest(manifestValue, options = {}) {
     if (manifest.capabilities !== undefined && !Array.isArray(manifest.capabilities)) errors.push('manifest.capabilities 必须是数组。');
     if (manifest.permissions !== undefined && !Array.isArray(manifest.permissions)) errors.push('manifest.permissions 必须是数组。');
     if (manifest.tools !== undefined && !Array.isArray(manifest.tools)) errors.push('manifest.tools 必须是数组。');
+    if (manifest.tags !== undefined && (!Array.isArray(manifest.tags) || manifest.tags.length > 100
+        || manifest.tags.some(tag => typeof tag !== 'string' || !tag.trim() || tag.length > 100))) {
+        errors.push('manifest.tags 必须是最多 100 项的非空文本数组，每项不超过 100 个字符。');
+    }
     const declared = Array.isArray(manifest.capabilities)
         ? manifest.capabilities.map(String)
         : Array.isArray(manifest.permissions) ? manifest.permissions.map(String) : [];
@@ -269,8 +273,10 @@ async function findBestPersonalSkill(user, goal, options = {}) {
     const terms = text.split(/[^a-z0-9\u4e00-\u9fa5]+/i).filter(item => item.length > 1).slice(0, 40);
     const chineseBigrams = [...text.replace(/[^\u4e00-\u9fa5]/g, '')].flatMap((character, index, chars) => index < chars.length - 1 ? [`${character}${chars[index + 1]}`] : []).slice(0, 60);
     const candidates = (releases || []).filter(release => release.owner_key === ownerKey && release.rollout_scope === 'personal' && release.status === 'published').map(release => {
-        let manifest = {};
-        try { manifest = parseSkillManifest(release.manifest_json || release.manifest_yaml || '{}'); } catch (_) {}
+        const checked = validateSkillManifest(release.manifest_json || release.manifest_yaml || '{}');
+        // 历史异常清单留待治理修订，不让单个条目阻断无关任务的自动匹配。
+        if (!checked.valid) return null;
+        const manifest = checked.manifest;
         // 外部指引的显式调用标记只收紧自动匹配，不改变任何授权或发布状态。
         if (manifest.importSource?.originalFields?.metadata?.activation === 'explicit') return null;
         const haystack = [release.name, manifest.title, manifest.description, ...(Array.isArray(manifest.tags) ? manifest.tags : [])].join(' ').toLowerCase();
@@ -310,16 +316,9 @@ async function disableAgentSkill(name, user) {
     // 禁止直接写投影造成“目录已停用、运行时仍可解析”的双表分叉。
     const safeName = String(name || '').trim();
     if (!safeName || !user?.id) return null;
-    const { getSkillReleaseForUser, pauseSkillRelease } = require('./agent-releases');
-    const releases = await query(
-        "SELECT id FROM agent_skill_releases WHERE name = ? AND status = 'published' ORDER BY published_at DESC",
-        [safeName]
-    );
-    for (const candidate of releases || []) {
-        const release = await getSkillReleaseForUser(candidate.id, user, 'manage');
-        if (release) return pauseSkillRelease(release.id, user, 'user_disabled');
-    }
-    return null;
+    const { resolvePublishedSkill, pauseSkillRelease } = require('./agent-releases');
+    const release = await resolvePublishedSkill(safeName, user);
+    return release ? pauseSkillRelease(release.id, user, 'user_disabled') : null;
 }
 
 module.exports = {

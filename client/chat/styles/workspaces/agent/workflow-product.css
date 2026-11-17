@@ -23,19 +23,6 @@
     letter-spacing: -0.01em;
 }
 
-#workflow-product-name,
-.workflow-product-name {
-    height: 32px;
-    padding: 0 10px;
-    border-radius: var(--radius-sm, 6px);
-    font-size: 0.82rem;
-    font-weight: 500;
-    min-width: 0;
-    max-width: 220px;
-    flex: 1 1 120px;
-    box-sizing: border-box;
-}
-
 #workflow-product-run,
 #workflow-product-publish {
     height: 32px;
@@ -360,11 +347,8 @@ details.agent-workflow-management-menu:not([open]) > .agent-workflow-management-
 
 #workflow-product-results {
     position: fixed;
-    top: 54px;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1050;
+    inset: 0;
+    z-index: 1900;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -970,6 +954,31 @@ details.agent-workflow-management-menu:not([open]) > .agent-workflow-management-
     .workflow-product-panel {
         padding: 10px;
     }
+
+    .workflow-product-results-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .workflow-product-results-title-group {
+        flex: 1 1 100%;
+        min-width: 0;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .workflow-product-results-header-actions {
+        flex: 1 1 100%;
+        min-width: 0;
+        gap: 8px;
+    }
+
+    .workflow-product-history-wrap,
+    .workflow-product-history-select-box {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
 }
 
 @media (pointer: coarse) {
@@ -1082,8 +1091,8 @@ body.is-main-workspace-full .chat-container {
 
 .automation-editor-view .agent-dag-library-bar .agent-workflow-picker {
     min-width: 0 !important;
-    flex: 1 1 140px !important;
-    max-width: 100% !important;
+    flex: 0 1 320px !important;
+    max-width: min(320px, 100%) !important;
 }
 
 .automation-editor-view .agent-dag-library-bar-actions {
@@ -1092,6 +1101,17 @@ body.is-main-workspace-full .chat-container {
     max-width: 100% !important;
     min-width: 0 !important;
     margin-left: auto;
+}
+
+@media (max-width: 600px) {
+    .automation-editor-view .agent-dag-library-bar .agent-workflow-management-menu {
+        position: static;
+    }
+
+    .automation-editor-view .agent-dag-library-bar .agent-workflow-management-popover {
+        right: 14px;
+        max-width: calc(100vw - 28px);
+    }
 }
 
 .automation-editor-view .agent-dag-workbench {

@@ -4,6 +4,7 @@ import re
 
 
 TOOLS = {
+    "text_measure": ("text_measure.py", {"--outline"}),
     "project": ("project_manager.py", {"--format", "--dir", "--quick-generate", "--copy", "--no-image-propagation", "--json", "--pretty", "--bundle", "--record-usage"}),
     "check_svg": ("svg_quality_checker.py", {"--quick-generate", "--canonical-authoring", "--stage", "--json", "--template-mode", "--template-kind"}),
     "finalize": ("finalize_svg.py", {"--json"}),
@@ -43,6 +44,13 @@ def relative_path(value: str, root: Path, must_exist: bool = False) -> Path:
 def command(tool: str, args: list, skill: Path, workspace: Path) -> list[str]:
     if tool not in TOOLS or not isinstance(args, list) or len(args) > 48:
         raise ValueError("工具或参数数量不受支持。")
+    if tool == "text_measure":
+        if len(args) != 3 or args[0] != "calibrate" or args[2] != "--outline":
+            raise ValueError("文字校准仅支持项目目录与 --outline。")
+        project = relative_path(args[1], workspace, must_exist=True)
+        parts = project.relative_to(workspace).parts
+        if not project.is_dir() or not parts or parts[0] in {"inputs", "delivery"}:
+            raise ValueError("文字校准需要可写的任务项目目录。")
     script, flags = TOOLS[tool]
     script_path = skill / "scripts" / script
     if not script_path.is_file():

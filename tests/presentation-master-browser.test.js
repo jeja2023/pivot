@@ -70,6 +70,50 @@ async function word(name, text) {
     return { name, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph(text)] }] })) };
 }
 
+test('工作中轮询保留用量展开与停止操作，短暂失败后自动恢复', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        let calls = 0;
+        await page.route('**/master/tasks/fixture-task', async route => {
+            calls++;
+            if (calls === 2) return route.fulfill({ status: 503, json: { error: '临时故障' } });
+            return route.fulfill({ json: { task: { id: 'fixture-task', status: 'working', request: { presentationId: '', tokenBudget: 1000000 },
+                usageDiagnostics: [{ call: 1, step: 1, inputTokens: 10, outputTokens: 2, cumulativeTokens: 12 }] } } });
+        });
+        await page.locator('#presentation-master-start').click();
+        await panel.locator('.presentation-master-usage summary').click();
+        await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
+        await expect(panel).toContainText('后台任务可能仍在运行', { timeout: 6000 });
+        await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
+        await expect.poll(() => calls, { timeout: 8000 }).toBeGreaterThanOrEqual(3);
+        await expect(panel.locator('.presentation-master-usage')).toHaveAttribute('open', '');
+        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+    } finally { await context.close(); }
+});
+
+test('必填信息缺失时显示醒目的错误提示，补全后可正常提交', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+            await page.setViewportSize(viewport);
+            await page.locator('#presentation-master-title').fill('');
+            await page.locator('#presentation-master-start').click();
+            const alert = panel.getByRole('alert');
+            await expect(alert).toHaveText('请填写名称和制作要求，并选择模型。');
+            assert.equal(await alert.evaluate(element => window.getComputedStyle(element).color), await panel.evaluate(element => {
+                const probe = document.createElement('button');
+                probe.className = 'btn-danger'; element.appendChild(probe);
+                const color = window.getComputedStyle(probe).color; probe.remove(); return color;
+            }));
+            await page.locator('#presentation-master-title').fill('测试演示');
+        }
+        await page.locator('#presentation-master-start').click();
+        await expect(panel).toContainText('测试制作已接收材料');
+    } finally { await context.close(); }
+});
+
 test('模板制作通过真实上传解析两份Word材料，合并补充文字并保留固定模板和完整正文', async () => {
     const context = await fixture();
     try {

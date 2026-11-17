@@ -89,6 +89,24 @@ test('多轮制作对旧写入收敛上下文，检查点保留原文且用实�
     assert.equal(current.usedTokens, 360);
 });
 
+test('动作间检查点保留已完成回执及未确认动作，恢复时不会伪称全部执行', async () => {
+    const fixture = driverFixture([]), current = state(), checkpoints = [];
+    const text = '页面内容', hash = require('node:crypto').createHash('sha256').update(text).digest('hex');
+    fixture.deps.execute = async (_user, _id, action) => {
+        if (action.action === 'health') return { status: 'ready', contentDigest: runtime.lock.contentDigest };
+        if (action.action === 'read_runtime') return { text: '上游权威指引', nextOffset: null };
+        if (action.action === 'write') return { path: action.path, sha256: hash };
+        if (action.action === 'read') { fixture.controller.abort(); throw new Error('执行中断'); }
+    };
+    fixture.deps.callModel = async () => ({ actions: [{ action: 'write', path: 'p.svg', text }, { action: 'read', path: 'inputs/a.md' }] });
+    fixture.hooks.checkpoint = async value => checkpoints.push(JSON.parse(JSON.stringify(value)));
+    await assert.rejects(() => drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps));
+    const last = checkpoints.at(-1), observations = JSON.parse(last.messages.at(-1).content);
+    assert.equal(observations[0].result.sha256, hash);
+    assert.equal(observations[1].action, 'pending');
+    assert.match(observations[1].error, /尚未确认/);
+});
+
 test('选择固定上游模板时复制和校验真实模板工作区，并将选择交给制作模型', async () => {
     const fixture = driverFixture([{ requestInput: { kind: 'confirmation', question: '确认按咨询决策模板制作？' } }]), current = state();
     current.request.profile = 'default'; current.request.template = { type: 'runtime', id: 'master-style-consulting-decision' };

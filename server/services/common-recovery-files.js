@@ -15,7 +15,12 @@ async function applicationRoots(env = process.env, projectRoot = path.resolve(__
     for (const [name, directory] of Object.entries(candidates)) {
         let stat;
         try { stat = await fs.lstat(directory); }
-        catch (error) { if (error.code === 'ENOENT') { aliases[name] = { path: directory, absent: true }; continue; } throw error; }
+        catch (error) {
+            if (error.code === 'ENOENT' && (allowMissing || name !== 'agent-skills' || !String(env.AGENT_SKILL_ROOT || '').trim())) {
+                aliases[name] = { path: directory, absent: true }; continue;
+            }
+            throw error;
+        }
         if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(directory) !== directory) throw new Error('共享恢复目录不得包含符号链接或别名。');
         aliases[name] = { path: directory, absent: false }; directories.push(directory);
     }

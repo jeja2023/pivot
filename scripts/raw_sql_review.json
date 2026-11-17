@@ -382,8 +382,8 @@
     {
       "file": "server/services/agent-skill-access.js",
       "count": 8,
-      "rationale": "技能授权修改在参数化事务内锁定所属发布，替换和删除 ACL 不暴露中间状态；管理权限及主体租户先行校验。",
-      "verification": "node scripts/run_node_tests.js tests/agent-skill-release-consistency.test.js tests/agent-skill-discovery-integration.test.js"
+      "rationale": "技能授权修改在参数化事务内锁定所属发布，替换和删除 ACL 不暴露中间状态；管理权限与主体租户先行校验。个人允许授权不能扩大受众，历史记录也不能绕过执行边界；单租户默认组织与发布使用统一解析，用户主体通过既有账号查询核对有效性。",
+      "verification": "node scripts/run_node_tests.js tests/agent-skill-audit-fixes.test.js tests/agent-skill-release-consistency.test.js tests/agent-skill-discovery-integration.test.js"
     },
     {
       "file": "server/services/agent-task-effect-executor.js",

@@ -403,11 +403,12 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
 
 async function recordAgentModelUsage(user, modelCfg, messages, output, source = 'agent', runId = '', options = {}) {
     const usage = options.usage || options.usageRef?.usage || null;
-    const usageInput = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens ?? 0) || 0;
-    const usageOutput = Number(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens ?? 0) || 0;
-    const estimated = estimateProviderUsage(messages, output);
-    const inputTokens = usageInput > 0 ? usageInput : estimated.inputTokens;
-    const outputTokens = usageOutput > 0 ? usageOutput : estimated.outputTokens;
+    const usageInput = usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens;
+    const usageOutput = usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens;
+    const estimated = options.estimatedUsage || estimateProviderUsage(messages, output);
+    const valid = value => value !== undefined && value !== null && Number.isFinite(Number(value)) && Number(value) >= 0;
+    const inputTokens = valid(usageInput) ? Number(usageInput) : estimated.inputTokens;
+    const outputTokens = valid(usageOutput) ? Number(usageOutput) : estimated.outputTokens;
     const promptCache = options.promptCache || options.usageRef?.promptCache || extractPromptCacheUsage(usage);
     recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
     let calibration = null;

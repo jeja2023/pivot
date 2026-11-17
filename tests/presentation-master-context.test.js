@@ -63,3 +63,44 @@ test('诊断按供应方实际用量累计，缺失用量明确标记估算，�
     assert.equal(state.usageDiagnostics[1].outputEstimated, true);
     assert.doesNotMatch(JSON.stringify(state.usageDiagnostics), /正文/);
 });
+
+test('重复的固定运行包页面只在模型视图保留一份，原始检查点和不同内容完整保留', () => {
+    const read = text => ({ role: 'user', content: JSON.stringify([{ action: 'read_runtime', result: { path: 'references/a.md', offset: 0, nextOffset: null, text } }]) });
+    const original = [read('相同指引'.repeat(1000)), read('不同指引'), read('相同指引'.repeat(1000))];
+    const copy = JSON.stringify(original), result = compactMessages(original);
+    assert.equal(JSON.stringify(original), copy);
+    assert.match(result.messages[0].content, /后续读取结果/);
+    assert.equal(result.messages[1].content, original[1].content);
+    assert.equal(result.messages[2].content, original[2].content);
+    assert.ok(estimateMessagesTokens(result.messages) < estimateMessagesTokens(original));
+    const initial = { role: 'user', content: JSON.stringify({ runtimeDocument: 'references/a.md', path: 'references/a.md', offset: 0, nextOffset: null, text: '相同指引' }) };
+    const duplicate = read('相同指引');
+    const combined = compactMessages([initial, duplicate]);
+    assert.match(combined.messages[0].content, /后续读取结果/);
+    assert.equal(combined.messages[1].content, duplicate.content);
+});
+
+test('长观察按字符分页且保留 JSON 与写入回执', () => {
+    const { boundedObservation } = require('../server/services/presentations/master/observations');
+    const text = '🧭'.repeat(13000), action = { action: 'read', path: 'inputs/a.md', offset: 30 };
+    const result = boundedObservation(action, { path: action.path, text, nextOffset: null, totalChars: 13030 });
+    assert.equal(Array.from(result.text).length, 12000);
+    assert.equal(result.nextOffset, 12030);
+    const receipts = [{ action: 'write', result: { path: 'p.svg', sha256: 'a'.repeat(64) } }, { action: 'read', result }];
+    assert.deepEqual(JSON.parse(JSON.stringify(receipts)), receipts);
+});
+
+test('任务与平台模型账目对图片缺失用量、有效零值和实际用量采用相同口径', async () => {
+    const { recordAgentModelUsage } = require('../server/services/agent-model');
+    const messages = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + 'A'.repeat(200000) } }] }];
+    const estimate = estimateMessagesTokens(messages), output = '完成', estimateOutput = require('../server/llm').estimateTokens(output);
+    const plan = { inputEstimate: estimate, originalEstimate: estimate, breakdown: {} };
+    for (const usage of [undefined, { prompt_tokens: 0, completion_tokens: 10 }, { prompt_tokens: 100, completion_tokens: 20 }, { prompt_tokens: 5 }]) {
+        const state = { steps: 0, usedTokens: 0 }, usageRef = { usage };
+        usageRecord(state, plan, usageRef, output, 0, require('../server/llm').estimateTokens);
+        const recorded = await recordAgentModelUsage({ id: 0 }, { id: 0 }, messages, output, 'ppt_master_engine', '',
+            { usageRef, estimatedUsage: { inputTokens: estimate, outputTokens: estimateOutput } });
+        assert.equal(state.usedTokens, recorded.totalTokens);
+    }
+    assert.ok(estimate < 5000);
+});

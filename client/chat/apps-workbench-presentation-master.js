@@ -150,7 +150,7 @@
         });
     }
     function errorText(error) { const message = String(error?.message || ''); return /[\u3400-\u9fff]/u.test(message) ? message : '处理未完成，请检查文件、网络或服务连接后重试。'; }
-    function showError(error) { if (error.name === 'AbortError') return; const status = byId('presentation-master-status'); status.replaceChildren(node('p', '', errorText(error))); status.scrollIntoView?.({ block: 'nearest' }); }
+    function showError(error) { if (error.name === 'AbortError') return; const status = byId('presentation-master-status'), message = node('p', 'presentation-master-task-feedback', errorText(error)); message.setAttribute('role', 'alert'); status.replaceChildren(message); status.scrollIntoView?.({ block: 'nearest' }); }
 
     function renderEngineReady() {
         const panel = byId('presentation-master-status');
@@ -209,12 +209,12 @@
             fallback.addEventListener('click', () => { const profile = window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master'); closeModal(); helpers.openCreateModal(); window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-create', profile); });
             byId('presentation-master-status').replaceChildren(node('p', '', '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。'), fallback);
         }
-        else if (task && (['working', 'input_required'].includes(task.status) || task.recoverable) && task.request?.presentationId === (state.active?.id || '')) await poll(task.id, ++epoch);
+        else if (task && (['working', 'input_required'].includes(task.status) || task.inputRequest || task.recoverable || task.result?.files?.length) && task.request?.presentationId === (state.active?.id || '')) await poll(task.id, ++epoch);
         else {
             task = null;
             const data = await helpers.requestJson(API + '/tasks/latest?presentationId=' + encodeURIComponent(state.active?.id || ''));
             if (sequence !== epoch) return;
-            if (data.task && (['working', 'input_required'].includes(data.task.status) || data.task.recoverable)) { task = data.task; await poll(task.id, ++epoch); }
+            if (data.task && (['working', 'input_required'].includes(data.task.status) || data.task.inputRequest || data.task.recoverable || data.task.result?.files?.length)) { task = data.task; await poll(task.id, ++epoch); }
             else renderEngineReady();
         }
     }
@@ -257,36 +257,57 @@
             if (!byId('presentation-master-modal').classList.contains('hidden')) byId('presentation-master-status').scrollIntoView({ block: 'nearest' });
         } finally { if (preparation === controller) { preparation = null; button.disabled = false; button.textContent = '开始制作'; } }
     }
-    async function poll(id, sequence) {
-        const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id));
+    async function poll(id, sequence, failures = 0) {
+        let data;
+        try { data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id)); }
+        catch (error) {
+            if (sequence !== epoch || byId('presentation-master-modal').classList.contains('hidden')) return;
+            const panel = byId('presentation-master-status');
+            let warning = panel.querySelector('[data-master-poll-error]');
+            if (!warning) { warning = node('div', 'presentation-master-task-feedback'); warning.dataset.masterPollError = 'true'; warning.setAttribute('role', 'alert'); panel.appendChild(warning); }
+            warning.replaceChildren(node('p', '', '状态暂时无法更新，后台任务可能仍在运行。'));
+            const retry = node('button', 'btn-secondary', '重新查询状态'); retry.type = 'button';
+            retry.addEventListener('click', () => { retry.disabled = true; void poll(id, ++epoch).catch(showError); }); warning.appendChild(retry);
+            if (failures < 3) window.setTimeout(() => poll(id, sequence, failures + 1).catch(showError), 3000);
+            return;
+        }
         if (sequence !== epoch) return;
         task = data.task; renderTask(task);
         if (['working'].includes(task.status) && !byId('presentation-master-modal').classList.contains('hidden')) window.setTimeout(() => poll(id, sequence).catch(showError), 1500);
     }
     function renderTask(value) {
-        const panel = byId('presentation-master-status'); panel.replaceChildren();
+        const panel = byId('presentation-master-status'), previous = panel.querySelector('.presentation-master-usage');
+        const sameTask = panel.dataset.taskId === String(value.id), wasOpen = sameTask && previous?.open, wasFocused = sameTask && previous?.contains(document.activeElement);
+        const scroll = panel.closest('.workspace-modal-body')?.scrollTop || 0;
+        panel.dataset.taskId = String(value.id); panel.replaceChildren();
         const feedback = node('p', 'presentation-master-task-feedback'); feedback.setAttribute('role', 'alert');
         const head = node('div', 'presentation-master-task-head');
         const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: '需要人工确认', completed: '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
         head.appendChild(statusBadge);
         panel.appendChild(head);
-        if (value.status !== 'input_required') panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
+        if (!value.inputRequest) panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
         const currentBudget = Number(value.request?.tokenBudget);
         const budgetText = Number.isSafeInteger(currentBudget) && currentBudget > 0 ? currentBudget.toLocaleString('zh-CN') : '未记录';
         panel.appendChild(node('p', 'presentation-master-task-summary', `步骤 ${value.steps || 0}；已用约 ${Number(value.usedTokens || 0).toLocaleString('zh-CN')} 令牌；本任务累计预算 ${budgetText} 令牌。`));
         const modal = byId('presentation-master-modal');
+        if ((value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
+            const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);
+            modal.dataset.modelTask = String(value.id);
+        }
         if (value.recoverable && modal.dataset.budgetTask !== value.id && Number.isSafeInteger(value.request?.tokenBudget)) {
             byId('presentation-master-budget').value = value.request.tokenBudget;
             modal.dataset.budgetTask = value.id;
         }
         if (Array.isArray(value.usageDiagnostics) && value.usageDiagnostics.length) {
             const details = node('details', 'presentation-master-usage'), list = node('ol');
+            details.open = Boolean(wasOpen);
             details.appendChild(node('summary', '', '查看每轮模型用量'));
             for (const item of value.usageDiagnostics) {
                 const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
                 list.appendChild(node('li', '', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）：输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}；预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`));
             }
             details.appendChild(list); panel.appendChild(details);
+            if (wasFocused) details.querySelector('summary')?.focus({ preventScroll: true });
         }
         if (value.recoverable && value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED') {
             const budget = byId('presentation-master-budget');
@@ -296,10 +317,10 @@
         }
         if (['working', 'input_required'].includes(value.status)) {
             const cancel = node('button', 'btn-secondary', '停止制作'); cancel.type = 'button';
-            cancel.addEventListener('click', async () => { cancel.disabled = true; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); task = data.task; renderTask(task); } catch (error) { cancel.disabled = false; feedback.textContent = errorText(error); } });
+            cancel.addEventListener('click', async () => { cancel.disabled = true; const sequence = ++epoch; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); if (sequence !== epoch) return; task = data.task; renderTask(task); } catch (error) { if (sequence === epoch) { cancel.disabled = false; feedback.textContent = errorText(error); window.setTimeout(() => poll(value.id, sequence).catch(showError), 3000); } } });
             head.appendChild(cancel);
         }
-        if (value.status === 'input_required') {
+        if (value.inputRequest) {
             const request = value.inputRequest || {}, confirmation = request.kind === 'confirmation';
             panel.appendChild(node('p', 'presentation-master-task-question', request.question || '请提供继续制作所需的答复。'));
             if (request.context) panel.appendChild(node('div', 'presentation-master-task-context', request.context));
@@ -320,6 +341,7 @@
             panel.append(answer, actions);
         }
         if (value.recoverable) {
+            panel.appendChild(node('p', 'presentation-master-task-message', '已保存任务检查点；继续前会核对现有文件和权限。'));
             const resume = node('button', 'btn-secondary', '从检查点继续'); resume.type = 'button';
             resume.addEventListener('click', async () => { resume.disabled = true; try {
                 const budget = byId('presentation-master-budget');
@@ -329,7 +351,8 @@
                 }
                 await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', post({
                     tokenBudget: Math.max(Number(budget.value), Number(value.request?.tokenBudget || 0)),
-                    maxSteps: Math.max(Number(byId('presentation-master-steps').value), Number(value.request?.maxSteps || 0))
+                    maxSteps: Math.max(Number(byId('presentation-master-steps').value), Number(value.request?.maxSteps || 0)),
+                    modelId: byId('presentation-master-model').value
                 }));
                 await poll(value.id, ++epoch);
             } catch (error) { resume.disabled = false; panel.appendChild(node('p', '', errorText(error))); } }); panel.appendChild(resume);
@@ -353,6 +376,7 @@
         }
         if (actionRow.children.length) panel.appendChild(actionRow);
         panel.appendChild(feedback);
+        if (sameTask && panel.closest('.workspace-modal-body')) panel.closest('.workspace-modal-body').scrollTop = scroll;
     }
     function bind(currentState, currentHelpers) {
         state = currentState; helpers = currentHelpers;

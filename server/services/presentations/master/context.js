@@ -29,6 +29,32 @@ function compactMessages(messages) {
             result[index] = { ...message, content: JSON.stringify({ ...turn, actions }) };
         }
     }
+    // 固定运行包中的完全相同页只保留最后一次全文；不同页或不同内容不合并。
+    const seen = new Set();
+    for (let index = result.length - 1; index >= 0; index--) {
+        const message = result[index];
+        if (message.role !== 'user' || typeof message.content !== 'string') continue;
+        let observations;
+        try { observations = JSON.parse(message.content); } catch (_) { continue; }
+        if (!Array.isArray(observations)) {
+            if (typeof observations?.runtimeDocument === 'string' && typeof observations.text === 'string') {
+                const key = JSON.stringify([observations.runtimeDocument, observations.offset ?? 0, observations.nextOffset ?? null, observations.text]);
+                if (seen.has(key)) result[index] = { ...message, content: JSON.stringify({ runtimeDocument: observations.runtimeDocument, offset: observations.offset ?? 0, nextOffset: observations.nextOffset ?? null, note: '相同运行包页的全文保留在后续读取结果中。' }) };
+                else seen.add(key);
+            }
+            continue;
+        }
+        let changed = false;
+        const revised = observations.map(item => {
+            if (item?.action !== 'read_runtime' || item.error || typeof item.result?.path !== 'string' || typeof item.result?.text !== 'string') return item;
+            const key = JSON.stringify([item.result.path, item.result.offset ?? 0, item.result.nextOffset ?? null, item.result.text]);
+            if (!seen.has(key)) { seen.add(key); return item; }
+            changed = true;
+            const { text: _text, ...rest } = item.result;
+            return { ...item, result: { ...rest, note: '相同运行包页的全文保留在后续读取结果中。' } };
+        });
+        if (changed) result[index] = { ...message, content: JSON.stringify(revised) };
+    }
     return { messages: result, compactedWrites };
 }
 

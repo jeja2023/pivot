@@ -38,14 +38,14 @@ async function main() {
     const analysis = path.join(root, 'analysis');
     const blobs = path.join(root, 'agent-blobs');
     const packs = path.join(root, 'agent-runtime-packs');
-    const skills = path.join(data, 'agent-skills');
+    const skills = path.join(root, 'custom-agent-skills');
     const port = await reservePort();
     const base = `http://127.0.0.1:${port}`;
     const bin = process.env.PIVOT_RESTORE_PG_BIN || '';
     const executable = name => bin ? path.join(bin, process.platform === 'win32' ? `${name}.exe` : name) : name;
     const env = { ...process.env, DATABASE_URL: url, PG_TEST_SCHEMA: schema, PG_IDLE_TIMEOUT_MS: '100', PIVOT_TEST_PG_SYNC: 'true',
         DATA_DIR: data, PIVOT_ARTIFACT_CAS_DIR: cas, PIVOT_UPLOAD_DIR: uploads, UPLOAD_DIR: uploads,
-        PIVOT_DOCUMENT_PROCESSING_DIR: documents, PIVOT_ANALYSIS_DIR: analysis, AGENT_BLOB_DIR: blobs, PIVOT_RUNTIME_PACK_ROOT: packs,
+        PIVOT_DOCUMENT_PROCESSING_DIR: documents, PIVOT_ANALYSIS_DIR: analysis, AGENT_BLOB_DIR: blobs, PIVOT_RUNTIME_PACK_ROOT: packs, AGENT_SKILL_ROOT: skills,
         LOG_DIR: path.join(root, 'logs'),
         PORT: String(port), DEFAULT_ADMIN_PASSWORD: 'RestoreTest123!', JWT_SECRET: 'restore-test-jwt-secret-012345678901234567890123',
         DATA_ENCRYPTION_KEY: 'restore-test-data-secret-012345678901234567890123', TZ: 'Asia/Shanghai', PG_TIMEZONE: 'Asia/Shanghai' };

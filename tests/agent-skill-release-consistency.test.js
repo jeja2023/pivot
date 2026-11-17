@@ -36,9 +36,9 @@ test('灰度列表绑定真实版本，暂停和回滚保留其他发布，并�
         assert.equal(Number(context.releaseId), Number(first.id));
         await assert.rejects(() => getAgentSkillExecutionContext(user, name, { releaseId: String(second.id), version: '2.0.0', digest: current.digest }), /变化/);
 
-        const permission = { subjectType: 'role', subjectId: user.role, action: 'use' };
+        const permission = { subjectType: 'user', subjectId: String(user.id), action: 'use' };
         await Promise.all(['deny', 'allow', 'deny'].map(effect => upsertSkillReleasePermission(first.id, user, { ...permission, effect })));
-        const rows = await query("SELECT id FROM resource_permissions WHERE resource_type='skill_release' AND resource_id=? AND subject_type='role' AND subject_id=? AND action='use'", [String(first.id), user.role]);
+        const rows = await query("SELECT id FROM resource_permissions WHERE resource_type='skill_release' AND resource_id=? AND subject_type='user' AND subject_id=? AND action='use'", [String(first.id), String(user.id)]);
         assert.equal(rows.length, 1);
         await execute("DELETE FROM resource_permissions WHERE resource_type='skill_release' AND resource_id=?", [String(first.id)]);
 

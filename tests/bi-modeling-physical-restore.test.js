@@ -68,7 +68,7 @@ test('durable whole-cluster PITR restores a common shared-file point after compl
     await fs.writeFile(publicKey, signing.publicKey.export({ type: 'spki', format: 'pem' }), { mode: 0o600 });
     const environment = { DATA_DIR: data, PIVOT_UPLOAD_DIR: uploads, UPLOAD_DIR: uploads, PIVOT_ARTIFACT_CAS_DIR: path.join(application, 'cas'),
         PIVOT_DOCUMENT_PROCESSING_DIR: path.join(application, 'documents'), PIVOT_ANALYSIS_DIR: path.join(application, 'analysis'),
-        AGENT_BLOB_DIR: path.join(application, 'blobs'), PIVOT_RUNTIME_PACK_ROOT: path.join(application, 'packs'),
+        AGENT_BLOB_DIR: path.join(application, 'blobs'), PIVOT_RUNTIME_PACK_ROOT: path.join(application, 'packs'), AGENT_SKILL_ROOT: path.join(data, 'agent-skills'),
         DATA_ANALYSIS_SECURITY_JOURNAL_DIR: securityRoot, DATA_ANALYSIS_SECURITY_KEY_FILE: securityKey, DATA_ANALYSIS_SECURITY_AUTHORITY_PUBLIC_KEY_FILE: publicKey };
     for (const directory of [data, uploads, ...Object.values(require('../server/services/offline-backup-bundle').backupPaths(environment))]) await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const fixtureFiles = [];

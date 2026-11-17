@@ -16,7 +16,7 @@ const {
     normalizeSubjectType
 } = require('./enterprise-access');
 const { query, queryOne, transaction } = require('../db/client');
-const { normalizeTenantId } = require('./agent-tenant-context');
+const { normalizeTenantId, resolveTenantContext } = require('./agent-tenant-context');
 const { normalizeReleaseScope, parseOwnerKey } = require('./agent-skill-scope');
 
 const SKILL_RELEASE_RESOURCE_TYPE = 'skill_release';
@@ -44,10 +44,10 @@ async function resolveAccessSubjects(user) {
     const userId = Number.parseInt(user?.id, 10) || 0;
     const context = await getUserEnterpriseContext(userId);
     const teamIds = (context.teams || []).map(team => Number.parseInt(team.id, 10)).filter(Boolean);
-    const directTenantId = normalizeTenantId(user?.tenant_id ?? user?.tenantId);
+    const tenant = userId ? await resolveTenantContext(user) : { resolvable: false };
     const organizationIds = [...new Set([
         ...(context.organizations || []).map(item => Number.parseInt(item.id, 10)).filter(Boolean),
-        ...(directTenantId ? [directTenantId] : [])
+        ...(tenant.resolvable ? [tenant.tenantId] : [])
     ])];
     const teamRoles = new Map((context.teams || []).map(team => [Number.parseInt(team.id, 10), String(team.role || 'member').toLowerCase()]));
     const subjects = [
@@ -105,7 +105,7 @@ async function evaluateSkillReleaseAccess({ user, release, action = 'use', subje
     // 个人范围：仅创建者本人，或同租户管理员做治理动作。
     if (scope === 'personal') {
         if (owner.type === 'user' && owner.id === context.userId) return { allowed: true, reason: '', via: 'owner' };
-        if (aclDecision === 'allow') return { allowed: true, reason: '', via: 'acl_allow' };
+        // 历史 ACL 也不能把无签名个人配方变成共享技能；扩大受众必须经过共享发布。
         if (isTenantAdmin(user) && required === 'manage'
             && (!releaseTenantId || context.organizationIds.includes(releaseTenantId))) {
             return { allowed: true, reason: '', via: 'tenant_admin' };
@@ -220,8 +220,9 @@ async function assertPermissionSubjectTenant(release, permission) {
         return;
     }
     if (permission.subjectType === 'user') {
-        const context = await getUserEnterpriseContext(permission.subjectId);
-        if (!(context.organizations || []).some(item => Number(item.id) === tenantId)) {
+        const subject = await require('../auth').getUserById(permission.subjectId);
+        const context = subject ? await resolveAccessSubjects(subject) : null;
+        if (subject?.status !== 'active' || !context?.organizationIds.includes(tenantId)) {
             throw accessError('用户授权主体必须属于当前技能租户。', 'SKILL_PERMISSION_TENANT_MISMATCH', 409);
         }
         return;
@@ -255,6 +256,11 @@ async function upsertSkillReleasePermission(releaseId, user, input = {}) {
     const release = await getManageableSkillRelease(releaseId, user);
     if (!release) return null;
     const permission = normalizePermissionInput(input);
+    const owner = parseOwnerKey(release.owner_key);
+    if (normalizeReleaseScope(release.rollout_scope) === 'personal' && permission.effect === 'allow'
+        && !(permission.subjectType === 'user' && owner.type === 'user' && permission.subjectId === String(owner.id))) {
+        throw accessError('个人技能不能通过额外授权共享，请先由管理员批准并发布到团队或组织。', 'SKILL_PERSONAL_SHARING_FORBIDDEN', 409);
+    }
     await assertPermissionSubjectTenant(release, permission);
     return transaction(async trx => {
         await trx.queryOne('SELECT id FROM agent_skill_releases WHERE id = ? FOR UPDATE', [release.id]);

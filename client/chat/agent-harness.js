@@ -481,7 +481,7 @@
             const scopeLabel = ({ user: '个人', shared: '共享', global: '全局' })[skill.scope] || skill.scope || '个人';
             const statusBadge = organizationCandidate ? `<span class="agent-inbox-type-badge badge-approval">组织候选</span>` : status === 'enabled' ? `<span class="agent-inbox-type-badge badge-run">已启用</span>` : `<span class="agent-inbox-type-badge badge-event">已停用</span>`;
             const description = organizationCandidate ? `来自个人经验 · ${organizationCandidate.status === 'pending_review' ? '待管理员审批' : organizationCandidate.status === 'approved' ? '已审批，待验证' : '验证/发布中'} · ${skill.description || '脱敏受控候选'}` : skill.description || '未填写说明';
-            return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(description)}">${escape(shortText(description, 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.name)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
+            return `<tr class="${status === 'disabled' ? 'is-muted' : ''}"><td class="tc">${startIndex + i + 1}</td><td title="${escapeAttr(skill.title || skill.name)}">${escape(shortText(skill.title || skill.name, 20))}</td><td class="tc">${escape(scopeLabel)}</td><td class="tc">${statusBadge}</td><td class="mono" title="${escapeAttr(`${skill.name} v${skill.version}`)}">${escape(shortText(`${skill.name || ''}`, 14))} · v${escape(skill.version || '')}</td><td title="${escapeAttr(description)}">${escape(shortText(description, 60))}</td><td class="tc">${escape(formatDate(skill.updated_at))}</td><td class="tc"><div class="aht-actions">${own ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-manage="${escapeAttr(skill.versionId || skill.release?.skill_version_id || skill.id)}" data-agent-skill-release="${escapeAttr(skill.releaseId || '')}">治理</button>` : ''}${own && status === 'enabled' ? `<button type="button" class="btn-secondary btn-xs" data-agent-harness-disable-skill="${escapeAttr(skill.releaseId)}">停用</button>` : ''}${own && ['draft', 'validated'].includes(status) ? `<button type="button" class="btn-secondary btn-xs" data-agent-skill-validate="${escapeAttr(skill.id)}">验证</button>` : ''}${own && status === 'validated' ? `<button type="button" class="btn-primary btn-xs" data-agent-skill-publish="${escapeAttr(skill.id)}">发布</button>` : ''}</div></td></tr>`;
         }).join('')}</tbody></table></div>`);
 
         if (paginationContainer) { if (window.Pivot.legacy.renderWorkspacePagination) window.Pivot.legacy.renderWorkspacePagination(paginationContainer, { total, limit, page: currentPage, onPageChange: newPage => { state.skillsPage = newPage; renderSkills(); } }); else paginationContainer.replaceChildren(); }
@@ -508,9 +508,8 @@
             .map(item => [String(item.artifactVersionId || ''), item]));
         const published = Array.isArray(data.data) ? data.data : [];
         const drafts = (Array.isArray(versions.data) ? versions.data : []).filter(version => !published.some(skill => String(skill.versionId) === String(version.id))).map(version => ({ ...version, title: version.name, scope: 'user', status: version.status === 'published' ? 'disabled' : version.status === 'validated' ? 'validated' : 'draft', user_id: version.created_by }));
-        const releaseMap = new Map((Array.isArray(releases.data) ? releases.data : []).map(release => [`${release.name}@${release.version}`, release]));
         state.skills = [...published, ...drafts].map(skill => {
-            const release = (Array.isArray(releases.data) ? releases.data : []).find(item => String(item.id) === String(skill.releaseId)) || releaseMap.get(`${skill.name}@${skill.version}`) || null;
+            const release = (Array.isArray(releases.data) ? releases.data : []).find(item => String(item.id) === String(skill.releaseId)) || (Array.isArray(releases.data) ? releases.data : []).find(item => String(item.skill_version_id) === String(skill.versionId || skill.id)) || null;
             return { ...skill, release, releaseId: skill.releaseId || release?.id || null, versionId: skill.versionId || release?.skill_version_id || skill.id || null };
         });
         renderSkills();
@@ -555,10 +554,10 @@
         finally { if (input) { input.disabled = false; input.value = ''; } }
     }
 
-    async function disableSkill(name) {
+    async function disableSkill(releaseId) {
         try {
-            await apiJson(`${API_BASE}/agents/skills/${encodeURIComponent(name)}/disable`, { method: 'POST' });
-            setNotice('技能包已停用。', 'success');
+            await apiJson(`${API_BASE}/agents/skills/releases/${encodeURIComponent(releaseId)}/pause`, { method: 'POST' });
+            setNotice('所选技能发布已暂停。', 'success');
             await loadSkills();
         } catch (error) { setNotice(error.message || '技能包停用失败。', 'error'); }
     }
@@ -933,7 +932,7 @@
             if (publish) publishSkillVersion(publish.dataset.agentSkillPublish);
             const manage = event.target.closest('[data-agent-skill-manage]');
             if (manage) {
-                const skill = state.skills.find(item => String(item.versionId || item.id) === String(manage.dataset.agentSkillManage));
+                const skill = state.skills.find(item => String(item.versionId || item.id) === String(manage.dataset.agentSkillManage) && String(item.releaseId || '') === String(manage.dataset.agentSkillRelease || ''));
                 if (skill) window.Pivot?.moduleApi?.('agent.skillManagement')?.open?.(skill);
             }
         });

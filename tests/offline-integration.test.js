@@ -140,6 +140,38 @@ test('备份明确记录缺失目录，排除临时文件并兼容旧清单', as
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('自定义技能目录进入完整备份并可恢复读取，显式目录缺失时拒绝备份', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-skill-backup-'));
+    const env = { DATA_DIR: path.join(root, 'data'), PIVOT_UPLOAD_DIR: path.join(root, 'uploads'), AGENT_SKILL_ROOT: path.join(root, 'custom-skills') };
+    const sources = backupPaths(env, root);
+    try {
+        assert.equal(sources['agent-skills'], env.AGENT_SKILL_ROOT);
+        for (const directory of [sources.cas, sources.uploads]) await fs.mkdir(directory, { recursive: true });
+        const JSZip = require('jszip'), zip = new JSZip();
+        zip.file('SKILL.json', JSON.stringify({ id: 'backup-skill', name: 'backup-skill', version: '1.0.0', files: ['references/rules.md'] }));
+        zip.file('references/rules.md', '恢复后必须完整保留');
+        const zipFile = path.join(root, 'skill.zip');
+        await fs.writeFile(zipFile, await zip.generateAsync({ type: 'nodebuffer' }));
+        const installed = await require('../server/services/agent-skill-packages').installSkillPackage(zipFile, { installRoot: sources['agent-skills'], requireSignature: false });
+        const { applicationRoots } = require('../server/services/common-recovery-files');
+        assert.ok((await applicationRoots(env, root)).roots.includes(env.AGENT_SKILL_ROOT));
+        const output = path.join(root, 'backup');
+        const options = { output, env, maintenanceConfirmed: true, dumpDatabase: file => fs.writeFile(file, '隔离测试数据库转储') };
+        const manifest = await createBackupBundle(options);
+        assert.equal(manifest.sources['agent-skills'], 'included');
+        assert.ok(manifest.files.some(item => item.path.endsWith('/references/rules.md')));
+        await verifyBackupBundle(output);
+        const restored = path.join(root, 'restored-skills');
+        await fs.cp(path.join(output, 'agent-skills'), restored, { recursive: true });
+        const pack = await require('../server/services/agent-skill-resources').readInstalledSkillResources(path.join(restored, 'sha256', installed.contentDigest), { root: restored });
+        assert.equal(pack.entries.find(item => item.name === 'references/rules.md').data.toString('utf8'), '恢复后必须完整保留');
+        await assert.rejects(createBackupBundle({ ...options, output: path.join(root, 'failed'), env: { ...env, AGENT_SKILL_ROOT: path.join(root, 'missing-skills') } }), error => error.code === 'ENOENT');
+        await assert.rejects(applicationRoots({ ...env, AGENT_SKILL_ROOT: path.join(root, 'missing-skills') }, root), error => error.code === 'ENOENT');
+        assert.equal((await applicationRoots({ ...env, AGENT_SKILL_ROOT: path.join(root, 'missing-skills') }, root, { allowMissing: true })).aliases['agent-skills'].absent, true);
+        await assert.rejects(fs.stat(path.join(root, 'failed')), error => error.code === 'ENOENT');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('图形拒绝脚本、外部资源和异常结构，安全矢量与 PNG 导出均可用', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="green"/></svg>';
     assert.match(sanitizeSvg(svg), /rect/);

@@ -67,22 +67,6 @@
         editor.classList.add('workflow-product-modern');
         const libraryBar = editor.querySelector('.agent-dag-library-bar');
         const actionsGroup = editor.querySelector('.agent-dag-library-bar-actions') || libraryBar;
-        let nameInput = el('workflow-product-name');
-        if (!nameInput) {
-            nameInput = document.createElement('input');
-            nameInput.id = 'workflow-product-name';
-            nameInput.className = 'form-input workflow-product-name';
-            nameInput.placeholder = '未命名工作流';
-            nameInput.setAttribute('aria-label', '工作流名称');
-            const picker = el('agent-workflow-picker') || el('agent-workflow-select');
-            if (picker) picker.after(nameInput);
-            else if (libraryBar) libraryBar.prepend(nameInput);
-            nameInput.addEventListener('input', () => {
-                bridge().setName(nameInput.value);
-                drafts().changed();
-                updateRunButtonState();
-            });
-        }
         let save = el('workflow-product-save');
         if (!save) {
             save = document.createElement('span');
@@ -155,6 +139,7 @@
         feedback.querySelector('[data-draft-export]').addEventListener('click', () => download());
         const management = el('agent-workflow-management-menu');
         for (const [id, label, action] of [
+            ['workflow-product-rename-draft', '修改草稿名称', () => void renameDraft()],
             ['agent-workflow-ai-edit-btn', '用自然语言修改', () => window.Pivot.moduleApi('agent.workflowAuthoring').describe()],
             ['agent-workflow-export-draft-btn', '导出当前草稿', () => download()]
         ]) {
@@ -184,6 +169,7 @@
         for (const id of ['workflow-product-results', 'workflow-product-run-form', 'workflow-product-start', 'workflow-product-release']) {
             const panel = document.createElement('section'); panel.id = id; panel.className = 'workflow-product-panel'; panel.hidden = true;
             if (id === 'workflow-product-start') el('automation-assets-view').prepend(panel);
+            else if (id === 'workflow-product-results') document.body.appendChild(panel);
             else editor.appendChild(panel);
         }
         el('agent-dag-spec')?.addEventListener('input', event => {
@@ -210,10 +196,7 @@
         const exportDraftBtn = el('agent-workflow-export-draft-btn');
         if (aiEditBtn) aiEditBtn.hidden = bridge().readOnly();
         if (exportDraftBtn) exportDraftBtn.hidden = bridge().readOnly();
-        const nameInput = el('workflow-product-name');
-        if (nameInput) {
-            nameInput.value = bridge().capture()?.name || bridge().current()?.name || '';
-        }
+        updateRenameDraft();
         updateRunButtonState();
         refreshFeedback();
         if (!isOpeningDraft) {
@@ -230,6 +213,19 @@
             updateRunButtonState();
         }
     }
+    function updateRenameDraft() {
+        const button = el('workflow-product-rename-draft');
+        if (button) button.hidden = bridge().readOnly() || Boolean(bridge().current()?.id);
+    }
+    async function chooseDraftName(value = '') {
+        const selected = await window.Pivot.legacy.showInputPrompt({ title: '工作流草稿名称', message: '填写工作流名称，之后可在更多操作中修改。', value, maxLength: 100, required: true, requiredMessage: '请填写工作流名称。' });
+        return selected === null || selected === undefined ? null : String(selected).trim().slice(0, 100) || null;
+    }
+    async function renameDraft() {
+        if (bridge().readOnly() || bridge().current()?.id) return;
+        const before = drafts().current()?.key, owner = bridge().userId(), name = await chooseDraftName(bridge().capture().name);
+        if (name && owner === bridge().userId() && el('automation-editor-view')?.getClientRects().length && !bridge().readOnly() && !bridge().current()?.id && before === drafts().current()?.key) bridge().setName(name);
+    }
     async function release() { await window.Pivot.moduleApi('agent.workflowRelease').open(); }
     async function start() {
         mount(); const panel = el('workflow-product-start'); panel.hidden = false;
@@ -244,11 +240,14 @@
         const models = bridge().models(); const chooser = document.createElement('label'); chooser.className = 'workflow-product-field';
         PivotSafeHtml.setHtml(chooser, `<span>模板使用的文本模型</span><select class="form-input" data-template-model>${models.map(model => `<option value="${escape(model.id)}">${escape(model.name)}</option>`).join('')}<option value="">稍后配置，先查看示例与画布</option></select>${!models.length ? '<small>当前没有可用文本模型。示例结果可以直接查看，正式试运行前请在模型设置中配置授权模型。</small>' : ''}`);
         panel.querySelector('h3').after(chooser);
-        panel.querySelectorAll('[data-template]').forEach(button => button.addEventListener('click', () => {
+        panel.querySelectorAll('[data-template]').forEach(button => button.addEventListener('click', async () => {
             const value = window.Pivot.moduleApi('agent.workflowTemplates').instantiate(button.dataset.template, chooser.querySelector('select').value);
-            bridge().newWorkflow({ name: value.name, description: value.description }); bridge().write(value.spec); drafts().changed(); panel.hidden = true;
+            const owner = bridge().userId();
+            const name = await chooseDraftName(value.name);
+            if (!name || owner !== bridge().userId() || panel.hidden || !panel.getClientRects().length) return;
+            bridge().newWorkflow({ name, description: value.description }); bridge().write(value.spec); drafts().changed(); panel.hidden = true;
         }));
-        panel.querySelector('[data-start-blank]').addEventListener('click', () => { panel.hidden = true; bridge().newWorkflow({}); });
+        panel.querySelector('[data-start-blank]').addEventListener('click', async () => { const owner = bridge().userId(), name = await chooseDraftName(); if (!name || owner !== bridge().userId() || panel.hidden || !panel.getClientRects().length) return; panel.hidden = true; bridge().newWorkflow({ name }); });
         panel.querySelector('[data-start-ai]').addEventListener('click', () => window.Pivot.moduleApi('agent.workflowAuthoring').describe(el('workflow-product-start-detail')));
         panel.querySelectorAll('[data-open-draft]').forEach(button => button.addEventListener('click', async () => {
             const entry = draftMap.get(button.dataset.openDraft);
@@ -289,8 +288,8 @@
         await bridge().request(`/agents/workflows/${id}/preference`, { method: 'PATCH', body: JSON.stringify({ favorite }) });
         await refreshPreferences(); window.Pivot.moduleApi('agent.automation').renderAssetCenter();
     }
-    function closed() { draftId = null; drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
-    window.Pivot.registerModule('agent.workflowExperience', { mount, opened, changed, status, saveStatus, offerRecovery, compareDraft, start, release, closed,
+    function closed() { draftId = null; drafts().detach(); window.Pivot.moduleApi('agent.workflowResults').stop(); window.Pivot.moduleApi('agent.workflowResults').close({ restoreFocus: false }); window.Pivot.moduleApi('agent.workflowRunForm')?.close(); window.Pivot.moduleApi('agent.workflowRelease')?.close(); }
+    window.Pivot.registerModule('agent.workflowExperience', { mount, opened, changed, status, saveStatus, offerRecovery, compareDraft, start, release, closed, updateRenameDraft,
         showNodeResult: (...args) => window.Pivot.moduleApi('agent.workflowResults').nodeResult(...args),
         refreshPreferences, toggleFavorite, recent, openRecent, preferences: () => preferences });
 })();

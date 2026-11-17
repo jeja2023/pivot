@@ -53,3 +53,48 @@ test('完整引擎接纳与任务创建在同一事务中，多个请求不能�
         const next = await create(); created.push(next.id); assert.notEqual(next.id, created[0]);
     } finally { for (const id of created) await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [id, user.id]); }
 });
+
+test('过期检查点可续跑，待确认任务必须先提交实际答复，取消任务不能复活', { skip: !process.env.DATABASE_URL }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const task = await taskStore.create({ user, toolName: repository.TOOL, ttlMs: 600000 });
+    const base = { request: { presentationId: '', tokenBudget: 1000000, maxSteps: 80 }, steps: 3, usedTokens: 321 };
+    try {
+        await execute("UPDATE tool_tasks SET status='expired',result_json=?::jsonb WHERE id=?", [JSON.stringify({ state: base }), task.id]);
+        assert.ok(await repository.resume(user, task.id, base));
+        assert.equal((await repository.read(user, task.id)).result_json.state.usedTokens, 321);
+        const pending = { ...base, pendingKind: 'confirmation' };
+        await execute("UPDATE tool_tasks SET status='expired',result_json=?::jsonb WHERE id=?", [JSON.stringify({ state: pending }), task.id]);
+        assert.equal(await repository.resume(user, task.id, pending), null);
+        assert.ok(await repository.acceptResponse(user, task.id, { ...pending, response: '确认保留金额' }));
+        assert.equal((await repository.read(user, task.id)).result_json.state.response, '确认保留金额');
+        await execute("UPDATE tool_tasks SET status='expired' WHERE id=?", [task.id]);
+        assert.ok(await repository.resume(user, task.id, { ...pending, response: '确认保留金额' }));
+        await taskStore.requestCancel(task.id, user);
+        assert.equal(await repository.resume(user, task.id, base), null);
+        assert.equal(await repository.acceptResponse(user, task.id, pending), null);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('压缩归档随租约检查点持久化，隔离账号不能读取，恢复后可分页取回原观察', { skip: !process.env.DATABASE_URL }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const task = await taskStore.create({ user, toolName: repository.TOOL, ttlMs: 600000 });
+    const state = { request: { presentationId: '', tokenBudget: 1000000, maxSteps: 80 }, messages: [{ role: 'system', content: '完整指引' }] };
+    for (let index = 0; index < 12; index++) {
+        state.messages.push({ role: 'assistant', content: JSON.stringify({ actions: [{ action: 'read', path: `inputs/${index}.md` }] }) });
+        state.messages.push({ role: 'user', content: JSON.stringify([{ action: 'read', result: { path: `inputs/${index}.md`, text: '中文资料'.repeat(18000) } }]) });
+    }
+    const original = state.messages[2].content, lease = crypto.randomUUID();
+    try {
+        assert.equal(await require('../server/services/presentations/master/history').archiveOlderObservations(state), true);
+        assert.ok(await repository.claim(user, task.id, lease));
+        assert.ok(await repository.save(user, task.id, lease, state, { phase: 'authoring' }));
+        assert.equal(await repository.read({ id: Number(user.id) + 99999 }, task.id), null);
+        const restored = (await repository.read(user, task.id)).result_json.state;
+        let text = '', offset = 0;
+        do {
+            const chunk = await require('../server/services/presentations/master/history').readHistory(restored, { archive: 0, index: 2, offset });
+            text += chunk.text; offset = chunk.nextOffset;
+        } while (offset !== null);
+        assert.equal(text, original);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});

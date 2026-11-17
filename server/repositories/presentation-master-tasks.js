@@ -34,13 +34,13 @@ async function parentActive(runId, user) {
     return Boolean(run && !['completed', 'completed_with_errors', 'partial', 'cancelled', 'deleted', 'failed', 'error', 'needs_input'].includes(run.status));
 }
 async function acceptResponse(user, id, state) {
-    return queryOne(`UPDATE tool_tasks SET status='working',result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND status='input_required' AND expires_at>NOW() RETURNING id`, [JSON.stringify(state), id, user.id, TOOL]);
+    return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
+        WHERE id=? AND user_id=? AND tool_name=? AND (status='input_required' AND expires_at>NOW() OR status IN ('expired','failed') AND result_json->'state'->>'pendingKind' IN ('confirmation','clarification')) RETURNING id`, [JSON.stringify(state), id, user.id, TOOL]);
 }
 async function resume(user, id, state) {
     return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',
         result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND (status='failed' OR (status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()))) RETURNING id`,
+        WHERE id=? AND user_id=? AND tool_name=? AND (COALESCE(result_json->'state'->>'pendingKind','')='' OR COALESCE(result_json->'state'->>'response','')<>'') AND (status IN ('failed','expired') OR (status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()))) RETURNING id`,
     [JSON.stringify(state), id, user.id, TOOL]);
 }
 async function admit(user, create, excludedTaskId = '') {

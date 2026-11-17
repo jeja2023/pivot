@@ -68,9 +68,11 @@ document.addEventListener('click', async (event) => {
     }
     const breadcrumbBackBtn = event.target.closest('#agent-breadcrumb-back-btn');
     if (breadcrumbBackBtn) {
+        agentRunDetailRequestId++; window.Pivot.moduleApi('agent.detailLoader')?.cancel();
+        window.Pivot.moduleApi('agent.detailLoader')?.clearNotice(document.getElementById('agent-tasks-detail-container'));
         document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
         activeAgentRunId = '';
-        currentRunDetailRecord = null;
+        currentRunDetailRecord = null; currentRunDetailData = null;
         document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
         if (activeAgentRunReturnContext && activeAgentRunReturnContext.tab) {
             const targetTab = activeAgentRunReturnContext.tab;
@@ -96,6 +98,7 @@ document.addEventListener('click', async (event) => {
     }
     const editBtn = event.target.closest('[data-agent-run-edit], [data-agent-edit-run]');
     if (editBtn) {
+        if (editBtn.closest('#agent-run-detail, #agent-tasks-detail-container')) return;
         const runId = editBtn.dataset.agentRunEdit || editBtn.dataset.agentEditRun || activeAgentRunId || currentRunDetailRecord?.id;
         if (runId) {
             const openModal = window.Pivot?.moduleApi?.('agent.taskEdit')?.openAgentTaskEditModal || (typeof openAgentTaskEditModal === 'function' ? openAgentTaskEditModal : null);
@@ -105,6 +108,7 @@ document.addEventListener('click', async (event) => {
     }
     const rerunBtn = event.target.closest('[data-agent-rerun]');
     if (rerunBtn) {
+        if (rerunBtn.closest('#agent-run-detail, #agent-tasks-detail-container')) return;
         const runId = rerunBtn.dataset.agentRerun || activeAgentRunId || currentRunDetailRecord?.id;
         if (runId && typeof window.Pivot?.legacy?.rerunAgentRun === 'function') {
             window.Pivot.legacy.rerunAgentRun(runId);
@@ -113,6 +117,7 @@ document.addEventListener('click', async (event) => {
     }
     const resumeBtn = event.target.closest('[data-agent-resume]');
     if (resumeBtn) {
+        if (resumeBtn.closest('#agent-run-detail, #agent-tasks-detail-container')) return;
         const runId = resumeBtn.dataset.agentResume || activeAgentRunId || currentRunDetailRecord?.id;
         if (runId && typeof window.Pivot?.legacy?.resumeAgentRun === 'function') {
             window.Pivot.legacy.resumeAgentRun(runId);
@@ -334,39 +339,6 @@ window.Pivot?.exposeModule?.('agent.runDisclosure', {
 
 let currentActiveRunSubtab = 'overview';
 
-function bindAgentRunSubtabs() {
-    const tabsContainer = document.querySelector('.agent-run-tabs');
-    if (tabsContainer && tabsContainer.dataset.boundSubtabs !== '1') {
-        tabsContainer.dataset.boundSubtabs = '1';
-        tabsContainer.addEventListener('click', event => {
-            const tabBtn = event.target.closest('[data-agent-run-subtab]');
-            if (!tabBtn) return;
-            switchAgentRunSubtab(tabBtn.dataset.agentRunSubtab);
-        });
-    }
-
-    const backBtn = document.getElementById('agent-breadcrumb-back-btn');
-    if (backBtn && backBtn.dataset.boundBack !== '1') {
-        backBtn.dataset.boundBack = '1';
-        backBtn.addEventListener('click', () => {
-            document.getElementById('agent-tasks-view')?.classList.remove('has-active-detail');
-            activeAgentRunId = '';
-            currentRunDetailRecord = null;
-            document.querySelectorAll('[data-agent-run-id]').forEach(row => row.classList.remove('active'));
-            if (activeAgentRunReturnContext && activeAgentRunReturnContext.tab) {
-                const targetTab = activeAgentRunReturnContext.tab;
-                const targetSubview = activeAgentRunReturnContext.subview;
-                activeAgentRunReturnContext = null;
-                const openWorkbench = window.Pivot?.moduleApi?.('workspaces.navigation')?.openAgentWorkbench;
-                if (typeof openWorkbench === 'function') openWorkbench({ tab: targetTab });
-                if (targetTab === 'workbench' && targetSubview) {
-                    window.Pivot?.moduleApi?.('agent.harness')?.switchAgentCpSubview?.(targetSubview);
-                }
-            }
-        });
-    }
-}
-
 function switchAgentRunSubtab(subtab = 'overview') {
     currentActiveRunSubtab = subtab;
     document.querySelectorAll('[data-agent-run-subtab]').forEach(btn => {
@@ -561,6 +533,8 @@ async function resolveUncertainAgentTaskEffect(effectId, runId) {
 }
 
 window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
+    if (options.silent && !options.full && activeAgentRunId === runId && window.Pivot.moduleApi('agent.detailLoader')?.isFullLoading(runId)) return currentRunDetailRecord;
+    const previousRunId = activeAgentRunId;
     const requestId = ++agentRunDetailRequestId;
     activeAgentRunId = runId;
     if (options.returnTab || options.returnTo) {
@@ -572,7 +546,6 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
     } else if (options.clearReturnContext || (!options.silent && !options.returnTab && !options.returnTo)) {
         activeAgentRunReturnContext = null;
     }
-    bindAgentRunSubtabs();
     const modal = window.Pivot.moduleApi('agent.detailLoader').ensureVisible();
     const detail = document.getElementById('agent-run-detail');
     const workbenchDetailContainer = document.getElementById('agent-tasks-detail-container');
@@ -585,9 +558,19 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         if (typeof openWorkbench === 'function') await openWorkbench({ tab: 'tasks', skipAutoOpen: true });
     }
 
+    if (requestId !== agentRunDetailRequestId || activeAgentRunId !== runId) return null;
     const isWorkbenchLayout = Boolean(workbenchDetailContainer && !options.workflowPreview && activeWorkspace === 'agent');
     const currentContainer = isWorkbenchLayout ? workbenchDetailContainer : detail;
-    if (currentContainer) captureAgentRunDisclosureState(currentContainer, runId);
+    if (currentContainer?.dataset.detailRunId !== String(runId) && (!options.silent || previousRunId !== runId)) {
+        if (previousRunId) captureAgentRunDisclosureState(currentContainer, previousRunId);
+        currentRunDetailRecord = null; currentRunDetailData = null;
+        window.Pivot.moduleApi('agent.detailLoader').clearNotice(currentContainer);
+        if (currentContainer) delete currentContainer.dataset.detailRunId;
+        if (isWorkbenchLayout) {
+            currentActiveRunSubtab = 'overview';
+            window.Pivot.moduleApi('agent.detailLoader').showWorkbenchLoading();
+        }
+    } else if (currentContainer) captureAgentRunDisclosureState(currentContainer, runId);
 
     document.querySelectorAll('[data-agent-run-id]').forEach(row => {
         const active = row.dataset.agentRunId === runId;
@@ -616,6 +599,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
     const run = data.run;
     currentRunDetailRecord = run;
     currentRunDetailData = data;
+    if (currentContainer) currentContainer.dataset.detailRunId = String(runId);
     const isPreview = isAgentWorkflowPreviewRun(run, options);
     const steps = data.steps || [];
     const dagNodes = agentSortDagNodesForDisplay(data.dagNodes || []);
@@ -715,7 +699,6 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         const topActions = document.getElementById('agent-detail-header-actions');
         if (topActions) {
             PivotSafeHtml.setHtml(topActions, actionMarkup);
-            bindAgentRunDetailDomEvents(topActions, run, isPreview);
         }
 
         // Subtab Badges
@@ -854,6 +837,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
                 </div>
             </div>` : '';
 
+        const restoreNotice = window.Pivot.moduleApi('agent.detailLoader').retainNotice(detail, runId);
         PivotSafeHtml.setHtml(detail, `
             <section class="agent-run-overview ${agentEscape(runStatus)}">
                 <div class="agent-run-overview-top">
@@ -910,6 +894,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             ${legacyHarnessMarkup}
             ${technicalDiagnosticsMarkup}
         `);
+        restoreNotice?.();
         const progressFill = detail.querySelector('.agent-progress-fill');
         if (progressFill) progressFill.style.width = `${progressPercent}%`;
         personalContext.appendCollaboratorGroup?.(detail, run);
@@ -918,7 +903,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         bindAgentRunDetailDomEvents(detail, run, isPreview);
     }
 
-    window.Pivot.moduleApi('agent.detailLoader').offerFull(currentContainer, runId, data);
+    window.Pivot.moduleApi('agent.detailLoader').offerFull(currentContainer, runId, data, options);
     if (isAgentRunActive(run.status)) {
         startAgentWorkflowPreviewPolling(run.id, isPreview);
     } else {

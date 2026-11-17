@@ -152,7 +152,7 @@ async function installSkillPackage(zipPath, options = {}) {
         error.details = verified;
         throw error;
     }
-    const root = path.resolve(options.installRoot || path.join(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'agent-skills'));
+    const root = path.resolve(options.installRoot || require('./agent-skill-storage').resolveSkillStorageRoot());
     const contentDigest = verified.package.digest;
     if (!/^[0-9a-f]{64}$/.test(contentDigest)) throw new Error('Skill 包内容摘要非法，拒绝安装。');
     const installDir = path.join(root, 'sha256', contentDigest);

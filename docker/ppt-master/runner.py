@@ -177,7 +177,8 @@ def main(request: dict) -> dict:
             raise ValueError("只允许读取任务内的受限文本文件。")
         source = file.read_text(encoding="utf-8")
         offset = max(0, min(int(request.get("offset", 0)), len(source)))
-        return {"path": request["path"], "text": source[offset:offset + 60_000], "nextOffset": offset + 60_000 if offset + 60_000 < len(source) else None, "totalChars": len(source)}
+        length = max(1, min(int(request.get("length", 32_000)), 60_000))
+        return {"path": request["path"], "text": source[offset:offset + length], "offset": offset, "nextOffset": offset + length if offset + length < len(source) else None, "totalChars": len(source)}
     if action == "write":
         file = relative_path(request.get("path"), WORKSPACE)
         source = request.get("text")

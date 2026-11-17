@@ -73,39 +73,47 @@ async function collectReleaseMetrics(releaseId, since) {
  */
 async function sweepSkillReleaseBreakers(options = {}) {
     const since = windowStart(options.windowMinutes);
-    let releases = [];
-    try {
-        releases = await query(`
+    let cursor = null, evaluated = 0;
+    const actions = [];
+    for (;;) {
+        let releases;
+        try {
+            releases = await query(`
             SELECT id, name, tenant_id, owner_key, rollout_scope, previous_release_id, breaker_thresholds, published_by
             FROM agent_skill_releases
-            WHERE status = 'published'
-            ORDER BY published_at DESC
+            WHERE status = 'published' AND (?::bigint IS NULL OR id < ?::bigint)
+            ORDER BY id DESC
             LIMIT 200
-        `);
-    } catch (error) {
-        if (isMissingRelationError(error)) return { evaluated: 0, tripped: 0, actions: [] };
-        throw error;
-    }
-    const actions = [];
-    for (const release of releases || []) {
-        const thresholds = parseThresholds(release.breaker_thresholds);
-        // 未冻结阈值的历史 release 不参与自动熔断，避免用默认值误伤存量发布。
-        if (!Object.keys(thresholds).length) continue;
-        const metrics = await collectReleaseMetrics(release.id, since);
-        const decision = evaluateBreaker(thresholds, metrics);
-        if (!decision.tripped) continue;
-        const reason = `${decision.reason} 实际 ${(decision.actual * 100).toFixed(1)}% 超过阈值 ${(decision.limit * 100).toFixed(1)}%（样本 ${decision.samples}）`;
-        try {
-            const action = release.previous_release_id
-                ? await rollbackSkillReleaseBySystem(release, reason)
-                : await pauseSkillReleaseBySystem(release, reason);
-            actions.push({ releaseId: release.id, name: release.name, action: action.action, reason });
-            logger.warn({ releaseId: release.id, name: release.name, reason, action: action.action }, '技能发布触发熔断');
+        `, [cursor, cursor]);
         } catch (error) {
-            logger.error({ releaseId: release.id, err: error.message }, '技能发布熔断处置失败');
+            if (isMissingRelationError(error)) break;
+            throw error;
         }
+        if (!releases.length) break;
+        // 按不可变主键推进，暂停或回滚不会挤掉下一页；巡检期间新增发布留给下一轮。
+        cursor = releases.at(-1).id;
+        evaluated += releases.length;
+        for (const release of releases) {
+            const thresholds = parseThresholds(release.breaker_thresholds);
+            // 未冻结阈值的历史发布不参与自动熔断，避免误伤存量版本。
+            if (!Object.keys(thresholds).length) continue;
+            try {
+                const metrics = await collectReleaseMetrics(release.id, since);
+                const decision = evaluateBreaker(thresholds, metrics);
+                if (!decision.tripped) continue;
+                const reason = `${decision.reason} 实际 ${(decision.actual * 100).toFixed(1)}% 超过阈值 ${(decision.limit * 100).toFixed(1)}%（样本 ${decision.samples}）`;
+                const action = release.previous_release_id
+                    ? await rollbackSkillReleaseBySystem(release, reason)
+                    : await pauseSkillReleaseBySystem(release, reason);
+                actions.push({ releaseId: release.id, name: release.name, action: action.action, reason });
+                logger.warn({ releaseId: release.id, name: release.name, reason, action: action.action }, '技能发布触发熔断');
+            } catch (error) {
+                logger.error({ releaseId: release.id, err: error.message }, '技能发布熔断处置失败');
+            }
+        }
+        if (releases.length < 200) break;
     }
-    return { evaluated: (releases || []).length, tripped: actions.length, actions };
+    return { evaluated, tripped: actions.length, actions };
 }
 
 /** 周期性巡检器。间隔由 PIVOT_SKILL_BREAKER_INTERVAL_MS 控制，默认 5 分钟。 */

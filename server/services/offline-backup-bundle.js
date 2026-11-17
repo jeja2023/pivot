@@ -16,7 +16,7 @@ function backupPaths(env = process.env, root = path.resolve(__dirname, '../..'))
         analysis: path.resolve(env.PIVOT_ANALYSIS_DIR || path.join(data, 'analysis')),
         'agent-blobs': path.resolve(env.AGENT_BLOB_DIR || path.join(data, 'agent-blobs')),
         'agent-runtime-packs': path.resolve(env.PIVOT_RUNTIME_PACK_ROOT || path.join(data, 'agent-runtime-packs')),
-        'agent-skills': path.resolve(path.join(data, 'agent-skills'))
+        'agent-skills': require('./agent-skill-storage').resolveSkillStorageRoot(env, root)
     };
 }
 
@@ -80,7 +80,8 @@ async function createBackupBundle({ output, maintenanceConfirmed, env = process.
         try { realSource = await fs.realpath(source); }
         catch (error) {
             const explicitlyConfigured = (name === 'document-processing' && env.PIVOT_DOCUMENT_PROCESSING_DIR) || (name === 'analysis' && env.PIVOT_ANALYSIS_DIR)
-                || (name === 'agent-blobs' && env.AGENT_BLOB_DIR) || (name === 'agent-runtime-packs' && env.PIVOT_RUNTIME_PACK_ROOT);
+                || (name === 'agent-blobs' && env.AGENT_BLOB_DIR) || (name === 'agent-runtime-packs' && env.PIVOT_RUNTIME_PACK_ROOT)
+                || (name === 'agent-skills' && String(env.AGENT_SKILL_ROOT || '').trim());
             if (error.code !== 'ENOENT' || !OPTIONAL_SOURCES.has(name) || explicitlyConfigured) throw error;
             sourceStates[name] = 'absent';
             continue;

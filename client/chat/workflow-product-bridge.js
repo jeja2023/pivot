@@ -14,8 +14,7 @@
     function restore(value) {
         agentWorkflowDraftName = value.name || '未命名工作流';
         agentWorkflowDraftDescription = value.description || '';
-        const nameInput = document.getElementById('workflow-product-name');
-        if (nameInput) nameInput.value = value.name || '';
+        renderAgentWorkflowLibrary();
         writeAgentWorkflowText(value.specText);
         try { editor()?.setValue?.(JSON.parse(value.specText), { notify: false }); } catch (_) { /* 未完成 JSON 仍作为可恢复草稿保留。 */ }
         refreshAgentDagInputsPanel();
@@ -41,8 +40,6 @@
         tools: () => agentToolsCache || [], models: () => window.Pivot.legacy._cachedAgentModels || [],
         setName: name => {
             agentWorkflowDraftName = name.slice(0, 100);
-            const nameInput = document.getElementById('workflow-product-name');
-            if (nameInput && nameInput.value !== name) nameInput.value = name;
             renderAgentWorkflowLibrary();
             window.Pivot.moduleApi('agent.workflowDrafts')?.changed?.();
         },
@@ -64,8 +61,6 @@
         openEditor: (id, options) => showAutomationWorkflowEditor(id, options),
         newWorkflow: values => {
             newAgentWorkflow({ showToast: false, ...values });
-            const nameInput = document.getElementById('workflow-product-name');
-            if (nameInput) nameInput.value = values?.name || '';
             showAutomationWorkflowEditor('', { keepDraft: true });
         },
         run: (source, options) => runAgentWorkflowFromWorkbench(source, options),
