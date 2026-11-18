@@ -11,26 +11,32 @@ function createInspectionProgress(messages) {
     let seen = new Map(), inspectionRounds = 0, repeatedRounds = 0;
 
     function observe(actions, observations, historical = false) {
-        if (!actions.length || !actions.every(isInspection)) {
+        const productive = observations.some((observation, index) => {
+            const action = actions[index];
+            return action && !isInspection(action) && action.action === observation?.action && observation?.result
+                && !observation.error && (observation.result.exitCode === undefined || observation.result.exitCode === 0);
+        });
+        if (productive) {
             seen = new Map();
             inspectionRounds = 0;
             repeatedRounds = 0;
-            return;
+            return true;
         }
         let foundNew = false;
         for (const [index, observation] of observations.entries()) {
             const action = actions[index], result = observation?.result;
-            if (!action || action.action !== observation?.action) continue;
+            if (!isInspection(action) || action.action !== observation?.action || observation.error || !result
+                || result.exitCode !== undefined && result.exitCode !== 0) continue;
             let key, end = 1;
-            if (result && !observation.error && action.action === 'read_runtime') {
+            if (action.action === 'read_runtime') {
                 key = JSON.stringify(['runtime', result.path || action.path, result.offset ?? action.offset ?? 0]);
                 end = result.nextOffset ?? result.totalChars ?? Infinity;
-            } else if (result && !observation.error && action.action === 'read_history') {
+            } else if (action.action === 'read_history') {
                 // 旧回读归档后，源归档坐标可能包含在请求中而不在压缩后的回执中。
                 key = JSON.stringify(['history', action.archive, action.index, result.offset ?? action.offset ?? 0]);
                 end = result.nextOffset ?? result.totalChars ?? Infinity;
-            } else if (!result?.archived) {
-                key = digest(observation.error ? [action, observation.error] : [action, result]);
+            } else if (!result.archived) {
+                key = digest([action, result]);
             } else continue;
             if (!seen.has(key) || seen.get(key) < end) {
                 seen.set(key, end);
@@ -39,6 +45,7 @@ function createInspectionProgress(messages) {
         }
         inspectionRounds++;
         if (!historical) repeatedRounds = foundNew ? 0 : repeatedRounds + 1;
+        return foundNew;
     }
 
     for (let index = 0; index < messages.length - 1; index++) {

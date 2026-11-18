@@ -224,7 +224,7 @@ test('默认不限累计预算的任务可超过一百万并保留用量记录�
     assert.equal(current.usageDiagnostics[0].cumulativeTokens, 1000075);
 });
 
-test('重复读取同一资料会停止空转，后续新分页可推进至实际写入', async () => {
+test('重复读取在两次调整后暂停，检查点仍可通过新分页继续写入', async () => {
     const fixture = driverFixture([]), current = state();
     let calls = 0;
     const page = { action: 'read_runtime', path: 'references/guide.md', offset: 0 };
@@ -239,8 +239,9 @@ test('重复读取同一资料会停止空转，后续新分页可推进至实�
         return JSON.stringify({ actions: [page] });
     };
     await assert.rejects(drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), { code: 'PPT_MASTER_NO_PROGRESS' });
-    assert.equal(calls, 4);
-    assert.equal(current.steps, 4);
+    assert.equal(calls, 6);
+    assert.equal(current.steps, 6);
+    assert.equal(current.inspectionRepairAttempts, 2);
     const next = [
         { actions: [{ ...page, offset: 4 }] },
         { actions: [{ action: 'write', path: 'project/page.svg', text: '<svg/>' }] },
@@ -248,6 +249,32 @@ test('重复读取同一资料会停止空转，后续新分页可推进至实�
     ];
     fixture.deps.callModel = async () => next.shift();
     await drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps);
+    assert.deepEqual(fixture.calls.slice(-2).map(action => action.action), ['write', 'deliver']);
+});
+
+test('检测到重复读取后自动调整，用新分页和已有成果继续交付', async () => {
+    const fixture = driverFixture([]), current = state();
+    const page = { action: 'read_runtime', path: 'references/guide.md', offset: 0 };
+    const execute = fixture.deps.execute;
+    fixture.deps.execute = async (user, id, action) => action.path === page.path
+        ? { path: action.path, offset: action.offset, text: '制作要求', nextOffset: action.offset === 0 ? 4 : null, totalChars: 8 }
+        : execute(user, id, action);
+    let calls = 0;
+    fixture.deps.callModel = async (_model, messages) => {
+        if (++calls <= 4) return { actions: [page] };
+        if (calls === 5) {
+            assert.match(messages[0].content, /正在从重复检查中恢复/);
+            return { actions: [{ ...page, offset: 4 }] };
+        }
+        if (calls === 6) {
+            assert.doesNotMatch(messages[0].content, /正在从重复检查中恢复/);
+            return { actions: [{ action: 'write', path: 'project/page.svg', text: '<svg/>' }] };
+        }
+        return { complete: { path: 'project/exports/final.pptx' } };
+    };
+    const completed = await drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps);
+    assert.equal(completed.receipt.sha256, 'final');
+    assert.equal(current.inspectionRepairAttempts, 1);
     assert.deepEqual(fixture.calls.slice(-2).map(action => action.action), ['write', 'deliver']);
 });
 

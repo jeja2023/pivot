@@ -74,6 +74,26 @@ async function word(name, text) {
     return { name, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph(text)] }] })) };
 }
 
+test('待核验草稿在失败面板可单独下载，保留继续制作入口', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        await page.evaluate(() => { window.Pivot.api = { fetch: (...args) => fetch(...args) }; });
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, request: { title: '经营回顾', maxSteps: 80 },
+            error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '交付第 1 页缺少已确认的可见标题。' }
+        } } }));
+        await page.route('**/master/tasks/fixture-task/review-draft', route => route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', body: 'fixture draft' }));
+        await page.locator('#presentation-master-start').click();
+        await expect(panel.getByRole('button', { name: '从检查点继续' })).toBeVisible();
+        await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toHaveCount(0);
+        const download = page.waitForEvent('download');
+        await panel.getByRole('button', { name: '下载待核验草稿（.pptx）' }).click();
+        assert.equal((await download).suggestedFilename(), '经营回顾-待核验草稿.pptx');
+        await expect(panel).toContainText('制作未完成');
+    } finally { await context.close(); }
+});
+
 test('工作中轮询保留用量展开与停止操作，短暂失败后自动恢复', async () => {
     const context = await fixture();
     try {
@@ -86,27 +106,34 @@ test('工作中轮询保留用量展开与停止操作，短暂失败后自动�
                 usageDiagnostics: [{ call: 1, step: 1, inputTokens: 10, outputTokens: 2, cumulativeTokens: 12 }] } } });
         });
         await page.locator('#presentation-master-start').click();
-        await panel.locator('.presentation-master-usage summary').click();
-        await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
+        await panel.getByRole('button', { name: /查看每轮模型用量/ }).click();
+        const usageDialog = page.getByRole('dialog', { name: '每轮模型用量明细' });
+        await expect(usageDialog).toBeVisible();
+        await expect(usageDialog).toContainText('第 1 次模型调用（步骤 1）');
         await expect(panel).toContainText('后台任务可能仍在运行', { timeout: 6000 });
-        await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
         await expect.poll(() => calls, { timeout: 8000 }).toBeGreaterThanOrEqual(3);
-        await expect(panel.locator('.presentation-master-usage')).toHaveAttribute('open', '');
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(usageDialog).toBeVisible();
+        await usageDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(usageDialog).toBeHidden();
+        await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
+        await page.getByRole('dialog', { name: '完整制作过程' }).getByRole('button', { name: '关闭', exact: true }).click();
     } finally { await context.close(); }
 });
 
-test('必填信息缺失时显示醒目的错误提示，补全后可正常提交', async () => {
+test('必填信息缺失时显示醒目的错误提示，补全后可正常提交并弹出制作过程弹窗', async () => {
     const context = await fixture();
     try {
-        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        const page = await pageFor(context);
+        const formError = page.locator('#presentation-master-form-error');
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+        const panel = page.locator('#presentation-master-status');
         for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
             await page.setViewportSize(viewport);
             await page.locator('#presentation-master-title').fill('');
             await page.locator('#presentation-master-start').click();
-            const alert = panel.getByRole('alert');
-            await expect(alert).toHaveText('请填写名称和制作要求，并选择模型。');
-            assert.equal(await alert.evaluate(element => window.getComputedStyle(element).color), await panel.evaluate(element => {
+            await expect(formError).toHaveText('请填写名称和制作要求，并选择模型。');
+            await expect(processDialog).toBeHidden();
+            assert.equal(await formError.evaluate(element => window.getComputedStyle(element).color), await formError.evaluate(element => {
                 const probe = document.createElement('button');
                 probe.className = 'btn-danger'; element.appendChild(probe);
                 const color = window.getComputedStyle(probe).color; probe.remove(); return color;
@@ -114,6 +141,7 @@ test('必填信息缺失时显示醒目的错误提示，补全后可正常提�
             await page.locator('#presentation-master-title').fill('测试演示');
         }
         await page.locator('#presentation-master-start').click();
+        await expect(processDialog).toBeVisible();
         await expect(panel).toContainText('测试制作已接收材料');
     } finally { await context.close(); }
 });
@@ -171,17 +199,24 @@ test('重新打开不查询旧任务并按默认不限新建，旧预算仅主�
         await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
         await page.locator('#entry').click();
         const panel = page.locator('#presentation-master-status');
-        await expect(panel).toContainText('完整制作引擎已登记');
+        const engineState = page.locator('#presentation-master-engine-state');
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+        await expect(engineState).toContainText('完整制作引擎已登记');
+        await expect(processDialog).toBeHidden();
         assert.equal(latestRequests, 0);
         await page.getByRole('button', { name: '查看最近制作' }).click();
+        await expect(processDialog).toBeVisible();
         await expect(panel).toContainText('本任务累计预算为 1,000,000 令牌');
         assert.equal(latestRequests, 1);
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(processDialog).toBeHidden();
         await expect(page.locator('#presentation-master-budget')).toHaveValue('');
         await page.locator('#presentation-master-title').fill('新的演示');
         await page.locator('#presentation-master-instruction').fill('沿用模板制作新演示。');
         const sent = page.waitForRequest(request => request.method() === 'POST' && request.url().endsWith('/master/tasks'));
         await page.locator('#presentation-master-start').click();
         assert.equal(Object.hasOwn((await sent).postDataJSON(), 'tokenBudget'), false);
+        await expect(processDialog).toBeVisible();
         await expect(panel).toContainText('测试制作已接收材料');
         assert.equal(context.requests[0].tokenBudget, 0);
     } finally { await context.close(); }
@@ -217,35 +252,46 @@ test('切换模板保留未提交内容，关闭后清空旧任务问题、进�
     const context = await fixture();
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        const engineState = page.locator('#presentation-master-engine-state');
+        const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
         await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => {} }));
         await page.getByRole('button', { name: '更换模板' }).click();
         await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-title')).toHaveValue('测试演示');
         await expect(page.locator('#presentation-master-instruction')).toHaveValue('按材料制作汇报，保留原始数字和来源。');
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         let recent = { id: 'fixture-task', status: 'completed', result: { message: '旧任务已交付',
             files: [{ format: 'pptx', renditionId: 'old', filename: '旧任务.pptx' }] } };
         await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task: recent } }));
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: recent } }));
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
+        await expect(processDialog).toBeHidden();
         await expect(page.locator('#presentation-master-title')).toHaveValue('');
         await page.getByRole('button', { name: '查看最近制作' }).click();
+        await expect(processDialog).toBeVisible();
         await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toBeVisible();
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(processDialog).toBeHidden();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await expect(panel).toHaveCount(0);
         recent = { id: 'fixture-task', status: 'input_required', request: { presentationId: '', productionProfile: { purpose: '旧任务目的' } }, inputRequest: { question: '请确认方案' } };
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
+        await expect(processDialog).toBeHidden();
         await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toHaveCount(0);
         await page.getByRole('button', { name: '查看最近制作' }).click();
         await expect(panel).toContainText('请确认方案');
         await expect(page.locator('#presentation-master-purpose')).toHaveValue('');
         await panel.getByRole('textbox', { name: '对制作方案的实际答复' }).fill('未提交的旧答复');
         await page.keyboard.press('Escape');
-        await expect(panel).toHaveCount(0);
+        await expect(processDialog).toBeHidden();
+        await expect(panel).toBeEmpty();
+        await page.keyboard.press('Escape');
+        await expect(formDialog).toBeHidden();
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
         await expect(panel.getByRole('textbox')).toHaveCount(0);
     } finally { await context.close(); }
 });
@@ -254,6 +300,9 @@ test('关闭后迟到的续跑成功响应无法重新查询旧任务或填回�
     const context = await fixture();
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        const engineState = page.locator('#presentation-master-engine-state');
+        const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
         const task = { id: 'fixture-task', status: 'failed', recoverable: true, request: { presentationId: '', modelId: '1' },
             error: { code: 'PPT_MASTER_STEP_LIMIT', message: '旧任务已达到轮次上限。' } };
         let statusRequests = 0, release, entered;
@@ -269,14 +318,18 @@ test('关闭后迟到的续跑成功响应无法重新查询旧任务或填回�
             await route.fulfill({ json: { task: { ...task, status: 'working' } } });
         });
         await page.locator('#presentation-master-start').click();
+        await expect(processDialog).toBeVisible();
         await panel.getByRole('button', { name: '从检查点继续' }).click();
         await pending;
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
+        await expect(processDialog).toBeHidden();
         release();
         await page.waitForFunction(() => window.fixtureTaskResponses.some(url => url.endsWith('/resume')));
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
+        await expect(processDialog).toBeHidden();
         await expect(page.locator('#presentation-master-title')).toHaveValue('');
         assert.equal(statusRequests, 1);
     } finally { await context.close(); }
@@ -351,22 +404,41 @@ test('累计预算不足时展示原预算，续跑可提高上限或改为不�
             await route.fulfill({ json: { task: failed } });
         });
         await page.locator('#presentation-master-start').click();
-        const panel = page.locator('#presentation-master-status'), budget = page.locator('#presentation-master-budget');
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+        const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
+        const engineState = page.locator('#presentation-master-engine-state');
+        const panel = page.locator('#presentation-master-status');
+        const budget = panel.locator('#presentation-master-resume-budget');
+        await expect(processDialog).toBeVisible();
         await expect(panel).toContainText('本任务累计预算为 400,000 令牌');
         await expect(panel).toContainText('错误代码 PPT_MASTER_BUDGET_EXHAUSTED');
         await expect(panel).toContainText('已确认直接写入 2 次。最近写入 project/spec_lock.md。写入失败 1 次。最近工具动作包括写入文件未完成。');
         await expect(panel).toContainText('单轮窗口 256,000，配置输入上限 220,000，预计输入 1,300，本轮输出上限 12,000 令牌。');
         await expect(panel).toContainText('请求时限 300 秒。');
+        await expect(panel.locator('.presentation-master-resume-panel')).toBeVisible();
+        const resumeBoundsDesktop = await panel.getByRole('button', { name: '从检查点继续' }).boundingBox();
+        const panelBoundsDesktop = await panel.boundingBox();
+        assert(resumeBoundsDesktop.width < panelBoundsDesktop.width * 0.5, '桌面端从检查点继续按钮不应拉伸占满整行');
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/resume-1366.png') });
         await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await processDialog.evaluate(element => element.scrollWidth <= element.clientWidth), true);
         assert.equal(await panel.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/resume-390.png') });
         await expect(budget).toHaveValue('');
-        await panel.getByText('查看每轮模型用量').click();
-        await expect(panel).toContainText('输入 1200，输出 200（估算）');
-        await expect(panel).toContainText('初始指引及任务 500，历史消息 700，工具结果 100，图片 0');
+        await panel.getByRole('button', { name: /查看每轮模型用量/ }).click();
+        const usageDialog = page.getByRole('dialog', { name: '每轮模型用量明细' });
+        await expect(usageDialog).toBeVisible();
+        await expect(usageDialog).toContainText('输入 1200，输出 200（估算）');
+        await expect(usageDialog).toContainText('初始指引及任务 500，历史消息 700，工具结果 100，图片 0');
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/usage-390.png') });
+        await page.setViewportSize({ width: 1366, height: 768 });
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/usage-1366.png') });
+        await usageDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(usageDialog).toBeHidden();
         await expect(budget).toBeVisible();
         const resume = panel.getByRole('button', { name: '从检查点继续' });
         await resume.click();
-        await expect(panel).toContainText('请先在高级设置中增加累计模型预算');
+        await expect(panel).toContainText('请先提高续跑累计模型预算');
         assert.equal(submitted.length, 0);
         await budget.fill('800000'); await resume.click();
         await expect(panel).toContainText('服务暂不可用，请重试');
@@ -377,22 +449,24 @@ test('累计预算不足时展示原预算，续跑可提高上限或改为不�
         await expect.poll(() => submitted.length).toBe(2);
         failed.request.tokenBudget = 800000;
         await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task: failed } }));
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
         await page.getByRole('button', { name: '查看最近制作' }).click();
         await expect(panel).toContainText('本任务累计预算为 800,000 令牌');
         await expect(budget).toHaveValue('');
         await resume.click();
-        await expect(panel).toContainText('请先在高级设置中增加累计模型预算');
+        await expect(panel).toContainText('请先提高续跑累计模型预算');
         assert.equal(submitted.length, 2);
         await budget.fill('0');
         await resume.click();
         await expect(panel).toContainText('本任务累计预算 不限');
         assert.equal(submitted[2].tokenBudget, 0);
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await page.locator('#entry').click();
-        await expect(panel).toContainText('完整制作引擎已登记');
+        await expect(engineState).toContainText('完整制作引擎已登记');
         await page.getByRole('button', { name: '查看最近制作' }).click();
         await expect(panel).toContainText('本任务累计预算 不限');
         await expect(budget).toHaveValue('');
@@ -405,7 +479,8 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
         const page = await pageFor(context), submitted = [];
         let task = { id: 'fixture-task', status: 'input_required', steps: 3, usedTokens: 59211,
             request: { presentationId: '', tokenBudget: 400000, maxSteps: 80 },
-            progress: { message: '是否按方案制作？' }, inputRequest: { kind: 'confirmation', question: '是否按方案制作？', context: '八页汇报方案。', promptId: 'a'.repeat(64) } };
+            progress: { message: '是否按方案制作？' }, inputRequest: { kind: 'confirmation', stage: 'design', question: '是否按方案制作？', context: '八页汇报方案。',
+                plan: { pages: [{ title: '1. 离线机房 AI 运行环境搭建', values: [{ text: '搭建现代化 AI 运行环境', source: { path: 'inputs/material-1.md', quote: '通过这套流程搭建出 RTX 2080 Ti 加速环境' } }] }] }, promptId: 'a'.repeat(64) } };
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
         let fail = true;
         await page.route('**/master/tasks/fixture-task/respond', async route => {
@@ -415,7 +490,10 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
             return route.fulfill({ json: { task } });
         });
         await page.locator('#presentation-master-start').click();
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
         const panel = page.locator('#presentation-master-status');
+        await expect(processDialog.getByRole('button', { name: '返回配置' })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: '停止制作' })).toHaveClass(/btn-danger-outline/);
         await expect(panel).toContainText('已用约 59,211 令牌。本任务累计预算 400,000 令牌');
         await expect(panel.getByText('是否按方案制作？', { exact: true })).toHaveCount(1);
         for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
@@ -424,12 +502,19 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
             const contextBounds = await panel.locator('.presentation-master-task-context').boundingBox();
             assert(contextBounds.height < 100, '短方案说明不应撑开大块空白');
             await expect(panel.getByRole('button', { name: '确认并继续' })).toBeVisible();
+            await expect(panel.getByRole('button', { name: '提交修改意见' })).toBeVisible();
         }
+        await page.setViewportSize({ width: 1366, height: 768 });
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/confirm-1366.png') });
         await panel.getByRole('button', { name: '确认并继续' }).click();
         await expect(panel.getByRole('alert')).toHaveText('确认服务暂不可用，请重试。');
         await expect(panel.getByRole('button', { name: '确认并继续' })).toBeEnabled();
         assert.deepEqual(submitted[0], { answer: '', decision: 'approve', promptId: 'a'.repeat(64) });
+        const actionsBar = panel.locator('.presentation-master-confirm-actions');
+        await expect(actionsBar).not.toHaveClass(/has-draft-reply/);
         await panel.getByRole('textbox', { name: '对制作方案的实际答复' }).fill('请保留原始金额');
+        await expect(actionsBar).toHaveClass(/has-draft-reply/);
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/confirm-has-reply-1366.png') });
         await panel.getByRole('button', { name: '确认并继续' }).click();
         await expect(panel.getByRole('alert')).toHaveText('请提交已填写的修改意见，或清空意见后确认。');
         assert.equal(submitted.length, 1);
@@ -441,7 +526,8 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
         await expect(panel).toContainText('正在制作中');
         assert.equal(submitted[2].answer, '请保留原始金额');
         assert.equal(submitted[2].decision, 'revise');
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click();
+        await page.getByRole('dialog', { name: '完整制作过程' }).getByRole('button', { name: '关闭', exact: true }).click();
+        await page.getByRole('dialog', { name: '完整演示制作' }).getByRole('button', { name: '关闭', exact: true }).click();
         task = { ...task, status: 'input_required', inputRequest: { kind: 'clarification', question: '请提供目标受众。', context: '制作需要受众信息。' } };
         await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task } }));
         await page.locator('#entry').click();
@@ -460,8 +546,8 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
 test('英文浏览器下文件选择、数量、清除和系统错误均显示中文，键盘可打开文件选择器', async () => {
     const context = await fixture();
     try {
-        const page = await pageFor(context), dialog = page.getByRole('dialog');
-        await expect(page.locator('#presentation-master-status')).toContainText('完整制作引擎已登记');
+        const page = await pageFor(context), dialog = page.getByRole('dialog', { name: '完整演示制作' });
+        await expect(page.locator('#presentation-master-engine-state')).toContainText('完整制作引擎已登记');
         await expect(dialog.getByText('未选择任何文件', { exact: true })).toHaveCount(2);
         await expect(dialog.locator('input[type="file"]:visible')).toHaveCount(0);
         const browse = dialog.getByRole('button', { name: '选择文件材料', exact: true });
@@ -486,9 +572,13 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
     const context = await fixture();
     try {
         const page = await pageFor(context), upload = page.locator('#presentation-master-material-files');
+        const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+        const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
         for (const file of [await word('空白材料.docx', ''), { name: '超长材料.txt', mimeType: 'text/plain', buffer: Buffer.from('甲'.repeat(120001)) }]) {
             await upload.setInputFiles(file); await page.locator('#presentation-master-start').click();
+            await expect(processDialog).toBeVisible();
             await expect(page.locator('#presentation-master-status')).toContainText(/未能.*提取|超过十二万字/);
+            await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
             await expect(page.locator('#presentation-master-instruction')).toHaveValue('按材料制作汇报，保留原始数字和来源。');
             assert.equal(context.requests.length, 0);
         }
@@ -498,7 +588,8 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
         await page.route('**/materials/extract', async route => { entered(); await gate; await route.fulfill({ json: { material: { text: '迟到的材料' } } }).catch(() => {}); });
         await upload.setInputFiles(await word('等待解析.docx', '等待解析'));
         await page.locator('#presentation-master-start').click(); await started;
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click(); release();
+        await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click(); release();
         await expect(page.locator('#presentation-master-start')).toHaveCount(0); assert.equal(context.requests.length, 0);
         await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-start')).toBeEnabled();
@@ -512,7 +603,8 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
         await page.locator('#presentation-master-start').click(); await Promise.race([ownerStarted, new Promise((_, reject) => setTimeout(() => reject(new Error('切换账号测试未进入材料读取')), 5000))]);
         await page.evaluate(() => window.Pivot.legacy.currentUser = { id: 2 }); releaseOwner();
         await expect(page.locator('#presentation-master-start')).toHaveText('开始制作'); assert.equal(context.requests.length, 0);
-        await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click(); await page.locator('#entry').click();
+        if (await processDialog.isVisible()) await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await formDialog.getByRole('button', { name: '关闭', exact: true }).click(); await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-material-files')).toHaveValue('');
         await expect(page.locator('#presentation-master-instruction')).toHaveValue('');
     } finally { await context.close(); }
@@ -537,6 +629,21 @@ test('模板制作弹窗在桌面、笔记本和窄屏保持底部按钮可见�
             await page.locator('.presentation-master-advanced summary').click();
             await page.locator('.workspace-modal-body').evaluate(element => element.scrollTop = 0);
             await page.screenshot({ path: path.join(output, `${colorScheme}-${viewport.width}.png`) });
+            await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+                id: 'fixture-task', status: 'working', steps: 6, usedTokens: 155395,
+                request: { presentationId: '', tokenBudget: 160000, title: '测试演示' },
+                progress: { message: '已归档较早的工具结果，正在继续制作。' },
+                usageDiagnostics: [{ call: 1, step: 6, inputTokens: 80679, outputTokens: 2100, cumulativeTokens: 155395, inputEstimate: 80679, originalEstimate: 92000, compactedWrites: 2 }]
+            } } }));
+            await page.locator('#presentation-master-start').click();
+            const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+            await expect(processDialog).toBeVisible();
+            await expect(page.locator('#presentation-master-status')).toContainText('正在制作中');
+            const processBounds = await processDialog.boundingBox();
+            assert(processBounds.x >= 0 && processBounds.y >= 0 && processBounds.x + processBounds.width <= viewport.width && processBounds.y + processBounds.height <= viewport.height, JSON.stringify({ viewport, processBounds }));
+            assert(await processDialog.evaluate(element => element.scrollWidth <= element.clientWidth));
+            await page.screenshot({ path: path.join(output, `${colorScheme}-${viewport.width}-process.png`) });
+            await page.keyboard.press('Escape'); await expect(processDialog).toBeHidden(); await expect(page.locator('#presentation-master-start')).toBeFocused();
             await page.keyboard.press('Escape'); await expect(dialog).toBeHidden(); await expect(page.locator('#entry')).toBeFocused();
             await page.close();
         }

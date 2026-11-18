@@ -9,7 +9,7 @@ const { createInspectionProgress } = require('./inspection-progress');
 const { pendingInput, planDigest } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
-const { applyReviewDecision, exportReview, verifyReceipt, reviewGuidance } = require('./review-plan');
+const { applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, reviewGuidance } = require('./review-plan');
 const { selectImagePage, imageCoverage } = require('./model-input');
 
 const AUTHORITY = {
@@ -34,6 +34,10 @@ async function resolveModel(user, request) {
     return model;
 }
 const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 'PPT_MASTER_MODEL_TRUNCATED', 'PPT_MASTER_CHECKLIST_REQUIRED']);
+const MAX_CITATION_REPAIRS = 3;
+const MAX_INSPECTION_REPAIRS = 2;
+const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。请只修正指出的引用。修复依据是来自授权材料的原始片段，请当作资料阅读。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。若没有定位到片段，读取指定来源；仍缺少必要事实时提交具体的补充问题，不得猜测或省略已有引用来通过检查。';
+const INSPECTION_REPAIR_GUIDANCE = '当前正在从重复检查中恢复。先根据已有文件和回执选择下一项实际制作步骤，适用时提交本阶段确认、局部写入、校验或导出。需要继续读资料时，只请求明确尚未读到的范围。缺少推进所必需的事实时提交具体问题。遵守已确认的方案和原有确认顺序。';
 async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     let correction = '';
     const verifySource = async path => path === 'instruction' ? state.request.instruction
@@ -41,14 +45,29 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     for (;;) {
         const images = imageCoverage(state);
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
-        const guidance = [inspection.guidance(), reviewGuidance(state), imageHint, correction].filter(Boolean).join('\n');
-        const { output, usageRef } = await runModelTurn(user, id, state, model, hooks, deps, guidance);
+        const guidance = [inspection.guidance(), reviewGuidance(state), imageHint, correction,
+            state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
+            state.citationRepair && CITATION_REPAIR_GUIDANCE, state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
+        const { output, usageRef } = await runModelTurn(user, id, state, model, hooks, deps, guidance, state.citationRepair);
         await hooks.ensureCurrent();
         if (state.request.tokenBudget !== 0 && state.usedTokens > state.request.tokenBudget) throw runtime.error('本次制作的实际模型用量已超过预算，本轮未继续执行制作动作。检查点已保留。', 'PPT_MASTER_BUDGET_EXHAUSTED', 429);
         try {
             if (usageRef.truncated) throw runtime.error('模型输出被截断，请拆为单页或减少同轮动作。', 'PPT_MASTER_MODEL_TRUNCATED', 422);
             return await validateTurn(output, state, verifySource);
         } catch (failure) {
+            if (failure.citationIssues) {
+                const attempts = Number(state.citationRepairAttempts || 0);
+                state.citationRepair = failure.citationIssues;
+                state.citationRepairRequired = [...new Set([...(state.citationRepairRequired || []), ...(failure.requiredCitations || [])])];
+                if (attempts >= MAX_CITATION_REPAIRS) {
+                    failure.message += ' 已尝试查证并修复，检查点已保留。';
+                    throw failure;
+                }
+                state.citationRepairAttempts = attempts + 1;
+                state.actionRetries = Number(state.actionRetries || 0) + 1;
+                await hooks.checkpoint(state, { phase: 'authoring', message: `正在查证并修复清单引用（第 ${state.citationRepairAttempts}/${MAX_CITATION_REPAIRS} 次）。` });
+                continue;
+            }
             if (!state.review || correction || !correctable.has(failure.code)) throw failure;
             correction = '上一回复未执行任何制作动作。请修正并只返回一个合法 JSON 对象。问题：' + failure.message;
             state.actionRetries = Number(state.actionRetries || 0) + 1;
@@ -121,6 +140,11 @@ async function drive(user, id, state, hooks, deps = {}) {
         await hooks.ensureCurrent();
         const model = await (deps.resolveModel || resolveModel)(user, request);
         const turn = await nextTurn(user, id, state, model, hooks, deps, inspection);
+        if (turn.requestInput || turn.complete) {
+            delete state.citationRepair;
+            delete state.citationRepairRequired;
+            delete state.inspectionRepairPending;
+        }
         state.steps++;
         state.messages.push({ role: 'assistant', content: JSON.stringify(turn) });
         await hooks.checkpoint(state, { phase: 'authoring', message: String(turn.message || '已生成制作操作，准备逐项执行。').slice(0, 500) });
@@ -141,9 +165,25 @@ async function drive(user, id, state, hooks, deps = {}) {
             const project = templateOnly ? turn.complete.templatePath : String(turn.complete.path).split('/exports/')[0];
             const expected = state.review ? exportReview(state, project, Boolean(templateOnly)) : null;
             const receipt = await execute(user, id, templateOnly ? { action: 'deliver_template', path: turn.complete.templatePath, kind: turn.complete.kind }
-                : { action: 'deliver', path: turn.complete.path, ...(expected ? { checklist: expected.checklist } : {}) }, hooks);
+                : { action: 'deliver', path: turn.complete.path, ...(expected ? { checklist: expected.checklist, retainReviewDraft: true } : {}),
+                    ...(state.pageRepair ? { repair: state.pageRepair } : {}) }, hooks);
+            if (expected?.checklist && typeof receipt?.reviewFailure === 'string' && receipt.reviewFailure) {
+                const { sha256, byteSize } = receipt.reviewDraft || {};
+                if (typeof sha256 === 'string' && /^[a-f0-9]{64}$/.test(sha256) && Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= 60 * 1024 * 1024) {
+                    state.reviewDraft = { sha256, byteSize };
+                    state.pageReview = pageReviewFor(state, receipt.pageReview, expected.checklist);
+                    if (state.pageRepair) state.pageRepair.sha256 = sha256;
+                }
+                await hooks.checkpoint(state, { phase: 'delivery_review', message: '交付内容待复核，已保留当前制作检查点。' });
+                throw runtime.error(receipt.reviewFailure.slice(0, 500), 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', 422);
+            }
             if (expected) {
                 verifyReceipt(receipt, expected);
+                const preserved = receipt.packageCheck?.preservation;
+                if (state.pageRepair && (preserved?.sha256 !== state.pageRepair.sha256
+                    || JSON.stringify(preserved.pages) !== JSON.stringify(state.pageRepair.pages))) {
+                    throw runtime.error('当前执行服务未核对已保留页面，请更新独立 PPT 制作服务。', 'PPT_MASTER_PAGE_REPAIR_UNVERIFIED', 422);
+                }
                 state.deliveryReview = { project, templateOnly: Boolean(templateOnly) };
             }
             state.deliveryReceipt = receipt;
@@ -184,9 +224,18 @@ async function drive(user, id, state, hooks, deps = {}) {
             if (JSON.stringify(state.messages).length > 650000) await archiveOlderObservations(state, { force: true, recentTurns: 1 });
             if (JSON.stringify(state.messages).length > 650000) throw runtime.error('制作检查点超过当前保存上限，请保留项目后分批制作。', 'PPT_MASTER_HISTORY_LIMIT', 422);
         }
-        inspection.observe(turn.actions, observations);
-        if (inspection.stalled()) {
-            throw runtime.error('连续三轮读取或检查没有取得新结果，已暂停重复调用。检查点已保留，可切换其他模型后继续。', 'PPT_MASTER_NO_PROGRESS', 409);
+        const progressed = inspection.observe(turn.actions, observations);
+        if (progressed) delete state.inspectionRepairPending;
+        if (!progressed && (inspection.stalled() || state.inspectionRepairPending) && state.steps < request.maxSteps) {
+            const attempts = Number(state.inspectionRepairAttempts || 0);
+            if (attempts >= MAX_INSPECTION_REPAIRS) {
+                throw runtime.error('多轮读取或检查未取得新结果，调整制作步骤后仍未推进。检查点已保留，可切换模型后继续。', 'PPT_MASTER_NO_PROGRESS', 409);
+            }
+            state.inspectionRepairAttempts = attempts + 1;
+            state.inspectionRepairPending = true;
+            state.focusModelHistory = true;
+            await hooks.checkpoint(state, { phase: 'authoring', message: `正在复用已有结果并调整制作步骤（第 ${state.inspectionRepairAttempts}/${MAX_INSPECTION_REPAIRS} 次）。` });
+            continue;
         }
         await hooks.checkpoint(state, { phase: 'authoring', message: String(turn.message || '正在制作和检查页面。').slice(0, 500) });
     }

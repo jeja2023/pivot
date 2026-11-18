@@ -2,9 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const { drive } = require('../server/services/presentations/master/driver');
 const { validateTurn } = require('../server/services/presentations/master/actions');
-const { initializeReview, exportReview, verifyReceipt } = require('../server/services/presentations/master/review-plan');
+const { initializeReview, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('../server/services/presentations/master/review-plan');
+const { readReviewDraft } = require('../server/services/presentations/master/tasks');
 const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
 const { getMaxImagesPerMessage } = require('../server/image-safety');
 const { checkModel } = require('../server/services/presentations/master/model-preflight');
@@ -52,7 +54,11 @@ test('默认制作按阶段批准，非法动作批次整体拒绝，交付绑�
     approve(state);
     const bogus = globalThis.structuredClone(design);
     bogus.requestInput.plan.pages[0].values[0].source.quote = '并不存在的收入120万元。';
-    await turns([bogus, messages => { assert.match(messages[0].content, /引文与材料原文不一致/); return design; }]);
+    await turns([bogus, messages => {
+        assert.match(messages[0].content, /未通过核验的引用/);
+        assert.match(messages.at(-1).content, /引文与材料原文不一致/);
+        return design;
+    }]);
     assert.deepEqual(executed, []);
     assert.throws(() => exportReview(state, 'report'), { code: 'PPT_MASTER_CHECKLIST_REQUIRED' });
     approve(state);
@@ -102,6 +108,124 @@ test('只重试一次无效动作，两个失败回复分别计量且不会部�
     assert.equal(attempts, 2);
     assert.equal(state.steps, 0);
     assert.equal(state.usedTokens, 120);
+});
+
+test('定位不一致的引文及数据项，续跑提示携带原拒绝原因', async () => {
+    const state = makeState('quick');
+    state.request.pageCount = 2;
+    state.request.inputFiles = [{ path: 'inputs/material-1.md', kind: 'text' }];
+    const proposal = globalThis.structuredClone(design);
+    proposal.requestInput.plan.pages.push({ title: '季度营收', values: [
+        { text: '营收120万元', source: { path: 'inputs/material-1.md', quote: '本期营收 120 万元。' } },
+        { text: '净利润30万元', source: { path: 'inputs/material-1.md', quote: '本期净利润为30万元。' } }
+    ] });
+    const read = async path => path === 'instruction' ? state.request.instruction : '本期营收120万元。净利润30万元。';
+    await assert.rejects(validateTurn(proposal, state, read), error => {
+        assert.equal(error.code, 'PPT_MASTER_ACTION_INVALID');
+        assert.match(error.message, /第 2 页第 2 项（inputs\/material-1\.md）的关键数据引文与材料原文不一致/);
+        assert.match(reviewRecoveryGuidance(state, error.code, error.message), /第 2 页第 2 项/);
+        return true;
+    });
+    proposal.requestInput.plan.pages[1].values[1].source.quote = '净利润30万元。';
+    proposal.requestInput.plan.pages[1].values[1].text = '净利润40万元';
+    await assert.rejects(validateTurn(proposal, state, read), /第 2 页第 2 项.*关键数据未完整出现在引文中/);
+    proposal.requestInput.plan.pages[1].values[1].text = '净利润30万元';
+    const validated = await validateTurn(proposal, state, read);
+    assert.equal(validated.requestInput.plan.pages[1].values[1].source.quote, '净利润30万元。');
+});
+
+test('引文自动修复使用材料原文，拒绝删除失败引用，修正后继续正式交付', async () => {
+    const state = makeState('quick'), calls = [], progress = [];
+    const bogus = globalThis.structuredClone(design), omitted = globalThis.structuredClone(design);
+    bogus.requestInput.plan.pages[0].values[0].source.quote = '并不存在的收入120万元。';
+    delete omitted.requestInput.plan.pages[0].values[0].source;
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async (_state, update) => progress.push(update.message) };
+    const turns = outputs => drive({ id: 1 }, 'task', state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async (_model, messages) => {
+            const next = outputs.shift();
+            return typeof next === 'function' ? next(messages) : next;
+        },
+        execute: async (_user, _task, action) => {
+            calls.push(action);
+            const expected = exportReview(state, 'report');
+            return { packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 1, checklistDigest: expected.checklistDigest } };
+        }
+    });
+    const checkEvidence = messages => {
+        assert.match(messages[0].content, /原始片段/);
+        const evidence = messages.find(message => message.role === 'user' && typeof message.content === 'string'
+            && message.content.startsWith('{"citationRepairEvidence":'));
+        assert.equal(JSON.parse(evidence.content).citationRepairEvidence[0].excerpt, '原始收入120万元。');
+    };
+    await turns([bogus, messages => { checkEvidence(messages); return omitted; }, messages => { checkEvidence(messages); return design; }]);
+    assert.equal(state.citationRepairAttempts, 2);
+    assert.equal(state.steps, 1);
+    assert.equal(progress.filter(message => /正在查证并修复清单引用/.test(message)).length, 2);
+    assert.deepEqual(calls, []);
+    assert.equal(pendingInput('task', state).plan.pages[0].values[0].source.quote, '原始收入120万元。');
+    approve(state);
+    const completed = await turns([{ complete: { path: 'report/exports/final.pptx' } }]);
+    assert.equal(completed.receipt.packageCheck.checkedValues, 1);
+});
+
+test('找不到原文时自动查证次数有上限并保留检查点', async () => {
+    const state = makeState('quick');
+    const bogus = globalThis.structuredClone(design);
+    bogus.requestInput.plan.pages[0].values[0].source.quote = '并不存在的本月收入。';
+    bogus.requestInput.plan.pages[0].values[0].text = '本月收入100万元';
+    let calls = 0;
+    await assert.rejects(drive({ id: 1 }, 'task', state, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async () => { calls++; return bogus; },
+        execute: async () => assert.fail('无法核验的引文不能触发工具动作')
+    }), /已尝试查证并修复，检查点已保留/);
+    assert.equal(calls, 4);
+    assert.equal(state.citationRepairAttempts, 3);
+    assert.equal(state.citationRepair[0].excerpt, undefined);
+});
+
+test('交付核验失败保留草稿检查点，仍需通过清单才有正式回执', async () => {
+    const state = makeState('quick');
+    const user = { id: 1 }, taskId = 'task';
+    const hint = '交付第 1 页缺少已确认的可见标题，请修正后重新导出。';
+    const sha256 = 'a'.repeat(64);
+    const calls = [], checkpoints = [];
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async (_state, progress) => checkpoints.push(progress.phase) };
+    const makeTurn = output => drive(user, taskId, state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async () => output,
+        execute: async (_user, _taskId, action) => {
+            calls.push(action);
+            return { reviewFailure: hint, reviewDraft: { sha256, byteSize: 321 } };
+        }
+    });
+    await makeTurn(design);
+    approve(state);
+    await assert.rejects(makeTurn({ complete: { path: 'report/exports/report.pptx' } }), { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: hint });
+    assert.deepEqual(calls, [{ action: 'deliver', path: 'report/exports/report.pptx', checklist: [['经营回顾', ['收入120万元']]], retainReviewDraft: true }]);
+    assert.deepEqual(state.reviewDraft, { sha256, byteSize: 321 });
+    assert.equal(checkpoints.at(-1), 'delivery_review');
+    assert.equal(state.deliveryReceipt, undefined);
+    assert.match(reviewRecoveryGuidance(state, 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', hint), /经营回顾.*收入120万元/);
+    assert.match(reviewRecoveryGuidance(state, 'PPT_MASTER_OPERATION_FAILED', hint), /复用已生成稿件/);
+});
+
+test('待核验草稿仅在任务仍可访问且失败状态和文件摘要一致时交付', async () => {
+    const user = { id: 1 }, buffer = Buffer.from('待核验文件');
+    const sha256 = createHash('sha256').update(buffer).digest('hex');
+    const row = { result_json: { state: { reviewDraft: { sha256, byteSize: buffer.length }, request: { title: '经营回顾' } } } };
+    const failed = { row, task: { status: 'failed' } };
+    await assert.rejects(readReviewDraft({ id: 2 }, 'task', { lookup: async () => null,
+        readOutput: async () => assert.fail('越权时不能读取草稿') }), { code: 'PPT_MASTER_DRAFT_UNAVAILABLE' });
+    let checks = 0;
+    await assert.rejects(readReviewDraft(user, 'task', { lookup: async () => ++checks === 1 ? failed : null,
+        readOutput: async () => buffer }), { code: 'PPT_MASTER_DRAFT_CHANGED' });
+    await assert.rejects(readReviewDraft(user, 'task', { lookup: async () => failed,
+        readOutput: async () => Buffer.alloc(buffer.length) }), { code: 'PPT_MASTER_DRAFT_CHANGED' });
+    assert.deepEqual(await readReviewDraft(user, 'task', { lookup: async () => failed, readOutput: async (_user, _id, name) => {
+        assert.equal(name, 'review-draft.pptx'); return buffer;
+    } }), { buffer, filename: '经营回顾-待核验草稿.pptx' });
 });
 
 test('预检先校验窗口和图片能力，仅合格配置使用端点探针', async () => {

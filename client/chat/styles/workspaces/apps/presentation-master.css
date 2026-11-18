@@ -1,8 +1,10 @@
-.presentation-master-dialog {
+.presentation-master-dialog,
+.presentation-master-process-dialog,
+.presentation-master-usage-dialog {
     width: min(1260px, calc(100vw - 32px));
     height: auto;
     max-width: 1260px;
-    max-height: calc(100dvh - 36px);
+    max-height: calc(100dvh - 20px);
     margin: auto;
     border-radius: var(--radius-md, 10px);
     box-shadow: var(--shadow-md);
@@ -11,47 +13,79 @@
     overflow: hidden;
 }
 
-.presentation-master-dialog .workspace-modal-header,
-.presentation-master-dialog .workspace-modal-body,
-.presentation-master-footer {
-    background: var(--surface);
+.presentation-master-process-overlay {
+    z-index: 120;
+}
+
+.presentation-master-usage-overlay {
+    z-index: 130;
+}
+
+.presentation-master-process-dialog {
+    width: min(860px, calc(100vw - 32px));
+    max-width: 860px;
+    max-height: min(760px, calc(100dvh - 36px));
+    box-shadow: var(--shadow-lg);
+}
+
+.presentation-master-usage-dialog {
+    width: min(760px, calc(100vw - 32px));
+    max-width: 760px;
+    max-height: min(700px, calc(100dvh - 36px));
+    box-shadow: var(--shadow-lg);
 }
 
 .presentation-master-dialog .workspace-modal-header,
+.presentation-master-process-dialog .workspace-modal-header,
+.presentation-master-usage-dialog .workspace-modal-header,
 .presentation-master-footer {
+    background: var(--surface);
     flex-shrink: 0;
+}
+
+.presentation-master-dialog .workspace-modal-body,
+.presentation-master-process-dialog .workspace-modal-body,
+.presentation-master-usage-dialog .workspace-modal-body {
+    background: color-mix(in srgb, var(--bg-side) 70%, var(--surface));
 }
 
 .presentation-master-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
+    padding: 9px 20px;
     border-bottom: 1px solid var(--border);
 }
 
 .presentation-master-header-info {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 6px 14px;
+    gap: 6px 12px;
     min-width: 0;
 }
 
 .presentation-master-header-title-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
 }
 
-.presentation-master-header-title-row svg {
+.presentation-master-header-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--primary) 11%, transparent);
     color: var(--primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
 }
 
 .presentation-master-header-title-row h3 {
     margin: 0;
-    font-size: 1.05rem;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--text-main);
     line-height: 1.3;
@@ -64,12 +98,13 @@
     line-height: 1.4;
 }
 
-.presentation-master-dialog .workspace-modal-body {
-    padding: 14px 20px;
+.presentation-master-dialog .workspace-modal-body,
+.presentation-master-process-dialog .workspace-modal-body {
+    padding: 10px 20px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 9px;
 }
 
 /* 顶部 Hero 模板卡片 */
@@ -78,17 +113,18 @@
     align-items: center;
     justify-content: space-between;
     gap: 14px;
-    padding: 10px 14px;
+    padding: 7px 14px;
     border-radius: var(--radius-md);
-    background: var(--bg-side);
+    background: var(--surface);
     border: 1px solid var(--border);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 4%, transparent);
     transition: all 0.2s ease;
 }
 
 .presentation-master-hero.is-template-active {
     border-left: 4px solid var(--primary);
-    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, transparent), transparent 70%), var(--bg-side);
-    border-color: color-mix(in srgb, var(--primary) 25%, transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, transparent), transparent 68%), var(--surface);
+    border-color: color-mix(in srgb, var(--primary) 26%, transparent);
 }
 
 .presentation-master-hero-content {
@@ -169,34 +205,47 @@
 .presentation-master-form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 9px;
 }
 
 .presentation-master-columns {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-items: stretch;
-    gap: 14px;
+    gap: 12px;
 }
 
 .presentation-master-section {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 12px 14px;
+    padding: 9px 14px;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--text-main) 4%, transparent);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     min-width: 0;
 }
 
 .presentation-master-section-head {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
     color: var(--primary);
+}
+
+.presentation-master-section-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    color: var(--primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .presentation-master-section-head h4 {
@@ -209,7 +258,7 @@
 .presentation-master-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 12px;
+    gap: 7px 12px;
 }
 
 .presentation-master-grid-4 {
@@ -218,14 +267,16 @@
     gap: 12px;
 }
 
-.presentation-master-dialog .modal-form-field {
+.presentation-master-dialog .modal-form-field,
+.presentation-master-process-dialog .modal-form-field {
     display: flex;
     flex-direction: column;
     gap: 4px;
     min-width: 0;
 }
 
-.presentation-master-dialog .modal-form-label {
+.presentation-master-dialog .modal-form-label,
+.presentation-master-process-dialog .modal-form-label {
     display: flex;
     align-items: center;
     color: var(--text-muted);
@@ -234,20 +285,25 @@
     line-height: 1.2;
 }
 
+.presentation-master-pages-label {
+    justify-content: space-between;
+}
+
 .presentation-master-badge-tip {
     font-size: 0.68rem;
-    padding: 0 5px;
+    padding: 1px 6px;
     border-radius: 4px;
     background: color-mix(in srgb, var(--primary) 10%, transparent);
     color: var(--primary);
     margin-left: 6px;
-    font-weight: normal;
+    font-weight: 500;
 }
 
-.presentation-master-dialog .form-input {
+.presentation-master-dialog .form-input,
+.presentation-master-process-dialog .form-input {
     width: 100%;
     min-width: 0;
-    height: 34px;
+    height: 32px;
     font-size: 0.82rem;
     background: var(--bg-main);
     border: 1px solid var(--border);
@@ -265,52 +321,57 @@
 .presentation-master-dialog textarea.form-input {
     height: auto;
     resize: vertical;
-    min-height: 52px;
-    padding: 6px 10px;
+    min-height: 44px;
+    padding: 5px 10px;
     line-height: 1.4;
 }
 
 #presentation-master-instruction {
-    min-height: 58px;
+    min-height: 48px;
+}
+
+.presentation-master-material-field {
+    flex: 1;
 }
 
 #presentation-master-material {
-    min-height: 54px;
+    flex: 1;
+    min-height: 70px;
 }
 
-/* 受众快捷胶囊（单行紧凑排列） */
+/* 快捷预设胶囊 */
 .presentation-master-chips {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     margin-top: 2px;
 }
 
 .presentation-master-chip {
     font-size: 0.7rem;
-    padding: 2px 7px;
-    border-radius: 10px;
-    background: var(--bg-side);
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-side) 80%, var(--surface));
     border: 1px solid var(--border);
     color: var(--text-muted);
     cursor: pointer;
-    line-height: 1.25;
+    line-height: 1.3;
     transition: all 0.15s ease;
 }
 
 .presentation-master-chip:hover {
-    background: color-mix(in srgb, var(--primary) 8%, transparent);
-    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 9%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 55%, transparent);
     color: var(--primary);
 }
 
 /* 一体式拖拽上传区域（整合选择按钮与状态） */
 .presentation-master-dropzone {
-    border: 1.5px dashed var(--border);
+    border: 1.5px dashed color-mix(in srgb, var(--border) 90%, var(--text-muted));
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    background: var(--bg-side);
+    padding: 9px 12px;
+    background: color-mix(in srgb, var(--bg-side) 70%, var(--surface));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -322,13 +383,13 @@
 .presentation-master-dropzone:hover,
 .presentation-master-dropzone.is-dragover {
     border-color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 4%, transparent);
+    background: color-mix(in srgb, var(--primary) 5%, var(--surface));
 }
 
 .presentation-master-dropzone.has-files {
     border-style: solid;
     border-color: color-mix(in srgb, var(--primary) 35%, transparent);
-    background: color-mix(in srgb, var(--primary) 2%, transparent);
+    background: color-mix(in srgb, var(--primary) 3%, var(--surface));
 }
 
 .presentation-master-dropzone-main {
@@ -339,15 +400,22 @@
     flex: 1;
 }
 
-.presentation-master-dropzone-main svg {
-    color: var(--text-muted);
+.presentation-master-dropzone-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--primary) 9%, transparent);
+    color: var(--primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    transition: color 0.15s ease;
+    transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
-.presentation-master-dropzone:hover svg,
-.presentation-master-dropzone.is-dragover svg {
-    color: var(--primary);
+.presentation-master-dropzone:hover .presentation-master-dropzone-icon,
+.presentation-master-dropzone.is-dragover .presentation-master-dropzone-icon {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
 }
 
 .presentation-master-dropzone-content {
@@ -502,34 +570,177 @@
 
 /* 高级设置 */
 .presentation-master-advanced {
-    padding-top: 6px;
-    border-top: 1px solid var(--border);
+    padding-top: 7px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
 }
 
 .presentation-master-advanced summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
     color: var(--text-muted);
     font-size: 0.74rem;
     cursor: pointer;
     font-weight: 500;
+    transition: all 0.15s ease;
 }
 
 .presentation-master-advanced summary:hover {
     color: var(--text-main);
+    border-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 .presentation-master-advanced[open]>.presentation-master-grid {
-    margin-top: 8px;
+    margin-top: 10px;
 }
 
-/* 状态展示卡片 */
+.presentation-master-engine-state {
+    flex: 1 1 240px;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.presentation-master-form-error {
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.presentation-master-form-error:empty {
+    display: none;
+}
+
+/* 状态展示卡片（位于独立制作过程弹窗内） */
 .presentation-master-status-card {
     border-radius: var(--radius-md);
     background: var(--surface);
     border: 1px solid var(--border);
-    padding: 8px 14px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+}
+
+.presentation-master-error-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.presentation-master-error-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.presentation-master-error-head svg {
+    color: var(--danger);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.presentation-master-error-head .presentation-master-task-message {
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+.presentation-master-error-code {
+    align-self: flex-start;
+    margin-left: 23px;
+    font-family: var(--font-mono, Consolas, monospace);
+    font-size: 0.71rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    color: var(--danger);
+}
+
+.presentation-master-resume-panel {
+    margin-top: 4px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
+    background: color-mix(in srgb, var(--bg-side) 75%, var(--surface));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.presentation-master-resume-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.presentation-master-resume-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--primary) 11%, transparent);
+    color: var(--primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.presentation-master-resume-head-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.presentation-master-resume-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.25;
+}
+
+.presentation-master-resume-subtitle {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.presentation-master-resume-tip {
+    margin: 0;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--text-main);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
+.presentation-master-resume-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
+}
+
+.presentation-master-resume-fields .is-highlighted .form-input {
+    border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+}
+
+.presentation-master-resume-actions {
+    justify-content: flex-end;
+    margin-top: 2px;
 }
 
 .presentation-master-ready-row {
@@ -589,20 +800,63 @@
     gap: 10px;
 }
 
+.presentation-master-task-head-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.presentation-master-task-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-stop-btn {
+    margin-left: auto;
+    height: 30px;
+    padding: 0 11px;
+    gap: 5px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm, 6px);
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 5%, transparent);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    flex-shrink: 0;
+}
+
+.presentation-master-stop-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
 .presentation-master-task-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 2px 9px;
     border-radius: 10px;
     font-size: 0.74rem;
     font-weight: 600;
     background: color-mix(in srgb, var(--primary) 12%, transparent);
     color: var(--primary);
+    flex-shrink: 0;
 }
 
-.presentation-master-task-badge.working {
+.presentation-master-task-badge.working,
+.presentation-master-task-badge.completed {
     background: color-mix(in srgb, var(--primary) 14%, transparent);
     color: var(--primary);
+}
+
+.presentation-master-task-badge.input_required {
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    color: color-mix(in srgb, var(--warning) 82%, var(--text-main));
 }
 
 .presentation-master-task-badge.failed {
@@ -610,22 +864,31 @@
     color: var(--danger);
 }
 
+.presentation-master-task-badge.cancelled,
+.presentation-master-task-badge.expired {
+    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+    color: var(--text-muted);
+}
+
 .presentation-master-task-message {
     margin: 0;
-    font-size: 0.8rem;
+    font-size: 0.81rem;
     color: var(--text-main);
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 .presentation-master-task-summary,
 .presentation-master-task-feedback {
     margin: 0;
+    font-size: 0.77rem;
     color: var(--text-muted);
-    line-height: 1.4;
+    line-height: 1.45;
     overflow-wrap: anywhere;
 }
 
-.presentation-master-status-card .presentation-master-task-feedback {
+.presentation-master-status-card .presentation-master-task-feedback,
+.presentation-master-form-error {
+    font-size: 0.79rem;
     color: var(--danger);
 }
 
@@ -635,7 +898,10 @@
 
 .presentation-master-task-question {
     margin: 0;
+    font-size: 0.84rem;
     font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.45;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
@@ -653,21 +919,108 @@
 .presentation-master-task-context {
     max-height: 180px;
     overflow: auto;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    padding: 9px 12px;
+    font-size: 0.79rem;
+    line-height: 1.55;
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--warning) 26%, var(--border));
+    border-left: 3px solid var(--warning);
+    border-radius: var(--radius-sm, 6px);
     color: var(--text-main);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-.presentation-master-dialog textarea.presentation-master-task-answer {
-    min-height: 52px;
+.presentation-master-dialog textarea.presentation-master-task-answer,
+.presentation-master-process-dialog textarea.presentation-master-task-answer {
+    min-height: 62px;
+    font-size: 0.81rem;
 }
 
-.presentation-master-usage ol {
-    margin: 6px 0 0;
-    padding-left: 24px;
+/* 每轮模型用量触发条与独立明细弹窗 */
+.presentation-master-usage-bar {
+    display: flex;
+    align-items: center;
+    padding-top: 2px;
+}
+
+.presentation-master-usage-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 11px;
+    border-radius: var(--radius-sm, 6px);
+    font-size: 0.77rem;
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+.presentation-master-usage-btn svg {
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.presentation-master-usage-btn span {
+    color: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.presentation-master-usage-body {
+    padding: 12px 18px;
+    overflow-y: auto;
+}
+
+.presentation-master-usage-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.presentation-master-usage-item {
+    padding: 9px 12px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-variant-numeric: tabular-nums;
+}
+
+.presentation-master-usage-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.presentation-master-usage-step {
+    font-size: 0.76rem;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    color: var(--primary);
+}
+
+.presentation-master-usage-metrics {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-usage-detail {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--text-muted);
     overflow-wrap: anywhere;
 }
 
@@ -679,14 +1032,205 @@
     margin-top: 4px;
 }
 
+.presentation-master-review-panel {
+    margin-top: 4px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border));
+    border-left: 4px solid var(--warning);
+    background: color-mix(in srgb, var(--warning) 4%, var(--surface));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.presentation-master-review-stage {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--warning) 13%, transparent);
+    color: color-mix(in srgb, var(--warning) 85%, var(--text-main));
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+/* 拟定页面与数据核对清单 */
+.presentation-master-plan-checklist {
+    margin-top: 2px;
+}
+
+.presentation-master-plan-checklist summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.presentation-master-plan-pages {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.presentation-master-plan-page {
+    padding: 8px 11px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.presentation-master-plan-page-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.presentation-master-plan-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 19px;
+    height: 19px;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.presentation-master-plan-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.35;
+}
+
+.presentation-master-plan-facts {
+    margin: 5px 0 0 26px;
+    padding-left: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.presentation-master-plan-fact {
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+
+.presentation-master-plan-source {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.presentation-master-confirm-actions {
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.presentation-master-confirm-btn,
+.presentation-master-revise-btn,
+.presentation-master-resume-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 35px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    transition: all 0.15s ease;
+}
+
+.presentation-master-confirm-btn span,
+.presentation-master-revise-btn span,
+.presentation-master-stop-btn span,
+.presentation-master-resume-btn span {
+    color: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.presentation-master-confirm-btn,
+.presentation-master-resume-btn {
+    font-weight: 600;
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+.presentation-master-confirm-btn:hover:not(:disabled),
+.presentation-master-resume-btn:hover:not(:disabled) {
+    filter: brightness(1.04);
+}
+
+.presentation-master-revise-btn {
+    color: var(--text-muted);
+    background: var(--surface);
+}
+
+.presentation-master-revise-btn:hover:not(:disabled) {
+    color: var(--text-main);
+    border-color: color-mix(in srgb, var(--text-muted) 65%, transparent);
+}
+
+.presentation-master-confirm-actions.has-draft-reply .presentation-master-revise-btn {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+    font-weight: 600;
+}
+
+.presentation-master-confirm-actions.has-draft-reply .presentation-master-confirm-btn {
+    opacity: 0.78;
+}
+
 /* 底部操作栏 */
 .presentation-master-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 10px 20px;
+    padding: 8px 20px;
     border-top: 1px solid var(--border);
+}
+
+.presentation-master-footer:has(.presentation-master-footer-bar) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.presentation-master-footer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+}
+
+.presentation-master-footer-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .presentation-master-footer-hint {
@@ -714,7 +1258,10 @@
 
 /* 响应式调整 */
 @media (max-width: 900px) {
-    .presentation-master-dialog {
+
+    .presentation-master-dialog,
+    .presentation-master-process-dialog,
+    .presentation-master-usage-dialog {
         width: calc(100vw - 16px);
         max-height: calc(100dvh - 24px);
     }
@@ -723,8 +1270,14 @@
         padding: 10px 14px;
     }
 
-    .presentation-master-dialog .workspace-modal-body {
+    .presentation-master-dialog .workspace-modal-body,
+    .presentation-master-process-dialog .workspace-modal-body,
+    .presentation-master-usage-dialog .workspace-modal-body {
         padding: 12px 14px;
+    }
+
+    .presentation-master-resume-fields {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .presentation-master-columns {
@@ -759,10 +1312,39 @@
         padding: 10px 14px;
         flex-direction: column;
         align-items: stretch;
+        gap: 8px;
+    }
+
+    .presentation-master-footer-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .presentation-master-engine-state {
+        flex: 0 0 auto;
+    }
+
+    .presentation-master-footer-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .presentation-master-footer-actions .btn-secondary {
+        flex: 1 1 auto;
     }
 
     .presentation-master-start-btn {
         width: 100%;
+    }
+
+    .presentation-master-confirm-actions {
+        justify-content: stretch;
+    }
+
+    .presentation-master-confirm-btn,
+    .presentation-master-revise-btn,
+    .presentation-master-resume-btn {
+        flex: 1 1 auto;
     }
 }
 

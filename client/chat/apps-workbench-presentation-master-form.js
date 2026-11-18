@@ -35,7 +35,11 @@
     function section(title, iconPaths, className = '') {
         const element = node('section', 'presentation-master-section ' + className);
         const header = node('div', 'presentation-master-section-head');
-        if (iconPaths) header.appendChild(svgIcon(iconPaths, 16));
+        if (iconPaths) {
+            const iconBox = node('span', 'presentation-master-section-icon');
+            iconBox.appendChild(svgIcon(iconPaths, 14));
+            header.appendChild(iconBox);
+        }
         header.appendChild(node('h4', '', title));
         element.appendChild(header); return element;
     }
@@ -47,15 +51,16 @@
 
         const dropzone = node('div', 'presentation-master-dropzone');
         const dropMain = node('div', 'presentation-master-dropzone-main');
-        const dropIcon = svgIcon([['path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }], ['polyline', { points: '17 8 12 3 7 8' }], ['line', { x1: '12', y1: '3', x2: '12', y2: '15' }]], 20);
+        const dropIconBox = node('span', 'presentation-master-dropzone-icon');
+        dropIconBox.appendChild(svgIcon([['path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }], ['polyline', { points: '17 8 12 3 7 8' }], ['line', { x1: '12', y1: '3', x2: '12', y2: '15' }]], 18));
         const dropText = node('div', 'presentation-master-dropzone-content');
-        const dropPrompt = node('p', 'presentation-master-dropzone-title', '拖拽文件至此或点击右侧选择');
+        const dropPrompt = node('p', 'presentation-master-dropzone-title', '拖拽文件至此或点击上传');
         const dropSub = node('p', 'presentation-master-dropzone-subtitle', fileTypeLabel || '支持格式：' + accept);
         const selection = node('span', 'presentation-master-file-selection', '未选择任何文件');
         selection.id = input.id + '-selection';
         selection.setAttribute('aria-live', 'polite');
         dropText.append(dropPrompt, dropSub, selection);
-        dropMain.append(dropIcon, dropText);
+        dropMain.append(dropIconBox, dropText);
 
         const picker = node('div', 'presentation-master-dropzone-actions');
         const browse = node('button', 'btn-secondary presentation-master-browse-btn', '选择文件');
@@ -202,8 +207,10 @@
         const purpose = settings.querySelector('#presentation-master-purpose');
         const consumption = settings.querySelector('#presentation-master-consumption').parentElement, duration = settings.querySelector('#presentation-master-duration').parentElement;
         const pages = field('目标页数（1至40）', 'pages', 'number');
+        const pagesLabel = pages.querySelector('.modal-form-label');
+        pagesLabel?.classList.add('presentation-master-pages-label');
         const pagesTip = node('span', 'presentation-master-badge-tip', '建议8~16页');
-        pages.querySelector('.modal-form-label')?.appendChild(pagesTip);
+        pagesLabel?.appendChild(pagesTip);
 
         settings.insertBefore(pages, purpose.parentElement);
         settings.append(purpose.parentElement, field('制作要求', 'instruction', 'textarea'));
@@ -223,7 +230,9 @@
 
         const sources = section('参考材料与多媒体素材', [['path', { d: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z' }]]);
         const materialFiles = fileField('文件材料', 'material-files', '.doc,.docx,.pdf,.txt,.md', '最多10份，单份≤10MB；读取文字内容（扫描件请先识别，图片/嵌入附件不参与解析）。', '支持 Word (.doc/.docx)、PDF、TXT、Markdown');
-        sources.append(materialFiles, field('补充文字材料（可选）', 'material', 'textarea'), fileField('原稿与图片、音视频', 'source', '.pptx,.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4', '可选，最多21个文件；演示原稿（.pptx）用于编辑，图片和音视频作为制作素材。', '支持 PPTX 原稿、图片 (PNG/JPG/WEBP)、音视频 (WAV/MP3/MP4)'));
+        const supplementField = field('补充文字材料（可选）', 'material', 'textarea');
+        supplementField.classList.add('presentation-master-material-field');
+        sources.append(materialFiles, supplementField, fileField('原稿与图片、音视频', 'source', '.pptx,.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4', '可选，最多21个文件；演示原稿（.pptx）用于编辑，图片和音视频作为制作素材。', '支持 PPTX 原稿、图片 (PNG/JPG/WEBP)、音视频 (WAV/MP3/MP4)'));
 
         columns.append(requirements, sources);
 
@@ -252,8 +261,9 @@
         }
         form.querySelector('#presentation-master-budget').placeholder = '新建不限，续跑沿用原预算';
         for (const [key, max] of [['title', 120], ['instruction', 16000], ['material', 120000]]) form.querySelector('#presentation-master-' + key).maxLength = max;
-        form.querySelector('#presentation-master-title').placeholder = '演示文稿主题（如：2026年度业务规划与关键决策）';
-        form.querySelector('#presentation-master-instruction').placeholder = '说明主题、重点章节、风格要求（如沉稳严谨、现代简约）及需保留的关键数字或结论';
+        form.querySelector('#presentation-master-title').placeholder = '如：2026年度业务规划汇报';
+        form.querySelector('#presentation-master-audience').placeholder = '如：管理层、评审组、客户';
+        form.querySelector('#presentation-master-instruction').placeholder = '说明重点章节、视觉风格（沉稳严谨/现代简约等）及需保留的关键数字或结论';
         form.querySelector('#presentation-master-purpose').placeholder = '希望受众看完后了解什么或采取什么行动';
         form.querySelector('#presentation-master-material').placeholder = '可直接粘贴事实论据、经营数据或核心结论，与上传的文件材料一起作为制作依据';
         return form;

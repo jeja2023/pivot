@@ -16,6 +16,7 @@ from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
 
 from tool_catalog import TOOLS, command, relative_path
+from delivery_checklist import ChecklistMismatch, read_slide_order, verify_checklist, verify_preserved_pages
 
 ENGINE = Path(os.environ.get("PIVOT_MASTER_ENGINE_ROOT", "/engine"))
 WORKSPACE = Path(os.environ.get("PIVOT_MASTER_WORKSPACE", "/workspace"))
@@ -25,6 +26,7 @@ REVISION = json.loads(LOCK_PATH.read_text(encoding="utf-8"))["revision"]
 TEXT_EXTENSIONS = {".md", ".json", ".yaml", ".yml", ".txt", ".svg", ".csv", ".xml"}
 MAX_TEXT = 180_000
 MAX_WORKSPACE = 250 * 1024 * 1024
+REVIEW_DRAFT = ".pivot/review-draft.pptx"
 
 
 def source_fingerprint() -> str:
@@ -91,7 +93,7 @@ def validate_svg(source: str, target: Path) -> None:
         relative_path(candidate.resolve().relative_to(WORKSPACE.resolve()).as_posix(), WORKSPACE, must_exist=True)
 
 
-def package_report(data: bytes, checklist=None) -> dict:
+def package_report(data: bytes, checklist=None, preservation=None) -> dict:
     if len(data) > 60 * 1024 * 1024:
         raise ValueError("PPTX 超过输出上限。")
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -112,10 +114,76 @@ def package_report(data: bytes, checklist=None) -> dict:
                     raise ValueError("最终文件含不支持的 XML 声明。")
                 ET.fromstring(text)
         report = {"status": "passed", "slideCount": len(slide_names), "charts": len([name for name in names if re.fullmatch(r"ppt/charts/chart\d+\.xml", name)]), "officeVisual": "not_checked"}
+        if preservation is not None:
+            baseline, selected = preservation
+            with zipfile.ZipFile(io.BytesIO(baseline)) as previous:
+                verify_preserved_pages(previous, archive, read_slide_order(archive, slide_names), selected)
         if checklist is not None:
-            from delivery_checklist import verify_checklist
             report.update(verify_checklist(archive, slide_names, checklist))
         return report
+
+
+def deliver_presentation(request: dict) -> dict:
+    file = relative_path(request.get("path"), WORKSPACE, must_exist=True)
+    if file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
+        raise ValueError("只能交付 exports 目录中的最终 PPTX。")
+    data = file.read_bytes()
+    content_hash = hashlib.sha256(data).hexdigest()
+    receipt = json.loads((WORKSPACE / ".pivot/export.json").read_text(encoding="utf-8"))
+    if receipt.get("sourceFingerprint") != source_fingerprint() or receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != content_hash:
+        raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。")
+    preservation = None
+    repair = request.get("repair")
+    draft = WORKSPACE / REVIEW_DRAFT
+    if repair is not None:
+        baseline_digest = repair.get("sha256")
+        pages = repair.get("pages")
+        if not isinstance(baseline_digest, str) or not re.fullmatch(r"[a-f0-9]{64}", baseline_digest) or not isinstance(pages, list) or not pages or any(type(page) is not int or not 1 <= page <= 100 for page in pages):
+            raise ValueError("按页修复的草稿摘要或页码无效。")
+        if draft.is_symlink() or not draft.is_file() or draft.stat().st_size > 60 * 1024 * 1024:
+            raise ValueError("原待核验草稿已不可用。")
+        baseline = draft.read_bytes()
+        if hashlib.sha256(baseline).hexdigest() != baseline_digest:
+            raise ValueError("待核验草稿已变化，请刷新任务后重试。")
+        preservation = (baseline, set(pages))
+    try:
+        report = package_report(data, request.get("checklist"), preservation)
+    except ChecklistMismatch as error:
+        if request.get("retainReviewDraft") is not True:
+            raise
+        # 仅保留与本次成功导出回执一致且结构可读的草稿，正式交付仍须通过清单核验。
+        result = {"reviewFailure": str(error)}
+        if error.report is not None:
+            result["pageReview"] = error.report
+        files = inventory()
+        if sum(entry.stat().st_size for entry in files if entry != draft) + len(data) > MAX_WORKSPACE or (draft not in files and len(files) >= 16_000):
+            return result
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=draft.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(data)
+            temporary.replace(draft)
+            result["reviewDraft"] = {"sha256": content_hash, "byteSize": len(data)}
+        except OSError:
+            pass
+        finally:
+            if temporary:
+                temporary.unlink(missing_ok=True)
+        return result
+    delivery = WORKSPACE / "delivery"
+    delivery.mkdir(exist_ok=True)
+    (delivery / "presentation.pptx").write_bytes(data)
+    with zipfile.ZipFile(delivery / "project.zip", "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
+        for entry in inventory():
+            relative = entry.relative_to(WORKSPACE)
+            if relative.parts[0] != "delivery" and relative.as_posix() != REVIEW_DRAFT:
+                archive.write(entry, relative.as_posix())
+    with (delivery / "project.zip").open("rb") as project_file:
+        project_digest = hashlib.file_digest(project_file, "sha256").hexdigest()
+    if preservation is not None:
+        report["preservation"] = {"sha256": repair["sha256"], "pages": sorted(preservation[1])}
+    return {"path": "delivery/presentation.pptx", "projectPath": "delivery/project.zip", "sha256": content_hash, "projectSha256": project_digest, "byteSize": len(data), "packageCheck": report}
 
 
 def main(request: dict) -> dict:
@@ -136,7 +204,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "pageRepair": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action in {"native_inspect", "native_patch", "native_video_prepare", "native_video_clip", "native_video_finish"}:
         from native_adapter import execute
@@ -233,25 +301,7 @@ def main(request: dict) -> dict:
         data = (delivery / "project.zip").read_bytes()
         return {"projectPath": "delivery/project.zip", "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data), "packageCheck": {"status": "passed", "kind": kind, "upstreamValidation": check["stdout"], "officeVisual": "not_checked"}, "templateOnly": True}
     if action == "deliver":
-        file = relative_path(request.get("path"), WORKSPACE, must_exist=True)
-        if file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
-            raise ValueError("只能交付 exports 目录中的最终 PPTX。")
-        data = file.read_bytes()
-        receipt = json.loads((WORKSPACE / ".pivot/export.json").read_text(encoding="utf-8"))
-        if receipt.get("sourceFingerprint") != source_fingerprint() or receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != hashlib.sha256(data).hexdigest():
-            raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。")
-        report = package_report(data, request.get("checklist"))
-        delivery = WORKSPACE / "delivery"
-        delivery.mkdir(exist_ok=True)
-        (delivery / "presentation.pptx").write_bytes(data)
-        with zipfile.ZipFile(delivery / "project.zip", "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
-            for entry in inventory():
-                relative = entry.relative_to(WORKSPACE)
-                if relative.parts[0] != "delivery":
-                    archive.write(entry, relative.as_posix())
-        with (delivery / "project.zip").open("rb") as project_file:
-            project_digest = hashlib.file_digest(project_file, "sha256").hexdigest()
-        return {"path": "delivery/presentation.pptx", "projectPath": "delivery/project.zip", "sha256": hashlib.sha256(data).hexdigest(), "projectSha256": project_digest, "byteSize": len(data), "packageCheck": report}
+        return deliver_presentation(request)
     raise ValueError("执行动作未登记。")
 
 

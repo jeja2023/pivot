@@ -21,7 +21,7 @@ async function availability() {
             const health = await remote.info({ force: true });
             if (!health) return { enabled: false, transport: 'service', message: '完整制作服务已停用，标准PPT功能继续可用。' };
             return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId,
-                checklistReady: health.deliveryChecklist === 1, message: '独立PPT制作服务可用。' };
+                checklistReady: health.deliveryChecklist === 1, pageRepairReady: health.pageRepair === 1, message: '独立PPT制作服务可用。' };
         }
     } catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }
     if (!deployment.accepting()) return { enabled: false, message: 'PPT制作引擎正在更新，请稍后重新提交。' };
@@ -77,9 +77,11 @@ async function inputFile(user, id, name, buffer) {
     return 'inputs/' + name;
 }
 async function readOutput(user, id, name, maxBytes = 60 * 1024 * 1024) {
-    if (!['presentation.pptx', 'project.zip', 'manifest.json', 'video.mp4', 'video-first.png'].includes(name) && !/^preview-(?:[1-9]|[1-3]\d|40)\.png$/.test(name)) throw error('交付文件类型无效。');
+    if (!['presentation.pptx', 'project.zip', 'manifest.json', 'video.mp4', 'video-first.png', 'review-draft.pptx'].includes(name) && !/^preview-(?:[1-9]|[1-3]\d|40)\.png$/.test(name)) throw error('交付文件类型无效。');
     if (await remote.configured()) return remote.file(user, id, 'outputs', name, maxBytes);
-    const root = await workspace(user, id), file = name.startsWith('preview-') ? path.join(root, 'native-preview', name.replace('preview-', 'slide-')) : path.join(root, 'delivery', name);
+    const root = await workspace(user, id);
+    const file = name.startsWith('preview-') ? path.join(root, 'native-preview', name.replace('preview-', 'slide-'))
+        : path.join(root, name === 'review-draft.pptx' ? '.pivot' : 'delivery', name);
     const stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes || !comparable(await fs.realpath(file)).startsWith(comparable(root) + path.sep)) throw error('交付文件不存在或越过当前任务范围。', 'PPT_MASTER_OUTPUT_INVALID', 422);
     return fs.readFile(file);

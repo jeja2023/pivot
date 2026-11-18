@@ -12,10 +12,14 @@ const { prepareDelivery, commitDelivery } = require('./delivery');
 const { pendingInput, parseDecision } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { checkModel } = require('./model-preflight');
-const { initializeReview, exportReview, verifyReceipt } = require('./review-plan');
+const { initializeReview, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('./review-plan');
 const { imageCoverage } = require('./model-input');
 const deployment = require('./deployment');
 const active = require('./continuation').createContinuationCoordinator();
+
+function reviewDraftFor(row, task) {
+    return ['failed', 'expired'].includes(task.status) ? row.result_json.state?.reviewDraft : null;
+}
 
 async function ensureAccess(user, request) {
     let visionRequired = false;
@@ -42,16 +46,43 @@ function publicResult(row, task) {
         imageCoverage: state?.prepared ? imageCoverage(state) : undefined, actionRetries: state?.actionRetries || 0,
         usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
         recoverable: Boolean(state && (!state.pendingKind || state.response) && (task.status === 'failed' || task.status === 'expired' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
+        ...(reviewDraftFor(row, task) ? { hasReviewDraft: true } : {}),
+        ...(reviewDraftFor(row, task) && state.pageReview ? { pageReview: state.pageReview, draftRevision: state.reviewDraft.sha256,
+            canRepairPages: state.engine?.pageRepair === 1 } : {}),
         ...((task.status === 'input_required' || ['expired', 'failed'].includes(task.status)) && !state?.response && pending ? { inputRequest: pending } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
 }
-async function get(user, id) {
+async function accessibleTask(user, id) {
     const row = await repository.read(user, id);
     if (!row) return null;
     const task = await taskStore.getForUser(id, user);
     if (!task) return null;
     await ensureAccess(user, row.result_json.state?.request || row.input_request);
-    return publicResult(row, task);
+    return { row, task };
+}
+async function get(user, id) {
+    const result = await accessibleTask(user, id);
+    return result && publicResult(result.row, result.task);
+}
+async function readReviewDraft(user, id, { lookup = accessibleTask, readOutput = runtime.readOutput } = {}) {
+    const result = await lookup(user, id);
+    const draft = result && reviewDraftFor(result.row, result.task);
+    if (!draft) throw runtime.error('待核验草稿暂不可用，请刷新任务状态。', 'PPT_MASTER_DRAFT_UNAVAILABLE', 404);
+    let buffer;
+    try {
+        buffer = await readOutput(user, id, 'review-draft.pptx');
+    } catch (error) {
+        if (!['ENOENT', 'PPT_SERVICE_OUTPUT_MISSING'].includes(error.code)) throw error;
+        throw runtime.error('待核验草稿已不可用，请在检查点可用时继续制作。', 'PPT_MASTER_DRAFT_UNAVAILABLE', 404);
+    }
+    const current = await lookup(user, id);
+    const stillAvailable = current && reviewDraftFor(current.row, current.task);
+    if (!stillAvailable || stillAvailable.sha256 !== draft.sha256 || buffer.length !== draft.byteSize
+        || crypto.createHash('sha256').update(buffer).digest('hex') !== draft.sha256) {
+        throw runtime.error('待核验草稿已变化，请刷新任务后重试。', 'PPT_MASTER_DRAFT_CHANGED', 409);
+    }
+    const title = current.row.result_json.state.request.title || '演示文稿';
+    return { buffer, filename: title.replace(/[\r\n\\/]/g, '_') + '-待核验草稿.pptx' };
 }
 async function prepareInputs(user, id, request, deps = {}) {
     const input = deps.inputFile || runtime.inputFile;
@@ -220,6 +251,24 @@ async function resume(user, id, input = {}) {
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
     deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
+    if (input.pages !== undefined) {
+        if (!['failed', 'expired'].includes(row.status) || !state.reviewDraft || !state.pageReview || state.engine?.pageRepair !== 1) {
+            throw runtime.error('当前任务没有可按页修复的草稿，请检查任务或重新生成整份。', 'PPT_MASTER_PAGE_REPAIR_UNAVAILABLE', 409);
+        }
+        if (input.draftRevision !== state.reviewDraft.sha256) throw runtime.error('草稿已更新，请刷新后重新选择页面。', 'PPT_MASTER_DRAFT_CHANGED', 409);
+        const failedPages = new Set(state.pageReview.failedPages.map(page => page.page));
+        if (!Array.isArray(input.pages) || !input.pages.length || input.pages.length > failedPages.size
+            || new Set(input.pages).size !== input.pages.length || input.pages.some(page => !failedPages.has(page))) {
+            throw runtime.error('请选择需要修复的未通过页面。');
+        }
+        if (input.repairNote !== undefined && (typeof input.repairNote !== 'string' || input.repairNote.length > 1000)) {
+            throw runtime.error('修改意见请填写一千字以内的文字。');
+        }
+        state.pageRepair = { sha256: state.reviewDraft.sha256, pages: [...input.pages].sort((a, b) => a - b) };
+        const issues = state.pageReview.failedPages.filter(page => input.pages.includes(page.page));
+        state.messages.push({ role: 'user', content: '用户要求只修复选中的页面，保留其他页面。以下是已确认清单与本次修改意见：'
+            + JSON.stringify({ issues, note: input.repairNote?.trim() || '' }) });
+    }
     const modelId = input.modelId === undefined ? state.request.modelId : String(input.modelId || '').trim();
     if (!modelId || modelId.length > 160) throw runtime.error('请选择可用的制作模型。');
     if (modelId !== state.request.modelId) {
@@ -228,14 +277,45 @@ async function resume(user, id, input = {}) {
     const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = contract.normalizeTokenBudget(input.tokenBudget, state.request.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160) throw runtime.error('继续轮次只能在上限内增加，不能重置累计消耗。');
     state.request.maxSteps = maxSteps; state.request.tokenBudget = tokenBudget; state.request.modelId = modelId;
+    if (row.error_code === 'PPT_MASTER_ACTION_INVALID' && state.citationRepair) state.citationRepairAttempts = 0;
+    if (row.error_code === 'PPT_MASTER_NO_PROGRESS') {
+        state.inspectionRepairAttempts = 0;
+        state.inspectionRepairPending = true;
+    }
     // 旧检查点可能只保存了转发超时或带超时原因的熔断错误。
     if (['PPT_MASTER_MODEL_TIMEOUT', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
         || row.error_code === 'AI_ENDPOINT_CIRCUIT_OPEN' && /timeout of \d+ms exceeded/i.test(row.error_message || '')) {
         state.focusModelHistory = true;
     }
-    if (state.messages) state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' });
+    if (state.messages) {
+        const repair = reviewRecoveryGuidance(state, row.error_code, row.error_message);
+        state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' + repair });
+    }
     if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);
     setImmediate(() => run(id, user).catch(() => {})); return get(user, id);
 }
 
-module.exports = { start, get, respond, cancel, latest, activeTask, run, resume };
+async function regenerate(user, id, dependencies = {}) {
+    const previous = await (dependencies.lookup || accessibleTask)(user, id);
+    if (!previous || !['failed', 'expired'].includes(previous.task.status) || previous.row.result_json.state?.request?.runId) {
+        throw runtime.error('此任务当前不能重新生成整份。', 'PPT_MASTER_REGENERATE_UNAVAILABLE', 409);
+    }
+    const request = previous.row.result_json.state?.request || previous.row.input_request;
+    const readOriginal = dependencies.readOriginal || runtime.inputBuffer;
+    const materials = await Promise.all((request.materials || []).map(async material => {
+        if (typeof material.text === 'string') return material;
+        const path = /^inputs\/(material-[1-9]\d*\.md)$/.exec(material.path || '');
+        if (!path) throw runtime.error('原材料快照已不可用，请使用原材料新建制作。', 'PPT_MASTER_REGENERATE_UNAVAILABLE', 409);
+        try {
+            const buffer = await readOriginal(user, id, path[1], 500000);
+            if (crypto.createHash('sha256').update(buffer).digest('hex') !== material.digest) throw new Error();
+            return { ...material, text: buffer.toString('utf8') };
+        } catch (_) {
+            throw runtime.error('原材料快照已不可用，请使用原材料新建制作。', 'PPT_MASTER_REGENERATE_UNAVAILABLE', 409);
+        }
+    }));
+    const { sourceAssetId, ...settings } = request;
+    return (dependencies.start || start)(user, { ...settings, ...(sourceAssetId ? { sourceAssetId } : {}), materials });
+}
+
+module.exports = { start, get, readReviewDraft, respond, cancel, latest, activeTask, run, resume, regenerate };

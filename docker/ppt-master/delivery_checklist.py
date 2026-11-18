@@ -14,6 +14,14 @@ REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
 
+class ChecklistMismatch(ValueError):
+    """文件可读，但放映页与已确认内容不符。"""
+
+    def __init__(self, message, report=None):
+        super().__init__(message)
+        self.report = report
+
+
 def compact(text: str) -> str:
     return "".join(unicodedata.normalize("NFKC", text).split())
 
@@ -115,13 +123,68 @@ def valid_value(value):
             and len(value[3]) <= 48 and re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?", value[3]))
 
 
+def slide_identity(archive, slide_path, parts, part_hashes):
+    # 比较页面及其依赖部件，包括图表工作簿、图片、备注、版式和主题。
+    pending = [slide_path]
+    visited = {}
+    while pending:
+        path = pending.pop()
+        if path in visited:
+            continue
+        if path not in parts:
+            raise ValueError("页面引用的文件缺失，无法核对保留页。")
+        if path not in part_hashes:
+            payload = archive.read(path)
+            if path.endswith(".xml"):
+                root = ET.fromstring(payload)
+                # 导出器会重新分配 Office 的创建标识和日期、页码域的内部标识。
+                for element in root.iter():
+                    if element.tag == "{http://schemas.microsoft.com/office/powerpoint/2010/main}creationId":
+                        element.attrib.pop("val", None)
+                    elif element.tag == f"{{{A}}}fld" and element.get("type", "").startswith(("slidenum", "datetime")):
+                        element.attrib.pop("id", None)
+                payload = ET.tostring(root)
+            part_hashes[path] = hashlib.sha256(payload).hexdigest()
+        visited[path] = part_hashes[path]
+        parent, name = posixpath.split(path)
+        relationships = posixpath.join(parent, "_rels", name + ".rels")
+        if relationships not in parts:
+            continue
+        pending.append(relationships)
+        for relation in ET.fromstring(archive.read(relationships)).findall(f"{{{REL}}}Relationship"):
+            if relation.get("TargetMode") == "External":
+                continue
+            # 备注及版式的反向引用会回到页面，母版引用的其他版式与当前页无关。
+            relation_type = relation.get("Type", "").rsplit("/", 1)[-1]
+            if relation_type == "slide" or relation_type == "slideLayout" and "/slideMasters/" in path:
+                continue
+            target = relation.get("Target", "").split("#", 1)[0]
+            if target:
+                pending.append(posixpath.normpath(target.lstrip("/") if target.startswith("/") else posixpath.join(parent, target)))
+    return hashlib.sha256(json.dumps(sorted(visited.items())).encode()).hexdigest()
+
+
+def verify_preserved_pages(baseline, archive, ordered, selected):
+    previous_names = baseline.namelist()
+    previous = read_slide_order(baseline, [name for name in previous_names if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)])
+    if len(ordered) != len(previous):
+        raise ValueError("按页修复须保留原页数，请按指定页面修正后重新导出。")
+    before_parts, after_parts = set(previous_names), set(archive.namelist())
+    before_hashes, after_hashes = {}, {}
+    for index, (old_path, new_path) in enumerate(zip(previous, ordered), 1):
+        if index not in selected and slide_identity(baseline, old_path, before_parts, before_hashes) != slide_identity(archive, new_path, after_parts, after_hashes):
+            raise ValueError(f"按页修复改变了第 {index} 页或它使用的资源。已保留原草稿，请仅修改选中的页面。")
+
+
 def verify_checklist(archive, slide_names: list[str], checklist) -> dict:
     if not isinstance(checklist, list) or not 1 <= len(checklist) <= 100:
         raise ValueError("交付缺少有效的已确认页面清单。")
+    ordered = read_slide_order(archive, slide_names)
     if len(checklist) != len(slide_names):
-        raise ValueError(f"交付页数不符：已确认 {len(checklist)} 页，实际导出 {len(slide_names)} 页。")
-    checked = 0
-    for index, (item, path) in enumerate(zip(checklist, read_slide_order(archive, slide_names)), 1):
+        raise ChecklistMismatch(f"交付页数不符：已确认 {len(checklist)} 页，实际导出 {len(slide_names)} 页。")
+    checked, passed, failed = 0, [], []
+    first_message = ""
+    for index, (item, path) in enumerate(zip(checklist, ordered), 1):
         if not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str) or not 0 < len(item[0]) <= 180:
             raise ValueError("已确认的页面标题无效。")
         title, values = item
@@ -132,9 +195,11 @@ def verify_checklist(archive, slide_names: list[str], checklist) -> dict:
             raise ValueError("已确认的关键数据超过核验范围。")
         slide = ET.fromstring(archive.read(path))
         fragments = visible_fragments(slide)
-        if not any(contains(text, title) for text in fragments):
-            raise ValueError(f"交付第 {index} 页缺少已确认的可见标题，请修正后重新导出。")
+        missing_title = not any(contains(text, title) for text in fragments)
+        if missing_title and not first_message:
+            first_message = f"交付第 {index} 页缺少已确认的可见标题，请修正后重新导出。"
         points = chart_points(archive, slide, path) if any(isinstance(value, list) for value in values) else []
+        missing_values = []
         for item_number, value in enumerate(values, 1):
             if isinstance(value, list):
                 candidates = [number for series, category, number in points if (series, category) == (compact(value[1]), compact(value[2]))]
@@ -142,6 +207,14 @@ def verify_checklist(archive, slide_names: list[str], checklist) -> dict:
             else:
                 matched = any(contains(text, value, numeric=True) for text in fragments)
             if not matched:
-                raise ValueError(f"交付第 {index} 页第 {item_number} 项关键数据无法在页面回读中核对，请修正后重新导出。")
+                missing_values.append(item_number)
+                if not first_message:
+                    first_message = f"交付第 {index} 页第 {item_number} 项关键数据无法在页面回读中核对，请修正后重新导出。"
+        if missing_title or missing_values:
+            failed.append({"page": index, "missingTitle": missing_title, "missingValues": missing_values})
+        else:
+            passed.append(index)
+    if failed:
+        raise ChecklistMismatch(first_message, {"passedPages": passed, "failedPages": failed})
     payload = json.dumps(checklist, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return {"checklistDigest": hashlib.sha256(payload).hexdigest(), "checkedPages": len(checklist), "checkedValues": checked}

@@ -1,7 +1,7 @@
 (function () {
     'use strict';
     const API = '/api/apps/presentations/master';
-    let bound = false, state, helpers, epoch = 0, selectedTemplate = null, preparation = null, returnFocus = null;
+    let bound = false, state, helpers, epoch = 0, selectedTemplate = null, preparation = null, returnFocus = null, processReturnFocus = null, usageReturnFocus = null, currentUsageDiagnostics = [];
     const byId = id => document.getElementById(id);
     const actorId = () => String(window.Pivot.legacy?.currentUser?.id || '');
     const presentationId = () => String(state.active?.id || '');
@@ -9,6 +9,10 @@
         const modal = byId('presentation-master-modal');
         return sequence === epoch && modal && !modal.classList.contains('hidden')
             && modal.dataset.owner === actorId() && modal.dataset.presentationId === presentationId();
+    }
+    function isProcessCurrent(sequence) {
+        const processModal = byId('presentation-master-process-modal');
+        return isCurrent(sequence) && processModal && !processModal.classList.contains('hidden');
     }
     function node(tag, className = '', value = '') { const item = document.createElement(tag); if (className) item.className = className; if (value) item.textContent = value; return item; }
     function svgIcon(paths, size = 16) {
@@ -24,19 +28,70 @@
         }
         return el;
     }
-    function closeModal({ preserveForm = false } = {}) {
-        ++epoch;
-        preparation?.abort(); preparation = null;
+    function setFormModalInert(inactive) {
         const modal = byId('presentation-master-modal');
-        if (preserveForm) {
-            modal.classList.add('hidden');
-            const panel = byId('presentation-master-status');
+        if (!modal) return;
+        if (inactive) modal.setAttribute('aria-hidden', 'true');
+        else modal.removeAttribute('aria-hidden');
+        if ('inert' in modal) modal.inert = Boolean(inactive);
+    }
+    function setProcessModalInert(inactive) {
+        const processModal = byId('presentation-master-process-modal');
+        if (!processModal) return;
+        if (inactive) processModal.setAttribute('aria-hidden', 'true');
+        else processModal.removeAttribute('aria-hidden');
+        if ('inert' in processModal) processModal.inert = Boolean(inactive);
+    }
+    function closeUsageModal({ restoreFocus = true } = {}) {
+        const usageModal = byId('presentation-master-usage-modal');
+        const list = byId('presentation-master-usage-list');
+        if (list) list.replaceChildren();
+        setProcessModalInert(false);
+        if (usageModal && !usageModal.classList.contains('hidden')) usageModal.classList.add('hidden');
+        const focus = usageReturnFocus; usageReturnFocus = null;
+        if (restoreFocus && focus?.isConnected) focus.focus();
+    }
+    function closeProcessModal({ restoreFocus = true, resetEpoch = true } = {}) {
+        if (resetEpoch) ++epoch;
+        preparation?.abort(); preparation = null;
+        currentUsageDiagnostics = [];
+        closeUsageModal({ restoreFocus: false });
+        const processModal = byId('presentation-master-process-modal');
+        const panel = byId('presentation-master-status');
+        if (panel) {
             panel.replaceChildren();
             delete panel.dataset.taskId;
+        }
+        const modal = byId('presentation-master-modal');
+        if (modal) {
             delete modal.dataset.modelTask;
-            byId('presentation-master-start').textContent = '开始制作';
+            const startButton = byId('presentation-master-start');
+            const historyButton = byId('presentation-master-history');
+            const activeButton = byId('presentation-master-active');
+            const activeForm = !modal.classList.contains('hidden');
+            if (startButton) { startButton.textContent = '开始制作'; startButton.disabled = !activeForm || modal.dataset.engineEnabled !== 'true'; }
+            if (historyButton) historyButton.disabled = !activeForm;
+            if (activeButton) activeButton.disabled = !activeForm;
+        }
+        setFormModalInert(false);
+        if (processModal && !processModal.classList.contains('hidden')) processModal.classList.add('hidden');
+        const focus = processReturnFocus; processReturnFocus = null;
+        if (restoreFocus && focus?.isConnected) focus.focus();
+    }
+    function closeModal({ preserveForm = false } = {}) {
+        ++epoch;
+        closeProcessModal({ restoreFocus: false, resetEpoch: false });
+        const modal = byId('presentation-master-modal');
+        const processModal = byId('presentation-master-process-modal');
+        const usageModal = byId('presentation-master-usage-modal');
+        if (preserveForm) {
+            modal?.classList.add('hidden');
+            const formError = byId('presentation-master-form-error');
+            if (formError) formError.textContent = '';
         } else {
-            modal.remove();
+            usageModal?.remove();
+            processModal?.remove();
+            modal?.remove();
             selectedTemplate = null;
         }
         const focus = returnFocus; returnFocus = null; focus?.focus();
@@ -117,12 +172,14 @@
 
         const header = node('header', 'workspace-modal-header presentation-master-header');
         const headerInfo = node('div', 'presentation-master-header-info');
+        const headerIcon = node('span', 'presentation-master-header-icon');
+        headerIcon.appendChild(svgIcon([['rect', { x: '2', y: '3', width: '20', height: '14', rx: '2', ry: '2' }], ['line', { x1: '8', y1: '21', x2: '16', y2: '21' }], ['line', { x1: '12', y1: '17', x2: '12', y2: '21' }]], 17));
         const headerTitleRow = node('div', 'presentation-master-header-title-row');
         headerTitleRow.append(
-            svgIcon([['rect', { x: '2', y: '3', width: '20', height: '14', rx: '2', ry: '2' }], ['line', { x1: '8', y1: '21', x2: '16', y2: '21' }], ['line', { x1: '12', y1: '17', x2: '12', y2: '21' }]], 20),
+            headerIcon,
             node('h3', '', '完整演示制作')
         );
-        const headerSubtitle = node('p', 'presentation-master-header-subtitle', '基于多模态大模型的工业级高保真 PPT 制作引擎 · 交付原生矢量可编辑演示文稿');
+        const headerSubtitle = node('p', 'presentation-master-header-subtitle', '多模态高保真 PPT 引擎 · 原生矢量可编辑交付');
         headerInfo.append(headerTitleRow, headerSubtitle);
 
         const close = node('button', 'btn-secondary workspace-modal-close', '关闭'); close.type = 'button'; close.addEventListener('click', () => closeModal());
@@ -136,23 +193,25 @@
         const submit = node('button', 'btn-primary presentation-master-start-btn', '开始制作'); submit.type = 'button'; submit.id = 'presentation-master-start'; submit.disabled = true;
         submit.addEventListener('click', start);
 
-        const status = node('div', 'presentation-evidence-card presentation-master-status-card'); status.id = 'presentation-master-status'; status.setAttribute('aria-live', 'polite');
+        const engineState = node('div', 'presentation-master-engine-state'); engineState.id = 'presentation-master-engine-state'; engineState.setAttribute('aria-live', 'polite');
         const history = node('button', 'btn-secondary', '查看最近制作'); history.type = 'button'; history.id = 'presentation-master-history';
         history.addEventListener('click', () => loadTask(history, '/tasks/latest?presentationId=' + encodeURIComponent(presentationId())));
-        const activeTask = node('button', 'btn-secondary', '查看进行中的制作'); activeTask.type = 'button';
+        const activeTask = node('button', 'btn-secondary', '查看进行中的制作'); activeTask.type = 'button'; activeTask.id = 'presentation-master-active';
         activeTask.addEventListener('click', () => loadTask(activeTask, '/tasks/active', true));
-        const historyActions = node('div', 'presentation-master-task-actions'); historyActions.append(history, activeTask);
+
+        const formError = node('p', 'presentation-master-task-feedback presentation-master-form-error'); formError.id = 'presentation-master-form-error'; formError.setAttribute('role', 'alert');
 
         const footer = node('footer', 'presentation-master-footer');
-        const footerHint = node('div', 'presentation-master-footer-hint');
-        footerHint.append(
-            svgIcon([['circle', { cx: '12', cy: '12', r: '10' }], ['line', { x1: '12', y1: '16', x2: '12', y2: '12' }], ['line', { x1: '12', y1: '8', x2: '12.01', y2: '8' }]], 15),
-            node('p', 'presentation-master-hint', '生成可编辑演示文件和项目源包，制作过程消耗所选模型额度。')
-        );
-        footer.append(footerHint, submit);
+        const footerBar = node('div', 'presentation-master-footer-bar');
+        const footerActions = node('div', 'presentation-master-footer-actions');
+        footerActions.append(history, activeTask, submit);
+        footerBar.append(engineState, footerActions);
+        footer.append(formError, footerBar);
 
-        body.append(form, historyActions, status); dialog.append(header, body, footer); modal.appendChild(dialog); document.body.appendChild(modal);
+        body.appendChild(form); dialog.append(header, body, footer); modal.appendChild(dialog); document.body.appendChild(modal);
         modal.addEventListener('keydown', event => {
+            const processModal = byId('presentation-master-process-modal');
+            if (processModal && !processModal.classList.contains('hidden')) return;
             if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
             if (event.key !== 'Tab') return;
             const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
@@ -167,16 +226,155 @@
             renderTemplateCard();
         });
     }
+    function ensureProcessModal() {
+        if (byId('presentation-master-process-modal')) return byId('presentation-master-process-modal');
+        const processModal = node('div', 'modal-overlay presentation-master-process-overlay hidden');
+        processModal.id = 'presentation-master-process-modal';
+        const dialog = node('section', 'workspace-modal presentation-master-process-dialog');
+        dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', '完整制作过程');
+
+        const header = node('header', 'workspace-modal-header presentation-master-header');
+        const headerInfo = node('div', 'presentation-master-header-info');
+        const headerTitleRow = node('div', 'presentation-master-header-title-row');
+        const headerIcon = node('span', 'presentation-master-header-icon');
+        headerIcon.appendChild(svgIcon([['polyline', { points: '22 12 18 12 15 21 9 3 6 12 2 12' }]], 16));
+        headerTitleRow.append(
+            headerIcon,
+            node('h3', '', '完整制作过程')
+        );
+        const headerSubtitle = node('p', 'presentation-master-header-subtitle', '实时展示模型预检、材料读取、分阶段确认与产物交付');
+        headerInfo.append(headerTitleRow, headerSubtitle);
+        const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
+        closeBtn.addEventListener('click', () => closeProcessModal());
+        header.append(headerInfo, closeBtn);
+
+        const body = node('div', 'workspace-modal-body presentation-master-process-body');
+        const status = node('div', 'presentation-master-status-card');
+        status.id = 'presentation-master-status'; status.setAttribute('aria-live', 'polite');
+        body.appendChild(status);
+
+        const footer = node('footer', 'presentation-master-footer presentation-master-process-footer');
+        const footerHint = node('div', 'presentation-master-footer-hint');
+        footerHint.append(
+            svgIcon([['circle', { cx: '12', cy: '12', r: '10' }], ['line', { x1: '12', y1: '16', x2: '12', y2: '12' }], ['line', { x1: '12', y1: '8', x2: '12.01', y2: '8' }]], 15),
+            node('p', 'presentation-master-hint', '点击右上角「关闭」或按 Esc 返回配置页面，后台任务将继续运行；如需取消请点击「停止制作」。')
+        );
+        footer.appendChild(footerHint);
+
+        dialog.append(header, body, footer); processModal.appendChild(dialog); document.body.appendChild(processModal);
+        processModal.addEventListener('click', event => { if (event.target === processModal) closeProcessModal(); });
+        processModal.addEventListener('keydown', event => {
+            const usageModal = byId('presentation-master-usage-modal');
+            if (usageModal && !usageModal.classList.contains('hidden')) return;
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeProcessModal(); return; }
+            if (event.key !== 'Tab') return;
+            const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
+            const first = controls[0], last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        });
+        return processModal;
+    }
+    function ensureUsageModal() {
+        if (byId('presentation-master-usage-modal')) return byId('presentation-master-usage-modal');
+        const usageModal = node('div', 'modal-overlay presentation-master-usage-overlay hidden');
+        usageModal.id = 'presentation-master-usage-modal';
+        const dialog = node('section', 'workspace-modal presentation-master-usage-dialog');
+        dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', '每轮模型用量明细');
+
+        const header = node('header', 'workspace-modal-header presentation-master-header');
+        const headerInfo = node('div', 'presentation-master-header-info');
+        const headerTitleRow = node('div', 'presentation-master-header-title-row');
+        const headerIcon = node('span', 'presentation-master-header-icon');
+        headerIcon.appendChild(svgIcon([['line', { x1: '18', y1: '20', x2: '18', y2: '10' }], ['line', { x1: '12', y1: '20', x2: '12', y2: '4' }], ['line', { x1: '6', y1: '20', x2: '6', y2: '14' }]], 16));
+        headerTitleRow.append(headerIcon, node('h3', '', '每轮模型用量明细'));
+        headerInfo.append(headerTitleRow, node('p', 'presentation-master-header-subtitle', '按模型调用轮次展示输入、输出、累计令牌与上下文收敛详情'));
+        const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
+        closeBtn.addEventListener('click', () => closeUsageModal());
+        header.append(headerInfo, closeBtn);
+
+        const body = node('div', 'workspace-modal-body presentation-master-usage-body');
+        const list = node('ol', 'presentation-master-usage-list'); list.id = 'presentation-master-usage-list';
+        body.appendChild(list);
+
+        dialog.append(header, body); usageModal.appendChild(dialog); document.body.appendChild(usageModal);
+        usageModal.addEventListener('click', event => { if (event.target === usageModal) closeUsageModal(); });
+        usageModal.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeUsageModal(); return; }
+            if (event.key !== 'Tab') return;
+            const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
+            const first = controls[0], last = controls.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        });
+        return usageModal;
+    }
+    function renderUsageList() {
+        const list = byId('presentation-master-usage-list');
+        if (!list) return;
+        list.replaceChildren();
+        for (const item of currentUsageDiagnostics) {
+            const row = node('li', 'presentation-master-usage-item');
+            const top = node('div', 'presentation-master-usage-item-head');
+            top.append(
+                node('span', 'presentation-master-usage-step', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）`),
+                node('span', 'presentation-master-usage-metrics', `输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}`)
+            );
+            const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
+            const detail = node('p', 'presentation-master-usage-detail', `预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`);
+            row.append(top, detail);
+            list.appendChild(row);
+        }
+    }
+    function openUsageModal(trigger = null) {
+        const usageModal = ensureUsageModal();
+        if (usageModal.classList.contains('hidden')) usageReturnFocus = trigger || document.activeElement;
+        renderUsageList();
+        setProcessModalInert(true);
+        usageModal.classList.remove('hidden');
+        usageModal.querySelector('.workspace-modal-close')?.focus();
+    }
+    function openProcessModal({ trigger = null, initialMessage = '' } = {}) {
+        const processModal = ensureProcessModal();
+        if (processModal.classList.contains('hidden')) processReturnFocus = trigger || document.activeElement;
+        setFormModalInert(true);
+        processModal.classList.remove('hidden');
+        const panel = byId('presentation-master-status');
+        if (panel && initialMessage) panel.replaceChildren(node('p', 'presentation-master-task-message', initialMessage));
+        processModal.querySelector('.workspace-modal-close')?.focus();
+    }
     function errorText(error) { const message = String(error?.message || ''); return /[\u3400-\u9fff]/u.test(message) ? message : '处理未完成，请检查文件、网络或服务连接后重试。'; }
-    function showError(error, sequence) { if (!isCurrent(sequence) || error.name === 'AbortError') return; const status = byId('presentation-master-status'), message = node('p', 'presentation-master-task-feedback', errorText(error)); message.setAttribute('role', 'alert'); status.replaceChildren(message); status.scrollIntoView?.({ block: 'nearest' }); }
+    function clearFormError() {
+        const formError = byId('presentation-master-form-error');
+        if (formError) formError.textContent = '';
+    }
+    function showFormError(message) {
+        const formError = byId('presentation-master-form-error');
+        if (!formError) return;
+        formError.textContent = message;
+        formError.scrollIntoView?.({ block: 'nearest' });
+    }
+    function showError(error, sequence) {
+        if (!isCurrent(sequence) || error.name === 'AbortError') return;
+        const text = errorText(error);
+        const processModal = byId('presentation-master-process-modal');
+        if (processModal && !processModal.classList.contains('hidden')) {
+            const status = byId('presentation-master-status'), message = node('p', 'presentation-master-task-feedback', text);
+            message.setAttribute('role', 'alert');
+            status.replaceChildren(message);
+            status.scrollIntoView?.({ block: 'nearest' });
+            return;
+        }
+        showFormError(text);
+    }
 
     function renderEngineReady() {
-        const panel = byId('presentation-master-status');
+        const panel = byId('presentation-master-engine-state');
         if (!panel) return;
         panel.replaceChildren();
         const row = node('div', 'presentation-master-ready-row');
         const dot = node('span', 'presentation-master-ready-dot');
-        const text = node('span', 'presentation-master-ready-text', '完整制作引擎已登记，开始后将显示实际制作进度。');
+        const text = node('span', 'presentation-master-ready-text', '完整制作引擎已登记，交付原生矢量文稿与项目源包');
         const badge = node('span', 'presentation-master-ready-badge', '服务就绪');
         row.append(dot, text, badge);
         panel.appendChild(row);
@@ -187,9 +385,10 @@
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-goals.js');
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-form.js');
         if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
-        preparation?.abort(); preparation = null;
+        closeProcessModal({ restoreFocus: false, resetEpoch: false });
         const previous = byId('presentation-master-modal');
         if (previous && (!previous.classList.contains('hidden') || previous.dataset.owner !== actor || previous.dataset.presentationId !== target)) {
+            byId('presentation-master-process-modal')?.remove();
             previous.remove();
             selectedTemplate = null;
         }
@@ -197,11 +396,14 @@
         ensureModal();
         const modal = byId('presentation-master-modal');
         modal.dataset.owner = actor; modal.dataset.presentationId = target;
+        modal.dataset.engineEnabled = 'false';
         modal.classList.remove('hidden');
+        clearFormError();
         const startButton = byId('presentation-master-start');
         startButton.disabled = true;
         startButton.textContent = '开始制作';
         byId('presentation-master-history').disabled = true;
+        byId('presentation-master-active').disabled = true;
         byId('presentation-master-title').focus();
         const goalProfile = state.active?.content?.metadata?.productionProfile;
         if (modal.dataset.goalSource !== JSON.stringify(goalProfile || {})) {
@@ -231,33 +433,35 @@
             if (!isCurrent(sequence)) return;
             const { engine } = await helpers.requestJson(API + '/info');
             if (!isCurrent(sequence)) return;
+            modal.dataset.engineEnabled = engine.enabled ? 'true' : 'false';
             startButton.disabled = !engine.enabled;
             if (engine.enabled) renderEngineReady();
             else {
                 const fallback = node('button', 'btn-secondary', '使用标准演示制作'); fallback.type = 'button';
                 fallback.addEventListener('click', () => { const profile = window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master'); closeModal(); helpers.openCreateModal(); window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-create', profile); });
-                byId('presentation-master-status').replaceChildren(node('p', '', '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。'), fallback);
+                byId('presentation-master-engine-state').replaceChildren(node('p', 'presentation-master-task-message', '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。'), fallback);
             }
         } catch (error) { showError(error, sequence); }
-        finally { if (isCurrent(sequence)) byId('presentation-master-history').disabled = false; }
+        finally { if (isCurrent(sequence)) { byId('presentation-master-history').disabled = false; byId('presentation-master-active').disabled = false; } }
     }
 
     async function loadTask(button, route, showAccountTask = false) {
         if (preparation) return;
         const sequence = ++epoch;
+        clearFormError();
         button.disabled = true;
+        openProcessModal({ trigger: button, initialMessage: '正在查询制作进度…' });
         try {
             const { task } = await helpers.requestJson(API + route);
-            if (!isCurrent(sequence)) return;
+            if (!isProcessCurrent(sequence)) return;
             if (task) {
                 if (showAccountTask) renderTask(task);
                 if (!showAccountTask || task.request && task.status === 'working') await poll(task.id, sequence);
             } else byId('presentation-master-status').replaceChildren(node('p', 'presentation-master-task-message', showAccountTask ? '当前账号暂无进行中的制作任务。' : '暂无制作记录。'));
         } catch (error) { showError(error, sequence); }
-        finally { button.disabled = false; }
+        finally { if (isCurrent(sequence) || !byId('presentation-master-modal')?.classList.contains('hidden')) button.disabled = false; }
     }
-    function readTokenBudget() {
-        const input = byId('presentation-master-budget');
+    function readTokenBudget(input = byId('presentation-master-budget')) {
         const budget = Number(input.value);
         if (!input.validity.valid || !Number.isSafeInteger(budget) || (budget !== 0 && budget < 10000)) {
             throw new Error('累计模型预算请填写 0（不限）或不小于 10000 的整数。');
@@ -266,17 +470,29 @@
     }
     async function start() {
         if (preparation) return;
-        const button = byId('presentation-master-start'), history = byId('presentation-master-history');
-        button.disabled = true; history.disabled = true;
-        const controller = preparation = new AbortController(), sequence = ++epoch, active = state.active;
-        const ensureCurrent = () => { if (controller.signal.aborted || !isCurrent(sequence) || active !== state.active) throw Object.assign(new Error('制作准备已取消'), { name: 'AbortError' }); };
+        clearFormError();
+        const button = byId('presentation-master-start'), history = byId('presentation-master-history'), activeButton = byId('presentation-master-active');
+        let title, instruction, modelId, tokenBudget, files, form, snapshot;
         try {
-            const title = byId('presentation-master-title').value.trim(), instruction = byId('presentation-master-instruction').value.trim(), modelId = byId('presentation-master-model').value;
+            title = byId('presentation-master-title').value.trim();
+            instruction = byId('presentation-master-instruction').value.trim();
+            modelId = byId('presentation-master-model').value;
             if (!title || !instruction || !modelId) throw new Error('请填写名称和制作要求，并选择模型。');
-            const tokenBudget = readTokenBudget();
-            const files = [...(byId('presentation-master-source').files || [])];
+            tokenBudget = readTokenBudget();
+            files = [...(byId('presentation-master-source').files || [])];
             if (files.length > 21) throw new Error('单次最多提供21个原稿和补充素材。');
-            const form = window.Pivot.moduleApi('apps.presentations.masterForm'), snapshot = form.snapshot(), template = selectedTemplate;
+            form = window.Pivot.moduleApi('apps.presentations.masterForm');
+            snapshot = form.snapshot();
+        } catch (error) {
+            showFormError(errorText(error));
+            return;
+        }
+        button.disabled = true; history.disabled = true; if (activeButton) activeButton.disabled = true;
+        const controller = preparation = new AbortController(), sequence = ++epoch, active = state.active;
+        const ensureCurrent = () => { if (controller.signal.aborted || !isProcessCurrent(sequence) || active !== state.active) throw Object.assign(new Error('制作准备已取消'), { name: 'AbortError' }); };
+        openProcessModal({ trigger: button, initialMessage: '正在预检模型…' });
+        try {
+            const template = selectedTemplate;
             const currentMaterial = active?.content ? { title: active.title || '当前文稿', text: JSON.stringify(active.content) } : null;
             const request = { title, instruction, modelId, operation: byId('presentation-master-operation').value,
                 productionProfile: window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master', active?.content?.metadata?.productionProfile || {}),
@@ -284,11 +500,11 @@
                 maxSteps: Number(byId('presentation-master-steps').value), presentationId: active?.id || '',
                 ...(template ? { template: { type: template.type, id: template.id, ...(template.version ? { version: template.version } : {}) } } : {}) };
             button.textContent = '正在预检模型…';
-            byId('presentation-master-status').replaceChildren(node('p', 'presentation-master-task-message', '正在预检模型…'));
             await helpers.requestJson(API + '/model-preflight', { ...post({ modelId, operation: request.operation, profile: request.profile,
                 visionRequired: files.some(file => /\.(?:png|jpe?g|webp)$/i.test(file.name)) }), signal: controller.signal });
             ensureCurrent();
             button.textContent = snapshot.files.length ? '正在读取材料…' : '正在准备制作…';
+            byId('presentation-master-status').replaceChildren(node('p', 'presentation-master-task-message', snapshot.files.length ? '正在读取材料…' : '正在准备制作…'));
             const materials = await form.extract(snapshot, helpers.requestJson, { signal: controller.signal, ensureCurrent });
             if (currentMaterial) materials.push(currentMaterial);
             ensureCurrent();
@@ -305,23 +521,23 @@
             const data = await helpers.requestJson(API + '/tasks', { ...post({ ...request, materials, assetIds, ...(sourceAssetId ? { sourceAssetId } : {}) }), signal: controller.signal });
             ensureCurrent();
             await poll(data.task.id, sequence);
-            if (isCurrent(sequence)) byId('presentation-master-status').scrollIntoView({ block: 'nearest' });
         } catch (error) { showError(error, sequence); }
         finally {
             if (preparation === controller) {
                 preparation = null;
                 button.disabled = !isCurrent(epoch);
                 history.disabled = button.disabled;
+                if (activeButton) activeButton.disabled = button.disabled;
                 button.textContent = '开始制作';
             }
         }
     }
     async function poll(id, sequence, failures = 0) {
-        if (!isCurrent(sequence)) return;
+        if (!isProcessCurrent(sequence)) return;
         let data;
         try { data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id)); }
         catch (error) {
-            if (!isCurrent(sequence)) return;
+            if (!isProcessCurrent(sequence)) return;
             const panel = byId('presentation-master-status');
             let warning = panel.querySelector('[data-master-poll-error]');
             if (!warning) { warning = node('div', 'presentation-master-task-feedback'); warning.dataset.masterPollError = 'true'; warning.setAttribute('role', 'alert'); panel.appendChild(warning); }
@@ -331,24 +547,37 @@
             if (failures < 3) window.setTimeout(() => poll(id, sequence, failures + 1).catch(error => showError(error, sequence)), 3000);
             return;
         }
-        if (!isCurrent(sequence)) return;
+        if (!isProcessCurrent(sequence)) return;
         renderTask(data.task);
         if (data.task.status === 'working') window.setTimeout(() => poll(id, sequence).catch(error => showError(error, sequence)), 1500);
     }
     function renderTask(value) {
-        const panel = byId('presentation-master-status'), previous = panel.querySelector('.presentation-master-usage');
-        const sameTask = panel.dataset.taskId === String(value.id), wasOpen = sameTask && previous?.open, wasFocused = sameTask && previous?.contains(document.activeElement);
+        const panel = byId('presentation-master-status');
         const scroll = panel.closest('.workspace-modal-body')?.scrollTop || 0;
         panel.dataset.taskId = String(value.id); panel.replaceChildren();
         const feedback = node('p', 'presentation-master-task-feedback'); feedback.setAttribute('role', 'alert');
         const head = node('div', 'presentation-master-task-head');
+        const headMeta = node('div', 'presentation-master-task-head-meta');
         const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: '需要人工确认', completed: '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
-        head.appendChild(statusBadge);
-        if (value.request?.title) head.appendChild(node('span', '', value.request.title));
+        headMeta.appendChild(statusBadge);
+        if (value.request?.title) headMeta.appendChild(node('span', 'presentation-master-task-title', value.request.title));
+        head.appendChild(headMeta);
         panel.appendChild(head);
-        if (!value.inputRequest) panel.appendChild(node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.result?.message || value.progress?.message || '正在准备。'));
-        if (value.status === 'failed' && /^[A-Z][A-Z0-9_]{1,79}$/.test(value.error?.code || '')) {
-            panel.appendChild(node('p', 'presentation-master-task-summary', '错误代码 ' + value.error.code));
+        if (!value.inputRequest) {
+            if (value.status === 'failed' || value.error?.message) {
+                const errorBanner = node('div', 'presentation-master-error-banner');
+                const errorHead = node('div', 'presentation-master-error-head');
+                const errIcon = svgIcon([['circle', { cx: '12', cy: '12', r: '10' }], ['line', { x1: '12', y1: '8', x2: '12', y2: '12' }], ['line', { x1: '12', y1: '16', x2: '12.01', y2: '16' }]], 15);
+                errIcon.setAttribute('aria-hidden', 'true');
+                errorHead.append(errIcon, node('p', 'presentation-master-task-message', value.error?.message ? errorText(value.error) : value.progress?.message || '制作未完成。'));
+                errorBanner.appendChild(errorHead);
+                if (value.status === 'failed' && /^[A-Z][A-Z0-9_]{1,79}$/.test(value.error?.code || '')) {
+                    errorBanner.appendChild(node('span', 'presentation-master-error-code', '错误代码 ' + value.error.code));
+                }
+                panel.appendChild(errorBanner);
+            } else {
+                panel.appendChild(node('p', 'presentation-master-task-message', value.result?.message || value.progress?.message || '正在准备。'));
+            }
         }
         const currentBudget = value.request?.tokenBudget;
         const budgetText = currentBudget === 0 ? '不限' : Number.isSafeInteger(currentBudget) ? `${currentBudget.toLocaleString('zh-CN')} 令牌` : '未记录';
@@ -388,56 +617,86 @@
             const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);
             modal.dataset.modelTask = String(value.id);
         }
-        if (Array.isArray(value.usageDiagnostics) && value.usageDiagnostics.length) {
-            const details = node('details', 'presentation-master-usage'), list = node('ol');
-            details.open = Boolean(wasOpen);
-            details.appendChild(node('summary', '', '查看每轮模型用量'));
-            for (const item of value.usageDiagnostics) {
-                const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
-                list.appendChild(node('li', '', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）：输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}；预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`));
-            }
-            details.appendChild(list); panel.appendChild(details);
-            if (wasFocused) details.querySelector('summary')?.focus({ preventScroll: true });
-        }
-        if (value.recoverable && value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED') {
-            const budget = byId('presentation-master-budget');
-            budget.closest('details').open = true;
-            panel.appendChild(node('p', 'presentation-master-task-message', `本任务累计预算为 ${budgetText}。请在“高级设置”中提高预算或填 0 取消累计上限，再点击“从检查点继续”。`));
+        currentUsageDiagnostics = Array.isArray(value.usageDiagnostics) ? value.usageDiagnostics : [];
+        if (currentUsageDiagnostics.length) {
+            const usageBar = node('div', 'presentation-master-usage-bar');
+            const usageBtn = node('button', 'btn-secondary presentation-master-usage-btn');
+            usageBtn.type = 'button'; usageBtn.id = 'presentation-master-usage-btn';
+            const chartIcon = svgIcon([['line', { x1: '18', y1: '20', x2: '18', y2: '10' }], ['line', { x1: '12', y1: '20', x2: '12', y2: '4' }], ['line', { x1: '6', y1: '20', x2: '6', y2: '14' }]], 13);
+            chartIcon.setAttribute('aria-hidden', 'true');
+            usageBtn.append(chartIcon, node('span', '', `查看每轮模型用量（共 ${currentUsageDiagnostics.length} 轮）`));
+            usageBtn.addEventListener('click', () => openUsageModal(usageBtn));
+            usageBar.appendChild(usageBtn);
+            panel.appendChild(usageBar);
+            const usageModal = byId('presentation-master-usage-modal');
+            if (usageModal && !usageModal.classList.contains('hidden')) renderUsageList();
         }
         if (['working', 'input_required'].includes(value.status)) {
-            const cancel = node('button', 'btn-secondary', '停止制作'); cancel.type = 'button';
-            cancel.addEventListener('click', async () => { cancel.disabled = true; const sequence = ++epoch; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); if (isCurrent(sequence)) renderTask(data.task); } catch (error) { if (isCurrent(sequence)) { cancel.disabled = false; feedback.textContent = errorText(error); window.setTimeout(() => poll(value.id, sequence).catch(failure => showError(failure, sequence)), 3000); } } });
+            const cancel = node('button', 'btn-danger-outline presentation-master-stop-btn'); cancel.type = 'button';
+            const stopIcon = svgIcon([['rect', { x: '6', y: '6', width: '12', height: '12', rx: '2' }]], 12);
+            stopIcon.setAttribute('aria-hidden', 'true');
+            cancel.append(stopIcon, node('span', '', '停止制作'));
+            cancel.addEventListener('click', async () => { cancel.disabled = true; const sequence = ++epoch; try { const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/cancel', post({})); if (isProcessCurrent(sequence)) renderTask(data.task); } catch (error) { if (isProcessCurrent(sequence)) { cancel.disabled = false; feedback.textContent = errorText(error); window.setTimeout(() => poll(value.id, sequence).catch(failure => showError(failure, sequence)), 3000); } } });
             head.appendChild(cancel);
         }
         if (value.inputRequest) {
             const request = value.inputRequest || {}, confirmation = request.kind === 'confirmation';
+            const reviewBox = node('div', 'presentation-master-review-panel');
             if (request.stage) {
                 const stages = { direction: '确认沟通方向', design: '确认最终页面与关键数据清单', template: '确认模板制作方案' };
-                if (stages[request.stage]) panel.appendChild(node('strong', '', stages[request.stage]));
+                if (stages[request.stage]) {
+                    const stageHead = node('div', 'presentation-master-review-stage');
+                    const stageIcon = svgIcon([['path', { d: 'M9 11l3 3L22 4' }], ['path', { d: 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' }]], 14);
+                    stageIcon.setAttribute('aria-hidden', 'true');
+                    stageHead.append(stageIcon, node('span', '', stages[request.stage]));
+                    reviewBox.appendChild(stageHead);
+                }
             }
-            panel.appendChild(node('p', 'presentation-master-task-question', request.question || '请提供继续制作所需的答复。'));
-            if (request.context) panel.appendChild(node('div', 'presentation-master-task-context', request.context));
+            reviewBox.appendChild(node('p', 'presentation-master-task-question', request.question || '请提供继续制作所需的答复。'));
+            if (request.context) reviewBox.appendChild(node('div', 'presentation-master-task-context', request.context));
             if (request.plan?.pages?.length) {
-                const details = node('details', 'presentation-master-usage'), pages = node('ol');
+                const details = node('details', 'presentation-master-plan-checklist'), pages = node('ol', 'presentation-master-plan-pages');
                 details.open = true;
                 details.appendChild(node('summary', '', `已拟定 ${request.plan.pages.length} 页，请逐页核对`));
+                let pageIndex = 0;
                 for (const page of request.plan.pages) {
-                    const item = node('li', '', page.title), facts = node('ul');
+                    pageIndex++;
+                    const item = node('li', 'presentation-master-plan-page');
+                    const titleRow = node('div', 'presentation-master-plan-page-head');
+                    titleRow.append(node('span', 'presentation-master-plan-num', String(pageIndex)), node('span', 'presentation-master-plan-title', page.title));
+                    item.appendChild(titleRow);
+                    const facts = node('ul', 'presentation-master-plan-facts');
                     for (const fact of page.values || []) {
                         const chart = fact.chart ? `（图表 ${fact.chart.series} / ${fact.chart.category} 为 ${fact.chart.number}）` : '';
-                        facts.appendChild(node('li', '', fact.text + chart + (fact.source ? `（${fact.source.path === 'instruction' ? '制作要求' : fact.source.path}，引文 ${fact.source.quote}）` : '')));
+                        const factLi = node('li', 'presentation-master-plan-fact');
+                        factLi.append(node('span', 'presentation-master-plan-fact-text', fact.text + chart));
+                        if (fact.source) factLi.append(node('span', 'presentation-master-plan-source', `（${fact.source.path === 'instruction' ? '制作要求' : fact.source.path}，引文 ${fact.source.quote}）`));
+                        facts.appendChild(factLi);
                     }
                     if (facts.children.length) item.appendChild(facts);
                     pages.appendChild(item);
                 }
-                details.appendChild(pages); panel.appendChild(details);
+                details.appendChild(pages); reviewBox.appendChild(details);
             }
             const answer = node('textarea', 'form-input presentation-master-task-answer'); answer.rows = 2; answer.maxLength = 12000; answer.setAttribute('aria-label', '对制作方案的实际答复');
-            answer.placeholder = confirmation ? '如需调整方案，请填写并提交修改意见。' : '请填写具体答复后继续。';
-            const submit = node('button', 'btn-primary', confirmation ? '确认并继续' : '提交答复并继续'); submit.type = 'button';
-            const actions = node('div', 'presentation-master-task-actions'); actions.appendChild(submit);
-            const revise = confirmation ? node('button', 'btn-secondary', '提交修改意见') : null;
-            if (revise) { revise.type = 'button'; actions.appendChild(revise); }
+            answer.placeholder = confirmation ? '如需调整方案，请在此输入修改意见，再点击「提交修改意见」；无须调整可直接点击「确认并继续」。' : '请填写具体答复后继续。';
+            const submit = node('button', 'btn-primary presentation-master-confirm-btn'); submit.type = 'button';
+            const confirmIcon = svgIcon([['polyline', { points: '20 6 9 17 4 12' }]], 14);
+            confirmIcon.setAttribute('aria-hidden', 'true');
+            submit.append(confirmIcon, node('span', '', confirmation ? '确认并继续' : '提交答复并继续'));
+            const actions = node('div', 'presentation-master-task-actions presentation-master-confirm-actions');
+            const revise = confirmation ? node('button', 'btn-secondary presentation-master-revise-btn') : null;
+            if (revise) {
+                revise.type = 'button';
+                const editIcon = svgIcon([['path', { d: 'M12 20h9' }], ['path', { d: 'M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z' }]], 13);
+                editIcon.setAttribute('aria-hidden', 'true');
+                revise.append(editIcon, node('span', '', '提交修改意见'));
+                actions.appendChild(revise);
+            }
+            actions.appendChild(submit);
+            const syncActionState = () => actions.classList.toggle('has-draft-reply', Boolean(answer.value.trim()));
+            answer.addEventListener('input', syncActionState);
+            syncActionState();
             async function respond(decision) {
                 const response = answer.value.trim();
                 if (decision !== 'approve' && !response) { feedback.textContent = '请先填写具体答复，再继续制作。'; answer.focus(); return; }
@@ -447,36 +706,124 @@
                 try {
                     await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/respond', post({ answer: response, decision, promptId: request.promptId }));
                     await poll(value.id, sequence);
-                } catch (error) { if (isCurrent(sequence)) { submit.disabled = false; if (revise) revise.disabled = false; feedback.textContent = errorText(error); } }
+                } catch (error) { if (isProcessCurrent(sequence)) { submit.disabled = false; if (revise) revise.disabled = false; feedback.textContent = errorText(error); } }
             }
             submit.addEventListener('click', () => respond(confirmation ? 'approve' : 'clarify'));
             revise?.addEventListener('click', () => respond('revise'));
-            panel.append(answer, actions);
+            reviewBox.append(answer, actions);
+            panel.appendChild(reviewBox);
         }
         if (value.recoverable) {
-            panel.appendChild(node('p', 'presentation-master-task-message', '已保存任务检查点；继续前会核对现有文件和权限。'));
-            const resume = node('button', 'btn-secondary', '从检查点继续'); resume.type = 'button';
+            const resumePanel = node('div', 'presentation-master-resume-panel');
+            const resumeHead = node('div', 'presentation-master-resume-head');
+            const resumeHeadIcon = node('span', 'presentation-master-resume-icon');
+            const cpIcon = svgIcon([['path', { d: 'M3 12a9 9 0 1 0 3-6.7L3 8' }], ['polyline', { points: '3 3 3 8 8 8' }]], 15);
+            cpIcon.setAttribute('aria-hidden', 'true');
+            resumeHeadIcon.appendChild(cpIcon);
+            const resumeHeadText = node('div', 'presentation-master-resume-head-text');
+            resumeHeadText.append(
+                node('strong', 'presentation-master-resume-title', '从检查点恢复'),
+                node('p', 'presentation-master-resume-subtitle', '已保存任务检查点；继续前会核对现有文件和权限。')
+            );
+            resumeHead.append(resumeHeadIcon, resumeHeadText);
+            resumePanel.appendChild(resumeHead);
+            if (value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED') {
+                resumePanel.appendChild(node('p', 'presentation-master-resume-tip', `本任务累计预算为 ${budgetText}。请在下方提高续跑累计预算或填 0 取消累计上限，再点击“从检查点继续”。`));
+            }
+            const resumeFields = node('div', 'presentation-master-resume-fields');
+            const budgetWrap = node('label', 'modal-form-field' + (value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED' ? ' is-highlighted' : ''));
+            budgetWrap.appendChild(node('span', 'modal-form-label', '续跑累计预算（令牌，0 为不限）'));
+            const resumeBudget = node('input', 'form-input'); resumeBudget.type = 'number'; resumeBudget.id = 'presentation-master-resume-budget';
+            resumeBudget.min = '0'; resumeBudget.step = '1'; resumeBudget.placeholder = '留空沿用原预算，0 改为不限';
+            const formBudget = byId('presentation-master-budget');
+            resumeBudget.value = formBudget?.value || '';
+            resumeBudget.addEventListener('input', () => { if (formBudget) formBudget.value = resumeBudget.value; });
+            budgetWrap.appendChild(resumeBudget);
+
+            const stepsWrap = node('label', 'modal-form-field');
+            stepsWrap.appendChild(node('span', 'modal-form-label', '执行轮次上限（5至160）'));
+            const resumeSteps = node('input', 'form-input'); resumeSteps.type = 'number'; resumeSteps.id = 'presentation-master-resume-steps';
+            resumeSteps.min = '5'; resumeSteps.max = '160'; resumeSteps.step = '1';
+            const formSteps = byId('presentation-master-steps');
+            resumeSteps.value = formSteps?.value || String(value.request?.maxSteps || 80);
+            resumeSteps.addEventListener('input', () => { if (formSteps) formSteps.value = resumeSteps.value; });
+            stepsWrap.appendChild(resumeSteps);
+
+            const modelWrap = node('label', 'modal-form-field');
+            modelWrap.appendChild(node('span', 'modal-form-label', '制作模型'));
+            const resumeModel = node('select', 'form-input'); resumeModel.id = 'presentation-master-resume-model';
+            const formModel = byId('presentation-master-model');
+            if (formModel) {
+                for (const option of formModel.options) resumeModel.appendChild(option.cloneNode(true));
+                resumeModel.value = formModel.value;
+                resumeModel.addEventListener('change', () => { formModel.value = resumeModel.value; });
+            }
+            modelWrap.appendChild(resumeModel);
+            resumeFields.append(budgetWrap, stepsWrap, modelWrap);
+            resumePanel.appendChild(resumeFields);
+
+            const resumeActions = node('div', 'presentation-master-task-actions presentation-master-resume-actions');
+            const resume = node('button', 'btn-primary presentation-master-resume-btn'); resume.type = 'button';
+            const playIcon = svgIcon([['polygon', { points: '6 4 20 12 6 20 6 4' }]], 13);
+            playIcon.setAttribute('aria-hidden', 'true');
+            resume.append(playIcon, node('span', '', '从检查点继续'));
             resume.addEventListener('click', async () => { const sequence = ++epoch; resume.disabled = true; feedback.textContent = ''; try {
-                const tokenBudget = readTokenBudget();
+                const tokenBudget = readTokenBudget(resumeBudget);
                 if (currentBudget === 0 && tokenBudget > 0) throw new Error('本任务累计模型预算为不限，请清空预算或填写 0 后继续。');
                 if (value.error?.code === 'PPT_MASTER_BUDGET_EXHAUSTED' && tokenBudget !== 0 && (tokenBudget ?? currentBudget) <= currentBudget) {
-                    throw new Error('请先在高级设置中增加累计模型预算，或填 0 取消累计上限。');
+                    resumeBudget.focus();
+                    throw new Error('请先提高续跑累计模型预算，或填 0 取消累计上限。');
                 }
                 await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', post({
                     tokenBudget: tokenBudget > 0 ? Math.max(tokenBudget, currentBudget ?? 0) : tokenBudget,
-                    maxSteps: Math.max(Number(byId('presentation-master-steps').value), Number(value.request?.maxSteps || 0)),
-                    modelId: byId('presentation-master-model').value
+                    maxSteps: Math.max(Number(resumeSteps.value), Number(value.request?.maxSteps || 0)),
+                    modelId: resumeModel.value || formModel?.value || ''
                 }));
                 await poll(value.id, sequence);
-            } catch (error) { if (isCurrent(sequence)) { resume.disabled = false; feedback.textContent = errorText(error); } } }); panel.appendChild(resume);
+            } catch (error) { if (isProcessCurrent(sequence)) { resume.disabled = false; feedback.textContent = errorText(error); } } });
+            resumeActions.appendChild(resume);
+            resumePanel.appendChild(resumeActions);
+            panel.appendChild(resumePanel);
         }
         const actionRow = node('div', 'presentation-master-task-actions');
+        if (value.hasReviewDraft) {
+            panel.appendChild(node('p', 'presentation-master-task-summary', '已保留待核验草稿，供检查版面与内容。正式交付须通过清单核验。'));
+            const draft = node('button', 'btn-secondary', '下载待核验草稿（.pptx）');
+            draft.type = 'button';
+            draft.addEventListener('click', async () => {
+                const sequence = epoch;
+                draft.disabled = true;
+                feedback.textContent = '';
+                try {
+                    const response = await window.Pivot.api.fetch(API + '/tasks/' + encodeURIComponent(value.id) + '/review-draft');
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw new Error(data.error?.message || data.error || '草稿下载失败，请刷新任务状态后重试。');
+                    }
+                    const blob = await response.blob();
+                    if (!isProcessCurrent(sequence)) return;
+                    const url = URL.createObjectURL(blob);
+                    const link = node('a');
+                    link.href = url;
+                    link.download = String(value.request?.title || '演示文稿').replace(/[\r\n\\/]/g, '_') + '-待核验草稿.pptx';
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    URL.revokeObjectURL(url);
+                } catch (error) {
+                    if (isProcessCurrent(sequence)) feedback.textContent = errorText(error);
+                } finally {
+                    if (isProcessCurrent(sequence)) draft.disabled = false;
+                }
+            });
+            actionRow.appendChild(draft);
+        }
         for (const file of value.result?.files || []) {
             const download = node('button', 'btn-secondary', file.format === 'pptx' ? '下载演示文件（.pptx）' : '下载完整项目源包'); download.type = 'button';
             download.addEventListener('click', async () => {
                 const sequence = epoch;
                 try { const data = await helpers.requestJson('/api/agents/renditions/' + file.renditionId + '/download-token', post({}));
-                    if (!isCurrent(sequence)) return;
+                    if (!isProcessCurrent(sequence)) return;
                     const url = '/api/agents/renditions/' + file.renditionId + '/download?token=' + encodeURIComponent(data.token);
                     const link = node('a'); link.href = url; link.download = file.filename; document.body.appendChild(link); link.click(); link.remove();
                 } catch (error) { showError(error, sequence); }
@@ -492,7 +839,7 @@
         }
         if (actionRow.children.length) panel.appendChild(actionRow);
         panel.appendChild(feedback);
-        if (sameTask && panel.closest('.workspace-modal-body')) panel.closest('.workspace-modal-body').scrollTop = scroll;
+        if (panel.closest('.workspace-modal-body')) panel.closest('.workspace-modal-body').scrollTop = scroll;
     }
     function bind(currentState, currentHelpers) {
         state = currentState; helpers = currentHelpers;

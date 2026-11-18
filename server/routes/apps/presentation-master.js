@@ -26,6 +26,11 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
     }));
     router.get('/apps/presentations/master/tasks/latest', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.latest(req.user, String(req.query.presentationId || '')) })));
     router.get('/apps/presentations/master/tasks/active', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.activeTask(req.user) })));
+    router.get('/apps/presentations/master/tasks/:taskId/review-draft', authMiddleware, asyncHandler(async (req, res) => {
+        const draft = await tasks.readReviewDraft(req.user, req.params.taskId);
+        writeLog(req, '下载待核验PPT草稿', `任务: ${req.params.taskId}`);
+        res.set('Cache-Control', 'private, no-store').attachment(draft.filename).send(draft.buffer);
+    }));
     router.get('/apps/presentations/master/tasks/:taskId', authMiddleware, asyncHandler(async (req, res) => {
         const task = await tasks.get(req.user, req.params.taskId);
         if (!task) return res.status(404).json({ error: '制作任务不存在或无权访问。' });
@@ -33,6 +38,11 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
     }));
     router.post('/apps/presentations/master/tasks/:taskId/respond', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.respond(req.user, req.params.taskId, req.body) })));
     router.post('/apps/presentations/master/tasks/:taskId/resume', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.resume(req.user, req.params.taskId, req.body || {}) })));
+    router.post('/apps/presentations/master/tasks/:taskId/regenerate', authMiddleware, asyncHandler(async (req, res) => {
+        const task = await tasks.regenerate(req.user, req.params.taskId);
+        writeLog(req, '重新生成整份PPT', `任务: ${task.id}`);
+        res.status(202).json({ task });
+    }));
     router.post('/apps/presentations/master/tasks/:taskId/cancel', authMiddleware, asyncHandler(async (req, res) => {
         const task = await tasks.cancel(req.user, req.params.taskId);
         if (!task) return res.status(404).json({ error: '制作任务不存在或无权访问。' });

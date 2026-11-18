@@ -54,6 +54,7 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     const requests = [];
     page.on('response', response => { if (response.request().method() === 'POST' && /\/master\/(?:tasks|model-preflight)$/.test(response.url())) requests.push(response); });
     await page.locator('#presentation-master-start').click();
+    await expect(page.getByRole('dialog', { name: '完整制作过程' })).toBeVisible();
     await expect.poll(() => requests.length, { timeout: 30000, message: '应先发出模型预检和任务登记请求' }).toBeGreaterThanOrEqual(1);
     const preflight = requests[0];
     expect(preflight.url()).toContain('/model-preflight');
@@ -71,7 +72,7 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     expect(['PPT_MASTER_BUDGET_EXHAUSTED', 'CAPABILITY_WORKER_TIMEOUT']).toContain(initial.error?.code);
     expect(initial.recoverable).toBeTruthy();
     await expect(panel.getByRole('button', { name: '从检查点继续' })).toBeVisible();
-    await page.locator('#presentation-master-budget').fill('0');
+    await panel.locator('#presentation-master-resume-budget').fill('0');
     await panel.getByRole('button', { name: '从检查点继续' }).click();
     await expect(panel).toContainText('确认沟通方向', { timeout: 150000 });
     await expect(panel).toContainText('已修正模型动作 1 次');
@@ -110,14 +111,19 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
     await page.locator('#presentation-create-ai-btn').click();
     await page.getByRole('button', { name: '查看最近制作' }).click();
+    const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
+    await expect(processDialog).toBeVisible();
     await expect(page.locator('#presentation-master-status')).toContainText('制作完成');
     const evidence = process.env.E2E_PPT_MASTER_EVIDENCE_DIR;
     if (evidence) await fs.mkdir(evidence, { recursive: true });
     const screenshotPath = name => evidence ? path.join(evidence, name) : testInfo.outputPath(name);
     await page.screenshot({ path: screenshotPath('desktop-completed.png') });
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(processDialog).toBeVisible();
+    expect(await processDialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy();
+    await page.screenshot({ path: screenshotPath('mobile-completed.png') });
+    await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '完整演示制作' });
     await expect(dialog).toBeVisible();
     expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy();
-    await page.screenshot({ path: screenshotPath('mobile-completed.png') });
 });

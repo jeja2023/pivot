@@ -1,12 +1,17 @@
 """核对最终 OOXML 的物理页序、正文、备注隔离和图表关键数据。"""
 import io
+import hashlib
+import json
 import sys
+import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "docker" / "ppt-master"))
 from delivery_checklist import A, C, P, R, REL, verify_checklist  # noqa: E402
+import runner  # noqa: E402
 
 
 def deck():
@@ -28,7 +33,7 @@ def deck():
         archive.writestr("ppt/charts/chart1.xml", f'<c:chartSpace xmlns:c="{C}"><c:chart><c:plotArea><c:barChart><c:ser><c:tx><c:v>实际</c:v></c:tx>'
                         '<c:cat><c:strLit><c:pt idx="0"><c:v>一季度</c:v></c:pt></c:strLit></c:cat>'
                         '<c:val><c:numLit><c:pt idx="0"><c:v>120.00</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>')
-        archive.writestr("ppt/notesSlides/notesSlide2.xml", "只写在备注的数据30")
+        archive.writestr("ppt/notesSlides/notesSlide2.xml", "<note>只写在备注的数据30</note>")
     return buffer
 
 
@@ -52,3 +57,37 @@ class DeliveryChecklistTests(unittest.TestCase):
             for checklist, message in invalid:
                 with self.subTest(checklist=checklist), self.assertRaisesRegex(ValueError, message):
                     verify_checklist(archive, ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"], checklist)
+
+    def test_only_an_intact_registered_export_can_be_retained_as_unverified_draft(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, "WORKSPACE", Path(directory)):
+            root = Path(directory)
+            export = root / "project/exports/report.pptx"
+            export.parent.mkdir(parents=True)
+            data = deck().getvalue()
+            export.write_bytes(data)
+            digest = hashlib.sha256(data).hexdigest()
+            draft = root / runner.REVIEW_DRAFT
+            draft.parent.mkdir()
+            receipt = draft.parent / "export.json"
+            request = {"path": "project/exports/report.pptx", "checklist": [["误写首页", []], ["后页", []]]}
+            receipt.write_text(json.dumps({"sourceFingerprint": runner.source_fingerprint(), "exports": {request["path"]: digest}}), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "缺少已确认的可见标题"):
+                runner.deliver_presentation(request)
+            self.assertFalse(draft.exists())
+            result = runner.deliver_presentation({**request, "retainReviewDraft": True})
+            self.assertEqual(draft.read_bytes(), data)
+            self.assertEqual(result["reviewDraft"], {"sha256": digest, "byteSize": len(data)})
+            self.assertIn("交付第 1 页", result["reviewFailure"])
+            self.assertFalse((root / "delivery").exists())
+
+            export.write_bytes(b"unregistered bytes")
+            with self.assertRaisesRegex(ValueError, "与最近成功的上游导出"):
+                runner.deliver_presentation({**request, "retainReviewDraft": True})
+            self.assertEqual(draft.read_bytes(), data)
+
+            export.write_bytes(data)
+            delivered = runner.deliver_presentation({**request, "checklist": [["首页", []], ["后页", []]], "retainReviewDraft": True})
+            self.assertEqual(delivered["packageCheck"]["status"], "passed")
+            with zipfile.ZipFile(root / delivered["projectPath"]) as project:
+                self.assertNotIn(runner.REVIEW_DRAFT, project.namelist())

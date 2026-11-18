@@ -104,11 +104,14 @@ class Jobs:
             return {"path": "inputs/" + name, "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data)}
 
     def output(self, key, name):
-        if name not in {"presentation.pptx", "project.zip", "manifest.json", "video.mp4", "video-first.png"} and not re.fullmatch(r"preview-(?:[1-9]|[1-3]\d|40)\.png", name):
+        if name not in {"presentation.pptx", "project.zip", "manifest.json", "video.mp4", "video-first.png", "review-draft.pptx"} and not re.fullmatch(r"preview-(?:[1-9]|[1-3]\d|40)\.png", name):
             raise ServiceError("交付文件名无效。")
         with self.locked(key) as root:
             workspace = root / "workspace"
-            file = workspace / "native-preview" / name.replace("preview-", "slide-") if name.startswith("preview-") else workspace / "delivery" / name
+            if name.startswith("preview-"):
+                file = workspace / "native-preview" / name.replace("preview-", "slide-")
+            else:
+                file = workspace / (".pivot" if name == "review-draft.pptx" else "delivery") / name
             if not file.is_file() or file.is_symlink() or file.resolve() != file.absolute() or any(parent.is_symlink() for parent in file.parents if parent != root.parent) or file.stat().st_size > 120 * 1024**2:
                 raise ServiceError("交付文件不存在、已变化或超过大小上限。", 404, "PPT_SERVICE_OUTPUT_MISSING")
             return file.read_bytes()

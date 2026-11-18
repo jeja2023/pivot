@@ -1,7 +1,7 @@
 'use strict';
 
 const { error } = require('./runtime');
-const { exportReview, normalizeStage } = require('./review-plan');
+const { exportReview, normalizeStage, repairActionAllowed } = require('./review-plan');
 const { imageCoverage, selectImagePage } = require('./model-input');
 
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
@@ -25,6 +25,9 @@ function validateAction(action, state) {
     if (Object.keys(action).some(key => !allowed.has(key))) throw invalid('制作动作含不支持的参数。');
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
     if (!state.review) return;
+    if (state.pageRepair && !repairActionAllowed(state, action)) {
+        throw invalid('按页修复只允许编辑当前项目的页面源稿，或校验和导出当前项目。系统会核对未选页面是否保留。');
+    }
     if (['read', 'read_runtime', 'write', 'copy', 'copy_template', 'validate_template'].includes(action.action) && !presentationPath(action.path)) {
         throw invalid('制作动作须提供当前任务内的安全相对路径。');
     }
@@ -70,6 +73,7 @@ async function validateTurn(output, state, verifySource) {
         if (typeof question !== 'string' || !question.trim() || question.length > 2000 || (context !== undefined && (typeof context !== 'string' || context.length > 12000))
             || !['confirmation', 'clarification'].includes(kind)) throw invalid('制作确认问题格式无效。');
         if (kind === 'confirmation' && state.review) {
+            if (state.pageRepair) throw invalid('按页修复须使用原已确认清单。如需改动清单，请重新生成整份。');
             const coverage = imageCoverage(state);
             if (['design', 'template'].includes(turn.requestInput.stage) && coverage.read < coverage.total) {
                 throw invalid(`尚有 ${coverage.total - coverage.read} 张图片未读取。请先用 read_images 从 offset=${coverage.nextOffset} 继续。`);

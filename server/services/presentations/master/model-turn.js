@@ -34,7 +34,7 @@ function modelFailure(error, timeoutMs) {
     return error;
 }
 
-async function runModelTurn(user, id, state, model, hooks, deps, progressGuidance) {
+async function runModelTurn(user, id, state, model, hooks, deps, progressGuidance, citationIssues) {
     const limits = requestLimits(model);
     const makeView = async () => {
         const original = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
@@ -42,6 +42,9 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
         const { messages } = phaseMessages(compacted.messages, state);
         if (messages[0]?.role === 'system' && typeof messages[0].content === 'string') {
             messages[0] = { ...messages[0], content: [messages[0].content, HOST_GUIDANCE, progressGuidance].filter(Boolean).join('\n') };
+        }
+        if (citationIssues?.length) {
+            messages.push({ role: 'user', content: JSON.stringify({ citationRepairEvidence: citationIssues }) });
         }
         return { original, messages, compactedWrites: compacted.compactedWrites, inputEstimate: estimateMessagesTokens(messages) };
     };

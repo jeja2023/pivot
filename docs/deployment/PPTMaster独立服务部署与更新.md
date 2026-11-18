@@ -12,7 +12,7 @@ PPT Master作为独立常驻HTTP服务运行，Pivot只通过内网服务协议�
 npm run build:ppt-master-service -- --checkout E:/ppt-master-upstream --output E:/releases/ppt-master-service
 ```
 
-可用 `--image ppt-master:6.8.0-pivot0.7.172` 区分使用同一上游版本的不同 Pivot 制品。已有目标版本对应的服务镜像时可加 `--skip-build --image <镜像标签>`。打包工具检查服务启动和交付核验能力，导出固定文件名 `ppt-master.tar`，附独立 Compose 和配置示例。旧的仅 stdin 动作镜像需要首次更新为带 HTTP 服务的新镜像。
+镜像默认使用 `ppt-master:6.8.0`，也可通过 `--image ppt-master:6.8.0` 显式指定。重用同名标签时，以随包 `image.json` 的镜像 ID 和 `ppt-master.tar.sha256` 区分交付批次。已有目标版本对应的服务镜像时可加 `--skip-build --image <镜像标签>`。打包工具检查服务启动和交付核验能力，导出固定文件名 `ppt-master.tar`，附独立 Compose 和配置示例。旧的仅 stdin 动作镜像需要首次更新为带 HTTP 服务的新镜像。
 
 ## 首次启动服务
 
@@ -53,6 +53,8 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 
 ## 更新服务镜像与主应用
 
+v0.7.175 的引文和重复检查自动修复随主应用更新。待核验草稿使用同批交付的 `ppt-master:6.8.0` 镜像和新版主应用。已有检查点绑定原引擎身份。可以先更新主应用，在原镜像上处理在途和待恢复任务，再安排独立服务换镜像。保留服务数据卷和连接配置。若既有配置使用其他标签，请将 `PPT_MASTER_IMAGE` 改为本次镜像标签。[v0.7.175 发布说明](../releases/v0.7.175-PPTMaster自动修复与待核验草稿.md)
+
 升级到 Pivot v0.7.172 时，使用该版源码重建 PPT Master 服务镜像，使其包含更新后的 `runner.py`、`tool_catalog.py` 和 `delivery_checklist.py`，并同时更新 Pivot 主应用。建议在切换前结束运行中或等待确认的任务，保存已有交付文件。服务数据卷与现有连接配置可继续使用；运行身份改变后，原检查点需在原运行环境完成，切换后按需新建任务。[v0.7.172 发布说明](../releases/v0.7.172-PPTMaster分阶段确认与交付核验.md)
 
 等待完整制作和原稿任务结束后，复制新版 `ppt-master.tar` 和 `docker-compose.ppt-master.yml` 到现有服务目录，在 `.env` 中按随包 `.env.example` 设置 `PPT_MASTER_IMAGE`，并配置 `PPT_MASTER_TOKEN`。现有部署可以沿用已单独配置的密钥。曾使用旧模板固定密钥的部署应生成新密钥，并在 Pivot 的 PPT Master 服务设置中同步更新。保留现有命名卷，再替换服务容器。
@@ -66,6 +68,12 @@ docker compose -f docker-compose.ppt-master.yml up -d --no-build --pull never --
 ```
 
 使用其他镜像标签时修改服务目录 `.env` 的 `PPT_MASTER_IMAGE`。访问密钥与数据卷保留。仅升级运行包且兼容当前 Pivot 时，可独立替换服务镜像。v0.7.172 部署后，管理员先测试连接，再检查已登录请求 `GET /api/apps/presentations/master/info` 返回 `engine.checklistReady: true`。协议不兼容时 Pivot 会禁用完整引擎，标准功能继续可用。
+
+### 引文或交付核验失败时恢复
+
+如果页面提示某页某项引文与材料原文不一致，先核对该项指向的原材料，保留任务编号、失败提示及任务工作区。通过“从检查点继续”复用已有进度，按原文修订清单并重新确认。若上游已成功导出且页面提供“下载待核验草稿”，所有者可以先保存草稿，再处理核验提示。草稿用于复核，正式交付仍需通过已批准清单的检查。
+
+草稿支持随 Pivot 主应用和独立执行镜像一起更新。执行镜像身份与检查点绑定，安排升级前先处理在途和待恢复任务，并保留独立服务的数据卷及已有产物。旧版失败记录按其原有检查点处理。
 
 v0.7.159归档的模板校验修复：模板制作反复提示“所选模板未通过上游工作区校验”时，旧版服务的模板适配器可能仍把工作区限定为`/workspace`，与独立服务的`/data/jobs/<任务标识>/workspace`不一致。修复需要使用包含更新后`runner.py`和`template_adapter.py`的源码重新构建并更新PPT Master服务镜像；仅更新Pivot页面或重启旧服务不会生效。更新后新建制作任务，模板继续由固定上游校验器检查，不能通过放宽任务目录边界绕过校验。上游技能仍固定为6.8.0，服务协议仍为1，源码版本不替代镜像自身的运行身份。
 
